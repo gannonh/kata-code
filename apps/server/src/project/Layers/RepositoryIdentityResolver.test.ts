@@ -61,7 +61,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       expect(identity?.displayName).toBe("t3tools/t3code");
       expect(identity?.provider).toBe("github");
       expect(identity?.owner).toBe("t3tools");
-      expect(identity?.name).toBe("katacode");
+      expect(identity?.name).toBe("t3code");
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 
@@ -151,7 +151,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       expect(identity?.canonicalKey).toBe("gitlab.com/t3tools/platform/t3code");
       expect(identity?.displayName).toBe("t3tools/platform/t3code");
       expect(identity?.owner).toBe("t3tools");
-      expect(identity?.name).toBe("katacode");
+      expect(identity?.name).toBe("t3code");
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 
@@ -182,7 +182,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
         const refreshedIdentity = yield* resolver.resolve(cwd);
         expect(refreshedIdentity).not.toBeNull();
         expect(refreshedIdentity?.canonicalKey).toBe("github.com/t3tools/t3code");
-        expect(refreshedIdentity?.name).toBe("katacode");
+        expect(refreshedIdentity?.name).toBe("t3code");
       }).pipe(
         Effect.provide(
           Layer.merge(
