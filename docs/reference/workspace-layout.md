@@ -1,3 +1,11 @@
+---
+type: Reference
+title: "Workspace layout"
+description: "- `/apps/server`: Node.js WebSocket server. Wraps Codex app-server, serves the built web app, and opens the browser on start."
+tags: [reference, reference]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Workspace layout
 
 - `/apps/server`: Node.js WebSocket server. Wraps Codex app-server, serves the built web app, and opens the browser on start.

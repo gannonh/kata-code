@@ -1,3 +1,11 @@
+---
+type: Guide
+title: "Environment Authentication Profile"
+description: "The environment server and the relay use separate credentials, issuers, and trust"
+tags: [cloud, guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Environment Authentication Profile
 
 The environment server and the relay use separate credentials, issuers, and trust

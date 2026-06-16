@@ -1,3 +1,11 @@
+---
+type: Reference
+title: "Scripts"
+description: "- `bun run dev` — Starts contracts, server, and web in `turbo watch` mode."
+tags: [reference, reference]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Scripts
 
 - `bun run dev` — Starts contracts, server, and web in `turbo watch` mode.

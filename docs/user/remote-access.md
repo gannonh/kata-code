@@ -1,3 +1,11 @@
+---
+type: Guide
+title: "Remote Access"
+description: "Use this when you want to connect to a KataCode server from another device such as a phone, tablet, or separate desktop app."
+tags: [user, guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Remote Access
 
 Use this when you want to connect to a KataCode server from another device such as a phone, tablet, or separate desktop app.

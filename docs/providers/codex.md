@@ -1,3 +1,11 @@
+---
+type: Guide
+title: "Codex"
+description: "This guide is for people who want to use more than one Codex account in KataCode."
+tags: [providers, guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Codex
 
 This guide is for people who want to use more than one Codex account in KataCode.

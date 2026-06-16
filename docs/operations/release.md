@@ -1,3 +1,11 @@
+---
+type: Runbook
+title: "Release Checklist"
+description: "This document covers the unified release workflow for stable and nightly desktop releases."
+tags: [operations, runbook]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Release Checklist
 
 This document covers the unified release workflow for stable and nightly desktop releases.

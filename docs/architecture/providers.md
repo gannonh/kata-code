@@ -1,3 +1,11 @@
+---
+type: Architecture Note
+title: "Provider architecture"
+description: "The web app communicates with the server via WebSocket using a simple JSON-RPC-style protocol:"
+tags: [architecture, architecture-note]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Provider architecture
 
 The web app communicates with the server via WebSocket using a simple JSON-RPC-style protocol:

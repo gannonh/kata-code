@@ -1,3 +1,11 @@
+---
+type: Runbook
+title: "Observability"
+description: "KataCode has one server-side observability model:"
+tags: [operations, runbook]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Observability
 
 KataCode has one server-side observability model:

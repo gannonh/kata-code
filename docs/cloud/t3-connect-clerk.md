@@ -1,3 +1,11 @@
+---
+type: Guide
+title: "KataCode Connect Clerk Setup"
+description: "KataCode Connect uses one Clerk application for web, desktop, and mobile authentication. The relay accepts"
+tags: [cloud, guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # KataCode Connect Clerk Setup
 
 KataCode Connect uses one Clerk application for web, desktop, and mobile authentication. The relay accepts

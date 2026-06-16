@@ -1,3 +1,11 @@
+---
+type: Guide
+title: "Source Control Integrations"
+description: "KataCode connects directly to your Git hosting provider so you can create pull requests, review code, and manage repositories without leaving your editor. Work stays in flow—no more jumping between br"
+tags: [integrations, guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Source Control Integrations
 
 KataCode connects directly to your Git hosting provider so you can create pull requests, review code, and manage repositories without leaving your editor. Work stays in flow—no more jumping between browser tabs and terminal windows.

@@ -1,12 +1,20 @@
+---
+type: Guide
+title: "Documentation"
+description: "The OKF knowledge bundle lives at **[docs/index.md](./index.md)**."
+tags: [guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Documentation
 
-- [Fork setup and upstream sync](../FORK.md)
-- [Getting started](./getting-started/quick-start.md)
-- [Architecture](./architecture/overview.md)
-- [KataCode Connect](./cloud/t3-connect-clerk.md)
-- [Integrations](./integrations/source-control-providers.md)
-- [Mobile](./mobile/app.md)
-- [Operations](./operations/ci.md)
-- [Providers](./providers/codex.md)
-- [Reference](./reference/encyclopedia.md)
-- [User guides](./user/keybindings.md)
+The OKF knowledge bundle lives at **[docs/index.md](./index.md)**.
+
+Quick links:
+
+- [Specs roadmap](./specs/index.md)
+- [Fork setup](./specs/fork-setup.md) · [FORK.md](../FORK.md) (canonical)
+- [Architecture](./architecture/index.md)
+- [Guides](./guides/index.md)
+- [Runbooks](./runbooks/index.md)
+- [ADRs](./adrs/index.md)

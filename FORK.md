@@ -201,7 +201,7 @@ Prefer a short compatibility shim during transition (read both `KATACODE_*` and
 | ------------------------------------- | -------------------------------------------------- |
 | `README.md`                           | Rewrite for KataCode; link to upstream attribution |
 | `AGENTS.md`                           | Update project snapshot; link to this file         |
-| `docs/README.md`                      | Add fork docs link                                 |
+| `docs/index.md` (OKF bundle)          | Fork docs map; see `docs/specs/fork-setup.md`      |
 | `docs/getting-started/quick-start.md` | Update install/run commands                        |
 | `CONTRIBUTING.md`                     | Replace with fork contribution policy              |
 
@@ -362,7 +362,7 @@ Structure fork-specific work to reduce merge cost.
 | New package under `packages/kata-*` | Sprinkling `if (katacode)` in upstream core       |
 | New app under `apps/kata-*`         | Editing `packages/contracts` for fork-only fields |
 | Adapter layer at provider boundary  | Renaming upstream types in place                  |
-| `docs/fork/` for fork docs          | Rewriting upstream architecture docs in place     |
+| `docs/specs/` for fork specs/ADRs   | Rewriting upstream architecture docs in place     |
 
 ### Vendored reference repos (`.repos/`)
 
@@ -401,9 +401,10 @@ Do not edit `.repos/` except via sync tooling (see `AGENTS.md`).
 Coding agents working in this repo should:
 
 1. Read `FORK.md` before large refactors or upstream merges.
-2. Prefer merge-based upstream sync over cherry-pick unless asked otherwise.
-3. Never push to `upstream` remote.
-4. Keep MIT notices in files with substantial upstream-derived code.
+2. Read [`docs/index.md`](docs/index.md) (OKF bundle) for specs, ADRs, and architecture context.
+3. Prefer merge-based upstream sync over cherry-pick unless asked otherwise.
+4. Never push to `upstream` remote.
+5. Keep MIT notices in files with substantial upstream-derived code.
 
 ---
 

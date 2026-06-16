@@ -40,6 +40,7 @@ Very early WIP. Expect bugs. Contributions are welcome on the fork — see [CONT
 
 ## Documentation
 
+- [OKF docs bundle](./docs/index.md)
 - [Fork setup & upstream sync](./FORK.md)
 - [Getting started](./docs/getting-started/quick-start.md)
 - [Architecture overview](./docs/architecture/overview.md)

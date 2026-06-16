@@ -1,3 +1,11 @@
+---
+type: Runbook
+title: "CI quality gates"
+description: "- `.github/workflows/ci.yml` runs `bun run lint`, `bun run typecheck`, and `bun run test` on pull requests and pushes to `main`."
+tags: [operations, runbook]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # CI quality gates
 
 - `.github/workflows/ci.yml` runs `bun run lint`, `bun run typecheck`, and `bun run test` on pull requests and pushes to `main`.

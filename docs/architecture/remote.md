@@ -1,3 +1,11 @@
+---
+type: Architecture Note
+title: "Remote Architecture"
+description: "This document describes the target architecture for first-class remote environments in KataCode."
+tags: [architecture, architecture-note]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Remote Architecture
 
 This document describes the target architecture for first-class remote environments in KataCode.

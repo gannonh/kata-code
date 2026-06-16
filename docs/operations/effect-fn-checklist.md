@@ -1,3 +1,11 @@
+---
+type: Runbook
+title: "Effect.fn Refactor Checklist"
+description: "Generated from a repo scan for non-test wrapper-style candidates matching either `=> Effect.gen(function* ...)` or `return Effect.gen(function* ...)`."
+tags: [operations, runbook]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Effect.fn Refactor Checklist
 
 Generated from a repo scan for non-test wrapper-style candidates matching either `=> Effect.gen(function* ...)` or `return Effect.gen(function* ...)`.

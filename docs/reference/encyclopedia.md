@@ -1,3 +1,11 @@
+---
+type: Reference
+title: "Encyclopedia"
+description: "This is a living glossary for KataCode. It explains what common terms mean in this codebase."
+tags: [reference, reference]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Encyclopedia
 
 This is a living glossary for KataCode. It explains what common terms mean in this codebase.

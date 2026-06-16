@@ -1,3 +1,11 @@
+---
+type: Runbook
+title: "Relay observability"
+description: "The relay Alchemy stack owns a focused Axiom trace setup:"
+tags: [operations, runbook]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Relay observability
 
 The relay Alchemy stack owns a focused Axiom trace setup:
