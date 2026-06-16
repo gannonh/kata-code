@@ -14,6 +14,8 @@ import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/Desktop
 
 export const DESKTOP_SCHEME = "t3";
 
+/** Internal Electron static-asset protocol (not user-facing deep links — see FORK.md divergence log). */
+
 export class ElectronProtocolRegistrationError extends Data.TaggedError(
   "ElectronProtocolRegistrationError",
 )<{

@@ -10,7 +10,10 @@ timestamp: 2026-06-16T17:10:05Z
 
 KataCode reads keybindings from:
 
-- `~/.t3/keybindings.json`
+- `~/.katacode/userdata/keybindings.json` (packaged server / production)
+- `~/.katacode/dev/keybindings.json` (local development with `pnpm run dev`)
+
+Override the base directory with `KATACODE_HOME` if needed.
 
 The file must be a JSON array of rules:
 

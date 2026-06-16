@@ -205,7 +205,7 @@ Prefer a short compatibility shim during transition (read both `T3CODE_*` and
 | `docs/getting-started/quick-start.md` | Update install/run commands                        |
 | `CONTRIBUTING.md`                     | Replace with fork contribution policy              |
 
-Keep a short **Attribution** section in `README.md` crediting KataCode (MIT).
+Keep a short **Attribution** section in `README.md` crediting T3 Code (MIT).
 
 ### 1.4 Verification gate
 
@@ -231,9 +231,9 @@ Review and fork-customize:
 | Workflow                                   | Purpose               | Action                                                         |
 | ------------------------------------------ | --------------------- | -------------------------------------------------------------- |
 | `.github/workflows/ci.yml`                 | PR checks             | Keep; remove upstream-only secrets                             |
-| `.github/workflows/release.yml`            | Desktop/npm releases  | Point artifacts to `gannonh/katacode`; new signing credentials |
-| `.github/workflows/deploy-relay.yml`       | Relay deploy          | Disable or re-point to fork infra                              |
-| `.github/workflows/mobile-eas-preview.yml` | Mobile                | Disable until fork mobile signing exists                       |
+| `.github/disabled/release.yml`             | Desktop/npm releases  | **Disabled** — move back to `workflows/` when fork signing/channels ready |
+| `.github/disabled/deploy-relay.yml`        | Relay deploy          | **Disabled** — re-point to fork infra in Phase 2                          |
+| `.github/disabled/mobile-eas-preview.yml`  | Mobile                | **Disabled** — requires fork Expo project (`KATACODE_EAS_PROJECT_ID`)     |
 | `.github/workflows/pr-vouch.yml`           | Upstream trust labels | Remove or replace                                              |
 | `.github/workflows/pr-size.yml`            | Size labels           | Optional keep                                                  |
 | `.github/workflows/issue-labels.yml`       | Automation            | Review                                                         |
@@ -424,6 +424,10 @@ Until relay/mobile hosted infra splits, these wire identifiers stay upstream-sha
 - OAuth client IDs `t3-mobile`, `t3-web`
 - Environment well-known path `/.well-known/t3/environment`
 - Connect API prefix `/api/t3-connect`
+
+### Internal Electron static protocol
+
+The packaged desktop app still registers an internal `t3://` scheme for bundled static assets (`apps/desktop/src/electron/ElectronProtocol.ts`). User-facing deep links use `katacode://` / `katacode-dev://`. Renaming the internal scheme is deferred to Phase 2 to avoid breaking bundled asset resolution.
 
 ### Fork-only features
 

@@ -11,6 +11,22 @@ export const ENV_PREFIX = "KATACODE_" as const;
 /** Git branch namespace for product-generated refs (worktrees, PR branches). */
 export const WORKTREE_BRANCH_PREFIX = "katacode" as const;
 
+/** Legacy upstream state directory name (`~/.t3`). */
+export const LEGACY_HOME_DIR_NAME = ".t3" as const;
+
+/** Hosted web router host until fork infra is provisioned (Phase 2). */
+export const HOSTED_WEB_ROUTER_HOST = "app.katacode.sh" as const;
+
+export const DEFAULT_HOSTED_APP_ORIGIN = `https://${HOSTED_WEB_ROUTER_HOST}` as const;
+
+export const HOSTED_WEB_LATEST_ORIGIN = "https://latest.app.katacode.sh" as const;
+
+export const HOSTED_WEB_NIGHTLY_ORIGIN = "https://nightly.app.katacode.sh" as const;
+
+export const HOSTED_WEB_CHANNEL_PATH = "/__katacode/channel" as const;
+
+export const HOSTED_WEB_CHANNEL_COOKIE = "katacode_web_channel" as const;
+
 const NIGHTLY_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/u;
 
 const UPSTREAM_APP_BASE_NAME = "T3 Code" as const;
@@ -27,6 +43,9 @@ export const envKey = (suffix: string): string => `${ENV_PREFIX}${suffix}`;
 
 export const resolveDefaultKatacodeHome = (homeDirectory: string): string =>
   `${homeDirectory.replace(/[/\\]+$/, "")}/${DEFAULT_HOME_DIR_NAME}`;
+
+export const resolveLegacyT3Home = (homeDirectory: string): string =>
+  `${homeDirectory.replace(/[/\\]+$/, "")}/${LEGACY_HOME_DIR_NAME}`;
 
 export const isNightlyAppVersion = (version: string): boolean =>
   NIGHTLY_VERSION_PATTERN.test(version.trim());

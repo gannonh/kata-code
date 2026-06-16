@@ -241,7 +241,7 @@ function createBaseServerConfig(): ServerConfig {
     providers: [],
     availableEditors: ["cursor"],
     observability: {
-      logsDirectoryPath: "/repo/project/.t3/logs",
+      logsDirectoryPath: "/repo/project/.katacode/logs",
       localTracingEnabled: true,
       otlpTracesUrl: "http://localhost:4318/v1/traces",
       otlpTracesEnabled: true,
@@ -1177,8 +1177,8 @@ describe("GeneralSettingsPanel observability", () => {
           .fn()
           .mockResolvedValue(createEmptyProcessResourceHistoryResult()),
         getTraceDiagnostics: vi.fn().mockResolvedValue({
-          traceFilePath: "/repo/project/.t3/traces.jsonl",
-          scannedFilePaths: ["/repo/project/.t3/traces.jsonl"],
+          traceFilePath: "/repo/project/.katacode/traces.jsonl",
+          scannedFilePaths: ["/repo/project/.katacode/traces.jsonl"],
           readAt: makeUtc("2036-04-07T00:00:00.000Z"),
           recordCount: 0,
           parseErrorCount: 0,
@@ -1211,7 +1211,7 @@ describe("GeneralSettingsPanel observability", () => {
     const openLogsButton = page.getByLabelText("Open logs folder");
     await openLogsButton.click();
 
-    expect(openInEditor).toHaveBeenCalledWith("/repo/project/.t3/logs", "cursor");
+    expect(openInEditor).toHaveBeenCalledWith("/repo/project/.katacode/logs", "cursor");
   });
 
   it("shows an OpenCode server URL field in provider settings", async () => {

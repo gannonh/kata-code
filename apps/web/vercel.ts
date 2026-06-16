@@ -1,9 +1,12 @@
+import {
+  HOSTED_WEB_CHANNEL_COOKIE,
+  HOSTED_WEB_CHANNEL_PATH,
+  HOSTED_WEB_LATEST_ORIGIN,
+  HOSTED_WEB_NIGHTLY_ORIGIN,
+  HOSTED_WEB_ROUTER_HOST,
+} from "@kata-sh/code-shared/branding";
 import { matchers, routes, type Transform, type VercelConfig } from "@vercel/config/v1";
 
-const ROUTER_HOST = "app.t3.codes";
-const HOSTED_WEB_CHANNEL_COOKIE = "t3code_web_channel";
-const LATEST_ORIGIN = "https://latest.app.t3.codes";
-const NIGHTLY_ORIGIN = "https://nightly.app.t3.codes";
 const CLEAN_CHANNEL_QUERY_TRANSFORMS = [
   {
     type: "request.query",
@@ -33,7 +36,7 @@ export const config: VercelConfig = {
     "npm install -g vite-plus && vp install --filter '@kata-sh/code-scripts...' --filter '@kata-sh/code-web...'",
   routes: [
     {
-      src: "/__t3code/channel",
+      src: HOSTED_WEB_CHANNEL_PATH,
       has: [matchers.query("channel", "nightly")],
       transforms: CLEAN_CHANNEL_QUERY_TRANSFORMS,
       headers: {
@@ -43,7 +46,7 @@ export const config: VercelConfig = {
       status: 302,
     },
     {
-      src: "/__t3code/channel",
+      src: HOSTED_WEB_CHANNEL_PATH,
       transforms: CLEAN_CHANNEL_QUERY_TRANSFORMS,
       headers: {
         Location: "/",
@@ -53,13 +56,16 @@ export const config: VercelConfig = {
     },
     {
       src: "/(.*)",
-      has: [matchers.host(ROUTER_HOST), matchers.cookie(HOSTED_WEB_CHANNEL_COOKIE, "nightly")],
-      dest: `${NIGHTLY_ORIGIN}/$1`,
+      has: [
+        matchers.host(HOSTED_WEB_ROUTER_HOST),
+        matchers.cookie(HOSTED_WEB_CHANNEL_COOKIE, "nightly"),
+      ],
+      dest: `${HOSTED_WEB_NIGHTLY_ORIGIN}/$1`,
     },
     {
       src: "/(.*)",
-      has: [matchers.host(ROUTER_HOST)],
-      dest: `${LATEST_ORIGIN}/$1`,
+      has: [matchers.host(HOSTED_WEB_ROUTER_HOST)],
+      dest: `${HOSTED_WEB_LATEST_ORIGIN}/$1`,
     },
   ],
   rewrites: [routes.rewrite("/(.*)", "/index.html")],

@@ -1,6 +1,6 @@
-import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
+import { DEFAULT_HOSTED_APP_ORIGIN, HOSTED_WEB_CHANNEL_PATH } from "@kata-sh/code-shared/branding";
 
-const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
+import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
 
 export interface HostedPairingRequest {
   readonly host: string;
@@ -11,7 +11,8 @@ export interface HostedPairingRequest {
 export type HostedAppChannel = "latest" | "nightly";
 
 export function configuredHostedAppUrl(): string {
-  return import.meta.env.VITE_HOSTED_APP_URL?.trim() || DEFAULT_HOSTED_APP_URL;
+  const configured = import.meta.env.VITE_HOSTED_APP_URL?.trim();
+  return configured || DEFAULT_HOSTED_APP_ORIGIN;
 }
 
 function configuredBackendUrl(): string {
@@ -83,7 +84,7 @@ export function buildHostedPairingUrl(input: {
 export function buildHostedChannelSelectionUrl(input: {
   readonly channel: HostedAppChannel;
 }): string {
-  const url = new URL("/__t3code/channel", configuredHostedAppUrl());
+  const url = new URL(HOSTED_WEB_CHANNEL_PATH, configuredHostedAppUrl());
   url.searchParams.set("channel", input.channel);
   return url.toString();
 }

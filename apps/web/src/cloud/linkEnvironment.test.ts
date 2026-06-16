@@ -120,7 +120,7 @@ function validChallenge() {
 function availableRelayClient() {
   return {
     status: "available",
-    executablePath: "/Users/test/.t3/tools/cloudflared/cloudflared",
+    executablePath: "/Users/test/.katacode/tools/cloudflared/cloudflared",
     source: "managed",
     version: "2026.5.2",
   };

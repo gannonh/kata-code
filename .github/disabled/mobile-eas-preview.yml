@@ -1,3 +1,5 @@
+# Disabled — see .github/disabled/README.md (Phase 2 infrastructure split)
+
 name: Mobile EAS Preview
 
 on:

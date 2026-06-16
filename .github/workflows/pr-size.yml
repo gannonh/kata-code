@@ -10,7 +10,6 @@ permissions:
 jobs:
   prepare-config:
     name: Prepare PR size config
-    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.ref != 'fork-setup'
     runs-on: ubuntu-24.04
     outputs:
       labels_json: ${{ steps.config.outputs.labels_json }}
@@ -115,7 +114,7 @@ jobs:
   label:
     name: Label PR size
     needs: prepare-config
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.head.ref != 'fork-setup'
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
