@@ -80,7 +80,10 @@ Use workflow dispatch with `dry_run: true` to run preflight quality gates and th
 1. GitHub → Actions → **Release** → **Run workflow**
 2. Choose channel (stable/nightly is ignored for dry-run publish steps)
 3. Enable **Validate signing inputs and quality gates without publishing**
-4. Confirm the **Validate macOS signing inputs** job reports required secret names are present (values are never printed)
+4. Leave **version** blank for dry runs (stable channel uses a synthetic `0.0.0-dryrun.<run>` version for preflight only)
+5. Confirm the **Validate macOS signing inputs** job reports required secret names are present (values are never printed)
+
+Stable-channel prerelease versions (for example `1.2.3-rc.1`) publish `@kata-sh/code-cli` with npm dist-tag `next`, not `latest`.
 
 ## What the workflow publishes
 

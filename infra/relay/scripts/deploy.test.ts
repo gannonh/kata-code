@@ -171,6 +171,9 @@ describe("release workflow tracing config propagation", () => {
       expect(workflow).not.toContain("relay-client-tracing-config");
       expect(workflow).toContain("resolve_public_config:");
       expect(workflow).toContain("node scripts/check-macos-release-signing.ts");
+      expect(workflow).toContain("DISPATCH_DRY_RUN:");
+      expect(workflow).toContain('raw="0.0.0-dryrun.${NIGHTLY_RUN_NUMBER}"');
+      expect(workflow).toContain("cli_dist_tag=next");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
