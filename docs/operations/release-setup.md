@@ -80,7 +80,9 @@ Domain defaults (override with repository variables if needed):
 
 Stable releases publish with dist-tag `latest`; nightlies use `nightly`; stable prereleases (`1.2.3-rc.1`) use `next`.
 
-Enable [npm trusted publishing](https://docs.npmjs.com/generating-provenance#trusted-publishers) (OIDC) for the package before the first stable CLI publish.
+1. Publish once from your machine (`npm login`, then `node apps/server/scripts/cli.ts publish ...`) to create the package.
+2. On npmjs.com: **Packages → `@kata-sh/code-cli` → Settings → Trusted publishing → GitHub Actions** — org `gannonh`, repo `katacode`, workflow `release.yml`, action `npm publish`.
+3. CI uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC); no `NPM_TOKEN` secret.
 
 ## Optional (KataCode Connect)
 

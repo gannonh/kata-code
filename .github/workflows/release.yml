@@ -553,8 +553,12 @@ jobs:
       - name: Build CLI package
         run: vp run --filter @kata-sh/code-cli build
 
+      # npm trusted publishing (OIDC) requires npm CLI 11.5.1+.
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@11.6.2
+
       - name: Publish CLI package
-        run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --verbose
+        run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --provenance --verbose
 
   release:
     name: Publish GitHub Release
