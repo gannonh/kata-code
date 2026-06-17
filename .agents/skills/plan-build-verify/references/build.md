@@ -2,20 +2,20 @@
 
 Use this workflow to execute an approved spec or implementation plan through small implementation tasks, review gates, and verified completion.
 
-Build is the second phase in Plan → Build → Verify. It should start from an approved spec with a Build handoff.
+Build is the second phase in Plan → Build → Verify. It should start from approved spec and/or plan file path(s) with a Build handoff or implementation plan.
 
 ## Required inputs
 
-- Approved spec path, usually `docs/specs/YYYY-MM-DD-<topic>.md`.
+- Spec and/or plan file path(s), usually `docs/specs/YYYY-MM-DD-<topic>.md` or an implementation plan referenced by the user.
 - `## Acceptance criteria` section with observable pass/fail outcomes.
-- Build handoff section with scope, non-goals, ordered tasks, verification commands, and blocking open questions.
-- Explicit user approval if the spec status is not `Approved`.
+- Build handoff or plan section with scope, non-goals, ordered tasks, verification commands, and blocking open questions.
+- Explicit user approval if the spec or plan status is not `Approved`.
 
 ## Required dependency
 
-Implementation tasks must use the `test-driven-development` skill before writing production code. In harnesses that expose skills as slash commands, `/tdd` is the adapter for that skill.
+Implementation tasks must use a TDD skill before writing production code. Valid skill names are `tdd` and `test-driven-development`. Prefer `tdd` when both are available.
 
-If neither `test-driven-development` nor `/tdd` is available, stop and alert the user. Do not substitute another TDD workflow.
+If neither `tdd` nor `test-driven-development` is available, use TDD best practices before writing production code and record that no dedicated TDD skill was available.
 
 ## Build workflow
 
@@ -23,22 +23,22 @@ If neither `test-driven-development` nor `/tdd` is available, stop and alert the
 
 Before editing files:
 
-1. Read the approved spec completely.
+1. Read the approved spec and/or plan file path(s) completely.
 2. Confirm `## Status` is `Approved`, or confirm the user explicitly overrode the approval gate.
-3. Confirm the spec contains `## Acceptance criteria` with concrete criteria. If missing or ambiguous, stop and return to Plan to fix the spec.
+3. Confirm the spec or plan contains `## Acceptance criteria` with concrete criteria. If missing or ambiguous, stop and return to Plan to fix the source document.
 4. Confirm `Blocking open questions` is `None`, or confirm the user explicitly approved proceeding with listed questions.
 5. Inspect repo instructions such as `AGENTS.md`, `CLAUDE.md`, and README command sections.
 6. Check worktree state with `git status --short --branch`.
 7. Identify the current branch. Do not start implementation on `main` or `master` without explicit user consent.
 8. Capture a base SHA with `git rev-parse HEAD`.
-9. Identify verification commands from the spec and repo scripts.
-10. Confirm required tools are available: todo tracking, `test-driven-development` or `/tdd`, and subagent dispatch if using the subagent path.
+9. Identify verification commands from the spec and/or plan and repo scripts.
+10. Confirm required tools are available: todo tracking and subagent dispatch if using the subagent path. Determine the TDD path: use `tdd` if present, otherwise `test-driven-development` if present, otherwise TDD best practices.
 
-Stop and ask if the spec is unapproved, the worktree has unrelated changes, the branch is unsafe, tools are missing, or the plan has blocking questions.
+Stop and ask if the spec or plan is unapproved, the worktree has unrelated changes, the branch is unsafe, required tools are missing, or the plan has blocking questions.
 
 ### 2. Extract tasks and create todos
 
-Extract implementation tasks from the approved spec. Preserve the full task text, context, files, acceptance criteria, and verification commands.
+Extract implementation tasks from the approved spec and/or plan. Preserve the full task text, context, files, acceptance criteria, and verification commands.
 
 Create todo items for all tasks when a todo tool is available. Keep exactly one implementation task in progress at a time.
 
@@ -46,7 +46,7 @@ Create todo items for all tasks when a todo tool is available. Keep exactly one 
 
 Prefer the subagent path when subagent dispatch is available and the current agent is acting as orchestrator.
 
-Use the single-agent path only when subagents are unavailable or the user explicitly asks you to work without them. Preserve the same gates: `test-driven-development` or `/tdd`, self-review, spec compliance check, code quality check, tests, and completion report.
+Use the single-agent path only when subagents are unavailable or the user explicitly asks you to work without them. Preserve the same gates: `tdd` or `test-driven-development` when available, TDD best practices when neither skill is available, self-review, spec compliance check, code quality check, tests, and completion report.
 
 ## Subagent path
 
@@ -56,14 +56,14 @@ For each task, dispatch a fresh implementer subagent using `references/implement
 
 Give the subagent:
 
-- Spec path.
+- Spec and/or plan file path(s).
 - Task ID and full task text.
 - Acceptance criteria for the task.
 - Relevant code paths and repo context.
 - Approved scope and non-goals.
 - Base SHA for the task.
 - Required verification commands.
-- Instruction to use `test-driven-development` or `/tdd` before writing implementation code.
+- Instruction to use `tdd` or `test-driven-development` before writing implementation code, preferring `tdd` when both are present. If neither skill is present, instruct the implementer to follow TDD best practices and report that no dedicated TDD skill was available.
 
 Do not make the implementer read the plan file to discover its own task. Provide the needed context directly.
 
@@ -84,7 +84,7 @@ After implementation, dispatch a spec compliance reviewer using `references/spec
 
 The reviewer must inspect actual code and compare it to:
 
-- Approved spec.
+- Approved spec and/or plan.
 - Task text.
 - Acceptance criteria.
 - Non-goals.
@@ -99,7 +99,7 @@ After spec compliance passes, dispatch a code quality reviewer using `references
 Provide:
 
 - Task summary.
-- Spec path and task ID.
+- Spec and/or plan file path(s) and task ID.
 - Base SHA before task.
 - Head SHA after implementation.
 - Test evidence.
@@ -111,7 +111,7 @@ If the reviewer finds Critical or Important issues, send them back to the implem
 
 A task is complete only when:
 
-- `test-driven-development` or `/tdd` was used, or the user explicitly approved an exception.
+- `tdd` or `test-driven-development` was used when available, or TDD best practices were followed and the missing dedicated skill was recorded.
 - Required tests and verification commands pass.
 - Spec compliance review passes.
 - Code quality review passes.
@@ -130,7 +130,7 @@ Use this path only when subagents are unavailable or disallowed.
 For each task:
 
 1. Read the task text and acceptance criteria.
-2. Load and follow `test-driven-development` or `/tdd` before writing implementation code.
+2. Load and follow `tdd` or `test-driven-development` before writing implementation code, preferring `tdd` when both are present. If neither skill is available, follow TDD best practices and record that no dedicated TDD skill was available.
 3. Implement the smallest slice that satisfies the task.
 4. Run required verification commands.
 5. Perform a written spec compliance check against the task and non-goals.
@@ -167,15 +167,15 @@ Do not silently implement a different plan.
 After all tasks pass their per-task gates:
 
 1. Capture final head SHA.
-2. Run the full verification command set from the spec.
-3. Dispatch or perform a final whole-branch review against the approved spec.
+2. Run the full verification command set from the spec and/or plan.
+3. Dispatch or perform a final whole-branch review against the approved spec and/or plan.
 4. Fix final-review issues.
 5. Re-run final review until no blocking issues remain.
-6. Update the spec status from `Approved` to `Implemented`, or note why status could not be updated.
+6. Update the spec or plan status from `Approved` to `Implemented`, or note why status could not be updated.
 
 ## Build completion report
 
-Create a concise Build completion report. Prefer adding it to the spec under `## Build completion report`; if the spec should remain unchanged, write an adjacent file such as:
+Create a concise Build completion report. Prefer adding it to the spec or plan under `## Build completion report`; if the source document should remain unchanged, write an adjacent file such as:
 
 ```text
 docs/specs/YYYY-MM-DD-<topic>-build-report.md
@@ -183,7 +183,7 @@ docs/specs/YYYY-MM-DD-<topic>-build-report.md
 
 Include:
 
-- Spec path.
+- Spec and/or plan file path(s).
 - Base SHA and final head SHA.
 - Tasks completed.
 - Files changed.
@@ -203,11 +203,11 @@ If yes, transition to `references/verify.md` and follow it for acceptance review
 
 Stop and ask when:
 
-- The spec is not approved and the user has not explicitly overridden the gate.
+- The spec or plan is not approved and the user has not explicitly overridden the gate.
 - Blocking open questions remain.
 - The worktree contains unrelated changes.
 - The branch is `main` or `master` and the user has not approved direct implementation there.
-- `test-driven-development` and `/tdd` are unavailable.
+- No dedicated TDD skill is available and TDD best practices cannot be applied.
 - Acceptance criteria are missing, vague, or not testable.
 - Required verification commands are unknown.
 - Reviewers find unresolved issues.
@@ -215,7 +215,7 @@ Stop and ask when:
 
 Never:
 
-- Skip `test-driven-development` or `/tdd` unless the user explicitly approves an exception.
+- Skip `tdd`, `test-driven-development`, or TDD best practices before implementation.
 - Skip spec compliance review.
 - Skip code quality review.
 - Start code quality review before spec compliance passes.

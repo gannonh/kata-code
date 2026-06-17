@@ -59,7 +59,7 @@
       "source": "gannonh/skills",
       "sourceType": "github",
       "skillPath": "plan-build-verify/SKILL.md",
-      "computedHash": "0e02ff8cba126124b606c6612def5f7410a76367f053744690a14c9aa3069c17"
+      "computedHash": "2757e0347cd42478da725e13ff495e1ae7f6ea88a4f9cee56dfe41e7d5dabaa7"
     },
     "simplify": {
       "source": "gannonh/skills",
@@ -72,6 +72,12 @@
       "sourceType": "github",
       "skillPath": "strict-quality-review/SKILL.md",
       "computedHash": "b6d3bc2c76b78ae5ec9228f3a187d3e66738f20bb084b255c5a963467c201c3b"
+    },
+    "tdd": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/tdd/SKILL.md",
+      "computedHash": "d5ca5c8ae0615f343f1cfd71591f4a586046d77b1f36e8d67b8f643bad51043e"
     },
     "user-acceptance": {
       "source": "gannonh/skills",

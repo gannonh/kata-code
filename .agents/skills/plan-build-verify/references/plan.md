@@ -21,10 +21,12 @@ You MUST create a task for each of these items and complete them in order:
 3. **Propose 2-3 approaches** — with trade-offs and your recommendation
 4. **Define acceptance criteria** — agree on observable pass/fail outcomes before writing the spec
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
-6. **Write design spec** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md` and commit
-7. **Spec self-review** — quick inline check for required acceptance criteria, placeholders, contradictions, ambiguity, scope (see below)
-8. **User reviews written spec** — ask user to review the spec file before proceeding
-9. **Transition to Build phase** — ask the user if they would like to advance to the Build phase (`./build.md`).
+6. **Write design spec** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md`
+7. **Adversarial spec review** — dispatch a separate sub-agent that did not write the spec to review it and provide feedback (see below)
+8. **Validate reviewer feedback** — revise the spec when feedback is valid and actionable, or provide a reasoned rebuttal when it is not
+9. **Finalize spec location** — move or save the finalized spec to the appropriate section/location and commit
+10. **User reviews written spec** — ask user to review the spec file before proceeding
+11. **Transition to Build phase** — ask the user if they would like to advance to the Build phase (`./build.md`).
 
 ## Process Flow
 
@@ -37,7 +39,9 @@ digraph brainstorming {
     "Present design sections" [shape=box];
     "User approves design?" [shape=diamond];
     "Write design spec" [shape=box];
-    "Spec self-review\n(fix inline)" [shape=box];
+    "Adversarial spec review\n(separate sub-agent)" [shape=box];
+    "Validate feedback\n(revise or rebut)" [shape=box];
+    "Finalize spec location" [shape=box];
     "User reviews spec?" [shape=diamond];
     "Advance to Build phase" [shape=doublecircle];
 
@@ -47,8 +51,10 @@ digraph brainstorming {
     "Present design sections" -> "User approves design?";
     "User approves design?" -> "Present design sections" [label="no, revise"];
     "User approves design?" -> "Write design spec" [label="yes"];
-    "Write design spec" -> "Spec self-review\n(fix inline)";
-    "Spec self-review\n(fix inline)" -> "User reviews spec?";
+    "Write design spec" -> "Adversarial spec review\n(separate sub-agent)";
+    "Adversarial spec review\n(separate sub-agent)" -> "Validate feedback\n(revise or rebut)";
+    "Validate feedback\n(revise or rebut)" -> "Finalize spec location";
+    "Finalize spec location" -> "User reviews spec?";
     "User reviews spec?" -> "Write design spec" [label="changes requested"];
     "User reviews spec?" -> "Advance to Build phase" [label="approved"];
 }
@@ -140,23 +146,26 @@ Under it, include a numbered list or checklist. Each criterion must be:
 
 If acceptance criteria are genuinely unknown, stop and ask the user. Do not write a spec with missing, placeholder, or implied criteria.
 
-**Spec Self-Review:**
-After writing the spec document, look at it with fresh eyes:
+**Adversarial Spec Review:**
+After writing the spec document, dispatch a separate adversarial sub-agent that did not write the spec. The sub-agent reviews the spec and provides feedback. Do not replace this with a same-agent self-review. If no sub-agent mechanism is available, say so and ask the user how to proceed.
 
-1. **Acceptance criteria gate:** Does the spec include an exact `## Acceptance criteria` heading with numbered or checklist-style criteria? Does each item have a clear verification path and pass/fail meaning? If not, fix this first.
-2. **Placeholder scan:** Any "TBD", "TODO", incomplete sections, or vague requirements? Fix them.
+Ask the reviewer to challenge:
+
+1. **Acceptance criteria gate:** Does the spec include an exact `## Acceptance criteria` heading with numbered or checklist-style criteria? Does each item have a clear verification path and pass/fail meaning?
+2. **Placeholder scan:** Are there any "TBD", "TODO", incomplete sections, or vague requirements?
 3. **Internal consistency:** Do any sections contradict each other? Does the architecture match the feature descriptions?
 4. **Scope check:** Is this focused enough for a single implementation plan, or does it need decomposition?
-5. **Ambiguity check:** Could any requirement be interpreted two different ways? If so, pick one and make it explicit.
+5. **Ambiguity check:** Could any requirement be interpreted two different ways?
+6. **Feasibility and verification:** Are there repo, dependency, testing, sequencing, or risk assumptions that need evidence?
 
-Fix any issues inline. No need to re-review — just fix and move on.
+The main agent validates the reviewer's feedback. Revise the spec when feedback is valid and actionable. When feedback is not valid or not actionable, leave the spec unchanged for that point and record a reasoned rebuttal in the planning notes or response. After accepted revisions are applied, move or save the finalized spec to the appropriate section/location and commit it.
 
 **User Review Gate:**
-After the spec review loop passes, ask the user to review the written spec before proceeding:
+After the adversarial review and main-agent validation pass, ask the user to review the written spec before proceeding:
 
 > "Spec written and committed to `<path>`. Please review it and let me know if you want to make any changes."
 
-Wait for the user's response. If they request changes, make them and re-run the spec review loop. Only proceed once the user approves.
+Wait for the user's response. If they request changes, make them and re-run the adversarial spec review loop. Only proceed once the user approves.
 
 **Build phase:**
 
