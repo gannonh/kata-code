@@ -1,11 +1,12 @@
-import {
-  HOSTED_WEB_CHANNEL_COOKIE,
-  HOSTED_WEB_CHANNEL_PATH,
-  HOSTED_WEB_LATEST_ORIGIN,
-  HOSTED_WEB_NIGHTLY_ORIGIN,
-  HOSTED_WEB_ROUTER_HOST,
-} from "@kata-sh/code-shared/branding";
 import { matchers, routes, type Transform, type VercelConfig } from "@vercel/config/v1";
+
+// Vercel compiles this file before the monorepo build; keep in sync with
+// packages/shared/src/branding.ts (workspace TS imports fail at config compile time).
+const HOSTED_WEB_ROUTER_HOST = "app.kata.sh" as const;
+const HOSTED_WEB_LATEST_ORIGIN = "https://latest.app.kata.sh" as const;
+const HOSTED_WEB_NIGHTLY_ORIGIN = "https://nightly.app.kata.sh" as const;
+const HOSTED_WEB_CHANNEL_PATH = "/__katacode/channel" as const;
+const HOSTED_WEB_CHANNEL_COOKIE = "katacode_web_channel" as const;
 
 const CLEAN_CHANNEL_QUERY_TRANSFORMS = [
   {
