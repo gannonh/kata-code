@@ -1,143 +1,160 @@
 ---
 type: Runbook
-title: "Release Checklist"
-description: "Fork release workflow for KataCode desktop, hosted web, and CLI packages."
-tags: [operations, runbook]
-timestamp: 2026-06-16T23:30:00Z
+title: "Release runbook"
+description: "How to cut a KataCode stable or nightly release."
+tags: [operations, runbook, release]
+timestamp: 2026-06-17T15:00:00Z
 ---
 
-# Release Checklist
+# Release runbook
 
-This runbook describes the **KataCode fork** release workflow. Upstream T3 release docs are obsolete for this repository.
+Merging to `main` runs CI only — **not** a release. Releases are triggered explicitly.
 
-## Active workflow
+**Prerequisite:** [Release setup](./release-setup.md) completed (secrets present). If a dry run fails on signing, fix setup first.
 
-- Workflow: [`.github/workflows/release.yml`](../../.github/workflows/release.yml)
-- Triggers:
-  - push tag matching `v*.*.*` for stable releases
-  - manual `workflow_dispatch` for stable or nightly channels
-  - manual `workflow_dispatch` with `dry_run: true` to validate signing inputs without publishing
+## 1. Local checks
 
-## Quality gates
-
-Preflight runs before any publish step:
+On `main`, with the ship candidate merged:
 
 ```bash
+git checkout main && git pull
+
 vp check
 vp run typecheck
 vp run test
 vp run release:smoke
 ```
 
-## macOS signing and notarization secrets
+## 2. Dry run
 
-CI release builds require all five GitHub Actions secrets. Missing values fail macOS build jobs before artifact collection.
-
-| Secret                        | Purpose                                                                      |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| `CSC_LINK`                    | Base64-encoded `.p12` export of the **Developer ID Application** certificate |
-| `CSC_KEY_PASSWORD`            | Password used when exporting the `.p12`                                      |
-| `APPLE_ID`                    | Apple ID email used for notarization                                         |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for that Apple ID                                      |
-| `APPLE_TEAM_ID`               | Apple Developer team ID                                                      |
-
-`APPLE_SIGNING_IDENTITY` can stay in local `.env` for Keychain documentation. CI imports the certificate from `CSC_LINK` / `CSC_KEY_PASSWORD` non-interactively.
-
-### Export the Developer ID Application certificate
-
-1. Open **Keychain Access** on macOS.
-2. Select **login** → **My Certificates**.
-3. Export the **Developer ID Application: …** certificate as a `.p12` with a strong export password.
-4. Base64-encode the `.p12` for `CSC_LINK` (do not commit the `.p12` or encoded file):
+Confirms CI gates + macOS signing secrets. Does not build or publish.
 
 ```bash
-base64 -i path/to/DeveloperIDApplication.p12 -o /tmp/katacode-csc-link.txt
+gh workflow run release.yml -R gannonh/katacode \
+  -f dry_run=true \
+  -f channel=stable
+
+gh run watch -R gannonh/katacode --workflow=release.yml
 ```
 
-5. Store secrets with `gh secret set` (never print secret values in logs or commits):
+Pass criteria: **Validate macOS signing inputs** succeeds.
+
+## 3. Choosing the version
+
+| Channel     | Who picks the version? | How                            |
+| ----------- | ---------------------- | ------------------------------ |
+| **Stable**  | **You**                | See below                      |
+| **Nightly** | **Workflow**           | Automatic — no `version` input |
+
+### Stable — pick the next semver
+
+1. Check what is already shipped:
 
 ```bash
-gh secret set CSC_LINK < /tmp/katacode-csc-link.txt
-gh secret set CSC_KEY_PASSWORD
-
-set -a
-source .env
-set +a
-
-gh secret set APPLE_ID --body "$APPLE_ID"
-gh secret set APPLE_APP_SPECIFIC_PASSWORD --body "$APPLE_APP_SPECIFIC_PASSWORD"
-gh secret set APPLE_TEAM_ID --body "$APPLE_TEAM_ID"
-
-gh secret list
+gh release list -R gannonh/katacode --limit 5
+node -p "require('./apps/desktop/package.json').version"
 ```
 
-6. Remove temporary files: `rm /tmp/katacode-csc-link.txt`.
+2. Choose the next **semver** (`MAJOR.MINOR.PATCH`):
+   - **Patch** (`0.0.27` → `0.0.28`) — bugfixes, small changes (most releases)
+   - **Minor** (`0.0.27` → `0.1.0`) — new features, backward compatible
+   - **Major** (`0.0.27` → `1.0.0`) — breaking changes
 
-### Dry-run signing validation
+3. Use that number in the stable command (step 4) or tag (`v0.0.28`).
 
-Use workflow dispatch with `dry_run: true` to run preflight quality gates and the macOS signing gate without building or publishing:
+`apps/desktop/package.json` on `main` is the source of truth **between** releases. After a successful stable release, the workflow bumps it to match the version you released. Your chosen stable version should normally be **≥ package.json** and **> last stable GitHub Release** (unless you intentionally ship a prerelease).
 
-1. GitHub → Actions → **Release** → **Run workflow**
-2. Choose channel (stable/nightly is ignored for dry-run publish steps)
-3. Enable **Validate signing inputs and quality gates without publishing**
-4. Leave **version** blank for dry runs (stable channel uses a synthetic `0.0.0-dryrun.<run>` version for preflight only)
-5. Confirm the **Validate macOS signing inputs** job reports required secret names are present (values are never printed)
+**Prerelease** (`1.2.3-rc.1`): same flow; npm publishes dist-tag **`next`**, not `latest`.
 
-Stable-channel prerelease versions (for example `1.2.3-rc.1`) publish `@kata-sh/code-cli` with npm dist-tag `next`, not `latest`.
+### Nightly — automatic
 
-## What the workflow publishes
+No version to choose. The workflow reads `apps/desktop/package.json`, bumps patch by 1, and appends date + run number:
 
-- macOS (`arm64`, `x64`), Linux (`x64`), and Windows (`x64`) desktop artifacts to GitHub Releases
-- CLI package **`@kata-sh/code-cli`** (`katacode`) with OIDC trusted publishing:
-  - stable releases → npm dist-tag `latest`
-  - nightly releases → npm dist-tag `nightly`
-- Hosted web deploy for `apps/web` on fork domains (`app.kata.sh`, `latest.app.kata.sh`, `nightly.app.kata.sh`)
+```text
+{patch+1}-nightly.{YYYYMMDD}.{run}
+```
 
-Optional KataCode Connect public config (`CLERK_*`, `RELAY_*` repository variables) is read when present but does not require relay/cloud VM deploy jobs.
+Example: package.json `0.0.27` → tag `v0.0.28-nightly.20260617.578`.
 
-## Hosted web domains
+## 4. Stable release
 
-Release deploy defaults to KataCode domains only. Override with repository variables when needed:
-
-| Variable                      | Default               |
-| ----------------------------- | --------------------- |
-| `KATACODE_WEB_ROUTER_URL`     | `https://app.kata.sh` |
-| `KATACODE_WEB_LATEST_DOMAIN`  | `latest.app.kata.sh`  |
-| `KATACODE_WEB_NIGHTLY_DOMAIN` | `nightly.app.kata.sh` |
-
-Vercel deploy still requires `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID`.
-
-## Local verification before tagging
+Release current `main` HEAD:
 
 ```bash
-vp check
-vp run typecheck
-vp run test
-vp run release:smoke
-vp run build:desktop
+gh workflow run release.yml -R gannonh/katacode \
+  -f channel=stable \
+  -f version=0.0.28
 ```
 
-## Post-release macOS verification
-
-After a release build on macOS runners, verify artifacts locally when downloaded:
+Alternative — tag a specific commit (version comes from the tag name):
 
 ```bash
-codesign --verify --deep --strict --verbose=2 KataCode.app
-spctl --assess --type execute --verbose KataCode.app
+git tag v0.0.28 && git push origin v0.0.28
 ```
 
-## Troubleshooting
+### Verify stable
 
-| Symptom                                     | Likely cause                                                      | Fix                                                                                                    |
-| ------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| macOS build fails at signing gate           | Missing one of the five required secrets                          | `gh secret list`; set missing names with `gh secret set`                                               |
-| Notarization fails in electron-builder logs | Wrong `APPLE_ID`, expired app-specific password, or team mismatch | Regenerate app-specific password; confirm `APPLE_TEAM_ID` matches the Developer ID cert                |
-| `CSC_LINK` import fails                     | Wrong export password or non–Developer ID cert                    | Re-export **Developer ID Application** `.p12`; update `CSC_KEY_PASSWORD`                               |
-| Hosted web deploy uses wrong domain         | Missing fork repository variables                                 | Set `KATACODE_WEB_*` vars; defaults never fall back to upstream `app.t3.codes`                         |
-| Relay/Clerk features empty in release build | Optional vars unset                                               | Expected for desktop/web-only releases; set `CLERK_*` / `RELAY_*` vars when cloud features are enabled |
+```bash
+gh run watch -R gannonh/katacode --workflow=release.yml
+gh release view v0.0.28 -R gannonh/katacode
+```
+
+| Check                | What to confirm                                                            |
+| -------------------- | -------------------------------------------------------------------------- |
+| **Workflow**         | Build, Publish release, Deploy, Finalize all green                         |
+| **GitHub Release**   | `.dmg`, `.AppImage`, `.exe` attached                                       |
+| **Web**              | https://app.kata.sh and https://latest.app.kata.sh load                    |
+| **npm**              | `npm view @kata-sh/code-cli version` and `dist-tags.latest` match `0.0.28` |
+| **macOS** (optional) | Download `.dmg`; `codesign --verify` + `spctl --assess` on the app         |
+
+## 5. Nightly release
+
+Release current `main` HEAD (version computed automatically — step 3):
+
+```bash
+gh workflow run release.yml -R gannonh/katacode \
+  -f channel=nightly
+```
+
+### Verify nightly
+
+```bash
+gh run watch -R gannonh/katacode --workflow=release.yml
+gh release list -R gannonh/katacode --limit 3   # newest tag ends with -nightly.*
+```
+
+| Check              | What to confirm                                        |
+| ------------------ | ------------------------------------------------------ |
+| **Workflow**       | Build, Publish release, Deploy green (no Finalize job) |
+| **GitHub Release** | New `v*-nightly.*` tag with desktop artifacts          |
+| **Web**            | https://nightly.app.kata.sh loads                      |
+| **npm**            | `npm view @kata-sh/code-cli dist-tags.nightly` updated |
+
+## Quick reference
+
+```bash
+# Last shipped + current package.json version
+gh release list -R gannonh/katacode --limit 5
+node -p "require('./apps/desktop/package.json').version"
+
+# Local gates
+vp check && vp run typecheck && vp run test && vp run release:smoke
+
+# Dry run
+gh workflow run release.yml -R gannonh/katacode -f dry_run=true -f channel=stable
+
+# Stable (you supply version)
+gh workflow run release.yml -R gannonh/katacode -f channel=stable -f version=0.0.28
+
+# Nightly (version automatic)
+gh workflow run release.yml -R gannonh/katacode -f channel=nightly
+
+# Watch any release run
+gh run watch -R gannonh/katacode --workflow=release.yml
+```
 
 ## Related
 
-- [CI quality gates](./ci.md)
-- [Phase 2 desktop/web release spec](../specs/2026-06-16-phase-2-desktop-web-release-design.md)
-- [FORK.md — Phase 2](../../FORK.md#phase-2--infrastructure-split)
+- [Release setup](./release-setup.md) — secrets and infrastructure
+- [CI](./ci.md)
+- [Phase 2 release spec](../specs/2026-06-16-phase-2-desktop-web-release-design.md)

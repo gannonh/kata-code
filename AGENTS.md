@@ -40,7 +40,7 @@ maintainability is encouraged.
 - Brand icon rasters must use ImageMagick `-background none` — run `pnpm run generate:brand-rasters` after SVG changes.
 - **CI:** PR checks run from [`.github/workflows/ci.yml`](./.github/workflows/ci.yml). Require **Check**, **Test**, **Test Browser**, **Release Smoke**, and **Mobile Native Static Analysis** on `main` — see [branch protection](./docs/operations/ci.md#branch-protection-main). **Release** ([`release.yml`](./.github/workflows/release.yml)) runs on tags/`workflow_dispatch`, not PRs. Relay deploy and mobile EAS remain in [`.github/disabled/`](./.github/disabled/README.md).
 - **Hosted web:** `apps/web` deploys to Vercel (`katacode-web`, root `apps/web`). Domains: `app.kata.sh`, `latest.app.kata.sh`, `nightly.app.kata.sh`. `apps/web/vercel.ts` inlines branding constants — Vercel compiles config before the monorepo build; keep in sync with `packages/shared/src/branding.ts`.
-- **Release secrets:** macOS signing (`CSC_*`, `APPLE_*`), GitHub Release app (`RELEASE_APP_*`), Vercel (`VERCEL_*`) — see [release runbook](./docs/operations/release.md).
+- **Release secrets:** see [release setup](./docs/operations/release-setup.md). Day-to-day releases: [release runbook](./docs/operations/release.md).
 - **Fork tests:** rename product surfaces (`katacode`, `KATACODE_*`, worktree prefix `katacode/`) but keep upstream-shaped repo names in fixtures (`octocat/t3code` → clone dir `t3code`). See [fork rebrand test fixtures](./docs/operations/ci.md#fork-rebrand-test-fixtures).
 
 ## Open Knowledge Format docs

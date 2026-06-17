@@ -1,5 +1,13 @@
 # Runbooks log
 
+## 2026-06-17 (release docs split)
+
+- Split [release runbook](/operations/release.md) (steps + verification) from [release setup](/operations/release-setup.md) (secrets/infrastructure).
+
+## 2026-06-17 (release runbook)
+
+- [Release runbook](/operations/release.md): parallel stable/nightly sections, version-selection guide, per-channel verification.
+
 ## 2026-06-17 (Phase 2 pre-merge)
 
 - [CI runbook](/operations/ci.md): branch protection allowlist for `main` (five CI jobs; Release workflow excluded from PR gates).
