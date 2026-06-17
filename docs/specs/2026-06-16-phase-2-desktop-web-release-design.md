@@ -4,7 +4,7 @@ title: "Phase 2 desktop and web release split"
 description: "Design for re-enabling fork-owned desktop and web releases with CI macOS signing and notarization."
 tags: [fork, release, desktop, web, ci, signing]
 timestamp: 2026-06-16T23:30:00Z
-status: Draft
+status: Approved
 ---
 
 # Phase 2 desktop and web release split
