@@ -12,8 +12,8 @@ describe("desktop Clerk external account adapter", () => {
     const bridge = {
       createCloudAuthRequest: vi
         .fn()
-        .mockResolvedValueOnce("t3code://auth/callback?t3_state=add")
-        .mockResolvedValueOnce("t3code://auth/callback?t3_state=reconnect"),
+        .mockResolvedValueOnce("katacode://auth/callback?katacode_state=add")
+        .mockResolvedValueOnce("katacode://auth/callback?katacode_state=reconnect"),
       onCloudAuthCallback: vi.fn((listener: (rawUrl: string) => void) => {
         callbacks.push(listener);
         return callbackCleanup;
@@ -37,11 +37,11 @@ describe("desktop Clerk external account adapter", () => {
     });
 
     expect(createExternalAccount).toHaveBeenCalledWith({
-      redirectUrl: "t3code://auth/callback?t3_state=add",
+      redirectUrl: "katacode://auth/callback?katacode_state=add",
       strategy: "oauth_microsoft",
     });
 
-    callbacks[0]?.("t3code://auth/callback?t3_state=add");
+    callbacks[0]?.("katacode://auth/callback?katacode_state=add");
     await Promise.resolve();
     expect(reload).toHaveBeenCalledOnce();
 
@@ -49,14 +49,16 @@ describe("desktop Clerk external account adapter", () => {
       redirectUrl: "http://127.0.0.1:3773/?__clerk_modal_state=state",
     });
     expect(reauthorize).toHaveBeenCalledWith({
-      redirectUrl: "t3code://auth/callback?t3_state=reconnect",
+      redirectUrl: "katacode://auth/callback?katacode_state=reconnect",
     });
   });
 
   it("cleans up the pending callback when Clerk rejects account creation", async () => {
     const callbackCleanup = vi.fn();
     const bridge = {
-      createCloudAuthRequest: vi.fn().mockResolvedValue("t3code://auth/callback?t3_state=failed"),
+      createCloudAuthRequest: vi
+        .fn()
+        .mockResolvedValue("katacode://auth/callback?katacode_state=failed"),
       onCloudAuthCallback: vi.fn(() => callbackCleanup),
     };
     const createError = new Error("oauth provider unavailable");

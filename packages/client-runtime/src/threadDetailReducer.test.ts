@@ -8,8 +8,8 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import type { OrchestrationThread } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import type { OrchestrationThread } from "@kata-sh/code-contracts";
 
 import { applyThreadDetailEvent } from "./threadDetailReducer.ts";
 
@@ -54,7 +54,7 @@ describe("applyThreadDetailEvent", () => {
         type: "project.created",
         payload: {
           projectId: ProjectId.make("project-1"),
-          title: "T3 Code",
+          title: "KataCode",
           workspaceRoot: "/repo",
           repositoryIdentity: null,
           defaultModelSelection: null,

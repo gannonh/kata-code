@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
+import { dedupeRemoteBranchesWithLocalMatches } from "@kata-sh/code-shared/git";
 
 import { useVcsActionState } from "./use-vcs-action-state";
 import { useVcsRefs } from "./use-vcs-refs";

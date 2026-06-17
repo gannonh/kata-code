@@ -29,4 +29,4 @@ export interface RelayConfigurationShape {
 export class RelayConfiguration extends Context.Service<
   RelayConfiguration,
   RelayConfigurationShape
->()("t3code-relay/Config/RelayConfiguration") {}
+>()("@kata-sh/code-relay/Config/RelayConfiguration") {}

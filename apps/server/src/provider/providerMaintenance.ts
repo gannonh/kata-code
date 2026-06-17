@@ -2,9 +2,9 @@ import {
   ProviderDriverKind,
   type ServerProvider,
   type ServerProviderVersionAdvisory,
-} from "@t3tools/contracts";
-import { compareSemverVersions } from "@t3tools/shared/semver";
-import { resolveCommandPath } from "@t3tools/shared/shell";
+} from "@kata-sh/code-contracts";
+import { compareSemverVersions } from "@kata-sh/code-shared/semver";
+import { resolveCommandPath } from "@kata-sh/code-shared/shell";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -81,7 +81,7 @@ export interface ProviderVersionCacheEntry {
 }
 
 export const ProviderVersionCache = Context.Reference<Map<string, ProviderVersionCacheEntry>>(
-  "@t3tools/server/providerMaintenance/ProviderVersionCache",
+  "@kata-sh/code-cli/providerMaintenance/ProviderVersionCache",
   {
     defaultValue: () => new Map(),
   },

@@ -1,4 +1,4 @@
-import { EnvironmentId, MessageId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId } from "@kata-sh/code-contracts";
 import { createRef, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";

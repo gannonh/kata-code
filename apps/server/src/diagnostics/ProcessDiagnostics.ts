@@ -3,8 +3,8 @@ import type {
   ServerProcessDiagnosticsResult,
   ServerProcessSignal,
   ServerSignalProcessResult,
-} from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+} from "@kata-sh/code-contracts";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -42,7 +42,7 @@ export interface ProcessDiagnosticsShape {
 export class ProcessDiagnostics extends Context.Service<
   ProcessDiagnostics,
   ProcessDiagnosticsShape
->()("t3/diagnostics/ProcessDiagnostics") {}
+>()("@kata-sh/code-cli/diagnostics/ProcessDiagnostics") {}
 
 class ProcessDiagnosticsError extends Schema.TaggedErrorClass<ProcessDiagnosticsError>()(
   "ProcessDiagnosticsError",
@@ -390,7 +390,9 @@ function assertDescendantPid(
   pid: number,
 ): Effect.Effect<void, ProcessDiagnosticsError, ChildProcessSpawner.ChildProcessSpawner> {
   if (pid === process.pid) {
-    return Effect.fail(toProcessDiagnosticsError("Refusing to signal the T3 server process."));
+    return Effect.fail(
+      toProcessDiagnosticsError("Refusing to signal the KataCode server process."),
+    );
   }
 
   return readProcessRows.pipe(
@@ -402,7 +404,9 @@ function assertDescendantPid(
       return descendant
         ? Effect.void
         : Effect.fail(
-            toProcessDiagnosticsError(`Process ${pid} is not a live descendant of the T3 server.`),
+            toProcessDiagnosticsError(
+              `Process ${pid} is not a live descendant of the KataCode server.`,
+            ),
           );
     }),
   );

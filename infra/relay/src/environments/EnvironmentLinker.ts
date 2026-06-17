@@ -2,13 +2,13 @@ import {
   RelayEnvironmentLinkProofPayload,
   RelayEnvironmentLinkProofInvalidReason,
   type RelayEnvironmentLinkRequest,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import {
   decodeRelayJwt,
   normalizeRelayIssuer,
   RELAY_LINK_PROOF_TYP,
   verifyRelayJwt,
-} from "@t3tools/shared/relayJwt";
+} from "@kata-sh/code-shared/relayJwt";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -71,7 +71,7 @@ export interface EnvironmentLinkerShape {
 }
 
 export class EnvironmentLinker extends Context.Service<EnvironmentLinker, EnvironmentLinkerShape>()(
-  "t3code-relay/environments/EnvironmentLinker",
+  "@kata-sh/code-relay/environments/EnvironmentLinker",
 ) {}
 
 const decodeProof = Schema.decodeUnknownEffect(RelayEnvironmentLinkProofPayload);

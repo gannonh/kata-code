@@ -1,4 +1,4 @@
-import { type ServerProvider } from "@t3tools/contracts";
+import { type ServerProvider } from "@kata-sh/code-contracts";
 import { memo } from "react";
 import { InfoIcon } from "lucide-react";
 import { cn } from "~/lib/utils";

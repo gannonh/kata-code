@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 import { FolderIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAssetUrl } from "../assets/assetUrls";

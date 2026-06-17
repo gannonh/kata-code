@@ -1,4 +1,8 @@
-import { EnvironmentId, ThreadId, type OrchestrationGetTurnDiffResult } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ThreadId,
+  type OrchestrationGetTurnDiffResult,
+} from "@kata-sh/code-contracts";
 import { AtomRegistry } from "effect/unstable/reactivity";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 

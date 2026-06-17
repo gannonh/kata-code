@@ -28,28 +28,28 @@ import {
   type VcsStatusRemoteResult,
   VcsStatusResult,
   ModelSelection,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   mergeGitStatusParts,
   resolveAutoFeatureBranchName,
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
-} from "@t3tools/shared/git";
+} from "@kata-sh/code-shared/git";
 import {
   getChangeRequestTerminologyForKind,
   type ChangeRequestTerminology,
-} from "@t3tools/shared/sourceControl";
+} from "@kata-sh/code-shared/sourceControl";
 
-import { GitManagerError } from "@t3tools/contracts";
+import { GitManagerError } from "@kata-sh/code-contracts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import type { GitManagerServiceError } from "@t3tools/contracts";
+import type { GitManagerServiceError } from "@kata-sh/code-contracts";
 import { GitVcsDriver, type GitStatusDetails } from "../vcs/GitVcsDriver.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
-import type { ChangeRequest } from "@t3tools/contracts";
+import type { ChangeRequest } from "@kata-sh/code-contracts";
 
 export interface GitActionProgressReporter {
   readonly publish: (event: GitActionProgressEvent) => Effect.Effect<void, never>;
@@ -86,7 +86,7 @@ export interface GitManagerShape {
 }
 
 export class GitManager extends Context.Service<GitManager, GitManagerShape>()(
-  "t3/git/GitManager",
+  "@kata-sh/code-cli/git/GitManager",
 ) {}
 
 const COMMIT_TIMEOUT_MS = 10 * 60_000;
@@ -184,7 +184,7 @@ function resolvePullRequestWorktreeLocalBranchName(
 
   const sanitizedHeadBranch = sanitizeBranchFragment(pullRequest.headBranch).trim();
   const suffix = sanitizedHeadBranch.length > 0 ? sanitizedHeadBranch : "head";
-  return `t3code/pr-${pullRequest.number}/${suffix}`;
+  return `katacode/pr-${pullRequest.number}/${suffix}`;
 }
 
 function parseGitHubRepositoryNameWithOwnerFromRemoteUrl(url: string | null): string | null {
@@ -1307,7 +1307,10 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       modelSelection,
     });
 
-    const bodyFile = path.join(tempDir, `t3code-pr-body-${process.pid}-${yield* randomUUIDv4}.md`);
+    const bodyFile = path.join(
+      tempDir,
+      `katacode-pr-body-${process.pid}-${yield* randomUUIDv4}.md`,
+    );
     yield* fileSystem
       .writeFileString(bodyFile, generated.body)
       .pipe(

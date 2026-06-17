@@ -16,9 +16,9 @@ import type * as Electron from "electron";
 
 export const CLOUD_AUTH_CALLBACK_HOST = "auth";
 export const CLOUD_AUTH_CALLBACK_PATHNAME = "/callback";
-export const CLOUD_AUTH_CALLBACK_STATE_PARAM = "t3_state";
-export const CLOUD_AUTH_CALLBACK_SCHEME = "t3code";
-export const DEVELOPMENT_CLOUD_AUTH_CALLBACK_SCHEME = "t3code-dev";
+export const CLOUD_AUTH_CALLBACK_STATE_PARAM = "katacode_state";
+export const CLOUD_AUTH_CALLBACK_SCHEME = "katacode";
+export const DEVELOPMENT_CLOUD_AUTH_CALLBACK_SCHEME = "katacode-dev";
 
 const CLOUD_AUTH_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -48,7 +48,7 @@ export interface DesktopCloudAuthShape {
 }
 
 export class DesktopCloudAuth extends Context.Service<DesktopCloudAuth, DesktopCloudAuthShape>()(
-  "@t3tools/desktop/app/DesktopCloudAuth",
+  "@kata-sh/code-desktop/app/DesktopCloudAuth",
 ) {}
 
 export function resolveCloudAuthCallbackScheme(input: { readonly isDevelopment: boolean }): string {
@@ -113,12 +113,12 @@ function resolveConfiguredProtocolClient(): {
   readonly path: string;
   readonly args: readonly string[];
 } | null {
-  const path = process.env.T3CODE_DESKTOP_PROTOCOL_CLIENT_PATH?.trim();
+  const path = process.env.KATACODE_DESKTOP_PROTOCOL_CLIENT_PATH?.trim();
   if (!path) return null;
 
   return {
     path,
-    args: (process.env.T3CODE_DESKTOP_PROTOCOL_CLIENT_ARGS ?? "")
+    args: (process.env.KATACODE_DESKTOP_PROTOCOL_CLIENT_ARGS ?? "")
       .split("\n")
       .map((arg) => arg.trim())
       .filter((arg) => arg.length > 0),
@@ -126,11 +126,11 @@ function resolveConfiguredProtocolClient(): {
 }
 
 function isProtocolRegistrationManagedExternally(): boolean {
-  return process.env.T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED?.trim() === "1";
+  return process.env.KATACODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED?.trim() === "1";
 }
 
 function resolveProtocolCallbackForwardUrl(): URL | null {
-  const rawUrl = process.env.T3CODE_DESKTOP_PROTOCOL_CALLBACK_URL?.trim();
+  const rawUrl = process.env.KATACODE_DESKTOP_PROTOCOL_CALLBACK_URL?.trim();
   if (!rawUrl) return null;
 
   try {

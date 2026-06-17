@@ -1,8 +1,8 @@
-import { EDITORS, EditorId, LocalApi } from "@t3tools/contracts";
+import { EDITORS, EditorId, LocalApi } from "@kata-sh/code-contracts";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "./hooks/useLocalStorage";
 import { useMemo } from "react";
 
-const LAST_EDITOR_KEY = "t3code:last-editor";
+const LAST_EDITOR_KEY = "katacode:last-editor";
 
 export function usePreferredEditor(availableEditors: ReadonlyArray<EditorId>) {
   const [lastEditor, setLastEditor] = useLocalStorage(LAST_EDITOR_KEY, null, EditorId);

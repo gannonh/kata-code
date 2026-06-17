@@ -7,7 +7,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 
-import { GitCommandError } from "@t3tools/contracts";
+import { GitCommandError } from "@kata-sh/code-contracts";
 import { ServerConfig } from "../config.ts";
 import { splitNullSeparatedGitStdoutPaths } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";

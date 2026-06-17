@@ -1,5 +1,5 @@
-import { resolveDefaultBranchActionDialogCopy } from "@t3tools/client-runtime";
-import { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
+import { resolveDefaultBranchActionDialogCopy } from "@kata-sh/code-client-runtime";
+import { resolveAutoFeatureBranchName } from "@kata-sh/code-shared/git";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { useLocalSearchParams, useRouter } from "expo-router";

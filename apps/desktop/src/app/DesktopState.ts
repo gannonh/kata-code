@@ -9,7 +9,7 @@ export interface DesktopStateShape {
 }
 
 export class DesktopState extends Context.Service<DesktopState, DesktopStateShape>()(
-  "@t3tools/desktop/app/DesktopState",
+  "@kata-sh/code-desktop/app/DesktopState",
 ) {}
 
 export const layer = Layer.effect(

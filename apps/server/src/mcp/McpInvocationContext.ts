@@ -1,5 +1,5 @@
-import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import { PreviewAutomationUnavailableError } from "@t3tools/contracts";
+import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@kata-sh/code-contracts";
+import { PreviewAutomationUnavailableError } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
@@ -18,7 +18,7 @@ export interface McpInvocationScope {
 export class McpInvocationContext extends Context.Service<
   McpInvocationContext,
   McpInvocationScope
->()("t3/mcp/McpInvocationContext") {}
+>()("@kata-sh/code-cli/mcp/McpInvocationContext") {}
 
 export const requireMcpCapability = Effect.fn("mcp.requireCapability")(function* (
   capability: McpCapability,

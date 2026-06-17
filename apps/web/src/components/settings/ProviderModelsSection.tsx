@@ -15,8 +15,8 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProviderModel,
-} from "@t3tools/contracts";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+} from "@kata-sh/code-contracts";
+import { normalizeModelSlug } from "@kata-sh/code-shared/model";
 
 import { cn } from "../../lib/utils";
 import { sortModelsForProviderInstance } from "../../modelOrdering";

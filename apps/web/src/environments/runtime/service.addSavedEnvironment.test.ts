@@ -1,4 +1,4 @@
-import { EnvironmentAuthInvalidError, EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentAuthInvalidError, EnvironmentId } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -6,7 +6,7 @@ import * as Tracer from "effect/Tracer";
 import { Headers } from "effect/unstable/http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { RelayClientTracer } from "@t3tools/shared/relayTracing";
+import { RelayClientTracer } from "@kata-sh/code-shared/relayTracing";
 
 const decodeEnvironmentAuthInvalidError = Schema.decodeUnknownSync(EnvironmentAuthInvalidError);
 
@@ -20,7 +20,7 @@ const mockFetchRemoteDpopSessionState = vi.fn();
 const mockResolveRemoteDpopWebSocketConnectionUrl = vi.fn();
 const mockResolveRemoteWebSocketConnectionUrl = vi.fn();
 const mockWsTransportConnectors: Array<() => Promise<string>> = [];
-let managedRelayDpopSigner: typeof import("@t3tools/client-runtime").ManagedRelayDpopSigner;
+let managedRelayDpopSigner: typeof import("@kata-sh/code-client-runtime").ManagedRelayDpopSigner;
 let mockRelayClientTracer = Option.none<Tracer.Tracer>();
 const mockRemoteHttpRunPromise = vi.fn(<A, E>(effect: Effect.Effect<A, E>) =>
   Effect.runPromise(
@@ -87,8 +87,8 @@ const mockClientGetConfig = vi.fn(async () => ({
 const mockConnectManagedCloudEnvironment = vi.fn();
 const mockReadManagedRelayClerkToken = vi.fn();
 
-vi.mock("@t3tools/shared/remote", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@t3tools/shared/remote")>()),
+vi.mock("@kata-sh/code-shared/remote", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@kata-sh/code-shared/remote")>()),
   resolveRemotePairingTarget: mockResolveRemotePairingTarget,
 }));
 
@@ -150,8 +150,8 @@ vi.mock("./connection", async (importOriginal) => ({
   createEnvironmentConnection: mockCreateEnvironmentConnection,
 }));
 
-vi.mock("@t3tools/client-runtime", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@t3tools/client-runtime")>();
+vi.mock("@kata-sh/code-client-runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@kata-sh/code-client-runtime")>();
   managedRelayDpopSigner = actual.ManagedRelayDpopSigner;
   return {
     ...actual,

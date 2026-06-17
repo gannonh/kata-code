@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime";
-import type { PreviewListResult, ScopedThreadRef } from "@t3tools/contracts";
+import { parseScopedThreadKey, scopedThreadKey } from "@kata-sh/code-client-runtime";
+import type { PreviewListResult, ScopedThreadRef } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";

@@ -2,7 +2,7 @@ import {
   EnvironmentId,
   type LocalApi,
   type PersistedSavedEnvironmentRecord,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {

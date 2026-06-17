@@ -1,5 +1,5 @@
 {
-  "name": "t3code-relay",
+  "name": "@kata-sh/code-relay",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,9 +11,9 @@
   "dependencies": {
     "@clerk/backend": "3.4.14",
     "@effect/sql-pg": "catalog:",
-    "@t3tools/client-runtime": "workspace:*",
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
+    "@kata-sh/code-client-runtime": "workspace:*",
+    "@kata-sh/code-contracts": "workspace:*",
+    "@kata-sh/code-shared": "workspace:*",
     "alchemy": "https://pkg.ing/alchemy/078ff00",
     "drizzle-orm": "1.0.0-rc.3",
     "effect": "catalog:"

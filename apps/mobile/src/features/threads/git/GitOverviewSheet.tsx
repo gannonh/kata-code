@@ -3,8 +3,8 @@ import {
   buildMenuItems,
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
-} from "@t3tools/client-runtime";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime";
+import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useMemo } from "react";

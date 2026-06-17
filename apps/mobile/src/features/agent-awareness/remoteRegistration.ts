@@ -3,12 +3,12 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import * as Effect from "effect/Effect";
 import { Platform } from "react-native";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 import {
   type RelayDeviceRegistrationRequest,
   type RelayLiveActivityRegistrationRequest,
-} from "@t3tools/contracts/relay";
-import { ManagedRelayClient } from "@t3tools/client-runtime";
+} from "@kata-sh/code-contracts/relay";
+import { ManagedRelayClient } from "@kata-sh/code-client-runtime";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { mobileRuntime } from "../../lib/runtime";

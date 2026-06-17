@@ -1,4 +1,4 @@
-import type { ProviderDriverKind, ThreadId } from "@t3tools/contracts";
+import type { ProviderDriverKind, ThreadId } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";

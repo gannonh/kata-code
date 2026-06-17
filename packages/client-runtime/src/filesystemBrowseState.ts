@@ -1,4 +1,4 @@
-import type { FilesystemBrowseInput, FilesystemBrowseResult } from "@t3tools/contracts";
+import type { FilesystemBrowseInput, FilesystemBrowseResult } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 

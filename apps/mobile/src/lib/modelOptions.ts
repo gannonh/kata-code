@@ -1,4 +1,4 @@
-import type { ModelSelection, ServerConfig as T3ServerConfig } from "@t3tools/contracts";
+import type { ModelSelection, ServerConfig as T3ServerConfig } from "@kata-sh/code-contracts";
 
 export type ModelOption = {
   readonly key: string;

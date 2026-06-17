@@ -15,9 +15,9 @@ import { CheckpointStoreLive } from "./CheckpointStore.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
-import type { VcsError } from "@t3tools/contracts";
+import type { VcsError } from "@kata-sh/code-contracts";
 import { ServerConfig } from "../../config.ts";
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@kata-sh/code-contracts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-checkpoint-store-test-",

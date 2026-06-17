@@ -2,22 +2,22 @@ import {
   RelayApi,
   type RelayAgentActivityPublishProofPayload,
   type RelayAgentActivityState,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import type {
   EnvironmentId,
   OrchestrationEvent,
   OrchestrationProjectShell,
   OrchestrationThreadShell,
   ThreadId,
-} from "@t3tools/contracts";
-import { projectThreadAwareness } from "@t3tools/shared/agentAwareness";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+} from "@kata-sh/code-contracts";
+import { projectThreadAwareness } from "@kata-sh/code-shared/agentAwareness";
+import { makeDrainableWorker } from "@kata-sh/code-shared/DrainableWorker";
+import { withRelayClientTracing } from "@kata-sh/code-shared/relayTracing";
 import {
   RELAY_ACTIVITY_PUBLISH_TYP,
   signRelayJwt,
   normalizeRelayIssuer,
-} from "@t3tools/shared/relayJwt";
+} from "@kata-sh/code-shared/relayJwt";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -53,7 +53,7 @@ export interface AgentAwarenessRelayShape {
 export class AgentAwarenessRelay extends Context.Service<
   AgentAwarenessRelay,
   AgentAwarenessRelayShape
->()("t3/relay/AgentAwarenessRelay") {}
+>()("@kata-sh/code-cli/relay/AgentAwarenessRelay") {}
 
 export function eventThreadId(event: OrchestrationEvent): ThreadId | null {
   const payload = event.payload as { readonly threadId?: unknown };
@@ -304,7 +304,7 @@ const make = Effect.gen(function* () {
     }
     const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
     if (!relayConfig) {
-      yield* Effect.logDebug("agent activity publish skipped; T3 Connect config missing", {
+      yield* Effect.logDebug("agent activity publish skipped; KataCode Connect config missing", {
         threadId,
       });
       return;
@@ -423,7 +423,7 @@ const make = Effect.gen(function* () {
     }
     const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
     if (!relayConfig) {
-      yield* Effect.logDebug("agent activity snapshot skipped; T3 Connect config missing");
+      yield* Effect.logDebug("agent activity snapshot skipped; KataCode Connect config missing");
       return false;
     }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
@@ -461,7 +461,7 @@ const make = Effect.gen(function* () {
     function* () {
       const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
       if (!relayConfig) {
-        yield* Effect.logInfo("agent activity publishing standby; T3 Connect config missing");
+        yield* Effect.logInfo("agent activity publishing standby; KataCode Connect config missing");
       } else {
         yield* Effect.logInfo("agent activity publishing enabled", {
           relayUrl: relayConfig.url,

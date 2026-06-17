@@ -1,7 +1,7 @@
 import * as Crypto from "node:crypto";
 
-import type { DesktopSshEnvironmentTarget, DesktopUpdateChannel } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import type { DesktopSshEnvironmentTarget, DesktopUpdateChannel } from "@kata-sh/code-contracts";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,7 +14,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { buildSshChildEnvironment, type SshAuthOptions } from "./auth.ts";
 import { SshCommandError, SshInvalidTargetError } from "./errors.ts";
 
-const PUBLISHABLE_T3_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+const PUBLISHABLE_CLI_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+export const REMOTE_CLI_PACKAGE_NAME = "@kata-sh/code-cli" as const;
+export const DEFAULT_REMOTE_CLI_PACKAGE_SPEC = `${REMOTE_CLI_PACKAGE_NAME}@latest` as const;
 const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000;
 const MAX_SSH_ERROR_OUTPUT_LENGTH = 4_000;
 
@@ -361,19 +363,24 @@ export const resolveSshTarget = Effect.fn("ssh/command.resolveSshTarget")(functi
   );
 });
 
-export function resolveRemoteT3CliPackageSpec(input: {
+export function resolveRemoteCliPackageSpec(input: {
   readonly appVersion: string;
   readonly updateChannel: DesktopUpdateChannel;
   readonly isDevelopment?: boolean;
 }): string {
   const appVersion = input.appVersion.trim();
-  if (!input.isDevelopment && PUBLISHABLE_T3_VERSION_PATTERN.test(appVersion)) {
-    return `t3@${appVersion}`;
+  if (!input.isDevelopment && PUBLISHABLE_CLI_VERSION_PATTERN.test(appVersion)) {
+    return `${REMOTE_CLI_PACKAGE_NAME}@${appVersion}`;
   }
 
   if (input.isDevelopment) {
-    return "t3@nightly";
+    return `${REMOTE_CLI_PACKAGE_NAME}@nightly`;
   }
 
-  return input.updateChannel === "nightly" ? "t3@nightly" : "t3@latest";
+  return input.updateChannel === "nightly"
+    ? `${REMOTE_CLI_PACKAGE_NAME}@nightly`
+    : `${REMOTE_CLI_PACKAGE_NAME}@latest`;
 }
+
+/** @deprecated Use {@link resolveRemoteCliPackageSpec}. */
+export const resolveRemoteT3CliPackageSpec = resolveRemoteCliPackageSpec;

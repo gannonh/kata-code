@@ -1,5 +1,5 @@
-import { EnvironmentId } from "@t3tools/contracts";
-import { RelayWebClientId } from "@t3tools/contracts/relay";
+import { EnvironmentId } from "@kata-sh/code-contracts";
+import { RelayWebClientId } from "@kata-sh/code-contracts/relay";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -10,7 +10,7 @@ import {
   ManagedRelayClient,
   ManagedRelayDpopSigner,
   remoteHttpClientLayer,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 
 import type { SavedEnvironmentRecord } from "../environments/runtime";
 import {
@@ -120,7 +120,7 @@ function validChallenge() {
 function availableRelayClient() {
   return {
     status: "available",
-    executablePath: "/Users/test/.t3/tools/cloudflared/cloudflared",
+    executablePath: "/Users/test/.katacode/tools/cloudflared/cloudflared",
     source: "managed",
     version: "2026.5.2",
   };
@@ -142,7 +142,7 @@ describe("web cloud link environment client", () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     createProofMock.mockClear();
-    vi.stubEnv("VITE_T3CODE_RELAY_URL", "https://relay.example.test");
+    vi.stubEnv("VITE_KATACODE_RELAY_URL", "https://relay.example.test");
     getSavedEnvironmentSecretMock.mockResolvedValue("local-bearer");
     relayClientInstallDialogHarness.requestConfirmation.mockResolvedValue(true);
     getRelayClientStatusMock.mockResolvedValue(availableRelayClient());

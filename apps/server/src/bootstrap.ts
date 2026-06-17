@@ -10,8 +10,8 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { decodeJsonResult } from "@t3tools/shared/schemaJson";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { decodeJsonResult } from "@kata-sh/code-shared/schemaJson";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 
 class BootstrapError extends Data.TaggedError("BootstrapError")<{
   readonly message: string;

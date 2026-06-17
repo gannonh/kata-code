@@ -1,9 +1,9 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@kata-sh/code-contracts";
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
-} from "@t3tools/client-runtime";
-import { resolveRemotePairingTarget, stripPairingTokenFromUrl } from "@t3tools/shared/remote";
+} from "@kata-sh/code-client-runtime";
+import { resolveRemotePairingTarget, stripPairingTokenFromUrl } from "@kata-sh/code-shared/remote";
 import * as Effect from "effect/Effect";
 import { mobileAuthClientMetadata } from "./authClientMetadata";
 import { mobileRuntime } from "./runtime";

@@ -3,7 +3,7 @@ import { pipe } from "effect/Function";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SecureStore from "expo-secure-store";
-import { EnvironmentId, OrchestrationShellSnapshot } from "@t3tools/contracts";
+import { EnvironmentId, OrchestrationShellSnapshot } from "@kata-sh/code-contracts";
 
 import {
   isRelayManagedConnection,
@@ -11,9 +11,9 @@ import {
   toStableSavedRemoteConnection,
 } from "./connection";
 
-const CONNECTIONS_KEY = "t3code.connections";
-const PREFERENCES_KEY = "t3code.preferences";
-const AGENT_AWARENESS_DEVICE_ID_KEY = "t3code.agent-awareness.device-id";
+const CONNECTIONS_KEY = "katacode.connections";
+const PREFERENCES_KEY = "katacode.preferences";
+const AGENT_AWARENESS_DEVICE_ID_KEY = "katacode.agent-awareness.device-id";
 const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
 const SHELL_SNAPSHOT_CACHE_DIRECTORY = "shell-snapshots";
 

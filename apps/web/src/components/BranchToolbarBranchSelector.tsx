@@ -1,5 +1,5 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
-import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@kata-sh/code-client-runtime";
+import type { EnvironmentId, VcsRef, ThreadId } from "@kata-sh/code-contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon, GitBranchIcon, SearchIcon } from "lucide-react";
 import {

@@ -1,7 +1,7 @@
-# T3 Code Mobile
+# KataCode Mobile
 
 > [!WARNING]
-> T3 Code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
+> KataCode Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
 
 ## Quickstart
 
@@ -10,13 +10,13 @@
 
 This app has three variants:
 
-- `development`: Expo dev client, installable side-by-side as `T3 Code Dev`
-- `preview`: persistent internal preview build, installable side-by-side as `T3 Code Preview`
-- `production`: store/release build as `T3 Code`
+- `development`: Expo dev client, installable side-by-side as `KataCode Dev`
+- `preview`: persistent internal preview build, installable side-by-side as `KataCode Preview`
+- `production`: store/release build as `KataCode`
 
 Run commands from `apps/mobile`.
 
-T3 Connect is optional and disabled in a fresh clone. Public configuration belongs in the
+KataCode Connect is optional and disabled in a fresh clone. Public configuration belongs in the
 repository-root `.env` or `.env.local`, not an `apps/mobile/.env` file. See
 [`../../.env.example`](../../.env.example).
 
@@ -67,8 +67,8 @@ The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin.
 
 CI uses Expo fingerprinting with the `preview:dev` profile to reuse an existing compatible build when possible, or start a new internal EAS build when native runtime inputs change. Production and default local builds continue to use the `appVersion` runtime policy.
 
-For preview or production EAS environments, set `T3CODE_CLERK_PUBLISHABLE_KEY`,
-`T3CODE_CLERK_JWT_TEMPLATE`, and `T3CODE_RELAY_URL`
+For preview or production EAS environments, set `KATACODE_CLERK_PUBLISHABLE_KEY`,
+`KATACODE_CLERK_JWT_TEMPLATE`, and `KATACODE_RELAY_URL`
 as EAS environment variables. Expo config maps the canonical values into the mobile build.
 
 Create a PR preview dev-client build manually:

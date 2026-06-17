@@ -14,7 +14,7 @@ const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 
 const AppPackageMetadata = Schema.Struct({
-  t3codeCommitHash: Schema.optional(Schema.String),
+  katacodeCommitHash: Schema.optional(Schema.String),
 });
 const decodeAppPackageMetadata = Schema.decodeEffect(Schema.fromJsonString(AppPackageMetadata));
 
@@ -26,7 +26,7 @@ export interface DesktopAppIdentityShape {
 export class DesktopAppIdentity extends Context.Service<
   DesktopAppIdentity,
   DesktopAppIdentityShape
->()("@t3tools/desktop/app/DesktopAppIdentity") {}
+>()("@kata-sh/code-desktop/app/DesktopAppIdentity") {}
 
 const normalizeCommitHash = (value: string): Option.Option<string> => {
   const trimmed = value.trim();
@@ -50,7 +50,9 @@ const make = Effect.gen(function* () {
       onSome: (value) =>
         decodeAppPackageMetadata(value).pipe(
           Effect.map((parsed) =>
-            Option.fromNullishOr(parsed.t3codeCommitHash).pipe(Option.flatMap(normalizeCommitHash)),
+            Option.fromNullishOr(parsed.katacodeCommitHash).pipe(
+              Option.flatMap(normalizeCommitHash),
+            ),
           ),
           Effect.orElseSucceed(() => Option.none<string>()),
         ),
@@ -81,16 +83,17 @@ const make = Effect.gen(function* () {
   });
 
   const resolveUserDataPath = Effect.gen(function* () {
-    const legacyPath = environment.path.join(
-      environment.appDataDirectory,
-      environment.legacyUserDataDirName,
-    );
-    const legacyPathExists = yield* fileSystem
-      .exists(legacyPath)
-      .pipe(Effect.orElseSucceed(() => false));
-    return legacyPathExists
-      ? legacyPath
-      : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
+    for (const legacyUserDataDirName of environment.legacyUserDataDirNames) {
+      const legacyPath = environment.path.join(environment.appDataDirectory, legacyUserDataDirName);
+      const legacyPathExists = yield* fileSystem
+        .exists(legacyPath)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (legacyPathExists) {
+        return legacyPath;
+      }
+    }
+
+    return environment.path.join(environment.appDataDirectory, environment.userDataDirName);
   }).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
 
   const configure = Effect.gen(function* () {

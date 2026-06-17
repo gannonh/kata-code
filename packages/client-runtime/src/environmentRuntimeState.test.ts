@@ -1,5 +1,5 @@
 import { AtomRegistry } from "effect/unstable/reactivity";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@kata-sh/code-contracts";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { createEnvironmentRuntimeManager } from "./environmentRuntimeState.ts";

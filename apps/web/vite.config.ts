@@ -16,7 +16,7 @@ Object.assign(process.env, repoEnv);
 const port = Number(process.env.PORT ?? 5733);
 const host = process.env.HOST?.trim() || "localhost";
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
-const configuredRelayUrl = repoEnv.VITE_T3CODE_RELAY_URL?.trim() || "";
+const configuredRelayUrl = repoEnv.VITE_KATACODE_RELAY_URL?.trim() || "";
 const configuredClerkPublishableKey = repoEnv.VITE_CLERK_PUBLISHABLE_KEY?.trim() || "";
 const configuredClerkJwtTemplate = repoEnv.VITE_CLERK_JWT_TEMPLATE?.trim() || "";
 const configuredRelayTracingUrl = repoEnv.VITE_RELAY_OTLP_TRACES_URL?.trim() || "";
@@ -37,7 +37,7 @@ const configuredHostedAppUrl = (() => {
   }
   return undefined;
 })();
-const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
+const sourcemapEnv = process.env.KATACODE_WEB_SOURCEMAP?.trim().toLowerCase();
 
 const buildSourcemap: boolean | "hidden" =
   sourcemapEnv === "0" || sourcemapEnv === "false"
@@ -135,7 +135,7 @@ export default defineConfig(() => {
     define: {
       // In dev mode, tell the web app where the WebSocket server lives
       "import.meta.env.VITE_WS_URL": JSON.stringify(configuredWsUrl ?? ""),
-      "import.meta.env.VITE_T3CODE_RELAY_URL": JSON.stringify(configuredRelayUrl),
+      "import.meta.env.VITE_KATACODE_RELAY_URL": JSON.stringify(configuredRelayUrl),
       "import.meta.env.VITE_CLERK_PUBLISHABLE_KEY": JSON.stringify(configuredClerkPublishableKey),
       "import.meta.env.VITE_CLERK_JWT_TEMPLATE": JSON.stringify(configuredClerkJwtTemplate),
       "import.meta.env.VITE_RELAY_OTLP_TRACES_URL": JSON.stringify(configuredRelayTracingUrl),

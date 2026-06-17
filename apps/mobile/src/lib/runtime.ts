@@ -1,7 +1,7 @@
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 
-import { remoteHttpClientLayer } from "@t3tools/client-runtime";
+import { remoteHttpClientLayer } from "@kata-sh/code-client-runtime";
 
 import { mobileCryptoLayer } from "../features/cloud/dpop";
 import { mobileManagedRelayClientLayer } from "../features/cloud/managedRelayLayer";

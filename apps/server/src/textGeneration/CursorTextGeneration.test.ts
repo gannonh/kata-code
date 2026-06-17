@@ -11,10 +11,10 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection } from "@kata-sh/code-shared/model";
 import { expect } from "vite-plus/test";
 
-import { CursorSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { CursorSettings, ProviderInstanceId } from "@kata-sh/code-contracts";
 
 import { ServerConfig } from "../config.ts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
@@ -29,7 +29,7 @@ function shellSingleQuote(value: string): string {
 }
 
 const CursorTextGenerationTestLayer = ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3code-cursor-text-generation-test-",
+  prefix: "katacode-cursor-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 function makeAcpAgentWrapper(dir: string, env: Record<string, string>): string {

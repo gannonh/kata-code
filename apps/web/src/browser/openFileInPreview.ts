@@ -1,4 +1,4 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@kata-sh/code-contracts";
 
 import { readEnvironmentApi } from "~/environmentApi";
 import { resolveAssetUrl } from "~/assets/assetUrls";

@@ -2,8 +2,8 @@ import type {
   EnvironmentApi,
   ProjectListEntriesResult,
   ProjectReadFileResult,
-} from "@t3tools/contracts";
-import { EnvironmentId } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import { EnvironmentId } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, AtomRegistry } from "effect/unstable/reactivity";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";

@@ -48,7 +48,7 @@ export interface ElectronSafeStorageShape {
 export class ElectronSafeStorage extends Context.Service<
   ElectronSafeStorage,
   ElectronSafeStorageShape
->()("@t3tools/desktop/electron/ElectronSafeStorage") {}
+>()("@kata-sh/code-desktop/electron/ElectronSafeStorage") {}
 
 const make = ElectronSafeStorage.of({
   isEncryptionAvailable: Effect.try({

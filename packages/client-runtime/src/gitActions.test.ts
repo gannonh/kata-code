@@ -1,4 +1,4 @@
-import type { VcsStatusResult } from "@t3tools/contracts";
+import type { VcsStatusResult } from "@kata-sh/code-contracts";
 import { assert, describe, it } from "vite-plus/test";
 
 import { resolveLiveThreadBranchUpdate } from "./gitActions.js";

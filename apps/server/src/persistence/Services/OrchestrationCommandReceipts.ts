@@ -14,7 +14,7 @@ import {
   OrchestrationCommandReceiptStatus,
   ProjectId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -68,4 +68,6 @@ export interface OrchestrationCommandReceiptRepositoryShape {
 export class OrchestrationCommandReceiptRepository extends Context.Service<
   OrchestrationCommandReceiptRepository,
   OrchestrationCommandReceiptRepositoryShape
->()("t3/persistence/Services/OrchestrationCommandReceipts/OrchestrationCommandReceiptRepository") {}
+>()(
+  "@kata-sh/code-cli/persistence/Services/OrchestrationCommandReceipts/OrchestrationCommandReceiptRepository",
+) {}

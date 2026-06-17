@@ -9,7 +9,7 @@ import {
   type ServerConfig,
   EnvironmentAuthInvalidError,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   createWsRpcClient as createBaseWsRpcClient,
   type WsRpcClient,
@@ -21,7 +21,7 @@ import {
   ManagedRelayDpopSigner,
   resolveRemoteDpopWebSocketConnectionUrl,
   resolveRemoteWebSocketConnectionUrl,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 
 import { type QueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
@@ -29,14 +29,14 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Headers, HttpTraceContext } from "effect/unstable/http";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+import { withRelayClientTracing } from "@kata-sh/code-shared/relayTracing";
 import {
   createKnownEnvironment,
   getKnownEnvironmentWsBaseUrl,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 
 import {
   markPromotedDraftThreadByRef,
@@ -95,7 +95,7 @@ import { getClientSettings } from "~/hooks/useSettings";
 import { subscribeTerminalMetadata, terminalSessionManager } from "../../terminalSessionState";
 import { subscribePortDiscovery, usePortDiscoveryStore } from "../../portDiscoveryState";
 import { resetWsReconnectBackoff } from "~/rpc/wsConnectionState";
-import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
+import { resolveRemotePairingTarget } from "@kata-sh/code-shared/remote";
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -153,7 +153,7 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 
 // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
 // This file still owns web's legacy thread-detail subscription cache. Mobile
-// uses createThreadDetailManager from @t3tools/client-runtime for the same
+// uses createThreadDetailManager from @kata-sh/code-client-runtime for the same
 // retain/reconnect/evict lifecycle. When touching this logic, prefer migrating
 // web to the shared manager or extracting the missing adapter layer instead of
 // adding more behavior here.
@@ -1123,7 +1123,7 @@ function createEnvironmentConnectionHandlers() {
     syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
       // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
       // Shell snapshots already have createShellSnapshotManager in
-      // @t3tools/client-runtime. Web currently projects snapshots straight into
+      // @kata-sh/code-client-runtime. Web currently projects snapshots straight into
       // its denormalized Zustand store; future shell changes should migrate or
       // bridge to the shared manager instead of growing this handler.
       if (
@@ -1621,7 +1621,7 @@ async function ensureSavedEnvironmentConnection(
             await removeSavedEnvironmentBearerToken(activeRecord.environmentId);
             throw new Error(
               activeCredential.current.method === "dpop"
-                ? "Managed tunnel credential expired. Connect it again from T3 Connect."
+                ? "Managed tunnel credential expired. Connect it again from KataCode Connect."
                 : "Saved environment credential expired. Pair it again.",
               {
                 cause: error,

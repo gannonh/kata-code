@@ -1,8 +1,8 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@kata-sh/code-contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createEnvironmentConnection } from "./connection";
-import type { WsRpcClient } from "@t3tools/client-runtime";
+import type { WsRpcClient } from "@kata-sh/code-client-runtime";
 
 function createTestClient(config?: { readonly emitInitialSnapshot?: boolean }) {
   const lifecycleListeners = new Set<(event: any) => void>();

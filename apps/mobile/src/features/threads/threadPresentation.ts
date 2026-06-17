@@ -1,5 +1,5 @@
 import type { StatusTone } from "../../components/StatusPill";
-import { EnvironmentScopedThreadShell } from "@t3tools/client-runtime";
+import { EnvironmentScopedThreadShell } from "@kata-sh/code-client-runtime";
 
 export function threadSortValue(thread: EnvironmentScopedThreadShell): number {
   const candidate = Date.parse(thread.updatedAt ?? thread.createdAt);

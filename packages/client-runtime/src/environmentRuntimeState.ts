@@ -1,4 +1,4 @@
-import type { EnvironmentId, ServerConfig as T3ServerConfig } from "@t3tools/contracts";
+import type { EnvironmentId, ServerConfig as T3ServerConfig } from "@kata-sh/code-contracts";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 
 export type EnvironmentConnectionState =

@@ -7,9 +7,9 @@ import * as Layer from "effect/Layer";
 import {
   SourceControlProviderError,
   type SourceControlProviderDiscoveryItem,
-} from "@t3tools/contracts";
-import type { SourceControlProviderKind } from "@t3tools/contracts";
-import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
+} from "@kata-sh/code-contracts";
+import type { SourceControlProviderKind } from "@kata-sh/code-contracts";
+import { detectSourceControlProviderFromRemoteUrl } from "@kata-sh/code-shared/sourceControl";
 
 import * as AzureDevOpsSourceControlProvider from "./AzureDevOpsSourceControlProvider.ts";
 import * as BitbucketSourceControlProvider from "./BitbucketSourceControlProvider.ts";
@@ -51,7 +51,7 @@ export interface SourceControlProviderRegistryShape {
 export class SourceControlProviderRegistry extends Context.Service<
   SourceControlProviderRegistry,
   SourceControlProviderRegistryShape
->()("t3/sourceControl/SourceControlProviderRegistry") {}
+>()("@kata-sh/code-cli/sourceControl/SourceControlProviderRegistry") {}
 
 function unsupportedProvider(
   kind: SourceControlProviderKind,

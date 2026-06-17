@@ -1,5 +1,5 @@
 import { assert, beforeEach, it, vi } from "vite-plus/test";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 import { AtomRegistry } from "effect/unstable/reactivity";
 
 import {

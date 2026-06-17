@@ -11,6 +11,7 @@ import {
   DesktopClerkFooterAction,
   DesktopClerkHeader,
 } from "./DesktopClerkCard";
+import { APP_DISPLAY_NAME } from "../../branding";
 import { useDesktopClerkSignIn } from "./useDesktopClerkSignIn";
 
 // Mirrors Clerk's compact social-button layout while delegating OAuth to the desktop bridge:
@@ -51,7 +52,7 @@ export function DesktopClerkSignInCard({
       }
     >
       <DesktopClerkHeader
-        title="Sign in to T3 Code"
+        title={`Sign in to ${APP_DISPLAY_NAME}`}
         subtitle="Welcome back! Please sign in to continue"
       />
       {oauthOptions.length === 0 ? (

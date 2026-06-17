@@ -6,16 +6,16 @@ import {
   type AuthEnvironmentScope,
   EnvironmentHttpApi,
   EnvironmentHttpCommonError,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import type {
   EnvironmentAuthInvalidError,
   EnvironmentInternalError,
   EnvironmentOperationForbiddenError,
   EnvironmentRequestInvalidError,
   EnvironmentScopeRequiredError,
-} from "@t3tools/contracts";
-import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
-import { httpHeaderRedactionLayer } from "@t3tools/shared/httpObservability";
+} from "@kata-sh/code-contracts";
+import { encodeOAuthScope } from "@kata-sh/code-shared/oauthScope";
+import { httpHeaderRedactionLayer } from "@kata-sh/code-shared/httpObservability";
 import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";

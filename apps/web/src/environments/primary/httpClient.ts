@@ -1,4 +1,4 @@
-import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime";
+import { makeEnvironmentHttpApiClient } from "@kata-sh/code-client-runtime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -12,7 +12,7 @@ export type PrimaryEnvironmentHttpClientShape = Effect.Success<
 export class PrimaryEnvironmentHttpClient extends Context.Service<
   PrimaryEnvironmentHttpClient,
   PrimaryEnvironmentHttpClientShape
->()("@t3tools/web/environments/primary/httpClient/PrimaryEnvironmentHttpClient") {}
+>()("@kata-sh/code-web/environments/primary/httpClient/PrimaryEnvironmentHttpClient") {}
 
 export const primaryEnvironmentHttpClientLive = Layer.effect(
   PrimaryEnvironmentHttpClient,

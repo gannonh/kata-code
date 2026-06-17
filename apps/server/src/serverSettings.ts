@@ -24,7 +24,7 @@ import {
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Cache from "effect/Cache";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -45,9 +45,9 @@ import * as Cause from "effect/Cause";
 import * as Semaphore from "effect/Semaphore";
 import { writeFileStringAtomically } from "./atomicWrite.ts";
 import { ServerConfig } from "./config.ts";
-import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
-import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
-import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
+import { type DeepPartial, deepMerge } from "@kata-sh/code-shared/Struct";
+import { fromJsonStringPretty, fromLenientJson } from "@kata-sh/code-shared/schemaJson";
+import { applyServerSettingsPatch } from "@kata-sh/code-shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
@@ -130,7 +130,7 @@ export interface ServerSettingsShape {
 export class ServerSettingsService extends Context.Service<
   ServerSettingsService,
   ServerSettingsShape
->()("t3/serverSettings/ServerSettingsService") {
+>()("@kata-sh/code-cli/serverSettings/ServerSettingsService") {
   static readonly layerTest = (overrides: DeepPartial<ServerSettings> = {}) =>
     Layer.effect(
       ServerSettingsService,

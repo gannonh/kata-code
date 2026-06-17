@@ -7,7 +7,10 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import type * as DateTime from "effect/DateTime";
 
-import { TrimmedNonEmptyString, type SourceControlRepositoryVisibility } from "@t3tools/contracts";
+import {
+  TrimmedNonEmptyString,
+  type SourceControlRepositoryVisibility,
+} from "@kata-sh/code-contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitLabMergeRequests from "./gitLabMergeRequests.ts";
@@ -97,7 +100,7 @@ export interface GitLabCliShape {
 }
 
 export class GitLabCli extends Context.Service<GitLabCli, GitLabCliShape>()(
-  "t3/sourceControl/GitLabCli",
+  "@kata-sh/code-cli/sourceControl/GitLabCli",
 ) {}
 
 function isVcsProcessSpawnError(error: unknown): boolean {

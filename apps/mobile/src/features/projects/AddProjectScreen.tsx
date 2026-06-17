@@ -18,8 +18,8 @@ import {
   resolveAddProjectPath,
   sortAddProjectProviderSources,
   type AddProjectRemoteSource,
-} from "@t3tools/client-runtime";
-import { CommandId, type EnvironmentId, ProjectId } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime";
+import { CommandId, type EnvironmentId, ProjectId } from "@kata-sh/code-contracts";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";

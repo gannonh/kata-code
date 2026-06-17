@@ -1,4 +1,6 @@
-import { readHostedPairingRequest } from "@t3tools/shared/remote";
+import { readHostedPairingRequest } from "@kata-sh/code-shared/remote";
+
+const MOBILE_PAIRING_SCHEMES = ["katacode:", "katacode-dev:", "katacode-preview:"] as const;
 
 const MOBILE_PAIRING_URL_PARAM = "pairingUrl";
 
@@ -53,7 +55,7 @@ export function extractPairingUrlFromQrPayload(payload: string): string {
 
   try {
     const url = new URL(trimmed);
-    if (url.protocol === "t3code:") {
+    if (MOBILE_PAIRING_SCHEMES.includes(url.protocol as (typeof MOBILE_PAIRING_SCHEMES)[number])) {
       const pairingUrl = url.searchParams.get(MOBILE_PAIRING_URL_PARAM)?.trim() ?? "";
       if (pairingUrl.length > 0) {
         return pairingUrl;

@@ -1,4 +1,4 @@
-import type { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
+import type { OrchestrationEvent, ThreadId } from "@kata-sh/code-contracts";
 
 export interface OrchestrationBatchEffects {
   promoteDraftThreadIds: ThreadId[];

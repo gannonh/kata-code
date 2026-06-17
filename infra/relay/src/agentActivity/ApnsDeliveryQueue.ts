@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import type { RelayDeliveryResult } from "@t3tools/contracts/relay";
+import type { RelayDeliveryResult } from "@kata-sh/code-contracts/relay";
 
 import {
   sanitizeAgentActivityAggregateState,
@@ -40,7 +40,7 @@ export interface ApnsDeliveryQueueSenderShape {
 export class ApnsDeliveryQueueSender extends Context.Service<
   ApnsDeliveryQueueSender,
   ApnsDeliveryQueueSenderShape
->()("t3code-relay/agentActivity/ApnsDeliveryQueue/ApnsDeliveryQueueSender") {}
+>()("@kata-sh/code-relay/agentActivity/ApnsDeliveryQueue/ApnsDeliveryQueueSender") {}
 
 export interface ApnsDeliveryQueueShape {
   readonly enqueueLiveActivity: (input: {
@@ -59,7 +59,7 @@ export interface ApnsDeliveryQueueShape {
 }
 
 export class ApnsDeliveryQueue extends Context.Service<ApnsDeliveryQueue, ApnsDeliveryQueueShape>()(
-  "t3code-relay/agentActivity/ApnsDeliveryQueue",
+  "@kata-sh/code-relay/agentActivity/ApnsDeliveryQueue",
 ) {}
 
 const make = Effect.gen(function* () {

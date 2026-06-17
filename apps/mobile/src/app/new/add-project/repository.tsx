@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams } from "expo-router";
-import { addProjectRemoteSourceLabel } from "@t3tools/client-runtime";
+import { addProjectRemoteSourceLabel } from "@kata-sh/code-client-runtime";
 
 import { AddProjectRepositoryScreen } from "../../../features/projects/AddProjectScreen";
 

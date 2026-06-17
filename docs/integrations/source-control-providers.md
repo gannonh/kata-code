@@ -1,10 +1,18 @@
+---
+type: Guide
+title: "Source Control Integrations"
+description: "KataCode connects directly to your Git hosting provider so you can create pull requests, review code, and manage repositories without leaving your editor. Work stays in flow—no more jumping between br"
+tags: [integrations, guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Source Control Integrations
 
-T3 Code connects directly to your Git hosting provider so you can create pull requests, review code, and manage repositories without leaving your editor. Work stays in flow—no more jumping between browser tabs and terminal windows.
+KataCode connects directly to your Git hosting provider so you can create pull requests, review code, and manage repositories without leaving your editor. Work stays in flow—no more jumping between browser tabs and terminal windows.
 
 ## Supported Providers
 
-T3 Code works with the platforms your team already uses:
+KataCode works with the platforms your team already uses:
 
 - **GitHub** – Pull requests, repository creation, and clone integration
 - **GitLab** – Merge requests, repository publishing, and hosted clones
@@ -32,7 +40,7 @@ T3 Code works with the platforms your team already uses:
 **Create pull requests while you work**
 
 - Push a branch and create a pull request from the Git panel
-- T3 Code can suggest titles and descriptions based on your commits
+- KataCode can suggest titles and descriptions based on your commits
 - Supports GitHub Pull Requests, GitLab Merge Requests, and Bitbucket Pull Requests
 
 **Stay on top of open reviews**
@@ -55,7 +63,7 @@ Run a quick **Rescan** after setting up a new machine or changing credentials.
 
 ### For GitHub (Recommended for most users)
 
-1. Install the GitHub CLI on the machine running T3 Code:
+1. Install the GitHub CLI on the machine running KataCode:
    ```bash
    brew install gh
    ```
@@ -63,7 +71,7 @@ Run a quick **Rescan** after setting up a new machine or changing credentials.
    ```bash
    gh auth login
    ```
-3. Open **Settings → Source Control** in T3 Code and verify GitHub shows as authenticated
+3. Open **Settings → Source Control** in KataCode and verify GitHub shows as authenticated
 
 That's it—you can now clone, publish, and create pull requests.
 
@@ -84,12 +92,12 @@ That's it—you can now clone, publish, and create pull requests.
 Bitbucket uses API tokens instead of a CLI tool:
 
 1. Create an API token in your Atlassian account with read/write access to pull requests and repositories
-2. Add these environment variables to the environment running T3 Code:
+2. Add these environment variables to the environment running KataCode:
    ```bash
-   export T3CODE_BITBUCKET_EMAIL="you@example.com"
-   export T3CODE_BITBUCKET_API_TOKEN="your-token"
+   export KATACODE_BITBUCKET_EMAIL="you@example.com"
+   export KATACODE_BITBUCKET_API_TOKEN="your-token"
    ```
-3. Restart T3 Code and verify the connection in **Source Control settings**
+3. Restart KataCode and verify the connection in **Source Control settings**
 
 ### For Azure DevOps
 
@@ -110,9 +118,9 @@ Bitbucket uses API tokens instead of a CLI tool:
 
 ## Requirements & Troubleshooting
 
-**Git is required** – T3 Code uses Git for all local operations. Ensure `git` is installed on your server.
+**Git is required** – KataCode uses Git for all local operations. Ensure `git` is installed on your server.
 
-**Server-side setup** – Authentication happens on the machine running T3 Code (the server), not your local browser. If you're using a hosted or team instance, your administrator may have already configured providers.
+**Server-side setup** – Authentication happens on the machine running KataCode (the server), not your local browser. If you're using a hosted or team instance, your administrator may have already configured providers.
 
 **Common issues:**
 

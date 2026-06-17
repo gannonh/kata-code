@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { TextInputWrapper } from "expo-paste-input";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View, useColorScheme, useWindowDimensions } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";

@@ -27,7 +27,7 @@ describe("VcsProjectConfig", () => {
     );
   });
 
-  it.layer(TestLayer)("discovers .t3code/vcs.json from nested workspaces", (it) => {
+  it.layer(TestLayer)("discovers .katacode/vcs.json from nested workspaces", (it) => {
     it.effect("returns the configured kind", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -35,7 +35,7 @@ describe("VcsProjectConfig", () => {
         const root = yield* fileSystem.makeTempDirectoryScoped({
           prefix: "t3-vcs-config-test-",
         });
-        const configDir = path.join(root, ".t3code");
+        const configDir = path.join(root, ".katacode");
         const nested = path.join(root, "packages", "app");
         yield* fileSystem.makeDirectory(configDir, { recursive: true });
         yield* fileSystem.makeDirectory(nested, { recursive: true });

@@ -6,7 +6,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Data from "effect/Data";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -57,7 +57,7 @@ export interface ServerRuntimeStartupShape {
 export class ServerRuntimeStartup extends Context.Service<
   ServerRuntimeStartup,
   ServerRuntimeStartupShape
->()("t3/serverRuntimeStartup") {}
+>()("@kata-sh/code-cli/serverRuntimeStartup") {}
 
 interface QueuedCommand {
   readonly run: Effect.Effect<void, never>;
@@ -448,7 +448,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         const startupBrowserTarget = yield* resolveStartupBrowserTarget;
         if (serverConfig.mode !== "desktop") {
           yield* Effect.logInfo(
-            "Authentication required. Open T3 Code using the pairing URL.",
+            "Authentication required. Open KataCode using the pairing URL.",
           ).pipe(Effect.annotateLogs({ pairingUrl: startupBrowserTarget }));
         }
         yield* runStartupPhase("browser.open", maybeOpenBrowser(startupBrowserTarget));

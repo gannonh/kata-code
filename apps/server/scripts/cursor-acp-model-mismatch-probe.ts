@@ -3,7 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import process from "node:process";
 import readline from "node:readline";
 import * as NodeTimers from "node:timers";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import * as Effect from "effect/Effect";
 
 type JsonPrimitive = null | boolean | number | string;

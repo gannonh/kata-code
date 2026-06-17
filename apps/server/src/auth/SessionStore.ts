@@ -6,7 +6,7 @@ import {
   type AuthClientSession,
   type AuthEnvironmentScope,
   type ServerAuthSessionMethod,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -122,7 +122,7 @@ export interface SessionStoreShape {
 }
 
 export class SessionStore extends Context.Service<SessionStore, SessionStoreShape>()(
-  "t3/auth/SessionStore",
+  "@kata-sh/code-cli/auth/SessionStore",
 ) {}
 
 const SIGNING_SECRET_NAME = "server-signing-key";

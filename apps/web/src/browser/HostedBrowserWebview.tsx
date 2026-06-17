@@ -1,6 +1,6 @@
 "use client";
 
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@kata-sh/code-contracts";
 import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef } from "react";
 

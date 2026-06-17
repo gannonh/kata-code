@@ -1,6 +1,10 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
-import { EnvironmentId } from "@t3tools/contracts";
-import { createModelCapabilities } from "@t3tools/shared/model";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@kata-sh/code-contracts";
+import { EnvironmentId } from "@kata-sh/code-contracts";
+import { createModelCapabilities } from "@kata-sh/code-shared/model";
 import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -16,7 +20,7 @@ import {
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   type UnifiedSettings,
-} from "@t3tools/contracts/settings";
+} from "@kata-sh/code-contracts/settings";
 import { __resetLocalApiForTests } from "../../localApi";
 
 // Mock the environments/runtime module to provide a mock primary environment connection
@@ -467,7 +471,7 @@ describe("ProviderModelPicker", () => {
 
   it("keeps the full provider rail in locked mode and only lists compatible models", async () => {
     localStorage.setItem(
-      "t3code:client-settings:v1",
+      "katacode:client-settings:v1",
       JSON.stringify({
         ...DEFAULT_CLIENT_SETTINGS,
         favorites: [
@@ -510,7 +514,7 @@ describe("ProviderModelPicker", () => {
         ]);
       });
     } finally {
-      localStorage.removeItem("t3code:client-settings:v1");
+      localStorage.removeItem("katacode:client-settings:v1");
       await mounted.cleanup();
     }
   });
@@ -977,7 +981,7 @@ describe("ProviderModelPicker", () => {
   });
 
   it("toggles favorite stars when clicked", async () => {
-    localStorage.removeItem("t3code:client-settings:v1");
+    localStorage.removeItem("katacode:client-settings:v1");
 
     const mounted = await mountPicker({
       activeInstanceId: CLAUDE_INSTANCE_ID,
@@ -1020,12 +1024,12 @@ describe("ProviderModelPicker", () => {
       });
     } finally {
       await mounted.cleanup();
-      localStorage.removeItem("t3code:client-settings:v1");
+      localStorage.removeItem("katacode:client-settings:v1");
     }
   });
 
   it("does not duplicate favorited models across favorites and all models sections", async () => {
-    localStorage.removeItem("t3code:client-settings:v1");
+    localStorage.removeItem("katacode:client-settings:v1");
 
     const mounted = await mountPicker({
       activeInstanceId: CLAUDE_INSTANCE_ID,
@@ -1054,13 +1058,13 @@ describe("ProviderModelPicker", () => {
       });
     } finally {
       await mounted.cleanup();
-      localStorage.removeItem("t3code:client-settings:v1");
+      localStorage.removeItem("katacode:client-settings:v1");
     }
   });
 
   it("shows favorited models first within the selected provider list", async () => {
     localStorage.setItem(
-      "t3code:client-settings:v1",
+      "katacode:client-settings:v1",
       JSON.stringify({
         ...DEFAULT_CLIENT_SETTINGS,
         favorites: [{ provider: "codex", model: "gpt-5.3-codex" }],
@@ -1081,13 +1085,13 @@ describe("ProviderModelPicker", () => {
       });
     } finally {
       await mounted.cleanup();
-      localStorage.removeItem("t3code:client-settings:v1");
+      localStorage.removeItem("katacode:client-settings:v1");
     }
   });
 
   it("filters favorites to compatible models in locked mode", async () => {
     localStorage.setItem(
-      "t3code:client-settings:v1",
+      "katacode:client-settings:v1",
       JSON.stringify({
         ...DEFAULT_CLIENT_SETTINGS,
         favorites: [
@@ -1113,7 +1117,7 @@ describe("ProviderModelPicker", () => {
       });
     } finally {
       await mounted.cleanup();
-      localStorage.removeItem("t3code:client-settings:v1");
+      localStorage.removeItem("katacode:client-settings:v1");
     }
   });
 

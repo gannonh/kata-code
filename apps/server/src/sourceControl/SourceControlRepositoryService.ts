@@ -17,7 +17,7 @@ import {
   type SourceControlRepositoryCloneUrls,
   type SourceControlRepositoryInfo,
   type SourceControlRepositoryLookupInput,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -39,7 +39,7 @@ export interface SourceControlRepositoryServiceShape {
 export class SourceControlRepositoryService extends Context.Service<
   SourceControlRepositoryService,
   SourceControlRepositoryServiceShape
->()("t3/sourceControl/SourceControlRepositoryService") {}
+>()("@kata-sh/code-cli/sourceControl/SourceControlRepositoryService") {}
 
 function detailFromUnknown(cause: unknown): string {
   if (typeof cause === "object" && cause !== null) {

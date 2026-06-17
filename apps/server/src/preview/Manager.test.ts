@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { type PreviewEvent, ThreadId } from "@t3tools/contracts";
+import { type PreviewEvent, ThreadId } from "@kata-sh/code-contracts";
 import { Effect, PubSub } from "effect";
 import { expect } from "vite-plus/test";
 

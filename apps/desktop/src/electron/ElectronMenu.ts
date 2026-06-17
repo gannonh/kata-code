@@ -1,11 +1,11 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as Electron from "electron";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 
 export interface ElectronMenuPosition {
   readonly x: number;
@@ -34,7 +34,7 @@ export interface ElectronMenuShape {
 }
 
 export class ElectronMenu extends Context.Service<ElectronMenu, ElectronMenuShape>()(
-  "@t3tools/desktop/electron/ElectronMenu",
+  "@kata-sh/code-desktop/electron/ElectronMenu",
 ) {}
 
 function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextMenuItem[] {

@@ -11,7 +11,7 @@ import {
   type ReviewDiffPreviewError,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -24,7 +24,7 @@ export interface ReviewServiceShape {
 }
 
 export class ReviewService extends Context.Service<ReviewService, ReviewServiceShape>()(
-  "t3/review/ReviewService",
+  "@kata-sh/code-cli/review/ReviewService",
 ) {}
 
 export const make = Effect.fn("makeReviewService")(function* () {

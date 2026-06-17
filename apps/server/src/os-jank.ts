@@ -1,11 +1,12 @@
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { resolveDefaultKatacodeHome, resolveLegacyT3Home } from "@kata-sh/code-shared/branding";
+import { HostProcessEnvironment, HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import {
   listLoginShellCandidates,
   mergePathEntries,
   readPathFromLoginShell,
   readPathFromLaunchctl,
   resolveWindowsEnvironment,
-} from "@t3tools/shared/shell";
+} from "@kata-sh/code-shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -84,9 +85,38 @@ export const expandHomePath = Effect.fn(function* (input: string) {
 });
 
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
-  const { join, resolve } = yield* Path.Path;
+  const { resolve } = yield* Path.Path;
   if (!raw || raw.trim().length === 0) {
-    return join(NodeOS.homedir(), ".t3");
+    return resolveDefaultKatacodeHome(NodeOS.homedir());
   }
   return resolve(yield* expandHomePath(raw.trim()));
+});
+
+export const warnLegacyHomeDirectoryIfNeeded = Effect.fn(function* (input: {
+  readonly baseDir: string;
+  readonly configuredExplicitly: boolean;
+}) {
+  if (input.configuredExplicitly) {
+    return;
+  }
+
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const homeDirectory = NodeOS.homedir();
+  const legacyHome = resolveLegacyT3Home(homeDirectory);
+  const defaultKatacodeHome = resolveDefaultKatacodeHome(homeDirectory);
+  const legacyExists = yield* fs.exists(legacyHome).pipe(Effect.orElseSucceed(() => false));
+  const katacodeExists = yield* fs
+    .exists(defaultKatacodeHome)
+    .pipe(Effect.orElseSucceed(() => false));
+
+  if (
+    legacyExists &&
+    !katacodeExists &&
+    path.resolve(input.baseDir) === path.resolve(defaultKatacodeHome)
+  ) {
+    yield* Effect.logWarning(
+      `Found existing upstream state at ${legacyHome}. KataCode uses ${defaultKatacodeHome} by default. Set KATACODE_HOME=${legacyHome} to reuse your existing data.`,
+    );
+  }
 });

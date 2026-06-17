@@ -1,5 +1,5 @@
-import type { AssetResource } from "@t3tools/contracts";
-import { AssetAccessError } from "@t3tools/contracts";
+import type { AssetResource } from "@kata-sh/code-contracts";
+import { AssetAccessError } from "@kata-sh/code-contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

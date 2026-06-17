@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { DesktopPreviewWebviewConfig, EnvironmentId } from "@t3tools/contracts";
+import type { DesktopPreviewWebviewConfig, EnvironmentId } from "@kata-sh/code-contracts";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

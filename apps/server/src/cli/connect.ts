@@ -3,10 +3,10 @@ import {
   EnvironmentHttpApi,
   type RelayClientInstallProgressEvent,
   type RelayClientInstallProgressStage,
-} from "@t3tools/contracts";
-import { RelayOkResponse } from "@t3tools/contracts/relay";
-import * as RelayClient from "@t3tools/shared/relayClient";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+} from "@kata-sh/code-contracts";
+import { RelayOkResponse } from "@kata-sh/code-contracts/relay";
+import * as RelayClient from "@kata-sh/code-shared/relayClient";
+import { withRelayClientTracing } from "@kata-sh/code-shared/relayTracing";
 import * as Console from "effect/Console";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -91,15 +91,15 @@ function formatCloudStatus(status: CloudCliStatus, options?: { readonly json?: b
       ? "pending server startup"
       : "not provisioned";
   const nextStep = !status.authenticated
-    ? "Run `t3 connect link` to authorize and enable T3 Connect."
+    ? "Run `katacode connect link` to authorize and enable KataCode Connect."
     : !status.desired
-      ? "Run `t3 connect link` to enable T3 Connect."
+      ? "Run `katacode connect link` to enable KataCode Connect."
       : !status.linked
-        ? "Start T3 to provision the environment link and launch its managed tunnel."
+        ? "Start KataCode to provision the environment link and launch its managed tunnel."
         : undefined;
 
   return [
-    "T3 Connect",
+    "KataCode Connect",
     `  Exposure: ${status.desired ? "enabled" : "disabled"}`,
     `  Authorization: ${status.authenticated ? "stored credential" : "missing"}`,
     `  Environment link: ${provisioned}`,
@@ -114,7 +114,7 @@ const CLOUD_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(5);
 const confirmRelayClientInstall = (version: string) =>
   Prompt.run(
     Prompt.confirm({
-      message: `The T3 relay client is required for T3 Connect. Download and install version ${version}?`,
+      message: `The KataCode Connect relay client is required. Download and install version ${version}?`,
       initial: false,
     }),
   );
@@ -252,24 +252,24 @@ const disconnectCloud = Effect.fn("cloud.cli.disconnect")(function* (options: {
 
   if (liveResult.status === "failed") {
     yield* Console.warn(
-      `T3 Connect is disabled, but the running server could not stop its tunnel: ${String(liveResult.cause)}\nRestart that server to stop the connector.`,
+      `KataCode Connect is disabled, but the running server could not stop its tunnel: ${String(liveResult.cause)}\nRestart that server to stop the connector.`,
     );
   } else {
-    yield* Console.log("T3 Connect is disabled locally.");
+    yield* Console.log("KataCode Connect is disabled locally.");
   }
 
   if (Exit.isFailure(relayResult)) {
     yield* Console.warn(
       options.clearAuthorization
         ? `Could not revoke the relay-side environment record before signing out: ${String(relayResult.cause)}\nThe stored CLI authorization was still removed locally.`
-        : `Could not revoke the relay-side environment record yet: ${String(relayResult.cause)}\nRun \`t3 connect unlink\` again when the relay is reachable.`,
+        : `Could not revoke the relay-side environment record yet: ${String(relayResult.cause)}\nRun \`katacode connect unlink\` again when the relay is reachable.`,
     );
   } else if (relayResult.value.status === "revoked") {
     yield* Console.log("Revoked the relay-side environment record.");
   }
 
   if (options.clearAuthorization) {
-    yield* Console.log("Signed out of T3 Connect locally.");
+    yield* Console.log("Signed out of KataCode Connect locally.");
   }
 });
 
@@ -314,14 +314,14 @@ const runCloudCommand = <A, E>(
 const connectLoginCommand = Command.make("login", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Authorize the T3 Connect CLI without enabling remote access."),
+  Command.withDescription("Authorize the KataCode Connect CLI without enabling remote access."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
         const tokens = yield* CliTokenManager.CloudCliTokenManager;
         yield* tokens.get;
-        yield* Console.log("Signed in to T3 Connect.");
+        yield* Console.log("Signed in to KataCode Connect.");
       }),
     ),
   ),
@@ -330,7 +330,7 @@ const connectLoginCommand = Command.make("login", {
 const connectLinkCommand = Command.make("link", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Authorize this environment for T3 Connect on next start."),
+  Command.withDescription("Authorize this environment for KataCode Connect on next start."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
@@ -342,7 +342,9 @@ const connectLinkCommand = Command.make("link", {
           reportRelayClientInstallProgress,
         );
         if (Option.isNone(installed)) {
-          yield* Console.log("T3 Connect setup cancelled. The relay client was not installed.");
+          yield* Console.log(
+            "KataCode Connect setup cancelled. The relay client was not installed.",
+          );
           return;
         }
         yield* Console.log(
@@ -353,7 +355,7 @@ const connectLinkCommand = Command.make("link", {
         yield* tokens.get;
         yield* CliState.setCliDesiredCloudLink(true);
         yield* Console.log(
-          "This T3 environment will be available through T3 Connect the next time T3 starts.",
+          "This KataCode environment will be available through KataCode Connect the next time KataCode starts.",
         );
       }),
     ),
@@ -364,7 +366,7 @@ const connectStatusCommand = Command.make("status", {
   ...projectLocationFlags,
   json: jsonFlag,
 }).pipe(
-  Command.withDescription("Show persisted T3 Connect and relay client state."),
+  Command.withDescription("Show persisted KataCode Connect and relay client state."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
@@ -402,7 +404,7 @@ const connectStatusCommand = Command.make("status", {
 const connectUnlinkCommand = Command.make("unlink", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Disable T3 Connect while retaining the stored authorization."),
+  Command.withDescription("Disable KataCode Connect while retaining the stored authorization."),
   Command.withHandler((flags) =>
     runCloudCommand(flags, disconnectCloud({ clearAuthorization: false })),
   ),
@@ -411,14 +413,14 @@ const connectUnlinkCommand = Command.make("unlink", {
 const connectLogoutCommand = Command.make("logout", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Disable T3 Connect and clear the stored CLI authorization."),
+  Command.withDescription("Disable KataCode Connect and clear the stored CLI authorization."),
   Command.withHandler((flags) =>
     runCloudCommand(flags, disconnectCloud({ clearAuthorization: true })),
   ),
 );
 
 export const connectCommand = Command.make("connect").pipe(
-  Command.withDescription("Manage headless T3 Connect access."),
+  Command.withDescription("Manage headless KataCode Connect access."),
   Command.withSubcommands([
     connectLoginCommand,
     connectLinkCommand,

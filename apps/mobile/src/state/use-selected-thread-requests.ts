@@ -1,7 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useMemo, useState } from "react";
 
-import { ApprovalRequestId, CommandId, type ProviderApprovalDecision } from "@t3tools/contracts";
+import {
+  ApprovalRequestId,
+  CommandId,
+  type ProviderApprovalDecision,
+} from "@kata-sh/code-contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { scopedRequestKey } from "../lib/scopedEntities";

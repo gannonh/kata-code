@@ -1,22 +1,42 @@
+---
+type: Guide
+title: "Quick start"
+description: "KataCode is developed from the [gannonh/katacode](https://github.com/gannonh/katacode) fork. See [FORK.md](../../FORK.md) for upstream sync and identity decisions."
+tags: [getting-started, guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Quick start
 
+KataCode is developed from the [gannonh/katacode](https://github.com/gannonh/katacode) fork. See [FORK.md](../../FORK.md) for upstream sync and identity decisions.
+
 ```bash
+# Install dependencies
+vp i
+
+# Ensure Electron runtime (desktop dev, first time / fresh worktree)
+vp run --filter @kata-sh/code-desktop ensure:electron
+
 # Development (with hot reload)
-bun run dev
+pnpm run dev
 
 # Desktop development
-bun run dev:desktop
+pnpm run dev:desktop
 
 # Desktop development on an isolated port set
-T3CODE_DEV_INSTANCE=feature-xyz bun run dev:desktop
+KATACODE_DEV_INSTANCE=feature-xyz pnpm run dev:desktop
 
-# Production
-bun run build
-bun run start
+# Production build
+pnpm run build
+pnpm run start
 
 # Build a shareable macOS .dmg (arm64 by default)
-bun run dist:desktop:dmg
+pnpm run dist:desktop:dmg
 
-# Or from any project directory after publishing:
-npx t3
+# CLI from workspace (after build)
+pnpm exec katacode --help
 ```
+
+Default state directory: `~/.katacode` (override with `KATACODE_HOME`).
+
+Default dev ports: web `5733`, server `13773` (offset with `KATACODE_DEV_INSTANCE` or `KATACODE_PORT_OFFSET`).

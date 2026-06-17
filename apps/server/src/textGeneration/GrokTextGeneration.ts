@@ -5,11 +5,11 @@ import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 
-import { type GrokSettings, type ModelSelection } from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
-import { extractJsonObject } from "@t3tools/shared/schemaJson";
+import { type GrokSettings, type ModelSelection } from "@kata-sh/code-contracts";
+import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
+import { extractJsonObject } from "@kata-sh/code-shared/schemaJson";
 
-import { TextGenerationError } from "@t3tools/contracts";
+import { TextGenerationError } from "@kata-sh/code-contracts";
 import { type ThreadTitleGenerationResult, type TextGenerationShape } from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,

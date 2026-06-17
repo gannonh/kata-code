@@ -17,9 +17,9 @@ import type {
   GitPreparePullRequestThreadInput,
   ModelSelection,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
-import { GitCommandError, TextGenerationError } from "@t3tools/contracts";
+import { GitCommandError, TextGenerationError } from "@kata-sh/code-contracts";
 import { type GitManagerShape } from "./GitManager.ts";
 import {
   GitHubCliError,
@@ -1034,7 +1034,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         yield* runGit(repoDir, ["add", "fork-pr.txt"]);
         yield* runGit(repoDir, ["commit", "-m", "Fork PR branch"]);
         yield* runGit(repoDir, ["push", "-u", "fork-seed", "statemachine"]);
-        yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-488/statemachine"]);
+        yield* runGit(repoDir, ["checkout", "-b", "katacode/pr-488/statemachine"]);
         yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/statemachine"]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
@@ -1074,7 +1074,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         });
 
         const status = yield* manager.status({ cwd: repoDir });
-        expect(status.refName).toBe("t3code/pr-488/statemachine");
+        expect(status.refName).toBe("katacode/pr-488/statemachine");
         expect(status.pr).toEqual({
           number: 488,
           title: "Rebase this PR on latest main",
@@ -2065,7 +2065,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         const forkDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "fork-seed", forkDir]);
         yield* runGit(repoDir, ["push", "-u", "fork-seed", "statemachine"]);
-        yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-142/statemachine"]);
+        yield* runGit(repoDir, ["checkout", "-b", "katacode/pr-142/statemachine"]);
         yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/statemachine"]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
@@ -2078,7 +2078,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           ghScenario: {
             prListByHeadSelector: {
               // @effect-diagnostics-next-line preferSchemaOverJson:off
-              "t3code/pr-142/statemachine": JSON.stringify([]),
+              "katacode/pr-142/statemachine": JSON.stringify([]),
               // @effect-diagnostics-next-line preferSchemaOverJson:off
               statemachine: JSON.stringify([
                 {
@@ -2140,7 +2140,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         const forkDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "fork-seed", forkDir]);
         yield* runGit(repoDir, ["push", "-u", "fork-seed", "statemachine"]);
-        yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-142/statemachine"]);
+        yield* runGit(repoDir, ["checkout", "-b", "katacode/pr-142/statemachine"]);
         yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/statemachine"]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
@@ -2173,7 +2173,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
               // @effect-diagnostics-next-line preferSchemaOverJson:off
               "fork-seed:statemachine": JSON.stringify([]),
               // @effect-diagnostics-next-line preferSchemaOverJson:off
-              "t3code/pr-142/statemachine": JSON.stringify([]),
+              "katacode/pr-142/statemachine": JSON.stringify([]),
               // @effect-diagnostics-next-line preferSchemaOverJson:off
               statemachine: JSON.stringify([]),
             },
@@ -2328,7 +2328,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["add", "changes.txt"]);
       yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
       yield* runGit(repoDir, ["push", "-u", "fork-seed", "statemachine"]);
-      yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-91/statemachine"]);
+      yield* runGit(repoDir, ["checkout", "-b", "katacode/pr-91/statemachine"]);
       yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/statemachine"]);
       yield* configureVisibleRemoteUrlWithLocalRewrite(
         repoDir,
@@ -3007,7 +3007,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           mode: "worktree",
         });
 
-        expect(result.branch).toBe("t3code/pr-91/main");
+        expect(result.branch).toBe("katacode/pr-91/main");
         expect(result.worktreePath).not.toBeNull();
         expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe("main");
         expect((yield* runGit(repoDir, ["rev-parse", "main"])).stdout.trim()).toBe(mainBefore);
@@ -3016,7 +3016,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
             "branch",
             "--show-current",
           ])).stdout.trim(),
-        ).toBe("t3code/pr-91/main");
+        ).toBe("katacode/pr-91/main");
       }),
   );
 
@@ -3068,7 +3068,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           mode: "worktree",
         });
 
-        expect(result.branch).toBe("t3code/pr-92/main");
+        expect(result.branch).toBe("katacode/pr-92/main");
         expect((yield* runGit(repoDir, ["rev-parse", "main"])).stdout.trim()).toBe(localMainBefore);
         expect(
           (yield* runGit(result.worktreePath as string, [

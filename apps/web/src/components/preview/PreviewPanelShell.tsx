@@ -8,7 +8,7 @@ import { RightPanelResizeHandle } from "./RightPanelResizeHandle";
 
 export type PreviewPanelMode = "inline" | "sheet" | "sidebar" | "embedded";
 
-const PREVIEW_PANEL_WIDTH_STORAGE_KEY = "t3code:preview-panel-width";
+const PREVIEW_PANEL_WIDTH_STORAGE_KEY = "katacode:preview-panel-width";
 const PREVIEW_PANEL_MIN_WIDTH = 360;
 /** Hard ceiling so a wide monitor can't yield a panel that swallows the chat. */
 const PREVIEW_PANEL_MAX_WIDTH_PX = 1400;

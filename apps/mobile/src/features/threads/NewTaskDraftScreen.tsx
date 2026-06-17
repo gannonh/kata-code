@@ -11,7 +11,7 @@ import { KeyboardAvoidingView, useKeyboardState } from "react-native-keyboard-co
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useThemeColor } from "../../lib/useThemeColor";
 
-import { EnvironmentId, type ModelSelection } from "@t3tools/contracts";
+import { EnvironmentId, type ModelSelection } from "@kata-sh/code-contracts";
 
 import { AppTextInput as TextInput } from "../../components/AppText";
 import {

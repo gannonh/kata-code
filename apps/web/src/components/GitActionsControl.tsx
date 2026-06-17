@@ -1,4 +1,4 @@
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import { type ScopedThreadRef } from "@kata-sh/code-contracts";
 import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
@@ -9,7 +9,7 @@ import type {
   SourceControlPublishRepositoryResult,
   SourceControlRepositoryVisibility,
   VcsStatusResult,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";

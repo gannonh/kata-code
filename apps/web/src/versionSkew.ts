@@ -1,4 +1,4 @@
-import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
+import type { EnvironmentId, ServerConfig } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 
 import { APP_VERSION } from "./branding";
@@ -10,7 +10,7 @@ export interface VersionMismatch {
   readonly hint: string;
 }
 
-export const VERSION_MISMATCH_DISMISSALS_STORAGE_KEY = "t3code:version-mismatch-dismissals:v1";
+export const VERSION_MISMATCH_DISMISSALS_STORAGE_KEY = "katacode:version-mismatch-dismissals:v1";
 
 const VersionMismatchDismissalsSchema = Schema.Struct({
   keys: Schema.Array(Schema.String),
@@ -39,7 +39,7 @@ export function resolveVersionMismatch(
   return {
     clientVersion: normalizedClientVersion,
     serverVersion: normalizedServerVersion,
-    hint: "Version mismatch. Try syncing the client and server to the same T3 Code version.",
+    hint: "Version mismatch. Try syncing the client and server to the same KataCode version.",
   };
 }
 

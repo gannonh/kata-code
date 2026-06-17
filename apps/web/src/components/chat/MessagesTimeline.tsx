@@ -4,8 +4,8 @@ import {
   type ScopedThreadRef,
   type ServerProviderSkill,
   type TurnId,
-} from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime";
+} from "@kata-sh/code-contracts";
+import { parseScopedThreadKey } from "@kata-sh/code-client-runtime";
 import {
   createContext,
   Fragment,
@@ -90,7 +90,7 @@ import {
 } from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { type TimestampFormat } from "@kata-sh/code-contracts/settings";
 import { formatChatTimestampTooltip, formatShortTimestamp } from "../../timestampFormat";
 
 import {

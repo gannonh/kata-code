@@ -9,8 +9,8 @@ import type {
   SourceControlProviderDiscoveryItem,
   VcsDriverKind,
   VcsDiscoveryItem,
-} from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+} from "@kata-sh/code-contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@kata-sh/code-contracts/settings";
 
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";

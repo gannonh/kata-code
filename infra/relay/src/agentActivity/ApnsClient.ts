@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 
-import type { RelayAgentActivityAggregateState } from "@t3tools/contracts/relay";
+import type { RelayAgentActivityAggregateState } from "@kata-sh/code-contracts/relay";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
@@ -247,7 +247,7 @@ export interface ApnsClientShape {
 }
 
 export class ApnsClient extends Context.Service<ApnsClient, ApnsClientShape>()(
-  "t3code-relay/agentActivity/ApnsClient",
+  "@kata-sh/code-relay/agentActivity/ApnsClient",
 ) {}
 
 const make = Effect.gen(function* () {

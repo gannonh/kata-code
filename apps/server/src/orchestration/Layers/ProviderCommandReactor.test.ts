@@ -9,8 +9,8 @@ import {
   ProviderSession,
   ProviderDriverKind,
   ProviderInstanceId,
-} from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@kata-sh/code-contracts";
+import { createModelSelection } from "@kata-sh/code-shared/model";
 import {
   ApprovalRequestId,
   CommandId,
@@ -20,7 +20,7 @@ import {
   ProjectId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -32,7 +32,7 @@ import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
-import { TextGenerationError } from "@t3tools/contracts";
+import { TextGenerationError } from "@kata-sh/code-contracts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -615,7 +615,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-thread-branch"),
         threadId: ThreadId.make("thread-1"),
-        branch: "t3code/1234abcd",
+        branch: "katacode/1234abcd",
         worktreePath: "/tmp/provider-project-worktree",
       }),
     );

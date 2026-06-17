@@ -1,8 +1,9 @@
 import { SymbolView } from "expo-symbols";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 import { useCallback, useState } from "react";
 import { Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
+import { CLOUD_PRODUCT_NAME } from "@kata-sh/code-shared/branding";
 import { useThemeColor } from "../../lib/useThemeColor";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
@@ -115,7 +116,7 @@ export function ConnectionEnvironmentRow(props: {
         >
           {props.environment.isRelayManaged ? (
             <Text className="text-[13px] leading-[18px] text-foreground-muted">
-              Managed by T3 Cloud. Tunnel details update automatically.
+              Managed by {CLOUD_PRODUCT_NAME}. Tunnel details update automatically.
             </Text>
           ) : (
             <>

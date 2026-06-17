@@ -1,4 +1,4 @@
-import type { RepositoryIdentity } from "@t3tools/contracts";
+import type { RepositoryIdentity } from "@kata-sh/code-contracts";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   normalizeGitRemoteUrl,
-} from "@t3tools/shared/git";
+} from "@kata-sh/code-shared/git";
 
 import * as ProcessRunner from "../../processRunner.ts";
 import {

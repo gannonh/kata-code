@@ -8,7 +8,7 @@ import {
   ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
 

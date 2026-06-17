@@ -1,4 +1,4 @@
-// This file mostly exists because we want dev mode to say "T3 Code (Dev)" instead of "electron"
+import { resolveAppBranding } from "../../../packages/shared/src/branding.ts";
 
 import { spawnSync } from "node:child_process";
 import {
@@ -26,19 +26,23 @@ const repoRoot = resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+const devBranding = resolveAppBranding({
+  isDevelopment,
+  appVersion: process.env.npm_package_version ?? "0.0.0-dev",
+});
+export const APP_DISPLAY_NAME = devBranding.displayName;
 export const APP_BUNDLE_ID = isDevelopment
-  ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
-  : "com.t3tools.t3code";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+  ? `com.katacode.dev.${devBundleIdSuffix || "local"}`
+  : "com.katacode.app";
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["katacode-dev"] : ["katacode"];
 const LAUNCHER_VERSION = 11;
 const defaultIconPath = join(desktopDir, "resources", "icon.icns");
-const developmentMacIconPngPath = join(repoRoot, "assets", "dev", "blueprint-macos-1024.png");
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
+const developmentMacIconPngPath = join(repoRoot, "assets", "prod", "black-macos-1024.png");
+// oxlint-disable-next-line kata-code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
 function resolveDevelopmentProtocolCallbackPort() {
-  const configuredPort = Number.parseInt(process.env.T3CODE_PORT ?? "", 10);
+  const configuredPort = Number.parseInt(process.env.KATACODE_PORT ?? "", 10);
   if (Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65535) {
     return configuredPort + 1;
   }
@@ -103,14 +107,14 @@ function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
   const protocolCallbackUrl = `http://127.0.0.1:${resolveDevelopmentProtocolCallbackPort()}/auth/callback`;
   const envEntries = [
     ["VITE_DEV_SERVER_URL", process.env.VITE_DEV_SERVER_URL],
-    ["T3CODE_PORT", process.env.T3CODE_PORT],
-    ["T3CODE_HOME", process.env.T3CODE_HOME],
-    ["T3CODE_COMMIT_HASH", process.env.T3CODE_COMMIT_HASH],
-    ["T3CODE_OTLP_TRACES_URL", process.env.T3CODE_OTLP_TRACES_URL],
-    ["T3CODE_OTLP_EXPORT_INTERVAL_MS", process.env.T3CODE_OTLP_EXPORT_INTERVAL_MS],
-    ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
-    ["T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED", "1"],
-    ["T3CODE_DESKTOP_PROTOCOL_CALLBACK_URL", protocolCallbackUrl],
+    ["KATACODE_PORT", process.env.KATACODE_PORT],
+    ["KATACODE_HOME", process.env.KATACODE_HOME],
+    ["KATACODE_COMMIT_HASH", process.env.KATACODE_COMMIT_HASH],
+    ["KATACODE_OTLP_TRACES_URL", process.env.KATACODE_OTLP_TRACES_URL],
+    ["KATACODE_OTLP_EXPORT_INTERVAL_MS", process.env.KATACODE_OTLP_EXPORT_INTERVAL_MS],
+    ["KATACODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
+    ["KATACODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED", "1"],
+    ["KATACODE_DESKTOP_PROTOCOL_CALLBACK_URL", protocolCallbackUrl],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
   writeFileSync(
     targetBinaryPath,
@@ -119,14 +123,14 @@ function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
       ...envEntries.map(([name, value]) => `export ${name}=${shellSingleQuote(value)}`),
       'for arg in "$@"; do',
       '  case "$arg" in',
-      "    t3code-dev://auth/callback*)",
-      '      if [ -n "$T3CODE_DESKTOP_PROTOCOL_CALLBACK_URL" ]; then',
-      '        /usr/bin/curl -fsS --max-time 2 -X POST --data-binary "$arg" "$T3CODE_DESKTOP_PROTOCOL_CALLBACK_URL" >/dev/null 2>&1 && exit 0',
+      "    katacode-dev://auth/callback*)",
+      '      if [ -n "$KATACODE_DESKTOP_PROTOCOL_CALLBACK_URL" ]; then',
+      '        /usr/bin/curl -fsS --max-time 2 -X POST --data-binary "$arg" "$KATACODE_DESKTOP_PROTOCOL_CALLBACK_URL" >/dev/null 2>&1 && exit 0',
       "      fi",
       "      ;;",
       "  esac",
       "done",
-      `exec ${shellSingleQuote(electronBinaryPath)} --t3code-dev-root=${shellSingleQuote(desktopDir)} ${shellSingleQuote(mainEntryPath)} "$@"`,
+      `exec ${shellSingleQuote(electronBinaryPath)} --katacode-dev-root=${shellSingleQuote(desktopDir)} ${shellSingleQuote(mainEntryPath)} "$@"`,
       "",
     ].join("\n"),
   );

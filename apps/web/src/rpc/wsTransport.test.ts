@@ -1,4 +1,4 @@
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, WS_METHODS } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, ServerSettings, WS_METHODS } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -177,7 +177,7 @@ describe("WsTransport (web instrumentation)", () => {
         closeCode: 1006,
         closeReason: "server unavailable",
         hasConnected: false,
-        lastError: "Unable to connect to the T3 server WebSocket.",
+        lastError: "Unable to connect to the KataCode server WebSocket.",
         phase: "disconnected",
       });
     });

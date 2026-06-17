@@ -3,8 +3,8 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
-} from "@t3tools/contracts";
-import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
+} from "@kata-sh/code-contracts";
+import { decodeOtlpTraceRecords } from "@kata-sh/code-shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

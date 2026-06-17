@@ -6,7 +6,7 @@ import {
   type ServerProvider,
   type ServerProviderUpdatedPayload,
   type ServerProviderUpdateState,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -53,7 +53,7 @@ export interface ProviderMaintenanceRunnerShape {
 export class ProviderMaintenanceRunner extends Context.Service<
   ProviderMaintenanceRunner,
   ProviderMaintenanceRunnerShape
->()("t3/provider/providerMaintenanceRunner") {}
+>()("@kata-sh/code-cli/provider/providerMaintenanceRunner") {}
 
 class ProviderMaintenanceCommandError extends Data.TaggedError("ProviderMaintenanceCommandError")<{
   readonly message: string;
@@ -361,9 +361,9 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
                 startedAt,
                 finishedAt,
                 message: couldNotVerify
-                  ? "Update command completed, but T3 Code could not verify the provider version."
+                  ? "Update command completed, but KataCode could not verify the provider version."
                   : stillOutdated
-                    ? "Update command completed, but T3 Code still detects an outdated provider version."
+                    ? "Update command completed, but KataCode still detects an outdated provider version."
                     : "Provider updated.",
                 output: commandOutput(result),
               }),

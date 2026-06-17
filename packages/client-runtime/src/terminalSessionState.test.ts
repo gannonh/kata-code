@@ -7,7 +7,7 @@ import {
   TerminalMetadataStreamEvent,
   TerminalSessionSnapshot,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import {
   createTerminalSessionManager,

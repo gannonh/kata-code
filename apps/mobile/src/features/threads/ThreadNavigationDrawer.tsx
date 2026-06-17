@@ -22,7 +22,7 @@ import { threadStatusTone } from "./threadPresentation";
 import {
   EnvironmentScopedProjectShell,
   EnvironmentScopedThreadShell,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 
 const threadActivityOrder = Order.mapInput(
   Order.Struct({

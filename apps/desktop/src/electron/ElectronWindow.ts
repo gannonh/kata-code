@@ -6,7 +6,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import * as Electron from "electron";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 
 export class ElectronWindowCreateError extends Data.TaggedError("ElectronWindowCreateError")<{
   readonly cause: unknown;
@@ -34,7 +34,7 @@ export interface ElectronWindowShape {
 }
 
 export class ElectronWindow extends Context.Service<ElectronWindow, ElectronWindowShape>()(
-  "@t3tools/desktop/electron/ElectronWindow",
+  "@kata-sh/code-desktop/electron/ElectronWindow",
 ) {}
 
 const make = Effect.gen(function* () {

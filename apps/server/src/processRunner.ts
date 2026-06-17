@@ -8,8 +8,8 @@ import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
+import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import {
   collectUint8StreamText,
   type CollectedUint8StreamText,
@@ -91,7 +91,7 @@ export interface ProcessRunnerShape {
 }
 
 export class ProcessRunner extends Context.Service<ProcessRunner, ProcessRunnerShape>()(
-  "t3/processRunner",
+  "@kata-sh/code-cli/processRunner",
 ) {}
 
 const DEFAULT_TIMEOUT = "60 seconds";

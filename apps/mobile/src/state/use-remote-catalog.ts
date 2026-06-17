@@ -8,7 +8,7 @@ import {
   EnvironmentScopedThreadShell,
   scopeProjectShell,
   scopeThreadShell,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 
 import { ConnectedEnvironmentSummary } from "./remote-runtime-types";
 import type { SavedRemoteConnection } from "../lib/connection";

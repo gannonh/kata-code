@@ -7,7 +7,7 @@ import {
   createVcsRefManager,
   getVcsRefTargetKey,
   vcsRefStateAtom,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import { useEffect, useMemo } from "react";
 
 import {

@@ -1,7 +1,7 @@
 import "../index.css";
 
-import { scopeThreadRef } from "@t3tools/client-runtime";
-import { ThreadId, type TerminalAttachStreamEvent } from "@t3tools/contracts";
+import { scopeThreadRef } from "@kata-sh/code-client-runtime";
+import { ThreadId, type TerminalAttachStreamEvent } from "@kata-sh/code-contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 

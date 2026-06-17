@@ -8,7 +8,7 @@ import {
   Minimize2Icon,
   WrapTextIcon,
 } from "lucide-react";
-import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import type { ScopedThreadRef, ServerProviderSkill } from "@kata-sh/code-contracts";
 import React, {
   Children,
   Suspense,

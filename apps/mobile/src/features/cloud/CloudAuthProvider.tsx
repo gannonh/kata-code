@@ -1,6 +1,6 @@
 import { ClerkProvider, useAuth } from "@clerk/expo";
 import { tokenCache } from "@clerk/expo/token-cache";
-import { createManagedRelaySession, setManagedRelaySession } from "@t3tools/client-runtime";
+import { createManagedRelaySession, setManagedRelaySession } from "@kata-sh/code-client-runtime";
 import { type ReactNode, useEffect, useRef } from "react";
 
 import { mobileRuntime } from "../../lib/runtime";

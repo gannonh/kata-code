@@ -8,6 +8,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { Alert, Linking, Pressable, ScrollView, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CLOUD_PRODUCT_NAME } from "@kata-sh/code-shared/branding";
 import { AppText as Text } from "../../components/AppText";
 import { setLiveActivityUpdatesEnabled } from "../../features/agent-awareness/liveActivityPreferences";
 import { requestAgentNotificationPermission } from "../../features/agent-awareness/notificationPermissions";
@@ -160,8 +161,8 @@ function ConfiguredSettingsRouteScreen() {
 
   const promptSignIn = useCallback(() => {
     Alert.alert(
-      "Request T3 Cloud access",
-      "Live Activity updates require approved T3 Cloud access so relay can deliver updates to this device.",
+      `Request ${CLOUD_PRODUCT_NAME} access`,
+      `Live Activity updates require approved ${CLOUD_PRODUCT_NAME} access so relay can deliver updates to this device.`,
       [
         { text: "Cancel", style: "cancel" },
         { text: "Continue", onPress: () => push("/settings/waitlist") },
@@ -217,7 +218,7 @@ function ConfiguredSettingsRouteScreen() {
 
       Alert.alert(
         "Disable notifications",
-        "Notification permission is controlled by iOS. Open Settings to disable notifications for T3 Code.",
+        "Notification permission is controlled by iOS. Open Settings to disable notifications for KataCode.",
         [
           { text: "Cancel", style: "cancel" },
           { text: "Open Settings", onPress: () => void Linking.openSettings() },
@@ -266,8 +267,8 @@ function ConfiguredSettingsRouteScreen() {
       return;
     }
     Alert.alert(
-      "T3 Cloud unavailable",
-      "Native T3 Cloud account management is not available in this build.",
+      `${CLOUD_PRODUCT_NAME} unavailable`,
+      `Native ${CLOUD_PRODUCT_NAME} account management is not available in this build.`,
     );
   }, [isLoaded, isSignedIn, push]);
 
@@ -289,13 +290,13 @@ function ConfiguredSettingsRouteScreen() {
           <SettingsSection title="Account">
             <SettingsRow
               icon="person.crop.circle"
-              label="T3 Account"
+              label="KataCode Account"
               value={accountLabel}
               onPress={openAccount}
             />
           </SettingsSection>
           <Text className="px-2 text-[13px] leading-[18px] text-foreground-muted">
-            T3 Code works locally without signing in. Cloud features are optional.
+            KataCode works locally without signing in. Cloud features are optional.
           </Text>
         </View>
 

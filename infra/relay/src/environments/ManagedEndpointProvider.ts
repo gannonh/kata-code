@@ -14,7 +14,7 @@ import type {
   RelayManagedEndpoint,
   RelayManagedEndpointOrigin,
   RelayManagedEndpointRuntimeConfig,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 
 import * as RelayConfiguration from "../Config.ts";
 import {
@@ -89,7 +89,7 @@ export interface ManagedEndpointProviderShape {
 export class ManagedEndpointProvider extends Context.Service<
   ManagedEndpointProvider,
   ManagedEndpointProviderShape
->()("t3code-relay/environments/ManagedEndpointProvider") {}
+>()("@kata-sh/code-relay/environments/ManagedEndpointProvider") {}
 
 interface ManagedEndpointTunnel {
   readonly id?: string | null;
@@ -133,7 +133,7 @@ export interface ManagedEndpointTunnelClientShape {
 export class ManagedEndpointTunnelClient extends Context.Service<
   ManagedEndpointTunnelClient,
   ManagedEndpointTunnelClientShape
->()("t3code-relay/environments/ManagedEndpointProvider/ManagedEndpointTunnelClient") {}
+>()("@kata-sh/code-relay/environments/ManagedEndpointProvider/ManagedEndpointTunnelClient") {}
 
 interface ManagedEndpointCnameRecordInput {
   readonly type: "CNAME";
@@ -171,7 +171,7 @@ export interface ManagedEndpointDnsClientShape {
 export class ManagedEndpointDnsClient extends Context.Service<
   ManagedEndpointDnsClient,
   ManagedEndpointDnsClientShape
->()("t3code-relay/environments/ManagedEndpointProvider/ManagedEndpointDnsClient") {}
+>()("@kata-sh/code-relay/environments/ManagedEndpointProvider/ManagedEndpointDnsClient") {}
 
 const requireCloudflareSettings = Effect.fnUntraced(function* (
   settings: RelayConfiguration.RelayConfigurationShape,

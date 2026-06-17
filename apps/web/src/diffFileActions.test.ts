@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@kata-sh/code-client-runtime";
+import { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { openDiffFilePrimaryAction } from "./diffFileActions";

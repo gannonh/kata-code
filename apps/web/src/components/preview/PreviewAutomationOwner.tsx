@@ -1,6 +1,6 @@
 "use client";
 
-import { scopedThreadKey } from "@t3tools/client-runtime";
+import { scopedThreadKey } from "@kata-sh/code-client-runtime";
 import type {
   PreviewAutomationNavigateInput,
   PreviewAutomationOpenInput,
@@ -8,7 +8,7 @@ import type {
   PreviewAutomationResponse,
   PreviewAutomationStatus,
   ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { useCallback, useEffect, useId, useRef } from "react";
 
 import { ensureEnvironmentApi } from "~/environmentApi";

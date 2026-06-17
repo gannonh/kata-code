@@ -29,7 +29,7 @@ export interface ElectronDialogShape {
 }
 
 export class ElectronDialog extends Context.Service<ElectronDialog, ElectronDialogShape>()(
-  "@t3tools/desktop/electron/ElectronDialog",
+  "@kata-sh/code-desktop/electron/ElectronDialog",
 ) {}
 
 const make = ElectronDialog.of({

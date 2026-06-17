@@ -1,4 +1,4 @@
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import { fromLenientJson } from "@kata-sh/code-shared/schemaJson";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
@@ -69,7 +69,7 @@ export interface DesktopCloudAuthTokenStoreShape {
 export class DesktopCloudAuthTokenStore extends Context.Service<
   DesktopCloudAuthTokenStore,
   DesktopCloudAuthTokenStoreShape
->()("@t3tools/desktop/app/DesktopCloudAuthTokenStore") {}
+>()("@kata-sh/code-desktop/app/DesktopCloudAuthTokenStore") {}
 
 function decodeSecretBytes(
   encoded: string,

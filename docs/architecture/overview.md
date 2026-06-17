@@ -1,6 +1,14 @@
+---
+type: Architecture Note
+title: "Architecture"
+description: "KataCode runs as a **Node.js WebSocket server** that wraps `codex app-server` (JSON-RPC over stdio) and serves a React web app."
+tags: [architecture, architecture-note]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Architecture
 
-T3 Code runs as a **Node.js WebSocket server** that wraps `codex app-server` (JSON-RPC over stdio) and serves a React web app.
+KataCode runs as a **Node.js WebSocket server** that wraps `codex app-server` (JSON-RPC over stdio) and serves a React web app.
 
 ```
 ┌─────────────────────────────────┐
@@ -8,7 +16,7 @@ T3 Code runs as a **Node.js WebSocket server** that wraps `codex app-server` (JS
 │  wsTransport (state machine)    │
 │  Typed push decode at boundary  │
 └──────────┬──────────────────────┘
-           │ ws://localhost:3773
+           │ ws://localhost:13773
 ┌──────────▼──────────────────────┐
 │  apps/server (Node.js)          │
 │  WebSocket + HTTP static server │

@@ -11,7 +11,7 @@ import type {
   OrchestrationThread,
   OrchestrationThreadActivity,
   TurnId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 /**
  * Retention limits for collections within a thread.

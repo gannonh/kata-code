@@ -5,7 +5,7 @@ import {
   OrchestrationGetTurnDiffInput,
   type OrchestrationGetTurnDiffResult,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Duration from "effect/Duration";

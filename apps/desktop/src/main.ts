@@ -8,10 +8,10 @@ import * as Option from "effect/Option";
 
 import * as Electron from "electron";
 
-import * as NetService from "@t3tools/shared/Net";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
-import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
+import * as NetService from "@kata-sh/code-shared/Net";
+import { HostProcessArchitecture, HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
+import { resolveRemoteT3CliPackageSpec } from "@kata-sh/code-ssh/command";
+import type { RemoteT3RunnerOptions } from "@kata-sh/code-ssh/tunnel";
 import serverPackageJson from "../../server/package.json" with { type: "json" };
 
 import type { DesktopSettings as DesktopSettingsValue } from "./settings/DesktopAppSettings.ts";
@@ -70,7 +70,7 @@ const resolveDesktopSshCliRunner = (
   environment: DesktopEnvironment.DesktopEnvironmentShape,
   settings: DesktopSettingsValue,
 ): RemoteT3RunnerOptions => {
-  const devRemoteEntryPath = Option.getOrUndefined(environment.devRemoteT3ServerEntryPath);
+  const devRemoteEntryPath = Option.getOrUndefined(environment.devRemoteServerEntryPath);
   if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
     return {
       nodeScriptPath: devRemoteEntryPath,

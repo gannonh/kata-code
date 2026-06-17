@@ -1,4 +1,4 @@
-import { ClaudeSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderInstanceId } from "@kata-sh/code-contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -6,7 +6,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection } from "@kata-sh/code-shared/model";
 import { expect } from "vite-plus/test";
 
 import { ServerConfig } from "../config.ts";
@@ -16,7 +16,7 @@ import { makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const ClaudeTextGenerationTestLayer = ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3code-claude-text-generation-test-",
+  prefix: "katacode-claude-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 function makeFakeClaudeBinary(dir: string) {
@@ -83,7 +83,7 @@ function withFakeClaudeEnv<A, E, R>(
 ) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-claude-text-" });
+    const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-claude-text-" });
     const binDir = yield* makeFakeClaudeBinary(tempDir);
     const previousPath = process.env.PATH;
     const previousOutput = process.env.T3_FAKE_CLAUDE_OUTPUT;

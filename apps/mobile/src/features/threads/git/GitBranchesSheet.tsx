@@ -1,4 +1,4 @@
-import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";

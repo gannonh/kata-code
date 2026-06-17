@@ -14,6 +14,8 @@ import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/Desktop
 
 export const DESKTOP_SCHEME = "t3";
 
+/** Internal Electron static-asset protocol (not user-facing deep links — see FORK.md divergence log). */
+
 export class ElectronProtocolRegistrationError extends Data.TaggedError(
   "ElectronProtocolRegistrationError",
 )<{
@@ -52,7 +54,7 @@ export interface ElectronProtocolShape {
 }
 
 export class ElectronProtocol extends Context.Service<ElectronProtocol, ElectronProtocolShape>()(
-  "@t3tools/desktop/electron/ElectronProtocol",
+  "@kata-sh/code-desktop/electron/ElectronProtocol",
 ) {}
 
 export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option<string> {

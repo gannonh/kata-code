@@ -3,7 +3,7 @@ import type {
   RelayAgentActivityState,
   RelayDeliveryResult,
   RelayPublishResponse,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -39,7 +39,7 @@ export interface AgentActivityPublisherShape {
 export class AgentActivityPublisher extends Context.Service<
   AgentActivityPublisher,
   AgentActivityPublisherShape
->()("t3code-relay/agentActivity/AgentActivityPublisher") {}
+>()("@kata-sh/code-relay/agentActivity/AgentActivityPublisher") {}
 
 const make = Effect.gen(function* () {
   const rows = yield* AgentActivityRows.AgentActivityRows;
@@ -204,7 +204,7 @@ function aggregateRowForState(state: RelayAgentActivityState) {
 
 function terminalAggregateState(state: RelayAgentActivityState): RelayAgentActivityAggregateState {
   return sanitizeAgentActivityAggregateState({
-    title: "T3 Code",
+    title: "KataCode",
     subtitle: state.phase === "failed" ? "Agent work failed" : "Agent work completed",
     activeCount: 0,
     updatedAt: state.updatedAt,
@@ -224,7 +224,7 @@ function makeAggregateState(input: {
     state.updatedAt.localeCompare(latest.updatedAt) > 0 ? state : latest,
   ).updatedAt;
   return sanitizeAgentActivityAggregateState({
-    title: "T3 Code",
+    title: "KataCode",
     subtitle: "Agent work in progress",
     activeCount: activeStates.length,
     updatedAt,

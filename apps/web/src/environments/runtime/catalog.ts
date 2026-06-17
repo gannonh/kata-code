@@ -1,11 +1,11 @@
-import { getKnownEnvironmentHttpBaseUrl } from "@t3tools/client-runtime";
+import { getKnownEnvironmentHttpBaseUrl } from "@kata-sh/code-client-runtime";
 import type {
   AuthEnvironmentScope,
   EnvironmentId,
   ExecutionEnvironmentDescriptor,
   PersistedSavedEnvironmentRecord,
   ServerConfig,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";

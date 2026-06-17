@@ -8,12 +8,12 @@ import {
   createFilesystemBrowseManager,
   filesystemBrowseStateAtom,
   getFilesystemBrowseTargetKey,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import type {
   EnvironmentId,
   FilesystemBrowseInput,
   FilesystemBrowseResult,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { useEffect, useMemo } from "react";
 
 import { appAtomRegistry } from "./atom-registry";

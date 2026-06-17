@@ -8,7 +8,7 @@ import type { ClerkProviderProps } from "@clerk/react";
 import {
   clerkFrontendApiHostnameFromPublishableKey,
   isAllowedClerkFrontendApiHostname,
-} from "@t3tools/shared/relayAuth";
+} from "@kata-sh/code-shared/relayAuth";
 import React, { useEffect, useState } from "react";
 
 import {

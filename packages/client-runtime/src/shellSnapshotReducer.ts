@@ -1,5 +1,8 @@
 import * as Arr from "effect/Array";
-import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@t3tools/contracts";
+import type {
+  OrchestrationShellSnapshot,
+  OrchestrationShellStreamEvent,
+} from "@kata-sh/code-contracts";
 
 /**
  * Apply a single shell stream event to an existing snapshot, returning a new

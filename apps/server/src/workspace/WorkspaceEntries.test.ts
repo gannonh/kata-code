@@ -10,7 +10,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 
 import { ServerConfig } from "../config.ts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "./Layers/WorkspacePaths.ts";
@@ -137,7 +137,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("filters and ranks entries by query", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-query-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-query-" });
         yield* writeTextFile(cwd, "src/components/Composer.tsx");
         yield* writeTextFile(cwd, "src/components/composePrompt.ts");
         yield* writeTextFile(cwd, "docs/composition.md");
@@ -154,7 +154,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("supports fuzzy subsequence queries for composer path search", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-fuzzy-query-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-fuzzy-query-" });
         yield* writeTextFile(cwd, "src/components/Composer.tsx");
         yield* writeTextFile(cwd, "src/components/composePrompt.ts");
         yield* writeTextFile(cwd, "docs/composition.md");
@@ -170,7 +170,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("prioritizes exact basename matches ahead of broader path matches", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-exact-ranking-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-exact-ranking-" });
         yield* writeTextFile(cwd, "src/components/Composer.tsx");
         yield* writeTextFile(cwd, "docs/composer.tsx-notes.md");
 
@@ -182,7 +182,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("tracks truncation without sorting every fuzzy match", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-fuzzy-limit-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-fuzzy-limit-" });
         yield* writeTextFile(cwd, "src/components/Composer.tsx");
         yield* writeTextFile(cwd, "src/components/composePrompt.ts");
         yield* writeTextFile(cwd, "docs/composition.md");
@@ -196,7 +196,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("excludes gitignored paths for git repositories", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-gitignore-", git: true });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-gitignore-", git: true });
         yield* writeTextFile(cwd, ".gitignore", ".convex/\nconvex/\nignored.txt\n");
         yield* writeTextFile(cwd, "src/keep.ts", "export {};");
         yield* writeTextFile(cwd, "ignored.txt", "ignore me");
@@ -217,7 +217,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
     it.effect("excludes tracked paths that match ignore rules", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({
-          prefix: "t3code-workspace-tracked-gitignore-",
+          prefix: "katacode-workspace-tracked-gitignore-",
           git: true,
         });
         yield* writeTextFile(cwd, ".convex/local-storage/data.json", "{}");
@@ -236,7 +236,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("excludes .convex in non-git workspaces", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-non-git-convex-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-non-git-convex-" });
         yield* writeTextFile(cwd, ".convex/local-storage/data.json", "{}");
         yield* writeTextFile(cwd, "src/keep.ts", "export {};");
 
@@ -251,7 +251,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("supports typo-resistant file search through fff", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-fff-typo-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-fff-typo-" });
         yield* writeTextFile(cwd, "src/components/Composer.tsx");
 
         const result = yield* searchWorkspaceEntries({ cwd, query: "compoesr", limit: 10 });
@@ -266,7 +266,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
 
     it.effect("rebuilds the cached index after refresh fails", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-refresh-failure-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-refresh-failure-" });
         yield* writeTextFile(cwd, "src/index.ts", "export {};\n");
 
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -291,7 +291,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
       Effect.gen(function* () {
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
         const path = yield* Path.Path;
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-prefix-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-browse-prefix-" });
         yield* writeTextFile(cwd, "alphabet.txt", "ignore me");
         yield* writeTextFile(cwd, "alpha/index.ts", "export {};\n");
         yield* writeTextFile(cwd, "alpine/index.ts", "export {};\n");
@@ -314,7 +314,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
       Effect.gen(function* () {
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
         const path = yield* Path.Path;
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-hidden-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-browse-hidden-" });
         yield* writeTextFile(cwd, ".config/settings.json", "{}");
         yield* writeTextFile(cwd, "config/settings.json", "{}");
         const cwdWithSeparator = yield* appendSeparator(cwd);
@@ -338,7 +338,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
       Effect.gen(function* () {
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
         const path = yield* Path.Path;
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-relative-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-browse-relative-" });
         yield* writeTextFile(cwd, "packages/pkg.json", "{}");
 
         const result = yield* workspaceEntries.browse({
@@ -370,7 +370,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
     it.effect("returns an empty listing when the OS denies directory access", () =>
       Effect.gen(function* () {
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
-        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-eacces-" });
+        const cwd = yield* makeTempDir({ prefix: "katacode-workspace-browse-eacces-" });
 
         const denied = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
         vi.spyOn(fsPromises, "readdir").mockRejectedValueOnce(denied);

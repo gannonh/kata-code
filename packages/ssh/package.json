@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/ssh",
+  "name": "@kata-sh/code-ssh",
   "private": true,
   "type": "module",
   "exports": {
@@ -29,8 +29,8 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
+    "@kata-sh/code-contracts": "workspace:*",
+    "@kata-sh/code-shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

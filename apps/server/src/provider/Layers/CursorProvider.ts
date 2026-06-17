@@ -7,8 +7,8 @@ import type {
   ServerProviderAuth,
   ServerProviderModel,
   ServerProviderState,
-} from "@t3tools/contracts";
-import { ProviderDriverKind } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import { ProviderDriverKind } from "@kata-sh/code-contracts";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -26,8 +26,8 @@ import {
   createModelCapabilities,
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
-} from "@t3tools/shared/model";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+} from "@kata-sh/code-shared/model";
+import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 
 import {
   buildBooleanOptionDescriptor,
@@ -85,7 +85,7 @@ export function buildInitialCursorProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Cursor is disabled in T3 Code settings.",
+          message: "Cursor is disabled in KataCode settings.",
         },
       });
     }
@@ -990,7 +990,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Cursor is disabled in T3 Code settings.",
+        message: "Cursor is disabled in KataCode settings.",
       },
     });
   }

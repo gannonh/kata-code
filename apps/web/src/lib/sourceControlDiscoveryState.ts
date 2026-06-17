@@ -5,8 +5,8 @@ import {
   createSourceControlDiscoveryManager,
   getSourceControlDiscoveryTargetKey,
   sourceControlDiscoveryStateAtom,
-} from "@t3tools/client-runtime";
-import { EnvironmentId, type SourceControlDiscoveryResult } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime";
+import { EnvironmentId, type SourceControlDiscoveryResult } from "@kata-sh/code-contracts";
 import { useEffect } from "react";
 
 import { readPrimaryEnvironmentDescriptor } from "../environments/primary";

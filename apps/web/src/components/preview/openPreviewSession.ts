@@ -1,4 +1,8 @@
-import type { EnvironmentApi, PreviewSessionSnapshot, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  EnvironmentApi,
+  PreviewSessionSnapshot,
+  ScopedThreadRef,
+} from "@kata-sh/code-contracts";
 
 import type { PreviewStateStoreState } from "~/previewStateStore";
 

@@ -1,5 +1,5 @@
-import type { PreviewSessionSnapshot } from "@t3tools/contracts";
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import type { PreviewSessionSnapshot } from "@kata-sh/code-contracts";
+import { getTerminalLabel } from "@kata-sh/code-shared/terminalLabels";
 import { ClipboardList, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
 import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
 
@@ -36,7 +36,7 @@ interface RightPanelTabsProps {
 }
 
 const SURFACE_DISABLED_REASONS = {
-  browser: "Browser previews are only available in the T3 Code desktop app.",
+  browser: "Browser previews are only available in the KataCode desktop app.",
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
 } as const;

@@ -1,6 +1,14 @@
+---
+type: Architecture Note
+title: "Remote Architecture"
+description: "This document describes the target architecture for first-class remote environments in KataCode."
+tags: [architecture, architecture-note]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Remote Architecture
 
-This document describes the target architecture for first-class remote environments in T3 Code.
+This document describes the target architecture for first-class remote environments in KataCode.
 
 It is intentionally architecture-first. It does not define a complete implementation plan or user-facing rollout checklist. The goal is to establish the core model so remote support can be added without another broad rewrite.
 

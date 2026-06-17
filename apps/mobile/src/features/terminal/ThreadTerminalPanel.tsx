@@ -1,4 +1,4 @@
-import { DEFAULT_TERMINAL_ID, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
+import { DEFAULT_TERMINAL_ID, type EnvironmentId, type ThreadId } from "@kata-sh/code-contracts";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";

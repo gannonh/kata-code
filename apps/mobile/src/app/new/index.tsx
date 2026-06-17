@@ -1,6 +1,6 @@
 import { Link, Stack, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@kata-sh/code-contracts";
 import { useMemo } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

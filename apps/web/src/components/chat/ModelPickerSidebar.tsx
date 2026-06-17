@@ -1,4 +1,4 @@
-import { type ProviderInstanceId } from "@t3tools/contracts";
+import { type ProviderInstanceId } from "@kata-sh/code-contracts";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Clock3Icon, SparklesIcon, StarIcon } from "lucide-react";
 import { Gemini, GithubCopilotIcon } from "../Icons";

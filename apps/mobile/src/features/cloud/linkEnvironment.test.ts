@@ -2,14 +2,14 @@ import { beforeEach, vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { EnvironmentId } from "@t3tools/contracts";
-import { RelayMobileClientId } from "@t3tools/contracts/relay";
+import { EnvironmentId } from "@kata-sh/code-contracts";
+import { RelayMobileClientId } from "@kata-sh/code-contracts/relay";
 import {
   managedRelayClientLayer,
   ManagedRelayClient,
   ManagedRelayDpopSigner,
   remoteHttpClientLayer,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import { HttpClient } from "effect/unstable/http";
 
 import {
@@ -448,7 +448,7 @@ describe("mobile cloud link environment client", () => {
       const environmentTokenBody = new URLSearchParams(
         requestBodyText(environmentTokenRequest?.body),
       );
-      expect(environmentTokenBody.get("client_label")).toBe("T3 Code Mobile");
+      expect(environmentTokenBody.get("client_label")).toBe("KataCode Mobile");
       expect(environmentTokenBody.get("client_device_type")).toBe("mobile");
       expect(environmentTokenBody.get("client_os")).toBe("iOS");
     }),

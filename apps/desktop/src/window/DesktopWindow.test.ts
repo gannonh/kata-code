@@ -12,7 +12,7 @@ vi.mock("electron", async (importOriginal) => ({
   ...(await importOriginal<typeof import("electron")>()),
   session: {
     fromPartition: vi.fn(() => ({
-      getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/1.2.3"),
+      getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 katacode/1.2.3"),
       setPermissionRequestHandler: vi.fn(),
       setUserAgent: vi.fn(),
     })),
@@ -125,7 +125,7 @@ const desktopEnvironmentLayer = DesktopEnvironment.layer(environmentInput).pipe(
     Layer.mergeAll(
       NodeServices.layer,
       DesktopConfig.layerTest({
-        T3CODE_PORT: "3773",
+        KATACODE_PORT: "3773",
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5733",
       }),
     ),
@@ -179,8 +179,8 @@ function makeTestLayer(input: {
         Layer.mock(PreviewManager.PreviewManager)({
           getBrowserSession: () => Effect.succeed({} as Electron.Session),
           setMainWindow: () => Effect.void,
-          isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
-          getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
+          isBrowserPartition: (partition) => partition.startsWith("persist:katacode-preview-"),
+          getBrowserPartition: () => Effect.succeed("persist:katacode-preview-test"),
         }),
       ),
     ),

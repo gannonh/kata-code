@@ -12,7 +12,7 @@ import {
   PreviewAutomationStatus,
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
 

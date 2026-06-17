@@ -7,7 +7,7 @@ import {
   threadDetailStateAtom,
   type ThreadDetailState,
   type ThreadDetailTarget,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import { useEffect, useMemo } from "react";
 
 import { derivePendingApprovals, derivePendingUserInputs } from "../lib/threadActivity";

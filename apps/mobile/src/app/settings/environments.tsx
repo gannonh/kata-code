@@ -1,13 +1,14 @@
 import { useAuth } from "@clerk/expo";
 import { Stack, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { RelayClientEnvironmentRecord } from "@t3tools/contracts/relay";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
+import type { RelayClientEnvironmentRecord } from "@kata-sh/code-contracts/relay";
 import * as Effect from "effect/Effect";
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CLOUD_PRODUCT_NAME } from "@kata-sh/code-shared/branding";
 import { AppText as Text } from "../../components/AppText";
 import { connectCloudEnvironment } from "../../features/cloud/linkEnvironment";
 import {
@@ -136,7 +137,7 @@ function ConfiguredCloudEnvironmentRows() {
       try {
         const token = await getToken(resolveRelayClerkTokenOptions());
         if (!token) {
-          throw new Error("Sign in to T3 Cloud before connecting.");
+          throw new Error(`Sign in to ${CLOUD_PRODUCT_NAME} before connecting.`);
         }
         await mobileRuntime.runPromise(
           connectCloudEnvironment({
@@ -161,7 +162,9 @@ function ConfiguredCloudEnvironmentRows() {
   return (
     <View collapsable={false} className="mt-5 gap-3">
       <View className="flex-row items-center justify-between px-1">
-        <Text className="text-[13px] font-t3-bold uppercase text-foreground-muted">T3 Cloud</Text>
+        <Text className="text-[13px] font-t3-bold uppercase text-foreground-muted">
+          {CLOUD_PRODUCT_NAME}
+        </Text>
         <Pressable
           accessibilityRole="button"
           disabled={cloudEnvironmentsState.isPending}
@@ -198,7 +201,7 @@ function ConfiguredCloudEnvironmentRows() {
       ) : cloudEnvironmentsState.error ? (
         <View collapsable={false} className="gap-3 rounded-[24px] bg-card p-5">
           <Text className="text-[15px] font-t3-bold text-foreground">
-            Could not load T3 Cloud environments
+            Could not load {CLOUD_PRODUCT_NAME} environments
           </Text>
           <Text className="text-[13px] leading-[18px] text-foreground-muted">
             {cloudEnvironmentsState.error}

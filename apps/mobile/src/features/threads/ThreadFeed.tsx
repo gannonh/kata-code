@@ -2,7 +2,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { KeyboardAvoidingLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
-import type { ThreadId } from "@t3tools/contracts";
+import type { ThreadId } from "@kata-sh/code-contracts";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {

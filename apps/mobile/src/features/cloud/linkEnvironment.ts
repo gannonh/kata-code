@@ -9,8 +9,8 @@ import {
   EnvironmentHttpForbiddenError,
   EnvironmentHttpInternalServerError,
   EnvironmentHttpUnauthorizedError,
-} from "@t3tools/contracts";
-import { stripPairingTokenFromUrl } from "@t3tools/shared/remote";
+} from "@kata-sh/code-contracts";
+import { stripPairingTokenFromUrl } from "@kata-sh/code-shared/remote";
 import {
   type RelayEnvironmentConnectResponse as RelayEnvironmentConnectResponseType,
   type RelayEnvironmentLinkResponse as RelayEnvironmentLinkResponseType,
@@ -22,14 +22,14 @@ import {
   type RelayClientEnvironmentRecord,
   type RelayEnvironmentStatusResponse as RelayEnvironmentStatusResponseType,
   type RelayManagedEndpointProviderKind,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import {
   exchangeRemoteDpopAccessToken,
   fetchRemoteEnvironmentDescriptor,
   makeEnvironmentHttpApiClient,
   ManagedRelayClient,
   ManagedRelayDpopSigner,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 
 import { mobileAuthClientMetadata } from "../../lib/authClientMetadata";
 import type { SavedRemoteConnection } from "../../lib/connection";

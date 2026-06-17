@@ -6,14 +6,14 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   createModelSelection,
   normalizeModelSlug,
   resolveSelectableModel,
-} from "@t3tools/shared/model";
+} from "@kata-sh/code-shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderState";
-import { UnifiedSettings } from "@t3tools/contracts/settings";
+import { UnifiedSettings } from "@kata-sh/code-contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import {

@@ -14,4 +14,4 @@ export {
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
   resolveProjectPathForDispatch,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";

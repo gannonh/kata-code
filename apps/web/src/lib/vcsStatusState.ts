@@ -9,8 +9,8 @@ import {
   getVcsStatusDataForTarget,
   getVcsStatusTargetKey,
   vcsStatusStateAtom,
-} from "@t3tools/client-runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 import { useEffect } from "react";
 
 import {

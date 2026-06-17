@@ -6,7 +6,7 @@ import * as Schema from "effect/Schema";
 import * as HttpApiError from "effect/unstable/httpapi/HttpApiError";
 import { lt } from "drizzle-orm";
 
-import { verifyDpopProof } from "@t3tools/shared/dpop";
+import { verifyDpopProof } from "@kata-sh/code-shared/dpop";
 import { RelayDb } from "../db.ts";
 import { relayDpopProofs } from "../persistence/schema.ts";
 
@@ -42,7 +42,7 @@ export interface DpopProofReplayShape {
 }
 
 export class DpopProofReplay extends Context.Service<DpopProofReplay, DpopProofReplayShape>()(
-  "t3code-relay/auth/DpopProofs/DpopProofReplay",
+  "@kata-sh/code-relay/auth/DpopProofs/DpopProofReplay",
 ) {}
 
 const make = Effect.gen(function* () {

@@ -18,8 +18,8 @@ import type {
   VcsStatusRemoteResult,
   VcsStatusResult,
   VcsStatusStreamEvent,
-} from "@t3tools/contracts";
-import { mergeGitStatusParts } from "@t3tools/shared/git";
+} from "@kata-sh/code-contracts";
+import { mergeGitStatusParts } from "@kata-sh/code-shared/git";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 
@@ -82,7 +82,7 @@ export interface VcsStatusBroadcasterShape {
 export class VcsStatusBroadcaster extends Context.Service<
   VcsStatusBroadcaster,
   VcsStatusBroadcasterShape
->()("t3/vcs/VcsStatusBroadcaster") {}
+>()("@kata-sh/code-cli/vcs/VcsStatusBroadcaster") {}
 
 function fingerprintStatusPart(status: unknown): string {
   return JSON.stringify(status);

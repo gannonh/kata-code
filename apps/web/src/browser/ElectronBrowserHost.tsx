@@ -1,6 +1,6 @@
 "use client";
 
-import { parseScopedThreadKey } from "@t3tools/client-runtime";
+import { parseScopedThreadKey } from "@kata-sh/code-client-runtime";
 import { useEffect, useMemo } from "react";
 
 import { isElectron } from "~/env";

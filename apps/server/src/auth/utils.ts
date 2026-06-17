@@ -2,7 +2,7 @@ import type {
   AuthClientMetadata,
   AuthClientMetadataDeviceType,
   AuthClientPresentationMetadata,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as Crypto from "node:crypto";
 import * as Encoding from "effect/Encoding";

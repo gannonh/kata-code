@@ -1,65 +1,44 @@
-# Contributing
+# Contributing to KataCode
 
-## Read This First
+KataCode is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code), maintained at [gannonh/katacode](https://github.com/gannonh/katacode). Read [FORK.md](./FORK.md) before large refactors or upstream merges.
 
-We are not actively accepting contributions right now.
+## Ground rules
 
-You can still open an issue or PR, but please do so knowing there is a high chance we close it, defer it forever, or never look at it.
+1. **Performance and reliability first** — see [AGENTS.md](./AGENTS.md).
+2. **Keep fork branding intact** — do not reintroduce `@t3tools/*`, `T3CODE_*`, or upstream product strings without an explicit decision recorded in `FORK.md`.
+3. **Upstream sync is merge-based** — fetch `upstream`, merge on a sync branch, verify with `vp check && vp run typecheck`, then merge to `main`.
+4. **Never push to the `upstream` remote.**
 
-If that sounds annoying, that is because it is. This project is still early and we are trying to keep scope, quality, and direction under control.
+## Before opening a PR
 
-PRs are automatically labeled with a `vouch:*` trust status and a `size:*` diff size based on changed lines.
+```bash
+vp i
+vp check
+vp run typecheck
+vp test   # or targeted package tests for touched areas
+```
 
-If you are an external contributor, expect `vouch:unvouched` until we explicitly add you to [.github/VOUCHED.td](.github/VOUCHED.td).
+For desktop changes, also run:
 
-## What We Are Most Likely To Accept
+```bash
+vp run --filter @kata-sh/code-desktop ensure:electron
+```
 
-Small, focused bug fixes.
+## What we welcome
 
-Small reliability fixes.
+- Focused bug fixes and reliability improvements
+- Performance improvements with measurable impact
+- Fork maintenance (branding, CI split, docs, upstream sync)
+- Small, well-scoped features aligned with the fork roadmap in `FORK.md`
 
-Small performance improvements.
+## What to discuss first
 
-Tightly scoped maintenance work that clearly improves the project without changing its direction.
+- Large architectural changes
+- New cloud/relay infrastructure (Phase 2+)
+- Breaking changes to env vars, state dirs, or URL protocols
 
-## What We Are Least Likely To Accept
+## PR hygiene
 
-Large PRs.
-
-Drive-by feature work.
-
-Opinionated rewrites.
-
-Anything that expands product scope without us asking for it first.
-
-If you open a 1,000+ line PR full of new features, we will probably close it quickly and remember that you ignored the clearly written instructions.
-
-## If You Still Want To Open A PR
-
-Keep it small.
-
-Explain exactly what changed.
-
-Explain exactly why the change should exist.
-
-Do not mix unrelated fixes together.
-
-If the PR makes anything resembling a UI change, include clear before/after images.
-
-If the change depends on motion, timing, transitions, or interaction details, include a short video.
-
-If we have to guess what changed, we are much less likely to review it.
-
-## Issues First
-
-If you are thinking about a non-trivial change, open an issue first.
-
-That still does not mean we will want the PR, but it gives you a chance to avoid wasting your time.
-
-## Be Realistic
-
-Opening a PR does not create an obligation on our side.
-
-We may close it. We may ignore it. We may ask you to shrink it. We may reimplement the idea ourselves later.
-
-If you are fine with that, proceed.
+- Keep PRs reviewable — prefer several small PRs over one huge diff.
+- Update `FORK.md` when sync policy or intentional divergence changes.
+- Do not commit secrets, signing credentials, or `.env.local` files.

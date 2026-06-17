@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 import { useLocalSearchParams } from "expo-router";
 import Stack from "expo-router/stack";
 import { SymbolView } from "expo-symbols";

@@ -4,12 +4,12 @@ import type {
   ProjectScript,
   ThreadId,
   VcsStatusResult,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   type GitActionRequestInput,
   requiresDefaultBranchConfirmation,
   resolveQuickAction,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import Stack from "expo-router/stack";
 import { useCallback, useMemo } from "react";

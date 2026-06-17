@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { KnownTerminalSession } from "@t3tools/client-runtime";
-import { DEFAULT_TERMINAL_ID, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { KnownTerminalSession } from "@kata-sh/code-client-runtime";
+import { DEFAULT_TERMINAL_ID, EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import { getTerminalLabel } from "@kata-sh/code-shared/terminalLabels";
 
 import {
   buildTerminalMenuSessions,

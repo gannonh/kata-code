@@ -8,7 +8,7 @@ import {
   createVcsRefManager,
   getVcsRefTargetKey,
   vcsRefStateAtom,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 
 import { appAtomRegistry } from "./atom-registry";
 import {

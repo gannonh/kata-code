@@ -1,9 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo } from "react";
 
-import { EnvironmentScopedThreadShell } from "@t3tools/client-runtime";
-import { CommandId, MessageId, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
-import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
+import { EnvironmentScopedThreadShell } from "@kata-sh/code-client-runtime";
+import { CommandId, MessageId, type EnvironmentId, type ThreadId } from "@kata-sh/code-contracts";
+import { deriveActiveWorkStartedAt } from "@kata-sh/code-shared/orchestrationTiming";
 import { Atom } from "effect/unstable/reactivity";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";

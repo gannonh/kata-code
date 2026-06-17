@@ -1,12 +1,12 @@
 import * as Order from "effect/Order";
 import * as Arr from "effect/Array";
-import type { RepositoryIdentity } from "@t3tools/contracts";
+import type { RepositoryIdentity } from "@kata-sh/code-contracts";
 
 import { scopedProjectKey } from "./scopedEntities";
 import {
   EnvironmentScopedProjectShell,
   EnvironmentScopedThreadShell,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 
 const DateDescending = Order.flip(Order.Date);
 

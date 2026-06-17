@@ -8,7 +8,7 @@ import type {
   SourceControlProviderKind,
   SourceControlRepositoryCloneUrls,
   SourceControlRepositoryVisibility,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 export interface SourceControlProviderContext {
   readonly provider: SourceControlProviderInfo;
@@ -99,4 +99,4 @@ export interface SourceControlProviderShape {
 export class SourceControlProvider extends Context.Service<
   SourceControlProvider,
   SourceControlProviderShape
->()("t3/sourceControl/SourceControlProvider") {}
+>()("@kata-sh/code-cli/sourceControl/SourceControlProvider") {}

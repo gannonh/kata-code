@@ -10,8 +10,8 @@ import {
   type VcsStatusResult,
   type VcsStatusStreamEvent,
   WS_METHODS,
-} from "@t3tools/contracts";
-import { applyGitStatusStreamEvent } from "@t3tools/shared/git";
+} from "@kata-sh/code-contracts";
+import { applyGitStatusStreamEvent } from "@kata-sh/code-shared/git";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 

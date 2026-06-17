@@ -3,8 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { vi } from "vite-plus/test";
 
-import { remoteHttpClientLayer } from "@t3tools/client-runtime";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+import { remoteHttpClientLayer } from "@kata-sh/code-client-runtime";
+import { withRelayClientTracing } from "@kata-sh/code-shared/relayTracing";
 
 import { makeMobileTracingLayer } from "./mobileTracing";
 

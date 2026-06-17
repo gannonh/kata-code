@@ -49,7 +49,7 @@ vi.mock("../browser/openFileInPreview", async (importOriginal) => ({
 
 import ChatMarkdown from "./ChatMarkdown";
 import { serializeTableElementToCsv, serializeTableElementToMarkdown } from "../markdown-clipboard";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 
 const threadRef = {

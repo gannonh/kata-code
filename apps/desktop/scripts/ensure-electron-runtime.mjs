@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const require = createRequire(import.meta.url);
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone repair script has no Effect runtime.
+// oxlint-disable-next-line kata-code/no-global-process-runtime -- Standalone repair script has no Effect runtime.
 const hostPlatform = platform();
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone repair script has no Effect runtime.
+// oxlint-disable-next-line kata-code/no-global-process-runtime -- Standalone repair script has no Effect runtime.
 const hostArch = arch();
 
 function getPlatformPath() {

@@ -5,7 +5,7 @@ import type {
   AdvertisedEndpointReachability,
   AdvertisedEndpointSource,
   AdvertisedEndpointStatus,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 export interface CreateAdvertisedEndpointInput {
   readonly id: string;

@@ -10,10 +10,10 @@ import {
   type ProviderInstanceConfig,
   type ProviderInstanceId,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@kata-sh/code-contracts";
+import { scopeThreadRef } from "@kata-sh/code-client-runtime";
+import { DEFAULT_UNIFIED_SETTINGS } from "@kata-sh/code-contracts/settings";
+import { createModelSelection } from "@kata-sh/code-shared/model";
 import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
@@ -521,7 +521,7 @@ export function GeneralSettingsPanel() {
       <SettingsSection title="General">
         <SettingsRow
           title="Theme"
-          description="Choose how T3 Code looks across the app."
+          description="Choose how KataCode looks across the app."
           resetAction={
             theme !== "system" ? (
               <SettingResetButton label="theme" onClick={() => setTheme("system")} />

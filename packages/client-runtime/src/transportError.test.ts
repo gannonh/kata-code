@@ -20,9 +20,9 @@ describe("isTransportConnectionErrorMessage", () => {
   });
 
   it("returns true for the T3 server WebSocket message", () => {
-    expect(isTransportConnectionErrorMessage("Unable to connect to the T3 server WebSocket.")).toBe(
-      true,
-    );
+    expect(
+      isTransportConnectionErrorMessage("Unable to connect to the KataCode server WebSocket."),
+    ).toBe(true);
   });
 
   it("returns true for ping timeout", () => {

@@ -9,7 +9,7 @@ on:
 jobs:
   check:
     name: Check
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -23,13 +23,13 @@ jobs:
           run-install: true
 
       - name: Ensure Electron runtime is installed
-        run: vp run --filter @t3tools/desktop ensure:electron
+        run: vp run --filter @kata-sh/code-desktop ensure:electron
 
       - name: Check
         run: vp check
 
       - name: Typecheck
-        run: vpr typecheck
+        run: vp run typecheck
 
       - name: Build desktop pipeline
         run: vp run build:desktop
@@ -41,7 +41,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -55,14 +55,14 @@ jobs:
           run-install: true
 
       - name: Ensure Electron runtime is installed
-        run: vp run --filter @t3tools/desktop ensure:electron
+        run: vp run --filter @kata-sh/code-desktop ensure:electron
 
       - name: Test
         run: vp run test
 
   test_browser:
     name: Test Browser
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -84,7 +84,7 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install browser test runtime
-        run: vp run --filter @t3tools/web test:browser:install
+        run: vp run --filter @kata-sh/code-web test:browser:install
 
       - name: Browser test / Chat view
         working-directory: apps/web
@@ -108,7 +108,7 @@ jobs:
 
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
-    runs-on: blacksmith-12vcpu-macos-26
+    runs-on: macos-15
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -129,7 +129,7 @@ jobs:
 
   release_smoke:
     name: Release Smoke
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout

@@ -19,9 +19,9 @@ const defaultEnvironmentInput = {
   platform: "darwin",
   processArch: "arm64",
   appVersion: "1.2.3",
-  appPath: "/Applications/T3 Code.app/Contents/Resources/app.asar",
+  appPath: "/Applications/KataCode.app/Contents/Resources/app.asar",
   isPackaged: true,
-  resourcesPath: "/Applications/T3 Code.app/Contents/Resources",
+  resourcesPath: "/Applications/KataCode.app/Contents/Resources",
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
@@ -38,7 +38,7 @@ interface ElectronAppCalls {
 const makeElectronAppLayer = (calls: ElectronAppCalls) =>
   Layer.succeed(ElectronApp.ElectronApp, {
     metadata: Effect.die("unexpected metadata read"),
-    name: Effect.succeed("T3 Code"),
+    name: Effect.succeed("KataCode"),
     whenReady: Effect.void,
     quit: Effect.void,
     exit: () => Effect.void,
@@ -105,6 +105,7 @@ const withIdentity = <A, E, R>(
     readonly calls?: ElectronAppCalls;
     readonly environment?: TestEnvironmentInput;
     readonly legacyPathExists?: boolean;
+    readonly legacyPathName?: string;
     readonly packageJson?: string;
     readonly pngIconPath?: Option.Option<string>;
   } = {},
@@ -114,6 +115,7 @@ const withIdentity = <A, E, R>(
     setDockIcon: [],
     setName: [],
   };
+  const legacyPathName = input.legacyPathName ?? "KataCode (Alpha)";
 
   return effect.pipe(
     Effect.provide(
@@ -121,9 +123,9 @@ const withIdentity = <A, E, R>(
         Layer.provideMerge(
           FileSystem.layerNoop({
             exists: (path) =>
-              Effect.succeed(input.legacyPathExists === true && path.includes("T3 Code (Alpha)")),
+              Effect.succeed(input.legacyPathExists === true && path.includes(legacyPathName)),
             readFileString: () =>
-              Effect.succeed(input.packageJson ?? '{"t3codeCommitHash":"abcdef1234567890"}'),
+              Effect.succeed(input.packageJson ?? '{"katacodeCommitHash":"abcdef1234567890"}'),
           }),
         ),
         Layer.provideMerge(makeAssetsLayer(input.pngIconPath ?? Option.none())),
@@ -141,9 +143,21 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         const userDataPath = yield* identity.resolveUserDataPath;
 
-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code (Alpha)");
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/KataCode (Alpha)");
       }),
       { legacyPathExists: true },
+    ),
+  );
+
+  it.effect("migrates from upstream T3 Code userData folders", () =>
+    withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        const userDataPath = yield* identity.resolveUserDataPath;
+
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code (Alpha)");
+      }),
+      { legacyPathExists: true, legacyPathName: "T3 Code (Alpha)" },
     ),
   );
 
@@ -159,8 +173,8 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         yield* identity.configure;
 
-        assert.deepEqual(calls.setName, ["T3 Code (Alpha)"]);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "T3 Code (Alpha)");
+        assert.deepEqual(calls.setName, ["KataCode (Alpha)"]);
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "KataCode (Alpha)");
         assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
         assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
         assert.deepEqual(calls.setDockIcon, ["/icon.png"]);
@@ -169,7 +183,7 @@ describe("DesktopAppIdentity", () => {
         calls,
         environment: {
           env: {
-            T3CODE_COMMIT_HASH: "0123456789abcdef",
+            KATACODE_COMMIT_HASH: "0123456789abcdef",
           },
         },
         pngIconPath: Option.some("/icon.png"),

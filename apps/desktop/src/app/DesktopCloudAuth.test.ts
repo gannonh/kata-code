@@ -44,7 +44,7 @@ function makeHarness(input: { readonly isDevelopment: boolean }): CloudAuthHarne
       resourcesPath: "/tmp/t3-code-test/resources",
       runningUnderArm64Translation: false,
     }),
-    name: Effect.succeed("T3 Code"),
+    name: Effect.succeed("KataCode"),
     whenReady: Effect.void,
     quit: Effect.void,
     exit: () => Effect.void,
@@ -132,43 +132,43 @@ describe("DesktopCloudAuth", () => {
   it("uses separate callback schemes for packaged and development builds", () => {
     assert.equal(
       DesktopCloudAuth.resolveCloudAuthCallbackScheme({ isDevelopment: false }),
-      "t3code",
+      "katacode",
     );
     assert.equal(
       DesktopCloudAuth.resolveCloudAuthCallbackScheme({ isDevelopment: true }),
-      "t3code-dev",
+      "katacode-dev",
     );
   });
 
   it("builds a native callback URL with request state", () => {
     assert.equal(
       DesktopCloudAuth.buildCloudAuthCallbackUrl({
-        scheme: "t3code",
+        scheme: "katacode",
         state: "state-1",
       }),
-      "t3code://auth/callback?t3_state=state-1",
+      "katacode://auth/callback?katacode_state=state-1",
     );
   });
 
   it("accepts only the expected scheme, host, path, and state", () => {
     assert.isNotNull(
       DesktopCloudAuth.parseCloudAuthCallbackUrl({
-        rawUrl: "t3code://auth/callback?rotating_token_nonce=nonce&t3_state=state-1",
-        scheme: "t3code",
+        rawUrl: "katacode://auth/callback?rotating_token_nonce=nonce&katacode_state=state-1",
+        scheme: "katacode",
         state: "state-1",
       }),
     );
     assert.isNull(
       DesktopCloudAuth.parseCloudAuthCallbackUrl({
-        rawUrl: "t3code://auth/callback?rotating_token_nonce=nonce&t3_state=wrong",
-        scheme: "t3code",
+        rawUrl: "katacode://auth/callback?rotating_token_nonce=nonce&katacode_state=wrong",
+        scheme: "katacode",
         state: "state-1",
       }),
     );
     assert.isNull(
       DesktopCloudAuth.parseCloudAuthCallbackUrl({
-        rawUrl: "https://example.com/callback?rotating_token_nonce=nonce&t3_state=state-1",
-        scheme: "t3code",
+        rawUrl: "https://example.com/callback?rotating_token_nonce=nonce&katacode_state=state-1",
+        scheme: "katacode",
         state: "state-1",
       }),
     );
@@ -177,10 +177,10 @@ describe("DesktopCloudAuth", () => {
   it("builds a native development callback URL with request state", () => {
     assert.equal(
       DesktopCloudAuth.buildCloudAuthCallbackUrl({
-        scheme: "t3code-dev",
+        scheme: "katacode-dev",
         state: "state-1",
       }),
-      "t3code-dev://auth/callback?t3_state=state-1",
+      "katacode-dev://auth/callback?katacode_state=state-1",
     );
   });
 
@@ -206,7 +206,7 @@ describe("DesktopCloudAuth", () => {
       assert.isTrue(prevented);
       assert.deepEqual(
         harness.protocolRegistrations.map((registration) => registration.protocol),
-        ["t3code-dev"],
+        ["katacode-dev"],
       );
       assert.isString(harness.protocolRegistrations[0]?.path);
       assert.isArray(harness.protocolRegistrations[0]?.args);
@@ -258,7 +258,7 @@ describe("DesktopCloudAuth", () => {
 
       assert.deepEqual(
         harness.protocolRegistrations.map((registration) => registration.protocol),
-        ["t3code"],
+        ["katacode"],
       );
       assert.deepEqual(harness.sends, [
         {

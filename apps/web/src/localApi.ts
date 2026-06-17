@@ -1,5 +1,5 @@
-import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
-import type { WsRpcClient } from "@t3tools/client-runtime";
+import type { ContextMenuItem, LocalApi } from "@kata-sh/code-contracts";
+import type { WsRpcClient } from "@kata-sh/code-client-runtime";
 
 import { resetVcsStatusStateForTests } from "./lib/vcsStatusState";
 import { resetSourceControlDiscoveryStateForTests } from "./lib/sourceControlDiscoveryState";

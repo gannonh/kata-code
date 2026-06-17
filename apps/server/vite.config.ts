@@ -6,7 +6,7 @@ import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
 const bundledPackagePrefixes = [
   "@pierre/diffs",
-  "@t3tools/",
+  "@kata-sh/",
   "effect-acp",
   "effect-codex-app-server",
 ];
@@ -24,7 +24,7 @@ export default mergeConfig(
       tasks: {
         build: {
           command: "node scripts/cli.ts build",
-          dependsOn: ["@t3tools/web#build"],
+          dependsOn: ["@kata-sh/code-web#build"],
           cache: false,
         },
       },
@@ -42,21 +42,21 @@ export default mergeConfig(
         js: "#!/usr/bin/env node\n",
       },
       define: {
-        __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
-        __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
-          repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
+        __KATACODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.KATACODE_RELAY_URL?.trim() ?? ""),
+        __KATACODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
+          repoEnv.KATACODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
         ),
-        __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: JSON.stringify(
-          repoEnv.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() ?? "",
+        __KATACODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: JSON.stringify(
+          repoEnv.KATACODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() ?? "",
         ),
-        __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: JSON.stringify(
-          repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() ?? "",
+        __KATACODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: JSON.stringify(
+          repoEnv.KATACODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() ?? "",
         ),
-        __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__: JSON.stringify(
-          repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() ?? "",
+        __KATACODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__: JSON.stringify(
+          repoEnv.KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() ?? "",
         ),
-        __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__: JSON.stringify(
-          repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN?.trim() ?? "",
+        __KATACODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__: JSON.stringify(
+          repoEnv.KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN?.trim() ?? "",
         ),
       },
     },

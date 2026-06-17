@@ -1,5 +1,5 @@
-import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
-import * as RelayClient from "@t3tools/shared/relayClient";
+import type { RelayManagedEndpointRuntimeConfig } from "@kata-sh/code-contracts/relay";
+import * as RelayClient from "@kata-sh/code-shared/relayClient";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -36,7 +36,7 @@ export interface CloudManagedEndpointRuntimeShape {
 export class CloudManagedEndpointRuntime extends Context.Service<
   CloudManagedEndpointRuntime,
   CloudManagedEndpointRuntimeShape
->()("t3/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
+>()("@kata-sh/code-cli/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
 
 export type CloudManagedEndpointRuntimeStatus =
   | {

@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 import { Editor } from "@pierre/diffs/editor";
 import { EditorProvider, File, Virtualizer } from "@pierre/diffs/react";
 import { ChevronRight, FolderTree, LoaderCircle } from "lucide-react";
@@ -31,7 +31,7 @@ interface FilePreviewPanelProps {
   onPendingChange: (relativePath: string, pending: boolean) => void;
 }
 
-const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
+const FILE_EXPLORER_STORAGE_KEY = "katacode.fileExplorerOpen";
 const FILE_SAVE_DEBOUNCE_MS = 500;
 
 interface EditableFileSurfaceProps {

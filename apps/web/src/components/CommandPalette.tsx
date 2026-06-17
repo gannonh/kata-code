@@ -1,6 +1,6 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeProjectRef, scopeThreadRef } from "@kata-sh/code-client-runtime";
 import {
   DEFAULT_MODEL,
   type EnvironmentId,
@@ -10,7 +10,7 @@ import {
   type SourceControlDiscoveryResult,
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";

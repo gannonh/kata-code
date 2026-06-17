@@ -1,4 +1,4 @@
-import type { DiscoveredLocalServer, ScopedThreadRef } from "@t3tools/contracts";
+import type { DiscoveredLocalServer, ScopedThreadRef } from "@kata-sh/code-contracts";
 
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import { ensureEnvironmentApi } from "~/environmentApi";

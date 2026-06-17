@@ -16,9 +16,9 @@ import type {
   ProjectListEntriesResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
-} from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
+} from "@kata-sh/code-contracts";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
+import { isExplicitRelativePath, isWindowsAbsolutePath } from "@kata-sh/code-shared/path";
 
 import * as WorkspacePaths from "./Services/WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
@@ -58,7 +58,7 @@ export class WorkspaceEntries extends Context.Service<
     ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError>;
     readonly refresh: (cwd: string) => Effect.Effect<void>;
   }
->()("t3/workspace/WorkspaceEntries") {}
+>()("@kata-sh/code-cli/workspace/WorkspaceEntries") {}
 
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {

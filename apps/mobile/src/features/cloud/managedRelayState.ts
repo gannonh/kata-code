@@ -3,11 +3,11 @@ import {
   createManagedRelayQueryManager,
   managedRelaySessionAtom,
   readManagedRelaySnapshotState,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback } from "react";
 

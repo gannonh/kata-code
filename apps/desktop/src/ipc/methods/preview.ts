@@ -18,7 +18,7 @@ import {
   PreviewAnnotationPayloadSchema,
   PreviewAutomationSnapshot,
   PreviewAutomationStatus,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { BrowserWindow } from "electron";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

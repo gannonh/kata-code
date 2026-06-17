@@ -7,7 +7,7 @@ import {
   createVcsActionManager,
   getVcsActionTargetKey,
   vcsActionStateAtom,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { uuidv4 } from "../lib/uuid";

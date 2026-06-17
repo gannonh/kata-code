@@ -1,5 +1,5 @@
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import { scopeProjectRef } from "@t3tools/client-runtime";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@kata-sh/code-contracts";
+import { scopeProjectRef } from "@kata-sh/code-client-runtime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

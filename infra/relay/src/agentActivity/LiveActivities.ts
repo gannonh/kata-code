@@ -2,8 +2,8 @@ import type {
   RelayAgentActivityAggregateState,
   RelayDeliveryKind,
   RelayLiveActivityRegistrationRequest,
-} from "@t3tools/contracts/relay";
-import { RelayAgentActivityAggregateState as RelayAgentActivityAggregateStateSchema } from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
+import { RelayAgentActivityAggregateState as RelayAgentActivityAggregateStateSchema } from "@kata-sh/code-contracts/relay";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -97,7 +97,7 @@ export interface LiveActivitiesShape {
 }
 
 export class LiveActivities extends Context.Service<LiveActivities, LiveActivitiesShape>()(
-  "t3code-relay/agentActivity/LiveActivities",
+  "@kata-sh/code-relay/agentActivity/LiveActivities",
 ) {}
 
 const decodeJsonString = Schema.decodeEffect(Schema.UnknownFromJsonString);

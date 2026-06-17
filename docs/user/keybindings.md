@@ -1,8 +1,19 @@
+---
+type: Guide
+title: "Keybindings"
+description: "KataCode reads keybindings from:"
+tags: [user, guide]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Keybindings
 
-T3 Code reads keybindings from:
+KataCode reads keybindings from:
 
-- `~/.t3/keybindings.json`
+- `~/.katacode/userdata/keybindings.json` (packaged server / production)
+- `~/.katacode/dev/keybindings.json` (local development with `pnpm run dev`)
+
+Override the base directory with `KATACODE_HOME` if needed.
 
 The file must be a JSON array of rules:
 

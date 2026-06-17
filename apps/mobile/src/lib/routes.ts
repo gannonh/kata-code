@@ -1,6 +1,6 @@
 import type { Href, useRouter } from "expo-router";
-import type { EnvironmentScopedThreadShell } from "@t3tools/client-runtime";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentScopedThreadShell } from "@kata-sh/code-client-runtime";
+import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 
 import type { SelectedThreadRef } from "../state/remote-runtime-types";
 

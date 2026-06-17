@@ -20,25 +20,25 @@ const VARIANT_CONFIG: Record<
   }
 > = {
   development: {
-    appName: "T3 Code Dev",
-    scheme: "t3code-dev",
+    appName: "KataCode Dev",
+    scheme: "katacode-dev",
     iosIcon: "./assets/icon-composer-dev.icon",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
+    iosBundleIdentifier: "com.katacode.dev",
+    androidPackage: "com.katacode.dev",
   },
   preview: {
-    appName: "T3 Code Preview",
-    scheme: "t3code-preview",
+    appName: "KataCode Preview",
+    scheme: "katacode-preview",
     iosIcon: "./assets/icon-composer-prod.icon",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
+    iosBundleIdentifier: "com.katacode.preview",
+    androidPackage: "com.katacode.preview",
   },
   production: {
-    appName: "T3 Code",
-    scheme: "t3code",
+    appName: "KataCode",
+    scheme: "katacode",
     iosIcon: "./assets/icon-composer-prod.icon",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
+    iosBundleIdentifier: "com.katacode.app",
+    androidPackage: "com.katacode.app",
   },
 };
 
@@ -54,10 +54,11 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
+const easProjectId = repoEnv.KATACODE_EAS_PROJECT_ID?.trim() || undefined;
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "t3-code",
+  slug: "katacode",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
   version: "0.1.0",
@@ -67,12 +68,16 @@ const config: ExpoConfig = {
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
-  updates: {
-    enabled: true,
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    checkAutomatically: "ON_LOAD",
-    fallbackToCacheTimeout: 0,
-  },
+  updates: easProjectId
+    ? {
+        enabled: true,
+        url: `https://u.expo.dev/${easProjectId}`,
+        checkAutomatically: "ON_LOAD",
+        fallbackToCacheTimeout: 0,
+      }
+    : {
+        enabled: false,
+      },
   ios: {
     icon: variant.iosIcon,
     supportsTablet: true,
@@ -82,7 +87,7 @@ const config: ExpoConfig = {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow T3 Code to connect to T3 Code servers on your local network or tailnet.",
+        "Allow KataCode to connect to KataCode servers on your local network or tailnet.",
       ITSAppUsesNonExemptEncryption: false,
     },
   },
@@ -109,7 +114,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow KataCode to access your camera so you can scan pairing QR codes.",
         barcodeScannerEnabled: true,
       },
     ],
@@ -144,7 +149,7 @@ const config: ExpoConfig = {
           {
             name: "AgentActivity",
             displayName: "Agent Activity",
-            description: "Shows the current state of active T3 Code agents.",
+            description: "Shows the current state of active KataCode agents.",
             supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
           },
         ],
@@ -155,7 +160,7 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     relay: {
-      url: repoEnv.T3CODE_RELAY_URL ?? null,
+      url: repoEnv.KATACODE_RELAY_URL ?? null,
     },
     clerk: {
       publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
@@ -166,11 +171,9 @@ const config: ExpoConfig = {
       tracesDataset: repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null,
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
-    eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    },
+    eas: easProjectId ? { projectId: easProjectId } : undefined,
   },
-  owner: "pingdotgg",
+  owner: repoEnv.EXPO_OWNER?.trim() || "gannonh",
 };
 
 export default config;

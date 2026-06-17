@@ -1,4 +1,4 @@
-import { EnvironmentId, type VcsListRefsResult } from "@t3tools/contracts";
+import { EnvironmentId, type VcsListRefsResult } from "@kata-sh/code-contracts";
 import { AtomRegistry } from "effect/unstable/reactivity";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 

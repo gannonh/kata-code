@@ -7,7 +7,7 @@ import {
   type VcsError,
   type VcsInitInput,
   VcsUnsupportedOperationError,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as VcsDriverRegistry from "./VcsDriverRegistry.ts";
 
 export interface VcsProvisioningServiceShape {
@@ -17,7 +17,7 @@ export interface VcsProvisioningServiceShape {
 export class VcsProvisioningService extends Context.Service<
   VcsProvisioningService,
   VcsProvisioningServiceShape
->()("t3/vcs/VcsProvisioningService") {}
+>()("@kata-sh/code-cli/vcs/VcsProvisioningService") {}
 
 function resolveRequestedKind(
   kind: VcsDriverKind | undefined,

@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime";
-import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@kata-sh/code-client-runtime";
+import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@kata-sh/code-contracts";
 import type { DraftId } from "./composerDraftStore";
 
 export type ThreadRouteTarget =

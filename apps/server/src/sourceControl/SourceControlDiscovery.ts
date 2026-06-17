@@ -2,7 +2,7 @@ import {
   type SourceControlDiscoveryResult,
   type VcsDiscoveryItem,
   type VcsDriverKind,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -64,7 +64,7 @@ export interface SourceControlDiscoveryShape {
 export class SourceControlDiscovery extends Context.Service<
   SourceControlDiscovery,
   SourceControlDiscoveryShape
->()("t3/sourceControl/SourceControlDiscovery") {}
+>()("@kata-sh/code-cli/sourceControl/SourceControlDiscovery") {}
 
 export const layer = Layer.effect(
   SourceControlDiscovery,

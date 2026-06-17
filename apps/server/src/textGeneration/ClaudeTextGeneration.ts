@@ -13,11 +13,11 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { type ClaudeSettings, type ModelSelection } from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { type ClaudeSettings, type ModelSelection } from "@kata-sh/code-contracts";
+import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
+import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 
-import { TextGenerationError } from "@t3tools/contracts";
+import { TextGenerationError } from "@kata-sh/code-contracts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
@@ -35,7 +35,7 @@ import {
 import {
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
-} from "@t3tools/shared/model";
+} from "@kata-sh/code-shared/model";
 import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,

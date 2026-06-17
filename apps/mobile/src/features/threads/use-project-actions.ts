@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import { EnvironmentScopedProjectShell, type VcsRef } from "@t3tools/client-runtime";
+import { EnvironmentScopedProjectShell, type VcsRef } from "@kata-sh/code-client-runtime";
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -11,8 +11,11 @@ import {
   type ModelSelection,
   type ProviderInteractionMode,
   type RuntimeMode,
-} from "@t3tools/contracts";
-import { buildTemporaryWorktreeBranchName, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+} from "@kata-sh/code-contracts";
+import {
+  buildTemporaryWorktreeBranchName,
+  sanitizeFeatureBranchName,
+} from "@kata-sh/code-shared/git";
 import { uuidv4 } from "../../lib/uuid";
 
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";

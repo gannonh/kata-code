@@ -3,11 +3,11 @@ import type {
   RelayAgentAwarenessPreferences,
   RelayDeliveryKind,
   RelayDeliveryResult,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import {
   RelayAgentActivityAggregateState as RelayAgentActivityAggregateStateSchema,
   RelayAgentAwarenessPreferences as RelayAgentAwarenessPreferencesSchema,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -416,7 +416,7 @@ export interface ApnsDeliveriesShape {
 }
 
 export class ApnsDeliveries extends Context.Service<ApnsDeliveries, ApnsDeliveriesShape>()(
-  "t3code-relay/agentActivity/ApnsDeliveries",
+  "@kata-sh/code-relay/agentActivity/ApnsDeliveries",
 ) {}
 
 const make = Effect.gen(function* () {

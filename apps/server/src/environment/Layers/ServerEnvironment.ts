@@ -1,5 +1,5 @@
-import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@kata-sh/code-contracts";
+import { HostProcessArchitecture, HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

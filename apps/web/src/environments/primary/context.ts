@@ -2,8 +2,8 @@ import {
   attachEnvironmentDescriptor,
   createKnownEnvironment,
   type KnownEnvironment,
-} from "@t3tools/client-runtime";
-import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime";
+import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import { HttpClientError } from "effect/unstable/http";
 import { create } from "zustand";

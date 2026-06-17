@@ -3,7 +3,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,
@@ -14,8 +14,8 @@ import {
   ThreadId,
   type ModelSelection,
   type ProviderOptionSelection,
-} from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@kata-sh/code-contracts";
+import { createModelSelection } from "@kata-sh/code-shared/model";
 
 // The composer draft's `modelSelectionByProvider` and
 // `stickyModelSelectionByProvider` maps are keyed by `ProviderInstanceId`

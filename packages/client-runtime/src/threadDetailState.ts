@@ -10,7 +10,7 @@ import type {
   OrchestrationThreadStreamItem,
   EnvironmentId,
   ThreadId as ThreadIdType,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 
 import {

@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
-import { relayClerkTokenOptions } from "@t3tools/shared/relayAuth";
-import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
+import { relayClerkTokenOptions } from "@kata-sh/code-shared/relayAuth";
+import { normalizeSecureRelayUrl } from "@kata-sh/code-shared/relayUrl";
 
 export interface CloudPublicConfig {
   readonly clerk: {
@@ -87,7 +87,7 @@ export function hasMobileTracingPublicConfig(
 export function resolveRelayClerkTokenOptions() {
   const { jwtTemplate } = resolveCloudPublicConfig().clerk;
   if (!jwtTemplate) {
-    throw new Error("T3CODE_CLERK_JWT_TEMPLATE is not configured.");
+    throw new Error("KATACODE_CLERK_JWT_TEMPLATE is not configured.");
   }
   return relayClerkTokenOptions(jwtTemplate);
 }

@@ -15,7 +15,7 @@ import type {
   ProjectReadFileResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
 
 export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceFileSystemError>()(
@@ -67,4 +67,4 @@ export interface WorkspaceFileSystemShape {
 export class WorkspaceFileSystem extends Context.Service<
   WorkspaceFileSystem,
   WorkspaceFileSystemShape
->()("t3/workspace/Services/WorkspaceFileSystem") {}
+>()("@kata-sh/code-cli/workspace/Services/WorkspaceFileSystem") {}

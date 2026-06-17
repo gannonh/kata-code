@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeThreadRef } from "@kata-sh/code-client-runtime";
 import {
   EnvironmentId,
   ProjectId,
@@ -6,7 +6,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { type EnvironmentState, useStore } from "../store";
 import { type Thread } from "../types";

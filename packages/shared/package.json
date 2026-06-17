@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/shared",
+  "name": "@kata-sh/code-shared",
   "private": true,
   "type": "module",
   "exports": {
@@ -162,6 +162,10 @@
     "./relayTracing": {
       "types": "./src/relayTracing.ts",
       "import": "./src/relayTracing.ts"
+    },
+    "./branding": {
+      "types": "./src/branding.ts",
+      "import": "./src/branding.ts"
     }
   },
   "scripts": {
@@ -169,9 +173,9 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@kata-sh/code-contracts": "workspace:*",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
-    "@t3tools/contracts": "workspace:*",
     "effect": "catalog:",
     "jose": "catalog:",
     "yaml": "catalog:"

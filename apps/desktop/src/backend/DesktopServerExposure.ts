@@ -3,13 +3,13 @@ import * as NodeOS from "node:os";
 import {
   createAdvertisedEndpoint,
   type CreateAdvertisedEndpointInput,
-} from "@t3tools/shared/advertisedEndpoint";
+} from "@kata-sh/code-shared/advertisedEndpoint";
 import type {
   AdvertisedEndpoint,
   AdvertisedEndpointProvider,
   DesktopServerExposureMode,
   DesktopServerExposureState,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
@@ -23,7 +23,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { DEFAULT_DESKTOP_SETTINGS, type DesktopSettings } from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
-import { readTailscaleStatus } from "@t3tools/tailscale";
+import { readTailscaleStatus } from "@kata-sh/code-tailscale";
 import * as DesktopAppSettingsService from "../settings/DesktopAppSettings.ts";
 
 const TAILSCALE_STATUS_CACHE_TTL = Duration.seconds(60);
@@ -279,7 +279,7 @@ export interface DesktopServerExposureShape {
 export class DesktopServerExposure extends Context.Service<
   DesktopServerExposure,
   DesktopServerExposureShape
->()("@t3tools/desktop/backend/DesktopServerExposure") {}
+>()("@kata-sh/code-desktop/backend/DesktopServerExposure") {}
 
 export interface DesktopNetworkInterfacesServiceShape {
   readonly read: Effect.Effect<DesktopNetworkInterfaces>;
@@ -288,7 +288,7 @@ export interface DesktopNetworkInterfacesServiceShape {
 export class DesktopNetworkInterfacesService extends Context.Service<
   DesktopNetworkInterfacesService,
   DesktopNetworkInterfacesServiceShape
->()("@t3tools/desktop/backend/DesktopServerExposure/DesktopNetworkInterfacesService") {}
+>()("@kata-sh/code-desktop/backend/DesktopServerExposure/DesktopNetworkInterfacesService") {}
 
 interface RuntimeState {
   readonly requestedMode: DesktopServerExposureMode;

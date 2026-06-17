@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { DEFAULT_RECONNECT_BACKOFF, getReconnectDelayMs } from "@t3tools/client-runtime";
+import { DEFAULT_RECONNECT_BACKOFF, getReconnectDelayMs } from "@kata-sh/code-client-runtime";
 import { Atom } from "effect/unstable/reactivity";
 
 import { appAtomRegistry } from "./atomRegistry";

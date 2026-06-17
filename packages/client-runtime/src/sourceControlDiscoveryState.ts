@@ -1,4 +1,4 @@
-import type { SourceControlDiscoveryResult } from "@t3tools/contracts";
+import type { SourceControlDiscoveryResult } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 

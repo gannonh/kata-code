@@ -1,4 +1,4 @@
-import type { AssetResource, EnvironmentId } from "@t3tools/contracts";
+import type { AssetResource, EnvironmentId } from "@kata-sh/code-contracts";
 import { useEffect, useMemo, useState } from "react";
 
 import { readEnvironmentApi } from "~/environmentApi";

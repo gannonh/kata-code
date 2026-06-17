@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/client-runtime",
+  "name": "@kata-sh/code-client-runtime",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -18,8 +18,8 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
+    "@kata-sh/code-contracts": "workspace:*",
+    "@kata-sh/code-shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

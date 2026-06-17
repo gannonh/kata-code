@@ -3,7 +3,7 @@ import {
   type ProviderInstanceId,
   type ServerProvider,
   ServerProvider as ServerProviderSchema,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

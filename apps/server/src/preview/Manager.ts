@@ -22,12 +22,12 @@ import {
   type PreviewReportStatusInput,
   PreviewSessionLookupError,
   type PreviewSessionSnapshot,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   newPreviewTabId,
   normalizePreviewUrl,
   PreviewUrlNormalizationError,
-} from "@t3tools/shared/preview";
+} from "@kata-sh/code-shared/preview";
 import {
   Context,
   DateTime,
@@ -53,7 +53,7 @@ export interface PreviewManagerShape {
 }
 
 export class PreviewManager extends Context.Service<PreviewManager, PreviewManagerShape>()(
-  "t3/preview/Manager/PreviewManager",
+  "@kata-sh/code-cli/preview/Manager/PreviewManager",
 ) {}
 
 interface PreviewSessionState {

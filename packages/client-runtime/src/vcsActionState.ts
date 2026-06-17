@@ -13,7 +13,7 @@ import type {
   VcsStatusResult,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as DateTime from "effect/DateTime";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 

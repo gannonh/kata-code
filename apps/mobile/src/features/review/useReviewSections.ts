@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  OrchestrationCheckpointSummary,
+  ThreadId,
+} from "@kata-sh/code-contracts";
 
 import { getEnvironmentClient } from "../../state/environment-session-registry";
 import { checkpointDiffManager, loadCheckpointDiff } from "../../state/use-checkpoint-diff";

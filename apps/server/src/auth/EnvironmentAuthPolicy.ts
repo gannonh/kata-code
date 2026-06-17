@@ -1,4 +1,4 @@
-import type { ServerAuthDescriptor } from "@t3tools/contracts";
+import type { ServerAuthDescriptor } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -14,7 +14,7 @@ export interface EnvironmentAuthPolicyShape {
 export class EnvironmentAuthPolicy extends Context.Service<
   EnvironmentAuthPolicy,
   EnvironmentAuthPolicyShape
->()("t3/auth/EnvironmentAuthPolicy") {}
+>()("@kata-sh/code-cli/auth/EnvironmentAuthPolicy") {}
 
 export const make = Effect.fn("makeEnvironmentAuthPolicy")(function* () {
   const config = yield* ServerConfig;

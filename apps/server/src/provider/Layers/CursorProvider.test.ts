@@ -6,8 +6,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import { describe, expect, it } from "vite-plus/test";
 import type * as EffectAcpSchema from "effect-acp/schema";
-import type { CursorSettings } from "@t3tools/contracts";
-import { createModelCapabilities } from "@t3tools/shared/model";
+import type { CursorSettings } from "@kata-sh/code-contracts";
+import { createModelCapabilities } from "@kata-sh/code-shared/model";
 
 import {
   buildCursorProviderSnapshot,

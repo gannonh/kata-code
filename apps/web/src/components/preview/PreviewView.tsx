@@ -1,7 +1,7 @@
 "use client";
 
-import { scopedThreadKey } from "@t3tools/client-runtime";
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import { scopedThreadKey } from "@kata-sh/code-client-runtime";
+import { type ScopedThreadRef } from "@kata-sh/code-contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "~/composerDraftStore";

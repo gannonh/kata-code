@@ -1,4 +1,4 @@
-import { verifyDpopProof } from "@t3tools/shared/dpop";
+import { verifyDpopProof } from "@kata-sh/code-shared/dpop";
 import * as Effect from "effect/Effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 

@@ -7,8 +7,8 @@ import {
   type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderModel,
-} from "@t3tools/contracts";
-import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
+} from "@kata-sh/code-contracts";
+import { createModelCapabilities, normalizeModelSlug } from "@kata-sh/code-shared/model";
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],

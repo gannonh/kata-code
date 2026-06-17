@@ -2,8 +2,8 @@ import {
   managedRelayClientLayer,
   ManagedRelayDpopSigner,
   ManagedRelayDpopSignerError,
-} from "@t3tools/client-runtime";
-import { RelayWebClientId } from "@t3tools/contracts/relay";
+} from "@kata-sh/code-client-runtime";
+import { RelayWebClientId } from "@kata-sh/code-contracts/relay";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

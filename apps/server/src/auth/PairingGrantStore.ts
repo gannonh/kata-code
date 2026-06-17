@@ -4,7 +4,7 @@ import {
   type AuthEnvironmentScope,
   type AuthPairingLink,
   type ServerAuthBootstrapMethod,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
@@ -88,7 +88,7 @@ export interface PairingGrantStoreShape {
 }
 
 export class PairingGrantStore extends Context.Service<PairingGrantStore, PairingGrantStoreShape>()(
-  "t3/auth/PairingGrantStore",
+  "@kata-sh/code-cli/auth/PairingGrantStore",
 ) {}
 
 interface StoredBootstrapGrant extends BootstrapGrant {

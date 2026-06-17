@@ -8,7 +8,7 @@ import {
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 type WhenToken =
   | { type: "identifier"; value: string }

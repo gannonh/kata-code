@@ -26,7 +26,7 @@ export interface ElectronShellShape {
 }
 
 export class ElectronShell extends Context.Service<ElectronShell, ElectronShellShape>()(
-  "@t3tools/desktop/electron/ElectronShell",
+  "@kata-sh/code-desktop/electron/ElectronShell",
 ) {}
 
 const make = ElectronShell.of({

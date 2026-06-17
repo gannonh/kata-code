@@ -58,11 +58,11 @@ describe("managed endpoint names", () => {
     expect(managedEndpointHostname("dev_julius", ".example.com.", hash)).toBe(
       "dev-julius-abcdef0123456789.example.com",
     );
-    expect(managedEndpointHostname("prod", "t3coderelay.com", hash)).toBe(
-      "prod-abcdef0123456789.t3coderelay.com",
+    expect(managedEndpointHostname("prod", "katacoderelay.com", hash)).toBe(
+      "prod-abcdef0123456789.katacoderelay.com",
     );
     expect(managedEndpointTunnelName("dev_julius", hash)).toBe(
-      "t3coderelay-managedendpoint-dev-julius-abcdef0123456789",
+      "katacoderelay-managedendpoint-dev-julius-abcdef0123456789",
     );
   });
 

@@ -4,8 +4,8 @@ import type {
   TerminalSessionSnapshot,
   TerminalSummary,
   EnvironmentId,
-} from "@t3tools/contracts";
-import { ThreadId, type TerminalAttachInput } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import { ThreadId, type TerminalAttachInput } from "@kata-sh/code-contracts";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 import * as Order from "effect/Order";

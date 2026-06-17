@@ -1,0 +1,44 @@
+{
+  "skill_name": "finalize",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Finalize this feature branch. I want the simplify pass first, committed separately, then a strict quality review pass that fixes anything it finds and commits those fixes too.",
+      "expected_output": "The agent should use two ordered subagent runs, inject simplify into the first and strict-quality-review into the second, automatically accept safe in-scope fixes, commit after each phase, and summarize commits plus validation.",
+      "files": [],
+      "expectations": [
+        "Uses subagent orchestration for both finalize phases rather than doing all work in the eval runner.",
+        "Runs the simplify phase before the strict-quality-review phase.",
+        "Creates a separate commit for simplify changes when the phase changes files.",
+        "Creates a separate commit for strict quality review changes when the phase changes files.",
+        "Runs validation such as npm test, npm run lint, typecheck, or another justified focused check.",
+        "Leaves no uncommitted finalize changes in the repository."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "We\u2019re ready to prep this branch for PR. Please do the normal final cleanup: simplify the diff, commit it, then run the strict maintainability review, fix what it finds, and commit that too. Don\u2019t stop to ask me to accept every little cleanup change.",
+      "expected_output": "The agent should treat automatic acceptance as authorized for safe cleanup changes, still stop for risky decisions, avoid broad git staging, and produce separate commits for simplify and strict review work.",
+      "files": [],
+      "expectations": [
+        "Automatically accepts safe in-scope cleanup changes without asking for approval on every small fix.",
+        "Preserves separate phase ordering: simplify first, strict quality review second.",
+        "Uses explicit file staging or otherwise avoids sweeping unrelated files with broad git add commands.",
+        "Creates commits for accepted fixes or clearly reports when a phase produced no changes.",
+        "Reports validation commands and results."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "run finalize on the current branch but there are a couple of unrelated dirty notes files in the repo that I don\u2019t want included",
+      "expected_output": "The agent should inspect git status before launching subagents, detect unrelated dirty files, ask how to handle them or explicitly exclude them, and avoid sweeping unrelated files into finalize commits.",
+      "files": [],
+      "expectations": [
+        "Detects the unrelated dirty notes files before committing finalize work.",
+        "Does not include notes.md or todo-notes.md in any commit.",
+        "Leaves unrelated notes files untracked or explicitly asks the user how to handle them before proceeding.",
+        "Does not use broad staging that sweeps unrelated dirty files into finalize commits."
+      ]
+    }
+  ]
+}

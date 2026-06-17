@@ -1,5 +1,5 @@
-import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
-import { ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef, scopedThreadKey } from "@kata-sh/code-client-runtime";
+import { ThreadId } from "@kata-sh/code-contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {

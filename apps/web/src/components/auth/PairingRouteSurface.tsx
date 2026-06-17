@@ -1,4 +1,4 @@
-import type { AuthSessionState } from "@t3tools/contracts";
+import type { AuthSessionState } from "@kata-sh/code-contracts";
 import React, { startTransition, useEffect, useRef, useState, useCallback } from "react";
 
 import { APP_DISPLAY_NAME } from "../../branding";

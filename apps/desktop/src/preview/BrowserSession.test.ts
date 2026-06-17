@@ -36,7 +36,7 @@ describe("BrowserSession", () => {
       const browserSession = {
         clearCache: vi.fn(() => Promise.resolve()),
         clearStorageData: vi.fn(() => Promise.resolve()),
-        getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/0.0.27"),
+        getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 katacode/0.0.27"),
         setPermissionRequestHandler: vi.fn(),
         setUserAgent: vi.fn(),
       };
@@ -53,7 +53,7 @@ describe("BrowserSession", () => {
       const first = yield* browserSessions.getSession("scope-a");
       const second = yield* browserSessions.getSession("scope-a");
 
-      assert.strictEqual(partition, "persist:t3code-preview-f051bb2c68cb7b2fe969");
+      assert.strictEqual(partition, "persist:katacode-preview-f051bb2c68cb7b2fe969");
       assert.strictEqual(first, second);
       assert.strictEqual(fromPartition.mock.calls.length, 1);
     }).pipe(Effect.provide(layer)),

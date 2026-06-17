@@ -1,5 +1,5 @@
 import { useAuth } from "@clerk/react";
-import { createManagedRelaySession, setManagedRelaySession } from "@t3tools/client-runtime";
+import { createManagedRelaySession, setManagedRelaySession } from "@kata-sh/code-client-runtime";
 import { useEffect, type ReactNode } from "react";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";

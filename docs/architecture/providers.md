@@ -1,3 +1,11 @@
+---
+type: Architecture Note
+title: "Provider architecture"
+description: "The web app communicates with the server via WebSocket using a simple JSON-RPC-style protocol:"
+tags: [architecture, architecture-note]
+timestamp: 2026-06-16T17:10:05Z
+---
+
 # Provider architecture
 
 The web app communicates with the server via WebSocket using a simple JSON-RPC-style protocol:
@@ -7,7 +15,7 @@ The web app communicates with the server via WebSocket using a simple JSON-RPC-s
 
 Push channels: `server.welcome`, `server.configUpdated`, `terminal.event`, `orchestration.domainEvent`. Payloads are schema-validated at the transport boundary (`wsTransport.ts`). Decode failures produce structured `WsDecodeDiagnostic` with `code`, `reason`, and path info.
 
-Methods mirror the `NativeApi` interface defined in `@t3tools/contracts`:
+Methods mirror the `NativeApi` interface defined in `@kata-sh/code-contracts`:
 
 - `providers.startSession`, `providers.sendTurn`, `providers.interruptTurn`
 - `providers.respondToRequest`, `providers.stopSession`

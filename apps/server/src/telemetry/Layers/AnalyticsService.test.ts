@@ -47,10 +47,10 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       const telemetryLayer = AnalyticsServiceLayerLive.pipe(Layer.provideMerge(serverConfigLayer));
       const configLayer = ConfigProvider.layer(
         ConfigProvider.fromUnknown({
-          T3CODE_TELEMETRY_ENABLED: true,
-          T3CODE_POSTHOG_KEY: "phc_test_key",
-          T3CODE_POSTHOG_HOST: "",
-          T3CODE_TELEMETRY_FLUSH_BATCH_SIZE: 20,
+          KATACODE_TELEMETRY_ENABLED: true,
+          KATACODE_POSTHOG_KEY: "phc_test_key",
+          KATACODE_POSTHOG_HOST: "",
+          KATACODE_TELEMETRY_FLUSH_BATCH_SIZE: 20,
         }),
       );
       const batchServerLayer = HttpServer.serve(

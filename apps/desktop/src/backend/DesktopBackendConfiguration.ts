@@ -1,4 +1,4 @@
-import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
+import { parsePersistedServerObservabilitySettings } from "@kata-sh/code-shared/serverSettings";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -24,7 +24,7 @@ export interface DesktopBackendConfigurationShape {
 export class DesktopBackendConfiguration extends Context.Service<
   DesktopBackendConfiguration,
   DesktopBackendConfigurationShape
->()("@t3tools/desktop/backend/DesktopBackendConfiguration") {}
+>()("@kata-sh/code-desktop/backend/DesktopBackendConfiguration") {}
 
 interface BackendObservabilitySettings {
   readonly otlpTracesUrl: Option.Option<string>;
@@ -37,16 +37,16 @@ const emptyBackendObservabilitySettings: BackendObservabilitySettings = {
 };
 
 const DESKTOP_BACKEND_ENV_NAMES = [
-  "T3CODE_PORT",
-  "T3CODE_MODE",
-  "T3CODE_NO_BROWSER",
-  "T3CODE_HOST",
-  "T3CODE_DESKTOP_WS_URL",
-  "T3CODE_DESKTOP_LAN_ACCESS",
-  "T3CODE_DESKTOP_LAN_HOST",
-  "T3CODE_DESKTOP_HTTPS_ENDPOINTS",
-  "T3CODE_TAILSCALE_SERVE",
-  "T3CODE_TAILSCALE_SERVE_PORT",
+  "KATACODE_PORT",
+  "KATACODE_MODE",
+  "KATACODE_NO_BROWSER",
+  "KATACODE_HOST",
+  "KATACODE_DESKTOP_WS_URL",
+  "KATACODE_DESKTOP_LAN_ACCESS",
+  "KATACODE_DESKTOP_LAN_HOST",
+  "KATACODE_DESKTOP_HTTPS_ENDPOINTS",
+  "KATACODE_TAILSCALE_SERVE",
+  "KATACODE_TAILSCALE_SERVE_PORT",
 ] as const;
 
 const backendChildEnvPatch = (): Record<string, string | undefined> =>
@@ -110,7 +110,7 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         mode: "desktop",
         noBrowser: true,
         port: backendExposure.port,
-        t3Home: environment.baseDir,
+        katacodeHome: environment.baseDir,
         host: backendExposure.bindHost,
         desktopBootstrapToken: input.bootstrapToken,
         tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,

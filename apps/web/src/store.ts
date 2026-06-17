@@ -17,11 +17,11 @@ import type {
   ProjectId,
   ScopedProjectRef,
   ScopedThreadRef,
-} from "@t3tools/contracts";
-import { isProviderDriverKind, ProviderDriverKind } from "@t3tools/contracts";
-import type { ThreadId, TurnId } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import { isProviderDriverKind, ProviderDriverKind } from "@kata-sh/code-contracts";
+import type { ThreadId, TurnId } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
-import { resolveModelSlugForProvider } from "@t3tools/shared/model";
+import { resolveModelSlugForProvider } from "@kata-sh/code-shared/model";
 import { create } from "zustand";
 import {
   type ChatMessage,
@@ -45,7 +45,7 @@ export interface EnvironmentState {
   // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
   // Web still stores shell snapshots and thread details in this denormalized
   // Zustand shape. Mobile uses createShellSnapshotManager and
-  // createThreadDetailManager from @t3tools/client-runtime. New shared behavior
+  // createThreadDetailManager from @kata-sh/code-client-runtime. New shared behavior
   // belongs in those managers/reducers, with a web adapter layered on top.
   //
   // ---------------------------------------------------------------------------

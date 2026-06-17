@@ -1,4 +1,4 @@
-import { WsRpcGroup } from "@t3tools/contracts";
+import { WsRpcGroup } from "@kata-sh/code-contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -229,7 +229,7 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "error",
         () => {
-          lifecycle.onError("Unable to connect to the T3 server WebSocket.");
+          lifecycle.onError("Unable to connect to the KataCode server WebSocket.");
         },
         { once: true },
       );

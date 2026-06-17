@@ -10,8 +10,8 @@ import type {
   ReviewDiffPreviewInput,
   ReviewDiffPreviewResult,
   VcsRepositoryIdentity,
-} from "@t3tools/contracts";
-import { CheckpointRef } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import { CheckpointRef } from "@kata-sh/code-contracts";
 import * as VcsProcess from "./VcsProcess.ts";
 
 export interface VcsCaptureCheckpointInput {
@@ -74,4 +74,6 @@ export interface VcsDriverShape {
   ) => Effect.Effect<ReviewDiffPreviewResult, VcsError>;
 }
 
-export class VcsDriver extends Context.Service<VcsDriver, VcsDriverShape>()("t3/vcs/VcsDriver") {}
+export class VcsDriver extends Context.Service<VcsDriver, VcsDriverShape>()(
+  "@kata-sh/code-cli/vcs/VcsDriver",
+) {}

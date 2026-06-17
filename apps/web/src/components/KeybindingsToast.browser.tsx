@@ -15,7 +15,7 @@ import {
   ServerSettings,
   type ThreadId,
   WS_METHODS,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { ws, http, HttpResponse } from "msw";
 import { setupWorker } from "msw/browser";
@@ -110,7 +110,7 @@ function createBaseServerConfig(): ServerConfig {
       sessionCookieName: "t3_session",
     },
     cwd: "/repo/project",
-    keybindingsConfigPath: "/repo/project/.t3code-keybindings.json",
+    keybindingsConfigPath: "/repo/project/.katacode-keybindings.json",
     keybindings: [],
     issues: [],
     providers: [
@@ -130,7 +130,7 @@ function createBaseServerConfig(): ServerConfig {
     ],
     availableEditors: [],
     observability: {
-      logsDirectoryPath: "/repo/project/.t3/logs",
+      logsDirectoryPath: "/repo/project/.katacode/logs",
       localTracingEnabled: true,
       otlpTracesEnabled: false,
       otlpMetricsEnabled: false,

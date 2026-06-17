@@ -1,4 +1,4 @@
-import type { ProviderUserInputAnswers, UserInputQuestion } from "@t3tools/contracts";
+import type { ProviderUserInputAnswers, UserInputQuestion } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 
 const XAiAskUserQuestionOption = Schema.Struct({

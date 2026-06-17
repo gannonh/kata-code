@@ -7,14 +7,14 @@ import {
   RelayWebClientId,
   type RelayPublicClientId,
   type RelayEnvironmentLinkChallengeRequest,
-} from "@t3tools/contracts/relay";
-import { encodeOAuthScope, parseAllowedOAuthScope } from "@t3tools/shared/oauthScope";
+} from "@kata-sh/code-contracts/relay";
+import { encodeOAuthScope, parseAllowedOAuthScope } from "@kata-sh/code-shared/oauthScope";
 import {
   normalizeRelayIssuer,
   signRelayJwt,
   verifyRelayJwt,
   type RelayJwtError,
-} from "@t3tools/shared/relayJwt";
+} from "@kata-sh/code-shared/relayJwt";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -112,7 +112,7 @@ export interface RelayTokensShape {
 }
 
 export class RelayTokens extends Context.Service<RelayTokens, RelayTokensShape>()(
-  "t3code-relay/auth/RelayTokens",
+  "@kata-sh/code-relay/auth/RelayTokens",
 ) {}
 
 const make = Effect.gen(function* () {

@@ -24,8 +24,8 @@ import type {
   PreviewAutomationStatus,
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
-} from "@t3tools/contracts";
-import { normalizePreviewUrl } from "@t3tools/shared/preview";
+} from "@kata-sh/code-contracts";
+import { normalizePreviewUrl } from "@kata-sh/code-shared/preview";
 import {
   type BrowserWindow,
   type Session,
@@ -2242,7 +2242,7 @@ export interface PreviewManagerShape {
 }
 
 export class PreviewManager extends Context.Service<PreviewManager, PreviewManagerShape>()(
-  "@t3tools/desktop/preview/Manager/PreviewManager",
+  "@kata-sh/code-desktop/preview/Manager/PreviewManager",
 ) {}
 
 const make = Effect.gen(function* PreviewManagerMake() {

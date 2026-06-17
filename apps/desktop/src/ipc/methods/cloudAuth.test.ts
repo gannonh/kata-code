@@ -4,7 +4,7 @@ import { afterEach } from "vite-plus/test";
 
 import { fetchCloudAuth, validateClerkFrontendApiUrl } from "./cloudAuth.ts";
 
-const originalClerkPublishableKey = process.env.T3CODE_CLERK_PUBLISHABLE_KEY;
+const originalClerkPublishableKey = process.env.KATACODE_CLERK_PUBLISHABLE_KEY;
 const originalFetch = globalThis.fetch;
 
 const clerkPublishableKey = (hostname: string): string =>
@@ -31,14 +31,14 @@ describe("Desktop cloud auth IPC", () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     if (originalClerkPublishableKey === undefined) {
-      delete process.env.T3CODE_CLERK_PUBLISHABLE_KEY;
+      delete process.env.KATACODE_CLERK_PUBLISHABLE_KEY;
     } else {
-      process.env.T3CODE_CLERK_PUBLISHABLE_KEY = originalClerkPublishableKey;
+      process.env.KATACODE_CLERK_PUBLISHABLE_KEY = originalClerkPublishableKey;
     }
   });
 
   it.effect("preserves Clerk's URL-encoded OAuth form content type", () => {
-    const body = "strategy=oauth_google&redirect_url=t3code%3A%2F%2Fauth%2Fcallback";
+    const body = "strategy=oauth_google&redirect_url=katacode%3A%2F%2Fauth%2Fcallback";
     const fetch = recordedFetch(Response.json({ response: { object: "sign_in_attempt" } }));
     globalThis.fetch = fetch.fetchFn;
 
@@ -69,7 +69,7 @@ describe("Desktop cloud auth IPC", () => {
   it.effect(
     "allows the custom Clerk Frontend API host encoded by the configured publishable key",
     () => {
-      process.env.T3CODE_CLERK_PUBLISHABLE_KEY = clerkPublishableKey("clerk.t3.codes");
+      process.env.KATACODE_CLERK_PUBLISHABLE_KEY = clerkPublishableKey("clerk.t3.codes");
       const fetch = recordedFetch(Response.json({ response: { object: "client" } }));
       globalThis.fetch = fetch.fetchFn;
 
@@ -88,7 +88,7 @@ describe("Desktop cloud auth IPC", () => {
   );
 
   it("rejects arbitrary HTTPS hosts that are not configured Clerk Frontend API hosts", () => {
-    process.env.T3CODE_CLERK_PUBLISHABLE_KEY = clerkPublishableKey("clerk.t3.codes");
+    process.env.KATACODE_CLERK_PUBLISHABLE_KEY = clerkPublishableKey("clerk.t3.codes");
     assert.throws(
       () => validateClerkFrontendApiUrl("https://attacker.example/v1/client"),
       /restricted to Clerk Frontend API HTTPS hosts/u,

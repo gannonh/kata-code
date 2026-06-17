@@ -5,7 +5,7 @@ import {
   type AuthCreatePairingCredentialInput,
   type AuthSessionState,
   type DesktopBridge,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -68,7 +68,7 @@ function installTestBrowser(url: string) {
   };
 
   vi.stubGlobal("window", testWindow);
-  vi.stubGlobal("document", { title: "T3 Code" });
+  vi.stubGlobal("document", { title: "KataCode" });
 
   return testWindow;
 }

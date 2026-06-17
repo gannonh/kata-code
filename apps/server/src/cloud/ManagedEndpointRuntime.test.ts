@@ -8,7 +8,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import * as RelayClient from "@t3tools/shared/relayClient";
+import * as RelayClient from "@kata-sh/code-shared/relayClient";
 
 import { makeCloudManagedEndpointRuntime } from "./ManagedEndpointRuntime.ts";
 

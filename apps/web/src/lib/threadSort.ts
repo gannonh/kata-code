@@ -1,5 +1,8 @@
-import type { ProjectId } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import type { ProjectId } from "@kata-sh/code-contracts";
+import type {
+  SidebarProjectSortOrder,
+  SidebarThreadSortOrder,
+} from "@kata-sh/code-contracts/settings";
 import type { Thread } from "../types";
 
 export type ThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {

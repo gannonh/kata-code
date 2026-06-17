@@ -4,11 +4,11 @@ import {
   ManagedRelayClient,
   managedRelaySessionAtom,
   readManagedRelaySnapshotState,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import type {
   RelayClientDeviceRecord,
   RelayClientEnvironmentRecord,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

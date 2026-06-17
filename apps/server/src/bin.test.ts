@@ -6,8 +6,8 @@ import { join } from "node:path";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentOrchestrationHttpApi } from "@t3tools/contracts";
-import * as NetService from "@t3tools/shared/Net";
+import { EnvironmentOrchestrationHttpApi } from "@kata-sh/code-contracts";
+import * as NetService from "@kata-sh/code-shared/Net";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -68,7 +68,7 @@ const makeCliTestServerConfig = (baseDir: string) =>
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
       otlpExportIntervalMs: 10_000,
-      otlpServiceName: "t3-server",
+      otlpServiceName: "katacode-server",
       mode: "web",
       port: 0,
       host: "127.0.0.1",
@@ -189,12 +189,15 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       if (error._tag !== "ShowHelp") {
         assert.fail(`Expected ShowHelp, got ${error._tag}`);
       }
-      assert.deepEqual(error.commandPath, ["t3", "connect"]);
-      assert.include(error.errors[0]?.message ?? "", "missing T3 Connect public configuration");
+      assert.deepEqual(error.commandPath, ["katacode", "connect"]);
+      assert.include(
+        error.errors[0]?.message ?? "",
+        "missing KataCode Connect public configuration",
+      );
 
       const output = (yield* TestConsole.errorLines).join("\n");
       assert.include(output, "ERROR");
-      assert.include(output, "missing T3 Connect public configuration");
+      assert.include(output, "missing KataCode Connect public configuration");
     }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer))),
   );
 
@@ -228,10 +231,13 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         runConnectCli(["connect", "status", "--base-dir", baseDir]),
       );
 
-      assert.include(output, "T3 Connect\n  Exposure: disabled");
+      assert.include(output, "KataCode Connect\n  Exposure: disabled");
       assert.include(output, "  Authorization: missing");
       assert.include(output, "  Environment link: not provisioned");
-      assert.include(output, "Next: Run `t3 connect link` to authorize and enable T3 Connect.");
+      assert.include(
+        output,
+        "Next: Run `katacode connect link` to authorize and enable KataCode Connect.",
+      );
     }),
   );
 
@@ -262,7 +268,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         readonly authenticated: boolean;
       };
 
-      assert.equal(login.output, "Signed in to T3 Connect.");
+      assert.equal(login.output, "Signed in to KataCode Connect.");
       assert.isFalse(decoded.desired);
       assert.isTrue(decoded.authenticated);
     }),
@@ -275,7 +281,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         runConnectCli(["connect", "unlink", "--base-dir", baseDir]),
       );
 
-      assert.equal(output, "T3 Connect is disabled locally.");
+      assert.equal(output, "KataCode Connect is disabled locally.");
     }),
   );
 
@@ -291,7 +297,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         runConnectCli(["connect", "logout", "--base-dir", baseDir]),
       );
 
-      assert.equal(output, "Signed out of T3 Connect locally.");
+      assert.equal(output, "Signed out of KataCode Connect locally.");
       assert.isFalse(existsSync(tokenPath));
     }),
   );
@@ -389,7 +395,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       if (error._tag !== "ShowHelp") {
         assert.fail(`Expected ShowHelp, got ${error._tag}`);
       }
-      assert.deepEqual(error.commandPath, ["t3", "auth", "pairing", "create"]);
+      assert.deepEqual(error.commandPath, ["katacode", "auth", "pairing", "create"]);
       const ttlError = error.errors[0] as CliError.CliError | undefined;
       if (!ttlError || ttlError._tag !== "InvalidValue") {
         assert.fail(`Expected InvalidValue, got ${String(ttlError?._tag)}`);
@@ -492,7 +498,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       if (error._tag !== "ShowHelp") {
         assert.fail(`Expected ShowHelp, got ${error._tag}`);
       }
-      assert.deepEqual(error.commandPath, ["t3", "project", "add"]);
+      assert.deepEqual(error.commandPath, ["katacode", "project", "add"]);
       const optionError = error.errors[0] as CliError.CliError | undefined;
       if (!optionError || optionError._tag !== "UnrecognizedOption") {
         assert.fail(`Expected UnrecognizedOption, got ${String(optionError?._tag)}`);

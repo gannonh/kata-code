@@ -5,7 +5,7 @@ import {
   type ModelSelection,
   type ProviderInteractionMode,
   type RuntimeMode,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import { uuidv4 } from "../lib/uuid";
 import { environmentRuntimeManager } from "./use-environment-runtime";

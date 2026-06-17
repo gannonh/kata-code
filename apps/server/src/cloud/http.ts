@@ -11,7 +11,7 @@ import {
   EnvironmentHttpConflictError,
   EnvironmentHttpInternalServerError,
   EnvironmentHttpUnauthorizedError,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   RelayCloudEnvironmentHealthProofPayload,
   RelayCloudEnvironmentHealthRequest,
@@ -28,8 +28,8 @@ import {
   RelayEnvironmentLinkProofPayload,
   RelayLinkProofRequest,
   RelayManagedEndpointOrigin,
-} from "@t3tools/contracts/relay";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+} from "@kata-sh/code-contracts/relay";
+import { withRelayClientTracing } from "@kata-sh/code-shared/relayTracing";
 import {
   normalizeRelayIssuer,
   RELAY_HEALTH_REQUEST_TYP,
@@ -39,8 +39,8 @@ import {
   RELAY_MINT_RESPONSE_TYP,
   signRelayJwt,
   verifyRelayJwt,
-} from "@t3tools/shared/relayJwt";
-import { isSecureRelayUrl } from "@t3tools/shared/relayUrl";
+} from "@kata-sh/code-shared/relayJwt";
+import { isSecureRelayUrl } from "@kata-sh/code-shared/relayUrl";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
@@ -106,7 +106,7 @@ const requireRelayUrl = relayUrlConfig.pipe(
   Effect.mapError(
     () =>
       new EnvironmentHttpInternalServerError({
-        message: "T3CODE_RELAY_URL must be configured as a secure absolute HTTPS origin.",
+        message: "KATACODE_RELAY_URL must be configured as a secure absolute HTTPS origin.",
       }),
   ),
 );
@@ -523,7 +523,7 @@ const relayClientRequest = <A>(
     Effect.mapError(
       (cause) =>
         new EnvironmentHttpInternalServerError({
-          message: `T3 Connect relay request failed: ${String(cause)}`,
+          message: `KataCode Connect relay request failed: ${String(cause)}`,
         }),
     ),
     withRelayClientTracing,
@@ -550,7 +550,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
           onNone: () =>
             Effect.fail(
               new EnvironmentHttpUnauthorizedError({
-                message: "Run `t3 connect link` to authorize this environment.",
+                message: "Run `katacode connect link` to authorize this environment.",
               }),
             ),
           onSome: Effect.succeed,
@@ -610,7 +610,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
     CloudCliTokenManagerError: (error) =>
       failEnvironmentCloudInternalError(error.message)(error.cause),
     SecretStoreError: failEnvironmentCloudInternalError(
-      "Could not persist desired T3 Connect link state.",
+      "Could not persist desired KataCode Connect link state.",
     ),
   }),
 );
@@ -889,7 +889,7 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
       scopes: AuthStandardClientScopes,
       subject: "cloud-connect",
       ttl: Duration.minutes(2),
-      label: "T3 Connect connect",
+      label: "KataCode Connect connect",
       proofKeyThumbprint: proof.clientProofKeyThumbprint,
     });
     const responsePayload = {

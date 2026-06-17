@@ -2,7 +2,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
-import { AuthEnvironmentScopes } from "@t3tools/contracts";
+import { AuthEnvironmentScopes } from "@kata-sh/code-contracts";
 
 import type { AuthPairingLinkRepositoryError } from "../Errors.ts";
 
@@ -79,4 +79,4 @@ export interface AuthPairingLinkRepositoryShape {
 export class AuthPairingLinkRepository extends Context.Service<
   AuthPairingLinkRepository,
   AuthPairingLinkRepositoryShape
->()("t3/persistence/Services/AuthPairingLinks/AuthPairingLinkRepository") {}
+>()("@kata-sh/code-cli/persistence/Services/AuthPairingLinks/AuthPairingLinkRepository") {}

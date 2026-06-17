@@ -13,10 +13,10 @@ import {
   type TerminalAttachStreamEvent,
   type TerminalMetadataStreamEvent,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@kata-sh/code-contracts";
 
 const showContextMenuFallbackMock =
   vi.fn<
@@ -255,7 +255,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     setTheme: async () => undefined,
     showContextMenu: async () => null,
     openExternal: async () => true,
-    createCloudAuthRequest: async () => "t3code-dev://auth/callback?t3_state=test",
+    createCloudAuthRequest: async () => "katacode-dev://auth/callback?katacode_state=test",
     getCloudAuthToken: async () => null,
     setCloudAuthToken: async () => true,
     clearCloudAuthToken: async () => undefined,

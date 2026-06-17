@@ -1,6 +1,6 @@
-import type { KnownTerminalSession } from "@t3tools/client-runtime";
-import { DEFAULT_TERMINAL_ID, type ProjectScript } from "@t3tools/contracts";
-import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
+import type { KnownTerminalSession } from "@kata-sh/code-client-runtime";
+import { DEFAULT_TERMINAL_ID, type ProjectScript } from "@kata-sh/code-contracts";
+import { nextTerminalId, resolveTerminalSessionLabel } from "@kata-sh/code-shared/terminalLabels";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 
@@ -8,7 +8,7 @@ export {
   getTerminalLabel,
   nextTerminalId,
   resolveTerminalSessionLabel,
-} from "@t3tools/shared/terminalLabels";
+} from "@kata-sh/code-shared/terminalLabels";
 
 export interface TerminalMenuSession {
   readonly terminalId: string;

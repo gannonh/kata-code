@@ -18,24 +18,24 @@ describe("loadRepoEnv", () => {
   it("does not project cloud configuration for an unconfigured clone", () => {
     const env = loadRepoEnv({ baseEnv: {}, repoRoot: makeTemporaryDirectory() });
 
-    expect(env.T3CODE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
-    expect(env.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID).toBeUndefined();
+    expect(env.KATACODE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
+    expect(env.KATACODE_CLERK_CLI_OAUTH_CLIENT_ID).toBeUndefined();
     expect(env.VITE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
     expect(env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY).toBeUndefined();
-    expect(env.T3CODE_CLERK_JWT_TEMPLATE).toBeUndefined();
+    expect(env.KATACODE_CLERK_JWT_TEMPLATE).toBeUndefined();
     expect(env.VITE_CLERK_JWT_TEMPLATE).toBeUndefined();
     expect(env.EXPO_PUBLIC_CLERK_JWT_TEMPLATE).toBeUndefined();
-    expect(env.T3CODE_RELAY_URL).toBeUndefined();
-    expect(env.VITE_T3CODE_RELAY_URL).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_TOKEN).toBeUndefined();
+    expect(env.KATACODE_RELAY_URL).toBeUndefined();
+    expect(env.VITE_KATACODE_RELAY_URL).toBeUndefined();
+    expect(env.KATACODE_MOBILE_OTLP_TRACES_URL).toBeUndefined();
+    expect(env.KATACODE_MOBILE_OTLP_TRACES_DATASET).toBeUndefined();
+    expect(env.KATACODE_MOBILE_OTLP_TRACES_TOKEN).toBeUndefined();
     expect(env.EXPO_PUBLIC_OTLP_TRACES_URL).toBeUndefined();
     expect(env.EXPO_PUBLIC_OTLP_TRACES_DATASET).toBeUndefined();
     expect(env.EXPO_PUBLIC_OTLP_TRACES_TOKEN).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN).toBeUndefined();
+    expect(env.KATACODE_RELAY_CLIENT_OTLP_TRACES_URL).toBeUndefined();
+    expect(env.KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET).toBeUndefined();
+    expect(env.KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN).toBeUndefined();
     expect(env.VITE_RELAY_OTLP_TRACES_URL).toBeUndefined();
     expect(env.VITE_RELAY_OTLP_TRACES_DATASET).toBeUndefined();
     expect(env.VITE_RELAY_OTLP_TRACES_TOKEN).toBeUndefined();
@@ -45,36 +45,36 @@ describe("loadRepoEnv", () => {
     const repoRoot = makeTemporaryDirectory();
     writeFileSync(
       join(repoRoot, ".env"),
-      "T3CODE_CLERK_PUBLISHABLE_KEY=pk_root\nT3CODE_CLERK_JWT_TEMPLATE=template_root\nT3CODE_CLERK_CLI_OAUTH_CLIENT_ID=oauth_root\nT3CODE_RELAY_URL=https://root.example.test\n",
+      "KATACODE_CLERK_PUBLISHABLE_KEY=pk_root\nKATACODE_CLERK_JWT_TEMPLATE=template_root\nKATACODE_CLERK_CLI_OAUTH_CLIENT_ID=oauth_root\nKATACODE_RELAY_URL=https://root.example.test\n",
     );
     writeFileSync(
       join(repoRoot, ".env.local"),
-      "T3CODE_CLERK_PUBLISHABLE_KEY=pk_local\nT3CODE_CLERK_JWT_TEMPLATE=template_local\nT3CODE_CLERK_CLI_OAUTH_CLIENT_ID=oauth_local\nT3CODE_RELAY_URL=https://local.example.test\n",
+      "KATACODE_CLERK_PUBLISHABLE_KEY=pk_local\nKATACODE_CLERK_JWT_TEMPLATE=template_local\nKATACODE_CLERK_CLI_OAUTH_CLIENT_ID=oauth_local\nKATACODE_RELAY_URL=https://local.example.test\n",
     );
 
-    expect(loadRepoEnv({ baseEnv: {}, repoRoot }).T3CODE_RELAY_URL).toBe(
+    expect(loadRepoEnv({ baseEnv: {}, repoRoot }).KATACODE_RELAY_URL).toBe(
       "https://local.example.test",
     );
     expect(
       loadRepoEnv({
         baseEnv: {
-          T3CODE_CLERK_PUBLISHABLE_KEY: "pk_ci",
-          T3CODE_CLERK_JWT_TEMPLATE: "template_ci",
-          T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
-          T3CODE_RELAY_URL: "https://ci.example.test",
+          KATACODE_CLERK_PUBLISHABLE_KEY: "pk_ci",
+          KATACODE_CLERK_JWT_TEMPLATE: "template_ci",
+          KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
+          KATACODE_RELAY_URL: "https://ci.example.test",
         },
         repoRoot,
       }),
     ).toMatchObject({
-      T3CODE_CLERK_PUBLISHABLE_KEY: "pk_ci",
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
+      KATACODE_CLERK_PUBLISHABLE_KEY: "pk_ci",
+      KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
       VITE_CLERK_PUBLISHABLE_KEY: "pk_ci",
       EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_ci",
-      T3CODE_CLERK_JWT_TEMPLATE: "template_ci",
+      KATACODE_CLERK_JWT_TEMPLATE: "template_ci",
       VITE_CLERK_JWT_TEMPLATE: "template_ci",
       EXPO_PUBLIC_CLERK_JWT_TEMPLATE: "template_ci",
-      T3CODE_RELAY_URL: "https://ci.example.test",
-      VITE_T3CODE_RELAY_URL: "https://ci.example.test",
+      KATACODE_RELAY_URL: "https://ci.example.test",
+      VITE_KATACODE_RELAY_URL: "https://ci.example.test",
     });
   });
 
@@ -83,8 +83,8 @@ describe("loadRepoEnv", () => {
       resolvePublicConfig({
         VITE_CLERK_PUBLISHABLE_KEY: "pk_legacy",
         VITE_CLERK_JWT_TEMPLATE: "template_legacy",
-        T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_canonical",
-        VITE_T3CODE_RELAY_URL: "https://legacy.example.test",
+        KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_canonical",
+        VITE_KATACODE_RELAY_URL: "https://legacy.example.test",
         EXPO_PUBLIC_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
         EXPO_PUBLIC_OTLP_TRACES_DATASET: "mobile-traces",
         EXPO_PUBLIC_OTLP_TRACES_TOKEN: "mobile-token",
@@ -107,16 +107,16 @@ describe("loadRepoEnv", () => {
     expect(
       loadRepoEnv({
         baseEnv: {
-          T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
-          T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "relay-client-traces",
-          T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "relay-client-token",
+          KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
+          KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "relay-client-traces",
+          KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "relay-client-token",
         },
         repoRoot: makeTemporaryDirectory(),
       }),
     ).toEqual({
-      T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
-      T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "relay-client-traces",
-      T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "relay-client-token",
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "relay-client-traces",
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "relay-client-token",
       VITE_RELAY_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
       VITE_RELAY_OTLP_TRACES_DATASET: "relay-client-traces",
       VITE_RELAY_OTLP_TRACES_TOKEN: "relay-client-token",
@@ -127,19 +127,19 @@ describe("loadRepoEnv", () => {
     expect(
       loadRepoEnv({
         baseEnv: {
-          T3CODE_RELAY_URL: "https://relay.example.test",
-          T3CODE_MOBILE_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
-          T3CODE_MOBILE_OTLP_TRACES_DATASET: "mobile-traces",
-          T3CODE_MOBILE_OTLP_TRACES_TOKEN: "mobile-token",
+          KATACODE_RELAY_URL: "https://relay.example.test",
+          KATACODE_MOBILE_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
+          KATACODE_MOBILE_OTLP_TRACES_DATASET: "mobile-traces",
+          KATACODE_MOBILE_OTLP_TRACES_TOKEN: "mobile-token",
         },
         repoRoot: makeTemporaryDirectory(),
       }),
     ).toEqual({
-      T3CODE_RELAY_URL: "https://relay.example.test",
-      VITE_T3CODE_RELAY_URL: "https://relay.example.test",
-      T3CODE_MOBILE_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
-      T3CODE_MOBILE_OTLP_TRACES_DATASET: "mobile-traces",
-      T3CODE_MOBILE_OTLP_TRACES_TOKEN: "mobile-token",
+      KATACODE_RELAY_URL: "https://relay.example.test",
+      VITE_KATACODE_RELAY_URL: "https://relay.example.test",
+      KATACODE_MOBILE_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
+      KATACODE_MOBILE_OTLP_TRACES_DATASET: "mobile-traces",
+      KATACODE_MOBILE_OTLP_TRACES_TOKEN: "mobile-token",
       EXPO_PUBLIC_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
       EXPO_PUBLIC_OTLP_TRACES_DATASET: "mobile-traces",
       EXPO_PUBLIC_OTLP_TRACES_TOKEN: "mobile-token",

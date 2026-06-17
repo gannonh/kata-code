@@ -5,8 +5,8 @@ import {
   ProviderInstanceId,
   ServerSettings,
   ServerSettingsPatch,
-} from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@kata-sh/code-contracts";
+import { createModelSelection } from "@kata-sh/code-shared/model";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
@@ -24,7 +24,7 @@ const makeServerSettingsLayer = () =>
     Layer.provideMerge(
       Layer.fresh(
         ServerConfig.layerTest(process.cwd(), {
-          prefix: "t3code-server-settings-test-",
+          prefix: "katacode-server-settings-test-",
         }),
       ),
     ),

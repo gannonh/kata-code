@@ -1,5 +1,5 @@
 import { memo, useState, useId } from "react";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@kata-sh/code-contracts";
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
   buildProposedPlanMarkdownFilename,

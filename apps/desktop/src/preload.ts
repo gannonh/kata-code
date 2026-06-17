@@ -3,7 +3,7 @@ import type {
   DesktopPreviewPointerEvent,
   DesktopPreviewRecordingFrame,
   DesktopPreviewTabState,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";

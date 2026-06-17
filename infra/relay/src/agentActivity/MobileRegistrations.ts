@@ -1,7 +1,7 @@
 import type {
   RelayDeviceRegistrationRequest,
   RelayLiveActivityRegistrationRequest,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -33,7 +33,7 @@ export interface MobileRegistrationsShape {
 export class MobileRegistrations extends Context.Service<
   MobileRegistrations,
   MobileRegistrationsShape
->()("t3code-relay/agentActivity/MobileRegistrations") {}
+>()("@kata-sh/code-relay/agentActivity/MobileRegistrations") {}
 
 const make = Effect.gen(function* () {
   const devices = yield* Devices.Devices;

@@ -5,12 +5,12 @@ import {
   EnvironmentScopedThreadShell,
   type VcsRef,
   type GitActionRequestInput,
-} from "@t3tools/client-runtime";
-import { CommandId, type GitRunStackedActionResult } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime";
+import { CommandId, type GitRunStackedActionResult } from "@kata-sh/code-contracts";
 import {
   dedupeRemoteBranchesWithLocalMatches,
   sanitizeFeatureBranchName,
-} from "@t3tools/shared/git";
+} from "@kata-sh/code-shared/git";
 
 import { uuidv4 } from "../lib/uuid";
 import { getEnvironmentClient } from "./environment-session-registry";

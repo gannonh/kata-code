@@ -2,7 +2,7 @@ import type {
   EnvironmentScopedProjectShell,
   EnvironmentScopedThreadShell,
   VcsStatusState,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@kata-sh/code-contracts";
 
 import type { ComposerCommandItem } from "./ComposerCommandMenu";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";

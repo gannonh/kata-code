@@ -27,4 +27,4 @@ export interface ProjectFaviconResolverShape {
 export class ProjectFaviconResolver extends Context.Service<
   ProjectFaviconResolver,
   ProjectFaviconResolverShape
->()("t3/project/Services/ProjectFaviconResolver") {}
+>()("@kata-sh/code-cli/project/Services/ProjectFaviconResolver") {}

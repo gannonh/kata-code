@@ -1,5 +1,5 @@
-import type { EnvironmentApi, LocalApi, ScopedThreadRef } from "@t3tools/contracts";
-import { isPreviewableUrl } from "@t3tools/shared/preview";
+import type { EnvironmentApi, LocalApi, ScopedThreadRef } from "@kata-sh/code-contracts";
+import { isPreviewableUrl } from "@kata-sh/code-shared/preview";
 
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";

@@ -4,8 +4,8 @@ import {
   createArchivedThreadsManager,
   makeArchivedThreadsEnvironmentKey,
   readArchivedThreadsSnapshotState,
-} from "@t3tools/client-runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 import { useCallback, useMemo } from "react";
 
 import { readEnvironmentApi } from "../environmentApi";

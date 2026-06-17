@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeThreadRef } from "@kata-sh/code-client-runtime";
 import {
   CheckpointRef,
   DEFAULT_MODEL,
@@ -10,7 +10,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationEvent,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

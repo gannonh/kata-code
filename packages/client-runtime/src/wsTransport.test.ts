@@ -1,4 +1,4 @@
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS } from "@kata-sh/code-contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";

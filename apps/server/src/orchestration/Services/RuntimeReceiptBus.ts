@@ -14,7 +14,13 @@
  *
  * @module RuntimeReceiptBus
  */
-import { CheckpointRef, IsoDateTime, NonNegativeInt, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  CheckpointRef,
+  IsoDateTime,
+  NonNegativeInt,
+  ThreadId,
+  TurnId,
+} from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -62,5 +68,5 @@ export interface RuntimeReceiptBusShape {
 }
 
 export class RuntimeReceiptBus extends Context.Service<RuntimeReceiptBus, RuntimeReceiptBusShape>()(
-  "t3/orchestration/Services/RuntimeReceiptBus",
+  "@kata-sh/code-cli/orchestration/Services/RuntimeReceiptBus",
 ) {}

@@ -6,13 +6,13 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   detectComposerTrigger,
   replaceTextRange,
   serializeComposerFileLink,
   type ComposerTrigger,
-} from "@t3tools/shared/composerTrigger";
+} from "@kata-sh/code-shared/composerTrigger";
 import { TextInputWrapper } from "expo-paste-input";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -47,11 +47,11 @@ import {
   insertRankedSearchResult,
   normalizeSearchQuery,
   scoreQueryMatch,
-} from "@t3tools/shared/searchRanking";
+} from "@kata-sh/code-shared/searchRanking";
 import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
-} from "@t3tools/shared/model";
+} from "@kata-sh/code-shared/model";
 import { useComposerPathSearch } from "../../state/use-composer-path-search";
 import { CLAUDE_AGENT_EFFORT_OPTIONS } from "./claudeEffortOptions";
 import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";

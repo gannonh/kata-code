@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ReviewDiffPreviewResult } from "@t3tools/contracts";
+import type { EnvironmentId, ReviewDiffPreviewResult } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

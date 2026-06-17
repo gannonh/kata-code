@@ -2,6 +2,7 @@ import { useWaitlist } from "@clerk/expo";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useState } from "react";
 
+import { CLOUD_PRODUCT_NAME } from "@kata-sh/code-shared/branding";
 import { useThemeColor } from "../../lib/useThemeColor";
 
 export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void }) {
@@ -34,7 +35,7 @@ export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void }
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.foreground }]}>You are on the waitlist</Text>
         <Text style={[styles.body, styles.confirmationBody, { color: colors.secondaryForeground }]}>
-          We will email you when your T3 Cloud access is ready.
+          We will email you when your {CLOUD_PRODUCT_NAME} access is ready.
         </Text>
         <SignInAction onPress={props.onSignIn} />
       </View>

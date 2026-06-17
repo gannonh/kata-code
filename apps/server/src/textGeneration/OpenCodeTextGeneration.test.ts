@@ -1,4 +1,4 @@
-import { OpenCodeSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { OpenCodeSettings, ProviderInstanceId } from "@kata-sh/code-contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import * as NetService from "@t3tools/shared/Net";
+import * as NetService from "@kata-sh/code-shared/Net";
 import { beforeEach, expect } from "vite-plus/test";
 
 import { ServerConfig } from "../config.ts";
@@ -112,7 +112,7 @@ const OpenCodeTextGenerationTestLayer = Layer.succeed(
 ).pipe(
   Layer.provideMerge(
     ServerConfig.layerTest(process.cwd(), {
-      prefix: "t3code-opencode-text-generation-test-",
+      prefix: "katacode-opencode-text-generation-test-",
     }),
   ),
   Layer.provideMerge(NetService.layer),
@@ -125,7 +125,7 @@ const OpenCodeTextGenerationExistingServerTestLayer = Layer.succeed(
 ).pipe(
   Layer.provideMerge(
     ServerConfig.layerTest(process.cwd(), {
-      prefix: "t3code-opencode-text-generation-existing-server-test-",
+      prefix: "katacode-opencode-text-generation-existing-server-test-",
     }),
   ),
   Layer.provideMerge(NetService.layer),

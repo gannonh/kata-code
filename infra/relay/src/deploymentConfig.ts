@@ -1,8 +1,8 @@
-import type { RelayManagedEndpoint } from "@t3tools/contracts/relay";
+import type { RelayManagedEndpoint } from "@kata-sh/code-contracts/relay";
 
 const DNS_LABEL_MAX_LENGTH = 63;
 const MANAGED_ENDPOINT_HASH_LENGTH = 16;
-const MANAGED_ENDPOINT_TUNNEL_PREFIX = "t3coderelay-managedendpoint";
+const MANAGED_ENDPOINT_TUNNEL_PREFIX = "katacoderelay-managedendpoint";
 export const MANAGED_ENDPOINT_ZONE_OWNER_STAGE = "prod";
 
 function normalizeZoneName(zoneName: string): string {

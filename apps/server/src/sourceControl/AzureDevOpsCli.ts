@@ -8,7 +8,7 @@ import {
   TrimmedNonEmptyString,
   type SourceControlRepositoryVisibility,
   type VcsError,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as AzureDevOpsPullRequests from "./azureDevOpsPullRequests.ts";
@@ -94,7 +94,7 @@ export interface AzureDevOpsCliShape {
 }
 
 export class AzureDevOpsCli extends Context.Service<AzureDevOpsCli, AzureDevOpsCliShape>()(
-  "t3/sourceControl/AzureDevOpsCli",
+  "@kata-sh/code-cli/sourceControl/AzureDevOpsCli",
 ) {}
 
 function errorText(error: VcsError | unknown): string {

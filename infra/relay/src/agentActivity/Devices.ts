@@ -1,7 +1,7 @@
 import type {
   RelayClientDeviceRecord,
   RelayDeviceRegistrationRequest,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -55,7 +55,7 @@ export interface DevicesShape {
 }
 
 export class Devices extends Context.Service<Devices, DevicesShape>()(
-  "t3code-relay/agentActivity/Devices",
+  "@kata-sh/code-relay/agentActivity/Devices",
 ) {}
 
 const make = Effect.gen(function* () {

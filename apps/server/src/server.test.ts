@@ -29,14 +29,14 @@ import {
   WS_METHODS,
   WsRpcGroup,
   EditorId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
   type DpopPublicJwk,
-} from "@t3tools/shared/dpop";
-import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@t3tools/shared/relayJwt";
-import * as RelayClient from "@t3tools/shared/relayClient";
+} from "@kata-sh/code-shared/dpop";
+import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@kata-sh/code-shared/relayJwt";
+import * as RelayClient from "@kata-sh/code-shared/relayClient";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
@@ -810,7 +810,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mock(CloudCliTokenManager.CloudCliTokenManager)({
-          get: Effect.die(new Error("Unexpected T3 Connect CLI authorization request.")),
+          get: Effect.die(new Error("Unexpected KataCode Connect CLI authorization request.")),
           getExisting: Effect.succeed(Option.none()),
           hasCredential: Effect.succeed(false),
           clear: Effect.void,
@@ -1441,7 +1441,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
         scope: "orchestration:read orchestration:operate terminal:operate review:write",
         clientMetadata: {
-          label: "T3 Code Mobile",
+          label: "KataCode Mobile",
           deviceType: "mobile",
           os: "iOS",
         },
@@ -1468,7 +1468,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 200);
       assert.equal(clientsResponse.status, 200);
       assert.deepInclude(mobileClient?.client, {
-        label: "T3 Code Mobile",
+        label: "KataCode Mobile",
         deviceType: "mobile",
         os: "iOS",
         ipAddress: "127.0.0.1",
@@ -2421,7 +2421,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("serves the documented T3 Connect mint credential endpoint", () =>
+  it.effect("serves the documented KataCode Connect mint credential endpoint", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
@@ -2480,7 +2480,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("serves signed T3 Connect environment health checks", () =>
+  it.effect("serves signed KataCode Connect environment health checks", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
@@ -5441,7 +5441,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         displayName: "T3Tools/t3code",
         provider: "github",
         owner: "T3Tools",
-        name: "t3code",
+        name: "kata-code",
       };
 
       yield* buildAppUnderTest({
@@ -5923,7 +5923,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             isRepo: true,
             hasPrimaryRemote: true,
             isDefaultRef: false,
-            refName: "t3code/bootstrap-refName",
+            refName: "katacode/bootstrap-refName",
             hasWorkingTreeChanges: false,
             workingTree: {
               files: [],
@@ -5940,7 +5940,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           (_: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
             Effect.succeed({
               worktree: {
-                refName: "t3code/bootstrap-refName",
+                refName: "katacode/bootstrap-refName",
                 path: "/tmp/bootstrap-worktree",
               },
             }),
@@ -6009,7 +6009,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
-                  branch: "t3code/bootstrap-refName",
+                  branch: "katacode/bootstrap-refName",
                 },
                 runSetupScript: true,
               },
@@ -6032,7 +6032,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           refName: "main",
-          newRefName: "t3code/bootstrap-refName",
+          newRefName: "katacode/bootstrap-refName",
           path: null,
         });
         assert.deepEqual(runForThread.mock.calls[0]?.[0], {
@@ -6066,7 +6066,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "t3code/bootstrap-refName",
+              refName: "katacode/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -6126,7 +6126,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "katacode/bootstrap-refName",
               },
               runSetupScript: true,
             },
@@ -6160,7 +6160,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "t3code/bootstrap-refName",
+              refName: "katacode/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -6243,7 +6243,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "katacode/bootstrap-refName",
               },
               runSetupScript: true,
             },
@@ -6327,7 +6327,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "katacode/bootstrap-refName",
               },
               runSetupScript: false,
             },

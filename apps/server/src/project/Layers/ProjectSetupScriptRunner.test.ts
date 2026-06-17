@@ -1,4 +1,4 @@
-import { ProjectId, type OrchestrationProject } from "@t3tools/contracts";
+import { ProjectId, type OrchestrationProject } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -152,8 +152,8 @@ describe("ProjectSetupScriptRunner", () => {
       cwd: "/repo/worktrees/a",
       worktreePath: "/repo/worktrees/a",
       env: {
-        T3CODE_PROJECT_ROOT: "/repo/project",
-        T3CODE_WORKTREE_PATH: "/repo/worktrees/a",
+        KATACODE_PROJECT_ROOT: "/repo/project",
+        KATACODE_WORKTREE_PATH: "/repo/worktrees/a",
       },
     });
     expect(write).toHaveBeenCalledWith({

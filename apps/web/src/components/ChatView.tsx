@@ -20,16 +20,16 @@ import {
   ProviderDriverKind,
   RuntimeMode,
   TerminalOpenInput,
-} from "@t3tools/contracts";
-import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
+} from "@kata-sh/code-contracts";
+import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@kata-sh/code-client-runtime";
 import {
   applyClaudePromptEffortPrefix,
   createModelSelection,
   resolvePromptInjectedEffort,
-} from "@t3tools/shared/model";
-import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
-import { truncate } from "@t3tools/shared/String";
-import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
+} from "@kata-sh/code-shared/model";
+import { projectScriptCwd, projectScriptRuntimeEnv } from "@kata-sh/code-shared/projectScripts";
+import { truncate } from "@kata-sh/code-shared/String";
+import { nextTerminalId, resolveTerminalSessionLabel } from "@kata-sh/code-shared/terminalLabels";
 import { Debouncer } from "@tanstack/react-pacer";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -88,7 +88,7 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
-import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
+import { buildTemporaryWorktreeBranchName } from "@kata-sh/code-shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {

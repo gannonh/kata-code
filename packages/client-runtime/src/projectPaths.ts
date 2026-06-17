@@ -3,7 +3,7 @@ import {
   isUncPath,
   isWindowsAbsolutePath,
   isWindowsDrivePath,
-} from "@t3tools/shared/path";
+} from "@kata-sh/code-shared/path";
 
 function isWindowsPlatform(platform: string): boolean {
   return /^win(dows)?/i.test(platform);

@@ -5,8 +5,8 @@
  * API constrained to store actions/selectors.
  */
 
-import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime";
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import { parseScopedThreadKey, scopedThreadKey } from "@kata-sh/code-client-runtime";
+import { type ScopedThreadRef } from "@kata-sh/code-contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
@@ -27,7 +27,7 @@ interface ThreadTerminalUiState {
 }
 
 // Keep the old storage key so existing drawer layout preferences migrate.
-const TERMINAL_UI_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
+const TERMINAL_UI_STATE_STORAGE_KEY = "katacode:terminal-state:v1";
 
 interface PersistedTerminalUiStateStoreState {
   terminalUiStateByThreadKey?: Record<string, ThreadTerminalUiState>;

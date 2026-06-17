@@ -7,7 +7,7 @@ import {
   createVcsActionManager,
   getVcsActionTargetKey,
   vcsActionStateAtom,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import {
   type EnvironmentId,
   type GitActionProgressEvent,
@@ -19,7 +19,7 @@ import {
   type SourceControlRepositoryVisibility,
   type ThreadId,
   type VcsPullResult,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   useCallback,
   useEffect,

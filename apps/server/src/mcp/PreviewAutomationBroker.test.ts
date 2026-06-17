@@ -4,7 +4,7 @@ import {
   PreviewAutomationNoFocusedOwnerError,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 

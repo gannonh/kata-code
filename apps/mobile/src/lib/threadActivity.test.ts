@@ -8,7 +8,7 @@ import {
   TurnId,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import { buildThreadFeed } from "./threadActivity";
 

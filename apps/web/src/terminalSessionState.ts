@@ -12,13 +12,13 @@ import {
   type KnownTerminalSession,
   type TerminalSessionTarget,
   type TerminalSessionState,
-} from "@t3tools/client-runtime";
+} from "@kata-sh/code-client-runtime";
 import type {
   EnvironmentId,
   TerminalAttachInput,
   TerminalSessionSnapshot,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import { appAtomRegistry } from "./rpc/atomRegistry";
 

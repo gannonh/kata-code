@@ -11,12 +11,12 @@
  * The schema-level `tabId` exists because the server still keys sessions by
  * `(threadId, tabId)`; the client just always tracks one and ignores the rest.
  */
-import { scopedThreadKey } from "@t3tools/client-runtime";
+import { scopedThreadKey } from "@kata-sh/code-client-runtime";
 import {
   type PreviewEvent,
   type PreviewSessionSnapshot,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { create } from "zustand";
 
 import { PREVIEW_RECENT_URL_LIMIT } from "./components/preview/previewConstants";

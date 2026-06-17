@@ -24,7 +24,7 @@ export interface DesktopShutdownShape {
 }
 
 export class DesktopShutdown extends Context.Service<DesktopShutdown, DesktopShutdownShape>()(
-  "@t3tools/desktop/app/DesktopLifecycle/DesktopShutdown",
+  "@kata-sh/code-desktop/app/DesktopLifecycle/DesktopShutdown",
 ) {}
 
 const makeShutdown = Effect.gen(function* () {
@@ -65,7 +65,7 @@ export interface DesktopLifecycleShape {
  * @effect-expect-leaking DesktopEnvironment | DesktopShutdown | DesktopState | DesktopWindow | ElectronApp | ElectronTheme
  */
 export class DesktopLifecycle extends Context.Service<DesktopLifecycle, DesktopLifecycleShape>()(
-  "@t3tools/desktop/app/DesktopLifecycle",
+  "@kata-sh/code-desktop/app/DesktopLifecycle",
 ) {}
 
 const { logInfo: logLifecycleInfo, logError: logLifecycleError } =

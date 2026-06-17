@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { VcsProcessSpawnError } from "@t3tools/contracts";
+import { VcsProcessSpawnError } from "@kata-sh/code-contracts";
 
 import { ServerConfig } from "../config.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -103,7 +103,7 @@ it.effect("reports implemented tools separately from locally available executabl
             account: Option.none(),
             host: Option.some("bitbucket.org"),
             detail: Option.some(
-              "Set T3CODE_BITBUCKET_EMAIL and T3CODE_BITBUCKET_API_TOKEN, or T3CODE_BITBUCKET_ACCESS_TOKEN.",
+              "Set KATACODE_BITBUCKET_EMAIL and KATACODE_BITBUCKET_API_TOKEN, or KATACODE_BITBUCKET_ACCESS_TOKEN.",
             ),
           }),
         },

@@ -3,7 +3,7 @@ import type {
   DesktopAppStageLabel,
   DesktopRuntimeArch,
   DesktopRuntimeInfo,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -12,11 +12,17 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import {
+  formatAppDisplayName,
+  type AppStageLabel,
+  resolveAppBranding,
+  resolveDefaultKatacodeHome,
+  resolveLegacyUserDataDirNames,
+} from "@kata-sh/code-shared/branding";
+import {
   type DesktopSettings,
   resolveDefaultDesktopSettings,
 } from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
-import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
@@ -57,7 +63,7 @@ export interface DesktopEnvironmentShape {
   readonly preloadPath: string;
   readonly appUpdateYmlPath: string;
   readonly devServerUrl: Option.Option<URL>;
-  readonly devRemoteT3ServerEntryPath: Option.Option<string>;
+  readonly devRemoteServerEntryPath: Option.Option<string>;
   readonly configuredBackendPort: Option.Option<number>;
   readonly commitHashOverride: Option.Option<string>;
   readonly otlpTracesUrl: Option.Option<string>;
@@ -68,7 +74,7 @@ export interface DesktopEnvironmentShape {
   readonly linuxDesktopEntryName: string;
   readonly linuxWmClass: string;
   readonly userDataDirName: string;
-  readonly legacyUserDataDirName: string;
+  readonly legacyUserDataDirNames: readonly string[];
   readonly defaultDesktopSettings: DesktopSettings;
   readonly runtimeInfo: DesktopRuntimeInfo;
   readonly resolvePickFolderDefaultPath: (rawOptions: unknown) => Option.Option<string>;
@@ -79,30 +85,28 @@ export interface DesktopEnvironmentShape {
 export class DesktopEnvironment extends Context.Service<
   DesktopEnvironment,
   DesktopEnvironmentShape
->()("@t3tools/desktop/app/DesktopEnvironment") {}
+>()("@kata-sh/code-desktop/app/DesktopEnvironment") {}
 
-const APP_BASE_NAME = "T3 Code";
-
-function resolveDesktopAppStageLabel(input: {
-  readonly isDevelopment: boolean;
-  readonly appVersion: string;
-}): DesktopAppStageLabel {
-  if (input.isDevelopment) {
-    return "Dev";
+function toDesktopStageLabel(stageLabel: AppStageLabel): DesktopAppStageLabel {
+  switch (stageLabel) {
+    case "Dev":
+    case "Nightly":
+      return stageLabel;
+    default:
+      return "Alpha";
   }
-
-  return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Alpha";
 }
 
 function resolveDesktopAppBranding(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
 }): DesktopAppBranding {
-  const stageLabel = resolveDesktopAppStageLabel(input);
+  const branding = resolveAppBranding(input);
+  const stageLabel = toDesktopStageLabel(branding.stageLabel);
   return {
-    baseName: APP_BASE_NAME,
+    baseName: branding.baseName,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    displayName: formatAppDisplayName(stageLabel),
   };
 }
 
@@ -152,17 +156,26 @@ const makeDesktopEnvironment = Effect.fn("desktop.environment.make")(function* (
       : input.platform === "darwin"
         ? path.join(homeDirectory, "Library", "Application Support")
         : Option.getOrElse(config.xdgConfigHome, () => path.join(homeDirectory, ".config"));
-  const baseDir = Option.getOrElse(config.t3Home, () => path.join(homeDirectory, ".t3"));
+  const baseDir = Option.getOrElse(config.katacodeHome, () =>
+    resolveDefaultKatacodeHome(homeDirectory),
+  );
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
+  const devBundleIdSuffix = path
+    .basename(rootDir)
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "");
   const branding = resolveDesktopAppBranding({
     isDevelopment,
     appVersion: input.appVersion,
   });
   const displayName = branding.displayName;
   const stateDir = path.join(baseDir, isDevelopment ? "dev" : "userdata");
-  const userDataDirName = isDevelopment ? "t3code-dev" : "t3code";
-  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+  const userDataDirName = isDevelopment ? "katacode-dev" : "katacode";
+  const legacyUserDataDirNames = resolveLegacyUserDataDirNames({
+    isDevelopment,
+    appVersion: input.appVersion,
+  });
   const resourcesPath = input.resourcesPath;
 
   return DesktopEnvironment.of({
@@ -194,7 +207,7 @@ const makeDesktopEnvironment = Effect.fn("desktop.environment.make")(function* (
       ? path.join(resourcesPath, "app-update.yml")
       : path.join(input.appPath, "dev-app-update.yml"),
     devServerUrl,
-    devRemoteT3ServerEntryPath: config.devRemoteT3ServerEntryPath,
+    devRemoteServerEntryPath: config.devRemoteServerEntryPath,
     configuredBackendPort: config.configuredBackendPort,
     commitHashOverride: config.commitHashOverride,
     otlpTracesUrl: config.otlpTracesUrl,
@@ -202,12 +215,12 @@ const makeDesktopEnvironment = Effect.fn("desktop.environment.make")(function* (
     branding,
     displayName,
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
-      isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",
+      isDevelopment ? `com.katacode.dev.${devBundleIdSuffix || "local"}` : "com.katacode.app",
     ),
-    linuxDesktopEntryName: isDevelopment ? "t3code-dev.desktop" : "t3code.desktop",
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
+    linuxDesktopEntryName: isDevelopment ? "katacode-dev.desktop" : "katacode.desktop",
+    linuxWmClass: isDevelopment ? "katacode-dev" : "katacode",
     userDataDirName,
-    legacyUserDataDirName,
+    legacyUserDataDirNames,
     defaultDesktopSettings: resolveDefaultDesktopSettings(input.appVersion),
     runtimeInfo: resolveDesktopRuntimeInfo({
       platform: input.platform,
@@ -245,7 +258,7 @@ const makeDesktopEnvironment = Effect.fn("desktop.environment.make")(function* (
       path.join(resourcesPath, "resources", fileName),
       path.join(resourcesPath, fileName),
     ],
-    developmentDockIconPath: path.join(rootDir, "assets", "dev", "blueprint-macos-1024.png"),
+    developmentDockIconPath: path.join(rootDir, "assets", "prod", "black-macos-1024.png"),
   });
 });
 

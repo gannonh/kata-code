@@ -2,7 +2,7 @@ import type {
   EnvironmentId,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamEvent,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 
 import { applyShellStreamEvent } from "./shellSnapshotReducer.ts";

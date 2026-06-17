@@ -67,7 +67,7 @@ export interface ElectronUpdaterShape {
 }
 
 export class ElectronUpdater extends Context.Service<ElectronUpdater, ElectronUpdaterShape>()(
-  "@t3tools/desktop/electron/ElectronUpdater",
+  "@kata-sh/code-desktop/electron/ElectronUpdater",
 ) {}
 
 export const layer = Layer.succeed(ElectronUpdater, {

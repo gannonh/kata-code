@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/scripts",
+  "name": "@kata-sh/code-scripts",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,8 +8,8 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
+    "@kata-sh/code-contracts": "workspace:*",
+    "@kata-sh/code-shared": "workspace:*",
     "effect": "catalog:",
     "yaml": "catalog:"
   },

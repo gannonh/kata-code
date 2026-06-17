@@ -10,7 +10,7 @@ import type {
   ProjectEntry,
   ProjectListEntriesResult,
   ProjectSearchEntriesResult,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_INDEX_PAGE_SIZE = WORKSPACE_INDEX_MAX_ENTRIES + 2;
@@ -85,7 +85,7 @@ export class WorkspaceSearchIndex extends Context.Service<
       WorkspaceSearchIndexRefreshFailed | WorkspaceSearchIndexScanTimedOut
     >;
   }
->()("t3/workspace/WorkspaceSearchIndex") {}
+>()("@kata-sh/code-cli/workspace/WorkspaceSearchIndex") {}
 
 function toPosixPath(input: string): string {
   return input.replaceAll("\\", "/");
@@ -237,7 +237,7 @@ const workspaceSearchIndexLayer = (cwd: string) =>
   Layer.effect(WorkspaceSearchIndex, makeWorkspaceSearchIndex(cwd));
 
 export class WorkspaceSearchIndexMap extends LayerMap.Service<WorkspaceSearchIndexMap>()(
-  "t3/workspace/WorkspaceSearchIndexMap",
+  "@kata-sh/code-cli/workspace/WorkspaceSearchIndexMap",
   {
     lookup: workspaceSearchIndexLayer,
     idleTimeToLive: WORKSPACE_INDEX_IDLE_TTL,
