@@ -34,7 +34,7 @@ gh workflow run release.yml -R gannonh/katacode \
   -f dry_run=true \
   -f channel=stable
 
-gh run watch -R gannonh/katacode --workflow=release.yml
+gh run watch -R gannonh/katacode <run-number>
 ```
 
 Pass criteria: **Validate macOS signing inputs** succeeds.
@@ -95,7 +95,7 @@ git tag v0.0.28 && git push origin v0.0.28
 ### Verify stable
 
 ```bash
-gh run watch -R gannonh/katacode --workflow=release.yml
+gh run watch -R gannonh/katacode $(gh run list -R gannonh/katacode -w release.yml -L 1 --json databaseId -q '.[0].databaseId')
 gh release view v0.0.28 -R gannonh/katacode
 ```
 
@@ -119,7 +119,7 @@ gh workflow run release.yml -R gannonh/katacode \
 ### Verify nightly
 
 ```bash
-gh run watch -R gannonh/katacode --workflow=release.yml
+gh run watch -R gannonh/katacode $(gh run list -R gannonh/katacode -w release.yml -L 1 --json databaseId -q '.[0].databaseId')
 gh release list -R gannonh/katacode --limit 3   # newest tag ends with -nightly.*
 ```
 
@@ -149,8 +149,11 @@ gh workflow run release.yml -R gannonh/katacode -f channel=stable -f version=0.0
 # Nightly (version automatic)
 gh workflow run release.yml -R gannonh/katacode -f channel=nightly
 
-# Watch any release run
-gh run watch -R gannonh/katacode --workflow=release.yml
+# Watch the run you just triggered (RUN_URL printed by gh workflow run)
+gh run watch -R gannonh/katacode "${RUN_URL##*/}"
+
+# Or watch the latest release.yml run
+gh run watch -R gannonh/katacode $(gh run list -R gannonh/katacode -w release.yml -L 1 --json databaseId -q '.[0].databaseId')
 ```
 
 ## Related

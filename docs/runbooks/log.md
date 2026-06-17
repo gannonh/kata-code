@@ -1,5 +1,9 @@
 # Runbooks log
 
+## 2026-06-17 (release runbook gh watch fix)
+
+- [Release runbook](/operations/release.md): `gh run watch` requires a run ID — `--workflow` is not a valid flag. Use the run URL from `gh workflow run` or resolve the latest run via `gh run list -w release.yml`.
+
 ## 2026-06-17 (release docs split)
 
 - Split [release runbook](/operations/release.md) (steps + verification) from [release setup](/operations/release-setup.md) (secrets/infrastructure).
