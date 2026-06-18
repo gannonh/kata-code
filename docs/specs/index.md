@@ -6,7 +6,7 @@ Work map for Kata Code.
 
 | Item                            | Status      | Document                                                                                                                                                               |
 | ------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 2 — remaining infra split | **Planned** | Relay deploy, mobile EAS, marketing — see [disabled workflows README](../../.github/disabled/README.md) and [deferred work registry](/specs/deferred-work.md)          |
+| Phase 2 — remaining infra split | **Planned** | [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md); mobile EAS and marketing remain in [deferred work registry](/specs/deferred-work.md)                 |
 | Upstream sync (first merge)     | **Planned** | [Upstream sync guide](/guides/upstream-sync.md) · [ADR 0003](/adrs/0003-episodic-upstream-sync.md) · [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook) |
 
 ## Completed

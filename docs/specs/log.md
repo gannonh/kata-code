@@ -1,5 +1,10 @@
 # Specs log
 
+## 2026-06-18 (Relay Deploy design)
+
+- Added [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md) for manual production relay deploy, strict release config, smoke checks, and UAT evidence.
+- Updated [specs roadmap](/specs/index.md) and [deferred work registry](/specs/deferred-work.md) for relay follow-ups.
+
 ## 2026-06-18 (deferred work registry)
 
 - Added [deferred work registry](/specs/deferred-work.md) and linked it from the [specs roadmap](/specs/index.md) so deferred scope has a durable review queue.

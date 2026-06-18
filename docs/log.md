@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-06-18 (Relay Deploy design)
+
+- Added [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md) and updated [specs roadmap](/specs/index.md) plus [deferred work registry](/specs/deferred-work.md).
+
 ## 2026-06-18 (deferred work registry)
 
 - Added [deferred work registry](/specs/deferred-work.md) and roadmap links so spec out-of-scope items have a durable review queue.

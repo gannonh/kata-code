@@ -32,12 +32,39 @@ Each entry should include:
 
 ### Production Relay Deploy
 
-- **Status:** planned
+- **Status:** accepted
 - **Area:** relay, infrastructure, release
-- **Source:** [Phase 2 desktop/web release design](/specs/2026-06-16-phase-2-desktop-web-release-design.md), [specs roadmap](/specs/index.md), `.github/disabled/README.md`
+- **Source:** [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md), [Phase 2 desktop/web release design](/specs/2026-06-16-phase-2-desktop-web-release-design.md), [specs roadmap](/specs/index.md), `.github/disabled/README.md`
 - **Rationale:** Deferred from the desktop/web release split until fork-owned relay infrastructure and secrets are ready.
-- **Revisit trigger:** Current Relay Deploy planning and before re-enabling `.github/workflows/deploy-relay.yml`.
-- **Notes:** Initial direction is manual-only production deploy with dry-run mode, health/metadata checks, Clerk DPoP smoke, and release config from Alchemy state.
+- **Revisit trigger:** Build and Verify [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md); close after implementation and UAT evidence are complete.
+- **Notes:** Initial direction is manual-only production deploy with dry-run mode, health/metadata checks, Clerk DPoP smoke, release config from Alchemy state, and required manual link/connect UAT.
+
+### CI automation for full relay link/connect smoke
+
+- **Status:** deferred
+- **Area:** relay, testing, infrastructure
+- **Source:** [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md)
+- **Rationale:** Full link/connect automation requires a live environment process, Clerk identity, DNS/tunnel provisioning, signed-in client behavior, and cleanup.
+- **Revisit trigger:** Review after first successful manual production Relay Deploy UAT.
+- **Notes:** Manual UAT for link/connect/unlink is required by the Relay Deploy spec; this item tracks later CI automation only.
+
+### CI-managed developer relay stages
+
+- **Status:** deferred
+- **Area:** relay, infrastructure, developer-experience
+- **Source:** [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md)
+- **Rationale:** Initial GitHub Actions scope is production-only; personal stages remain local CLI-driven.
+- **Revisit trigger:** Review when multiple maintainers need shared non-production relay stages.
+- **Notes:** Do not add a stage input to the initial production deploy workflow.
+
+### APNs optionalization for relay deploy
+
+- **Status:** deferred
+- **Area:** relay, mobile, infrastructure
+- **Source:** [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md)
+- **Rationale:** Current relay stack expects APNs config, and initial production deploy should prove the full existing stack.
+- **Revisit trigger:** Review if product direction requires relay deployments without mobile notification support.
+- **Notes:** Relay Deploy requires APNs vars and secrets.
 
 ### Mobile EAS preview and production release
 
