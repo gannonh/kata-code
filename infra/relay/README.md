@@ -25,7 +25,7 @@ The relay currently owns:
 - Persisting relay state and exposing relay-specific traces for diagnostics.
 
 The environment server and relay have separate credentials and trust boundaries. Read
-[Environment Authentication Profile](../../docs/environment-auth.md) before changing token,
+[Environment Authentication Profile](../../docs/cloud/environment-auth.md) before changing token,
 credential, or authorization behavior.
 
 ## Code Map
