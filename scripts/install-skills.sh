@@ -38,6 +38,11 @@ npx skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-
 npx skills add https://github.com/vercel-labs/agent-skills --skill vercel-composition-patterns -y
 npx skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-native-skills -y
 npx skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-view-transitions -y
+# cloudflare skills: https://www.skills.sh/cloudflare/skills
+npx skills add https://github.com/cloudflare/skills --skill cloudflare -y
+npx skills add https://github.com/cloudflare/skills --skill wrangler -y
+npx skills add https://github.com/cloudflare/skills --skill workers-best-practices -y
+
 
 echo "==> Done. Installed skills:"
 npx skills ls --json 2>/dev/null || npx skills ls
