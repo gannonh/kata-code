@@ -91,15 +91,15 @@ function formatCloudStatus(status: CloudCliStatus, options?: { readonly json?: b
       ? "pending server startup"
       : "not provisioned";
   const nextStep = !status.authenticated
-    ? "Run `katacode connect link` to authorize and enable KataCode Connect."
+    ? "Run `katacode connect link` to authorize and enable Kata Code Connect."
     : !status.desired
-      ? "Run `katacode connect link` to enable KataCode Connect."
+      ? "Run `katacode connect link` to enable Kata Code Connect."
       : !status.linked
-        ? "Start KataCode to provision the environment link and launch its managed tunnel."
+        ? "Start Kata Code to provision the environment link and launch its managed tunnel."
         : undefined;
 
   return [
-    "KataCode Connect",
+    "Kata Code Connect",
     `  Exposure: ${status.desired ? "enabled" : "disabled"}`,
     `  Authorization: ${status.authenticated ? "stored credential" : "missing"}`,
     `  Environment link: ${provisioned}`,
@@ -114,7 +114,7 @@ const CLOUD_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(5);
 const confirmRelayClientInstall = (version: string) =>
   Prompt.run(
     Prompt.confirm({
-      message: `The KataCode Connect relay client is required. Download and install version ${version}?`,
+      message: `The Kata Code Connect relay client is required. Download and install version ${version}?`,
       initial: false,
     }),
   );
@@ -252,10 +252,10 @@ const disconnectCloud = Effect.fn("cloud.cli.disconnect")(function* (options: {
 
   if (liveResult.status === "failed") {
     yield* Console.warn(
-      `KataCode Connect is disabled, but the running server could not stop its tunnel: ${String(liveResult.cause)}\nRestart that server to stop the connector.`,
+      `Kata Code Connect is disabled, but the running server could not stop its tunnel: ${String(liveResult.cause)}\nRestart that server to stop the connector.`,
     );
   } else {
-    yield* Console.log("KataCode Connect is disabled locally.");
+    yield* Console.log("Kata Code Connect is disabled locally.");
   }
 
   if (Exit.isFailure(relayResult)) {
@@ -269,7 +269,7 @@ const disconnectCloud = Effect.fn("cloud.cli.disconnect")(function* (options: {
   }
 
   if (options.clearAuthorization) {
-    yield* Console.log("Signed out of KataCode Connect locally.");
+    yield* Console.log("Signed out of Kata Code Connect locally.");
   }
 });
 
@@ -314,14 +314,14 @@ const runCloudCommand = <A, E>(
 const connectLoginCommand = Command.make("login", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Authorize the KataCode Connect CLI without enabling remote access."),
+  Command.withDescription("Authorize the Kata Code Connect CLI without enabling remote access."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
         const tokens = yield* CliTokenManager.CloudCliTokenManager;
         yield* tokens.get;
-        yield* Console.log("Signed in to KataCode Connect.");
+        yield* Console.log("Signed in to Kata Code Connect.");
       }),
     ),
   ),
@@ -330,7 +330,7 @@ const connectLoginCommand = Command.make("login", {
 const connectLinkCommand = Command.make("link", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Authorize this environment for KataCode Connect on next start."),
+  Command.withDescription("Authorize this environment for Kata Code Connect on next start."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
@@ -343,7 +343,7 @@ const connectLinkCommand = Command.make("link", {
         );
         if (Option.isNone(installed)) {
           yield* Console.log(
-            "KataCode Connect setup cancelled. The relay client was not installed.",
+            "Kata Code Connect setup cancelled. The relay client was not installed.",
           );
           return;
         }
@@ -355,7 +355,7 @@ const connectLinkCommand = Command.make("link", {
         yield* tokens.get;
         yield* CliState.setCliDesiredCloudLink(true);
         yield* Console.log(
-          "This KataCode environment will be available through KataCode Connect the next time KataCode starts.",
+          "This Kata Code environment will be available through Kata Code Connect the next time Kata Code starts.",
         );
       }),
     ),
@@ -366,7 +366,7 @@ const connectStatusCommand = Command.make("status", {
   ...projectLocationFlags,
   json: jsonFlag,
 }).pipe(
-  Command.withDescription("Show persisted KataCode Connect and relay client state."),
+  Command.withDescription("Show persisted Kata Code Connect and relay client state."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
@@ -404,7 +404,7 @@ const connectStatusCommand = Command.make("status", {
 const connectUnlinkCommand = Command.make("unlink", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Disable KataCode Connect while retaining the stored authorization."),
+  Command.withDescription("Disable Kata Code Connect while retaining the stored authorization."),
   Command.withHandler((flags) =>
     runCloudCommand(flags, disconnectCloud({ clearAuthorization: false })),
   ),
@@ -413,14 +413,14 @@ const connectUnlinkCommand = Command.make("unlink", {
 const connectLogoutCommand = Command.make("logout", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Disable KataCode Connect and clear the stored CLI authorization."),
+  Command.withDescription("Disable Kata Code Connect and clear the stored CLI authorization."),
   Command.withHandler((flags) =>
     runCloudCommand(flags, disconnectCloud({ clearAuthorization: true })),
   ),
 );
 
 export const connectCommand = Command.make("connect").pipe(
-  Command.withDescription("Manage headless KataCode Connect access."),
+  Command.withDescription("Manage headless Kata Code Connect access."),
   Command.withSubcommands([
     connectLoginCommand,
     connectLinkCommand,

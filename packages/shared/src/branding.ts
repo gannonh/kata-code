@@ -1,6 +1,9 @@
-export const APP_BASE_NAME = "KataCode" as const;
+export const APP_BASE_NAME = "Kata Code" as const;
 
-export const CLOUD_PRODUCT_NAME = "KataCode Connect" as const;
+export const CLOUD_PRODUCT_NAME = "Kata Code Connect" as const;
+
+/** Pre-rebrand compact display name kept for Application Support folder migration. */
+const LEGACY_COMPACT_APP_BASE_NAME = "KataCode" as const;
 
 /** Default user state directory under the home folder (`~/.katacode`). */
 export const DEFAULT_HOME_DIR_NAME = ".katacode" as const;
@@ -53,6 +56,9 @@ export const isNightlyAppVersion = (version: string): boolean =>
 export const formatAppDisplayName = (stageLabel: string): string =>
   `${APP_BASE_NAME} (${stageLabel})`;
 
+export const formatLegacyCompactAppDisplayName = (stageLabel: string): string =>
+  `${LEGACY_COMPACT_APP_BASE_NAME} (${stageLabel})`;
+
 export const formatUpstreamAppDisplayName = (stageLabel: AppStageLabel): string =>
   `${UPSTREAM_APP_BASE_NAME} (${stageLabel})`;
 
@@ -96,5 +102,9 @@ export function resolveLegacyUserDataDirNames(input: {
     appVersion: input.appVersion,
   });
   const upstreamStageLabel = stageLabel;
-  return [formatAppDisplayName(stageLabel), formatUpstreamAppDisplayName(upstreamStageLabel)];
+  return [
+    formatAppDisplayName(stageLabel),
+    formatLegacyCompactAppDisplayName(stageLabel),
+    formatUpstreamAppDisplayName(upstreamStageLabel),
+  ];
 }

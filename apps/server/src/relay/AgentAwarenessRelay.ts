@@ -304,7 +304,7 @@ const make = Effect.gen(function* () {
     }
     const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
     if (!relayConfig) {
-      yield* Effect.logDebug("agent activity publish skipped; KataCode Connect config missing", {
+      yield* Effect.logDebug("agent activity publish skipped; Kata Code Connect config missing", {
         threadId,
       });
       return;
@@ -423,7 +423,7 @@ const make = Effect.gen(function* () {
     }
     const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
     if (!relayConfig) {
-      yield* Effect.logDebug("agent activity snapshot skipped; KataCode Connect config missing");
+      yield* Effect.logDebug("agent activity snapshot skipped; Kata Code Connect config missing");
       return false;
     }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
@@ -461,7 +461,9 @@ const make = Effect.gen(function* () {
     function* () {
       const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
       if (!relayConfig) {
-        yield* Effect.logInfo("agent activity publishing standby; KataCode Connect config missing");
+        yield* Effect.logInfo(
+          "agent activity publishing standby; Kata Code Connect config missing",
+        );
       } else {
         yield* Effect.logInfo("agent activity publishing enabled", {
           relayUrl: relayConfig.url,

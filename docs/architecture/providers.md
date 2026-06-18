@@ -1,7 +1,7 @@
 ---
 type: Architecture Note
 title: "Provider architecture"
-description: "How KataCode routes one WebSocket API to multiple agent provider drivers through adapters and canonical runtime events."
+description: "How Kata Code routes one WebSocket API to multiple agent provider drivers through adapters and canonical runtime events."
 tags: [architecture, providers, codex, claude, cursor, grok, opencode]
 timestamp: 2026-06-17T02:30:00Z
 ---
@@ -101,7 +101,7 @@ All three use `DrainableWorker` internally and expose `drain()` for deterministi
 ## What this is not
 
 - **Not** “Codex app-server is the universal model router.” Other providers are separate agent runtimes, not API calls inside Codex.
-- **Not** hosted agent execution via [KataCode Connect](/cloud/index.md). Providers run on the same machine as `katacode serve` (child processes or SDKs), whether that server is local desktop, a VM, or a tailnet host.
+- **Not** hosted agent execution via [Kata Code Connect](/cloud/index.md). Providers run on the same machine as `katacode serve` (child processes or SDKs), whether that server is local desktop, a VM, or a tailnet host.
 - **Not** the same as **remote environments** ([remote architecture](/architecture/remote.md)): remoteness is _where `katacode serve` runs_; providers are _which agent runtime that server uses_.
 
 ## Code map

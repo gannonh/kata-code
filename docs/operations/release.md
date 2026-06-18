@@ -1,7 +1,7 @@
 ---
 type: Runbook
 title: "Release runbook"
-description: "How to cut a KataCode stable or nightly release."
+description: "How to cut a Kata Code stable or nightly release."
 tags: [operations, runbook, release]
 timestamp: 2026-06-17T15:00:00Z
 ---

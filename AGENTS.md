@@ -20,7 +20,7 @@ Default dev ports: web `5733`, server `13773`. Offset with `KATACODE_DEV_INSTANC
 
 ## Project Snapshot
 
-KataCode is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code) — a minimal
+Kata Code is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code) — a minimal
 web GUI for using coding agents like Codex and Claude.
 
 - **Repo:** `gannonh/katacode` · **npm scope:** `@kata-sh/code-*` · **CLI:** `katacode` (`@kata-sh/code-cli`)
@@ -39,7 +39,7 @@ maintainability is encouraged.
 - Electron `path.txt missing` after fresh install → run `ensure:electron` (see Quick Start).
 - **Brand icons:** master raster is `apps/desktop/resources/source.png`. Run `pnpm run generate:brand-rasters` after icon changes — syncs `assets/prod/*`, `apps/web/public/*`, and desktop platform icons via `generate-icons.sh`. Icon paths live in `scripts/lib/brand-assets.ts`; all channels (dev, nightly, production) use production Kata artwork (no upstream blueprint icons).
 - **Desktop release packaging:** `electron-builder` `afterPack` hooks resolve relative to `apps/desktop`, not the staged `--projectDir`. Use `scripts/electron-after-pack.cjs` in build config; macOS Liquid Glass `Assets.car` is copied from `apps/desktop/resources/liquid-glass/`.
-- **Desktop dev launcher:** cached `KataCode (Dev).app` can keep a stale `VITE_DEV_SERVER_URL` if ports shift — `electron-launcher.mjs` refreshes the launcher script on each dev start.
+- **Desktop dev launcher:** cached `Kata Code (Dev).app` can keep a stale `VITE_DEV_SERVER_URL` if ports shift — `electron-launcher.mjs` refreshes the launcher script on each dev start.
 - **CI:** PR checks run from [`.github/workflows/ci.yml`](./.github/workflows/ci.yml). Require **Check**, **Test**, **Test Browser**, **Release Smoke**, and **Mobile Native Static Analysis** on `main` — see [branch protection](./docs/operations/ci.md#branch-protection-main). **Release** ([`release.yml`](./.github/workflows/release.yml)) runs on tags/`workflow_dispatch`, not PRs. Relay deploy and mobile EAS remain in [`.github/disabled/`](./.github/disabled/README.md).
 - **Hosted web:** `apps/web` deploys to Vercel (`katacode-web`, root `apps/web`). Domains: `app.kata.sh`, `latest.app.kata.sh`, `nightly.app.kata.sh`. `apps/web/vercel.ts` inlines branding constants — Vercel compiles config before the monorepo build; keep in sync with `packages/shared/src/branding.ts`.
 - **Release secrets:** see [release setup](./docs/operations/release-setup.md). Day-to-day releases: [release runbook](./docs/operations/release.md).

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>KataCode — Hosted web &amp; remote stack</title>
+    <title>Kata Code — Hosted web &amp; remote stack</title>
     <script>
       (function () {
         const saved = localStorage.getItem("theme");
@@ -419,7 +419,7 @@
   <body>
     <div class="bar">
       <div>
-        <h1>KataCode — hosted web &amp; remote stack</h1>
+        <h1>Kata Code — hosted web &amp; remote stack</h1>
         <div class="sub">
           static client on kata.sh · daemon server on your infra · connect is optional glue
         </div>
@@ -429,7 +429,7 @@
         <button class="chip on" data-flow="all">Overview</button>
         <button class="chip" data-flow="manual">Add environment</button>
         <button class="chip" data-flow="desktop">Desktop local</button>
-        <button class="chip" data-flow="connect">KataCode Connect</button>
+        <button class="chip" data-flow="connect">Kata Code Connect</button>
         <button class="chip" data-flow="hot">Hot path (agent traffic)</button>
         <button class="chip" data-flow="release">Release deploy</button>
       </div>
@@ -441,7 +441,7 @@
         viewBox="0 0 1680 1040"
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="KataCode hosted web and remote architecture"
+        aria-label="Kata Code hosted web and remote architecture"
       >
         <defs>
           <marker
@@ -497,7 +497,7 @@
         </g>
         <g class="zone" id="z-connect">
           <rect x="900" y="100" width="360" height="340" />
-          <text class="ztitle" x="920" y="130">KataCode Connect</text>
+          <text class="ztitle" x="920" y="130">Kata Code Connect</text>
           <text class="zsub" x="920" y="148">optional · control plane only</text>
         </g>
         <g class="zone deferred" id="z-deferred">
@@ -682,7 +682,7 @@
         <div class="meta" id="d-meta">architecture map</div>
         <p id="d-body">
           Use the flow chips to animate paths. <b>Add environment</b> is manual remote pairing.
-          <b>KataCode Connect</b> is optional cloud discovery — not where agents run.
+          <b>Kata Code Connect</b> is optional cloud discovery — not where agents run.
         </p>
       </div>
     </div>
@@ -702,7 +702,7 @@
         mobile: {
           t: "Mobile (Expo)",
           m: "client · shared runtime",
-          b: "Uses <code>packages/client-runtime</code>. Supports manual pairing URLs and KataCode Connect when cloud config is enabled.",
+          b: "Uses <code>packages/client-runtime</code>. Supports manual pairing URLs and Kata Code Connect when cloud config is enabled.",
         },
         router: {
           t: "app.kata.sh",
@@ -746,7 +746,7 @@
         },
         clerk: {
           t: "Clerk",
-          m: "KataCode Connect identity",
+          m: "Kata Code Connect identity",
           b: "Powers sign-in and the waitlist modal you saw on upstream. Answers <em>who is this user?</em> — not where agents execute.",
         },
         relay: {
@@ -806,7 +806,7 @@
           ],
         },
         connect: {
-          name: "KataCode Connect — optional cloud glue",
+          name: "Kata Code Connect — optional cloud glue",
           edges: [
             "e-clerk-browser",
             "e-relay-link",

@@ -61,7 +61,7 @@ export const resolveNightlyReleaseMetadata = (
     baseVersion,
     version,
     tag: `v${version}`,
-    name: `KataCode Nightly ${version} (${shortSha})`,
+    name: `Kata Code Nightly ${version} (${shortSha})`,
     shortSha,
   };
 };

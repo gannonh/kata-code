@@ -1,14 +1,14 @@
 ---
 type: Guide
 title: "Claude"
-description: "This guide is for people who want to use more than one Claude setup in KataCode."
+description: "This guide is for people who want to use more than one Claude setup in Kata Code."
 tags: [providers, guide]
 timestamp: 2026-06-16T17:10:05Z
 ---
 
 # Claude
 
-This guide is for people who want to use more than one Claude setup in KataCode.
+This guide is for people who want to use more than one Claude setup in Kata Code.
 
 Common reasons:
 
@@ -27,7 +27,7 @@ Log in with Claude Code normally:
 claude auth login
 ```
 
-In KataCode Settings, your Claude provider can stay like this:
+In Kata Code Settings, your Claude provider can stay like this:
 
 ```text
 Display name: Claude
@@ -35,7 +35,7 @@ Binary path: claude
 Claude HOME path: empty
 ```
 
-An empty `Claude HOME path` means KataCode uses your normal home directory.
+An empty `Claude HOME path` means Kata Code uses your normal home directory.
 
 ## I Want Work And Personal Claude Accounts
 
@@ -56,7 +56,7 @@ Log in normally:
 claude auth login
 ```
 
-In KataCode Settings:
+In Kata Code Settings:
 
 ```text
 Display name: Claude Work
@@ -73,7 +73,7 @@ mkdir -p ~/.claude_personal_home
 HOME=~/.claude_personal_home claude auth login
 ```
 
-Then add another Claude provider in KataCode:
+Then add another Claude provider in Kata Code:
 
 ```text
 Display name: Claude Personal
@@ -88,11 +88,11 @@ blurred by default; click the blurred email to reveal it.
 
 Usually, no.
 
-KataCode only offers Claude providers that use the same Claude home for an existing thread. A
+Kata Code only offers Claude providers that use the same Claude home for an existing thread. A
 different Claude home is treated as a different Claude environment.
 
 This is different from the recommended Codex setup. Claude Code keeps account and local state across
-multiple files under its home directory, so KataCode keeps separate Claude homes isolated instead of
+multiple files under its home directory, so Kata Code keeps separate Claude homes isolated instead of
 trying to share part of the state.
 
 ## I Want To Use OpenRouter
@@ -105,7 +105,7 @@ variables.
 
 ### Configure A Claude OpenRouter Provider
 
-Add or edit a Claude provider in KataCode Settings:
+Add or edit a Claude provider in Kata Code Settings:
 
 ```text
 Display name: Claude OpenRouter
@@ -121,7 +121,7 @@ ANTHROPIC_AUTH_TOKEN sk-or-...                Sensitive
 ANTHROPIC_API_KEY                              Empty value
 ```
 
-Mark `ANTHROPIC_AUTH_TOKEN` as sensitive. KataCode stores the value as a server secret and does not
+Mark `ANTHROPIC_AUTH_TOKEN` as sensitive. Kata Code stores the value as a server secret and does not
 send it back to the app after saving.
 
 If you want this setup isolated from your normal Claude account, create that home first:
@@ -180,7 +180,7 @@ OpenRouter's setup can change over time. Use its upstream Claude Code guide for 
 Claude Code Router is useful when you want a local routing layer with more control than a direct
 OpenRouter setup.
 
-KataCode does not need a special Claude Code Router provider. Treat the router as a Claude
+Kata Code does not need a special Claude Code Router provider. Treat the router as a Claude
 environment.
 
 Use this when you want Claude Code Router to decide which upstream model or provider handles Claude
@@ -189,7 +189,7 @@ requests.
 High-level flow:
 
 1. Start Claude Code Router.
-2. Add or configure a Claude provider in KataCode.
+2. Add or configure a Claude provider in Kata Code.
 3. Put the router's required variables on that provider instance.
 
 Configure a Claude provider:

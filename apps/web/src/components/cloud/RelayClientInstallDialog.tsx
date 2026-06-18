@@ -69,8 +69,8 @@ export function RelayClientInstallDialog() {
           </DialogTitle>
           <DialogDescription>
             {isInstalling
-              ? "KataCode is preparing this environment for secure access through KataCode Connect."
-              : "KataCode needs the relay client to make this environment available through KataCode Connect."}
+              ? "Kata Code is preparing this environment for secure access through Kata Code Connect."
+              : "Kata Code needs the relay client to make this environment available through Kata Code Connect."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>
@@ -91,14 +91,14 @@ export function RelayClientInstallDialog() {
                 value={activeStepIndex + 1}
               />
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Keep KataCode open while the relay client is installed.
+                Keep Kata Code open while the relay client is installed.
               </p>
             </div>
           ) : (
             <div className="rounded-xl border border-border/70 bg-muted/35 p-3">
               <p className="text-sm font-medium text-foreground">Managed relay client</p>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                KataCode will download and install version{" "}
+                Kata Code will download and install version{" "}
                 {view.status === "confirming" ? view.version : ""} locally.
               </p>
             </div>

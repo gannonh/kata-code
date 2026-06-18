@@ -13,9 +13,9 @@ const defaultInput = {
   platform: "darwin",
   processArch: "arm64",
   appVersion: "0.0.22",
-  appPath: "/Applications/KataCode.app/Contents/Resources/app.asar",
+  appPath: "/Applications/Kata Code.app/Contents/Resources/app.asar",
   isPackaged: false,
-  resourcesPath: "/Applications/KataCode.app/Contents/Resources",
+  resourcesPath: "/Applications/Kata Code.app/Contents/Resources",
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
@@ -66,7 +66,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.backendCwd, "/repo");
       assert.equal(environment.appUserModelId, "com.katacode.dev.repo");
       assert.equal(environment.linuxWmClass, "katacode-dev");
-      assert.equal(environment.displayName, "KataCode (Dev)");
+      assert.equal(environment.displayName, "Kata Code (Dev)");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),

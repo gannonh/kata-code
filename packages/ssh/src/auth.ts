@@ -72,14 +72,14 @@ function joinSshAskpassPath(
 }
 
 export const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
-# Invoked by ssh via SSH_ASKPASS when KataCode re-runs ssh with a cached password
+# Invoked by ssh via SSH_ASKPASS when Kata Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # KATACODE_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
 if [ "\${KATACODE_SSH_AUTH_SECRET+x}" = "x" ]; then
   printf "%s\\n" "$KATACODE_SSH_AUTH_SECRET"
   exit 0
 fi
-printf 'KataCode ssh-askpass invoked without KATACODE_SSH_AUTH_SECRET.\\n' >&2
+printf 'Kata Code ssh-askpass invoked without KATACODE_SSH_AUTH_SECRET.\\n' >&2
 exit 1
 `;
 
@@ -87,7 +87,7 @@ export const ASKPASS_WINDOWS_LAUNCHER_SCRIPT = `@echo off\r
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ssh-askpass.ps1" %*\r
 `;
 
-export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when KataCode re-runs\r
+export const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when Kata Code re-runs\r
 # ssh with a cached password from the renderer's in-app prompt. We never expose\r
 # a native dialog here - if KATACODE_SSH_AUTH_SECRET is missing, that's a caller bug\r
 # and we fail loudly.\r
@@ -95,7 +95,7 @@ if ($null -ne $env:KATACODE_SSH_AUTH_SECRET) {\r
   [Console]::Out.WriteLine($env:KATACODE_SSH_AUTH_SECRET)\r
   exit 0\r
 }\r
-[Console]::Error.WriteLine("KataCode ssh-askpass invoked without KATACODE_SSH_AUTH_SECRET.")\r
+[Console]::Error.WriteLine("Kata Code ssh-askpass invoked without KATACODE_SSH_AUTH_SECRET.")\r
 exit 1\r
 `;
 

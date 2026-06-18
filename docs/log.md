@@ -32,6 +32,6 @@
 - Created required sections: `specs/`, `adrs/`, root `index.md` and `log.md`.
 - Moved `.plans/` → `docs/specs/plans/` and `docs/project/todo.md` → `docs/specs/product-backlog.md`.
 - Added section indexes for `architecture/`, `guides/`, `runbooks/`, `reference/`, `cloud/`, `providers/`, `integrations/`.
-- Seeded ADRs for connected-fork strategy and KataCode product identity.
+- Seeded ADRs for connected-fork strategy and Kata Code product identity.
 - Added OKF frontmatter to existing concept documents.
 - Updated [AGENTS.md](../../AGENTS.md) with OKF consumption and maintenance instructions.

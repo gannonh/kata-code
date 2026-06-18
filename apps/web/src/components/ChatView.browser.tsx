@@ -6830,7 +6830,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           model: "gpt-5.3-codex-spark",
         },
         planMarkdown:
-          "# Imaginary Long-Range Plan: KataCode Adaptive Orchestration and Safe-Delay Execution Initiative",
+          "# Imaginary Long-Range Plan: Kata Code Adaptive Orchestration and Safe-Delay Execution Initiative",
       }),
     });
 
@@ -6863,7 +6863,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           model: "gpt-5.3-codex-spark",
         },
         planMarkdown:
-          "# Imaginary Long-Range Plan: KataCode Adaptive Orchestration and Safe-Delay Execution Initiative",
+          "# Imaginary Long-Range Plan: Kata Code Adaptive Orchestration and Safe-Delay Execution Initiative",
       }),
     });
 

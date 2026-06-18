@@ -1,6 +1,6 @@
 # Architecture
 
-System design and runtime structure for KataCode.
+System design and runtime structure for Kata Code.
 
 ## Documents
 
@@ -14,7 +14,7 @@ System design and runtime structure for KataCode.
 
 ## Related
 
-- [Guides — cloud / KataCode Connect](/cloud/index.md)
+- [Guides — cloud / Kata Code Connect](/cloud/index.md)
 - [Runbooks — observability](/operations/observability.md)
 - [Specs — fork setup](/specs/fork-setup.md)
 

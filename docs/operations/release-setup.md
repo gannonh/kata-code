@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: "Release setup"
-description: "One-time GitHub secrets and repository configuration for KataCode releases."
+description: "One-time GitHub secrets and repository configuration for Kata Code releases."
 tags: [operations, release, setup]
 timestamp: 2026-06-17T14:00:00Z
 ---
@@ -84,7 +84,7 @@ Stable releases publish with dist-tag `latest`; nightlies use `nightly`; stable 
 2. On npmjs.com: **Packages → `@kata-sh/code-cli` → Settings → Trusted publishing → GitHub Actions** — org `gannonh`, repo `katacode`, workflow `release.yml`, action `npm publish`.
 3. CI uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC); no `NPM_TOKEN` secret.
 
-## Optional (KataCode Connect)
+## Optional (Kata Code Connect)
 
 Repository variables when cloud features are enabled: `CLERK_*`, `RELAY_*`. Desktop/web-only releases work without them.
 

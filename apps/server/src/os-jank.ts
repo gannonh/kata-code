@@ -116,7 +116,7 @@ export const warnLegacyHomeDirectoryIfNeeded = Effect.fn(function* (input: {
     path.resolve(input.baseDir) === path.resolve(defaultKatacodeHome)
   ) {
     yield* Effect.logWarning(
-      `Found existing upstream state at ${legacyHome}. KataCode uses ${defaultKatacodeHome} by default. Set KATACODE_HOME=${legacyHome} to reuse your existing data.`,
+      `Found existing upstream state at ${legacyHome}. Kata Code uses ${defaultKatacodeHome} by default. Set KATACODE_HOME=${legacyHome} to reuse your existing data.`,
     );
   }
 });

@@ -50,7 +50,7 @@ export default function HomeRouteScreen() {
                 letterSpacing: -0.4,
               }}
             >
-              KataCode
+              Kata Code
             </RNText>
             <View
               style={{

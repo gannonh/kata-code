@@ -177,7 +177,7 @@ describe("WsTransport (web instrumentation)", () => {
         closeCode: 1006,
         closeReason: "server unavailable",
         hasConnected: false,
-        lastError: "Unable to connect to the KataCode server WebSocket.",
+        lastError: "Unable to connect to the Kata Code server WebSocket.",
         phase: "disconnected",
       });
     });

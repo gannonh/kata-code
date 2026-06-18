@@ -1,4 +1,4 @@
-# Cloud (KataCode Connect)
+# Cloud (Kata Code Connect)
 
 Managed relay, Clerk auth, and environment linking.
 

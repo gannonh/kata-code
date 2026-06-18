@@ -1,4 +1,4 @@
-# KataCode fork setup plan
+# Kata Code fork setup plan
 
 Hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) maintained at
 [gannonh/katacode](https://github.com/gannonh/katacode).
@@ -35,7 +35,7 @@ Verification:       vp check && vp run typecheck
 
 ## Goals
 
-1. **Ship an independent product** (KataCode) without waiting on upstream contribution policy.
+1. **Ship an independent product** (Kata Code) without waiting on upstream contribution policy.
 2. **Keep pulling upstream fixes and features** via merge-based sync, not ad-hoc cherry-picks.
 3. **Minimize merge pain** by isolating fork-only code and completing branding renames early.
 4. **Preserve MIT attribution** for upstream code and vendored dependencies.
@@ -44,7 +44,7 @@ Verification:       vp check && vp run typecheck
 
 - Contributing changes back upstream (upstream is not actively accepting large PRs).
 - Staying wire-compatible with upstream desktop auto-update channels or npm `t3` package.
-- Maintaining feature parity with upstream cloud/KataCode Connect unless explicitly chosen.
+- Maintaining feature parity with upstream cloud/Kata Code Connect unless explicitly chosen.
 
 ---
 
@@ -52,16 +52,16 @@ Verification:       vp check && vp run typecheck
 
 Decide these once, then execute Phase 1 in a single focused branch.
 
-| Upstream                 | KataCode                       | Status   |
+| Upstream                 | Kata Code                      | Status   |
 | ------------------------ | ------------------------------ | -------- |
-| Product name             | KataCode                       | **Done** |
+| Product name             | Kata Code                      | **Done** |
 | GitHub repo              | `gannonh/katacode`             | **Done** |
 | npm scope                | `@kata-sh/code`                | **Done** |
 | CLI binary               | `katacode`                     | **Done** |
 | Monorepo root package    | `@kata-sh/code-monorepo`       | **Done** |
 | Env prefix               | `KATACODE_*`                   | **Done** |
 | State dir default        | `~/.katacode` (was `~/.t3`)    | **Done** |
-| Desktop display name     | KataCode (Dev) / KataCode      | **Done** |
+| Desktop display name     | Kata Code (Dev) / Kata Code    | **Done** |
 | Desktop bundle id (prod) | `com.katacode.app`             | **Done** |
 | Desktop bundle id (dev)  | `com.katacode.dev.<suffix>`    | **Done** |
 | URL protocol             | `katacode` / `katacode-dev`    | **Done** |
@@ -96,13 +96,13 @@ Scope is `@kata-sh`; workspace packages use the `code-*` suffix:
 
 Canonical icon source and desktop packaging assets live under `apps/desktop/resources/`:
 
-| Asset | Path | Use |
-| ----- | ---- | --- |
-| Master raster | `apps/desktop/resources/source.png` | Source for all production rasters and platform icons |
-| Vector mark | `apps/desktop/resources/icon.svg` | Web `logo-mark.svg`, `assets/prod/logo.svg` |
-| macOS icons | `AppIcon.icns`, `icon.icns` | Desktop releases (`CFBundleIconName: AppIcon`) |
-| Windows / Linux | `icon.ico`, `icon.png`, `icons/` | Desktop release targets |
-| Liquid Glass (macOS 26+) | `liquid-glass/Assets.car` | Copied into release `.app` by `apps/desktop/scripts/electron-after-pack.cjs` |
+| Asset                    | Path                                | Use                                                                          |
+| ------------------------ | ----------------------------------- | ---------------------------------------------------------------------------- |
+| Master raster            | `apps/desktop/resources/source.png` | Source for all production rasters and platform icons                         |
+| Vector mark              | `apps/desktop/resources/icon.svg`   | Web `logo-mark.svg`, `assets/prod/logo.svg`                                  |
+| macOS icons              | `AppIcon.icns`, `icon.icns`         | Desktop releases (`CFBundleIconName: AppIcon`)                               |
+| Windows / Linux          | `icon.ico`, `icon.png`, `icons/`    | Desktop release targets                                                      |
+| Liquid Glass (macOS 26+) | `liquid-glass/Assets.car`           | Copied into release `.app` by `apps/desktop/scripts/electron-after-pack.cjs` |
 
 Legacy SVG tiles (`assets/logo-square-dark.svg`, `assets/logo-square-light.svg`) remain for marketing/light backgrounds only.
 
@@ -122,7 +122,7 @@ Mobile production icon composer uses `apps/mobile/assets/icon-composer-prod.icon
 
 > Dev desktop bundle IDs derive from the repo folder name (`katacode`) in
 > `apps/desktop/scripts/electron-launcher.mjs`. Production bundle id, display names,
-> and URL protocols use KataCode branding.
+> and URL protocols use Kata Code branding.
 
 ---
 
@@ -199,13 +199,13 @@ Prefer a short compatibility shim during transition (read both `T3CODE_*` and
 
 ### 1.3 User-facing docs
 
-| File                                  | Action                                             |
-| ------------------------------------- | -------------------------------------------------- |
-| `README.md`                           | Rewrite for KataCode; link to upstream attribution |
-| `AGENTS.md`                           | Update project snapshot; link to this file         |
-| `docs/index.md` (OKF bundle)          | Fork docs map; see `docs/specs/fork-setup.md`      |
-| `docs/getting-started/quick-start.md` | Update install/run commands                        |
-| `CONTRIBUTING.md`                     | Replace with fork contribution policy              |
+| File                                  | Action                                              |
+| ------------------------------------- | --------------------------------------------------- |
+| `README.md`                           | Rewrite for Kata Code; link to upstream attribution |
+| `AGENTS.md`                           | Update project snapshot; link to this file          |
+| `docs/index.md` (OKF bundle)          | Fork docs map; see `docs/specs/fork-setup.md`       |
+| `docs/getting-started/quick-start.md` | Update install/run commands                         |
+| `CONTRIBUTING.md`                     | Replace with fork contribution policy               |
 
 Keep a short **Attribution** section in `README.md` crediting T3 Code (MIT).
 
@@ -246,7 +246,7 @@ Review and fork-customize:
 
 Upstream-specific — do **not** reuse without explicit intent:
 
-- Clerk / KataCode Connect (`KATACODE_CLERK_*`, `docs/cloud/`)
+- Clerk / Kata Code Connect (`KATACODE_CLERK_*`, `docs/cloud/`)
 - Relay OTLP endpoints (`KATACODE_RELAY_*`)
 - Discord release webhooks (`scripts/notify-discord-release.ts`)
 - Desktop code signing / notarization certificates

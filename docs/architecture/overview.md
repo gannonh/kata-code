@@ -1,14 +1,14 @@
 ---
 type: Architecture Note
 title: "Architecture"
-description: "KataCode is a Node.js WebSocket server that orchestrates sessions, git, and terminals while routing turns to pluggable agent provider drivers."
+description: "Kata Code is a Node.js WebSocket server that orchestrates sessions, git, and terminals while routing turns to pluggable agent provider drivers."
 tags: [architecture, architecture-note]
 timestamp: 2026-06-17T03:00:00Z
 ---
 
 # Architecture
 
-KataCode is a **Node.js WebSocket server** (`apps/server`) that serves the React web app, orchestrates chat/git/terminal state, and routes agent work to **pluggable provider drivers** (Codex, Claude, Cursor, Grok, OpenCode). Clients use one typed API; each driver wraps its own agent runtime.
+Kata Code is a **Node.js WebSocket server** (`apps/server`) that serves the React web app, orchestrates chat/git/terminal state, and routes agent work to **pluggable provider drivers** (Codex, Claude, Cursor, Grok, OpenCode). Clients use one typed API; each driver wraps its own agent runtime.
 
 For driver details, see [provider architecture](/architecture/providers.md). For hosted clients vs where the server runs, see the [hosted web diagram](/diagrams/hosted-remote-stack.html).
 

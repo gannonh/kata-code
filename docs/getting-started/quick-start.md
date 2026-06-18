@@ -1,14 +1,14 @@
 ---
 type: Guide
 title: "Quick start"
-description: "KataCode is developed from the [gannonh/katacode](https://github.com/gannonh/katacode) fork. See [FORK.md](../../FORK.md) for upstream sync and identity decisions."
+description: "Kata Code is developed from the [gannonh/katacode](https://github.com/gannonh/katacode) fork. See [FORK.md](../../FORK.md) for upstream sync and identity decisions."
 tags: [getting-started, guide]
 timestamp: 2026-06-16T17:10:05Z
 ---
 
 # Quick start
 
-KataCode is developed from the [gannonh/katacode](https://github.com/gannonh/katacode) fork. See [FORK.md](../../FORK.md) for upstream sync and identity decisions.
+Kata Code is developed from the [gannonh/katacode](https://github.com/gannonh/katacode) fork. See [FORK.md](../../FORK.md) for upstream sync and identity decisions.
 
 ```bash
 # Install dependencies

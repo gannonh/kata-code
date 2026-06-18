@@ -11,7 +11,7 @@ status: Implemented
 
 ## Goal
 
-Re-enable a fork-owned KataCode release path for desktop and web while keeping distribution credentials, domains, and release artifacts under fork control.
+Re-enable a fork-owned Kata Code release path for desktop and web while keeping distribution credentials, domains, and release artifacts under fork control.
 
 This spec focuses on desktop and web release readiness. The first milestone must be able to publish signed and notarized macOS desktop artifacts from GitHub Actions, publish GitHub Release assets, and publish the CLI package only if it remains coupled to the release workflow.
 
@@ -52,7 +52,7 @@ Explicitly deferred:
 3. macOS CI release builds require signed and notarized artifacts. Missing Apple signing or notarization secrets fail loudly before publishing mac artifacts.
 4. macOS CI supports `CSC_LINK` and `CSC_KEY_PASSWORD` for the Developer ID Application certificate, plus Apple ID notarization through `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`.
 5. Release docs explain how to export the Developer ID Application certificate to `.p12`, base64 it for `CSC_LINK`, choose/store `CSC_KEY_PASSWORD`, and set GitHub secrets without committing credentials.
-6. `apps/web` hosted release configuration uses KataCode domains only, with no fallback to upstream `app.t3.codes` domains.
+6. `apps/web` hosted release configuration uses Kata Code domains only, with no fallback to upstream `app.t3.codes` domains.
 7. `apps/mobile`, `apps/marketing`, marketing download/release pages, relay/cloud VM deploys, and mobile EAS remain out of scope and are not required for desktop/web release signoff.
 8. Verification includes a dry-run or manual workflow dispatch plan that proves signing inputs are detected before real publishing.
 9. Verify can produce evidence that macOS artifacts are signed and notarized before GitHub Release publication is considered complete.
@@ -138,7 +138,7 @@ gh secret list
 ### Phase 4 — Web release path
 
 - Keep `apps/web` in scope as the hosted web app.
-- Replace upstream domain fallbacks in release workflow web deploy logic with KataCode domains or explicit required variables.
+- Replace upstream domain fallbacks in release workflow web deploy logic with Kata Code domains or explicit required variables.
 - Make relay/cloud VM public config optional or disabled for this milestone unless `apps/web` cannot build without it.
 - Do not edit `apps/marketing` release/download pages in this spec.
 
@@ -164,8 +164,8 @@ Required release verification evidence:
 
 - `gh secret list` shows the five required macOS signing/notarization secret names.
 - Manual workflow dispatch or dry-run reaches the signing gate and confirms required inputs are present without printing secret values.
-- macOS artifacts are code signed, for example with `codesign --verify --deep --strict --verbose=2 <KataCode.app>`.
-- macOS artifacts are notarized, for example with `spctl --assess --type execute --verbose <KataCode.app>` or equivalent notarization evidence from the workflow logs.
+- macOS artifacts are code signed, for example with `codesign --verify --deep --strict --verbose=2 <Kata Code.app>`.
+- macOS artifacts are notarized, for example with `spctl --assess --type execute --verbose <Kata Code.app>` or equivalent notarization evidence from the workflow logs.
 - GitHub Release publication occurs only after required desktop build jobs pass.
 - Hosted `apps/web` release uses fork domains and does not fall back to upstream domains.
 
@@ -175,7 +175,7 @@ Required release verification evidence:
 - Certificate export mismatch: verify the exported certificate is a Developer ID Application cert for the expected Apple team before encoding it.
 - Unsigned artifact publication: fail mac release jobs when required signing secrets are missing instead of silently building unsigned artifacts.
 - Cloud coupling in release workflow: remove or gate relay/cloud VM dependencies so desktop/web release signoff does not require deferred infrastructure.
-- Upstream fallback regression: replace upstream domain fallbacks with explicit KataCode vars or hard failures.
+- Upstream fallback regression: replace upstream domain fallbacks with explicit Kata Code vars or hard failures.
 
 ## Key files
 
@@ -212,7 +212,7 @@ Required Build outcomes:
 
 1. Active release workflow supports fork-owned desktop/web releases.
 2. macOS CI release builds require signing and notarization with `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`.
-3. Hosted `apps/web` release path uses KataCode domains only.
+3. Hosted `apps/web` release path uses Kata Code domains only.
 4. Documentation walks the maintainer through Developer ID `.p12` export, base64 encoding, and GitHub secret setup.
 5. Verification evidence includes local quality gates and a signing-aware workflow dry-run or dispatch.
 
@@ -226,7 +226,7 @@ Build should stop and ask before enabling mobile, marketing, relay/cloud VM depl
   - Activated `.github/workflows/release.yml` with fork-owned desktop/web release path
   - macOS CI requires `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` (fails before unsigned mac builds)
   - Replaced relay deploy dependency with optional `resolve_public_config` job
-  - Hosted web deploy defaults to KataCode domains (no `app.t3.codes` fallback)
+  - Hosted web deploy defaults to Kata Code domains (no `app.t3.codes` fallback)
   - Added `dry_run` workflow dispatch and `signing_gate` job
   - Added `scripts/lib/macos-release-signing.ts`, `scripts/lib/hosted-web-release-domains.ts`, and `scripts/check-macos-release-signing.ts`
   - Updated release runbook, CI docs, and workflow READMEs

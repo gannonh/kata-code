@@ -20,21 +20,21 @@ const VARIANT_CONFIG: Record<
   }
 > = {
   development: {
-    appName: "KataCode Dev",
+    appName: "Kata Code Dev",
     scheme: "katacode-dev",
     iosIcon: "./assets/icon-composer-dev.icon",
     iosBundleIdentifier: "com.katacode.dev",
     androidPackage: "com.katacode.dev",
   },
   preview: {
-    appName: "KataCode Preview",
+    appName: "Kata Code Preview",
     scheme: "katacode-preview",
     iosIcon: "./assets/icon-composer-prod.icon",
     iosBundleIdentifier: "com.katacode.preview",
     androidPackage: "com.katacode.preview",
   },
   production: {
-    appName: "KataCode",
+    appName: "Kata Code",
     scheme: "katacode",
     iosIcon: "./assets/icon-composer-prod.icon",
     iosBundleIdentifier: "com.katacode.app",
@@ -87,7 +87,7 @@ const config: ExpoConfig = {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow KataCode to connect to KataCode servers on your local network or tailnet.",
+        "Allow Kata Code to connect to Kata Code servers on your local network or tailnet.",
       ITSAppUsesNonExemptEncryption: false,
     },
   },
@@ -114,7 +114,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow KataCode to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow Kata Code to access your camera so you can scan pairing QR codes.",
         barcodeScannerEnabled: true,
       },
     ],
@@ -149,7 +149,7 @@ const config: ExpoConfig = {
           {
             name: "AgentActivity",
             displayName: "Agent Activity",
-            description: "Shows the current state of active KataCode agents.",
+            description: "Shows the current state of active Kata Code agents.",
             supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
           },
         ],

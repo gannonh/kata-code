@@ -1,18 +1,18 @@
 ---
 type: Spec
-title: "KataCode fork setup"
+title: "Kata Code fork setup"
 description: "Fork operations plan covering identity, upstream sync, release split, and intentional divergence."
 tags: [fork, roadmap, katacode]
 timestamp: 2026-06-16T22:45:00Z
 ---
 
-# KataCode fork setup
+# Kata Code fork setup
 
 **Canonical source:** [FORK.md](../../FORK.md) at the repository root. Update `FORK.md` when sync policy, identity, or divergence decisions change; keep this spec's summary and links aligned.
 
 ## Summary
 
-KataCode is a hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) at [gannonh/katacode](https://github.com/gannonh/katacode). Goals:
+Kata Code is a hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) at [gannonh/katacode](https://github.com/gannonh/katacode). Goals:
 
 1. Ship an independent product without waiting on upstream contribution policy.
 2. Pull upstream fixes via **merge-based sync** (not disconnected cherry-picks).

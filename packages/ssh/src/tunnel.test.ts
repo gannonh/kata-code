@@ -180,7 +180,7 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
     assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"');
     assert.notInclude(buildRemoteLaunchScript(), "server-home");
-    assert.include(buildRemoteLaunchScript(), "Remote KataCode server did not become ready");
+    assert.include(buildRemoteLaunchScript(), "Remote Kata Code server did not become ready");
     assert.include(
       buildRemoteLaunchScript({ packageSpec: "@kata-sh/code-cli@nightly" }),
       "@kata-sh/code-cli@nightly",

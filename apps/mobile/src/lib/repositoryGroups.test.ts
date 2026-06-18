@@ -60,20 +60,20 @@ describe("groupProjectsByRepository", () => {
       provider: "github",
       owner: "gannonh",
       name: "katacode",
-      displayName: "KataCode",
+      displayName: "Kata Code",
     };
 
     const projects = [
       makeProject({
         environmentId: EnvironmentId.make("env-local"),
         id: ProjectId.make("project-local"),
-        title: "KataCode",
+        title: "Kata Code",
         repositoryIdentity: repoIdentity,
       }),
       makeProject({
         environmentId: EnvironmentId.make("env-staging"),
         id: ProjectId.make("project-staging"),
-        title: "KataCode",
+        title: "Kata Code",
         repositoryIdentity: repoIdentity,
       }),
     ];
@@ -102,7 +102,7 @@ describe("groupProjectsByRepository", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
       key: "github.com/gannonh/katacode",
-      title: "KataCode",
+      title: "Kata Code",
       subtitle: "gannonh/katacode",
       projectCount: 2,
       threadCount: 2,

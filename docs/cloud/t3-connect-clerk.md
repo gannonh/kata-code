@@ -1,20 +1,20 @@
 ---
 type: Guide
-title: "KataCode Connect Clerk Setup"
-description: "KataCode Connect uses one Clerk application for web, desktop, and mobile authentication. The relay accepts"
+title: "Kata Code Connect Clerk Setup"
+description: "Kata Code Connect uses one Clerk application for web, desktop, and mobile authentication. The relay accepts"
 tags: [cloud, guide]
 timestamp: 2026-06-16T17:10:05Z
 ---
 
-# KataCode Connect Clerk Setup
+# Kata Code Connect Clerk Setup
 
-KataCode Connect uses one Clerk application for web, desktop, and mobile authentication. The relay accepts
+Kata Code Connect uses one Clerk application for web, desktop, and mobile authentication. The relay accepts
 Clerk JWTs only when they are generated from the `t3-relay` template with the shared
 `t3-code-relay` audience.
 
 ## Application Keys
 
-KataCode Connect is disabled in a fresh clone. To enable it for source builds, add a repository-root `.env`
+Kata Code Connect is disabled in a fresh clone. To enable it for source builds, add a repository-root `.env`
 or `.env.local` file:
 
 ```dotenv
@@ -153,9 +153,9 @@ For a private beta where people should request access, use **Clerk Dashboard > W
 1. Toggle on **Enable waitlist** and save.
 2. Review requests on the same page and select **Invite** or **Deny**.
 
-Approved signed-in users manage KataCode Connect under **Connections**. The web and desktop sidebars do
+Approved signed-in users manage Kata Code Connect under **Connections**. The web and desktop sidebars do
 not expose a dedicated account or waitlist control. Signed-out users reach Clerk's waitlist and
-sign-in flow contextually from the KataCode Connect controls on the Connections page.
+sign-in flow contextually from the Kata Code Connect controls on the Connections page.
 
 On mobile, signed-out users open **Settings > T3 Account** to reach `/settings/waitlist` within the
 Settings form sheet. It submits enrollment through Clerk's `useWaitlist()` flow because the prebuilt

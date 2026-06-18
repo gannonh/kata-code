@@ -391,7 +391,7 @@ function assertDescendantPid(
 ): Effect.Effect<void, ProcessDiagnosticsError, ChildProcessSpawner.ChildProcessSpawner> {
   if (pid === process.pid) {
     return Effect.fail(
-      toProcessDiagnosticsError("Refusing to signal the KataCode server process."),
+      toProcessDiagnosticsError("Refusing to signal the Kata Code server process."),
     );
   }
 
@@ -405,7 +405,7 @@ function assertDescendantPid(
         ? Effect.void
         : Effect.fail(
             toProcessDiagnosticsError(
-              `Process ${pid} is not a live descendant of the KataCode server.`,
+              `Process ${pid} is not a live descendant of the Kata Code server.`,
             ),
           );
     }),

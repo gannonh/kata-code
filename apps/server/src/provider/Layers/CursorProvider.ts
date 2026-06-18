@@ -85,7 +85,7 @@ export function buildInitialCursorProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Cursor is disabled in KataCode settings.",
+          message: "Cursor is disabled in Kata Code settings.",
         },
       });
     }
@@ -990,7 +990,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Cursor is disabled in KataCode settings.",
+        message: "Cursor is disabled in Kata Code settings.",
       },
     });
   }

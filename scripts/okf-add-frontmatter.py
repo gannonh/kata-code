@@ -57,7 +57,7 @@ def description_from_body(body: str) -> str:
         if not stripped or stripped.startswith("#"):
             continue
         return stripped[:200]
-    return "KataCode documentation."
+    return "Kata Code documentation."
 
 
 def has_frontmatter(text: str) -> bool:

@@ -100,5 +100,5 @@ export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironment
     return hostname;
   }
 
-  return normalizeLabel(input.cwdBaseName) ?? "KataCode environment";
+  return normalizeLabel(input.cwdBaseName) ?? "Kata Code environment";
 });

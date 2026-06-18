@@ -544,7 +544,7 @@ export class RelayEnvironmentPrincipal extends Context.Service<
 const RelayClientBearerAuthorization = HttpApiSecurity.http({ scheme: "bearer" }).pipe(
   HttpApiSecurity.annotate(
     OpenApi.Description,
-    "Clerk session or OAuth bearer token for the signed-in KataCode Connect user.",
+    "Clerk session or OAuth bearer token for the signed-in Kata Code Connect user.",
   ),
 );
 
@@ -1013,7 +1013,7 @@ export const RelayApi = HttpApi.make("RelayApi")
     RelayDpopClientGroup,
     RelayServerGroup,
   )
-  .annotate(OpenApi.Title, "KataCode Relay API")
+  .annotate(OpenApi.Title, "Kata Code Relay API")
   .annotate(OpenApi.Version, "1.0.0")
   .annotate(
     OpenApi.Description,

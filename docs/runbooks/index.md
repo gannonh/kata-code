@@ -16,7 +16,7 @@ Operational procedures for CI, release, and observability.
 ## Related
 
 - [Fork setup — Phase 2 CI/release](/specs/fork-setup.md)
-- [Cloud — KataCode Connect](/cloud/index.md)
+- [Cloud — Kata Code Connect](/cloud/index.md)
 
 ## History
 

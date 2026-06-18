@@ -1,14 +1,14 @@
 ---
 type: Guide
 title: "Remote Access"
-description: "Use this when you want to connect to a KataCode server from another device such as a phone, tablet, or separate desktop app."
+description: "Use this when you want to connect to a Kata Code server from another device such as a phone, tablet, or separate desktop app."
 tags: [user, guide]
 timestamp: 2026-06-16T17:10:05Z
 ---
 
 # Remote Access
 
-Use this when you want to connect to a KataCode server from another device such as a phone, tablet, or separate desktop app.
+Use this when you want to connect to a Kata Code server from another device such as a phone, tablet, or separate desktop app.
 
 ## Recommended Setup
 
@@ -110,29 +110,29 @@ npx katacode serve --tailscale-serve --tailscale-serve-port 8443
 
 ### Option 3: Desktop-Managed SSH Launch
 
-Use this when you want the desktop app to start or reuse KataCode on another machine over SSH.
+Use this when you want the desktop app to start or reuse Kata Code on another machine over SSH.
 
 1. Open **Settings** → **Connections**.
 2. Under **Remote Environments**, choose **Add environment**.
 3. Select the SSH launch flow.
 4. Enter the SSH target, such as `user@example.com`.
-5. Confirm the launch. The desktop app probes the host, starts or reuses a remote KataCode server, opens a local port forward, and saves the environment.
+5. Confirm the launch. The desktop app probes the host, starts or reuses a remote Kata Code server, opens a local port forward, and saves the environment.
 
-After setup, the renderer connects to a local forwarded HTTP/WebSocket endpoint. The remote host still owns the actual KataCode server, projects, files, git state, terminals, and provider sessions.
+After setup, the renderer connects to a local forwarded HTTP/WebSocket endpoint. The remote host still owns the actual Kata Code server, projects, files, git state, terminals, and provider sessions.
 
 SSH launch is a desktop feature because it needs local process and SSH access. Once the environment is paired and saved, it uses the same environment list and connection model as direct LAN, Tailscale, HTTPS, or future tunnel-backed environments.
 
 #### SSH Launch Troubleshooting
 
-The desktop SSH launcher connects with a non-interactive `sh` session, writes a small launcher script under `~/.katacode/ssh-launch/<host-key>/`, starts or reuses a remote KataCode server, and forwards the remote loopback port back to your desktop.
+The desktop SSH launcher connects with a non-interactive `sh` session, writes a small launcher script under `~/.katacode/ssh-launch/<host-key>/`, starts or reuses a remote Kata Code server, and forwards the remote loopback port back to your desktop.
 
-The remote host must have a compatible Node.js runtime. KataCode uses the server package's `engines.node` requirement:
+The remote host must have a compatible Node.js runtime. Kata Code uses the server package's `engines.node` requirement:
 
 ```text
 ^22.16 || ^23.11 || >=24.10
 ```
 
-During SSH launch, KataCode first checks whether `node` is already available on `PATH`. If it is missing, the launcher tries common non-interactive shell locations and version-manager shims/activation hooks:
+During SSH launch, Kata Code first checks whether `node` is already available on `PATH`. If it is missing, the launcher tries common non-interactive shell locations and version-manager shims/activation hooks:
 
 - `~/.local/bin`, `~/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`
 - Volta via `~/.volta/bin`
@@ -143,7 +143,7 @@ During SSH launch, KataCode first checks whether `node` is already available on 
 - nvm via `$NVM_DIR/nvm.sh`, then `nvm use default`, `nvm use node`, or `nvm use --lts`
 - installed nvm versions under `$NVM_DIR/versions/node/*/bin`
 
-If launch fails with `node: command not found`, a port-scan failure, or a message that the remote Node version does not satisfy the required range, SSH into the host and check the same non-interactive shell path KataCode uses:
+If launch fails with `node: command not found`, a port-scan failure, or a message that the remote Node version does not satisfy the required range, SSH into the host and check the same non-interactive shell path Kata Code uses:
 
 ```bash
 ssh user@example.com 'sh -lc "command -v node && node --version"'
@@ -183,7 +183,7 @@ Use hosted pairing when the backend is reachable from the browser over HTTPS/WSS
 
 Do not use hosted pairing for plain HTTP LAN URLs such as `http://192.168.x.y:3773`. Browsers block an HTTPS page from connecting to an insecure HTTP or WS backend. For those endpoints, use the direct pairing URL shown by the desktop app or CLI from a client that can open that HTTP URL directly.
 
-Hosted pairing does not proxy traffic through KataCode. The browser still connects directly to the backend URL in the pairing link.
+Hosted pairing does not proxy traffic through Kata Code. The browser still connects directly to the backend URL in the pairing link.
 
 ## Managing Access Later
 
@@ -207,7 +207,7 @@ Use `katacode auth --help` and the nested subcommand help pages for the full ref
 
 ## Migrating from T3 Code
 
-If you previously used upstream T3 Code, your data may still live under `~/.t3`. KataCode defaults to `~/.katacode`. To reuse existing state without copying files, set:
+If you previously used upstream T3 Code, your data may still live under `~/.t3`. Kata Code defaults to `~/.katacode`. To reuse existing state without copying files, set:
 
 ```bash
 export KATACODE_HOME=~/.t3

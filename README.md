@@ -1,13 +1,13 @@
-# KataCode
+# Kata Code
 
-KataCode is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code) — a minimal web GUI for coding agents (Codex, Claude, Cursor, OpenCode, and more).
+Kata Code is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code) — a minimal web GUI for coding agents (Codex, Claude, Cursor, OpenCode, and more).
 
 This repository is maintained independently at [gannonh/katacode](https://github.com/gannonh/katacode). See [FORK.md](./FORK.md) for fork operations, upstream sync, and intentional divergence.
 
 ## Installation
 
 > [!WARNING]
-> KataCode currently supports Codex, Claude, Cursor, and OpenCode.
+> Kata Code currently supports Codex, Claude, Cursor, and OpenCode.
 > Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
@@ -50,7 +50,7 @@ Very early WIP. Expect bugs. Contributions are welcome on the fork — see [CONT
 
 ## Development
 
-KataCode uses [Vite+](https://viteplus.dev/) (`vp`) for the monorepo toolchain.
+Kata Code uses [Vite+](https://viteplus.dev/) (`vp`) for the monorepo toolchain.
 
 ```bash
 # macOS / Linux
@@ -65,4 +65,4 @@ Agent instructions: [AGENTS.md](./AGENTS.md)
 
 ## Attribution
 
-KataCode is derived from [T3 Code](https://github.com/pingdotgg/t3code) (MIT). Upstream copyright and license notices are retained in files with substantial derived code. See `THIRD_PARTY_NOTICES.md` in app packages.
+Kata Code is derived from [T3 Code](https://github.com/pingdotgg/t3code) (MIT). Upstream copyright and license notices are retained in files with substantial derived code. See `THIRD_PARTY_NOTICES.md` in app packages.

@@ -14,7 +14,7 @@ Accepted
 
 ## Context
 
-KataCode is a hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code). We need upstream bug fixes and features while shipping an independent product from `gannonh/katacode`.
+Kata Code is a hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code). We need upstream bug fixes and features while shipping an independent product from `gannonh/katacode`.
 
 Alternatives considered:
 

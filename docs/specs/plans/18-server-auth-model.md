@@ -1,7 +1,7 @@
 ---
 type: Plan
 title: "Server Auth Model Plan"
-description: "Define the long-term server auth architecture for KataCode before first-class remote environments ship."
+description: "Define the long-term server auth architecture for Kata Code before first-class remote environments ship."
 tags: [plan]
 timestamp: 2026-06-16T17:10:05Z
 ---
@@ -10,7 +10,7 @@ timestamp: 2026-06-16T17:10:05Z
 
 ## Purpose
 
-Define the long-term server auth architecture for KataCode before first-class remote environments ship.
+Define the long-term server auth architecture for Kata Code before first-class remote environments ship.
 
 This plan is deliberately broader than the current WebSocket token check and narrower than a complete remote collaboration system. The goal is to make the server secure by default, keep local desktop UX frictionless, and leave clean integration points for future remote access methods.
 

@@ -53,7 +53,7 @@ export function createManagedRelaySession(input: {
         try: input.readClerkToken,
         catch: (cause) =>
           new ManagedRelaySessionError({
-            message: "Could not obtain the KataCode Connect session token.",
+            message: "Could not obtain the Kata Code Connect session token.",
             cause,
           }),
       }),
@@ -76,7 +76,7 @@ function readSessionClerkToken(
         ? Effect.succeed(token)
         : Effect.fail(
             new ManagedRelaySessionError({
-              message: "The KataCode Connect session token is unavailable.",
+              message: "The Kata Code Connect session token is unavailable.",
             }),
           ),
     ),
@@ -121,7 +121,7 @@ function requireClerkToken(
   if (!session || session.accountId !== accountId) {
     return Effect.fail(
       new ManagedRelaySessionError({
-        message: "Sign in to KataCode Connect before loading relay data.",
+        message: "Sign in to Kata Code Connect before loading relay data.",
       }),
     );
   }
@@ -190,7 +190,7 @@ export function readManagedRelaySnapshotState<A>(
   let error: string | null = null;
   if (result._tag === "Failure") {
     const cause = Cause.squash(result.cause);
-    error = cause instanceof Error ? cause.message : "Could not load KataCode Connect data.";
+    error = cause instanceof Error ? cause.message : "Could not load Kata Code Connect data.";
   }
   return {
     data: Option.getOrNull(AsyncResult.value(result)),

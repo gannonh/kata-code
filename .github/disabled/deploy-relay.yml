@@ -1,6 +1,6 @@
 # Disabled — see .github/disabled/README.md (Phase 2 infrastructure split)
 
-name: Deploy KataCode Connect relay
+name: Deploy Kata Code Connect relay
 
 on:
   workflow_dispatch:

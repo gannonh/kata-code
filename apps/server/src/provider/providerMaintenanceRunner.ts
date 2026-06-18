@@ -361,9 +361,9 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
                 startedAt,
                 finishedAt,
                 message: couldNotVerify
-                  ? "Update command completed, but KataCode could not verify the provider version."
+                  ? "Update command completed, but Kata Code could not verify the provider version."
                   : stillOutdated
-                    ? "Update command completed, but KataCode still detects an outdated provider version."
+                    ? "Update command completed, but Kata Code still detects an outdated provider version."
                     : "Provider updated.",
                 output: commandOutput(result),
               }),

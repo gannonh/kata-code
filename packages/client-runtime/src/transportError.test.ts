@@ -21,7 +21,7 @@ describe("isTransportConnectionErrorMessage", () => {
 
   it("returns true for the T3 server WebSocket message", () => {
     expect(
-      isTransportConnectionErrorMessage("Unable to connect to the KataCode server WebSocket."),
+      isTransportConnectionErrorMessage("Unable to connect to the Kata Code server WebSocket."),
     ).toBe(true);
   });
 

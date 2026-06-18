@@ -1,14 +1,14 @@
 ---
 type: Runbook
 title: "Observability"
-description: "KataCode has one server-side observability model:"
+description: "Kata Code has one server-side observability model:"
 tags: [operations, runbook]
 timestamp: 2026-06-16T17:10:05Z
 ---
 
 # Observability
 
-KataCode has one server-side observability model:
+Kata Code has one server-side observability model:
 
 - pretty logs go to stdout for humans
 - completed spans go to a local NDJSON trace file
@@ -149,7 +149,7 @@ macOS app bundle example:
 KATACODE_OTLP_TRACES_URL=http://localhost:4318/v1/traces \
 KATACODE_OTLP_METRICS_URL=http://localhost:4318/v1/metrics \
 KATACODE_OTLP_SERVICE_NAME=t3-desktop \
-"/Applications/KataCode.app/Contents/MacOS/KataCode"
+"/Applications/Kata Code.app/Contents/MacOS/Kata Code"
 ```
 
 Direct binary example:

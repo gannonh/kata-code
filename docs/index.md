@@ -2,9 +2,9 @@
 okf_version: "0.1"
 ---
 
-# KataCode knowledge bundle
+# Kata Code knowledge bundle
 
-Open Knowledge Format (OKF) documentation for the [KataCode](https://github.com/gannonh/katacode) fork of [T3 Code](https://github.com/pingdotgg/t3code).
+Open Knowledge Format (OKF) documentation for the [Kata Code](https://github.com/gannonh/katacode) fork of [T3 Code](https://github.com/pingdotgg/t3code).
 
 ## Start here
 

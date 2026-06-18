@@ -523,7 +523,7 @@ const relayClientRequest = <A>(
     Effect.mapError(
       (cause) =>
         new EnvironmentHttpInternalServerError({
-          message: `KataCode Connect relay request failed: ${String(cause)}`,
+          message: `Kata Code Connect relay request failed: ${String(cause)}`,
         }),
     ),
     withRelayClientTracing,
@@ -610,7 +610,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
     CloudCliTokenManagerError: (error) =>
       failEnvironmentCloudInternalError(error.message)(error.cause),
     SecretStoreError: failEnvironmentCloudInternalError(
-      "Could not persist desired KataCode Connect link state.",
+      "Could not persist desired Kata Code Connect link state.",
     ),
   }),
 );
@@ -889,7 +889,7 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
       scopes: AuthStandardClientScopes,
       subject: "cloud-connect",
       ttl: Duration.minutes(2),
-      label: "KataCode Connect connect",
+      label: "Kata Code Connect connect",
       proofKeyThumbprint: proof.clientProofKeyThumbprint,
     });
     const responsePayload = {

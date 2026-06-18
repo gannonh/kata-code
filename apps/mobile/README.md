@@ -1,7 +1,7 @@
-# KataCode Mobile
+# Kata Code Mobile
 
 > [!WARNING]
-> KataCode Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
+> Kata Code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
 
 ## Quickstart
 
@@ -10,13 +10,13 @@
 
 This app has three variants:
 
-- `development`: Expo dev client, installable side-by-side as `KataCode Dev`
-- `preview`: persistent internal preview build, installable side-by-side as `KataCode Preview`
-- `production`: store/release build as `KataCode`
+- `development`: Expo dev client, installable side-by-side as `Kata Code Dev`
+- `preview`: persistent internal preview build, installable side-by-side as `Kata Code Preview`
+- `production`: store/release build as `Kata Code`
 
 Run commands from `apps/mobile`.
 
-KataCode Connect is optional and disabled in a fresh clone. Public configuration belongs in the
+Kata Code Connect is optional and disabled in a fresh clone. Public configuration belongs in the
 repository-root `.env` or `.env.local`, not an `apps/mobile/.env` file. See
 [`../../.env.example`](../../.env.example).
 

@@ -20,7 +20,7 @@ Setup, user workflows, providers, cloud, and integrations.
 
 See [providers index](/providers/index.md).
 
-## Cloud (KataCode Connect)
+## Cloud (Kata Code Connect)
 
 See [cloud index](/cloud/index.md).
 

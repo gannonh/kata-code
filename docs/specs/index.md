@@ -1,13 +1,13 @@
 # Specs roadmap
 
-Work map for KataCode.
+Work map for Kata Code.
 
 ## Active / next
 
-| Item                            | Status      | Document                                                                                                                                                |
-| ------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 2 — remaining infra split | **Planned** | Relay deploy, mobile EAS, marketing — see [disabled workflows README](../../.github/disabled/README.md)                                                 |
-| Upstream sync (first merge)     | **Planned** | [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook)                                                                                       |
+| Item                            | Status      | Document                                                                                                |
+| ------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
+| Phase 2 — remaining infra split | **Planned** | Relay deploy, mobile EAS, marketing — see [disabled workflows README](../../.github/disabled/README.md) |
+| Upstream sync (first merge)     | **Planned** | [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook)                                       |
 
 ## Completed
 

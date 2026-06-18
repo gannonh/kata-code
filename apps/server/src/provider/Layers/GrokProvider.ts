@@ -73,7 +73,7 @@ export function buildInitialGrokProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Grok is disabled in KataCode settings.",
+          message: "Grok is disabled in Kata Code settings.",
         },
       });
     }
@@ -183,7 +183,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Grok is disabled in KataCode settings.",
+        message: "Grok is disabled in Kata Code settings.",
       },
     });
   }

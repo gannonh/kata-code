@@ -287,7 +287,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
         projects: [
           {
             id: projectId,
-            title: "KataCode",
+            title: "Kata Code",
           },
         ],
         threads: [
@@ -391,7 +391,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
 
         const project = {
           id: projectId,
-          title: "KataCode",
+          title: "Kata Code",
           workspaceRoot: "/workspace",
           repositoryIdentity: null,
           defaultModelSelection: null,
@@ -546,7 +546,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
 
         const project = {
           id: projectId,
-          title: "KataCode",
+          title: "Kata Code",
           workspaceRoot: "/workspace",
           repositoryIdentity: null,
           defaultModelSelection: null,

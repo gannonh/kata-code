@@ -33,7 +33,7 @@ describe("branding", () => {
   });
 
   it("builds display names from stage labels", () => {
-    assert.equal(formatAppDisplayName("Dev"), "KataCode (Dev)");
+    assert.equal(formatAppDisplayName("Dev"), "Kata Code (Dev)");
     assert.equal(formatUpstreamAppDisplayName("Alpha"), "T3 Code (Alpha)");
   });
 
@@ -45,9 +45,9 @@ describe("branding", () => {
         hostedAppChannel: "nightly",
       }),
       {
-        baseName: "KataCode",
+        baseName: "Kata Code",
         stageLabel: "Nightly",
-        displayName: "KataCode (Nightly)",
+        displayName: "Kata Code (Nightly)",
       },
     );
   });
@@ -58,7 +58,7 @@ describe("branding", () => {
         isDevelopment: false,
         appVersion: "0.0.27",
       }),
-      ["KataCode (Alpha)", "T3 Code (Alpha)"],
+      ["Kata Code (Alpha)", "KataCode (Alpha)", "T3 Code (Alpha)"],
     );
   });
 });

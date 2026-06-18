@@ -444,7 +444,7 @@ describe("MobileRegistrations", () => {
             token: "push-to-start-token",
           },
           aggregate: {
-            title: "KataCode",
+            title: "Kata Code",
             subtitle: "Agent work in progress",
             activeCount: 1,
             activities: [

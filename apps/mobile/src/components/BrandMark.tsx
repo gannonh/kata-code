@@ -1,5 +1,6 @@
 import { Image, View } from "react-native";
 
+import { APP_BASE_NAME } from "@kata-sh/code-shared/branding";
 import { AppText as Text } from "./AppText";
 
 const BRAND_MARK_SOURCE = require("../../../../assets/prod/black-ios-1024.png");
@@ -26,7 +27,7 @@ export function BrandMark(props: { readonly compact?: boolean; readonly stageLab
             className="text-[17px] font-t3-bold text-foreground"
             style={{ letterSpacing: -0.4 }}
           >
-            KataCode
+            {APP_BASE_NAME}
           </Text>
           <View className="rounded-full bg-subtle px-2 py-1">
             <Text

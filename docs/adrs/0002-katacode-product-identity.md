@@ -1,12 +1,12 @@
 ---
 type: ADR
-title: "KataCode product identity"
+title: "Kata Code product identity"
 description: "npm scope @kata-sh/code, katacode CLI binary, KATACODE_* env prefix, and ~/.katacode state directory for the fork."
 tags: [fork, branding, identity, adr]
 timestamp: 2026-06-16T22:45:00Z
 ---
 
-# ADR 0002: KataCode product identity
+# ADR 0002: Kata Code product identity
 
 ## Status
 
@@ -18,9 +18,9 @@ The fork must be distinguishable from upstream T3 Code in package names, CLI, en
 
 ## Decision
 
-| Surface                  | KataCode value                    |
+| Surface                  | Kata Code value                   |
 | ------------------------ | --------------------------------- |
-| Product name             | KataCode                          |
+| Product name             | Kata Code                         |
 | GitHub                   | `gannonh/katacode`                |
 | npm scope                | `@kata-sh/code-*`                 |
 | CLI package              | `@kata-sh/code-cli`               |

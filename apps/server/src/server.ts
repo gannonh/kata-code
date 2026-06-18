@@ -455,9 +455,11 @@ export const makeServerLayer = Layer.unwrap(
           Effect.sleep("250 millis").pipe(
             Effect.andThen(reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`)),
             Effect.retry({ times: 4 }),
-            Effect.tap(() => Effect.logInfo("KataCode Connect desired link reconciled on startup")),
+            Effect.tap(() =>
+              Effect.logInfo("Kata Code Connect desired link reconciled on startup"),
+            ),
             Effect.catch((cause) =>
-              Effect.logWarning("Failed to reconcile KataCode Connect desired link on startup", {
+              Effect.logWarning("Failed to reconcile Kata Code Connect desired link on startup", {
                 cause,
               }),
             ),

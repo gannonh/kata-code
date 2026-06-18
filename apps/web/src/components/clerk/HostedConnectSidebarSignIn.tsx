@@ -50,7 +50,7 @@ function ConfiguredHostedConnectSidebarSignIn() {
             onClick={openAuthPrompt}
           >
             <LogInIcon className="size-4" />
-            <span>Sign in to KataCode Connect</span>
+            <span>Sign in to Kata Code Connect</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

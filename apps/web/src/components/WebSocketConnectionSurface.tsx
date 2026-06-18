@@ -54,7 +54,7 @@ function describeExhaustedToast(): string {
 }
 
 function getConnectionDisplayName(status: WsConnectionStatus): string {
-  return status.connectionLabel?.trim() || "KataCode server";
+  return status.connectionLabel?.trim() || "Kata Code server";
 }
 
 function buildReconnectTitle(status: WsConnectionStatus): string {

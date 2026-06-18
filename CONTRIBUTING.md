@@ -1,6 +1,6 @@
-# Contributing to KataCode
+# Contributing to Kata Code
 
-KataCode is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code), maintained at [gannonh/katacode](https://github.com/gannonh/katacode). Read [FORK.md](./FORK.md) before large refactors or upstream merges.
+Kata Code is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code), maintained at [gannonh/katacode](https://github.com/gannonh/katacode). Read [FORK.md](./FORK.md) before large refactors or upstream merges.
 
 ## Ground rules
 

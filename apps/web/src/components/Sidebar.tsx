@@ -63,7 +63,7 @@ import {
 } from "@kata-sh/code-contracts/settings";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
-import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
+import { APP_STAGE_LABEL, APP_VERSION, APP_BASE_NAME } from "../branding";
 import { AppMark } from "./AppMark";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId } from "../lib/utils";
@@ -2509,7 +2509,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
             >
               <AppMark className="size-5 shrink-0 object-contain" />
               <span className="truncate text-sm font-medium tracking-tight text-foreground">
-                KataCode
+                {APP_BASE_NAME}
               </span>
               <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
                 {APP_STAGE_LABEL}

@@ -218,7 +218,7 @@ function ConfiguredSettingsRouteScreen() {
 
       Alert.alert(
         "Disable notifications",
-        "Notification permission is controlled by iOS. Open Settings to disable notifications for KataCode.",
+        "Notification permission is controlled by iOS. Open Settings to disable notifications for Kata Code.",
         [
           { text: "Cancel", style: "cancel" },
           { text: "Open Settings", onPress: () => void Linking.openSettings() },
@@ -290,13 +290,13 @@ function ConfiguredSettingsRouteScreen() {
           <SettingsSection title="Account">
             <SettingsRow
               icon="person.crop.circle"
-              label="KataCode Account"
+              label="Kata Code Account"
               value={accountLabel}
               onPress={openAccount}
             />
           </SettingsSection>
           <Text className="px-2 text-[13px] leading-[18px] text-foreground-muted">
-            KataCode works locally without signing in. Cloud features are optional.
+            Kata Code works locally without signing in. Cloud features are optional.
           </Text>
         </View>
 

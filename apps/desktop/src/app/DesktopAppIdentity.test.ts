@@ -19,9 +19,9 @@ const defaultEnvironmentInput = {
   platform: "darwin",
   processArch: "arm64",
   appVersion: "1.2.3",
-  appPath: "/Applications/KataCode.app/Contents/Resources/app.asar",
+  appPath: "/Applications/Kata Code.app/Contents/Resources/app.asar",
   isPackaged: true,
-  resourcesPath: "/Applications/KataCode.app/Contents/Resources",
+  resourcesPath: "/Applications/Kata Code.app/Contents/Resources",
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
@@ -38,7 +38,7 @@ interface ElectronAppCalls {
 const makeElectronAppLayer = (calls: ElectronAppCalls) =>
   Layer.succeed(ElectronApp.ElectronApp, {
     metadata: Effect.die("unexpected metadata read"),
-    name: Effect.succeed("KataCode"),
+    name: Effect.succeed("Kata Code"),
     whenReady: Effect.void,
     quit: Effect.void,
     exit: () => Effect.void,
@@ -173,8 +173,8 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         yield* identity.configure;
 
-        assert.deepEqual(calls.setName, ["KataCode (Alpha)"]);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "KataCode (Alpha)");
+        assert.deepEqual(calls.setName, ["Kata Code (Alpha)"]);
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "Kata Code (Alpha)");
         assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
         assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
         assert.deepEqual(calls.setDockIcon, ["/icon.png"]);

@@ -1072,7 +1072,7 @@ export function makeOpenCodeAdapter(
               }
               const openCodeSession = yield* runOpenCodeSdk("session.create", () =>
                 client.session.create({
-                  title: `KataCode ${input.threadId}`,
+                  title: `Kata Code ${input.threadId}`,
                   permission: buildOpenCodePermissionRules(input.runtimeMode),
                 }),
               );

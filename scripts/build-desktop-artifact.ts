@@ -8,6 +8,7 @@ import desktopPackageJson from "../apps/desktop/package.json" with { type: "json
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
+import { APP_BASE_NAME } from "@kata-sh/code-shared/branding";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -704,8 +705,8 @@ export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefi
 
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "KataCode (Nightly)"
-    : (desktopPackageJson.productName ?? "KataCode");
+    ? `${APP_BASE_NAME} (Nightly)`
+    : (desktopPackageJson.productName ?? APP_BASE_NAME);
 }
 
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -719,7 +720,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: "com.katacode.app",
     productName: resolveDesktopProductName(version),
-    artifactName: "KataCode-${version}-${arch}.${ext}",
+    artifactName: "Kata-Code-${version}-${arch}.${ext}",
     asarUnpack: [...DESKTOP_NATIVE_ASAR_UNPACK],
     afterPack: "scripts/electron-after-pack.cjs",
     directories: {
@@ -749,7 +750,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       },
       protocols: [
         {
-          name: "KataCode",
+          name: "Kata Code",
           schemes: ["katacode"],
         },
       ],
@@ -947,8 +948,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     katacodeCommitHash: commitHash,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    description: "KataCode desktop build",
-    author: "KataCode",
+    description: `${APP_BASE_NAME} desktop build`,
+    author: APP_BASE_NAME,
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
       options.platform,
@@ -1140,7 +1141,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for KataCode."),
+  Command.withDescription(`Build a desktop artifact for ${APP_BASE_NAME}.`),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

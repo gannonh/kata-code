@@ -192,12 +192,12 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       assert.deepEqual(error.commandPath, ["katacode", "connect"]);
       assert.include(
         error.errors[0]?.message ?? "",
-        "missing KataCode Connect public configuration",
+        "missing Kata Code Connect public configuration",
       );
 
       const output = (yield* TestConsole.errorLines).join("\n");
       assert.include(output, "ERROR");
-      assert.include(output, "missing KataCode Connect public configuration");
+      assert.include(output, "missing Kata Code Connect public configuration");
     }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer))),
   );
 
@@ -231,12 +231,12 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         runConnectCli(["connect", "status", "--base-dir", baseDir]),
       );
 
-      assert.include(output, "KataCode Connect\n  Exposure: disabled");
+      assert.include(output, "Kata Code Connect\n  Exposure: disabled");
       assert.include(output, "  Authorization: missing");
       assert.include(output, "  Environment link: not provisioned");
       assert.include(
         output,
-        "Next: Run `katacode connect link` to authorize and enable KataCode Connect.",
+        "Next: Run `katacode connect link` to authorize and enable Kata Code Connect.",
       );
     }),
   );
@@ -268,7 +268,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         readonly authenticated: boolean;
       };
 
-      assert.equal(login.output, "Signed in to KataCode Connect.");
+      assert.equal(login.output, "Signed in to Kata Code Connect.");
       assert.isFalse(decoded.desired);
       assert.isTrue(decoded.authenticated);
     }),
@@ -281,7 +281,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         runConnectCli(["connect", "unlink", "--base-dir", baseDir]),
       );
 
-      assert.equal(output, "KataCode Connect is disabled locally.");
+      assert.equal(output, "Kata Code Connect is disabled locally.");
     }),
   );
 
@@ -297,7 +297,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         runConnectCli(["connect", "logout", "--base-dir", baseDir]),
       );
 
-      assert.equal(output, "Signed out of KataCode Connect locally.");
+      assert.equal(output, "Signed out of Kata Code Connect locally.");
       assert.isFalse(existsSync(tokenPath));
     }),
   );

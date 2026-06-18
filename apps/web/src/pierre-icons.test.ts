@@ -14,7 +14,7 @@ describe("Pierre file icons", () => {
     assert.equal(resolvePierreIconForEntry("vite.config.ts", "file")?.token, "vite");
   });
 
-  it("extends Pierre with KataCode-specific exact filename icons", () => {
+  it("extends Pierre with Kata Code-specific exact filename icons", () => {
     assert.equal(
       resolvePierreIconForEntry("package.json", "file")?.name,
       "katacode-file-icon-package-json",

@@ -491,7 +491,7 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.withDescription("Development mode to run."),
   ),
   katacodeHome: Flag.string("home-dir").pipe(
-    Flag.withDescription("Base directory for all KataCode data (equivalent to KATACODE_HOME)."),
+    Flag.withDescription("Base directory for all Kata Code data (equivalent to KATACODE_HOME)."),
     Flag.withFallbackConfig(optionalStringConfig("KATACODE_HOME")),
   ),
   noBrowser: Flag.boolean("no-browser").pipe(

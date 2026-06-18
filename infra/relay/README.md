@@ -1,22 +1,22 @@
-# KataCode Connect Relay
+# Kata Code Connect Relay
 
 > [!WARNING]
-> KataCode Connect is currently in private beta. Join the waitlist in the app under Settings > KataCode Connect.
+> Kata Code Connect is currently in private beta. Join the waitlist in the app under Settings > Kata Code Connect.
 
-The relay is the hosted control plane for KataCode Connect. It helps clients discover and connect to
+The relay is the hosted control plane for Kata Code Connect. It helps clients discover and connect to
 remote environments, manages the cloud-side records needed for those connections, and delivers
 optional mobile notifications and Live Activities.
 
-The relay is intentionally not in the hot path for normal KataCode traffic. After a client connects,
+The relay is intentionally not in the hot path for normal Kata Code traffic. After a client connects,
 regular API and WebSocket traffic goes directly between that client and the selected environment.
-See the [KataCode Connect architecture overview](../../docs/cloud/t3-code-connect-auth-flow.html) for the larger system
+See the [Kata Code Connect architecture overview](../../docs/cloud/t3-code-connect-auth-flow.html) for the larger system
 design.
 
 ## Responsibilities
 
 The relay currently owns:
 
-- Linking KataCode environments to a cloud account.
+- Linking Kata Code environments to a cloud account.
 - Provisioning and tracking managed environment endpoints.
 - Issuing short-lived credentials used to connect clients to linked environments.
 - Listing linked environments and registered mobile devices for an account.
@@ -159,8 +159,8 @@ and hosted web builds.
 
 See:
 
-- [KataCode Connect Clerk Setup](../../docs/cloud/t3-connect-clerk.md) for Clerk keys, JWT templates, and waitlist
+- [Kata Code Connect Clerk Setup](../../docs/cloud/t3-connect-clerk.md) for Clerk keys, JWT templates, and waitlist
   setup.
 - [Relay Observability](../../docs/relay-observability.md) for deployment tracing and diagnostics.
-- [KataCode Connect Architecture Overview](../../docs/cloud/t3-code-connect-auth-flow.html) for the full link,
+- [Kata Code Connect Architecture Overview](../../docs/cloud/t3-code-connect-auth-flow.html) for the full link,
   connect, endpoint, and notification flows.

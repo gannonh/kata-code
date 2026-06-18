@@ -28,8 +28,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "KataCode (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "KataCode (Nightly)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "Kata Code (Alpha)");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Kata Code (Nightly)");
   });
 
   it("uses production desktop artwork for all release channels", () => {

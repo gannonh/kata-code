@@ -1636,7 +1636,7 @@ function CloudLinkSwitch({
 }) {
   const control = (
     <Switch
-      aria-label="Enable KataCode Connect"
+      aria-label="Enable Kata Code Connect"
       checked={checked}
       disabled={disabled}
       {...(onCheckedChange ? { onCheckedChange } : {})}
@@ -1667,7 +1667,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       const clerkToken = await getToken(resolveRelayClerkTokenOptions());
       if (enabled) {
         if (!clerkToken) {
-          throw new Error("Sign in to KataCode Connect before linking this environment.");
+          throw new Error("Sign in to Kata Code Connect before linking this environment.");
         }
         await webRuntime.runPromise(linkPrimaryEnvironmentToCloud({ clerkToken }));
       } else {
@@ -1679,18 +1679,18 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       refreshManagedRelayEnvironments();
       toastManager.add({
         type: "success",
-        title: enabled ? "KataCode Connect linked" : "KataCode Connect unlinked",
+        title: enabled ? "Kata Code Connect linked" : "Kata Code Connect unlinked",
         description: enabled
-          ? "This environment is available through KataCode Connect."
-          : "This environment is no longer available through KataCode Connect.",
+          ? "This environment is available through Kata Code Connect."
+          : "This environment is no longer available through Kata Code Connect.",
       });
     } catch (cause) {
       const message =
-        cause instanceof Error ? cause.message : "Could not update KataCode Connect access.";
+        cause instanceof Error ? cause.message : "Could not update Kata Code Connect access.";
       setOperationError(message);
       toastManager.add({
         type: "error",
-        title: "Could not update KataCode Connect",
+        title: "Could not update Kata Code Connect",
         description: message,
       });
     } finally {
@@ -1712,7 +1712,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     } catch (cause) {
       toastManager.add({
         type: "error",
-        title: "Could not update KataCode Connect preferences",
+        title: "Could not update Kata Code Connect preferences",
         description:
           cause instanceof Error ? cause.message : "Could not update agent activity publishing.",
       });
@@ -1721,20 +1721,20 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     }
   };
   const disabledReason = !isSignedIn
-    ? "Sign in to KataCode Connect"
+    ? "Sign in to Kata Code Connect"
     : !canManageRelay
-      ? "Your session does not have permission to manage KataCode Connect access."
+      ? "Your session does not have permission to manage Kata Code Connect access."
       : null;
   const linked = primaryCloudLinkState.data?.linked ?? false;
 
   return (
     <>
       <SettingsRow
-        title="KataCode Connect"
+        title="Kata Code Connect"
         description={
           linked
-            ? "This environment is available to your other devices through KataCode Connect."
-            : "Make this environment available to your other devices through KataCode Connect."
+            ? "This environment is available to your other devices through Kata Code Connect."
+            : "Make this environment available to your other devices through Kata Code Connect."
         }
         status={operationError ?? primaryCloudLinkState.error}
         control={
@@ -1808,10 +1808,10 @@ function EmptyRemoteEnvironments({
                   className="border-b border-dotted border-current text-foreground/80 hover:text-foreground"
                   onClick={onConnectFromCloud}
                 >
-                  KataCode Connect
+                  Kata Code Connect
                 </button>
               ) : (
-                "KataCode Connect"
+                "Kata Code Connect"
               )}
             </>
           ) : null}
@@ -1856,7 +1856,7 @@ function ConfiguredCloudRemoteEnvironmentRows({
     try {
       const clerkToken = await getToken(resolveRelayClerkTokenOptions());
       if (!clerkToken) {
-        throw new Error("Sign in to KataCode Connect before connecting this environment.");
+        throw new Error("Sign in to Kata Code Connect before connecting this environment.");
       }
       const connection = await webRuntime.runPromise(
         connectManagedCloudEnvironment({ clerkToken, environment }),
@@ -1865,7 +1865,7 @@ function ConfiguredCloudRemoteEnvironmentRows({
       toastManager.add({
         type: "success",
         title: "Environment connected",
-        description: `${connection.label} is available through KataCode Connect.`,
+        description: `${connection.label} is available through Kata Code Connect.`,
       });
     } catch (cause) {
       toastManager.add({
@@ -1874,7 +1874,7 @@ function ConfiguredCloudRemoteEnvironmentRows({
         description:
           cause instanceof Error
             ? cause.message
-            : "Could not connect the KataCode Connect environment.",
+            : "Could not connect the Kata Code Connect environment.",
       });
     } finally {
       setConnectingEnvironmentId(null);
@@ -1907,11 +1907,11 @@ function ConfiguredCloudRemoteEnvironmentRows({
           <div className="flex items-center gap-2">
             <ConnectionStatusDot
               dotClassName="bg-muted-foreground/35"
-              tooltipText="Available through KataCode Connect"
+              tooltipText="Available through Kata Code Connect"
             />
             <p className="truncate text-sm font-medium">{environment.label}</p>
           </div>
-          <p className="mt-1 truncate text-xs text-muted-foreground">KataCode Connect</p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">Kata Code Connect</p>
         </div>
         <Button
           size="sm"
@@ -3037,8 +3037,8 @@ export function ConnectionsSettings() {
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {pendingDesktopServerExposureMode === "network-accessible"
-                    ? "KataCode will restart to expose this environment over the network."
-                    : "KataCode will restart and limit this environment back to this machine."}
+                    ? "Kata Code will restart to expose this environment over the network."
+                    : "Kata Code will restart and limit this environment back to this machine."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -3082,7 +3082,7 @@ export function ConnectionsSettings() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Disable Tailscale HTTPS?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  KataCode will restart the local backend without Tailscale Serve.
+                  Kata Code will restart the local backend without Tailscale Serve.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -3120,7 +3120,7 @@ export function ConnectionsSettings() {
               <DialogHeader>
                 <DialogTitle>Set up Tailscale HTTPS?</DialogTitle>
                 <DialogDescription>
-                  KataCode will restart the local backend with Tailscale Serve enabled and ask
+                  Kata Code will restart the local backend with Tailscale Serve enabled and ask
                   Tailscale to proxy HTTPS traffic to this backend.
                 </DialogDescription>
               </DialogHeader>

@@ -1,14 +1,14 @@
 ---
 type: Guide
 title: "Keybindings"
-description: "KataCode reads keybindings from:"
+description: "Kata Code reads keybindings from:"
 tags: [user, guide]
 timestamp: 2026-06-16T17:10:05Z
 ---
 
 # Keybindings
 
-KataCode reads keybindings from:
+Kata Code reads keybindings from:
 
 - `~/.katacode/userdata/keybindings.json` (packaged server / production)
 - `~/.katacode/dev/keybindings.json` (local development with `pnpm run dev`)

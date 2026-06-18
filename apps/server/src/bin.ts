@@ -17,7 +17,7 @@ import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
 const connectPublicConfigMissingMessage =
-  "KataCode Connect commands are unavailable: this build is missing KataCode Connect public configuration.";
+  "Kata Code Connect commands are unavailable: this build is missing Kata Code Connect public configuration.";
 
 class ConnectPublicConfigMissingError extends CliError.UserError {
   override get message() {
@@ -27,7 +27,7 @@ class ConnectPublicConfigMissingError extends CliError.UserError {
 
 const connectUnavailableCommand = Command.make("connect").pipe(
   Command.withDescription(
-    "KataCode Connect is unavailable in builds without public configuration.",
+    "Kata Code Connect is unavailable in builds without public configuration.",
   ),
   Command.withHidden,
   Command.withHandler(() =>
@@ -42,7 +42,7 @@ const connectUnavailableCommand = Command.make("connect").pipe(
 
 export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
   Command.make("katacode", { ...sharedServerCommandFlags }).pipe(
-    Command.withDescription("Run the KataCode server."),
+    Command.withDescription("Run the Kata Code server."),
     Command.withHandler((flags) => runServerCommand(flags)),
     Command.withSubcommands([
       startCommand,
