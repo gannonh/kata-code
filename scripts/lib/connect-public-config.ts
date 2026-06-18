@@ -59,24 +59,19 @@ export function resolveConnectPublicConfig(
     relayClientOtlpTracesDataset: trimmed(input.relayClientOtlpTracesDataset),
     relayClientOtlpTracesToken: trimmed(input.relayClientOtlpTracesToken),
   };
-  const missing = CONNECT_PUBLIC_CONFIG_KEYS.filter((key) => {
-    switch (key) {
-      case "KATACODE_CLERK_PUBLISHABLE_KEY":
-        return config.clerkPublishableKey === undefined;
-      case "KATACODE_CLERK_JWT_TEMPLATE":
-        return config.clerkJwtTemplate === undefined;
-      case "KATACODE_CLERK_CLI_OAUTH_CLIENT_ID":
-        return config.clerkCliOAuthClientId === undefined;
-      case "KATACODE_RELAY_URL":
-        return config.relayUrl === undefined;
-      case "KATACODE_RELAY_CLIENT_OTLP_TRACES_URL":
-        return config.relayClientOtlpTracesUrl === undefined;
-      case "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET":
-        return config.relayClientOtlpTracesDataset === undefined;
-      case "KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN":
-        return config.relayClientOtlpTracesToken === undefined;
-    }
-  });
+  const missing = (
+    [
+      ["KATACODE_CLERK_PUBLISHABLE_KEY", config.clerkPublishableKey],
+      ["KATACODE_CLERK_JWT_TEMPLATE", config.clerkJwtTemplate],
+      ["KATACODE_CLERK_CLI_OAUTH_CLIENT_ID", config.clerkCliOAuthClientId],
+      ["KATACODE_RELAY_URL", config.relayUrl],
+      ["KATACODE_RELAY_CLIENT_OTLP_TRACES_URL", config.relayClientOtlpTracesUrl],
+      ["KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET", config.relayClientOtlpTracesDataset],
+      ["KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN", config.relayClientOtlpTracesToken],
+    ] as const satisfies ReadonlyArray<readonly [ConnectPublicConfigKey, string | undefined]>
+  )
+    .filter(([, value]) => value === undefined)
+    .map(([key]) => key);
   if (missing.length > 0) {
     return { ok: false, missing };
   }

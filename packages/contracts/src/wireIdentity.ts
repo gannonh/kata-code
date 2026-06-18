@@ -19,5 +19,6 @@ export const WIRE_RELAY_CLERK_JWT_TEMPLATE = "kata-relay" as const;
 /** JWT `aud` claim accepted by the hosted relay worker. */
 export const WIRE_RELAY_CLERK_JWT_AUDIENCE = "kata-code-relay" as const;
 
-export const wireEnvironmentIssuer = (environmentId: string): string =>
-  `${WIRE_ENVIRONMENT_ISSUER_PREFIX}${environmentId}`;
+export function wireEnvironmentIssuer(environmentId: string): string {
+  return `${WIRE_ENVIRONMENT_ISSUER_PREFIX}${environmentId}`;
+}

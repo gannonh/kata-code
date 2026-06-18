@@ -43,6 +43,18 @@ function ensureProductionEnvironment(repo: string) {
   }
 }
 
+function setGithubVariable(repo: string, name: string, value: string, environment?: string) {
+  const args = ["variable", "set", name, "--repo", repo, "--body", value];
+  if (environment) {
+    args.push("--env", environment);
+  }
+  runGh(args);
+}
+
+function setGithubSecret(repo: string, name: string, value: string, environment: string) {
+  runGh(["secret", "set", name, "--repo", repo, "--env", environment, "--body", value]);
+}
+
 const dryRun = process.argv.includes("--dry-run");
 const repo = process.env.GITHUB_REPOSITORY?.trim() || DEFAULT_REPO;
 const env = loadRelayEnvFile(RELAY_ENV_FILE);
@@ -72,33 +84,13 @@ if (dryRun) {
 ensureProductionEnvironment(repo);
 
 for (const entry of plan.repoVariables) {
-  runGh(["variable", "set", entry.name, "--repo", repo, "--body", entry.value]);
+  setGithubVariable(repo, entry.name, entry.value);
 }
 for (const entry of plan.productionVariables) {
-  runGh([
-    "variable",
-    "set",
-    entry.name,
-    "--repo",
-    repo,
-    "--env",
-    "production",
-    "--body",
-    entry.value,
-  ]);
+  setGithubVariable(repo, entry.name, entry.value, "production");
 }
 for (const entry of plan.productionSecrets) {
-  runGh([
-    "secret",
-    "set",
-    entry.name,
-    "--repo",
-    repo,
-    "--env",
-    "production",
-    "--body",
-    entry.value,
-  ]);
+  setGithubSecret(repo, entry.name, entry.value, "production");
 }
 
 process.stdout.write(`Synced relay config from ${RELAY_ENV_FILE} to GitHub (${repo}).\n`);

@@ -191,15 +191,13 @@ export async function runCredentialSmoke(
       secretKey: env.CLERK_SECRET_KEY ?? "",
       smokeUserId: env.CLERK_SMOKE_USER_ID ?? "",
     }),
-    Promise.resolve(
-      verifyApnsCredentials({
-        environment: env.APNS_ENVIRONMENT ?? "",
-        teamId: env.APNS_TEAM_ID ?? "",
-        keyId: env.APNS_KEY_ID ?? "",
-        bundleId: env.APNS_BUNDLE_ID ?? "",
-        privateKey: env.APNS_PRIVATE_KEY ?? "",
-      }),
-    ),
+    verifyApnsCredentials({
+      environment: env.APNS_ENVIRONMENT ?? "",
+      teamId: env.APNS_TEAM_ID ?? "",
+      keyId: env.APNS_KEY_ID ?? "",
+      bundleId: env.APNS_BUNDLE_ID ?? "",
+      privateKey: env.APNS_PRIVATE_KEY ?? "",
+    }),
   ]);
   return {
     results,

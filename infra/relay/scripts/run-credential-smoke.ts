@@ -6,7 +6,12 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 
-import { resolveRelayDeployConfig, resolveRelayDeploySmokeConfig } from "./deploy-config.ts";
+import {
+  RELAY_DEPLOY_SECRET_NAMES,
+  RELAY_DEPLOY_VARIABLE_NAMES,
+  resolveRelayDeployConfig,
+  resolveRelayDeploySmokeConfig,
+} from "./deploy-config.ts";
 import { runCredentialSmoke } from "./credential-smoke.ts";
 
 const RELAY_ROOT = NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)));
@@ -19,39 +24,21 @@ function loadRelayEnvFile(path: string): Record<string, string | undefined> {
   return NodeUtil.parseEnv(NodeFS.readFileSync(path, "utf8"));
 }
 
+function readEnv(
+  names: ReadonlyArray<string>,
+  source: Readonly<Record<string, string | undefined>>,
+) {
+  return Object.fromEntries(names.map((name) => [name, source[name]]));
+}
+
 const env = {
   ...loadRelayEnvFile(ENV_FILE),
   ...process.env,
 };
 
 const configStatus = resolveRelayDeployConfig(
-  Object.fromEntries(
-    [
-      "CLOUDFLARE_ACCOUNT_ID",
-      "PLANETSCALE_ORGANIZATION",
-      "AXIOM_ORG_ID",
-      "RELAY_API_ZONE_NAME",
-      "RELAY_TUNNEL_ZONE_NAME",
-      "CLERK_PUBLISHABLE_KEY",
-      "CLERK_JWT_AUDIENCE",
-      "CLERK_JWT_TEMPLATE",
-      "CLERK_CLI_OAUTH_CLIENT_ID",
-      "APNS_ENVIRONMENT",
-      "APNS_TEAM_ID",
-      "APNS_KEY_ID",
-      "APNS_BUNDLE_ID",
-    ].map((name) => [name, env[name]]),
-  ),
-  Object.fromEntries(
-    [
-      "CLOUDFLARE_API_TOKEN",
-      "PLANETSCALE_API_TOKEN_ID",
-      "PLANETSCALE_API_TOKEN",
-      "AXIOM_TOKEN",
-      "CLERK_SECRET_KEY",
-      "APNS_PRIVATE_KEY",
-    ].map((name) => [name, env[name]]),
-  ),
+  readEnv(RELAY_DEPLOY_VARIABLE_NAMES, env),
+  readEnv(RELAY_DEPLOY_SECRET_NAMES, env),
 );
 
 if (!configStatus.ready) {

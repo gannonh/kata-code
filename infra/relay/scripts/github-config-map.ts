@@ -10,10 +10,14 @@ export const RELAY_GITHUB_REPO_VARIABLES = [
   "AXIOM_ORG_ID",
 ] as const;
 
+const RELAY_GITHUB_REPO_VARIABLE_SET = new Set<string>(RELAY_GITHUB_REPO_VARIABLES);
+
+const RELAY_GITHUB_PRODUCTION_DEPLOY_VARIABLES = RELAY_DEPLOY_VARIABLE_NAMES.filter(
+  (name) => !RELAY_GITHUB_REPO_VARIABLE_SET.has(name),
+);
+
 export const RELAY_GITHUB_PRODUCTION_VARIABLES = [
-  ...RELAY_DEPLOY_VARIABLE_NAMES.filter(
-    (name) => !(RELAY_GITHUB_REPO_VARIABLES as ReadonlyArray<string>).includes(name),
-  ),
+  ...RELAY_GITHUB_PRODUCTION_DEPLOY_VARIABLES,
   ...RELAY_DEPLOY_SMOKE_VARIABLE_NAMES,
   "RELAY_DOMAIN",
 ] as const;
@@ -54,9 +58,7 @@ export function buildRelayGithubSyncPlan(
 
   const required = [
     ...RELAY_GITHUB_REPO_VARIABLES,
-    ...RELAY_DEPLOY_VARIABLE_NAMES.filter(
-      (name) => !(RELAY_GITHUB_REPO_VARIABLES as ReadonlyArray<string>).includes(name),
-    ),
+    ...RELAY_GITHUB_PRODUCTION_DEPLOY_VARIABLES,
     ...RELAY_DEPLOY_SMOKE_VARIABLE_NAMES,
     ...RELAY_DEPLOY_SECRET_NAMES,
   ];
