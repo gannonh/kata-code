@@ -27,7 +27,7 @@ Stable and nightly releases read relay URL and client tracing config from deploy
 
 1. Create or choose a fork-owned Cloudflare account (do not reuse upstream deploy targets).
 2. Copy the **Account ID** from the Cloudflare dashboard overview page.
-3. Create an API token with permissions sufficient for Alchemy to manage Workers, Queues, DNS records, and state storage in that account. Start from the **Edit Cloudflare Workers** template and extend it if deploy dry-run reports missing permissions.
+3. Create an API token with permissions sufficient for Alchemy to manage Workers, Queues, DNS records, Hyperdrive, and state storage in that account. Start from the **Edit Cloudflare Workers** template and include account-level access for Workers scripts/subdomain and Secrets Store plus zone-level `Zone:Read` and `DNS:Edit` for `kata.sh`. Validate with `node infra/relay/scripts/run-credential-smoke.ts` before deploying.
 4. Store:
    - Repository variable `CLOUDFLARE_ACCOUNT_ID`
    - `production` environment secret `CLOUDFLARE_API_TOKEN`

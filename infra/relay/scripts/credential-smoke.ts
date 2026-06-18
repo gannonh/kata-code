@@ -54,11 +54,48 @@ export async function verifyCloudflareCredentials(input: {
     readonly success?: boolean;
     readonly result?: ReadonlyArray<{ readonly id?: string; readonly name?: string }>;
   };
+  const workerEndpoints = [
+    [
+      "Workers script settings",
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+        input.accountId,
+      )}/workers/scripts/alchemy-state-store/settings`,
+    ],
+    [
+      "Workers subdomain",
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+        input.accountId,
+      )}/workers/subdomain`,
+    ],
+    [
+      "Secrets Store",
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+        input.accountId,
+      )}/secrets_store/stores`,
+    ],
+  ] as const;
+
+  for (const [label, url] of workerEndpoints) {
+    const permissionResponse = await fetchImpl(url, {
+      headers: {
+        Authorization: `Bearer ${input.apiToken}`,
+        "content-type": "application/json",
+      },
+    });
+    if (permissionResponse.status === 401 || permissionResponse.status === 403) {
+      return {
+        name: "cloudflare",
+        ok: false,
+        detail: `${label} permission check failed (${permissionResponse.status})`,
+      };
+    }
+  }
+
   const zoneCount = zonesPayload.result?.length ?? 0;
   return {
     name: "cloudflare",
     ok: true,
-    detail: `Token ${payload.result?.status ?? "active"}; account ${input.accountId}; ${zoneCount} zone(s) visible`,
+    detail: `Token ${payload.result?.status ?? "active"}; account ${input.accountId}; ${zoneCount} zone(s) visible; Workers/Secrets endpoints authorized`,
   };
 }
 

@@ -18,6 +18,13 @@ describe("verifyCloudflareCredentials", () => {
       if (url.includes("/zones")) {
         return Response.json({ success: true, result: [] });
       }
+      if (
+        url.includes("/workers/scripts/alchemy-state-store/settings") ||
+        url.includes("/workers/subdomain") ||
+        url.includes("/secrets_store/stores")
+      ) {
+        return Response.json({ success: true, result: {} });
+      }
       return new Response("not found", { status: 404 });
     }) as typeof fetch;
 
@@ -27,6 +34,33 @@ describe("verifyCloudflareCredentials", () => {
       fetchImpl,
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("fails when account-level Workers permissions are missing", async () => {
+    const fetchImpl = (async (input) => {
+      const url = String(input);
+      if (url.includes("/user/tokens/verify")) {
+        return Response.json({ success: true, result: { status: "active" } });
+      }
+      if (url.includes("/zones")) {
+        return Response.json({ success: true, result: [] });
+      }
+      if (url.includes("/workers/scripts/alchemy-state-store/settings")) {
+        return Response.json(
+          { success: false, errors: [{ code: 10000, message: "Authentication error" }] },
+          { status: 403 },
+        );
+      }
+      return Response.json({ success: true, result: {} });
+    }) as typeof fetch;
+
+    const result = await verifyCloudflareCredentials({
+      accountId: "account-1",
+      apiToken: "token-1",
+      fetchImpl,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("Workers script settings permission check failed");
   });
 });
 
