@@ -84,9 +84,13 @@ Stable releases publish with dist-tag `latest`; nightlies use `nightly`; stable 
 2. On npmjs.com: **Packages → `@kata-sh/code-cli` → Settings → Trusted publishing → GitHub Actions** — org `gannonh`, kata-code, workflow `release.yml`, action `npm publish`.
 3. CI uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC); no `NPM_TOKEN` secret.
 
-## Optional (Kata Code Connect)
+## Kata Code Connect / relay
 
-Repository variables when cloud features are enabled: `CLERK_*`, `RELAY_*`. Desktop/web-only releases work without them.
+Stable and nightly releases require production Connect public config. Relay URL and client tracing values come from deployed Alchemy `prod` state; Clerk public values come from the GitHub `production` environment.
+
+One-time relay infrastructure setup: [Relay deploy setup](./relay-deploy-setup.md)
+
+Legacy note: repository `RELAY_*` vars alone are no longer the release source of truth for relay URL or tracing config after the first production deploy.
 
 ## Troubleshooting
 

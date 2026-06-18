@@ -427,10 +427,10 @@ _(none yet)_
 
 Until relay/mobile hosted infra splits, these wire identifiers stay upstream-shaped. See `packages/contracts/src/wireIdentity.ts`:
 
-- Relay provider kind `t3_relay`
-- OAuth client IDs `t3-mobile`, `t3-web`
-- Environment well-known path `/.well-known/t3/environment`
-- Connect API prefix `/api/t3-connect`
+- Relay provider kind `kata_relay`
+- OAuth client IDs `kata-mobile`, `kata-web`
+- Environment well-known path `/.well-known/kata/environment`
+- Connect API prefix `/api/kata-connect`
 
 ### Internal Electron static protocol
 

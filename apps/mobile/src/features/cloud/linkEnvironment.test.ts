@@ -400,7 +400,7 @@ describe("mobile cloud link environment client", () => {
             }),
           );
         }
-        if (String(url).endsWith("/.well-known/t3/environment")) {
+        if (String(url).endsWith("/.well-known/kata/environment")) {
           return Promise.resolve(
             Response.json({
               environmentId: "env-1",
@@ -767,7 +767,7 @@ describe("mobile cloud link environment client", () => {
               Response.json(validDpopAccessTokenResponse("environment:connect")),
             );
           }
-          if (String(url).endsWith("/.well-known/t3/environment")) {
+          if (String(url).endsWith("/.well-known/kata/environment")) {
             return Promise.resolve(
               Response.json({
                 environmentId: "env-1",
@@ -854,7 +854,7 @@ describe("mobile cloud link environment client", () => {
               Response.json(validDpopAccessTokenResponse("environment:connect")),
             );
           }
-          if (String(url).endsWith("/.well-known/t3/environment")) {
+          if (String(url).endsWith("/.well-known/kata/environment")) {
             return Promise.resolve(
               Response.json({
                 environmentId: "env-1",
@@ -1061,7 +1061,7 @@ describe("mobile cloud link environment client", () => {
             Promise.resolve(
               String(url).endsWith("/v1/client/dpop-token")
                 ? Response.json(validDpopAccessTokenResponse("environment:connect"))
-                : String(url).endsWith("/.well-known/t3/environment")
+                : String(url).endsWith("/.well-known/kata/environment")
                   ? Response.json({
                       environmentId: "env-other",
                       label: "Other Desktop",

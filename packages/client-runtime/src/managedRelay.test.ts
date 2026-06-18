@@ -30,7 +30,7 @@ function managedRelayTestLayer(
   );
   return managedRelayClientLayer({
     relayUrl,
-    clientId: "t3-mobile",
+    clientId: "kata-mobile",
   }).pipe(Layer.provide(signerLayer), Layer.provide(httpClientLayer));
 }
 

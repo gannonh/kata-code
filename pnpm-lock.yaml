@@ -4985,7 +4985,7 @@ packages:
     resolution: {integrity: sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==}
 
   alchemy@https://pkg.ing/alchemy/078ff00:
-    resolution: {tarball: https://pkg.ing/alchemy/078ff00}
+    resolution: {integrity: sha512-+yX8sLZZSS5EfHHiO5vKHK782VMo1MkcvMGaHeOLoLSGTFWMT+wRqU5CX+LOOPXyymuMWW9cydg8Hg3c9/u1bw==, tarball: https://pkg.ing/alchemy/078ff00}
     version: 2.0.0-beta.51
     hasBin: true
     peerDependencies:

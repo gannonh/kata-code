@@ -8,8 +8,10 @@ import {
   managedEndpointTunnelName,
   relayOwnsManagedEndpointZone,
   relayPublicDomainForStage,
+  relayPublicOrigin,
   relayResourceNameForStage,
   relayStageSlug,
+  resolveRelayPublicUrl,
 } from "./deploymentConfig.ts";
 
 describe("relayStageSlug", () => {
@@ -30,6 +32,30 @@ describe("relayPublicDomainForStage", () => {
   });
 });
 
+describe("resolveRelayPublicUrl", () => {
+  it("prefixes RELAY_DOMAIN overrides with https", () => {
+    expect(
+      resolveRelayPublicUrl({
+        relayDomain: "relay.connect.kata.sh",
+      }),
+    ).toBe("https://relay.connect.kata.sh");
+  });
+
+  it("derives the production relay origin from the API zone name", () => {
+    expect(
+      resolveRelayPublicUrl({
+        relayApiZoneName: "connect.example.test",
+      }),
+    ).toBe("https://relay.connect.example.test");
+  });
+
+  it("strips an accidental scheme from domain overrides", () => {
+    expect(relayPublicOrigin("https://relay.connect.kata.sh/")).toBe(
+      "https://relay.connect.kata.sh",
+    );
+  });
+});
+
 describe("relayOwnsManagedEndpointZone", () => {
   it("keeps the shared Cloudflare zone owned by production", () => {
     expect(relayOwnsManagedEndpointZone("prod")).toBe(true);
@@ -39,11 +65,11 @@ describe("relayOwnsManagedEndpointZone", () => {
 
 describe("relayResourceNameForStage", () => {
   it("isolates production and personal stages", () => {
-    expect(relayResourceNameForStage("t3-code-relay-traces", "prod")).toBe(
-      "t3-code-relay-traces-prod",
+    expect(relayResourceNameForStage("kata-code-relay-traces", "prod")).toBe(
+      "kata-code-relay-traces-prod",
     );
-    expect(relayResourceNameForStage("t3-code-relay-traces", "dev_julius")).toBe(
-      "t3-code-relay-traces-dev-julius",
+    expect(relayResourceNameForStage("kata-code-relay-traces", "dev_julius")).toBe(
+      "kata-code-relay-traces-dev-julius",
     );
   });
 });

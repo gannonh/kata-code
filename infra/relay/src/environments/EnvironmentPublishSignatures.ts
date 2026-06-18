@@ -2,6 +2,7 @@ import {
   RelayAgentActivityPublishProofPayload,
   type RelayAgentActivityPublishRequest,
 } from "@kata-sh/code-contracts/relay";
+import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
 import {
   decodeRelayJwt,
   normalizeRelayIssuer,
@@ -118,7 +119,7 @@ const make = Effect.gen(function* () {
         publicKey: input.environmentPublicKey,
         token: input.request.proof,
         typ: RELAY_ACTIVITY_PUBLISH_TYP,
-        issuer: `t3-env:${input.environmentId}`,
+        issuer: wireEnvironmentIssuer(input.environmentId),
         audience: normalizeRelayIssuer(config.relayIssuer),
         nowEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
       }).pipe(

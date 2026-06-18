@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "deploy": "node -- scripts/deploy.ts",
+    "read-public-config": "node -- scripts/read-public-config.ts",
     "destroy": "alchemy destroy",
     "test": "vp test run",
     "typecheck": "tsgo --noEmit"

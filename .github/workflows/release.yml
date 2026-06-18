@@ -179,42 +179,71 @@ jobs:
             --github-output
 
   resolve_public_config:
-    name: Resolve optional Kata Code Connect public config
+    name: Resolve Kata Code Connect public config
     needs: preflight
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
+    environment:
+      name: production
     outputs:
       clerk_publishable_key: ${{ steps.public_config.outputs.clerk_publishable_key }}
       clerk_jwt_template: ${{ steps.public_config.outputs.clerk_jwt_template }}
       clerk_cli_oauth_client_id: ${{ steps.public_config.outputs.clerk_cli_oauth_client_id }}
       relay_url: ${{ steps.public_config.outputs.relay_url }}
+      relay_client_otlp_traces_url: ${{ steps.public_config.outputs.relay_client_otlp_traces_url }}
+      relay_client_otlp_traces_dataset: ${{ steps.public_config.outputs.relay_client_otlp_traces_dataset }}
+      relay_client_otlp_traces_token: ${{ steps.public_config.outputs.relay_client_otlp_traces_token }}
     env:
-      RELAY_DOMAIN: ${{ vars.RELAY_DOMAIN }}
-      RELAY_API_ZONE_NAME: ${{ vars.RELAY_API_ZONE_NAME }}
+      REQUIRE_CONNECT_CONFIG: ${{ needs.preflight.outputs.release_channel == 'stable' || needs.preflight.outputs.release_channel == 'nightly' }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
       CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
       CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+      ALCHEMY_TELEMETRY_DISABLED: "1"
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@kata-sh/code-relay
+
+      - id: relay_state
+        name: Read production relay Alchemy state
+        run: |
+          node infra/relay/scripts/read-public-config.ts \
+            --stage prod \
+            --github-output \
+            --github-env-file "$RUNNER_TEMP/relay-client-tracing.env"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
       - id: public_config
-        name: Resolve optional production public config
+        name: Resolve production Connect public config
         shell: bash
         run: |
           set -euo pipefail
-
-          relay_domain="${RELAY_DOMAIN:-}"
-          if [[ -z "$relay_domain" && -n "${RELAY_API_ZONE_NAME:-}" ]]; then
-            relay_domain="relay.$RELAY_API_ZONE_NAME"
+          if [[ -f "$RUNNER_TEMP/relay-client-tracing.env" ]]; then
+            set -a
+            # shellcheck disable=SC1091
+            source "$RUNNER_TEMP/relay-client-tracing.env"
+            set +a
           fi
-
-          echo "clerk_publishable_key=${CLERK_PUBLISHABLE_KEY:-}" >> "$GITHUB_OUTPUT"
-          echo "clerk_jwt_template=${CLERK_JWT_TEMPLATE:-}" >> "$GITHUB_OUTPUT"
-          echo "clerk_cli_oauth_client_id=${CLERK_CLI_OAUTH_CLIENT_ID:-}" >> "$GITHUB_OUTPUT"
-          if [[ -n "$relay_domain" ]]; then
-            echo "relay_url=https://$relay_domain" >> "$GITHUB_OUTPUT"
-          else
-            echo "relay_url=" >> "$GITHUB_OUTPUT"
-          fi
+          export RELAY_URL="${{ steps.relay_state.outputs.relay_url }}"
+          node scripts/resolve-connect-public-config.ts
+        env:
+          REQUIRE_CONNECT_CONFIG: ${{ env.REQUIRE_CONNECT_CONFIG }}
+          CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+          CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+          CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
 
   signing_gate:
     name: Validate macOS signing inputs
@@ -266,6 +295,9 @@ jobs:
       KATACODE_CLERK_JWT_TEMPLATE: ${{ needs.resolve_public_config.outputs.clerk_jwt_template }}
       KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ needs.resolve_public_config.outputs.clerk_cli_oauth_client_id }}
       KATACODE_RELAY_URL: ${{ needs.resolve_public_config.outputs.relay_url }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_url }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_dataset }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_token }}
     strategy:
       fail-fast: false
       matrix:
@@ -527,6 +559,9 @@ jobs:
       KATACODE_CLERK_JWT_TEMPLATE: ${{ needs.resolve_public_config.outputs.clerk_jwt_template }}
       KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ needs.resolve_public_config.outputs.clerk_cli_oauth_client_id }}
       KATACODE_RELAY_URL: ${{ needs.resolve_public_config.outputs.relay_url }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_url }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_dataset }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -697,6 +732,9 @@ jobs:
       KATACODE_CLERK_PUBLISHABLE_KEY: ${{ needs.resolve_public_config.outputs.clerk_publishable_key }}
       KATACODE_CLERK_JWT_TEMPLATE: ${{ needs.resolve_public_config.outputs.clerk_jwt_template }}
       KATACODE_RELAY_URL: ${{ needs.resolve_public_config.outputs.relay_url }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_url }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_dataset }}
+      KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: ${{ needs.resolve_public_config.outputs.relay_client_otlp_traces_token }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

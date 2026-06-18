@@ -18,8 +18,9 @@ Workflows land here until [Phase 2 — infrastructure split](../../FORK.md#phase
 
 | File                     | Blocked until Phase 2                                       |
 | ------------------------ | ----------------------------------------------------------- |
-| `deploy-relay.yml`       | Fork relay infra and secrets                                |
 | `mobile-eas-preview.yml` | Fork Expo project (`KATACODE_EAS_PROJECT_ID`, `EXPO_OWNER`) |
+
+Production relay deploy moved to [`.github/workflows/deploy-relay.yml`](../workflows/deploy-relay.yml). See [Relay deploy setup](../../docs/operations/relay-deploy-setup.md).
 
 `release.yml` moved back to [`.github/workflows/release.yml`](../workflows/release.yml) for the Phase 2 desktop/web release split.
 

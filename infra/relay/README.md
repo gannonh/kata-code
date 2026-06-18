@@ -85,7 +85,10 @@ vp run --filter @kata-sh/code-relay deploy
 The stack provisions the Cloudflare Worker and queues, managed endpoint resources, database
 connectivity, and relay tracing resources. Copy [`infra/relay/.env.example`](./.env.example) to
 `infra/relay/.env` and fill in the deployment-specific values before deploying. Alchemy loads that
-file from the relay directory. Runtime secrets include Clerk and APNs credentials. Production adopts
+file from the relay directory and merges it with process environment variables (so `CI=true` and
+other shell exports still apply). Scripted deploys pass `--yes` (and usually `--dry-run` first),
+which forces non-interactive provider auth. Runtime secrets include Clerk and APNs credentials.
+Production adopts
 the configured API and tunnel DNS zones as retained Cloudflare resources. Personal stages reference
 the production-owned zones.
 
@@ -98,6 +101,18 @@ developer stages:
 vp run --filter @kata-sh/code-relay deploy -- --stage prod
 vp run --filter @kata-sh/code-relay deploy -- --env-file .env.local
 ```
+
+### First deploy on a new Cloudflare account
+
+Bootstrap Alchemy's Cloudflare state store once before the first `prod` deploy:
+
+```sh
+CLOUDFLARE_ACCOUNT_ID="$(node -e "const {parseEnv}=require('node:util');const {readFileSync}=require('node:fs');console.log(parseEnv(readFileSync('infra/relay/.env','utf8')).CLOUDFLARE_ACCOUNT_ID)")" \
+CLOUDFLARE_API_TOKEN="$(node -e "const {parseEnv}=require('node:util');const {readFileSync}=require('node:fs');console.log(parseEnv(readFileSync('infra/relay/.env','utf8')).CLOUDFLARE_API_TOKEN)")" \
+pnpm --dir infra/relay exec alchemy cloudflare bootstrap --profile default
+```
+
+Export Cloudflare credentials into the shell for bootstrap; do not rely on `--env-file .env` for that command. See [Relay deploy setup](../../docs/operations/relay-deploy-setup.md) for the full operator checklist.
 
 Alchemy defaults personal deployments to the `dev_$USER` stage. Relay custom domains apply the same
 DNS-safe sanitization as Alchemy physical resource names, so `prod` uses
@@ -114,48 +129,11 @@ the URL manually.
 
 ### Deployment CI
 
-The relay is versioned separately from client releases. `.github/workflows/deploy-relay.yml` deploys
-the shared Alchemy `prod` stage on every push to `main`. Stable and nightly release builds both
-resolve their static public config from the same
-`production` GitHub environment. Pull requests do not deploy relay stages. Developers can
-deploy personal non-production stages locally with any stage name other than `prod`.
+Production relay deploy is manual-only through `.github/workflows/deploy-relay.yml`. Dispatch it with `dry_run=true` before the first apply, then run apply mode after GitHub `production` environment credentials are configured.
 
-The repository must define these Actions variables shared by relay deployments:
+The workflow deploys only the shared Alchemy `prod` stage. Stable and nightly release builds resolve relay URL and client tracing config from deployed Alchemy state plus Clerk public config from the GitHub `production` environment. Pull requests do not deploy relay stages. Developers deploy personal non-production stages locally with any stage name other than `prod`.
 
-- `CLOUDFLARE_ACCOUNT_ID`
-- `PLANETSCALE_ORGANIZATION`
-- `AXIOM_ORG_ID`
-
-The repository must define these Actions secrets shared by relay deployments:
-
-- `CLOUDFLARE_API_TOKEN`
-- `PLANETSCALE_API_TOKEN_ID`
-- `PLANETSCALE_API_TOKEN`
-- `AXIOM_TOKEN`
-
-The `production` GitHub environment must define these Actions variables:
-
-- `RELAY_API_ZONE_NAME`
-- `RELAY_TUNNEL_ZONE_NAME`
-- `RELAY_DOMAIN` if overriding the derived production relay domain
-- `CLERK_PUBLISHABLE_KEY`
-- `CLERK_JWT_AUDIENCE`
-- `CLERK_JWT_TEMPLATE`
-- `APNS_ENVIRONMENT`
-- `APNS_TEAM_ID`
-- `APNS_KEY_ID`
-- `APNS_BUNDLE_ID`
-
-The `production` GitHub environment must define these Actions secrets:
-
-- `CLERK_SECRET_KEY`
-- `APNS_PRIVATE_KEY`
-
-The account-scoped repository credentials are consumed by Alchemy while provisioning relay stages; they
-are not bound into the relay Worker. The production deployment uses an Axiom personal access token,
-so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. The release workflow reads the production relay's
-derived public URL and Clerk publishable key from the same environment for downstream desktop, CLI,
-and hosted web builds.
+See [Relay deploy setup](../../docs/operations/relay-deploy-setup.md) for the full credential checklist and operator flow.
 
 See:
 

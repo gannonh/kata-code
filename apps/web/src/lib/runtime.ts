@@ -22,7 +22,7 @@ function configuredRelayUrl(): string {
 
 const webHttpClientLayer = remoteHttpClientLayer(globalThis.fetch);
 const webRelayTracingLayer = makeRelayClientTracingLayer(resolveRelayTracingConfig(), {
-  serviceName: "t3-web-relay-client",
+  serviceName: "kata-web-relay-client",
   serviceVersion: import.meta.env.APP_VERSION,
   runtime: "browser",
   client: typeof window !== "undefined" && window.desktopBridge ? "desktop" : "web",

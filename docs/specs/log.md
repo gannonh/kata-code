@@ -1,5 +1,10 @@
 # Specs log
 
+## 2026-06-18 (Relay Deploy infra setup)
+
+- Updated [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md) with credential smoke + local dry-run progress and remaining GitHub/UAT gates.
+- Expanded [Relay deploy setup](/operations/relay-deploy-setup.md) and [Relay credentials playbook](/guides/relay-credentials-playbook.md) with Alchemy bootstrap and Cloudflare account ID troubleshooting.
+
 ## 2026-06-18 (Relay Deploy design)
 
 - Added and approved [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md) for manual production relay deploy, strict release config, smoke checks, and UAT evidence.

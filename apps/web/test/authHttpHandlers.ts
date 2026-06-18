@@ -97,7 +97,7 @@ export function createAuthenticatedSessionHandlers(getAuthDescriptor: () => Serv
   );
 
   return [
-    http.all("*/.well-known/t3/environment", ({ request }) => handler(request)),
+    http.all("*/.well-known/kata/environment", ({ request }) => handler(request)),
     http.all("*/api/auth/*", ({ request }) => handler(request)),
   ] as const;
 }

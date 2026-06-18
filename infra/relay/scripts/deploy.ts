@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+// @effect-diagnostics nodeBuiltinImport:off - Relay deploy bootstraps dotenv into process.env before Effect provider layers exist.
+
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+import * as NodeUtil from "node:util";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";
@@ -13,7 +19,6 @@ import { Cli } from "alchemy/Cli/Cli";
 import { LoggingCli } from "alchemy/Cli/LoggingCli";
 import * as Plan from "alchemy/Plan";
 import * as Stage from "alchemy/Stage";
-import * as State from "alchemy/State/State";
 import { TelemetryLive } from "alchemy/Telemetry/Layer";
 import { PlatformServices } from "alchemy/Util/PlatformServices";
 import * as Config from "effect/Config";
@@ -30,6 +35,24 @@ import { Command, Flag, Prompt } from "effect/unstable/cli";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
 import RelayStack from "../alchemy.run.ts";
+import { readRelayPublicConfigFromAlchemyState } from "./read-public-config-lib.ts";
+import {
+  publicConfigFromOutput,
+  reconcileRootEnvPublicConfig,
+  reconcileRootEnvRelayUrl,
+  serializeGithubOutput,
+  serializeRelayClientTracingEnvironment,
+  type RelayPublicConfig,
+} from "./relay-public-config.ts";
+
+export {
+  publicConfigFromOutput,
+  reconcileRootEnvPublicConfig,
+  reconcileRootEnvRelayUrl,
+  serializeGithubOutput,
+  serializeRelayClientTracingEnvironment,
+  type RelayPublicConfig,
+} from "./relay-public-config.ts";
 
 export class RelayDeployError extends Data.TaggedError("RelayDeployError")<{
   readonly message: string;
@@ -45,61 +68,6 @@ export interface RelayDeployOptions {
   readonly githubOutput: boolean;
   readonly githubEnvFile: Option.Option<string>;
   readonly readState: boolean;
-}
-
-export interface RelayPublicConfig {
-  readonly relayUrl: string;
-  readonly mobileTracingUrl: string;
-  readonly mobileTracingDataset: string;
-  readonly mobileTracingToken: string;
-  readonly clientTracingUrl: string;
-  readonly clientTracingDataset: string;
-  readonly clientTracingToken: string;
-}
-
-const publicConfigEnvEntries = (config: RelayPublicConfig) =>
-  ({
-    KATACODE_RELAY_URL: config.relayUrl,
-    KATACODE_MOBILE_OTLP_TRACES_URL: config.mobileTracingUrl,
-    KATACODE_MOBILE_OTLP_TRACES_DATASET: config.mobileTracingDataset,
-    KATACODE_MOBILE_OTLP_TRACES_TOKEN: config.mobileTracingToken,
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: config.clientTracingUrl,
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.clientTracingDataset,
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: config.clientTracingToken,
-  }) as const;
-
-export function reconcileRootEnvPublicConfig(contents: string, config: RelayPublicConfig): string {
-  let next = contents;
-  for (const [name, value] of Object.entries(publicConfigEnvEntries(config))) {
-    const entry = `${name}=${value}`;
-    const pattern = new RegExp(`^${name}=.*$`, "mu");
-    if (pattern.test(next)) {
-      next = next.replace(pattern, entry);
-      continue;
-    }
-    if (!next) {
-      next = `${entry}\n`;
-      continue;
-    }
-    next = `${next}${next.endsWith("\n") ? "" : "\n"}${entry}\n`;
-  }
-  return next;
-}
-
-export function reconcileRootEnvRelayUrl(contents: string, relayUrl: string): string {
-  return reconcileRootEnvPublicConfig(contents, {
-    relayUrl,
-    mobileTracingUrl: "",
-    mobileTracingDataset: "",
-    mobileTracingToken: "",
-    clientTracingUrl: "",
-    clientTracingDataset: "",
-    clientTracingToken: "",
-  })
-    .split("\n")
-    .filter((line) => !line.startsWith("KATACODE_MOBILE_OTLP_TRACES_"))
-    .filter((line) => !line.startsWith("KATACODE_RELAY_CLIENT_OTLP_TRACES_"))
-    .join("\n");
 }
 
 export function hasDeployChanges(plan: Plan.Plan): boolean {
@@ -120,18 +88,43 @@ export interface RelayDeployOutcome {
   readonly publicConfig: Option.Option<RelayPublicConfig>;
 }
 
-export function serializeGithubOutput(entries: Readonly<Record<string, string | boolean>>): string {
-  return Object.entries(entries)
-    .map(([key, value]) => `${key}=${value}\n`)
-    .join("");
+const relayRootPath = NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)));
+
+function resolveRelayEnvFilePath(envFileOverride: Option.Option<string>): string {
+  if (Option.isSome(envFileOverride)) {
+    return NodePath.resolve(relayRootPath, envFileOverride.value);
+  }
+  return NodePath.join(relayRootPath, ".env");
 }
 
-export function serializeRelayClientTracingEnvironment(config: RelayPublicConfig): string {
-  return serializeGithubOutput({
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: config.clientTracingUrl,
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.clientTracingDataset,
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: config.clientTracingToken,
-  });
+/** Load relay `.env` into `process.env` before Alchemy builds provider auth layers. */
+export function bootstrapRelayProcessEnv(envFileOverride: Option.Option<string>): void {
+  const envPath = resolveRelayEnvFilePath(envFileOverride);
+  if (!NodeFS.existsSync(envPath)) {
+    return;
+  }
+  Object.assign(process.env, NodeUtil.parseEnv(NodeFS.readFileSync(envPath, "utf8")));
+}
+
+function ensureNonInteractiveAuth(options: RelayDeployOptions): void {
+  if (!options.yes && !options.dryRun) {
+    return;
+  }
+  process.env.CI = "true";
+}
+
+export function createDeployConfigProvider(
+  options: RelayDeployOptions,
+): ConfigProvider.ConfigProvider {
+  bootstrapRelayProcessEnv(options.envFile);
+  ensureNonInteractiveAuth(options);
+  return ConfigProvider.fromEnv();
+}
+
+export function removeLeadingPackageManagerSeparator(argv: Array<string>): void {
+  if (argv[2] === "--") {
+    argv.splice(2, 1);
+  }
 }
 
 const relayRoot = Effect.service(Path.Path).pipe(
@@ -140,21 +133,6 @@ const relayRoot = Effect.service(Path.Path).pipe(
 const repoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
 );
-
-const loadDeployConfigProvider = Effect.fn("relay.deploy.loadConfigProvider")(function* (
-  envFileOverride: Option.Option<string>,
-) {
-  const path = yield* Path.Path;
-  const root = yield* relayRoot;
-
-  if (Option.isSome(envFileOverride)) {
-    return yield* ConfigProvider.fromDotEnv({ path: path.resolve(root, envFileOverride.value) });
-  }
-
-  return yield* ConfigProvider.fromDotEnv({ path: path.join(root, ".env") }).pipe(
-    Effect.orElseSucceed(() => ConfigProvider.fromEnv()),
-  );
-});
 
 const relayDeployStage = Config.nonEmptyString("stage").pipe(
   Config.option,
@@ -224,56 +202,15 @@ const deployBaseServices = Layer.mergeAll(
 );
 const deployServices = deployBaseServices;
 
-export function publicConfigFromOutput(output: unknown): RelayPublicConfig | null {
-  if (typeof output !== "object" || output === null) {
-    return null;
-  }
-  const value = output as Record<string, unknown>;
-  const text = (name: string) => (typeof value[name] === "string" ? value[name] : undefined);
-  const secret = (name: string): string | undefined => {
-    const candidate = value[name];
-    if (!Redacted.isRedacted(candidate)) {
-      return text(name);
-    }
-    const redacted = Redacted.value(candidate);
-    return typeof redacted === "string" ? redacted : undefined;
-  };
-  const relayUrl = text("url");
-  const mobileTracingUrl = text("mobileTracingUrl");
-  const mobileTracingDataset = text("mobileTracingDataset");
-  const mobileTracingToken = secret("mobileTracingToken");
-  const clientTracingUrl = text("clientTracingUrl");
-  const clientTracingDataset = text("clientTracingDataset");
-  const clientTracingToken = secret("clientTracingToken");
-  return relayUrl &&
-    mobileTracingUrl &&
-    mobileTracingDataset &&
-    mobileTracingToken &&
-    clientTracingUrl &&
-    clientTracingDataset &&
-    clientTracingToken
-    ? {
-        relayUrl,
-        mobileTracingUrl,
-        mobileTracingDataset,
-        mobileTracingToken,
-        clientTracingUrl,
-        clientTracingDataset,
-        clientTracingToken,
-      }
-    : null;
-}
-
 const readRelayPublicConfig = Effect.fn("relay.deploy.readState")(function* (stage: string) {
-  const state = yield* State.State;
-  const service = yield* state;
-  const output = yield* service.getOutput({ stack: "T3CodeRelay", stage });
-  const publicConfig = publicConfigFromOutput(output);
-  if (publicConfig === null) {
-    return yield* new RelayDeployError({
-      message: `Alchemy relay state for stage ${stage} did not include complete public client config`,
-    });
-  }
+  const publicConfig = yield* readRelayPublicConfigFromAlchemyState(stage).pipe(
+    Effect.mapError(
+      (error) =>
+        new RelayDeployError({
+          message: error.message,
+        }),
+    ),
+  );
   return {
     result: "state",
     changed: false,
@@ -284,13 +221,14 @@ const readRelayPublicConfig = Effect.fn("relay.deploy.readState")(function* (sta
 const runRelayDeploy = Effect.fn("relay.deploy.run")(
   function* (
     options: RelayDeployOptions,
-    _configProvider: ConfigProvider.ConfigProvider,
+    configProvider: ConfigProvider.ConfigProvider,
     _stage: string,
   ) {
     const stack = yield* RelayStack;
     const cli = yield* Cli;
     const plan = yield* Plan.make(stack, { force: options.force }).pipe(
       Effect.provide(stack.services),
+      Effect.provide(ConfigProvider.layer(configProvider)),
     );
     const changed = hasDeployChanges(plan);
     if (options.dryRun) {
@@ -364,7 +302,7 @@ const runRelayDeploy = Effect.fn("relay.deploy.run")(
 );
 
 export const deploy = Effect.fn("relay.deploy")(function* (options: RelayDeployOptions) {
-  const configProvider = yield* loadDeployConfigProvider(options.envFile);
+  const configProvider = createDeployConfigProvider(options);
   const configuredStage = yield* relayDeployStage.pipe(
     Effect.provide(ConfigProvider.layer(configProvider)),
   );
@@ -431,6 +369,7 @@ export const relayDeployCommand = Command.make(
 ).pipe(Command.withDescription("Deploy the Kata Code relay through Alchemy."));
 
 if (import.meta.main) {
+  removeLeadingPackageManagerSeparator(process.argv);
   Command.run(relayDeployCommand, { version: "0.0.0" }).pipe(
     Effect.provide(deployServices),
     Effect.scoped,

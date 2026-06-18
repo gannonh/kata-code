@@ -5,6 +5,20 @@ packages:
   - packages/*
   - scripts
 
+allowBuilds:
+  browser-tabs-lock: true
+  bufferutil: true
+  core-js: true
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  msgpackr-extract: true
+  msw: false
+  node-pty: true
+  sharp: true
+  utf-8-validate: true
+  workerd: true
+
 catalog:
   "@effect/atom-react": 4.0.0-beta.78
   "@effect/openapi-generator": 4.0.0-beta.78

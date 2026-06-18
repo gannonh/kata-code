@@ -4,10 +4,10 @@ Work map for Kata Code.
 
 ## Active / next
 
-| Item                            | Status      | Document                                                                                                                                                               |
-| ------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 2 — remaining infra split | **Planned** | [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md); mobile EAS and marketing remain in [deferred work registry](/specs/deferred-work.md)                  |
-| Upstream sync (first merge)     | **Planned** | [Upstream sync guide](/guides/upstream-sync.md) · [ADR 0003](/adrs/0003-episodic-upstream-sync.md) · [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook) |
+| Item                            | Status          | Document                                                                                                                                                                                                                                                                              |
+| ------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 2 — remaining infra split | **In progress** | [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md) (credential smoke + local dry-run pass; merge [PR #4](https://github.com/gannonh/kata-code/pull/4), GitHub apply, UAT pending) · mobile EAS and marketing remain in [deferred work registry](/specs/deferred-work.md) |
+| Upstream sync (first merge)     | **Planned**     | [Upstream sync guide](/guides/upstream-sync.md) · [ADR 0003](/adrs/0003-episodic-upstream-sync.md) · [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook)                                                                                                                |
 
 ## Completed
 

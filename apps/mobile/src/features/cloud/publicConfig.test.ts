@@ -31,7 +31,7 @@ describe("resolveCloudPublicConfig", () => {
   it("normalizes statically injected cloud configuration", () => {
     expect(
       resolveCloudPublicConfig({
-        clerk: { publishableKey: "  pk_test_example  ", jwtTemplate: "  t3-relay  " },
+        clerk: { publishableKey: "  pk_test_example  ", jwtTemplate: "  kata-relay  " },
         relay: { url: " https://relay.example.test/// " },
         observability: {
           tracesUrl: " https://api.axiom.co/v1/traces ",
@@ -42,7 +42,7 @@ describe("resolveCloudPublicConfig", () => {
     ).toEqual({
       clerk: {
         publishableKey: "pk_test_example",
-        jwtTemplate: "t3-relay",
+        jwtTemplate: "kata-relay",
       },
       relay: {
         url: "https://relay.example.test",
@@ -58,13 +58,13 @@ describe("resolveCloudPublicConfig", () => {
   it("rejects an insecure relay URL", () => {
     expect(
       resolveCloudPublicConfig({
-        clerk: { publishableKey: "pk_test_example", jwtTemplate: "t3-relay" },
+        clerk: { publishableKey: "pk_test_example", jwtTemplate: "kata-relay" },
         relay: { url: "http://relay.example.test" },
       }),
     ).toEqual({
       clerk: {
         publishableKey: "pk_test_example",
-        jwtTemplate: "t3-relay",
+        jwtTemplate: "kata-relay",
       },
       relay: {
         url: null,

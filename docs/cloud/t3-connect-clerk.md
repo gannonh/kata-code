@@ -9,8 +9,8 @@ timestamp: 2026-06-16T17:10:05Z
 # Kata Code Connect Clerk Setup
 
 Kata Code Connect uses one Clerk application for web, desktop, and mobile authentication. The relay accepts
-Clerk JWTs only when they are generated from the `t3-relay` template with the shared
-`t3-code-relay` audience.
+Clerk JWTs only when they are generated from the `kata-relay` template with the shared
+`kata-code-relay` audience.
 
 ## Application Keys
 
@@ -69,7 +69,7 @@ This uses an OAuth public client with PKCE, so the CLI stores no client secret.
 
 In **Clerk Dashboard > OAuth applications**:
 
-1. Create an OAuth application for the T3 CLI.
+1. Create an OAuth application for the Kata Code CLI.
 2. Enable the **Public** option so authorization-code exchange uses PKCE.
 3. Add `http://127.0.0.1:34338/callback` as an allowed redirect URI.
 4. Enable the `openid`, `profile`, and `email` scopes.
@@ -83,18 +83,18 @@ handshake; it only validates the issued Clerk bearer token when the CLI manages 
 The CLI supports these headless operations:
 
 ```sh
-t3 connect login
-t3 connect link
-t3 connect status
-t3 connect unlink
-t3 connect logout
-t3 serve
+katacode connect login
+katacode connect link
+katacode connect status
+katacode connect unlink
+katacode connect logout
+katacode serve
 ```
 
 `katacode connect login` opens the Clerk authorization flow and stores the CLI credential without enabling
 cloud exposure. `katacode connect link` installs the pinned managed `cloudflared` binary when needed,
 authorizes when needed, and records durable intent to expose the environment. It works without a
-running T3 server. The next `t3 serve` or `t3 start` reconciles the relay link and launches the
+running Kata Code server. The next `katacode serve` or `katacode start` reconciles the relay link and launches the
 managed tunnel. `katacode connect unlink` records disabled intent immediately, stops a reachable running
 connector, and attempts to revoke the relay-side environment record. It retains the stored CLI
 authorization so `katacode connect link` can re-enable exposure without another browser flow. `katacode connect
@@ -114,13 +114,13 @@ stored PKCE token model.
 
 In **Clerk Dashboard > JWT templates**, create a template with:
 
-| Setting | Value                        |
-| ------- | ---------------------------- |
-| Name    | `t3-relay`                   |
-| Claims  | `{ "aud": "t3-code-relay" }` |
+| Setting | Value                          |
+| ------- | ------------------------------ |
+| Name    | `kata-relay`                   |
+| Claims  | `{ "aud": "kata-code-relay" }` |
 
-Set `KATACODE_CLERK_JWT_TEMPLATE=t3-relay` in the repository-root `.env`, and set
-`CLERK_JWT_AUDIENCE=t3-code-relay` in `infra/relay/.env`. Define `CLERK_JWT_TEMPLATE` and
+Set `KATACODE_CLERK_JWT_TEMPLATE=kata-relay` in the repository-root `.env`, and set
+`CLERK_JWT_AUDIENCE=kata-code-relay` in `infra/relay/.env`. Define `CLERK_JWT_TEMPLATE` and
 `CLERK_JWT_AUDIENCE` in the production relay deployment environment as well. The stable `aud` value
 is shared by production and non-production relay stages. The client-facing `KATACODE_RELAY_URL` still
 selects the concrete relay deployment, but changing that URL does not require a JWT template change.
@@ -157,7 +157,7 @@ Approved signed-in users manage Kata Code Connect under **Connections**. The web
 not expose a dedicated account or waitlist control. Signed-out users reach Clerk's waitlist and
 sign-in flow contextually from the Kata Code Connect controls on the Connections page.
 
-On mobile, signed-out users open **Settings > T3 Account** to reach `/settings/waitlist` within the
+On mobile, signed-out users open **Settings > Account** to reach `/settings/waitlist` within the
 Settings form sheet. It submits enrollment through Clerk's `useWaitlist()` flow because the prebuilt
 `<Waitlist />` component is web-only in the Expo SDK. Approved users can use **Sign in** from that
 screen.

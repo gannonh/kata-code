@@ -310,7 +310,7 @@ describe("web cloud link environment client", () => {
       });
 
       const tokenBody = requestBodyText(fetchMock.mock.calls[0]?.[1]?.body);
-      expect(new URLSearchParams(tokenBody).get("client_id")).toBe("t3-web");
+      expect(new URLSearchParams(tokenBody).get("client_id")).toBe("kata-web");
       expect(new URLSearchParams(tokenBody).get("scope")).toBe("environment:connect");
       expect(fetchMock.mock.calls[1]?.[1]?.headers.authorization).toBe("DPoP relay-access-token");
       expect(fetchMock.mock.calls[1]?.[1]?.headers.dpop).toBe("web-dpop-proof");

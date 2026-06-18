@@ -28,7 +28,7 @@ export function makeMobileTracingLayer(
   resource: MobileTracingResource,
 ) {
   return makeRelayClientTracingLayer(config, {
-    serviceName: "t3-mobile-relay-client",
+    serviceName: "kata-mobile-relay-client",
     serviceVersion: resource.serviceVersion,
     runtime: "react-native",
     client: `mobile-${resource.appVariant}`,

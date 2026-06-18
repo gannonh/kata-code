@@ -5,6 +5,7 @@ import type {
   RelayAgentActivityPublishRequest,
   RelayAgentActivityState,
 } from "@kata-sh/code-contracts/relay";
+import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
 import { RELAY_ACTIVITY_PUBLISH_TYP } from "@kata-sh/code-shared/relayJwt";
 import { stableStringify } from "@kata-sh/code-shared/relaySigning";
 import { describe, expect, it } from "@effect/vitest";
@@ -34,7 +35,7 @@ const config = RelayConfiguration.RelayConfiguration.of({
   apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
   clerkSecretKey: Redacted.make("clerk-secret"),
   clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
+  clerkJwtAudience: "kata-code-relay",
   cloudMintPrivateKey: Redacted.make(keyPair.privateKey),
   cloudMintPublicKey: keyPair.publicKey,
   managedEndpointBaseDomain: undefined,
@@ -64,7 +65,7 @@ function signTestJwt(payload: object, privateKey: string): string {
 const freshRequest = Effect.gen(function* () {
   const now = yield* DateTime.now;
   const payload = {
-    iss: "t3-env:env",
+    iss: wireEnvironmentIssuer("env"),
     aud: "https://relay.example.test",
     sub: "env",
     jti: "publish-jti",

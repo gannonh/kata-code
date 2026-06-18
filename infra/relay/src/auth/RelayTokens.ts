@@ -8,6 +8,10 @@ import {
   type RelayPublicClientId,
   type RelayEnvironmentLinkChallengeRequest,
 } from "@kata-sh/code-contracts/relay";
+import {
+  WIRE_RELAY_DPOP_ACCESS_JWT_TYP,
+  WIRE_RELAY_LINK_CHALLENGE_JWT_TYP,
+} from "@kata-sh/code-contracts/wireIdentity";
 import { encodeOAuthScope, parseAllowedOAuthScope } from "@kata-sh/code-shared/oauthScope";
 import {
   normalizeRelayIssuer,
@@ -23,8 +27,8 @@ import * as Schema from "effect/Schema";
 
 import * as RelayConfiguration from "../Config.ts";
 
-const LINK_CHALLENGE_TYP = "t3-link-challenge+jwt";
-const ACCESS_TOKEN_TYP = "t3-relay-dpop-access+jwt";
+const LINK_CHALLENGE_TYP = WIRE_RELAY_LINK_CHALLENGE_JWT_TYP;
+const ACCESS_TOKEN_TYP = WIRE_RELAY_DPOP_ACCESS_JWT_TYP;
 const LINK_CHALLENGE_KIND = "environment_link_challenge";
 
 const LinkChallengeClaims = Schema.Struct({

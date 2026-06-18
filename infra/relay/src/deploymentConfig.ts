@@ -67,6 +67,34 @@ export function relayPublicDomainForStage(stage: string, zoneName: string): stri
   return `${relayLabel}.${normalizeZoneName(zoneName)}`;
 }
 
+export function normalizeRelayPublicDomain(value: string): string {
+  return value
+    .trim()
+    .replace(/^https?:\/\//iu, "")
+    .replace(/\/+$/u, "");
+}
+
+export function relayPublicOrigin(domain: string): string {
+  return `https://${normalizeRelayPublicDomain(domain)}`;
+}
+
+export function resolveRelayPublicUrl(input: {
+  readonly relayDomain?: string | undefined;
+  readonly relayApiZoneName?: string | undefined;
+  readonly stage?: string;
+}): string | undefined {
+  const domainOverride = input.relayDomain?.trim();
+  if (domainOverride) {
+    return relayPublicOrigin(domainOverride);
+  }
+  const zoneName = input.relayApiZoneName?.trim();
+  if (!zoneName) {
+    return undefined;
+  }
+  const stage = input.stage ?? "prod";
+  return relayPublicOrigin(relayPublicDomainForStage(stage, zoneName));
+}
+
 export function managedEndpointDigestInput(
   stage: string,
   userId: string,

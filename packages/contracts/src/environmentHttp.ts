@@ -26,7 +26,7 @@ import {
 } from "./auth.ts";
 import { AuthSessionId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
-import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH, WIRE_T3_CONNECT_API_PREFIX } from "./wireIdentity.ts";
+import { WIRE_CONNECT_API_PREFIX, WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "./wireIdentity.ts";
 import {
   ClientOrchestrationCommand,
   DispatchResult,
@@ -480,7 +480,7 @@ export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.post("health", `${WIRE_T3_CONNECT_API_PREFIX}/health`, {
+    HttpApiEndpoint.post("health", `${WIRE_CONNECT_API_PREFIX}/health`, {
       payload: RelayCloudEnvironmentHealthRequest,
       success: RelayEnvironmentHealthResponse,
       error: EnvironmentHttpCloudErrors,
@@ -494,11 +494,15 @@ export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }),
   )
   .add(
-    HttpApiEndpoint.post("t3MintCredential", `${WIRE_T3_CONNECT_API_PREFIX}/mint-credential`, {
-      payload: RelayCloudMintCredentialRequest,
-      success: RelayEnvironmentMintResponse,
-      error: EnvironmentHttpCloudErrors,
-    }),
+    HttpApiEndpoint.post(
+      "kataConnectMintCredential",
+      `${WIRE_CONNECT_API_PREFIX}/mint-credential`,
+      {
+        payload: RelayCloudMintCredentialRequest,
+        success: RelayEnvironmentMintResponse,
+        error: EnvironmentHttpCloudErrors,
+      },
+    ),
   ) {}
 
 export class EnvironmentHttpApi extends HttpApi.make("environment")

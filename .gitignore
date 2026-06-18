@@ -36,3 +36,6 @@ uat-evidence/
 
 # Husky - ignore generated files but keep hooks
 .husky/_
+
+# Local agent skills (installed per developer/machine)
+.agents/skills/

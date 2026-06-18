@@ -7,6 +7,13 @@
   - For CI parity before push, also run `vp run test` and `vp run release:smoke` (matches GitHub Actions **Test** and **Release Smoke** jobs).
 - Use `vp test` for the built-in Vite+ test command and `vp run test` when you specifically need the `test` package script.
 
+## Git Workflow
+
+- **Commit proactively:** After each meaningful, complete change, commit immediately. Do not ask whether to commit—just commit and keep moving.
+- **Atomic commits:** One logical change per commit. Stage only related files; never batch unrelated work into one commit.
+- **Clean worktree:** End each scoped task with `git status` clean. Commit or revert before starting unrelated work.
+- **Never commit secrets:** Exclude `.env`, credentials, and other local-only files.
+
 ## Quick Start
 
 ```bash

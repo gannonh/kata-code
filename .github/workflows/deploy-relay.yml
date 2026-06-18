@@ -1,0 +1,142 @@
+name: Deploy Kata Code Connect relay
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Plan the production relay deploy without applying infrastructure changes"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: none
+  statuses: write
+
+concurrency:
+  group: relay-production
+  cancel-in-progress: false
+
+jobs:
+  deploy_relay:
+    name: Deploy production relay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: production
+    env:
+      CI: "true"
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      PLANETSCALE_ORGANIZATION: ${{ vars.PLANETSCALE_ORGANIZATION }}
+      AXIOM_ORG_ID: ${{ vars.AXIOM_ORG_ID }}
+      RELAY_DOMAIN: ${{ vars.RELAY_DOMAIN }}
+      RELAY_API_ZONE_NAME: ${{ vars.RELAY_API_ZONE_NAME }}
+      RELAY_TUNNEL_ZONE_NAME: ${{ vars.RELAY_TUNNEL_ZONE_NAME }}
+      CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+      CLERK_JWT_AUDIENCE: ${{ vars.CLERK_JWT_AUDIENCE }}
+      CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+      CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+      CLERK_SMOKE_USER_ID: ${{ vars.CLERK_SMOKE_USER_ID }}
+      APNS_ENVIRONMENT: ${{ vars.APNS_ENVIRONMENT }}
+      APNS_TEAM_ID: ${{ vars.APNS_TEAM_ID }}
+      APNS_KEY_ID: ${{ vars.APNS_KEY_ID }}
+      APNS_BUNDLE_ID: ${{ vars.APNS_BUNDLE_ID }}
+      ALCHEMY_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Validate production relay deploy configuration
+        run: |
+          set -euo pipefail
+          args=(node infra/relay/scripts/validate-deploy-config.ts)
+          if [[ "${{ github.event.inputs.dry_run }}" != "true" ]]; then
+            args+=(--include-smoke)
+          fi
+          "${args[@]}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PLANETSCALE_API_TOKEN_ID: ${{ secrets.PLANETSCALE_API_TOKEN_ID }}
+          PLANETSCALE_API_TOKEN: ${{ secrets.PLANETSCALE_API_TOKEN }}
+          AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
+
+      - name: Plan production relay deploy
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        id: dry_run
+        run: vp run --filter @kata-sh/code-relay deploy -- --stage prod --dry-run --yes --github-output
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PLANETSCALE_API_TOKEN_ID: ${{ secrets.PLANETSCALE_API_TOKEN_ID }}
+          PLANETSCALE_API_TOKEN: ${{ secrets.PLANETSCALE_API_TOKEN }}
+          AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
+
+      - name: Apply production relay deploy
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        id: deploy
+        run: vp run --filter @kata-sh/code-relay deploy -- --stage prod --yes --github-output
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PLANETSCALE_API_TOKEN_ID: ${{ secrets.PLANETSCALE_API_TOKEN_ID }}
+          PLANETSCALE_API_TOKEN: ${{ secrets.PLANETSCALE_API_TOKEN }}
+          AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
+
+      - name: Verify relay public endpoints
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: node infra/relay/scripts/run-post-deploy-smoke.ts
+        env:
+          RELAY_URL: ${{ steps.deploy.outputs.relay_url }}
+
+      - name: Verify Clerk DPoP token exchange
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: node infra/relay/scripts/clerk-dpop-smoke.ts
+        env:
+          RELAY_URL: ${{ steps.deploy.outputs.relay_url }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_SMOKE_USER_ID: ${{ vars.CLERK_SMOKE_USER_ID }}
+          CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+
+      - name: Publish relay deploy commit status
+        if: ${{ !failure() && !cancelled() }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const dryRun = "${{ github.event.inputs.dry_run }}" === "true";
+            const result = dryRun
+              ? "${{ steps.dry_run.outputs.result }}"
+              : "${{ steps.deploy.outputs.result }}";
+            const changed = dryRun
+              ? "${{ steps.dry_run.outputs.changed }}" === "true"
+              : "${{ steps.deploy.outputs.changed }}" === "true";
+            const description = dryRun
+              ? changed
+                ? "Relay production dry-run found pending infrastructure changes."
+                : "Relay production dry-run completed with no pending changes."
+              : changed
+                ? "Relay production deploy applied infrastructure changes."
+                : result === "noop"
+                  ? "Relay production deploy was a no-op."
+                  : `Relay production deploy completed with result: ${result}.`;
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: "success",
+              context: "Relay deploy / production",
+              description,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });

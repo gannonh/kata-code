@@ -30,6 +30,11 @@ See [providers index](/providers/index.md).
 
 See [cloud index](/cloud/index.md).
 
+| Document                                                            | Summary                                                     |
+| ------------------------------------------------------------------- | ----------------------------------------------------------- |
+| [Relay credentials playbook](/guides/relay-credentials-playbook.md) | Credential collection, GitHub sync, bootstrap, deploy smoke |
+| [Relay Deploy UAT](/guides/relay-deploy-uat.md)                     | Manual acceptance after production relay apply              |
+
 ## Integrations
 
 See [integrations index](/integrations/index.md).

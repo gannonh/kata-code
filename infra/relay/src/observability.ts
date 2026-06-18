@@ -27,7 +27,7 @@ const relayRecentSpansQuery = (dataset: string) =>
 export const RelayObservability = Effect.gen(function* () {
   const { stage } = yield* Alchemy.Stack;
   const traces = yield* Axiom.Dataset("RelayTracesDataset", {
-    name: relayResourceNameForStage("t3-code-relay-traces", stage),
+    name: relayResourceNameForStage("kata-code-relay-traces", stage),
     kind: "otel:traces:v1",
     description: "Kata Code relay Worker HTTP request spans.",
     retentionDays: 30,
@@ -35,7 +35,7 @@ export const RelayObservability = Effect.gen(function* () {
   });
 
   const workerIngestToken = yield* Axiom.ApiToken("RelayWorkerAxiomIngestToken", {
-    name: relayResourceNameForStage("t3-code-relay-otel-ingest", stage),
+    name: relayResourceNameForStage("kata-code-relay-otel-ingest", stage),
     description: "Owned by Alchemy. Scoped OTLP ingest token for relay HTTP spans.",
     datasetCapabilities: Output.map(traces.name, (dataset) => ({
       [dataset]: { ingest: ["create" as const] },
@@ -43,7 +43,7 @@ export const RelayObservability = Effect.gen(function* () {
   });
 
   const mobileIngestToken = yield* Axiom.ApiToken("RelayMobileAxiomIngestToken", {
-    name: relayResourceNameForStage("t3-code-mobile-otel-ingest", stage),
+    name: relayResourceNameForStage("kata-code-mobile-otel-ingest", stage),
     description: "Owned by Alchemy. Scoped OTLP ingest token for Kata Code mobile spans.",
     datasetCapabilities: Output.map(traces.name, (dataset) => ({
       [dataset]: { ingest: ["create" as const] },
@@ -51,7 +51,7 @@ export const RelayObservability = Effect.gen(function* () {
   });
 
   const clientIngestToken = yield* Axiom.ApiToken("RelayClientAxiomIngestToken", {
-    name: relayResourceNameForStage("t3-code-relay-client-otel-ingest", stage),
+    name: relayResourceNameForStage("kata-code-relay-client-otel-ingest", stage),
     description: "Owned by Alchemy. Scoped OTLP ingest token for first-party relay client spans.",
     datasetCapabilities: Output.map(traces.name, (dataset) => ({
       [dataset]: { ingest: ["create" as const] },
@@ -59,7 +59,7 @@ export const RelayObservability = Effect.gen(function* () {
   });
 
   yield* Axiom.View("RelayRecentSpansView", {
-    name: relayResourceNameForStage("t3-code-relay-recent-spans", stage),
+    name: relayResourceNameForStage("kata-code-relay-recent-spans", stage),
     description: "Recent relay HTTP request spans.",
     datasets: [traces.name],
     aplQuery: Output.map(traces.name, relayRecentSpansQuery),
@@ -222,7 +222,7 @@ export const makeRelayTraceLayer = (input: {
     OtlpTracer.make({
       url: input.tracesEndpoint,
       resource: {
-        serviceName: "t3-code-relay-worker",
+        serviceName: "kata-code-relay-worker",
         attributes: {
           "service.runtime": "cloudflare-worker",
           "service.component": "relay",

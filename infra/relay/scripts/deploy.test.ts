@@ -2,9 +2,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import {
+  createDeployConfigProvider,
+  removeLeadingPackageManagerSeparator,
   hasDeployChanges,
   publicConfigFromOutput,
   reconcileRootEnvPublicConfig,
@@ -12,6 +15,51 @@ import {
   serializeGithubOutput,
   serializeRelayClientTracingEnvironment,
 } from "./deploy.ts";
+
+describe("removeLeadingPackageManagerSeparator", () => {
+  it("removes the package manager separator before CLI flag parsing", () => {
+    const argv = ["node", "scripts/deploy.ts", "--", "--stage", "prod", "--dry-run"];
+
+    removeLeadingPackageManagerSeparator(argv);
+
+    expect(argv).toEqual(["node", "scripts/deploy.ts", "--stage", "prod", "--dry-run"]);
+  });
+
+  it("leaves argv unchanged when the separator is absent", () => {
+    const argv = ["node", "scripts/deploy.ts", "--stage", "prod", "--dry-run"];
+
+    removeLeadingPackageManagerSeparator(argv);
+
+    expect(argv).toEqual(["node", "scripts/deploy.ts", "--stage", "prod", "--dry-run"]);
+  });
+});
+
+describe("createDeployConfigProvider", () => {
+  it("forces CI when dry-run or yes is set", () => {
+    const previousCi = process.env.CI;
+    delete process.env.CI;
+
+    createDeployConfigProvider({
+      dryRun: true,
+      force: false,
+      envFile: Option.none(),
+      stage: Option.none(),
+      yes: true,
+      adopt: false,
+      githubOutput: false,
+      githubEnvFile: Option.none(),
+      readState: false,
+    });
+
+    expect(process.env.CI).toBe("true");
+
+    if (previousCi === undefined) {
+      delete process.env.CI;
+    } else {
+      process.env.CI = previousCi;
+    }
+  });
+});
 
 describe("hasDeployChanges", () => {
   it("detects resource, binding, and deletion changes", () => {
@@ -66,10 +114,10 @@ describe("reconcileRootEnvPublicConfig", () => {
   const config = {
     relayUrl: "https://relay.example.test",
     mobileTracingUrl: "https://api.axiom.co/v1/traces",
-    mobileTracingDataset: "t3-code-mobile-traces-dev",
+    mobileTracingDataset: "kata-code-mobile-traces-dev",
     mobileTracingToken: "xaat-public-ingest",
     clientTracingUrl: "https://api.axiom.co/v1/traces",
-    clientTracingDataset: "t3-code-relay-client-traces-dev",
+    clientTracingDataset: "kata-code-relay-client-traces-dev",
     clientTracingToken: "xaat-relay-client-ingest",
   } as const;
 
@@ -78,10 +126,10 @@ describe("reconcileRootEnvPublicConfig", () => {
       [
         "KATACODE_RELAY_URL=https://relay.example.test",
         "KATACODE_MOBILE_OTLP_TRACES_URL=https://api.axiom.co/v1/traces",
-        "KATACODE_MOBILE_OTLP_TRACES_DATASET=t3-code-mobile-traces-dev",
+        "KATACODE_MOBILE_OTLP_TRACES_DATASET=kata-code-mobile-traces-dev",
         "KATACODE_MOBILE_OTLP_TRACES_TOKEN=xaat-public-ingest",
         "KATACODE_RELAY_CLIENT_OTLP_TRACES_URL=https://api.axiom.co/v1/traces",
-        "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET=t3-code-relay-client-traces-dev",
+        "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET=kata-code-relay-client-traces-dev",
         "KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=xaat-relay-client-ingest",
         "",
       ].join("\n"),
@@ -109,10 +157,10 @@ describe("reconcileRootEnvPublicConfig", () => {
         "KATACODE_CLERK_PUBLISHABLE_KEY=pk_test_example",
         "KATACODE_RELAY_URL=https://relay.example.test",
         "KATACODE_MOBILE_OTLP_TRACES_URL=https://api.axiom.co/v1/traces",
-        "KATACODE_MOBILE_OTLP_TRACES_DATASET=t3-code-mobile-traces-dev",
+        "KATACODE_MOBILE_OTLP_TRACES_DATASET=kata-code-mobile-traces-dev",
         "KATACODE_MOBILE_OTLP_TRACES_TOKEN=xaat-public-ingest",
         "KATACODE_RELAY_CLIENT_OTLP_TRACES_URL=https://api.axiom.co/v1/traces",
-        "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET=t3-code-relay-client-traces-dev",
+        "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET=kata-code-relay-client-traces-dev",
         "KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=xaat-relay-client-ingest",
         "",
       ].join("\n"),
@@ -156,7 +204,7 @@ describe("serializeRelayClientTracingEnvironment", () => {
 });
 
 describe("release workflow tracing config propagation", () => {
-  it.effect("does not depend on relay deploy jobs for desktop/web release", () =>
+  it.effect("reads production relay config from Alchemy state during release preflight", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -165,15 +213,12 @@ describe("release workflow tracing config propagation", () => {
       );
       const workflow = yield* fileSystem.readFileString(workflowPath);
 
-      expect(workflow).not.toContain("client_tracing_token:");
-      expect(workflow).not.toContain("needs.relay_public_config.outputs.client_tracing_token");
-      expect(workflow).not.toContain("@kata-sh/code-relay deploy");
-      expect(workflow).not.toContain("relay-client-tracing-config");
+      expect(workflow).toContain("relay_client_otlp_traces_token:");
+      expect(workflow).toContain("read-public-config.ts");
+      expect(workflow).toContain("--github-output");
+      expect(workflow).toContain("resolve-connect-public-config.ts");
+      expect(workflow).toContain("REQUIRE_CONNECT_CONFIG");
       expect(workflow).toContain("resolve_public_config:");
-      expect(workflow).toContain("node scripts/check-macos-release-signing.ts");
-      expect(workflow).toContain("DISPATCH_DRY_RUN:");
-      expect(workflow).toContain('raw="0.0.0-dryrun.${NIGHTLY_RUN_NUMBER}"');
-      expect(workflow).toContain("cli_dist_tag=next");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

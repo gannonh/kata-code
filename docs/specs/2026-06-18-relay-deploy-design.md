@@ -4,13 +4,13 @@ title: "Relay Deploy"
 description: "Plan to enable manual production deployment for the Kata Code Connect relay with strict release config, smoke checks, and UAT evidence."
 tags: [relay, connect, infrastructure, release, github-actions]
 timestamp: 2026-06-18T00:00:00Z
-status: Approved
+status: Implemented
 approved_at: 2026-06-18T00:00:00Z
 ---
 
 # Relay Deploy
 
-**Status:** Approved
+**Status:** Implemented (credential smoke + local dry-run pass; GitHub apply + UAT pending)
 
 ## Grounding context
 
@@ -407,3 +407,49 @@ Blocking questions for Build:
 
 1. Which Clerk-supported CI credential pattern can mint a fresh smoke token for `/v1/client/dpop-token` without storing a long-lived bearer token?
 2. Which minimal credentials are needed for release preflight to read Alchemy `prod` state without applying infrastructure changes?
+
+## Build completion report
+
+- **Spec:** `docs/specs/2026-06-18-relay-deploy-design.md`
+- **Base SHA:** `31451890f34e705d0e8f7729ec62eed295c9607d`
+- **Status:** Implemented (credential smoke + local dry-run pass; GitHub apply + UAT pending)
+
+### Tasks completed
+
+1. Enabled manual production `deploy-relay.yml` with `dry_run` input, config validation, apply-mode public smoke, Clerk DPoP smoke, and commit status publication.
+2. Added relay deploy/smoke helpers and tests under `infra/relay/scripts/`.
+3. Updated `release.yml` to read Alchemy `prod` state for relay URL and client tracing config and fail stable/nightly releases when Connect config is missing.
+4. Added relay setup runbook, UAT guide, and workflow/README updates.
+
+### Blocking question resolutions
+
+1. **Clerk smoke:** use `CLERK_SECRET_KEY` + `CLERK_SMOKE_USER_ID` to create a short-lived session, mint a fresh JWT from `CLERK_JWT_TEMPLATE`, exchange at `/v1/client/dpop-token`, then revoke the session. Documented in `docs/operations/relay-deploy-setup.md`.
+2. **Alchemy state read:** release preflight needs only `CLOUDFLARE_ACCOUNT_ID` (repository variable) and `CLOUDFLARE_API_TOKEN` (`production` secret).
+
+### Verification run locally
+
+- `vp check` — pass (pre-existing lint warnings only)
+- `vp run typecheck` — pass
+- `vp run --filter @kata-sh/code-relay test` — 137 tests pass
+- `vp test scripts/lib/connect-public-config.test.ts` — pass
+
+### Not completed in this Build pass (requires your action)
+
+- Merge [PR #4](https://github.com/gannonh/kata-code/pull/4) so `deploy-relay.yml` is on `main`
+- `deploy-relay.yml` dry-run and apply workflow evidence in GitHub Actions
+- `release.yml` dry-run Connect config resolution against live Alchemy state after apply
+- Manual Connect link/connect/unlink UAT evidence
+
+### Infra setup progress (2026-06-18)
+
+- Fork-owned Cloudflare, PlanetScale, Axiom, Clerk, and APNs credentials collected in `infra/relay/.env`
+- `node infra/relay/scripts/run-credential-smoke.ts` passes (including Cloudflare Workers/Secrets Store permission checks)
+- Corrected `CLOUDFLARE_ACCOUNT_ID` synced to GitHub `production` via `sync-github-config.ts`
+- One-time `alchemy cloudflare bootstrap` completed for Alchemy state store
+- Local `vp run --filter @kata-sh/code-relay deploy -- --stage prod --dry-run --yes` passes
+
+Operator docs updated in [Relay deploy setup](/operations/relay-deploy-setup.md) and [Relay credentials playbook](/guides/relay-credentials-playbook.md).
+
+### Review gates
+
+- Independent subagent review was unavailable; single-agent path used with written spec compliance and local verification.
