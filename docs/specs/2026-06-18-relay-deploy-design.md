@@ -4,9 +4,13 @@ title: "Relay Deploy"
 description: "Plan to enable manual production deployment for the Kata Code Connect relay with strict release config, smoke checks, and UAT evidence."
 tags: [relay, connect, infrastructure, release, github-actions]
 timestamp: 2026-06-18T00:00:00Z
+status: Approved
+approved_at: 2026-06-18T00:00:00Z
 ---
 
 # Relay Deploy
+
+**Status:** Approved
 
 ## Grounding context
 
