@@ -10,6 +10,7 @@ GANNONH_SKILLS=(
   address-pr-comments
   agents-md-improver
   babysit-pr
+  committing-changes
   finalize
   fix-github-ci
   okf

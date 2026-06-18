@@ -19,6 +19,12 @@
       "skillPath": "babysit-pr/SKILL.md",
       "computedHash": "e3f2bfdd46bcabccec1918dc6bce9b5faaf22c1d9a0bafaa3754124ec9b4bfbd"
     },
+    "committing-changes": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "committing-changes/SKILL.md",
+      "computedHash": "6da0ef970580eff1e1da30300390f5aa197ee5f423d04fa7701baf5e66b5c245"
+    },
     "deploy-to-vercel": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
