@@ -75,13 +75,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual(latestConfig, {
         provider: "github",
         owner: "gannonh",
-        repo: "katacode",
+        repo: "kata-code",
         releaseType: "release",
       });
       assert.deepStrictEqual(nightlyConfig, {
         provider: "github",
         owner: "gannonh",
-        repo: "katacode",
+        repo: "kata-code",
         releaseType: "prerelease",
         channel: "nightly",
       });
