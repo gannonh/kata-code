@@ -66,6 +66,15 @@ This repository maintains an [OKF](https://github.com/GoogleCloudPlatform/knowle
 - Maintain Markdown cross-links between related OKF concepts so future agents can traverse decisions, specs, architecture, runbooks, guides, and references.
 - Every non-reserved Markdown file under `./docs` should have OKF frontmatter with at least a non-empty `type` field. `index.md` and `log.md` are reserved navigation/history files.
 
+## Communication
+
+- **Answer first.** Lead with the direct answer in the fewest words that are still correct.
+- **Match depth to the question.** Procedural questions ("what's next?", "what order?") get a short numbered list. Do not add architecture, diagrams, caveats, or doc links unless asked or the answer would be wrong without them.
+- **Say it once.** Do not restate the same point in prose, bullets, and a summary.
+- **Do not say what not to do.** State the answer or the recommended path only. Avoid negation lists, "don't" sections, and ruling out alternatives the user did not ask about.
+- **Expand on request.** Add rationale, tradeoffs, or links only when the user asks why, or when ambiguity would cause a wrong action.
+- **One path by default.** Prefer a single recommended sequence over multiple options with long comparisons.
+
 ## Core Priorities
 
 1. Performance first.
