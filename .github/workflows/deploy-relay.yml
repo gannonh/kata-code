@@ -26,6 +26,7 @@ jobs:
     environment:
       name: production
     env:
+      CI: "true"
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       PLANETSCALE_ORGANIZATION: ${{ vars.PLANETSCALE_ORGANIZATION }}
       AXIOM_ORG_ID: ${{ vars.AXIOM_ORG_ID }}

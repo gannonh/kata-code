@@ -85,7 +85,10 @@ vp run --filter @kata-sh/code-relay deploy
 The stack provisions the Cloudflare Worker and queues, managed endpoint resources, database
 connectivity, and relay tracing resources. Copy [`infra/relay/.env.example`](./.env.example) to
 `infra/relay/.env` and fill in the deployment-specific values before deploying. Alchemy loads that
-file from the relay directory. Runtime secrets include Clerk and APNs credentials. Production adopts
+file from the relay directory and merges it with process environment variables (so `CI=true` and
+other shell exports still apply). Scripted deploys pass `--yes` (and usually `--dry-run` first),
+which forces non-interactive provider auth. Runtime secrets include Clerk and APNs credentials.
+Production adopts
 the configured API and tunnel DNS zones as retained Cloudflare resources. Personal stages reference
 the production-owned zones.
 

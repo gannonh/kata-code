@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+// @effect-diagnostics nodeBuiltinImport:off - Relay deploy bootstraps dotenv into process.env before Effect provider layers exist.
+
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+import * as NodeUtil from "node:util";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";
@@ -82,27 +88,51 @@ export interface RelayDeployOutcome {
   readonly publicConfig: Option.Option<RelayPublicConfig>;
 }
 
+const relayRootPath = NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)));
+
+function resolveRelayEnvFilePath(envFileOverride: Option.Option<string>): string {
+  if (Option.isSome(envFileOverride)) {
+    return NodePath.resolve(relayRootPath, envFileOverride.value);
+  }
+  return NodePath.join(relayRootPath, ".env");
+}
+
+/** Load relay `.env` into `process.env` before Alchemy builds provider auth layers. */
+export function bootstrapRelayProcessEnv(envFileOverride: Option.Option<string>): void {
+  const envPath = resolveRelayEnvFilePath(envFileOverride);
+  if (!NodeFS.existsSync(envPath)) {
+    return;
+  }
+  Object.assign(process.env, NodeUtil.parseEnv(NodeFS.readFileSync(envPath, "utf8")));
+}
+
+function ensureNonInteractiveAuth(options: RelayDeployOptions): void {
+  if (!options.yes && !options.dryRun) {
+    return;
+  }
+  process.env.CI = "true";
+}
+
+export function createDeployConfigProvider(
+  options: RelayDeployOptions,
+): ConfigProvider.ConfigProvider {
+  bootstrapRelayProcessEnv(options.envFile);
+  ensureNonInteractiveAuth(options);
+  return ConfigProvider.fromEnv();
+}
+
+export function removeLeadingPackageManagerSeparator(argv: Array<string>): void {
+  if (argv[2] === "--") {
+    argv.splice(2, 1);
+  }
+}
+
 const relayRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
 );
 const repoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
 );
-
-const loadDeployConfigProvider = Effect.fn("relay.deploy.loadConfigProvider")(function* (
-  envFileOverride: Option.Option<string>,
-) {
-  const path = yield* Path.Path;
-  const root = yield* relayRoot;
-
-  if (Option.isSome(envFileOverride)) {
-    return yield* ConfigProvider.fromDotEnv({ path: path.resolve(root, envFileOverride.value) });
-  }
-
-  return yield* ConfigProvider.fromDotEnv({ path: path.join(root, ".env") }).pipe(
-    Effect.orElseSucceed(() => ConfigProvider.fromEnv()),
-  );
-});
 
 const relayDeployStage = Config.nonEmptyString("stage").pipe(
   Config.option,
@@ -191,13 +221,14 @@ const readRelayPublicConfig = Effect.fn("relay.deploy.readState")(function* (sta
 const runRelayDeploy = Effect.fn("relay.deploy.run")(
   function* (
     options: RelayDeployOptions,
-    _configProvider: ConfigProvider.ConfigProvider,
+    configProvider: ConfigProvider.ConfigProvider,
     _stage: string,
   ) {
     const stack = yield* RelayStack;
     const cli = yield* Cli;
     const plan = yield* Plan.make(stack, { force: options.force }).pipe(
       Effect.provide(stack.services),
+      Effect.provide(ConfigProvider.layer(configProvider)),
     );
     const changed = hasDeployChanges(plan);
     if (options.dryRun) {
@@ -271,7 +302,7 @@ const runRelayDeploy = Effect.fn("relay.deploy.run")(
 );
 
 export const deploy = Effect.fn("relay.deploy")(function* (options: RelayDeployOptions) {
-  const configProvider = yield* loadDeployConfigProvider(options.envFile);
+  const configProvider = createDeployConfigProvider(options);
   const configuredStage = yield* relayDeployStage.pipe(
     Effect.provide(ConfigProvider.layer(configProvider)),
   );
@@ -338,6 +369,7 @@ export const relayDeployCommand = Command.make(
 ).pipe(Command.withDescription("Deploy the Kata Code relay through Alchemy."));
 
 if (import.meta.main) {
+  removeLeadingPackageManagerSeparator(process.argv);
   Command.run(relayDeployCommand, { version: "0.0.0" }).pipe(
     Effect.provide(deployServices),
     Effect.scoped,

@@ -2,9 +2,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import {
+  createDeployConfigProvider,
+  removeLeadingPackageManagerSeparator,
   hasDeployChanges,
   publicConfigFromOutput,
   reconcileRootEnvPublicConfig,
@@ -12,6 +15,51 @@ import {
   serializeGithubOutput,
   serializeRelayClientTracingEnvironment,
 } from "./deploy.ts";
+
+describe("removeLeadingPackageManagerSeparator", () => {
+  it("removes the package manager separator before CLI flag parsing", () => {
+    const argv = ["node", "scripts/deploy.ts", "--", "--stage", "prod", "--dry-run"];
+
+    removeLeadingPackageManagerSeparator(argv);
+
+    expect(argv).toEqual(["node", "scripts/deploy.ts", "--stage", "prod", "--dry-run"]);
+  });
+
+  it("leaves argv unchanged when the separator is absent", () => {
+    const argv = ["node", "scripts/deploy.ts", "--stage", "prod", "--dry-run"];
+
+    removeLeadingPackageManagerSeparator(argv);
+
+    expect(argv).toEqual(["node", "scripts/deploy.ts", "--stage", "prod", "--dry-run"]);
+  });
+});
+
+describe("createDeployConfigProvider", () => {
+  it("forces CI when dry-run or yes is set", () => {
+    const previousCi = process.env.CI;
+    delete process.env.CI;
+
+    createDeployConfigProvider({
+      dryRun: true,
+      force: false,
+      envFile: Option.none(),
+      stage: Option.none(),
+      yes: true,
+      adopt: false,
+      githubOutput: false,
+      githubEnvFile: Option.none(),
+      readState: false,
+    });
+
+    expect(process.env.CI).toBe("true");
+
+    if (previousCi === undefined) {
+      delete process.env.CI;
+    } else {
+      process.env.CI = previousCi;
+    }
+  });
+});
 
 describe("hasDeployChanges", () => {
   it("detects resource, binding, and deletion changes", () => {
