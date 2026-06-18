@@ -59,7 +59,7 @@ describe("groupProjectsByRepository", () => {
       },
       provider: "github",
       owner: "gannonh",
-      name: "katacode",
+      name: "kata-code",
       displayName: "Kata Code",
     };
 
