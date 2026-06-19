@@ -38,7 +38,11 @@ export const DESKTOP_NATIVE_ASAR_UNPACK = [
 ] as const;
 
 /** Optional deps carry platform-specific native binaries required at desktop runtime. */
-export const DESKTOP_STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
+export const DESKTOP_STAGE_INSTALL_ARGS = [
+  "install",
+  "--prod",
+  "--config.node-linker=hoisted",
+] as const;
 
 /** effect imports these packages from ESM entrypoints that Electron resolves from app.asar. */
 export const DESKTOP_STAGE_SUPPLEMENTAL_CATALOG_DEPENDENCIES = [
@@ -59,6 +63,7 @@ export const DESKTOP_STAGE_SUPPLEMENTAL_CATALOG_DEPENDENCIES = [
 export const DESKTOP_STAGE_RUNTIME_IMPORT_CHECKS = [
   "effect/testing/FastCheck",
   "effect/unstable/http/FindMyWay",
+  "@effect/platform-node-shared/NodeSocket",
   "electron-updater",
 ] as const;
 
@@ -1076,13 +1081,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
-  const installCommand = yield* resolveSpawnCommand("vp", [...DESKTOP_STAGE_INSTALL_ARGS]);
+  const installCommand = yield* resolveSpawnCommand("pnpm", [...DESKTOP_STAGE_INSTALL_ARGS]);
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: stageAppDir,
       shell: installCommand.shell,
     }),
-    { label: "vp install --prod", verbose: options.verbose },
+    { label: "pnpm install --prod --config.node-linker=hoisted", verbose: options.verbose },
   );
 
   yield* Effect.log("[desktop-artifact] Verifying staged runtime imports...");

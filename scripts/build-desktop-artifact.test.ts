@@ -145,8 +145,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
   });
 
-  it("keeps platform native optional deps for staged desktop installs", () => {
-    assert.deepStrictEqual(DESKTOP_STAGE_INSTALL_ARGS, ["install", "--prod"]);
+  it("uses a hoisted node_modules layout for staged desktop installs", () => {
+    assert.deepStrictEqual(DESKTOP_STAGE_INSTALL_ARGS, [
+      "install",
+      "--prod",
+      "--config.node-linker=hoisted",
+    ]);
   });
 
   it("unpacks workspace search native bindings from the desktop asar", () => {
