@@ -26,6 +26,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { stringify as stringifyYaml } from "yaml";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 
@@ -46,6 +47,8 @@ const WorkspaceConfig = Schema.Struct({
   catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   overrides: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   patchedDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  onlyBuiltDependencies: Schema.optional(Schema.Array(Schema.String)),
+  allowBuilds: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 });
 type WorkspaceConfig = typeof WorkspaceConfig.Type;
 
@@ -294,19 +297,56 @@ interface StagePackageJson {
   };
 }
 
+function filterStagePatchedDependencies(
+  patchedDependencies: Record<string, string>,
+  dependencies: Record<string, unknown>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(patchedDependencies).filter(([patchKey]) =>
+      Object.hasOwn(dependencies, getPatchedDependencyPackageName(patchKey)),
+    ),
+  );
+}
+
 export function createStagePnpmConfig(
   patchedDependencies: Record<string, string>,
   dependencies: Record<string, unknown>,
 ): StagePackageJson["pnpm"] | undefined {
-  const stagePatchedDependencies = Object.fromEntries(
-    Object.entries(patchedDependencies).filter(([patchKey]) =>
-      Object.hasOwn(dependencies, getPatchedDependencyPackageName(patchKey)),
-    ),
+  const stagePatchedDependencies = filterStagePatchedDependencies(
+    patchedDependencies,
+    dependencies,
   );
 
   return Object.keys(stagePatchedDependencies).length > 0
     ? { patchedDependencies: stagePatchedDependencies }
     : undefined;
+}
+
+export function createStagePnpmWorkspaceDocument(
+  workspaceConfig: WorkspaceConfig,
+  patchedDependencies: Record<string, string>,
+  dependencies: Record<string, unknown>,
+): Record<string, unknown> {
+  const document: Record<string, unknown> = {
+    packages: ["."],
+  };
+
+  if (workspaceConfig.onlyBuiltDependencies && workspaceConfig.onlyBuiltDependencies.length > 0) {
+    document.onlyBuiltDependencies = workspaceConfig.onlyBuiltDependencies;
+  }
+  if (workspaceConfig.allowBuilds && Object.keys(workspaceConfig.allowBuilds).length > 0) {
+    document.allowBuilds = workspaceConfig.allowBuilds;
+  }
+
+  const stagePatchedDependencies = filterStagePatchedDependencies(
+    patchedDependencies,
+    dependencies,
+  );
+  if (Object.keys(stagePatchedDependencies).length > 0) {
+    document.patchedDependencies = stagePatchedDependencies;
+  }
+
+  return document;
 }
 
 function getPatchedDependencyPackageName(patchKey: string): string {
@@ -969,6 +1009,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
+
+  const stagePnpmWorkspace = createStagePnpmWorkspaceDocument(
+    workspaceConfig,
+    workspacePatchedDependencies,
+    stageDependencies,
+  );
+  yield* fs.writeFileString(
+    path.join(stageAppDir, "pnpm-workspace.yaml"),
+    `${stringifyYaml(stagePnpmWorkspace)}\n`,
+  );
 
   if (Object.keys(workspacePatchedDependencies).length > 0) {
     yield* fs.copy(path.join(repoRoot, "patches"), path.join(stageAppDir, "patches"));

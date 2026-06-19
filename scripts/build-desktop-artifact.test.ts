@@ -7,6 +7,7 @@ import * as Option from "effect/Option";
 
 import {
   createStagePnpmConfig,
+  createStagePnpmWorkspaceDocument,
   DESKTOP_NATIVE_ASAR_UNPACK,
   DESKTOP_STAGE_INSTALL_ARGS,
   resolveDesktopRuntimeDependencies,
@@ -154,6 +155,38 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         { effect: "4.0.0-beta.73" },
       ),
       undefined,
+    );
+  });
+
+  it("carries staged pnpm workspace build approvals into desktop stage installs", () => {
+    assert.deepStrictEqual(
+      createStagePnpmWorkspaceDocument(
+        {
+          onlyBuiltDependencies: ["node-pty", "msgpackr-extract"],
+          allowBuilds: {
+            "node-pty": true,
+            "msgpackr-extract": true,
+          },
+          patchedDependencies: {
+            "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+          },
+        },
+        {
+          "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+        },
+        { effect: "4.0.0-beta.73", "node-pty": "1.1.0" },
+      ),
+      {
+        packages: ["."],
+        onlyBuiltDependencies: ["node-pty", "msgpackr-extract"],
+        allowBuilds: {
+          "node-pty": true,
+          "msgpackr-extract": true,
+        },
+        patchedDependencies: {
+          "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+        },
+      },
     );
   });
 
