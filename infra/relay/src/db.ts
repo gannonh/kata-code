@@ -32,7 +32,8 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
       ? yield* Planetscale.PostgresDatabase("RelayPostgresDatabase", {
           name: "katacoderelay",
           region: { slug: "us-west" },
-          clusterSize: "PS_DEV", // Bump to PS_5 when scaling for real user load
+          clusterSize: "PS_5",
+          arch: "arm", // PS_5_AWS_ARM — single-node ~$5/mo; scale clusterSize when load grows
           migrationsDir: schema.out,
           migrationsTable: "relay_migrations",
           replicas: 0,
