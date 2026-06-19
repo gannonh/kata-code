@@ -15,6 +15,7 @@ import {
 import type { SavedEnvironmentRecord } from "../environments/runtime";
 import {
   connectManagedCloudEnvironment,
+  isCloudSessionRejectedError,
   linkEnvironmentToCloud,
   linkPrimaryEnvironmentToCloud,
   listManagedCloudEnvironments,
@@ -728,6 +729,54 @@ describe("web cloud link environment client", () => {
         message: "Local environment is not ready yet.",
       });
       expect(fetch).not.toHaveBeenCalled();
+    }),
+  );
+
+  it.effect("marks invalid relay bearer failures as rejected cloud sessions", () =>
+    Effect.gen(function* () {
+      vi.mocked(readPrimaryEnvironmentDescriptor).mockReturnValue({
+        environmentId: EnvironmentId.make("env-1"),
+        label: "Desktop",
+        platform: { os: "darwin", arch: "arm64" },
+        serverVersion: "0.0.0-test",
+        capabilities: { repositoryIdentity: true },
+      });
+      vi.mocked(readPrimaryEnvironmentTarget).mockReturnValue({
+        source: "desktop-managed",
+        target: {
+          httpBaseUrl: "http://127.0.0.1:3000",
+          wsBaseUrl: "ws://127.0.0.1:3000",
+        },
+      });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValueOnce(
+          Response.json(
+            {
+              _tag: "RelayAuthInvalidError",
+              code: "auth_invalid",
+              reason: "invalid_bearer",
+              traceId: "trace-test",
+            },
+            { status: 401 },
+          ),
+        ),
+      );
+
+      const error = yield* withCloudServices(
+        linkPrimaryEnvironmentToCloud({
+          clerkToken: "stale-clerk-token",
+        }),
+      ).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkError",
+        reason: "cloud_session_rejected",
+        message:
+          "https://relay.example.test/v1/client/environment-link-challenges failed: Relay rejected the cloud session token.",
+      });
+      expect(isCloudSessionRejectedError(error)).toBe(true);
     }),
   );
 

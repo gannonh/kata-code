@@ -62,9 +62,12 @@ function relayUrl(): string | null {
   return resolveCloudPublicConfig().relayUrl;
 }
 
+export type CloudEnvironmentLinkErrorReason = "cloud_session_rejected";
+
 export class CloudEnvironmentLinkError extends Data.TaggedError("CloudEnvironmentLinkError")<{
   readonly message: string;
   readonly cause?: unknown;
+  readonly reason?: CloudEnvironmentLinkErrorReason;
 }> {}
 
 const relayClientRpcError = (message: string) => (cause: unknown) =>
@@ -125,6 +128,25 @@ const isEnvironmentCloudApiError = Schema.is(
   ]),
 );
 
+function relayProtectedErrorReason(
+  error: RelayProtectedErrorType,
+): CloudEnvironmentLinkErrorReason | null {
+  return error._tag === "RelayAuthInvalidError" &&
+    (error.reason === "missing_bearer" || error.reason === "invalid_bearer")
+    ? "cloud_session_rejected"
+    : null;
+}
+
+export function isCloudSessionRejectedError(cause: unknown): boolean {
+  if (cause instanceof CloudEnvironmentLinkError && cause.reason === "cloud_session_rejected") {
+    return true;
+  }
+  if (typeof cause !== "object" || cause === null) {
+    return false;
+  }
+  return "cause" in cause ? isCloudSessionRejectedError(cause.cause) : false;
+}
+
 function relayProtectedErrorMessage(error: RelayProtectedErrorType): string {
   switch (error._tag) {
     case "RelayAuthInvalidError":
@@ -164,9 +186,11 @@ function decodedRelayClientError(message: string) {
   return (cause: unknown) => {
     const relayError = findRelayProtectedError(cause);
     const detail = relayError ? relayProtectedErrorMessage(relayError) : null;
+    const reason = relayError ? relayProtectedErrorReason(relayError) : null;
     return new CloudEnvironmentLinkError({
       message: detail ? `${message}: ${detail}` : message,
       cause,
+      ...(reason ? { reason } : {}),
     });
   };
 }

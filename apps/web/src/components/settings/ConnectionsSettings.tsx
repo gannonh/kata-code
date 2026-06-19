@@ -7,7 +7,7 @@ import {
   TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useAuth } from "@clerk/react";
+import { useAuth, useClerk } from "@clerk/react";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AuthAccessReadScope,
@@ -120,10 +120,15 @@ import { resolveServerConfigVersionMismatch } from "~/versionSkew";
 import { useServerConfig } from "~/rpc/serverState";
 import {
   connectManagedCloudEnvironment,
+  isCloudSessionRejectedError,
   linkPrimaryEnvironmentToCloud,
   unlinkPrimaryEnvironmentFromCloud,
   updatePrimaryCloudPreferences,
 } from "~/cloud/linkEnvironment";
+import {
+  recoverRejectedCloudSession,
+  rejectedCloudSessionMessage,
+} from "~/cloud/rejectedCloudSessionRecovery";
 import {
   refreshManagedRelayEnvironments,
   useManagedRelayEnvironments,
@@ -1654,6 +1659,7 @@ function CloudLinkSwitch({
 
 function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
   const { getToken, isSignedIn } = useAuth();
+  const clerk = useClerk();
   const { authPrompt, openAuthPrompt } = useHostedConnectAuthPrompt();
   const primaryCloudLinkState = usePrimaryCloudLinkState();
   const [operationError, setOperationError] = useState<string | null>(null);
@@ -1685,8 +1691,25 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           : "This environment is no longer available through Kata Code Connect.",
       });
     } catch (cause) {
-      const message =
+      let message =
         cause instanceof Error ? cause.message : "Could not update Kata Code Connect access.";
+      if (isCloudSessionRejectedError(cause)) {
+        message = rejectedCloudSessionMessage;
+        try {
+          await recoverRejectedCloudSession({
+            clearCloudAuthToken: () =>
+              window.desktopBridge?.clearCloudAuthToken() ?? Promise.resolve(),
+            signOut: () => clerk.signOut(),
+            openAuthPrompt,
+            warn: console.warn,
+          });
+        } catch (recoveryCause) {
+          message =
+            recoveryCause instanceof Error
+              ? `Could not reset Kata Code Connect sign-in: ${recoveryCause.message}`
+              : "Could not reset Kata Code Connect sign-in.";
+        }
+      }
       setOperationError(message);
       toastManager.add({
         type: "error",

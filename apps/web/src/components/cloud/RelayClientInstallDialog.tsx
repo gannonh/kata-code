@@ -65,12 +65,12 @@ export function RelayClientInstallDialog() {
             <DownloadIcon aria-hidden className="size-4.5 text-muted-foreground" />
           </div>
           <DialogTitle>
-            {isInstalling ? "Installing relay client" : "Install relay client?"}
+            {isInstalling ? "Installing local tunnel client" : "Install local tunnel client?"}
           </DialogTitle>
           <DialogDescription>
             {isInstalling
-              ? "Kata Code is preparing this environment for secure access through Kata Code Connect."
-              : "Kata Code needs the relay client to make this environment available through Kata Code Connect."}
+              ? "Kata Code is preparing this running server for secure access through Kata Code Connect."
+              : "Kata Code needs a local tunnel client to connect this running Kata Code server to Kata Code Connect."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>
@@ -96,10 +96,11 @@ export function RelayClientInstallDialog() {
             </div>
           ) : (
             <div className="rounded-xl border border-border/70 bg-muted/35 p-3">
-              <p className="text-sm font-medium text-foreground">Managed relay client</p>
+              <p className="text-sm font-medium text-foreground">Cloudflare cloudflared</p>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                Kata Code will download and install version{" "}
-                {view.status === "confirming" ? view.version : ""} locally.
+                Kata Code will download Cloudflare cloudflared{" "}
+                {view.status === "confirming" ? view.version : ""} and install it locally for this
+                user.
               </p>
             </div>
           )}

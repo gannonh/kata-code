@@ -22,13 +22,16 @@ describe("RelayClientInstallDialog", () => {
     render(<RelayClientInstallDialog />);
     const confirmation = requestRelayClientInstallConfirmation("2026.5.2");
 
-    await expect.element(page.getByText("Install relay client?")).toBeInTheDocument();
-    await expect.element(page.getByText(/version 2026\.5\.2 locally/)).toBeInTheDocument();
+    await expect.element(page.getByText("Install local tunnel client?")).toBeInTheDocument();
+    await expect.element(page.getByText(/Cloudflare cloudflared 2026\.5\.2/)).toBeInTheDocument();
+    await expect
+      .element(page.getByText(/connect this running Kata Code server to Kata Code Connect/))
+      .toBeInTheDocument();
 
     await page.getByRole("button", { name: "Download and install" }).click();
     await expect(confirmation).resolves.toBe(true);
     await expect
-      .element(page.getByRole("heading", { name: "Installing relay client" }))
+      .element(page.getByRole("heading", { name: "Installing local tunnel client" }))
       .toBeInTheDocument();
 
     reportRelayClientInstallProgress({ type: "progress", stage: "downloading" });
@@ -40,7 +43,7 @@ describe("RelayClientInstallDialog", () => {
     finishRelayClientInstall();
     expect(readRelayClientInstallDialogState().status).toBe("closing");
     await expect
-      .element(page.getByRole("heading", { name: "Installing relay client" }))
+      .element(page.getByRole("heading", { name: "Installing local tunnel client" }))
       .not.toBeInTheDocument();
     expect(readRelayClientInstallDialogState()).toEqual({ status: "idle" });
   });
