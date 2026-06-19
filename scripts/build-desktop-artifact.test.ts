@@ -99,6 +99,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ini: "7.0.0",
       "kubernetes-types": "1.30.0",
       msgpackr: "2.0.2",
+      ms: "2.1.3",
       multipasta: "0.2.7",
       "pure-rand": "8.4.0",
       toml: "4.1.1",
@@ -209,7 +210,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ),
       {
         packages: ["."],
-        nodeLinker: "hoisted",
         onlyBuiltDependencies: ["node-pty", "msgpackr-extract"],
         allowBuilds: {
           "node-pty": true,

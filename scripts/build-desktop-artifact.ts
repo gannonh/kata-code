@@ -48,6 +48,7 @@ export const DESKTOP_STAGE_SUPPLEMENTAL_CATALOG_DEPENDENCIES = [
   "ini",
   "kubernetes-types",
   "msgpackr",
+  "ms",
   "multipasta",
   "pure-rand",
   "toml",
@@ -58,6 +59,7 @@ export const DESKTOP_STAGE_SUPPLEMENTAL_CATALOG_DEPENDENCIES = [
 export const DESKTOP_STAGE_RUNTIME_IMPORT_CHECKS = [
   "effect/testing/FastCheck",
   "effect/unstable/http/FindMyWay",
+  "electron-updater",
 ] as const;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -349,8 +351,6 @@ export function createStagePnpmWorkspaceDocument(
 ): Record<string, unknown> {
   const document: Record<string, unknown> = {
     packages: ["."],
-    // Electron asar cannot resolve pnpm's default isolated nested node_modules layout.
-    nodeLinker: "hoisted",
   };
 
   if (workspaceConfig.onlyBuiltDependencies && workspaceConfig.onlyBuiltDependencies.length > 0) {
@@ -1069,6 +1069,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     path.join(stageAppDir, "pnpm-workspace.yaml"),
     `${stringifyYaml(stagePnpmWorkspace)}\n`,
   );
+  yield* fs.writeFileString(path.join(stageAppDir, ".npmrc"), "node-linker=hoisted\n");
 
   if (Object.keys(workspacePatchedDependencies).length > 0) {
     yield* fs.copy(path.join(repoRoot, "patches"), path.join(stageAppDir, "patches"));
