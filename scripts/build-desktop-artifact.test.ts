@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import {
+  createDesktopStageRuntimeImportCheckScript,
   createStagePnpmConfig,
   createStagePnpmWorkspaceDocument,
   DESKTOP_NATIVE_ASAR_UNPACK,
@@ -91,15 +92,31 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   );
 
   it("hoists effect runtime supplemental dependencies for desktop staging", () => {
-    assert.deepStrictEqual(
-      resolveDesktopStageSupplementalDependencies({
-        "fast-check": "4.8.0",
-        "pure-rand": "8.4.0",
-      }),
-      {
-        "fast-check": "4.8.0",
-        "pure-rand": "8.4.0",
-      },
+    const catalog = {
+      "@standard-schema/spec": "1.1.0",
+      "fast-check": "4.8.0",
+      "find-my-way-ts": "0.1.6",
+      ini: "7.0.0",
+      "kubernetes-types": "1.30.0",
+      msgpackr: "2.0.2",
+      multipasta: "0.2.7",
+      "pure-rand": "8.4.0",
+      toml: "4.1.1",
+      uuid: "14.0.0",
+      yaml: "2.9.0",
+    };
+    assert.deepStrictEqual(resolveDesktopStageSupplementalDependencies(catalog), catalog);
+  });
+
+  it("creates a staged runtime import smoke check", () => {
+    assert.equal(
+      createDesktopStageRuntimeImportCheckScript(["effect/testing/FastCheck"]),
+      [
+        'const imports = ["effect/testing/FastCheck"];',
+        "for (const specifier of imports) {",
+        "  await import(specifier);",
+        "}",
+      ].join("\n"),
     );
   });
 

@@ -40,8 +40,25 @@ export const DESKTOP_NATIVE_ASAR_UNPACK = [
 /** Optional deps carry platform-specific native binaries required at desktop runtime. */
 export const DESKTOP_STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
 
-/** effect/Schema imports FastCheck at runtime; hoist for Electron asar resolution. */
-export const DESKTOP_STAGE_SUPPLEMENTAL_CATALOG_DEPENDENCIES = ["fast-check", "pure-rand"] as const;
+/** effect imports these packages from ESM entrypoints that Electron resolves from app.asar. */
+export const DESKTOP_STAGE_SUPPLEMENTAL_CATALOG_DEPENDENCIES = [
+  "@standard-schema/spec",
+  "fast-check",
+  "find-my-way-ts",
+  "ini",
+  "kubernetes-types",
+  "msgpackr",
+  "multipasta",
+  "pure-rand",
+  "toml",
+  "uuid",
+  "yaml",
+] as const;
+
+export const DESKTOP_STAGE_RUNTIME_IMPORT_CHECKS = [
+  "effect/testing/FastCheck",
+  "effect/unstable/http/FindMyWay",
+] as const;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
 const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
@@ -703,6 +720,17 @@ export function resolveDesktopStageSupplementalDependencies(
   );
 }
 
+export function createDesktopStageRuntimeImportCheckScript(
+  imports: readonly string[] = DESKTOP_STAGE_RUNTIME_IMPORT_CHECKS,
+): string {
+  return [
+    `const imports = ${JSON.stringify([...imports])};`,
+    `for (const specifier of imports) {`,
+    `  await import(specifier);`,
+    `}`,
+  ].join("\n");
+}
+
 export function resolveDesktopRuntimeDependencies(
   dependencies: Record<string, string> | undefined,
   catalog: Record<string, string>,
@@ -1054,6 +1082,18 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       shell: installCommand.shell,
     }),
     { label: "vp install --prod", verbose: options.verbose },
+  );
+
+  yield* Effect.log("[desktop-artifact] Verifying staged runtime imports...");
+  yield* runCommand(
+    ChildProcess.make(
+      "node",
+      ["--input-type=module", "--eval", createDesktopStageRuntimeImportCheckScript()],
+      {
+        cwd: stageAppDir,
+      },
+    ),
+    { label: "node staged runtime import check", verbose: options.verbose },
   );
 
   // electron-builder treats several set-but-empty variables (e.g. CSC_LINK="")
