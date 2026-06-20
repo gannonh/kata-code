@@ -1,4 +1,4 @@
-import { resolveDefaultKatacodeHome, resolveLegacyT3Home } from "@kata-sh/code-shared/branding";
+import { resolveDefaultKatacodeHome } from "@kata-sh/code-shared/branding";
 import { HostProcessEnvironment, HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import {
   listLoginShellCandidates,
@@ -90,33 +90,4 @@ export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
     return resolveDefaultKatacodeHome(NodeOS.homedir());
   }
   return resolve(yield* expandHomePath(raw.trim()));
-});
-
-export const warnLegacyHomeDirectoryIfNeeded = Effect.fn(function* (input: {
-  readonly baseDir: string;
-  readonly configuredExplicitly: boolean;
-}) {
-  if (input.configuredExplicitly) {
-    return;
-  }
-
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const homeDirectory = NodeOS.homedir();
-  const legacyHome = resolveLegacyT3Home(homeDirectory);
-  const defaultKatacodeHome = resolveDefaultKatacodeHome(homeDirectory);
-  const legacyExists = yield* fs.exists(legacyHome).pipe(Effect.orElseSucceed(() => false));
-  const katacodeExists = yield* fs
-    .exists(defaultKatacodeHome)
-    .pipe(Effect.orElseSucceed(() => false));
-
-  if (
-    legacyExists &&
-    !katacodeExists &&
-    path.resolve(input.baseDir) === path.resolve(defaultKatacodeHome)
-  ) {
-    yield* Effect.logWarning(
-      `Found existing upstream state at ${legacyHome}. Kata Code uses ${defaultKatacodeHome} by default. Set KATACODE_HOME=${legacyHome} to reuse your existing data.`,
-    );
-  }
 });

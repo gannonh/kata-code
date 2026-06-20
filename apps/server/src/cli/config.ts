@@ -23,7 +23,7 @@ import {
   type ServerConfigShape,
   type StartupPresentation,
 } from "../config.ts";
-import { expandHomePath, resolveBaseDir, warnLegacyHomeDirectoryIfNeeded } from "../os-jank.ts";
+import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
 
 export const modeFlag = Flag.choice("mode", RuntimeMode.literals).pipe(
   Flag.withDescription("Runtime mode. `desktop` keeps loopback defaults unless overridden."),
@@ -280,10 +280,6 @@ export const resolveServerConfig = (
       Option.fromUndefinedOr(bootstrap?.katacodeHome),
     );
     const baseDir = yield* resolveBaseDir(Option.getOrUndefined(explicitBaseDir));
-    yield* warnLegacyHomeDirectoryIfNeeded({
-      baseDir,
-      configuredExplicitly: Option.isSome(explicitBaseDir),
-    });
     const rawCwd = Option.getOrElse(normalizedFlags.cwd, () => process.cwd());
     const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()));
     yield* fs.makeDirectory(cwd, { recursive: true });

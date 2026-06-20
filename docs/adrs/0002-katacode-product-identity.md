@@ -36,7 +36,7 @@ Shared constants live in `packages/shared/src/branding.ts`.
 ## Consequences
 
 - No wire compatibility with upstream npm `t3` package or upstream desktop update channels until explicitly chosen.
-- Existing `~/.t3` data is not auto-migrated; use `KATACODE_HOME=~/.t3` temporarily if needed. Server startup warns when `~/.t3` exists and `~/.katacode` does not.
+- Kata Code is a hard fork with no upstream-state migration: `~/.t3` data is ignored, and the startup warning / `KATACODE_HOME=~/.t3` affordance described in the original Phase 1 decision was removed (2026-06-20). The legacy-T3 branding constants and `warnLegacyHomeDirectoryIfNeeded` no longer exist; `KATACODE_HOME` remains a general state-dir override.
 - Hosted pairing and user-facing URLs use fork domains from `packages/shared/src/branding.ts` (not upstream `app.t3.codes`).
 - Release workflows (`release.yml`) and hosted web deploy are active on the fork; relay and mobile EAS remain under `.github/disabled/` until explicitly re-enabled. PR CI (`ci.yml`) gates `main`.
 - Production Kata icons ship on all channels (dev, nightly, production); canonical source is `apps/desktop/resources/source.png` ([FORK.md — brand marks](../../FORK.md#brand-logo-marks)).

@@ -14,9 +14,6 @@ export const ENV_PREFIX = "KATACODE_" as const;
 /** Git branch namespace for product-generated refs (worktrees, PR branches). */
 export const WORKTREE_BRANCH_PREFIX = "katacode" as const;
 
-/** Legacy upstream state directory name (`~/.t3`). */
-export const LEGACY_HOME_DIR_NAME = ".t3" as const;
-
 /** Hosted web router host (Vercel). */
 export const HOSTED_WEB_ROUTER_HOST = "app.kata.sh" as const;
 
@@ -32,8 +29,6 @@ export const HOSTED_WEB_CHANNEL_COOKIE = "katacode_web_channel" as const;
 
 const NIGHTLY_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/u;
 
-const UPSTREAM_APP_BASE_NAME = "T3 Code" as const;
-
 export type AppStageLabel = "Dev" | "Alpha" | "Nightly" | "Latest";
 
 export interface AppBranding {
@@ -47,9 +42,6 @@ export const envKey = (suffix: string): string => `${ENV_PREFIX}${suffix}`;
 export const resolveDefaultKatacodeHome = (homeDirectory: string): string =>
   `${homeDirectory.replace(/[/\\]+$/, "")}/${DEFAULT_HOME_DIR_NAME}`;
 
-export const resolveLegacyT3Home = (homeDirectory: string): string =>
-  `${homeDirectory.replace(/[/\\]+$/, "")}/${LEGACY_HOME_DIR_NAME}`;
-
 export const isNightlyAppVersion = (version: string): boolean =>
   NIGHTLY_VERSION_PATTERN.test(version.trim());
 
@@ -58,9 +50,6 @@ export const formatAppDisplayName = (stageLabel: string): string =>
 
 export const formatLegacyCompactAppDisplayName = (stageLabel: string): string =>
   `${LEGACY_COMPACT_APP_BASE_NAME} (${stageLabel})`;
-
-export const formatUpstreamAppDisplayName = (stageLabel: AppStageLabel): string =>
-  `${UPSTREAM_APP_BASE_NAME} (${stageLabel})`;
 
 export function resolveAppStageLabel(input: {
   readonly isDevelopment: boolean;
@@ -92,7 +81,7 @@ export function resolveAppBranding(input: {
   };
 }
 
-/** Legacy Electron userData folder names to probe when migrating from upstream T3 Code. */
+/** Pre-rebrand Electron userData folder names to probe (`KataCode` compact name). */
 export function resolveLegacyUserDataDirNames(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
@@ -101,10 +90,5 @@ export function resolveLegacyUserDataDirNames(input: {
     isDevelopment: input.isDevelopment,
     appVersion: input.appVersion,
   });
-  const upstreamStageLabel = stageLabel;
-  return [
-    formatAppDisplayName(stageLabel),
-    formatLegacyCompactAppDisplayName(stageLabel),
-    formatUpstreamAppDisplayName(upstreamStageLabel),
-  ];
+  return [formatAppDisplayName(stageLabel), formatLegacyCompactAppDisplayName(stageLabel)];
 }

@@ -41,7 +41,7 @@ maintainability is encouraged.
 ## Fork Gotchas
 
 - Do not reintroduce `@t3tools/*`, `T3CODE_*`, or upstream product strings without an explicit decision in `FORK.md`.
-- `~/.t3` data is not auto-migrated; server warns on startup. Use `KATACODE_HOME=~/.t3` temporarily if you need old state.
+- Kata Code is a hard fork: no migration from upstream `~/.t3` state. Do not add legacy-T3 detection or migration affordances.
 - User-facing identity constants (protocols, hosted pairing, worktree prefix) live in `packages/shared/src/branding.ts` — do not hardcode upstream `app.t3.codes` or `t3code://` for product surfaces.
 - Electron `path.txt missing` after fresh install → run `ensure:electron` (see Quick Start).
 - **Brand icons:** master raster is `apps/desktop/resources/source.png`. Run `pnpm run generate:brand-rasters` after icon changes — syncs `assets/prod/*`, `apps/web/public/*`, and desktop platform icons via `generate-icons.sh`. Icon paths live in `scripts/lib/brand-assets.ts`; all channels (dev, nightly, production) use production Kata artwork (no upstream blueprint icons).

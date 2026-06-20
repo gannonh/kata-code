@@ -38,7 +38,6 @@ Branch `fork-setup` delivers Phase 1 identity work. GitHub Actions on [PR #1](ht
 
 - Hosted pairing defaults use [branding constants](../../packages/shared/src/branding.ts) (`app.kata.sh`, `/__katacode/channel`) — no fallback to upstream `app.t3.codes`.
 - Phase 1 moved release/relay/mobile EAS workflows to [`.github/disabled/`](../../.github/disabled/README.md) until Phase 2; **desktop/web `release.yml` re-activated in [PR #2](https://github.com/gannonh/kata-code/pull/2)**. Relay deploy and mobile EAS remain disabled.
-- `~/.t3` migration warning on startup (`warnLegacyHomeDirectoryIfNeeded` in `apps/server/src/os-jank.ts`).
 - Mobile EAS preview gated on `KATACODE_EAS_PROJECT_ID`; Expo owner `gannonh`.
 
 **Test fixture rule of thumb:** rename product surfaces (`katacode` CLI, `KATACODE_*`, worktree branch prefix `katacode/`, Grok OAuth referrer) but keep upstream-shaped **repository names** in fixtures (`octocat/t3code` → clone dir `t3code`, sidebar identity from `upstream` remote). See [CI runbook](/operations/ci.md#fork-rebrand-test-fixtures).
