@@ -1,5 +1,11 @@
 # OKF bundle log
 
+## 2026-06-19 (stable v0.0.29 released + full UAT pass)
+
+- Stable `v0.0.29` released ([run 27854360066](https://github.com/gannonh/kata-code/actions/runs/27854360066)); `@kata-sh/code-cli@0.0.29` published to npm.
+- Full UAT passed on stable (`app.kata.sh`): chat completion, Files panel, Connect sign-in, relay link/tunnel, network access toggle, manual environment add via `npx @kata-sh/code-cli serve`.
+- Deferred: Connect stale relay link on account switch; Connect open signups (waitlist off). See [deferred work registry](/specs/deferred-work.md).
+
 ## 2026-06-19 (Relay Deploy completed + Nightly UAT)
 
 - Marked [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md) **Completed**: production relay deployed ([run 27798366259](https://github.com/gannonh/kata-code/actions/runs/27798366259)), Nightly runtime regressions fixed, Connect UAT passed.

@@ -45,3 +45,30 @@ Include all of the following in the UAT bundle:
 ## Pass criteria
 
 All acceptance criteria in [Relay Deploy — User-path UAT criteria](../specs/2026-06-18-relay-deploy-design.md#user-path-uat-criteria) must pass with attached evidence.
+
+## UAT result — 2026-06-19 (stable v0.0.29)
+
+**Result: PASS**
+
+| Check                                                    | Result |
+| -------------------------------------------------------- | ------ |
+| Connect UI visible, no missing-config error              | ✓      |
+| Sign-in (approved user)                                  | ✓      |
+| Chat completion across providers                         | ✓      |
+| Files panel loads workspace files                        | ✓      |
+| Connect relay link + tunnel starts                       | ✓      |
+| Hosted web (`app.kata.sh`) sees linked environment       | ✓      |
+| Network access toggle (local network reachable)          | ✓      |
+| Manual environment add via `npx @kata-sh/code-cli serve` | ✓      |
+
+**Evidence:**
+
+- Relay deploy run: [27798366259](https://github.com/gannonh/kata-code/actions/runs/27798366259)
+- Stable release run: [27854360066](https://github.com/gannonh/kata-code/actions/runs/27854360066)
+- Installed version: `v0.0.29` (`app.kata.sh` + `Kata Code (Alpha).app`)
+- CLI: `@kata-sh/code-cli@0.0.29` on npm
+
+**Known issues (deferred):**
+
+- Stale relay link on account switch — see [deferred work registry](/specs/deferred-work.md)
+- Connect signups gated (waitlist on) — see [deferred work registry](/specs/deferred-work.md)

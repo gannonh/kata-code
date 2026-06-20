@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-06-19 (stable v0.0.29 UAT pass)
+
+- Stable `v0.0.29` UAT passed on `app.kata.sh`: chat, Files, Connect relay, network access, manual environment add.
+- `@kata-sh/code-cli@0.0.29` on npm; invoke with `npx @kata-sh/code-cli`.
+- [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md) fully closed with stable release evidence.
+
 ## 2026-06-19 (Relay Deploy completed)
 
 - Marked [Relay Deploy design](/specs/2026-06-18-relay-deploy-design.md) **Completed** with UAT evidence date 2026-06-19.
