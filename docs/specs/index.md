@@ -4,9 +4,9 @@ Work map for Kata Code.
 
 ## Active / next
 
-| Item                        | Status      | Document                                                                                                                                                               |
-| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Upstream sync (first merge) | **Planned** | [Upstream sync guide](/guides/upstream-sync.md) · [ADR 0003](/adrs/0003-episodic-upstream-sync.md) · [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook) |
+| Item                        | Status     | Document                                                                                                                                                                                                                            |
+| --------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Upstream sync (first merge) | **Active** | [Closure spec](/specs/2026-06-20-upstream-sync-closure.md) · [upstream-sync guide](/guides/upstream-sync.md) · [ADR 0003](/adrs/0003-episodic-upstream-sync.md) · [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook) |
 
 ## Completed
 

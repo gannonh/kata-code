@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-06-20 (upstream sync closure spec drafted)
+
+- Added [2026-06-20 upstream sync closure spec](/specs/2026-06-20-upstream-sync-closure.md) capturing Decisions 1-10 (single bulk merge of 80 upstream commits since baseline `708d5383` → tip `97e5cd3bf`) plus five post-merge closure tasks: branding re-application, Clerk publishable-key build-injection verification, OKF Effect conventions synthesis, classifier rule gaps, vendored-repo convergence (Effect bumped to `4.0.0-beta.78`).
+- Adversarial spec review by the `reviewer` sub-agent (separate from the author) found one blocker (Decision 8 mis-bucketed `b19fc1b87b`, which is `defer` not `review`) and seven actionable notes; all applied: split `b19fc1b87b` into Decision 9, fixed stale fork-divergence count (72→82), tightened the `t3://` scan exemption to the named path + literal, hardened the "blocked test" and "Build stops and asks" escape hatches, committed Phase 2 to definite action (Effect was bumped), listed the five docs-only SHAs in Decision 4, fixed the Task-2-below cross-ref to Task 3.
+- Promoted the "Upstream sync (first merge)" roadmap row from Planned to Active. Spec status: Draft, awaiting user review before Build (the merge).
+
 ## 2026-06-19 (stable v0.0.29 UAT pass)
 
 - Stable `v0.0.29` UAT passed on `app.kata.sh`: chat, Files, Connect relay, network access, manual environment add.
