@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-06-20 (upstream sync handoff doc added)
+
+Added [resume handoff](/specs/2026-06-20-upstream-sync-handoff.md) as the rollback target + sub-agent handoff contract for the paused merge. Distinct from the closure spec: the closure spec is the _what / acceptance_, the handoff is the _where-we-are / resume-from-here_ with the exact suggested sequence, the last-mile `rebrand-fork.ts` enhancements to bake in before re-running (PROPERTY_PATTERNS for `t3Home`/`t3-env:`/`~/.t3`, the `"t3/` and `"t3code-relay/` Context.Service key-prefix renames, the OTel brand fixes), the fork-file restorations after the bulk `take-upstream.sh` pass, and the one real code fix (`server.ts` `anyUnknownInErrorContext` from the Effect 4.0.0-beta.78 bump). Promoted the roadmap Active row to lead with the handoff doc.
+
 ## 2026-06-20 (upstream sync merge attempt — paused at clean checkpoint)
 
 The first full merge of upstream (baseline `708d5383` -> tip `97e5cd3bf`, 80 commits) ran long and hit repeated git-state disruptions (SIGPIPE-truncated first attempt, index-lock race, stash/restore chain). The branch was hard-reset to the clean baseline `20ef549a7` to preserve the durable deliverables and discard the thrashed in-progress merge state.
