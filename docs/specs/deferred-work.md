@@ -84,6 +84,15 @@ Each entry should include:
 - **Revisit trigger:** Review before public Connect launch, release download page work, or marketing site deployment work.
 - **Notes:** Keep release/download surfaces aligned with hosted web and desktop artifact channels.
 
+### Connect: open signups (waitlist off)
+
+- **Status:** deferred
+- **Area:** connect, relay, auth
+- **Source:** relay UAT 2026-06-19
+- **Rationale:** New sign-ups are currently being rejected. The relay or Clerk config is set to waitlist/restricted mode. Accepting new users requires flipping the signup gate.
+- **Revisit trigger:** Before any public Connect announcement or invite expansion.
+- **Notes:** Determine whether the gate lives in Clerk (sign-up restrictions), the relay waitlist logic, or both, and flip it to open enrollment.
+
 ### Connect: stale relay link on account switch
 
 - **Status:** deferred
