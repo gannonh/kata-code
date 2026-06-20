@@ -139,11 +139,12 @@ native `node-pty` build, and the `prepare` hook are handled). See the [Quick Sta
   pairing URL like `http://localhost:5733/pair#token=XXXX` to its stdout on startup. Open that exact URL
   (token included) in the browser to authenticate; the bare `http://localhost:5733/` will 302-redirect to
   pairing. Grab the token from the dev log, not by guessing.
-- **Providers are external:** no agent CLI (`codex`, `claude`, `cursor-agent`, `opencode`, `grok`) is
-  installed in the VM. Pairing, adding a project, creating threads, git branch detection, and the composer
-  all work without one, but actually sending a turn to an agent needs that provider CLI installed AND
-  authenticated (login/API key = user secrets). A red "provider not installed" banner in a thread is
-  expected here, not a bug.
+- **Providers are external:** agent turns require a provider CLI installed AND authenticated (login/API
+  key = user secrets). The **Codex** CLI (`@openai/codex`, global npm) is installed and logged in via the
+  `OPENAI_API_KEY` secret, so real Codex turns work (select a `gpt-5*` Codex model in the composer). Other
+  providers (`claude`, `cursor-agent`, `opencode`, `grok`) are not installed; a red "provider not
+  installed" banner appears only for those. The running server discovers `codex` on `PATH` at spawn time,
+  so install a new provider into the Node 24 bin and it is picked up without restarting the dev server.
 - **State dir:** `~/.katacode` (override with `KATACODE_HOME`). Delete it to reset pairing/projects/threads.
 - **Desktop dev** (`pnpm run dev:desktop`) additionally needs
   `vp run --filter @kata-sh/code-desktop ensure:electron` once per fresh worktree; not required for the web app.
