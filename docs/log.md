@@ -1,5 +1,10 @@
 # OKF bundle log
 
+## 2026-06-21 (local Electron E2E testing foundation design)
+
+- Added [Local Electron E2E testing foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md): local-only Playwright Electron suite, dev/release launch targets, real Clerk/LLM services, isolation, seeding, deterministic agent helper, starter tests, reporting, and reusable harness boundaries.
+- Added the draft to [specs roadmap](/specs/index.md) under Active / next.
+
 ## 2026-06-21 (upstream-sync branch OKF finalize — pre-merge)
 
 Documented finalized pre-merge state on `upstream-sync-2026-06-20` after simplify and strict-quality-review passes.
