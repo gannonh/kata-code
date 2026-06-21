@@ -201,47 +201,71 @@ interface RenameHit {
   readonly count: number;
 }
 
-function applyToContent(content: string): { rewritten: string; hits: Array<RenameHit> } {
+function applyStringRenames(
+  content: string,
+  renames: ReadonlyArray<readonly [string, string, string]>,
+): { rewritten: string; hits: Array<RenameHit> } {
   let rewritten = content;
   const hits: Array<RenameHit> = [];
 
-  for (const [from, to, category] of PACKAGE_RENAMES) {
+  for (const [from, to, category] of renames) {
     if (!rewritten.includes(from)) continue;
     const count = rewritten.split(from).length - 1;
     rewritten = rewritten.split(from).join(to);
     hits.push({ from, to, category, count });
   }
-  for (const [re, to] of T3_SERVER_PACKAGE_PATTERNS) {
-    re.lastIndex = 0;
-    const matches = rewritten.match(re);
-    if (matches) {
-      rewritten = rewritten.replace(re, to);
-      hits.push({ from: re.source, to, category: "package (t3 server)", count: matches.length });
-    }
-  }
-  for (const [from, to, category] of IDENTITY_RENAMES) {
-    if (!rewritten.includes(from)) continue;
-    const count = rewritten.split(from).length - 1;
-    rewritten = rewritten.split(from).join(to);
-    hits.push({ from, to, category, count });
-  }
-  for (const [re, to] of ENV_PREFIX_PATTERN) {
-    re.lastIndex = 0;
-    const matches = rewritten.match(re);
-    if (matches) {
-      rewritten = rewritten.replace(re, to);
-      hits.push({ from: re.source, to, category: "env prefix T3CODE_*", count: matches.length });
-    }
-  }
-  for (const [re, to] of PROPERTY_PATTERNS) {
-    re.lastIndex = 0;
-    const matches = rewritten.match(re);
-    if (matches) {
-      rewritten = rewritten.replace(re, to);
-      hits.push({ from: re.source, to, category: "property/identifier", count: matches.length });
-    }
-  }
+
   return { rewritten, hits };
+}
+
+function applyPatternRenames(
+  content: string,
+  patterns: ReadonlyArray<readonly [RegExp, string]>,
+  category: string,
+): { rewritten: string; hits: Array<RenameHit> } {
+  let rewritten = content;
+  const hits: Array<RenameHit> = [];
+
+  for (const [pattern, to] of patterns) {
+    pattern.lastIndex = 0;
+    const matches = rewritten.match(pattern);
+    if (!matches) continue;
+    rewritten = rewritten.replace(pattern, to);
+    hits.push({ from: pattern.source, to, category, count: matches.length });
+  }
+
+  return { rewritten, hits };
+}
+
+function applyToContent(content: string): { rewritten: string; hits: Array<RenameHit> } {
+  const packageResult = applyStringRenames(content, PACKAGE_RENAMES);
+  const t3ServerResult = applyPatternRenames(
+    packageResult.rewritten,
+    T3_SERVER_PACKAGE_PATTERNS,
+    "package (t3 server)",
+  );
+  const identityResult = applyStringRenames(t3ServerResult.rewritten, IDENTITY_RENAMES);
+  const envResult = applyPatternRenames(
+    identityResult.rewritten,
+    ENV_PREFIX_PATTERN,
+    "env prefix T3CODE_*",
+  );
+  const propertyResult = applyPatternRenames(
+    envResult.rewritten,
+    PROPERTY_PATTERNS,
+    "property/identifier",
+  );
+
+  return {
+    rewritten: propertyResult.rewritten,
+    hits: [
+      ...packageResult.hits,
+      ...t3ServerResult.hits,
+      ...identityResult.hits,
+      ...envResult.hits,
+      ...propertyResult.hits,
+    ],
+  };
 }
 
 function main() {

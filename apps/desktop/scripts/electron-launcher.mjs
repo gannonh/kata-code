@@ -50,15 +50,15 @@ export function resolveDevelopmentProtocolCallbackUrl() {
   return `http://127.0.0.1:${port}/auth/callback`;
 }
 
-function setPlistString(plistPath, key, value) {
-  const replaceResult = spawnSync("plutil", ["-replace", key, "-string", value, plistPath], {
+function setPlistValue(plistPath, key, type, serialized) {
+  const replaceResult = spawnSync("plutil", ["-replace", key, `-${type}`, serialized, plistPath], {
     encoding: "utf8",
   });
   if (replaceResult.status === 0) {
     return;
   }
 
-  const insertResult = spawnSync("plutil", ["-insert", key, "-string", value, plistPath], {
+  const insertResult = spawnSync("plutil", ["-insert", key, `-${type}`, serialized, plistPath], {
     encoding: "utf8",
   });
   if (insertResult.status === 0) {
@@ -67,46 +67,18 @@ function setPlistString(plistPath, key, value) {
 
   const details = [replaceResult.stderr, insertResult.stderr].filter(Boolean).join("\n");
   throw new Error(`Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim());
+}
+
+function setPlistString(plistPath, key, value) {
+  setPlistValue(plistPath, key, "string", value);
 }
 
 function setPlistJson(plistPath, key, value) {
-  const serialized = JSON.stringify(value);
-  const replaceResult = spawnSync("plutil", ["-replace", key, "-json", serialized, plistPath], {
-    encoding: "utf8",
-  });
-  if (replaceResult.status === 0) {
-    return;
-  }
-
-  const insertResult = spawnSync("plutil", ["-insert", key, "-json", serialized, plistPath], {
-    encoding: "utf8",
-  });
-  if (insertResult.status === 0) {
-    return;
-  }
-
-  const details = [replaceResult.stderr, insertResult.stderr].filter(Boolean).join("\n");
-  throw new Error(`Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim());
+  setPlistValue(plistPath, key, "json", JSON.stringify(value));
 }
 
 function setPlistBool(plistPath, key, value) {
-  const serialized = value ? "YES" : "NO";
-  const replaceResult = spawnSync("plutil", ["-replace", key, "-bool", serialized, plistPath], {
-    encoding: "utf8",
-  });
-  if (replaceResult.status === 0) {
-    return;
-  }
-
-  const insertResult = spawnSync("plutil", ["-insert", key, "-bool", serialized, plistPath], {
-    encoding: "utf8",
-  });
-  if (insertResult.status === 0) {
-    return;
-  }
-
-  const details = [replaceResult.stderr, insertResult.stderr].filter(Boolean).join("\n");
-  throw new Error(`Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim());
+  setPlistValue(plistPath, key, "bool", value ? "YES" : "NO");
 }
 
 function runChecked(command, args) {
@@ -520,20 +492,20 @@ export function resolveElectronPath() {
   return buildMacLauncher(electronBinaryPath);
 }
 
-export function resolveElectronLaunchCommand(args = []) {
-  const electronPath = resolveElectronPath();
+function resolveElectronLaunchCommandFrom(resolvePath, args = []) {
+  const electronPath = resolvePath();
   return {
     electronPath,
     args: [...resolveLinuxSandboxArgs(electronPath), ...args],
   };
 }
 
+export function resolveElectronLaunchCommand(args = []) {
+  return resolveElectronLaunchCommandFrom(resolveElectronPath, args);
+}
+
 export function resolveRawElectronLaunchCommand(args = []) {
-  const electronPath = resolveElectronBinaryPath();
-  return {
-    electronPath,
-    args: [...resolveLinuxSandboxArgs(electronPath), ...args],
-  };
+  return resolveElectronLaunchCommandFrom(resolveElectronBinaryPath, args);
 }
 
 export function resolveDevProtocolClient() {
@@ -541,9 +513,7 @@ export function resolveDevProtocolClient() {
     return null;
   }
 
-  const require = createRequire(import.meta.url);
-  const electronBinaryPath = require("electron");
-  const launcherBinaryPath = buildMacLauncher(electronBinaryPath);
+  const launcherBinaryPath = buildMacLauncher(resolveElectronBinaryPath());
   return {
     appBundlePath: resolve(launcherBinaryPath, "..", "..", ".."),
     appBundleId: APP_BUNDLE_ID,
