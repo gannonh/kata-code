@@ -31,7 +31,7 @@
 
 set -euo pipefail
 
-if [ ! -f .git/MERGE_HEAD ]; then
+if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
   echo "error: no merge in progress (MERGE_HEAD missing)." >&2
   echo "       Run \`git merge upstream/main\` first." >&2
   exit 1
@@ -67,7 +67,7 @@ done
 if [ "${#matched[@]}" -eq 0 ]; then
   echo "no unmerged paths matched filter(s): ${filters[*]:-<none>}" >&2
   echo "available unmerged:" >&2
-  for f in "${unmerged[@]}"; do echo "  $f" >&2; done | head -20
+  for f in "${unmerged[@]:0:20}"; do echo "  $f" >&2; done
   exit 2
 fi
 

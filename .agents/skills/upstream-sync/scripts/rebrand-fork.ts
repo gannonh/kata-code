@@ -69,6 +69,7 @@ const PACKAGE_RENAMES: ReadonlyArray<readonly [string, string, string]> = [
  */
 const T3_SERVER_PACKAGE_SKIP_PATHS: ReadonlyArray<RegExp> = [
   /^apps\/desktop\/src\/electron\/ElectronProtocol\.ts$/,
+  /^apps\/desktop\/src\/electron\/ElectronProtocol\.test\.ts$/,
 ];
 
 const T3_SERVER_PACKAGE_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
@@ -282,6 +283,10 @@ function applyToContent(
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.apply && args.check) {
+    process.stderr.write("Use either --apply or --check in a single invocation.\n");
+    process.exit(2);
+  }
   if (args.help) {
     process.stdout.write(
       [

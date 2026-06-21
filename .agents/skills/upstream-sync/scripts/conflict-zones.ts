@@ -3,7 +3,7 @@
  * conflict-zones.ts
  *
  * Predict where an upstream merge will conflict by intersecting:
- *   1. paths upstream touched since the last sync baseline
+ *   1. paths upstream touched since the last sync baseline (or a commit cluster)
  *   2. paths the fork has modified since that same baseline
  *   3. the FORK.md high-conflict zone catalog
  *
@@ -16,19 +16,23 @@
  * Read-only. No merges, no writes outside --out.
  *
  * Usage:
- *   node scripts/upstream-sync/conflict-zones.ts
- *   node scripts/upstream-sync/conflict-zones.ts --base <sha>
- *   node scripts/upstream-sync/conflict-zones.ts --out conflict-zones.md
+ *   node .agents/skills/upstream-sync/scripts/conflict-zones.ts
+ *   node .agents/skills/upstream-sync/scripts/conflict-zones.ts --base <sha>
+ *   node .agents/skills/upstream-sync/scripts/conflict-zones.ts --commits <sha1>,<sha2>
+ *   node .agents/skills/upstream-sync/scripts/conflict-zones.ts --out conflict-zones.md
  *
  * See `.agents/skills/upstream-sync/SKILL.md` for the full workflow.
  */
 
 // @effect-diagnostics nodeBuiltinImport:off
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
+
+import { readLastSyncBaseline } from "./fork-baseline.ts";
 
 interface CliArgs {
   base: string | undefined;
+  commits: ReadonlyArray<string> | undefined;
   out: string | undefined;
   help: boolean;
 }
@@ -62,11 +66,17 @@ const FORK_MD_HIGH_CONFlict_ZONES: ReadonlyArray<{ pattern: RegExp; label: strin
 ];
 
 function parseArgs(argv: ReadonlyArray<string>): CliArgs {
-  const args: CliArgs = { base: undefined, out: undefined, help: false };
+  const args: CliArgs = { base: undefined, commits: undefined, out: undefined, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--base") args.base = argv[++i];
-    else if (arg === "--out") args.out = argv[++i];
+    else if (arg === "--commits") {
+      const raw = argv[++i];
+      args.commits = raw
+        .split(",")
+        .map((sha) => sha.trim())
+        .filter((sha) => sha.length > 0);
+    } else if (arg === "--out") args.out = argv[++i];
     else if (arg === "-h" || arg === "--help") args.help = true;
   }
   return args;
@@ -76,21 +86,22 @@ function git(args: ReadonlyArray<string>): string {
   return execFileSync("git", args as string[], { encoding: "utf8" }).trim();
 }
 
-function readLastSyncBaseline(forkMdPath: string): string | undefined {
-  let content: string;
-  try {
-    content = readFileSync(forkMdPath, "utf8");
-  } catch {
-    return undefined;
-  }
-  return content.match(/^Upstream SHA:\s*([0-9a-f]{7,40})/m)?.[1];
-}
-
-function changedNames(args: CliArgs, forkMdPath: string, range: string): Set<string> {
+function changedNames(range: string): Set<string> {
   // --no-renames keeps the output a flat added/modified/deleted list, which is
   // what we want for a conflict-zone heatmap.
   const out = git(["diff", "--no-renames", "--name-only", range]);
   return new Set(out.split("\n").filter((l) => l.length > 0));
+}
+
+function pathsTouchedByCommits(commits: ReadonlyArray<string>): Set<string> {
+  const paths = new Set<string>();
+  for (const sha of commits) {
+    const out = git(["show", "--no-renames", "--name-only", "--format=", sha]);
+    for (const line of out.split("\n")) {
+      if (line.length > 0) paths.add(line);
+    }
+  }
+  return paths;
 }
 
 function zoneForPath(path: string): string | undefined {
@@ -105,7 +116,7 @@ function main() {
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: conflict-zones.ts [--base <sha>] [--out <path>]",
+        "Usage: conflict-zones.ts [--base <sha>] [--commits <sha1>,<sha2>] [--out <path>]",
         "",
         "Predicts merge conflict surface by intersecting upstream-changed paths,",
         "fork-changed paths since baseline, and the FORK.md high-conflict zones.",
@@ -124,10 +135,13 @@ function main() {
   process.stderr.write(`Fetching upstream...\n`);
   git(["fetch", "upstream", "--tags"]);
 
-  const upstreamPaths = changedNames(args, forkMdPath, `${base}..upstream/main`);
+  const upstreamPaths =
+    args.commits && args.commits.length > 0
+      ? pathsTouchedByCommits(args.commits)
+      : changedNames(`${base}..upstream/main`);
   // main..base is empty by definition (base is an ancestor of main), so the
   // fork-side changes since baseline are base..main.
-  const forkPaths = changedNames(args, forkMdPath, `${base}..main`);
+  const forkPaths = changedNames(`${base}..main`);
 
   const intersection = [...upstreamPaths].filter((p) => forkPaths.has(p)).sort();
 
@@ -144,8 +158,13 @@ function main() {
   const lines: string[] = [];
   lines.push(`# Predicted conflict zones`);
   lines.push("");
-  lines.push(`- Base (last sync): \`${base}\``);
+  lines.push(`- Base (last scan): \`${base}\``);
   lines.push(`- Upstream tip: \`${upstreamTip}\``);
+  if (args.commits && args.commits.length > 0) {
+    lines.push(
+      `- Commit cluster: ${args.commits.map((sha) => `\`${sha.slice(0, 10)}\``).join(", ")}`,
+    );
+  }
   lines.push(`- Upstream-touched paths: ${upstreamPaths.size}`);
   lines.push(`- Fork-modified paths since base: ${forkPaths.size}`);
   lines.push(`- Intersection (both sides changed — will conflict): ${intersection.length}`);

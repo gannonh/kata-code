@@ -2,7 +2,7 @@
  * Classification rules for selective upstream sync.
  *
  * This file is the source of truth for how Kata Code triages upstream
- * `pingdotgg/t3code` commits into Take / Cherry-pick / Reject / Defer buckets.
+ * `pingdotgg/t3code` commits into Port / Skip / Defer / Watch buckets.
  * Edit it when fork policy changes — the classifier script and the upstream-sync
  * skill both read from here so the rules never drift from the runbook.
  *
@@ -10,7 +10,7 @@
  * `docs/guides/upstream-sync.md` for the full workflow.
  *
  * Classification is a starting point for human review, not a final verdict.
- * The fork maintainer always confirms Take/Reject/Defer before merging.
+ * The fork maintainer always confirms Port/Skip/Defer/Watch before porting.
  */
 
 /**
@@ -25,7 +25,8 @@ export interface UpstreamCommit {
   readonly files: ReadonlyArray<readonly [string, string]>;
 }
 
-export type Classification = "take" | "cherry-pick" | "reject" | "defer" | "review";
+/** Draft classifier verdicts. `review` means assign Port/Skip/Defer/Watch in Step 1. */
+export type Classification = "port" | "skip" | "defer" | "watch" | "review";
 
 export interface RuleHit {
   readonly rule: string;
@@ -44,26 +45,28 @@ export interface CommitVerdict {
 /**
  * Keywords in a commit subject that strongly signal fork-relevant work.
  * Order matters only for the rationale text, not the verdict — a commit that
- * hits both a take pattern and a reject pattern is flagged ambiguous for review.
+ * hits both a port pattern and a skip pattern is flagged ambiguous for review.
  */
-const TAKE_SUBJECT_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [
+const PORT_SUBJECT_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [];
+
+const WATCH_SUBJECT_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [
   {
     // The "[codex]" prefix marks coordinated mechanical Effect service refactors.
-    // These commits are designed to be taken together; cherry-picking one in
-    // isolation usually fails to compile because they depend on each other.
+    // These commits are designed to land together; port intermediate states while
+    // upstream is still moving is wasted work — watch until the refactor stabilizes.
     pattern: /^\[codex\]/,
     rule: "[codex] coordinated refactor",
     reason:
-      "Coordinated [codex] Effect refactor. These commits are designed to land together; cherry-picking in isolation typically breaks compilation.",
+      "Coordinated [codex] Effect refactor. Watch until upstream stabilizes, then port the net result.",
   },
 ];
 
-const REJECT_SUBJECT_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [
+const SKIP_SUBJECT_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [
   {
     pattern: /\b(marketing|homepage|hero|endorsements|nav)\b/i,
     rule: "upstream marketing site",
     reason:
-      "Touches the upstream marketing homepage. Kata Code ships its own web surfaces; upstream marketing work is rejected.",
+      "Touches the upstream marketing homepage. Kata Code ships its own web surfaces; upstream marketing work is skipped.",
   },
   {
     pattern: /\beas\b|expo|mobile-terminal-native|mobile-review-diff-native/i,
@@ -76,16 +79,13 @@ const REJECT_SUBJECT_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; re
 /**
  * Path-based signals. A commit is more persuadable by what it touches than by
  * its subject line alone.
- *
- * `test` = take/reject signal contribution; these run after subject rules and
- * only when the subject rules did not already produce an unambiguous verdict.
  */
-const TAKE_PATH_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [
+const PORT_PATH_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [
   {
     pattern: /^packages\/contracts\//,
     rule: "shared protocol/schema surface",
     reason:
-      "Touches packages/contracts — shared protocol and schema surface that the fork consumes directly. Usually worth absorbing to stay close to upstream wire shapes.",
+      "Touches packages/contracts — shared protocol and schema surface that the fork consumes directly. Usually worth porting to stay close to upstream wire shapes.",
   },
   {
     pattern: /^packages\/shared\//,
@@ -100,7 +100,7 @@ const TAKE_PATH_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason:
   },
 ];
 
-const REJECT_PATH_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [
+const SKIP_PATH_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reason: string }> = [
   {
     // .github/workflows that are upstream-release-specific. The fork keeps its
     // own release.yml and disables upstream deploy/mobile workflows under
@@ -119,9 +119,7 @@ const REJECT_PATH_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reaso
 
 /**
  * Surfaces where the fork has intentionally diverged. Commits touching these paths
- * need the maintainer to check the FORK.md divergence log. Narrow the patterns so
- * a bare `package.json` version bump does not trip the strong divergence signal
- * — only source/config that actually carries fork policy does.
+ * need the maintainer to check the FORK.md divergence log.
  */
 const DIVERGENCE_REVIEW_PATHS: ReadonlyArray<{ pattern: RegExp; rule: string }> = [
   {
@@ -137,8 +135,8 @@ const DIVERGENCE_REVIEW_PATHS: ReadonlyArray<{ pattern: RegExp; rule: string }> 
 ];
 
 /**
- * Upstream-internal docs that don't affect runtime. Classified as take so they
- * land with the bulk merge; OKF closure in Step 6 handles fork-specific docs.
+ * Upstream-internal docs that don't affect runtime. Classified as port so they
+ * can be absorbed when porting related work; OKF closure handles fork-specific docs.
  */
 const UPSTREAM_INTERNAL_DOCS_PATTERN =
   /^(\.macroscope|\.github\/ISSUE_TEMPLATE|\.github\/PULL_REQUEST_TEMPLATE|CONTRIBUTING\.md$|\.cursor|\.claude)\//;
@@ -148,34 +146,34 @@ function isDocsOnlyCommit(files: ReadonlyArray<readonly [string, string]>): bool
 }
 
 /**
- * Known seed list of upstream paths/shas that are permanently rejected,
+ * Known seed list of upstream paths/shas that are permanently skipped,
  * mirrored from FORK.md "Divergence log → Rejected upstream".
- *
- * Extend this array when FORK.md records a permanent reject; runtime parsing
- * of FORK.md is not implemented yet.
  */
-export const PERMANENT_REJECT_SEED: ReadonlyArray<{ pattern: RegExp; reason: string }> = [];
+export const PERMANENT_SKIP_SEED: ReadonlyArray<{ pattern: RegExp; reason: string }> = [];
 
 /**
  * Classify a single commit. Returns the proposed verdict plus every rule that
  * fired, so the human reviewer can see why the script landed where it did.
  *
- * Ambiguity is surfaced explicitly: if a commit hits both a take and a reject
- * signal, it is classified `review` with rationale "Conflicting signals —
- * review manually" rather than silently picking one. This is the most
- * important property of the classifier: never hide a fork-policy conflict.
+ * Ambiguity is surfaced explicitly: if a commit hits both port and skip signals,
+ * it is classified `review` rather than silently picking one.
  */
 export function classifyCommit(commit: UpstreamCommit): CommitVerdict {
   const hits: Array<RuleHit> = [];
 
-  for (const { pattern, rule, reason } of TAKE_SUBJECT_PATTERNS) {
+  for (const { pattern, rule, reason } of PORT_SUBJECT_PATTERNS) {
     if (pattern.test(commit.subject)) {
-      hits.push({ rule, classification: "take", reason });
+      hits.push({ rule, classification: "port", reason });
     }
   }
-  for (const { pattern, rule, reason } of REJECT_SUBJECT_PATTERNS) {
+  for (const { pattern, rule, reason } of WATCH_SUBJECT_PATTERNS) {
     if (pattern.test(commit.subject)) {
-      hits.push({ rule, classification: "reject", reason });
+      hits.push({ rule, classification: "watch", reason });
+    }
+  }
+  for (const { pattern, rule, reason } of SKIP_SUBJECT_PATTERNS) {
+    if (pattern.test(commit.subject)) {
+      hits.push({ rule, classification: "skip", reason });
     }
   }
 
@@ -184,20 +182,20 @@ export function classifyCommit(commit: UpstreamCommit): CommitVerdict {
   if (isDocsOnlyCommit(commit.files)) {
     hits.push({
       rule: "upstream-internal docs only",
-      classification: "take",
+      classification: "port",
       reason:
-        "Touches only upstream-internal docs (.macroscope, .github templates, CONTRIBUTING). Absorb with OKF closure in Step 6; fork has its own equivalents for runtime guidance.",
+        "Touches only upstream-internal docs (.macroscope, .github templates, CONTRIBUTING). Absorb with OKF closure; fork has its own equivalents for runtime guidance.",
     });
   }
 
-  for (const { pattern, rule, reason } of TAKE_PATH_PATTERNS) {
+  for (const { pattern, rule, reason } of PORT_PATH_PATTERNS) {
     if (touchedPaths.some((p) => pattern.test(p))) {
-      hits.push({ rule, classification: "take", reason });
+      hits.push({ rule, classification: "port", reason });
     }
   }
-  for (const { pattern, rule, reason } of REJECT_PATH_PATTERNS) {
+  for (const { pattern, rule, reason } of SKIP_PATH_PATTERNS) {
     if (touchedPaths.some((p) => pattern.test(p))) {
-      hits.push({ rule, classification: "reject", reason });
+      hits.push({ rule, classification: "skip", reason });
     }
   }
 
@@ -213,31 +211,35 @@ export function classifyCommit(commit: UpstreamCommit): CommitVerdict {
   }
   hits.push(...divergenceHits);
 
-  const takeCount = hits.filter((h) => h.classification === "take").length;
-  const rejectCount = hits.filter((h) => h.classification === "reject").length;
+  const portCount = hits.filter((h) => h.classification === "port").length;
+  const skipCount = hits.filter((h) => h.classification === "skip").length;
   const deferCount = hits.filter((h) => h.classification === "defer").length;
+  const watchCount = hits.filter((h) => h.classification === "watch").length;
 
   let classification: Classification;
   let rationale: string;
 
-  if (takeCount > 0 && rejectCount > 0) {
-    // Conflicting take+reject signals (e.g. a [codex] refactor that also touches
-    // a marketing surface) cannot be resolved mechanically. This is the
-    // "review" verdict in the runbook vocabulary: not a clean take, not a clean
-    // reject, not a project-phase deferral — a human must decide.
+  if (portCount > 0 && skipCount > 0) {
     classification = "review";
-    const takeRules = hits.filter((h) => h.classification === "take").map((h) => h.rule);
-    const rejectRules = hits.filter((h) => h.classification === "reject").map((h) => h.rule);
-    rationale = `Conflicting signals: take (${takeRules.join(", ")}) vs reject (${rejectRules.join(", ")}). Review manually.`;
-  } else if (takeCount > 0 && deferCount > 0) {
-    // A [codex] coordinated refactor that also touches a fork divergence surface
-    // is the classic hard case: the refactor wants to land together, but the
-    // fork has policy-level reasons to diverge here. Surface both signals so the
-    // reviewer sees the take was not missed.
+    const portRules = hits.filter((h) => h.classification === "port").map((h) => h.rule);
+    const skipRules = hits.filter((h) => h.classification === "skip").map((h) => h.rule);
+    rationale = `Conflicting signals: port (${portRules.join(", ")}) vs skip (${skipRules.join(", ")}). Assign Port/Skip/Defer/Watch during review.`;
+  } else if (watchCount > 0 && skipCount > 0) {
+    classification = "review";
+    const watchRules = hits.filter((h) => h.classification === "watch").map((h) => h.rule);
+    const skipRules = hits.filter((h) => h.classification === "skip").map((h) => h.rule);
+    rationale = `Conflicting signals: watch (${watchRules.join(", ")}) vs skip (${skipRules.join(", ")}). Assign Port/Skip/Defer/Watch during review.`;
+  } else if (watchCount > 0) {
+    classification = "watch";
+    rationale = hits
+      .filter((h) => h.classification === "watch")
+      .map((h) => h.reason)
+      .join(" ");
+  } else if (portCount > 0 && deferCount > 0) {
     classification = "defer";
-    const takeRules = hits.filter((h) => h.classification === "take").map((h) => h.rule);
+    const portRules = hits.filter((h) => h.classification === "port").map((h) => h.rule);
     const deferRules = hits.filter((h) => h.classification === "defer").map((h) => h.rule);
-    rationale = `Take signal (${takeRules.join(", ")}) but also touches fork divergence surface (${deferRules.join(", ")}). Resolve with care: likely needs manual conflict resolution, not a clean take.`;
+    rationale = `Port signal (${portRules.join(", ")}) but also touches fork divergence surface (${deferRules.join(", ")}). Resolve with care during port.`;
   } else if (deferCount > 0) {
     classification = "defer";
     const rules = [
@@ -245,25 +247,22 @@ export function classifyCommit(commit: UpstreamCommit): CommitVerdict {
       ...hits.filter((h) => h.classification === "defer" && !divergenceHits.includes(h)),
     ].map((h) => h.rule);
     rationale = `Deferred: ${[...new Set(rules)].join(", ")}.`;
-  } else if (rejectCount > 0) {
-    classification = "reject";
+  } else if (skipCount > 0) {
+    classification = "skip";
     rationale = hits
-      .filter((h) => h.classification === "reject")
+      .filter((h) => h.classification === "skip")
       .map((h) => h.reason)
       .join(" ");
-  } else if (takeCount > 0) {
-    classification = "take";
+  } else if (portCount > 0) {
+    classification = "port";
     rationale = hits
-      .filter((h) => h.classification === "take")
+      .filter((h) => h.classification === "port")
       .map((h) => h.reason)
       .join(" ");
   } else {
-    // No rule fired. This is the "review" verdict: the classifier had no signal
-    // — it is NOT tied to a named fork project phase or revisit trigger, so it
-    // is not a legitimate "defer". The human assigns it to take/reject/defer.
     classification = "review";
     rationale =
-      "No classification rule matched (likely upstream-internal or peripheral). Not tied to any fork project phase — assign to Take/Reject/Defer during review.";
+      "No classification rule matched (likely upstream-internal or peripheral). Assign Port/Skip/Defer/Watch during review.";
   }
 
   return { commit, classification, rationale, hits };

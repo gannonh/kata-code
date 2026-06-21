@@ -3,22 +3,23 @@
  * classify-upstream.ts
  *
  * Inventory and classify upstream `pingdotgg/t3code` commits since the last
- * recorded sync baseline, producing a draft Take / Cherry-pick / Reject / Defer
- * table for human review.
+ * recorded sync baseline, producing a draft Port / Skip / Defer / Watch table
+ * for human review.
  *
  * This is the inventory + classify step of the upstream-sync runbook. It does
  * not merge, push, or mutate anything — it only reads git state and FORK.md.
  *
  * Usage:
  *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts
+ *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts --since-scan --out sync-plan.md
  *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts --base <sha>
  *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts --out sync-plan.md
  *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts --json
  *
  * Baseline resolution (first match wins):
  *   1. --base <sha> flag
- *   2. `Upstream SHA:` line in FORK.md
- *   3. git merge-base main upstream/main
+ *   2. `Upstream tip SHA:` (or legacy `Upstream SHA:`) in FORK.md
+ *   3. git merge-base main upstream/main (skipped when --since-scan is set)
  *
  * Output goes to stdout by default. Use --out to write a markdown file (prints
  * its path to stdout). Use --json for machine-readable output.
@@ -28,8 +29,9 @@
 
 // @effect-diagnostics nodeBuiltinImport:off
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 
+import { readLastSyncBaseline } from "./fork-baseline.ts";
 import { classifyCommit, type CommitVerdict, type UpstreamCommit } from "./rules.ts";
 
 const SCRIPT_ROOT = ".agents/skills/upstream-sync/scripts";
@@ -38,16 +40,24 @@ interface CliArgs {
   base: string | undefined;
   out: string | undefined;
   json: boolean;
+  sinceScan: boolean;
   help: boolean;
 }
 
 function parseArgs(argv: ReadonlyArray<string>): CliArgs {
-  const args: CliArgs = { base: undefined, out: undefined, json: false, help: false };
+  const args: CliArgs = {
+    base: undefined,
+    out: undefined,
+    json: false,
+    sinceScan: false,
+    help: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--base") args.base = argv[++i];
     else if (arg === "--out") args.out = argv[++i];
     else if (arg === "--json") args.json = true;
+    else if (arg === "--since-scan") args.sinceScan = true;
     else if (arg === "-h" || arg === "--help") args.help = true;
   }
   return args;
@@ -55,17 +65,6 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
 
 function git(args: ReadonlyArray<string>): string {
   return execFileSync("git", args as string[], { encoding: "utf8" }).trim();
-}
-
-function readLastSyncBaseline(forkMdPath: string): string | undefined {
-  let content: string;
-  try {
-    content = readFileSync(forkMdPath, "utf8");
-  } catch {
-    return undefined;
-  }
-  const match = content.match(/^Upstream SHA:\s*([0-9a-f]{7,40})/m);
-  return match?.[1];
 }
 
 function listUpstreamCommits(base: string): ReadonlyArray<UpstreamCommit> {
@@ -116,9 +115,15 @@ function resolveBase(args: CliArgs, forkMdPath: string): string {
   if (args.base) return args.base;
   const fromFork = readLastSyncBaseline(forkMdPath);
   if (fromFork) return fromFork;
+  if (args.sinceScan) {
+    process.stderr.write(
+      "error: --since-scan requires 'Upstream tip SHA:' (or legacy 'Upstream SHA:') in FORK.md; use --base to override.\n",
+    );
+    process.exit(1);
+  }
   const mb = git(["merge-base", "main", "upstream/main"]);
   process.stderr.write(
-    `warn: no 'Upstream SHA:' line in FORK.md; falling back to merge-base ${mb}\n`,
+    `warn: no upstream scan baseline in FORK.md; falling back to merge-base ${mb}\n`,
   );
   return mb;
 }
@@ -128,10 +133,10 @@ function summarize(verdicts: ReadonlyArray<CommitVerdict>): {
   total: number;
 } {
   const byClass: Record<string, number> = {
-    take: 0,
-    "cherry-pick": 0,
-    reject: 0,
+    port: 0,
+    skip: 0,
     defer: 0,
+    watch: 0,
     review: 0,
   };
   for (const v of verdicts) byClass[v.classification] = (byClass[v.classification] ?? 0) + 1;
@@ -147,24 +152,24 @@ function renderMarkdown(
   const lines: string[] = [];
   lines.push(`# Upstream sync plan`);
   lines.push("");
-  lines.push(`- Base (last sync): \`${base}\``);
+  lines.push(`- Base (last scan): \`${base}\``);
   lines.push(`- Upstream tip: \`${upstreamTip}\``);
   lines.push(`- Commits since base: ${total}`);
   lines.push(
-    `- Draft classification: ${byClass.take ?? 0} take · ${byClass["cherry-pick"] ?? 0} cherry-pick · ${byClass.reject ?? 0} reject · ${byClass.defer ?? 0} defer · ${byClass.review ?? 0} review`,
+    `- Draft classification: ${byClass.port ?? 0} port · ${byClass.skip ?? 0} skip · ${byClass.defer ?? 0} defer · ${byClass.watch ?? 0} watch · ${byClass.review ?? 0} review`,
   );
   lines.push("");
   lines.push(
-    `> Draft produced by \`node ${SCRIPT_ROOT}/classify-upstream.ts\`. Every verdict is a starting point for human review, not a final decision. Confirm before merging.`,
+    `> Draft produced by \`node ${SCRIPT_ROOT}/classify-upstream.ts\`. Every verdict is a starting point for human review, not a final decision. Confirm Port/Skip/Defer/Watch before porting.`,
   );
   lines.push("");
 
   const groups: Array<[string, string]> = [
-    ["take", "### Take"],
-    ["cherry-pick", "### Cherry-pick"],
+    ["port", "### Port"],
+    ["watch", "### Watch"],
     ["defer", "### Defer (project-phase-tied, see docs/specs/deferred-work.md)"],
-    ["review", "### Review (unclassified — assign to Take/Reject/Defer)"],
-    ["reject", "### Reject"],
+    ["review", "### Review (assign Port / Skip / Defer / Watch)"],
+    ["skip", "### Skip"],
   ];
 
   for (const [cls, heading] of groups) {
@@ -186,7 +191,7 @@ function renderMarkdown(
   lines.push(`## Conflicts to expect`);
   lines.push("");
   lines.push(
-    `Before merging, run \`node ${SCRIPT_ROOT}/conflict-zones.ts\` to intersect upstream-touched paths with fork-modified files and FORK.md high-conflict zones.`,
+    `Before porting a cluster, run \`node ${SCRIPT_ROOT}/conflict-zones.ts --commits <sha1>,<sha2>\` to intersect upstream-touched paths with fork-modified files and FORK.md high-conflict zones.`,
   );
   lines.push("");
 
@@ -198,12 +203,13 @@ function main() {
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: classify-upstream.ts [--base <sha>] [--out <path>] [--json]",
+        "Usage: classify-upstream.ts [--base <sha>] [--since-scan] [--out <path>] [--json]",
         "",
-        "Inventories upstream commits since the last sync baseline and produces a",
-        "draft Take/Cherry-pick/Reject/Defer classification. Read-only — no merges.",
+        "Inventories upstream commits since the last scan baseline and produces a",
+        "draft Port/Skip/Defer/Watch classification. Read-only — no merges.",
         "",
-        "Baseline: --base flag, else 'Upstream SHA:' in FORK.md, else merge-base.",
+        "Baseline: --base flag, else FORK.md scan SHA, else merge-base.",
+        "  --since-scan  require FORK.md baseline (no merge-base fallback)",
       ].join("\n") + "\n",
     );
     return;
