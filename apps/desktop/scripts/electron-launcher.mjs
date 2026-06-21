@@ -41,12 +41,13 @@ const developmentMacIconPngPath = join(desktopDir, "resources", "source.png");
 // oxlint-disable-next-line kata-code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
-function resolveDevelopmentProtocolCallbackPort() {
+export function resolveDevelopmentProtocolCallbackUrl() {
   const configuredPort = Number.parseInt(process.env.KATACODE_PORT ?? "", 10);
-  if (Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65535) {
-    return configuredPort + 1;
-  }
-  return 13774;
+  const port =
+    Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65535
+      ? configuredPort + 1
+      : 13774;
+  return `http://127.0.0.1:${port}/auth/callback`;
 }
 
 function setPlistString(plistPath, key, value) {
@@ -268,7 +269,7 @@ export function createDevelopmentLauncherShim() {
 
 function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
   const shimEntryPath = join(dirname(targetBinaryPath), "katacode-dev-callback.cjs");
-  const protocolCallbackUrl = `http://127.0.0.1:${resolveDevelopmentProtocolCallbackPort()}/auth/callback`;
+  const protocolCallbackUrl = resolveDevelopmentProtocolCallbackUrl();
   const envEntries = [
     ["VITE_DEV_SERVER_URL", process.env.VITE_DEV_SERVER_URL],
     ["KATACODE_PORT", process.env.KATACODE_PORT],

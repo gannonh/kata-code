@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   desktopDir,
   resolveDevProtocolClient,
+  resolveDevelopmentProtocolCallbackUrl,
   resolveElectronLaunchCommand,
   resolveRawElectronLaunchCommand,
 } from "./electron-launcher.mjs";
@@ -233,6 +234,7 @@ const devProtocolClient = resolveDevProtocolClient();
 if (devProtocolClient) {
   childEnv.KATACODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
   childEnv.KATACODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
+  childEnv.KATACODE_DESKTOP_PROTOCOL_CALLBACK_URL = resolveDevelopmentProtocolCallbackUrl();
 }
 
 startWatchers();
