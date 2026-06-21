@@ -67,6 +67,10 @@ const PACKAGE_RENAMES: ReadonlyArray<readonly [string, string, string]> = [
  * it only as a quoted package dependency, not as a bare token, to avoid
  * rewriting unrelated "t3" occurrences.
  */
+const T3_SERVER_PACKAGE_SKIP_PATHS: ReadonlyArray<RegExp> = [
+  /^apps\/desktop\/src\/electron\/ElectronProtocol\.ts$/,
+];
+
 const T3_SERVER_PACKAGE_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/"t3"/g, '"@kata-sh/code-cli"'],
   [/'t3'/g, "'@kata-sh/code-cli'"],
@@ -237,13 +241,21 @@ function applyPatternRenames(
   return { rewritten, hits };
 }
 
-function applyToContent(content: string): { rewritten: string; hits: Array<RenameHit> } {
+function applyToContent(
+  content: string,
+  filePath?: string,
+): { rewritten: string; hits: Array<RenameHit> } {
   const packageResult = applyStringRenames(content, PACKAGE_RENAMES);
-  const t3ServerResult = applyPatternRenames(
-    packageResult.rewritten,
-    T3_SERVER_PACKAGE_PATTERNS,
-    "package (t3 server)",
-  );
+  const skipT3ServerPackageRenames =
+    filePath !== undefined &&
+    T3_SERVER_PACKAGE_SKIP_PATHS.some((pattern) => pattern.test(filePath));
+  const t3ServerResult = skipT3ServerPackageRenames
+    ? { rewritten: packageResult.rewritten, hits: [] as Array<RenameHit> }
+    : applyPatternRenames(
+        packageResult.rewritten,
+        T3_SERVER_PACKAGE_PATTERNS,
+        "package (t3 server)",
+      );
   const identityResult = applyStringRenames(t3ServerResult.rewritten, IDENTITY_RENAMES);
   const envResult = applyPatternRenames(
     identityResult.rewritten,
@@ -301,7 +313,7 @@ function main() {
     } catch {
       continue;
     }
-    const { rewritten, hits } = applyToContent(content);
+    const { rewritten, hits } = applyToContent(content, path);
     if (hits.length === 0) continue;
     changedFiles += 1;
     for (const h of hits) {

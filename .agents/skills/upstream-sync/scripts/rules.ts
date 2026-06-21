@@ -118,14 +118,9 @@ const REJECT_PATH_PATTERNS: ReadonlyArray<{ pattern: RegExp; rule: string; reaso
 ];
 
 /**
- * Commits touching these paths need the maintainer to check the FORK.md
- * divergence log + Phase 2 deferred wire-identity list, because these are the
- * places the fork has intentionally diverged. The classifier cannot resolve
- * these mechanically — it flags them for human review.
- */
-/**
- * Surfaces where the fork has intentionally diverged. Narrow the patterns so a
- * bare `package.json` version bump does not trip the strong divergence signal
+ * Surfaces where the fork has intentionally diverged. Commits touching these paths
+ * need the maintainer to check the FORK.md divergence log. Narrow the patterns so
+ * a bare `package.json` version bump does not trip the strong divergence signal
  * — only source/config that actually carries fork policy does.
  */
 const DIVERGENCE_REVIEW_PATHS: ReadonlyArray<{ pattern: RegExp; rule: string }> = [
@@ -142,8 +137,8 @@ const DIVERGENCE_REVIEW_PATHS: ReadonlyArray<{ pattern: RegExp; rule: string }> 
 ];
 
 /**
- * Upstream-internal docs that don't affect runtime. Surfaced as a separate
- * defer rationale so the reviewer knows it's docs-only, not a missed code rule.
+ * Upstream-internal docs that don't affect runtime. Classified as take so they
+ * land with the bulk merge; OKF closure in Step 6 handles fork-specific docs.
  */
 const UPSTREAM_INTERNAL_DOCS_PATTERN =
   /^(\.macroscope|\.github\/ISSUE_TEMPLATE|\.github\/PULL_REQUEST_TEMPLATE|CONTRIBUTING\.md$|\.cursor|\.claude)\//;
@@ -156,8 +151,8 @@ function isDocsOnlyCommit(files: ReadonlyArray<readonly [string, string]>): bool
  * Known seed list of upstream paths/shas that are permanently rejected,
  * mirrored from FORK.md "Divergence log → Rejected upstream".
  *
- * The classifier reads this at runtime from FORK.md when present, so this
- * constant is a fallback only. Keeping it here documents the shape.
+ * Extend this array when FORK.md records a permanent reject; runtime parsing
+ * of FORK.md is not implemented yet.
  */
 export const PERMANENT_REJECT_SEED: ReadonlyArray<{ pattern: RegExp; reason: string }> = [];
 
@@ -166,7 +161,7 @@ export const PERMANENT_REJECT_SEED: ReadonlyArray<{ pattern: RegExp; reason: str
  * fired, so the human reviewer can see why the script landed where it did.
  *
  * Ambiguity is surfaced explicitly: if a commit hits both a take and a reject
- * signal, it is classified `defer` with rationale "Conflicting signals —
+ * signal, it is classified `review` with rationale "Conflicting signals —
  * review manually" rather than silently picking one. This is the most
  * important property of the classifier: never hide a fork-policy conflict.
  */
@@ -189,9 +184,9 @@ export function classifyCommit(commit: UpstreamCommit): CommitVerdict {
   if (isDocsOnlyCommit(commit.files)) {
     hits.push({
       rule: "upstream-internal docs only",
-      classification: "defer",
+      classification: "take",
       reason:
-        "Touches only upstream-internal docs (.macroscope, .github templates, CONTRIBUTING). No runtime impact; absorb only if the fork wants the upstream guidance verbatim. Fork has its own equivalents (e.g. operations/effect-fn-checklist.md).",
+        "Touches only upstream-internal docs (.macroscope, .github templates, CONTRIBUTING). Absorb with OKF closure in Step 6; fork has its own equivalents for runtime guidance.",
     });
   }
 

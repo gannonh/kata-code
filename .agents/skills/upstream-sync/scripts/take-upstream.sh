@@ -38,8 +38,11 @@ if [ ! -f .git/MERGE_HEAD ]; then
 fi
 
 # Gather unmerged paths. git diff --name-only --diff-filter=U lists paths with
-# unresolved conflicts. If filters passed, grep -E against them.
-mapfile -t unmerged < <(git diff --name-only --diff-filter=U)
+# unresolved conflicts. If filters passed, prefix-match against them.
+unmerged=()
+while IFS= read -r path; do
+  [ -n "$path" ] && unmerged+=("$path")
+done < <(git diff --name-only --diff-filter=U)
 
 if [ "${#unmerged[@]}" -eq 0 ]; then
   echo "no unmerged paths to resolve." >&2

@@ -95,7 +95,12 @@ function shellSingleQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+export const AUTH_CALLBACK_RETRY_DELAYS_MS = [0, 200, 500, 1000];
+
 export function createDevelopmentLauncherScript({ envEntries, electronBinaryPath, shimEntryPath }) {
+  const shellRetryDelays = AUTH_CALLBACK_RETRY_DELAYS_MS.map((ms) =>
+    ms === 0 ? "0" : String(ms / 1000),
+  ).join(" ");
   return [
     "#!/bin/sh",
     ...envEntries.map(([name, value]) => `export ${name}=${shellSingleQuote(value)}`),
@@ -105,7 +110,7 @@ export function createDevelopmentLauncherScript({ envEntries, electronBinaryPath
     "    return 1",
     "  fi",
     "",
-    "  for delay in 0 0.2 0.5 1; do",
+    "  for delay in " + shellRetryDelays + "; do",
     '    if [ "$delay" != "0" ]; then',
     '      /bin/sleep "$delay"',
     "    fi",
@@ -130,6 +135,7 @@ export function createDevelopmentLauncherScript({ envEntries, electronBinaryPath
 }
 
 export function createDevelopmentLauncherShim() {
+  const retryDelaysLiteral = JSON.stringify(AUTH_CALLBACK_RETRY_DELAYS_MS);
   return [
     'const { app } = require("electron");',
     'const http = require("node:http");',
@@ -199,7 +205,7 @@ export function createDevelopmentLauncherShim() {
     "  callbackHandled = true;",
     "  let lastError;",
     "",
-    "  for (const waitMs of [0, 200, 500, 1000]) {",
+    "  for (const waitMs of " + retryDelaysLiteral + ") {",
     "    if (waitMs > 0) {",
     "      await delay(waitMs);",
     "    }",

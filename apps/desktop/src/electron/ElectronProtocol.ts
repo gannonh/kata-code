@@ -12,7 +12,7 @@ import * as Electron from "electron";
 
 import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
 
-export const DESKTOP_SCHEME = "@kata-sh/code-cli";
+export const DESKTOP_SCHEME = "t3";
 
 /** Internal Electron static-asset protocol (not user-facing deep links — see FORK.md divergence log). */
 

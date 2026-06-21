@@ -49,6 +49,14 @@ await waitForResources({
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
 
+cleanupStaleDevApps();
+const devProtocolClient = resolveDevProtocolClient();
+if (devProtocolClient) {
+  childEnv.KATACODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
+  childEnv.KATACODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
+  childEnv.KATACODE_DESKTOP_PROTOCOL_CALLBACK_URL = resolveDevelopmentProtocolCallbackUrl();
+}
+
 let shuttingDown = false;
 let restartTimer = null;
 let currentApp = null;
@@ -227,14 +235,6 @@ async function shutdown(exitCode) {
   killChildTree("KILL");
 
   process.exit(exitCode);
-}
-
-cleanupStaleDevApps();
-const devProtocolClient = resolveDevProtocolClient();
-if (devProtocolClient) {
-  childEnv.KATACODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
-  childEnv.KATACODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
-  childEnv.KATACODE_DESKTOP_PROTOCOL_CALLBACK_URL = resolveDevelopmentProtocolCallbackUrl();
 }
 
 startWatchers();

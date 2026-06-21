@@ -10,10 +10,10 @@
  * not merge, push, or mutate anything — it only reads git state and FORK.md.
  *
  * Usage:
- *   node scripts/upstream-sync/classify-upstream.ts
- *   node scripts/upstream-sync/classify-upstream.ts --base <sha>
- *   node scripts/upstream-sync/classify-upstream.ts --out sync-plan.md
- *   node scripts/upstream-sync/classify-upstream.ts --json
+ *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts
+ *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts --base <sha>
+ *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts --out sync-plan.md
+ *   node .agents/skills/upstream-sync/scripts/classify-upstream.ts --json
  *
  * Baseline resolution (first match wins):
  *   1. --base <sha> flag
@@ -31,6 +31,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
 import { classifyCommit, type CommitVerdict, type UpstreamCommit } from "./rules.ts";
+
+const SCRIPT_ROOT = ".agents/skills/upstream-sync/scripts";
 
 interface CliArgs {
   base: string | undefined;
@@ -153,7 +155,7 @@ function renderMarkdown(
   );
   lines.push("");
   lines.push(
-    `> Draft produced by \`scripts/upstream-sync/classify-upstream.ts\`. Every verdict is a starting point for human review, not a final decision. Confirm before merging.`,
+    `> Draft produced by \`node ${SCRIPT_ROOT}/classify-upstream.ts\`. Every verdict is a starting point for human review, not a final decision. Confirm before merging.`,
   );
   lines.push("");
 
@@ -184,7 +186,7 @@ function renderMarkdown(
   lines.push(`## Conflicts to expect`);
   lines.push("");
   lines.push(
-    `Before merging, run \`node scripts/upstream-sync/conflict-zones.ts\` to intersect upstream-touched paths with fork-modified files and FORK.md high-conflict zones.`,
+    `Before merging, run \`node ${SCRIPT_ROOT}/conflict-zones.ts\` to intersect upstream-touched paths with fork-modified files and FORK.md high-conflict zones.`,
   );
   lines.push("");
 

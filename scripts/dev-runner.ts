@@ -227,7 +227,6 @@ export function createDevRunnerEnv({
     }
 
     if (isDesktopMode) {
-      output.HOST = DESKTOP_DEV_LOOPBACK_HOST;
       delete output.KATACODE_DESKTOP_WS_URL;
     }
 
