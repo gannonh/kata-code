@@ -99,7 +99,7 @@ export const layer = Layer.effect(
     const platform = yield* HostProcessPlatform;
     if (platform === "win32") {
       return yield* Effect.die(
-        "Bun PTY terminal support is unavailable on Windows. Please use Node.js (e.g. by running `npx katacode`) instead.",
+        "Bun PTY terminal support is unavailable on Windows. Please use Node.js (e.g. by running `npx @kata-sh/code-cli`) instead.",
       );
     }
     return {

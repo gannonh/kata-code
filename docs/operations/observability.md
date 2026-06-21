@@ -73,7 +73,7 @@ You do not need any extra env vars. Just run the app normally and inspect `serve
 Examples:
 
 ```bash
-npx katacode
+npx @kata-sh/code-cli
 ```
 
 ```bash
@@ -124,7 +124,7 @@ export KATACODE_TRACE_TIMING_ENABLED=true
 CLI:
 
 ```bash
-npx katacode
+npx @kata-sh/code-cli
 ```
 
 Monorepo web/server dev:

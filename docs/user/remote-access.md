@@ -57,7 +57,7 @@ Depending on your Tailscale setup, this may include:
 The Tailscale HTTPS endpoint uses the clean MagicDNS URL, such as
 `https://machine.tailnet.ts.net/`, and is disabled until the app verifies that the URL reaches this
 backend. Use **Setup** on the Tailscale HTTPS row to opt in. The desktop app restarts the backend
-with the same server-side behavior as `katacode serve --tailscale-serve`, then the server asks Tailscale
+with the same server-side behavior as `npx @kata-sh/code-cli serve --tailscale-serve`, then the server asks Tailscale
 Serve to proxy HTTPS traffic to the local backend.
 
 The Tailscale support is an endpoint provider add-on. The core remote model still works without Tailscale: LAN HTTP endpoints, custom HTTPS endpoints, future tunnels, and SSH-launched environments all use the same saved environment and pairing flow.
@@ -68,13 +68,19 @@ For the hosted HTTPS web app, prefer an HTTPS Tailnet or other HTTPS endpoint. A
 
 Use this when you want to run the server without a GUI, for example on a remote machine over SSH.
 
-Run the server with `katacode serve`.
+Run the server with the npm CLI package:
 
 ```bash
-npx katacode serve --host "$(tailscale ip -4)"
+npx @kata-sh/code-cli serve --host "$(tailscale ip -4)"
 ```
 
-`katacode serve` starts the server without opening a browser and prints:
+For a same-machine quick test, bind to loopback:
+
+```bash
+npx @kata-sh/code-cli serve --host 127.0.0.1 --port 53210
+```
+
+`npx @kata-sh/code-cli serve` starts the server without opening a browser and prints:
 
 - a connection string
 - a pairing token
@@ -88,19 +94,19 @@ From there, connect from another device in either of these ways:
 - in the desktop app, enter the host and token separately
 - in the hosted web app, open a hosted pairing URL when the backend is reachable over HTTPS
 
-Use `katacode serve --help` for the full flag reference. It supports the same general startup options as the normal server command, including an optional `cwd` argument.
+Use `npx @kata-sh/code-cli serve --help` for the full flag reference. It supports the same general startup options as the normal server command, including an optional `cwd` argument.
 
 For hosted web pairing over Tailscale HTTPS, opt in to Tailscale Serve:
 
 ```bash
-npx katacode serve --tailscale-serve
+npx @kata-sh/code-cli serve --tailscale-serve
 ```
 
 By default this configures Tailscale Serve on HTTPS port 443 and advertises
 `https://machine.tailnet.ts.net/`. Advanced users can choose a different HTTPS port:
 
 ```bash
-npx katacode serve --tailscale-serve --tailscale-serve-port 8443
+npx @kata-sh/code-cli serve --tailscale-serve --tailscale-serve-port 8443
 ```
 
 > Note

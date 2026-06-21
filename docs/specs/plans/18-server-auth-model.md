@@ -577,7 +577,7 @@ T3Server -> T3Server : validate cookie session
 T3Server --> Frontend : websocket accepted
 ```
 
-### `npx katacode` user
+### `npx @kata-sh/code-cli` user
 
 This is the standalone local server flow.
 
@@ -585,7 +585,7 @@ There is no trusted desktop shell here, so pairing should be explicit.
 
 ```text
 Participants:
-  UserShell     = npx t3 launcher
+  UserShell     = npx @kata-sh/code-cli launcher
   T3Server      = standalone local server
   Browser       = browser tab
 
