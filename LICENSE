@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 T3 Tools Inc.
+Copyright (c) 2026 Gannon Hall
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+-------------------------------------------------------------------------------
+
+Kata Agents bundles and adapts code from the following MIT-licensed project:
+
+T3code — Copyright (c) 2026 T3 Tools Inc., distributed under the MIT License, the full text of which is identical
+to the license above (with its respective copyright holder).
