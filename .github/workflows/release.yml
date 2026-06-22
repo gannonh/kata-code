@@ -5,6 +5,10 @@ on:
     tags:
       - "v*.*.*"
       - "!v*-nightly.*"
+  schedule:
+    # Automatic nightly every 3 hours (UTC). Only proceeds when main has
+    # changed since the last nightly tag (see check_changes job below).
+    - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -20,10 +24,14 @@ on:
         required: false
         type: string
       dry_run:
-        description: "Validate signing inputs and quality gates without publishing"
+        description: "Build + sign only; create no GitHub Release and publish nothing"
         required: false
         default: false
         type: boolean
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -45,6 +53,7 @@ jobs:
       - id: check
         name: Compare HEAD to last nightly tag
         run: |
+          set -euo pipefail
           last_nightly_tag=$(git tag --list 'v*-nightly.*' 'nightly-v*' --sort=-creatordate | head -n 1)
           if [[ -z "$last_nightly_tag" ]]; then
             echo "No previous nightly tag found. Proceeding with release."
@@ -81,6 +90,7 @@ jobs:
       cli_dist_tag: ${{ steps.release_meta.outputs.cli_dist_tag }}
       is_prerelease: ${{ steps.release_meta.outputs.is_prerelease }}
       make_latest: ${{ steps.release_meta.outputs.make_latest }}
+      dry_run: ${{ steps.release_meta.outputs.dry_run }}
       ref: ${{ github.sha }}
     steps:
       - name: Checkout
@@ -109,6 +119,8 @@ jobs:
           NIGHTLY_SHA: ${{ github.sha }}
           NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
         run: |
+          set -euo pipefail
+
           if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-stable}" == "nightly" ) ]]; then
             nightly_date="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
 
@@ -122,6 +134,11 @@ jobs:
             echo "cli_dist_tag=nightly" >> "$GITHUB_OUTPUT"
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
             echo "make_latest=false" >> "$GITHUB_OUTPUT"
+            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+              echo "dry_run=${DISPATCH_DRY_RUN:-false}" >> "$GITHUB_OUTPUT"
+            else
+              echo "dry_run=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
               raw="${DISPATCH_VERSION}"
@@ -133,8 +150,10 @@ jobs:
                   exit 1
                 fi
               fi
+              echo "dry_run=${DISPATCH_DRY_RUN:-false}" >> "$GITHUB_OUTPUT"
             else
               raw="${GITHUB_REF_NAME}"
+              echo "dry_run=false" >> "$GITHUB_OUTPUT"
             fi
 
             version="${raw#v}"
@@ -157,6 +176,25 @@ jobs:
               echo "cli_dist_tag=next" >> "$GITHUB_OUTPUT"
             fi
           fi
+
+          channel="$(grep '^release_channel=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
+          version="$(grep '^version=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
+          tag="$(grep '^tag=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
+          is_prerelease="$(grep '^is_prerelease=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
+          make_latest="$(grep '^make_latest=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
+          dry_run="$(grep '^dry_run=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)"
+
+          {
+            echo "## Release parameters"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **channel** | \`$channel\` |"
+            echo "| **version** | \`$version\` |"
+            echo "| **tag** | \`$tag\` |"
+            echo "| **prerelease** | \`$is_prerelease\` |"
+            echo "| **make_latest** | \`$make_latest\` |"
+            echo "| **dry_run** | \`$dry_run\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check
         run: vp check
@@ -247,13 +285,10 @@ jobs:
 
   signing_gate:
     name: Validate macOS signing inputs
-    needs: [preflight, resolve_public_config]
+    needs: [preflight]
     if: |
       !failure() && !cancelled() &&
-      needs.preflight.result == 'success' &&
-      needs.resolve_public_config.result == 'success' &&
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.dry_run == 'true'
+      needs.preflight.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -282,12 +317,12 @@ jobs:
 
   build:
     name: Build ${{ matrix.label }}
-    needs: [preflight, resolve_public_config]
+    needs: [preflight, resolve_public_config, signing_gate]
     if: |
       !failure() && !cancelled() &&
       needs.preflight.result == 'success' &&
       needs.resolve_public_config.result == 'success' &&
-      !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+      needs.signing_gate.result == 'success'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
@@ -548,7 +583,7 @@ jobs:
       needs.preflight.result == 'success' &&
       needs.resolve_public_config.result == 'success' &&
       needs.build.result == 'success' &&
-      !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+      needs.preflight.outputs.dry_run != 'true'
     runs-on: ubuntu-24.04 # ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -603,7 +638,7 @@ jobs:
       needs.preflight.result == 'success' &&
       needs.build.result == 'success' &&
       needs.publish_cli.result == 'success' &&
-      !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+      needs.preflight.outputs.dry_run != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -725,7 +760,7 @@ jobs:
       needs.preflight.result == 'success' &&
       needs.resolve_public_config.result == 'success' &&
       needs.release.result == 'success' &&
-      !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+      needs.preflight.outputs.dry_run != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -825,7 +860,7 @@ jobs:
 
   finalize:
     name: Finalize release
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel == 'stable' }}
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel == 'stable' && needs.preflight.outputs.dry_run != 'true' }}
     needs: [preflight, release]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
