@@ -7,6 +7,32 @@
   - For CI parity before push, also run `vp run test` and `vp run release:smoke` (matches GitHub Actions **Test** and **Release Smoke** jobs).
 - Use `vp test` for the built-in Vite+ test command and `vp run test` when you specifically need the `test` package script.
 
+## Feature Validation
+
+Prove each acceptance criterion for user-facing features before marking work complete.
+
+1. **Manual validation with `playwright-cli`:** Launch the running app, walk through each
+   acceptance criterion interactively, and capture snapshots that confirm the expected behavior.
+
+   ```bash
+   playwright-cli open http://localhost:5733   # web
+   playwright-cli snapshot                     # capture state at each step
+   ```
+
+   For Electron flows, use `playwright-cli attach --cdp=chrome` against the dev app.
+
+2. **Author E2E tests:** After manual validation, encode each proven criterion as a Playwright
+   test under `e2e/tests/`. Follow the local `kata-code-e2e-testing` skill when installed — compose from `e2e/src/harness/`
+   and `e2e/src/flows/`, tag with the relevant feature tag, and verify with:
+
+   ```bash
+   vp run e2e --project desktop-dev --grep @your-tag
+   ```
+
+3. **Coverage gate:** Every acceptance criterion in the spec must have a corresponding assertion
+   in at least one E2E test. If a criterion cannot be automated (e.g., subjective visual quality),
+   document the manual verification in the PR description.
+
 ## Git Workflow
 
 - **Commit proactively:** After each meaningful, complete change, commit immediately. Do not ask whether to commit—just commit and keep moving.

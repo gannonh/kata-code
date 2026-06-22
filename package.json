@@ -37,12 +37,18 @@
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist apps/*/dist-electron packages/*/dist .vite-plus apps/*/.vite-plus packages/*/.vite-plus",
     "sync:repos": "node scripts/sync-reference-repos.ts",
     "generate:brand-rasters": "node scripts/generate-prod-brand-rasters.mjs",
+    "e2e": "playwright test --config e2e/playwright.config.ts --project desktop-dev",
+    "e2e:headed": "playwright test --config e2e/playwright.config.ts --project desktop-dev --headed",
+    "e2e:ui": "playwright test --config e2e/playwright.config.ts --project desktop-dev --ui",
+    "e2e:release": "playwright test --config e2e/playwright.config.ts --project desktop-release",
     "check:okf": "node scripts/check-okf.mjs"
   },
   "devDependencies": {
     "@babel/plugin-transform-react-jsx": "7.28.6",
+    "@clerk/testing": "^1.4.26",
     "@effect/tsgo": "catalog:",
     "@oxlint/plugins": "^1.63.0",
+    "@playwright/test": "1.60.0",
     "@types/node": "catalog:",
     "@typescript/native-preview": "catalog:",
     "husky": "^9.1.7",

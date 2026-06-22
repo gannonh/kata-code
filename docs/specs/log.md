@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-06-21 (local Electron E2E — implementation verification)
+
+- Updated [E2E foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md) with implementation notes, Clerk ticket auth path, headed verification evidence, and build completion report refresh.
+- Refreshed [specs roadmap](/specs/index.md) completed row.
+- Registered CI E2E and release-target follow-ups in [deferred work](/specs/deferred-work.md).
+
 ## 2026-06-21 (upstream-sync branch OKF finalize — pre-merge)
 
 - Refreshed [closure spec](/specs/2026-06-20-upstream-sync-closure.md) current state and branch-progress table; recorded Closure Task 4 audit (no new rules beyond `review` bucket).

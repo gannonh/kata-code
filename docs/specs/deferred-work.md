@@ -101,3 +101,21 @@ Each entry should include:
 - **Rationale:** Discovered during UAT when switching between Google accounts; the relay link from the first account persisted and the new account's `listEnvironments` returned empty.
 - **Revisit trigger:** Before stable release or public Connect launch.
 - **Notes:** On sign-out, revoke the relay link for the departing `cloudUserId` before clearing credentials. On sign-in, detect that `cloudUserId` changed and re-link under the new user.
+
+### CI integration for local Electron E2E
+
+- **Status:** deferred
+- **Area:** testing, desktop, CI
+- **Source:** [Local Electron E2E testing foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md)
+- **Rationale:** V1 is local-only; tests require macOS GUI session, real Clerk credentials, Google test user, and provider API keys unsuitable for default PR CI.
+- **Revisit trigger:** Review when dedicated macOS E2E runners, secret management, and stable test accounts exist.
+- **Notes:** `.github/workflows/ci.yml` must not invoke E2E scripts until an explicit CI spec approves gating.
+
+### Release-target E2E validation (`desktop-release`)
+
+- **Status:** deferred
+- **Area:** testing, desktop, release
+- **Source:** [Local Electron E2E testing foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md)
+- **Rationale:** Dev-target headed verification passed for starter tags; release smoke/settings against a built `.app` depends on maintainer-local `KATACODE_E2E_RELEASE_APP`.
+- **Revisit trigger:** Before nightly desktop promotion or when release artifact paths are standardized in CI/release runbooks.
+- **Notes:** Prerequisite gate verified (`KATACODE_E2E_RELEASE_APP` fails loudly when unset). Nightly commands documented in [e2e/README](../../e2e/README.md).

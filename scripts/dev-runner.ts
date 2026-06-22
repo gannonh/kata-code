@@ -11,7 +11,6 @@ import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import * as Config from "effect/Config";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Hash from "effect/Hash";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
@@ -20,16 +19,21 @@ import * as Schema from "effect/Schema";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
 
+import {
+  BASE_SERVER_PORT,
+  BASE_WEB_PORT,
+  DEV_PORT_PROBE_HOSTS,
+  MAX_PORT,
+  portPairForOffset,
+  resolveOffset,
+} from "./lib/dev-ports.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
 
 Object.assign(process.env, loadRepoEnv());
 
-const BASE_SERVER_PORT = 13773;
-const BASE_WEB_PORT = 5733;
-const MAX_HASH_OFFSET = 3000;
-const MAX_PORT = 65535;
 const DESKTOP_DEV_LOOPBACK_HOST = "127.0.0.1";
-const DEV_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::1", "::"] as const;
+
+export { resolveOffset } from "./lib/dev-ports.ts";
 
 export const DEFAULT_KATACODE_HOME = Effect.map(Effect.service(Path.Path), (_path) =>
   resolveDefaultKatacodeHome(NodeOS.homedir()),
@@ -93,33 +97,6 @@ const OffsetConfig = Config.all({
   portOffset: optionalIntegerConfig("KATACODE_PORT_OFFSET"),
   devInstance: optionalStringConfig("KATACODE_DEV_INSTANCE"),
 });
-
-export function resolveOffset(config: {
-  readonly portOffset: number | undefined;
-  readonly devInstance: string | undefined;
-}): { readonly offset: number; readonly source: string } {
-  if (config.portOffset !== undefined) {
-    if (config.portOffset < 0) {
-      throw new Error(`Invalid KATACODE_PORT_OFFSET: ${config.portOffset}`);
-    }
-    return {
-      offset: config.portOffset,
-      source: `KATACODE_PORT_OFFSET=${config.portOffset}`,
-    };
-  }
-
-  const seed = config.devInstance?.trim();
-  if (!seed) {
-    return { offset: 0, source: "default ports" };
-  }
-
-  if (/^\d+$/.test(seed)) {
-    return { offset: Number(seed), source: `numeric KATACODE_DEV_INSTANCE=${seed}` };
-  }
-
-  const offset = ((Hash.string(seed) >>> 0) % MAX_HASH_OFFSET) + 1;
-  return { offset, source: `hashed KATACODE_DEV_INSTANCE=${seed}` };
-}
 
 function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, never, Path.Path> {
   return Effect.gen(function* () {
@@ -232,16 +209,6 @@ export function createDevRunnerEnv({
 
     return output;
   });
-}
-
-function portPairForOffset(offset: number): {
-  readonly serverPort: number;
-  readonly webPort: number;
-} {
-  return {
-    serverPort: BASE_SERVER_PORT + offset,
-    webPort: BASE_WEB_PORT + offset,
-  };
 }
 
 export function checkPortAvailabilityOnHosts<R>(

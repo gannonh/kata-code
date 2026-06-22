@@ -1,5 +1,11 @@
 # OKF bundle log
 
+## 2026-06-21 (local Electron E2E — implementation verification)
+
+- Updated [Local Electron E2E testing foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md): implementation notes (Clerk ticket auth, hash navigation, model picker, toast dismissal, Vite-only dev launch), corrected starter-test scope (`@smoke` = app shell only), and build completion report with headed verification evidence for `@smoke`, `@settings`, and `@agent`.
+- Refreshed [specs roadmap](/specs/index.md) completed row with e2e-test-author skill link and verification note.
+- Added deferred-work entries for CI E2E gating and release-target validation from the E2E spec.
+
 ## 2026-06-21 (local Electron E2E testing foundation design)
 
 - Added [Local Electron E2E testing foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md): local-only Playwright Electron suite, dev/release launch targets, real Clerk/LLM services, isolation, seeding, deterministic agent helper, starter tests, reporting, and reusable harness boundaries.

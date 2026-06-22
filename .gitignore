@@ -19,6 +19,10 @@ release-local-smoke/
 .idea/
 apps/web/.playwright
 apps/web/playwright-report
+e2e/.auth/
+e2e/playwright-report/
+e2e/test-results/
+test-results/
 apps/web/src/components/__screenshots__
 .vitest-*
 __screenshots__/

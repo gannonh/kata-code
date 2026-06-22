@@ -3,8 +3,8 @@ type: Spec
 title: "Local Electron E2E testing foundation"
 description: "Design for a local-only Playwright E2E foundation for Kata Code desktop, dev, and release validation."
 tags: [testing, e2e, electron, playwright, desktop]
-timestamp: 2026-06-21T00:00:00Z
-status: Draft
+timestamp: 2026-06-21T18:00:00Z
+status: Implemented
 ---
 
 # Local Electron E2E testing foundation
@@ -61,7 +61,7 @@ References:
 2. **Dev and release launch targets:** On macOS with required local prerequisites, `vp run e2e -- --project desktop-dev --grep @smoke` launches the dev target and exits 0, and `KATACODE_E2E_RELEASE_APP=/path/to/Kata\ Code.app vp run e2e:release -- --grep @smoke` launches a release app and exits 0.
 3. **Run isolation:** Each E2E run writes its run id, `KATACODE_HOME`, server port, web port, artifact root, and seeded workspace root to an artifact manifest under `e2e/test-results/`; two sequential smoke runs use different app homes, ports, and workspace roots.
 4. **Real-service boundary:** Source review shows no Playwright `route().fulfill()`, HAR replay, service-worker mocks, MSW handlers, or fake backend/provider servers in the E2E suite. Native OS dialog control through Electron main-process hooks is allowed only for OS UI determinism and must be documented at the helper call site.
-5. **Clerk Google test-user auth:** With the documented Clerk and Google test-user environment variables present, `vp run e2e -- --project desktop-dev --grep @auth` logs into Clerk through the Google test user, exits 0, and stores auth state only under ignored `e2e/.auth/` or Playwright output directories.
+5. **Clerk Google test-user auth:** With the documented Clerk and Google test-user environment variables present, authenticated flows sign in through `@clerk/testing` `clerk.signIn({ page, emailAddress })` (ticket flow — not in-page Google OAuth UI). `@settings` and `@agent` reach signed-in Clerk state and exit 0. Auth state stays only under ignored `e2e/.auth/` or Playwright output directories.
 6. **Runner modes and workers:** The README documents headed and unattended/headless-style local runs, `KATACODE_E2E_WORKERS`, and the default `workers=1` for authenticated mutable tests. `vp run e2e:headed -- --grep @smoke` runs visibly, while `vp run e2e -- --grep @smoke` runs unattended in a macOS GUI session.
 7. **Feature filtering:** `vp run e2e -- --list --grep @smoke` and `vp run e2e -- --list --grep @settings` each show only matching tests.
 8. **Reporting artifacts:** A failing sample or real failure produces terminal list output plus artifacts under ignored paths: `e2e/playwright-report/`, `e2e/test-results/results.json`, a trace zip, and a screenshot. Video is produced when `KATACODE_E2E_VIDEO=1`.
@@ -78,7 +78,7 @@ References:
 | -------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Dev smoke      | `vp run e2e -- --project desktop-dev --grep @smoke`                                    | exit 0 with HTML/JSON report and run manifest       | Missing local secrets may block auth assertions only if the command fails with a clear prerequisite message |
 | Release smoke  | `KATACODE_E2E_RELEASE_APP=/path/to/Kata\ Code.app vp run e2e:release -- --grep @smoke` | exit 0 against supplied app                         | Missing release app path fails with a clear setup message                                                   |
-| Auth           | `vp run e2e -- --project desktop-dev --grep @auth`                                     | Google test user reaches signed-in Clerk state      | Missing Clerk/Google env fails with a clear setup message                                                   |
+| Auth           | `vp run e2e:headed -- --project desktop-dev --grep @settings` (includes Clerk sign-in) | Clerk ticket sign-in reaches signed-in state        | Missing Clerk/Google env fails with a clear setup message                                                   |
 | Settings       | `vp run e2e -- --project desktop-dev --grep @settings`                                 | theme change persists after reload or relaunch      | Missing auth env fails before UI assertions with a clear setup message                                      |
 | Agent          | `vp run e2e -- --project desktop-dev --grep @agent`                                    | real provider returns exact expected assistant text | Missing provider env fails with a clear setup message                                                       |
 | Static quality | `vp check` and `vp run typecheck`                                                      | both exit 0                                         | none                                                                                                        |
@@ -96,8 +96,13 @@ e2e/
     harness/                     # reusable Electron E2E foundation
       appLaunch.ts
       artifacts.ts
+      desktopArtifacts.ts
+      devStack.ts
+      devStackEnv.ts
       isolatedRun.ts
+      log.ts
       ports.ts
+      readiness.ts
       releaseTarget.ts
       seededWorkspace.ts
       testFixtures.ts
@@ -105,14 +110,15 @@ e2e/
       agentChat.ts
       auth.ts
       navigation.ts
+      pairing.ts
       settings.ts
+      shell.ts
       workspace.ts
     assertions/
-      agentAssertions.ts
       appAssertions.ts
     config/
-      env.ts
       tags.ts
+      timeouts.ts
   tests/
     smoke/app-launch.spec.ts
     settings/theme.spec.ts
@@ -171,7 +177,9 @@ Exact script names may be adjusted to match repo conventions, but E2E must remai
 
 ### Dev target
 
-The dev project should create an isolated run directory and launch the repo's development stack with env similar to the existing `scripts/dev-runner.ts` behavior:
+The dev project creates an isolated run directory and starts **Vite only** (`dev:web`). Playwright launches the **raw Electron binary** directly (not the macOS `.app` dev shim). Do not run `dev:desktop` inside E2E — it spawns a second Electron and causes EPIPE / duplicate backends.
+
+Isolated env mirrors `scripts/dev-runner.ts` behavior:
 
 - unique `KATACODE_HOME`
 - unique `KATACODE_PORT`
@@ -191,24 +199,23 @@ If no release target is supplied, `desktop-release` should fail loudly with a cl
 
 ## Authentication
 
-Authentication should use real Clerk and the configured Google test user.
+Authentication uses real Clerk and the configured Google test user email.
 
-Local-only env variables should be documented in `e2e/README.md`, for example:
+Local-only env variables are documented in [e2e/README](../../e2e/README.md), for example:
 
 - `CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
-- `CLERK_TESTING_TOKEN` or values required by `@clerk/testing`
 - `KATACODE_E2E_GOOGLE_EMAIL`
-- `KATACODE_E2E_GOOGLE_PASSWORD`, if UI login automation needs it
 - provider API keys required for deterministic agent tests
 
-The setup project should use Clerk's Playwright helpers where compatible with the Electron flow:
+The setup project uses Clerk's Playwright helpers:
 
 - `clerkSetup()` during setup.
 - `setupClerkTestingToken()` before navigation to Clerk surfaces.
-- Auth state saved under ignored `e2e/.auth/` or Playwright output directories.
 
-If Google OAuth cannot be fully automated without user interaction in the first build, the auth setup project and `@auth` test should fail with an explicit blocked message and document the missing credential, consent, or Clerk testing-token requirement. Passing auth requires the real signed-in Clerk state.
+**Electron auth path:** Do not drive Google OAuth in the Electron page. Desktop OAuth opens an external browser via `desktopBridge`; in-page email/password locators will not work. Use `@clerk/testing` **`clerk.signIn({ page, emailAddress })`** in `signInWithClerkGoogleTestUser`. Requires `CLERK_SECRET_KEY` and a Clerk user matching `KATACODE_E2E_GOOGLE_EMAIL`. Wait for the app shell (`command-palette-trigger`), then `clerk.loaded`, before signing in.
+
+Auth state is saved under ignored `e2e/.auth/` or Playwright output directories. Passing auth requires real signed-in Clerk state (`window.Clerk.user` and visible user avatar).
 
 ## Isolation and seeding
 
@@ -239,10 +246,10 @@ Seeded directories are real files on disk. Tests can open them through the appli
 
 ## Deterministic LLM-agent testing
 
-The deterministic agent helper should test a real provider while constraining the prompt and assertion:
+The deterministic agent helper tests a real provider while constraining the prompt and assertion:
 
 1. Create or open an isolated seeded workspace.
-2. Select the configured provider/model if the UI requires it.
+2. Call `selectComposerModel(page, turn.model)` before sending — the composer default model is not reliable for deterministic replies. Flow: click `[data-chat-provider-model-picker="true"]` → search → select matching `[role="option"]`. Dismiss provider update toasts when they block the picker (`dismissBlockingToasts`).
 3. Send a prompt like:
 
    ```text
@@ -262,10 +269,11 @@ Tags: `@smoke`
 
 Validates:
 
-- Electron launches.
-- The main window renders a known app surface.
-- The app reaches a signed-in Clerk state through the configured Google test user.
+- Electron launches past environment pairing.
+- The main window renders a known app shell surface (`command-palette-trigger`).
 - No fatal renderer or main-process errors are observed during launch.
+
+Auth is covered by `@settings` and `@agent`, not `@smoke`.
 
 ### `tests/settings/theme.spec.ts`
 
@@ -273,8 +281,9 @@ Tags: `@settings`
 
 Validates:
 
-- A signed-in app session can open Settings.
-- The test changes theme to dark mode through the UI.
+- Clerk ticket sign-in reaches a signed-in session.
+- Settings opens via sidebar navigation (Electron uses hash history — bare `page.goto("/settings/…")` is invalid).
+- The test changes theme to dark mode through the UI (`getByLabel("Theme preference")`).
 - The visible app theme updates.
 - The setting persists after reload or relaunch inside the same isolated app home.
 
@@ -302,8 +311,10 @@ Initial building blocks should include:
 - `openSettings()`
 - `setTheme(theme)`
 - `createOrOpenProject(path)`
+- `selectComposerModel(page, modelSlug)`
 - `sendAgentInstruction(text)`
 - `expectAssistantReply(text)`
+- `dismissBlockingToasts(page)`
 - `cleanupRunState()`
 
 These should be implemented as Playwright fixtures, page objects, or small composable functions where appropriate. Prefer user-visible locators by role, label, or text. Add stable `data-testid` attributes only when the UI has no durable accessible locator and the attribute represents a test contract worth maintaining.
@@ -439,6 +450,45 @@ KATACODE_E2E_RELEASE_APP=/path/to/Kata\ Code.app vp run e2e:release -- --grep @s
 - **Shared test account limits parallelism.** Default mutable authenticated tests to one worker until per-worker accounts exist.
 - **Release app path varies by machine.** Require explicit `KATACODE_E2E_RELEASE_APP` and fail loudly when absent.
 - **Reusable harness can over-abstract too early.** Keep generic harness utilities limited to Electron/process/isolation concerns. Put Kata product behavior in `flows/`.
+
+## Implementation notes
+
+Captured during headed verification on macOS with built desktop artifacts, Clerk test keys, Google test user, and OpenAI provider credentials.
+
+| Area           | Lesson                                                                                              |
+| -------------- | --------------------------------------------------------------------------------------------------- |
+| Dev launch     | Vite-only dev stack + raw Electron binary; pairing waits for app shell, not backend token polling   |
+| Auth           | `@clerk/testing` ticket sign-in — not in-page Google OAuth (opens external browser on desktop)      |
+| Navigation     | Hash history (`#/settings/general`); prefer in-app sidebar clicks (`openSettings` in `settings.ts`) |
+| Settings UI    | Wait on panel controls (`Theme preference`), not a Settings heading                                 |
+| Toasts         | Provider update toasts block clicks — call `dismissBlockingToasts` before theme/model selection     |
+| Agent          | Explicit `selectComposerModel` before `sendAgentInstruction`; set `KATACODE_E2E_AGENT_MODEL`        |
+| Exploration    | Prefer `vp run e2e:ui` / `PWDEBUG=1 vp run e2e:headed` over CDP attach for new flows                |
+| CDP (optional) | `KATACODE_DESKTOP_REMOTE_DEBUGGING_PORT` forwards `--remote-debugging-port` on Electron launch      |
+
+Authoring guidance lives in [.agents/skills/e2e-test-author/SKILL.md](../../.agents/skills/e2e-test-author/SKILL.md). Operational commands and env vars live in [e2e/README.md](../../e2e/README.md).
+
+## Build completion report
+
+- **Spec:** [Local Electron E2E testing foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md)
+- **Branch:** `feat/e2e-testing-foundation`
+- **Foundation commit:** `a95c4d183` (`feat: add local Electron E2E testing foundation`)
+- **Tasks completed:** Phases 1–5 (config/scripts, harness, flows, starter tests, e2e-test-author skill, OKF index update); headed flow hardening for auth, navigation, settings, and agent model selection
+- **Review gates:** TDD harness unit tests (8 passing); single-agent path; spec compliance self-review; code quality self-review
+- **Static verification:**
+  - `vp check` — pass (at foundation commit)
+  - `vp run typecheck` — pass
+  - `vp test run e2e/src/harness` — 8 passed
+  - `vp run e2e --list` — lists starter tests across smoke, settings, and agent surfaces
+- **Headed runtime verification (maintainer, macOS + credentials):**
+  - `vp run e2e:headed --project desktop-dev --grep @smoke` — pass
+  - `vp run e2e:headed --project desktop-dev --grep @settings` — pass (Clerk ticket sign-in + theme persistence)
+  - `vp run e2e:headed --project desktop-dev --grep @agent` — pass (with `KATACODE_E2E_AGENT_MODEL=gpt-5.4-mini` and `OPENAI_API_KEY`)
+- **Prerequisite-gate verification:**
+  - `vp run e2e:release --grep @smoke` — fails at `KATACODE_E2E_RELEASE_APP` with clear message when unset
+- **Approved deviations:** `vp run e2e` forwards Playwright args directly (omit the extra `--` shown in some spec examples); `@smoke` validates app shell only (auth covered by `@settings` / `@agent`)
+- **Known follow-up:** Run `desktop-release` smoke/settings against a built `.app` before nightly promotion; CI E2E gating remains out of scope
+- **Independent subagent review:** not used (single-agent build path)
 
 ## Explicitly deferred work
 
