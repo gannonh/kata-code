@@ -5,7 +5,7 @@
   "main": "index.ts",
   "scripts": {
     "dev": "expo start --clear",
-    "dev:client": "APP_VARIANT=development expo start --dev-client --clear",
+    "dev:client": "node ./scripts/clear-expo-image-cache.mjs && APP_VARIANT=development expo start --dev-client --clear",
     "start": "expo start",
     "start:dev": "APP_VARIANT=development expo start",
     "start:preview": "APP_VARIANT=preview expo start",
@@ -19,7 +19,7 @@
     "eas:android:preview:dev": "eas build --profile preview:dev -p android",
     "eas:android:prod": "eas build --profile production -p android",
     "ios": "EXPO_NO_GIT_STATUS=1 expo prebuild --clean --platform ios && expo run:ios",
-    "ios:dev": "APP_VARIANT=development EXPO_NO_GIT_STATUS=1 expo prebuild --clean --platform ios && expo run:ios",
+    "ios:dev": "APP_VARIANT=development EXPO_NO_GIT_STATUS=1 node ./scripts/clear-expo-image-cache.mjs && expo prebuild --clean --platform ios && expo run:ios",
     "ios:preview": "APP_VARIANT=preview EXPO_NO_GIT_STATUS=1 expo prebuild --clean --platform ios && expo run:ios",
     "ios:prod": "APP_VARIANT=production EXPO_NO_GIT_STATUS=1 expo prebuild --clean --platform ios && expo run:ios",
     "eas:ios:dev": "eas build --profile development -p ios",

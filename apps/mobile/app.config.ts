@@ -87,6 +87,7 @@ const config: ExpoConfig = {
       },
   ios: {
     icon: iosHomeScreenIcon,
+    deploymentTarget: "18.0",
     supportsTablet: true,
     bundleIdentifier: variant.iosBundleIdentifier,
     infoPlist: {
@@ -163,6 +164,7 @@ const config: ExpoConfig = {
         ],
       },
     ],
+    "./plugins/withIosWidgetTargetBuildSettings.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
   ],
   extra: {

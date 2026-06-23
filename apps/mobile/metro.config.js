@@ -25,6 +25,13 @@ const resolveShikiDependencyRoot = (packageName) => {
 config.watchFolders = [...new Set([...(config.watchFolders ?? []), workspaceRoot])];
 config.resolver = {
   ...config.resolver,
+  resolveRequest: (context, moduleName, platform) => {
+    if (moduleName === "@noble/hashes/crypto.js") {
+      return context.resolveRequest(context, "@noble/hashes/crypto", platform);
+    }
+
+    return context.resolveRequest(context, moduleName, platform);
+  },
   extraNodeModules: {
     // oxlint-disable-next-line unicorn/no-useless-fallback-in-spread
     ...(config.resolver?.extraNodeModules ?? {}),
