@@ -1,8 +1,11 @@
 import { spawnSync } from "node:child_process";
+import { platform } from "node:os";
 import { join } from "node:path";
 
+/* oxlint-disable kata-code/no-global-process-runtime -- E2E harness runs outside Effect runtime; platform gate for pkill. */
+
 export function cleanupStaleDesktopDevApps(repoRoot: string): void {
-  if (process.platform === "win32") {
+  if (platform() === "win32") {
     return;
   }
 
