@@ -1,7 +1,18 @@
 const { withXcodeProject } = require("expo/config-plugins");
 
 const WIDGET_TARGET_NAME = "ExpoWidgetsTarget";
-const APP_TARGET_INFO_PLIST = "KataCodeDev/Info.plist";
+
+function normalizeBuildSetting(value) {
+  return String(value ?? "").replaceAll('"', "");
+}
+
+function isMainAppInfoPlist(infoPlist, productBundleIdentifier) {
+  if (!infoPlist.endsWith("/Info.plist") || infoPlist.includes("Pods")) {
+    return false;
+  }
+
+  return productBundleIdentifier.length > 0 && !productBundleIdentifier.endsWith(".widgets");
+}
 
 module.exports = function withIosWidgetTargetBuildSettings(config) {
   return withXcodeProject(config, (nextConfig) => {
@@ -11,19 +22,23 @@ module.exports = function withIosWidgetTargetBuildSettings(config) {
 
     for (const configuration of Object.values(configurations)) {
       const buildSettings = configuration?.buildSettings;
-      if (!buildSettings?.INFOPLIST_FILE) {
+      if (!buildSettings) {
         continue;
       }
 
-      if (
-        buildSettings.INFOPLIST_FILE === APP_TARGET_INFO_PLIST ||
-        buildSettings.INFOPLIST_FILE === `${WIDGET_TARGET_NAME}/Info.plist`
-      ) {
+      const infoPlist = normalizeBuildSetting(buildSettings.INFOPLIST_FILE);
+      const productBundleIdentifier = normalizeBuildSetting(
+        buildSettings.PRODUCT_BUNDLE_IDENTIFIER,
+      );
+
+      if (infoPlist === `${WIDGET_TARGET_NAME}/Info.plist`) {
         buildSettings.MARKETING_VERSION = marketingVersion;
+        buildSettings.IPHONEOS_DEPLOYMENT_TARGET = deploymentTarget;
+        continue;
       }
 
-      if (buildSettings.INFOPLIST_FILE === `${WIDGET_TARGET_NAME}/Info.plist`) {
-        buildSettings.IPHONEOS_DEPLOYMENT_TARGET = deploymentTarget;
+      if (isMainAppInfoPlist(infoPlist, productBundleIdentifier)) {
+        buildSettings.MARKETING_VERSION = marketingVersion;
       }
     }
 
