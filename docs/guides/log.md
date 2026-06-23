@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-06-22 (mobile local dev iOS Simulator)
+
+- Added [Mobile local dev (iOS Simulator)](/guides/mobile-local-dev-ios-simulator.md) — dev client build, `katacode serve` + `project add`, manual loopback pairing, thread loop; linked from [guides index](/guides/index.md).
+
 ## 2026-06-22 (E2E adoption guide)
 
 - Added [E2E foundation adoption](/guides/e2e-foundation-adoption.md) for Kata Agents and Skillr App rollouts (architecture, learnings, per-repo checklists).

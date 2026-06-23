@@ -22,7 +22,7 @@ const VARIANT_CONFIG: Record<
   development: {
     appName: "Kata Code Dev",
     scheme: "katacode-dev",
-    iosIcon: "./assets/icon-composer-dev.icon",
+    iosIcon: "./assets/icon-composer-prod.icon",
     iosBundleIdentifier: "com.katacode.dev",
     androidPackage: "com.katacode.dev",
   },
@@ -55,6 +55,16 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 const easProjectId = repoEnv.KATACODE_EAS_PROJECT_ID?.trim() || undefined;
+
+const devClientPlugin: [string, Record<string, unknown>] = [
+  "expo-dev-client",
+  APP_VARIANT === "development"
+    ? {
+        toolsButton: false,
+        showMenuAtLaunch: false,
+      }
+    : {},
+];
 
 const config: ExpoConfig = {
   name: variant.appName,
@@ -106,6 +116,7 @@ const config: ExpoConfig = {
     favicon: "./assets/favicon.png",
   },
   plugins: [
+    devClientPlugin,
     "expo-router",
     "expo-font",
     "expo-secure-store",

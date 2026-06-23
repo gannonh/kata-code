@@ -9,8 +9,10 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopResourcesDir = join(repoRoot, "apps/desktop/resources");
 const sourcePng = join(desktopResourcesDir, "source.png");
 const sourceSvg = join(desktopResourcesDir, "icon.svg");
+const iconComposerMarkLayerSvg = join(desktopResourcesDir, "logo-mark-layer.svg");
 const prodDir = join(repoRoot, "assets/prod");
 const webPublicDir = join(repoRoot, "apps/web/public");
+const mobileAssetsDir = join(repoRoot, "apps/mobile/assets");
 
 function sips(...args) {
   execFileSync("sips", args, { stdio: "inherit" });
@@ -58,10 +60,43 @@ copyFileSync(
 );
 copyFileSync(sourceSvg, join(webPublicDir, "logo-mark.svg"));
 
+mkdirSync(mobileAssetsDir, { recursive: true });
+copyFileSync(join(prodDir, "black-ios-1024.png"), join(mobileAssetsDir, "icon.png"));
+copyFileSync(join(prodDir, "black-ios-1024.png"), join(mobileAssetsDir, "splash-icon.png"));
+sips(
+  "-z",
+  "1024",
+  "1024",
+  sourcePng,
+  "--out",
+  join(mobileAssetsDir, "android-icon-foreground.png"),
+);
+copyFileSync(
+  join(mobileAssetsDir, "android-icon-foreground.png"),
+  join(mobileAssetsDir, "android-icon-monochrome.png"),
+);
+sips(
+  "-z",
+  "1024",
+  "1024",
+  sourcePng,
+  "--out",
+  join(mobileAssetsDir, "android-icon-background.png"),
+);
+sips("-z", "180", "180", sourcePng, "--out", join(mobileAssetsDir, "favicon.png"));
+for (const iconBundle of ["icon-composer-prod.icon", "icon-composer-dev.icon"]) {
+  copyFileSync(
+    iconComposerMarkLayerSvg,
+    join(mobileAssetsDir, iconBundle, "Assets/logo-mark-layer.svg"),
+  );
+}
+
 execFileSync(join(desktopResourcesDir, "generate-icons.sh"), [sourcePng], {
   cwd: desktopResourcesDir,
   stdio: "inherit",
 });
 
 console.log("Generated production brand rasters from", sourcePng);
-console.log("Synced apps/web/public and refreshed apps/desktop/resources platform icons");
+console.log(
+  "Synced apps/web/public, apps/mobile/assets, and refreshed apps/desktop/resources platform icons",
+);

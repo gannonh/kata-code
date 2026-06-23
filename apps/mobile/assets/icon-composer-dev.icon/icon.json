@@ -6,26 +6,12 @@
     {
       "layers": [
         {
-          "hidden": false,
-          "image-name": "gpt-image-1.5-jd70szmrd03p36z4zv48ycsbax81egvr.png",
-          "name": "gpt-image-1.5-jd70szmrd03p36z4zv48ycsbax81egvr",
+          "image-name": "logo-mark-layer.svg",
+          "name": "Kata Code Dev",
           "position": {
-            "scale": 1.1,
+            "scale": 0.88,
             "translation-in-points": [0, 0]
           }
-        },
-        {
-          "image-name": "logo-mark.svg",
-          "name": "T3",
-          "position": {
-            "scale": 10,
-            "translation-in-points": [0, 0]
-          }
-        },
-        {
-          "hidden": true,
-          "image-name": "Texturelabs_Paper_381XL.jpg",
-          "name": "Texturelabs_Paper_381XL"
         }
       ],
       "shadow": {

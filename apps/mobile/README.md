@@ -34,6 +34,12 @@ Build and run the local iOS dev client:
 vp run ios:dev
 ```
 
+The development variant uses the Kata `icon-composer-prod.icon` bundle on iOS and synced `assets/icon.png` / `splash-icon.png` rasters (from `pnpm run generate:brand-rasters`). Re-run `vp run ios:dev` after icon or splash changes.
+
+The Expo dev tools floating button is disabled in development builds (`toolsButton: false`) so it does not cover the app settings control. Open the dev menu with **⌘D** in Simulator (or shake the device) when you need it.
+
+See [Mobile local dev (iOS Simulator)](../../docs/guides/mobile-local-dev-ios-simulator.md) for the full loopback pairing runbook.
+
 Build and run the local iOS preview app:
 
 ```bash

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { extractPairingUrlFromQrPayload, parsePairingUrl } from "./pairing";
+import { buildPairingUrl, extractPairingUrlFromQrPayload, parsePairingUrl } from "./pairing";
 
 describe("extractPairingUrlFromQrPayload", () => {
   it("trims raw pairing urls from qr payloads", () => {
@@ -20,6 +20,26 @@ describe("extractPairingUrlFromQrPayload", () => {
   it("rejects empty qr payloads", () => {
     expect(() => extractPairingUrlFromQrPayload("   ")).toThrow(
       "Scanned QR code did not contain a pairing URL.",
+    );
+  });
+});
+
+describe("buildPairingUrl", () => {
+  it("defaults loopback hosts to http for local katacode serve", () => {
+    expect(buildPairingUrl("localhost:3773", "PAIRCODE")).toBe(
+      "http://localhost:3773/#token=PAIRCODE",
+    );
+    expect(buildPairingUrl("127.0.0.1:3773", "PAIRCODE")).toBe(
+      "http://127.0.0.1:3773/#token=PAIRCODE",
+    );
+  });
+
+  it("keeps explicit remote schemes and uses https for non-loopback hosts", () => {
+    expect(buildPairingUrl("http://192.168.1.44:3773", "PAIRCODE")).toBe(
+      "http://192.168.1.44:3773/#token=PAIRCODE",
+    );
+    expect(buildPairingUrl("desktop.example.com:8443", "PAIRCODE")).toBe(
+      "https://desktop.example.com:8443/#token=PAIRCODE",
     );
   });
 });

@@ -10,10 +10,11 @@ Setup, user workflows, providers, cloud, and integrations.
 
 ## Getting started
 
-| Document                                                       | Summary                           |
-| -------------------------------------------------------------- | --------------------------------- |
-| [Quick start](/getting-started/quick-start.md)                 | Dev commands, ports, `KATACODE_*` |
-| [Codex prerequisites](/getting-started/codex-prerequisites.md) | Codex CLI setup                   |
+| Document                                                                      | Summary                                         |
+| ----------------------------------------------------------------------------- | ----------------------------------------------- |
+| [Quick start](/getting-started/quick-start.md)                                | Dev commands, ports, `KATACODE_*`               |
+| [Codex prerequisites](/getting-started/codex-prerequisites.md)                | Codex CLI setup                                 |
+| [Mobile local dev (iOS Simulator)](/guides/mobile-local-dev-ios-simulator.md) | Dev client build, loopback pairing, thread loop |
 
 ## Testing
 

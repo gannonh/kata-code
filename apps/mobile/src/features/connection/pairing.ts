@@ -4,6 +4,12 @@ const MOBILE_PAIRING_SCHEMES = ["katacode:", "katacode-dev:", "katacode-preview:
 
 const MOBILE_PAIRING_URL_PARAM = "pairingUrl";
 
+const LOOPBACK_HOST_PATTERN = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+
+function defaultSchemeForHost(host: string): "http://" | "https://" {
+  return LOOPBACK_HOST_PATTERN.test(host.trim()) ? "http://" : "https://";
+}
+
 export function buildPairingUrl(host: string, code: string): string {
   const h = host.trim();
   const c = code.trim();
@@ -11,7 +17,7 @@ export function buildPairingUrl(host: string, code: string): string {
   if (!c) return h;
 
   try {
-    const url = new URL(h.includes("://") ? h : `https://${h}`);
+    const url = new URL(h.includes("://") ? h : `${defaultSchemeForHost(h)}${h}`);
     url.hash = new URLSearchParams([["token", c]]).toString();
     return url.toString();
   } catch {
