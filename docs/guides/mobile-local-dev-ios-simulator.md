@@ -73,7 +73,7 @@ vp run dev:client    # Terminal B — Metro for the dev client (keep running)
 vp run ios:dev       # Terminal C — prebuild (first time) + compile + install
 ```
 
-First `ios:dev` runs `expo prebuild --clean --platform ios` and generates `ios/` (gitignored). Subsequent runs reuse the native project unless you pass a clean prebuild.
+First `ios:dev` clears stale Expo image cache (`node ./scripts/clear-expo-image-cache.mjs`), then runs `expo prebuild --clean --platform ios` with `APP_VARIANT=development EXPO_NO_GIT_STATUS=1` and generates `ios/` (gitignored). Subsequent runs reuse the native project unless you pass a clean prebuild.
 
 **Development variant notes**
 
@@ -122,15 +122,15 @@ node scripts/mobile-native-static-check.ts
 
 ## Troubleshooting
 
-| Symptom                                                               | Likely cause                                              | Fix                                                                                                    |
-| --------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `Unable to find a destination matching…` / `iOS X.Y is not installed` | Simulator runtime older than Xcode SDK                    | `xcodebuild -downloadPlatform iOS`; pick a simulator on the new runtime                                |
-| `actool` / `attempt to insert nil object` during compile              | Broken Icon Composer `.icon` asset references             | Run `pnpm run generate:brand-rasters`; ensure `icon-composer-*.icon/Assets/kanji.png` exists           |
-| Expo gear overlay blocks app settings                                 | Dev client tools button                                   | Rebuild after `toolsButton: false` in `app.config.ts`; use **⌘D** to open dev menu                     |
-| T3 blueprint splash before Kata splash                                | Stale `.expo/web/cache` splash image from pre-Kata assets | Delete the app from Simulator, then `cd apps/mobile && vp run ios:dev` (clears cache + clean prebuild) |
-| `Too many open files` during Xcode compile                            | Heavy parallel compile                                    | Retry build; close other Xcode/simulator processes; reduce `xcodebuild -jobs`                          |
-| Pairing fails / connection not ready                                  | Wrong host scheme, expired token, or no project           | Re-run `serve` for a fresh token; use loopback host; run `project add`                                 |
-| HTTPS errors to localhost                                             | Bare host defaulted to HTTPS on non-loopback patterns     | Use `127.0.0.1:3773` / `localhost:3773` or full `http://127.0.0.1:3773`                                |
+| Symptom                                                               | Likely cause                                              | Fix                                                                                                               |
+| --------------------------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `Unable to find a destination matching…` / `iOS X.Y is not installed` | Simulator runtime older than Xcode SDK                    | `xcodebuild -downloadPlatform iOS`; pick a simulator on the new runtime                                           |
+| `actool` / `attempt to insert nil object` during compile              | Broken Icon Composer `.icon` asset references             | Run `pnpm run generate:brand-rasters`; ensure `icon-composer-*.icon/Assets/kanji.png` exists                      |
+| Expo gear overlay blocks app settings                                 | Dev client tools button                                   | Rebuild after `toolsButton: false` in `app.config.ts`; use **⌘D** to open dev menu                                |
+| T3 blueprint splash before Kata splash                                | Stale `.expo/web/cache` splash image from pre-Kata assets | Delete the app from Simulator, then `cd apps/mobile && vp run ios:dev` (clears Expo image cache + clean prebuild) |
+| `Too many open files` during Xcode compile                            | Heavy parallel compile                                    | Retry build; close other Xcode/simulator processes; reduce `xcodebuild -jobs`                                     |
+| Pairing fails / connection not ready                                  | Wrong host scheme, expired token, or no project           | Re-run `serve` for a fresh token; use loopback host; run `project add`                                            |
+| HTTPS errors to localhost                                             | Bare host defaulted to HTTPS on non-loopback patterns     | Use `127.0.0.1:3773` / `localhost:3773` or full `http://127.0.0.1:3773`                                           |
 
 ## Related docs
 

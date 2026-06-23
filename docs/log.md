@@ -1,5 +1,12 @@
 # OKF bundle log
 
+## 2026-06-23 (mobile local dev slice — OKF update for PR #9)
+
+- Updated [build completion report](/specs/2026-06-22-mobile-local-dev-slice-build-report.md) with all post-build hardening: kanji brand rebrand (icon composer JSON, rasters, `generate-prod-brand-rasters.mjs`), splash screen gate (`splashScreen.ts`, `_layout.tsx`, cache-clearing script), iOS widget build-settings plugin (`withIosWidgetTargetBuildSettings.cjs`), Metro resolver fix, and PR #9 review fixes (5 comments from CodeRabbit, Greptile, Codex — all resolved).
+- Added `PRODUCT_ABBREVIATION = "KC"` to [branding.ts](../../packages/shared/src/branding.ts); replaced hardcoded "KC" in `AgentActivity.tsx`.
+- Added mobile local dev slice to [specs roadmap](/specs/index.md) Completed section.
+- Updated [mobile local dev guide](/guides/mobile-local-dev-ios-simulator.md) to document cache-clearing script and env var scoping in `ios:dev`.
+
 ## 2026-06-21 (local Electron E2E — implementation verification)
 
 - Updated [Local Electron E2E testing foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md): implementation notes (Clerk ticket auth, hash navigation, model picker, toast dismissal, Vite-only dev launch), corrected starter-test scope (`@smoke` = app shell only), and build completion report with headed verification evidence for `@smoke`, `@settings`, and `@agent`.

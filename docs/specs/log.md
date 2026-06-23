@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-06-23 (mobile local dev slice — build report updated with PR review fixes)
+
+- Updated [build completion report](/specs/2026-06-22-mobile-local-dev-slice-build-report.md) with all post-build commits: kanji brand rebrand, splash screen gate, iOS widget build-settings plugin, Metro resolver fix, and [PR #9](https://github.com/gannonh/kata-code/pull/9) review fixes (splash idempotency, dead code removal, widget target warning, `ios:dev` env scoping, `PRODUCT_ABBREVIATION` centralization).
+- Updated head SHA to `3f1056efc`; added PR #9 link.
+- Added [mobile local dev slice](/specs/2026-06-22-mobile-local-dev-slice-design.md) to [specs roadmap](/specs/index.md) Completed section.
+
 ## 2026-06-21 (local Electron E2E — implementation verification)
 
 - Updated [E2E foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md) with implementation notes, Clerk ticket auth path, headed verification evidence, and build completion report refresh.

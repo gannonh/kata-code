@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-06-23 (mobile local dev guide — cache clearing and env scoping)
+
+- Updated [Mobile local dev (iOS Simulator)](/guides/mobile-local-dev-ios-simulator.md) to document the cache-clearing script (`clear-expo-image-cache.mjs`) and correct `APP_VARIANT`/`EXPO_NO_GIT_STATUS` env var scoping in the `ios:dev` command (PR #9 review fix).
+
 ## 2026-06-22 (mobile local dev iOS Simulator)
 
 - Added [Mobile local dev (iOS Simulator)](/guides/mobile-local-dev-ios-simulator.md) — dev client build, `katacode serve` + `project add`, manual loopback pairing, thread loop; linked from [guides index](/guides/index.md).
