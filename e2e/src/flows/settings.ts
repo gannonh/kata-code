@@ -17,6 +17,14 @@ export async function openSettings(page: Page): Promise<void> {
     return;
   }
 
+  // On the /settings route the thread-sidebar footer "Settings" menu-button is not
+  // rendered (SettingsSidebarNav replaces it), so the click below would never resolve.
+  // After a reload the Theme control is still hydrating, so wait for it directly.
+  if (page.url().includes("/settings")) {
+    await themePreference.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.authMs });
+    return;
+  }
+
   await page.locator('[data-sidebar="menu-button"]', { hasText: "Settings" }).click();
   await dismissBlockingToasts(page);
   await themePreference.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.authMs });
