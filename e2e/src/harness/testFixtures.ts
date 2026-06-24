@@ -3,6 +3,7 @@ import { test as base, expect, type ElectronApplication, type Page } from "@play
 import { waitForAppEnvironmentReady } from "../flows/pairing.ts";
 import { expectSignedInClerkState, signInWithClerkGoogleTestUser } from "../flows/auth.ts";
 import { launchApp, type LaunchedApp } from "./appLaunch.ts";
+import { logHarnessPhase } from "./log.ts";
 import { writeRunManifest } from "./artifacts.ts";
 import { assertMacOsHost } from "./env.ts";
 import {
@@ -65,12 +66,16 @@ export const test = base.extend<E2EFixtures>({
     await use(launchedApp.electronApp);
   },
   appWindow: async ({ launchedApp, runContext }, use) => {
+    logHarnessPhase("Waiting for app environment (server port + app shell)...");
     await waitForAppEnvironmentReady(launchedApp.window, runContext);
+    logHarnessPhase("App environment is ready.");
     await use(launchedApp.window);
   },
   authenticatedAppWindow: async ({ appWindow }, use) => {
+    logHarnessPhase("Signing in with Clerk Google test user...");
     await signInWithClerkGoogleTestUser(appWindow);
     await expectSignedInClerkState(appWindow);
+    logHarnessPhase("Authenticated app window is ready.");
     await use(appWindow);
   },
 });
