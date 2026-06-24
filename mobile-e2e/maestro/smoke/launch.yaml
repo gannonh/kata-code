@@ -1,0 +1,12 @@
+# @smoke — launch the dev client and confirm the home screen renders without a redbox.
+#
+# Locators are verified with `maestro studio` (see ../../README.md). On a fresh
+# install with no saved environments the home screen shows the "Add environment"
+# empty-state CTA; update this anchor if that copy changes.
+appId: com.katacode.dev
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: false
+- assertVisible: "Add environment"

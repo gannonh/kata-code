@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { requiredCredentialGroupsForTags } from "./prereqs.ts";
+import { requiredCredentialGroupsForTags, runNeedsServer } from "./prereqs.ts";
 
 describe("requiredCredentialGroupsForTags", () => {
   it("requires no credentials for smoke or bearer pairing", () => {
@@ -28,5 +28,20 @@ describe("requiredCredentialGroupsForTags", () => {
   it("treats an empty tag filter as running everything (all creds required)", () => {
     // No --include-tags means every flow runs, so every credential group is needed.
     expect(requiredCredentialGroupsForTags([]).sort()).toEqual(["agent", "clerk", "google"]);
+  });
+});
+
+describe("runNeedsServer", () => {
+  it("skips the server for a smoke-only run", () => {
+    // @smoke only launches the app; standing up a real server would add failure
+    // surface for nothing.
+    expect(runNeedsServer(["@smoke"])).toBe(false);
+  });
+
+  it("requires the server for pairing, auth, agent, and unfiltered runs", () => {
+    expect(runNeedsServer(["@pairing"])).toBe(true);
+    expect(runNeedsServer(["@agent"])).toBe(true);
+    expect(runNeedsServer(["@smoke", "@pairing"])).toBe(true);
+    expect(runNeedsServer([])).toBe(true);
   });
 });

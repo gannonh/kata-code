@@ -32,6 +32,17 @@ export function requiredCredentialGroupsForTags(tags: readonly string[]): Creden
   return [...groups];
 }
 
+/**
+ * Whether a run needs the loopback server + project. Only @smoke (app launch)
+ * runs without one; any other tag, or an unfiltered run, pairs to a server.
+ */
+export function runNeedsServer(tags: readonly string[]): boolean {
+  if (tags.length === 0) {
+    return true;
+  }
+  return tags.some((tag) => tag !== MOBILE_E2E_TAGS.smoke);
+}
+
 function collectMissingCredentials(groups: readonly CredentialGroup[]): string[] {
   const missing: string[] = [];
   for (const group of groups) {

@@ -1,0 +1,28 @@
+# @pairing — bearer loopback pairing.
+#
+# The TS harness starts `katacode serve` + `project add` and injects the printed
+# host and one-time token as KC_HOST / KC_TOKEN (see src/flows/pairing.ts).
+#
+# Anchors below come from connections/new.tsx (Host placeholder "192.168.1.100:8080",
+# Pairing-code placeholder "abc-123-xyz", "Add environment" button). Confirm and
+# refine with `maestro studio`. The ready-state assertion needs a stable
+# accessibility id on ConnectionStatusDot (a deliberate test contract) — see the
+# top risk in the design spec.
+appId: com.katacode.dev
+tags:
+  - pairing
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add environment"
+- assertVisible: "Add Environment"
+- tapOn: "192.168.1.100:8080"
+- inputText: ${KC_HOST}
+- tapOn: "abc-123-xyz"
+- inputText: ${KC_TOKEN}
+- tapOn: "Add environment"
+# TODO(studio): assert the saved environment reaches "ready" (green ConnectionStatusDot).
+# Add e.g. accessibilityLabel="connection-status-ready" to ConnectionStatusDot, then:
+#   - assertVisible:
+#       id: "connection-status-ready"
+- assertVisible: ${KC_HOST}

@@ -13,6 +13,8 @@ export interface MaestroRunOptions {
   readonly env?: Record<string, string>;
   readonly format?: "junit" | "noop";
   readonly outputPath?: string;
+  /** Directory for Maestro screenshots / view hierarchy on failure. */
+  readonly debugOutputPath?: string;
 }
 
 /** Build the argv for `maestro <args>`. Pure so the mapping is unit-tested. */
@@ -27,6 +29,9 @@ export function buildMaestroArgs(options: MaestroRunOptions): string[] {
   }
   if (options.outputPath) {
     args.push("--output", options.outputPath);
+  }
+  if (options.debugOutputPath) {
+    args.push("--debug-output", options.debugOutputPath);
   }
   for (const [key, value] of Object.entries(options.env ?? {})) {
     args.push("-e", `${key}=${value}`);

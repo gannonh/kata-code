@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 
 import { formatMissingPrerequisiteError, readConfiguredSimulator } from "./env.ts";
 import { type MobileE2ERunContext } from "./isolatedRun.ts";
@@ -115,6 +115,38 @@ export async function assertDevClientInstalled(context: MobileE2ERunContext): Pr
       `${formatMissingPrerequisiteError("installed dev client", [DEV_CLIENT_BUNDLE_ID])} Build it once with: vp run e2e:mobile:build`,
     );
   }
+}
+
+export interface ScreenRecording {
+  readonly process: ChildProcess;
+  readonly outputPath: string;
+}
+
+/** Start recording the simulator screen via `simctl io recordVideo` (KATACODE_E2E_VIDEO=1). */
+export function startScreenRecording(udid: string, outputPath: string): ScreenRecording {
+  logHarnessPhase(`recording simulator video to ${outputPath}`);
+  const child = spawn(
+    "xcrun",
+    ["simctl", "io", udid, "recordVideo", "--codec=h264", "--force", outputPath],
+    { stdio: "ignore" },
+  );
+  return { process: child, outputPath };
+}
+
+/** Stop a screen recording, flushing the file via SIGINT (recordVideo writes on interrupt). */
+export async function stopScreenRecording(recording: ScreenRecording): Promise<void> {
+  if (recording.process.exitCode !== null) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    recording.process.once("exit", () => resolve());
+    recording.process.kill("SIGINT");
+    setTimeout(() => {
+      if (recording.process.exitCode === null) {
+        recording.process.kill("SIGKILL");
+      }
+    }, 5_000).unref();
+  });
 }
 
 /** Launch Maestro Studio against the booted simulator for interactive authoring. */

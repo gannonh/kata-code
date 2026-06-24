@@ -30,19 +30,23 @@ describe("buildMaestroArgs", () => {
     expect(joined).toContain("-e TOKEN=abc");
   });
 
-  it("includes report format and output path only when provided", () => {
+  it("includes report format, output path, and debug output only when provided", () => {
     const withReport = buildMaestroArgs({
       flowPath: "f.yaml",
       format: "junit",
       outputPath: "out/report.xml",
+      debugOutputPath: "out/debug",
     });
     expect(withReport).toContain("--format");
     expect(withReport).toContain("junit");
     expect(withReport).toContain("--output");
     expect(withReport).toContain("out/report.xml");
+    expect(withReport).toContain("--debug-output");
+    expect(withReport).toContain("out/debug");
 
     const withoutReport = buildMaestroArgs({ flowPath: "f.yaml" });
     expect(withoutReport).not.toContain("--format");
     expect(withoutReport).not.toContain("--output");
+    expect(withoutReport).not.toContain("--debug-output");
   });
 });
