@@ -47,7 +47,8 @@ vp run e2e:mobile:studio                         # boot sim + ensure app, then l
 ```
 
 `maestro studio` is the recommended way to discover stable accessibility ids and draft flows against
-the live app.
+the live app. When authoring new flows, follow the
+[mobile-e2e-test-author skill](../.agents/skills/mobile-e2e-test-author/SKILL.md).
 
 ## Tags
 

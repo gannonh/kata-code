@@ -18,11 +18,13 @@ Setup, user workflows, providers, cloud, and integrations.
 
 ## Testing
 
-| Document                                                                    | Summary                                                                    |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| [e2e/README](../../e2e/README.md)                                           | Local Playwright Electron E2E commands, env vars, and artifact paths       |
-| [E2E foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md) | Spec, acceptance criteria, implementation notes, and verification evidence |
-| [E2E foundation adoption](/guides/e2e-foundation-adoption.md)               | Rollout guide for Kata Agents, Skillr App, and future Electron repos       |
+| Document                                                                                  | Summary                                                                    |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| [e2e/README](../../e2e/README.md)                                                         | Local Playwright Electron E2E commands, env vars, and artifact paths       |
+| [E2E foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md)               | Spec, acceptance criteria, implementation notes, and verification evidence |
+| [E2E foundation adoption](/guides/e2e-foundation-adoption.md)                             | Rollout guide for Kata Agents, Skillr App, and future Electron repos       |
+| [mobile-e2e/README](../../mobile-e2e/README.md)                                           | Local Maestro iOS-Simulator E2E commands, env vars, tags, and Studio       |
+| [Mobile E2E foundation design](/specs/2026-06-24-mobile-e2e-testing-foundation-design.md) | Spec, acceptance criteria, and phases for the mobile E2E suite             |
 
 ## User
 
