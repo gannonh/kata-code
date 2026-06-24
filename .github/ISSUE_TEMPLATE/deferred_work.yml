@@ -1,0 +1,52 @@
+name: Deferred Work
+description: Track work deferred during planning, implementation, verification, or testing
+labels: ["deferred"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Capture work that was identified but intentionally postponed. File this immediately when the deferral is decided so it is not lost.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What work is being deferred?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      description: When was this deferred?
+      options:
+        - Planning
+        - Implementation
+        - Verification
+        - Testing
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: Reason for Deferral
+      description: Why was this postponed rather than done now? (e.g. out of scope, blocked, time-boxed)
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and Links
+      description: Related PR, branch, spec, ADR, files, or commits. Include enough detail to resume cold.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done When
+      description: What does completing this deferred work look like?

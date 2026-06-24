@@ -36,9 +36,14 @@ Prove each acceptance criterion for user-facing features before marking work com
 ## Git Workflow
 
 - **Commit proactively:** After each meaningful, complete change, commit immediately. Do not ask whether to commit—just commit and keep moving.
+- **Conventional Commits:** Format every commit as `<type>(<scope>): <summary>` (e.g. `feat(scope): summary`). Commit after every logical unit of work.
 - **Atomic commits:** One logical change per commit. Stage only related files; never batch unrelated work into one commit.
 - **Clean worktree:** End each scoped task with `git status` clean. Commit or revert before starting unrelated work.
 - **Never commit secrets:** Exclude `.env`, credentials, and other local-only files.
+
+## Deferred Work
+
+- **File deferrals as issues:** Any work deferred during planning, implementation, verification, or testing must be filed as a GitHub issue immediately using the [`deferred_work.yml`](./.github/ISSUE_TEMPLATE/deferred_work.yml) template. Do not leave deferrals only in code comments, chat, or memory.
 
 ## Quick Start
 
