@@ -2,6 +2,9 @@ import "../config/loadEnv.ts";
 
 import { join } from "node:path";
 
+import { MOBILE_E2E_TAGS } from "../config/tags.ts";
+import { buildAgentMaestroEnv } from "../flows/agent.ts";
+import { buildAuthMaestroEnv } from "../flows/auth.ts";
 import { buildPairingMaestroEnv } from "../flows/pairing.ts";
 import {
   type RunManifest,
@@ -50,8 +53,19 @@ function buildManifest(context: MobileE2ERunContext): RunManifest {
   };
 }
 
-function buildMaestroEnv(pairing: ServePairingInfo | null): Record<string, string> {
-  return pairing ? buildPairingMaestroEnv(pairing) : {};
+function buildMaestroEnv(
+  context: MobileE2ERunContext,
+  pairing: ServePairingInfo | null,
+): Record<string, string> {
+  const wants = (tag: string): boolean => context.tags.length === 0 || context.tags.includes(tag);
+  const env: Record<string, string> = pairing ? buildPairingMaestroEnv(pairing) : {};
+  if (wants(MOBILE_E2E_TAGS.auth)) {
+    Object.assign(env, buildAuthMaestroEnv());
+  }
+  if (wants(MOBILE_E2E_TAGS.agent)) {
+    Object.assign(env, buildAgentMaestroEnv(context.runId));
+  }
+  return env;
 }
 
 function printHelp(): void {
@@ -120,7 +134,7 @@ async function runFlows(options: CliOptions): Promise<number> {
       {
         flowPath: maestroFlowDir(),
         includeTags: options.tags,
-        env: buildMaestroEnv(pairing),
+        env: buildMaestroEnv(context, pairing),
         format: "junit",
         outputPath: join(context.artifactRoot, "report.xml"),
         debugOutputPath: join(resolveMaestroOutputRoot(), context.runId),

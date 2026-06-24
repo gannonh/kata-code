@@ -1,0 +1,26 @@
+# @auth — Kata Code Connect (Clerk) sign-in.
+#
+# Mobile sign-in is a NATIVE auth modal: CloudWaitlistEnrollment's "Sign in" calls
+# NativeClerk.presentAuth({ mode: "signInOrUp" }). Maestro drives the app's
+# accessibility tree and may NOT be able to drive a native system auth modal — this
+# is the top risk in the design spec. Resolve drivability with `maestro studio`; the
+# green runtime pass is a maintainer responsibility (deferred). The TS harness gates
+# on Clerk + Google creds and injects KC_GOOGLE_EMAIL.
+appId: com.katacode.dev
+tags:
+  - auth
+---
+- launchApp:
+    clearState: true
+# TODO(studio): confirm the settings entry point from home (may be an icon, not text).
+- tapOn: "Settings"
+# Opens the native Clerk auth modal via presentAuth.
+- tapOn: "Sign in"
+# TODO(studio): the steps below run INSIDE the native auth modal and likely require
+# native-modal automation Maestro may not support. Discover whether the modal exposes
+# drivable elements (or a Clerk testing-token / session-injection bypass). If not,
+# document @auth as non-automatable on the Simulator and keep bearer pairing.
+#   - inputText: ${KC_GOOGLE_EMAIL}
+#   - tapOn: "Continue"
+# TODO(studio): assert a signed-in Connect session once reachable.
+- assertVisible: "Sign in"
