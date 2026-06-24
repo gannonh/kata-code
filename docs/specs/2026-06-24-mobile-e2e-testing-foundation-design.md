@@ -15,7 +15,7 @@ Draft
 
 ## Goal
 
-Create a local-only end-to-end testing foundation for the Kata Code mobile app that automates the manual loop proven in the [mobile local dev slice](/specs/2026-06-22-mobile-local-dev-slice-design.md): launch the dev client on the iOS Simulator, pair to a local `katacode` server over loopback, and exercise a real agent thread. The foundation is the mobile analog of the [Electron E2E testing foundation](/specs/2026-06-21-e2e-testing-foundation-design.md): a reusable harness separated from Kata-specific flows, real services with no mocks, local-only with no CI, fail-loud prerequisite gates, 3-4 tagged starter flows, and an authoring skill. V1 covers both the bearer loopback path and Kata Code Connect (Clerk) sign-in.
+Create a local-only end-to-end testing foundation for the Kata Code mobile app that automates the manual loop proven in the [mobile local dev slice](/specs/2026-06-22-mobile-local-dev-slice-design.md): launch the dev client on the iOS Simulator, pair to a local `katacode` server over loopback, and exercise a real agent thread. The foundation is the mobile analog of the [Electron E2E testing foundation](/specs/2026-06-21-e2e-testing-foundation-design.md): a reusable harness separated from Kata-specific flows, real services with no mocks, local-only with no CI, fail-loud prerequisite gates, 4 tagged starter flows, and an authoring skill. V1 covers both the bearer loopback path and Kata Code Connect (Clerk) sign-in.
 
 ## Source of truth
 
