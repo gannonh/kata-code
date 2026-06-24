@@ -13,7 +13,7 @@ decisions change.
 | ------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------- |
 | Fork remote (`origin`)                     | Done                   | `https://github.com/gannonh/kata-code.git`                                            |
 | Upstream remote (`upstream`)               | Done                   | `https://github.com/pingdotgg/t3code.git`                                             |
-| Baseline sync point                        | `708d5383`             | Last merged upstream SHA — update after each sync                                     |
+| Upstream scan baseline                     | `708d5383`             | Starting tip for the first vendor-pull scan                                           |
 | Product rename (`@t3tools/*` → fork scope) | **Done**               | Phase 1.1                                                                             |
 | Env prefix rename (`KATACODE_*`)           | **Done**               | `~/.katacode`, protocols, storage keys                                                |
 | User-facing docs rebrand                   | **Done**               | README, CONTRIBUTING, quick-start                                                     |
@@ -21,14 +21,13 @@ decisions change.
 | CI / release split from upstream           | **Done** (desktop/web) | [PR #2](https://github.com/gannonh/kata-code/pull/2); relay/mobile EAS still disabled |
 | `FORK.md` divergence log                   | Started                | This file                                                                             |
 
-Record the last successful upstream merge here:
+Upstream sync state is tracked here. Under selective vendor-pull ([ADR 0004](docs/adrs/0004-selective-vendor-pull.md)) the baseline is the last **scanned** upstream tip, not a merge point. Advance it after each scan.
 
 ```text
-Last upstream sync: (none yet)
-Upstream SHA:       708d5383
-Fork SHA after merge:
-Conflicts resolved in:
-Verification:       vp check && vp run typecheck
+Last upstream scan: (none yet)
+Upstream tip SHA:   708d5383
+Ported:             (none yet) — <upstream-sha> → <fork-sha> (<description>)
+Watching:           [codex] Effect service migration (205+ commits) — port the net result once upstream stabilizes it
 ```
 
 ---
@@ -36,8 +35,8 @@ Verification:       vp check && vp run typecheck
 ## Goals
 
 1. **Ship an independent product** (Kata Code) without waiting on upstream contribution policy.
-2. **Keep pulling upstream fixes and features** via merge-based sync, not ad-hoc cherry-picks.
-3. **Minimize merge pain** by isolating fork-only code and completing branding renames early.
+2. **Absorb upstream fixes and features selectively** via vendor-pull ([ADR 0004](docs/adrs/0004-selective-vendor-pull.md)), porting each change as a fork-original commit.
+3. **Minimize porting cost** by isolating fork-only code and completing branding renames early.
 4. **Preserve MIT attribution** for upstream code and vendored dependencies.
 
 ## Non-goals (for now)
@@ -266,95 +265,49 @@ in this repo.
 
 ## Phase 3 — Upstream sync runbook
 
-**Policy:** [ADR 0003 — Episodic upstream sync](docs/adrs/0003-episodic-upstream-sync.md). **Operator guide:** [docs/guides/upstream-sync.md](docs/guides/upstream-sync.md).
+**Policy:** [ADR 0004 — Selective vendor-pull](docs/adrs/0004-selective-vendor-pull.md) (supersedes [ADR 0003](docs/adrs/0003-episodic-upstream-sync.md)). **Runbook:** [docs/guides/upstream-sync.md](docs/guides/upstream-sync.md).
 
-**Default strategy: merge `upstream/main` (or a pinned upstream SHA) on a sync branch.** Use cherry-pick only for individual hotfixes when a full merge is not ready. Kata Code does **not** target upstream parity.
+**Strategy: selective vendor-pull.** Scan upstream, then port individual changes or small clusters as fork-original commits with branding already applied. No bulk merge, no merge-commit ancestry, no conflict-resolution cascade. Coordinated upstream refactors (e.g. the `[codex]` Effect migration) are **watched** and ported once after they stabilize. Kata Code does **not** target upstream parity.
 
-### When to sync
+### When to port
 
-- When there is a **concrete reason** (security, reliability, provider/protocol change, or a bounded upstream feature set worth absorbing), or
-- Before starting large fork features that touch `contracts`, `server`, or `web` (optional prep sync), or
-- When you need a specific upstream fix (prefer cherry-pick if a full merge is not ready).
+- When there is a **concrete reason**: a security/reliability fix, a provider or protocol change, or a bounded feature worth absorbing.
+- When you need a specific upstream fix (every port is already targeted — this is the normal flow, not an exception).
+- Optionally before large fork work that would make later ports harder.
 
-Do **not** sync on a fixed weekly schedule solely because upstream is active.
+Do **not** port on a fixed weekly schedule solely because upstream is active.
 
-### Step-by-step
+### Process
+
+The full runbook lives in [docs/guides/upstream-sync.md](docs/guides/upstream-sync.md): scan → analyze/recommend (effort, risk, Port/Skip/Defer/Watch) → human gate → port as a fork-original commit → record. Per port:
 
 ```bash
-cd /Volumes/EVO/dev/katacode
-
-# 1. Update local upstream refs
 git fetch upstream --tags
-
-# 2. Create sync branch from your main
-git checkout main
-git pull origin main
-git checkout -b upstream-sync-$(date +%Y-%m-%d)
-
-# 3. Merge upstream (prefer merge over rebase for hard forks)
-git merge upstream/main
-# resolve conflicts — see "High-conflict zones" below
-
-# 4. Sync vendored reference repos if deps changed
-vp run sync:repos
-# or: node scripts/sync-reference-repos.ts
-
-# 5. Reinstall and verify
-vp i
-vp run --filter @kata-sh/code-desktop ensure:electron
-vp check
-vp run typecheck
-vp test
-
-# 6. Merge sync branch to main
-git checkout main
-git merge upstream-sync-$(date +%Y-%m-%d)
-git push origin main
-
-# 7. Update this file's "Last upstream sync" block
+git checkout -b port-upstream/<description>
+git show <upstream-sha>            # or: git diff <base>..<tip> for a cluster
+# apply the change with fork branding already in place
+node .agents/skills/upstream-sync/scripts/rebrand-fork.ts --check
+vp check && vp run typecheck
 ```
 
-### High-conflict zones
+Reference upstream SHAs in the commit body. If a port bumps a dep, sync the vendored subtree: `vp run sync:repos --repo <id>`. Records (ported, skipped, watched) go in the Divergence log below; the last-scanned tip advances the block at the top of this file.
 
-Expect conflicts where both fork and upstream edit the same surfaces:
+### High-divergence zones
 
-| Zone                         | Why                                       |
-| ---------------------------- | ----------------------------------------- |
-| `packages/contracts/`        | Protocol/schema changes ripple everywhere |
-| `packages/shared/`           | Shared runtime utilities                  |
-| `apps/server/`               | Provider wiring, CLI, session lifecycle   |
-| `apps/web/`                  | UI state, WebSocket client, session UX    |
-| `apps/desktop/`              | Electron main, backend manager, branding  |
-| `scripts/dev-runner.ts`      | Dev env and ports                         |
-| `pnpm-lock.yaml`             | Always regenerate with `vp i` after merge |
-| `package.json` (root + apps) | Scripts, filters, version bumps           |
+Where a ported upstream change is most likely to intersect fork-modified files (run `conflict-zones.ts` for per-commit intersection):
 
-**Low-conflict strategy:** keep fork-only features in new modules/packages where
-possible instead of editing upstream core files.
+| Zone                         | Why                                           |
+| ---------------------------- | --------------------------------------------- |
+| `packages/contracts/`        | Protocol/schema changes ripple everywhere     |
+| `packages/shared/`           | Shared runtime utilities                      |
+| `apps/server/`               | Provider wiring, CLI, session lifecycle       |
+| `apps/web/`                  | UI state, WebSocket client, session UX        |
+| `apps/desktop/`              | Electron main, backend manager, branding      |
+| `scripts/dev-runner.ts`      | Dev env and ports                             |
+| `pnpm-lock.yaml`             | Regenerate with `vp i` when a port bumps deps |
+| `package.json` (root + apps) | Scripts, filters, version bumps               |
 
-### Selective cherry-pick (exception path)
-
-```bash
-git fetch upstream
-git cherry-pick <upstream-commit-sha>
-```
-
-Use when:
-
-- You need one bugfix between scheduled merges.
-- A merge is blocked but a security/reliability fix is urgent.
-
-Always record cherry-picked SHAs in the divergence log below.
-
-### Rejecting upstream changes
-
-If you intentionally skip an upstream feature, log it:
-
-```markdown
-### Rejected upstream
-
-- `<sha>` — <reason> — <date>
-```
+**Lower-intersection strategy:** keep fork-only features in new modules/packages where possible instead of editing upstream core files.
 
 ---
 
@@ -395,21 +348,20 @@ Do not edit `.repos/` except via sync tooling (see `AGENTS.md`).
 - [ ] No accidental upstream secret/config commits
 - [ ] `FORK.md` updated if sync policy or divergence changed
 
-### Post-upstream-sync checklist
+### Post-port checklist (per vendor-pull PR)
 
-- [ ] Conflict resolutions reviewed (not just accepted ours/theirs blindly)
-- [ ] Branding rename intact (no `@t3tools` regression)
-- [ ] `pnpm run dev` and `pnpm run dev:desktop` smoke-tested
-- [ ] Desktop `ensure:electron` still passes on CI
-- [ ] Last sync SHA recorded in this file
+- [ ] `rebrand-fork.ts --check` passes (no `@t3tools` / `T3CODE_` regression)
+- [ ] `vp check` and `vp run typecheck` pass
+- [ ] Touched packages tested; `pnpm run dev` / `dev:desktop` smoke if session UX or providers changed
+- [ ] Upstream SHA(s) referenced in the commit body; port recorded in the Divergence log below
 
 ### Agent instructions
 
 Coding agents working in this repo should:
 
-1. Read `FORK.md` before large refactors or upstream merges.
+1. Read `FORK.md` before large refactors or upstream ports.
 2. Read [`docs/index.md`](docs/index.md) (OKF bundle) for specs, ADRs, and architecture context.
-3. Prefer merge-based upstream sync over cherry-pick unless asked otherwise.
+3. Use selective vendor-pull ([ADR 0004](docs/adrs/0004-selective-vendor-pull.md)) for upstream changes, not bulk merge or ad-hoc cherry-pick.
 4. Never push to `upstream` remote.
 5. Keep MIT notices in files with substantial upstream-derived code.
 
@@ -446,13 +398,19 @@ Until relay/mobile hosted infra splits, these wire identifiers stay upstream-sha
 
 The packaged desktop app still registers an internal `t3://` scheme for bundled static assets (`apps/desktop/src/electron/ElectronProtocol.ts`). User-facing deep links use `katacode://` / `katacode-dev://`. Renaming the internal scheme is deferred to Phase 2 to avoid breaking bundled asset resolution.
 
+### Watched upstream clusters
+
+Coordinated upstream refactors tracked for a single post-stabilization port. Do not port intermediate states.
+
+- **`[codex]` Effect service migration** — 205+ coupled upstream commits restructuring error handling. Stabilization trigger: upstream stops landing `[codex]`-tagged commits for a release cycle, then port the net API surface as one fork migration. Surfaced by `classify-upstream.ts`.
+
 ### Fork-only features
 
 _(none yet)_
 
-### Cherry-picks (outside full merges)
+### Ported upstream changes (vendor-pull)
 
-_(none yet)_
+Individual ports under [ADR 0004](docs/adrs/0004-selective-vendor-pull.md). Record `upstream-sha → fork-sha` with a one-line description. _(none yet)_
 
 ---
 

@@ -1,5 +1,12 @@
 # Specs log
 
+## 2026-06-24 (upstream sync strategy reconciliation)
+
+- Retired the ADR 0003 bulk-merge plan: marked [closure spec](/specs/2026-06-20-upstream-sync-closure.md) and [resume handoff](/specs/2026-06-20-upstream-sync-handoff.md) **Superseded**; promoted [strategy analysis](/specs/2026-06-21-upstream-sync-strategy-analysis.md) (Option D) to **Accepted** with outcome [ADR 0004](/adrs/0004-selective-vendor-pull.md).
+- Updated [specs roadmap](/specs/index.md): Active item is now "Upstream sync (first scan)" under selective vendor-pull; added a Retired note for the superseded ADR 0003 specs.
+- Updated [FORK.md](../../FORK.md): sync block → "Last upstream scan"; Phase 3 runbook → vendor-pull process; added Watched clusters (the `[codex]` Effect migration) and a Ported upstream changes log; post-port checklist and agent instructions point at ADR 0004.
+- Updated [fork-setup spec](/specs/fork-setup.md): status row, Phase 3 bullet, and Related now point at ADR 0004; retired the "Active bulk merge" row.
+
 ## 2026-06-23 (mobile local dev slice — build report updated with PR review fixes)
 
 - Updated [build completion report](/specs/2026-06-22-mobile-local-dev-slice-build-report.md) with all post-build commits: kanji brand rebrand, splash screen gate, iOS widget build-settings plugin, Metro resolver fix, and [PR #9](https://github.com/gannonh/kata-code/pull/9) review fixes (splash idempotency, dead code removal, widget target warning, `ios:dev` env scoping, `PRODUCT_ABBREVIATION` centralization).

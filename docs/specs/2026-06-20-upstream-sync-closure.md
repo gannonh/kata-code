@@ -4,11 +4,21 @@ title: "2026-06-20 upstream sync closure"
 description: "Closure plan for the first episodic upstream sync: the bulk merge of 80 pingdotgg/t3code commits into Kata Code on branch upstream-sync-2026-06-20, plus the sync-scoped follow-up work (branding re-application, Clerk build-injection verification, OKF integration of absorbed Effect conventions, classifier rule gaps) that must land on the integration branch before it merges to main."
 tags: [fork, upstream-sync, closure, spec]
 timestamp: 2026-06-20T00:00:00Z
-status: Approved
+status: Superseded
+superseded_by: /adrs/0004-selective-vendor-pull.md
 approved_at: 2026-06-20T00:00:00Z
 ---
 
 # 2026-06-20 upstream sync closure
+
+> **Superseded 2026-06-21.** This bulk-merge closure plan is no longer the
+> active upstream strategy. [ADR 0004 — Selective vendor-pull](/adrs/0004-selective-vendor-pull.md)
+> replaces the episodic bulk-merge approach (ADR 0003). The bulk merge described
+> here was never landed; the durable deliverables (skill, helper scripts, branding
+> rules) are preserved on `origin/upstream-sync-2026-06-20` for selective porting.
+> See the [upstream sync guide](/guides/upstream-sync.md) and
+> [strategy analysis](/specs/2026-06-21-upstream-sync-strategy-analysis.md).
+> Retained as a historical record of the abandoned approach.
 
 ## Goal
 

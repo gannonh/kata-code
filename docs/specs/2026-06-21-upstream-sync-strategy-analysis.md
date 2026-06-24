@@ -4,10 +4,16 @@ title: "Upstream sync strategy analysis"
 description: "Analysis of why the bulk upstream merge strategy failed and alternative approaches for absorbing upstream changes into the Kata Code fork."
 tags: [fork, upstream-sync, strategy, spec]
 timestamp: 2026-06-21T00:00:00Z
-status: Draft
+status: Accepted
+outcome: /adrs/0004-selective-vendor-pull.md
 ---
 
 # Upstream Sync Strategy Analysis
+
+> **Adopted 2026-06-21.** Recommendation Option D (selective vendor-pull) was
+> accepted as [ADR 0004 — Selective vendor-pull upstream sync](/adrs/0004-selective-vendor-pull.md).
+> This analysis is the rationale for that decision; the runbook lives in the
+> [upstream sync guide](/guides/upstream-sync.md).
 
 ## The Problem
 

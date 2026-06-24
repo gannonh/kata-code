@@ -21,14 +21,14 @@ Kata Code is a hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3co
 
 ## Current status
 
-| Item                                                                                 | Status                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fork / upstream remotes                                                              | Done                                                                                                                                                                                                                                   |
-| Phase 1 — packages, branding, `KATACODE_*`, `~/.katacode`                            | **Done**                                                                                                                                                                                                                               |
-| Phase 1 — PR [#1](https://github.com/gannonh/kata-code/pull/1) & CI gates            | **Done**                                                                                                                                                                                                                               |
-| Phase 2 — desktop/web release ([PR #2](https://github.com/gannonh/kata-code/pull/2)) | **Done** (merged)                                                                                                                                                                                                                      |
-| Phase 2 — remaining infra (relay, mobile EAS, marketing)                             | **Planned**                                                                                                                                                                                                                            |
-| First upstream merge since `708d5383`                                                | **Active** on branch `upstream-sync-2026-06-20` — pre-merge tooling and fork hardening landed; bulk merge pending ([handoff](/specs/2026-06-20-upstream-sync-handoff.md) · [closure spec](/specs/2026-06-20-upstream-sync-closure.md)) |
+| Item                                                                                 | Status                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fork / upstream remotes                                                              | Done                                                                                                                                                                                                                                                                                |
+| Phase 1 — packages, branding, `KATACODE_*`, `~/.katacode`                            | **Done**                                                                                                                                                                                                                                                                            |
+| Phase 1 — PR [#1](https://github.com/gannonh/kata-code/pull/1) & CI gates            | **Done**                                                                                                                                                                                                                                                                            |
+| Phase 2 — desktop/web release ([PR #2](https://github.com/gannonh/kata-code/pull/2)) | **Done** (merged)                                                                                                                                                                                                                                                                   |
+| Phase 2 — remaining infra (relay, mobile EAS, marketing)                             | **Planned**                                                                                                                                                                                                                                                                         |
+| Upstream sync since `708d5383`                                                       | **Retired** — episodic bulk-merge plan ([ADR 0003](/adrs/0003-episodic-upstream-sync.md)) superseded by selective vendor-pull ([ADR 0004](/adrs/0004-selective-vendor-pull.md)); first scan pending. See [strategy analysis](/specs/2026-06-21-upstream-sync-strategy-analysis.md). |
 
 ## Phase 1 delivery (PR #1)
 
@@ -47,7 +47,7 @@ Branch `fork-setup` delivers Phase 1 identity work. GitHub Actions on [PR #1](ht
 - **Phase 0** — Git remotes — complete
 - **Phase 1** — Branding and rename — complete ([ADR 0002](/adrs/0002-katacode-product-identity.md))
 - **Phase 2** — Desktop/web release — complete on [PR #2](https://github.com/gannonh/kata-code/pull/2); remaining relay/mobile EAS/marketing infra still planned
-- **Phase 3** — Upstream sync — [ADR 0003](/adrs/0003-episodic-upstream-sync.md), [upstream sync guide](/guides/upstream-sync.md), [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook)
+- **Phase 3** — Upstream sync — selective vendor-pull per [ADR 0004](/adrs/0004-selective-vendor-pull.md) (supersedes [ADR 0003](/adrs/0003-episodic-upstream-sync.md)); [upstream sync guide](/guides/upstream-sync.md), [FORK.md — upstream sync](../../FORK.md#phase-3--upstream-sync-runbook)
 - **Phase 4** — Divergence boundaries (where to put fork-only code)
 - **Phase 5** — Ongoing maintenance checklists
 
@@ -55,7 +55,7 @@ Branch `fork-setup` delivers Phase 1 identity work. GitHub Actions on [PR #1](ht
 
 - [Specs roadmap](/specs/index.md)
 - [ADR 0001 — Connected fork](/adrs/0001-connected-fork-upstream-merge.md)
-- [ADR 0003 — Episodic upstream sync](/adrs/0003-episodic-upstream-sync.md)
+- [ADR 0004 — Selective vendor-pull](/adrs/0004-selective-vendor-pull.md) (active upstream strategy; supersedes [ADR 0003](/adrs/0003-episodic-upstream-sync.md))
 - [Upstream sync guide](/guides/upstream-sync.md)
 - [ADR 0002 — Product identity](/adrs/0002-katacode-product-identity.md)
 - [Release runbook](/operations/release.md)

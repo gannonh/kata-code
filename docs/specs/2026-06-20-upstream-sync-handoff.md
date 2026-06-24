@@ -4,10 +4,18 @@ title: "2026-06-20 upstream sync — resume handoff"
 description: "Handoff and rollback checkpoint for the first episodic upstream sync. Pre-merge tooling and fork hardening are committed on upstream-sync-2026-06-20; the bulk merge is the next step. Read this before continuing the sync."
 tags: [fork, upstream-sync, handoff, plan]
 timestamp: 2026-06-20T00:00:00Z
-status: Active
+status: Superseded
+superseded_by: /adrs/0004-selective-vendor-pull.md
 ---
 
 # 2026-06-20 upstream sync — resume handoff
+
+> **Superseded 2026-06-21.** This handoff resumes the abandoned bulk-merge plan
+> ([ADR 0003](/adrs/0003-episodic-upstream-sync.md)). It is not the active process.
+> [ADR 0004 — Selective vendor-pull](/adrs/0004-selective-vendor-pull.md) replaces it.
+> Do not resume the merge sequence below; use the [vendor-pull runbook](/guides/upstream-sync.md)
+> instead. Retained as a rollback checkpoint and record of the pre-merge tooling that
+> survived on `origin/upstream-sync-2026-06-20`.
 
 Read this before continuing the upstream sync. It is the rollback target and the handoff contract for whoever (human or sub-agent) picks up the merge next.
 

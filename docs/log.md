@@ -1,5 +1,15 @@
 # OKF bundle log
 
+## 2026-06-24 (upstream sync docs reconciliation — ADR 0004)
+
+Reconciled the OKF bundle and [FORK.md](../../FORK.md) to the accepted [ADR 0004 — Selective vendor-pull](/adrs/0004-selective-vendor-pull.md), after the first episodic bulk-merge attempt ([ADR 0003](/adrs/0003-episodic-upstream-sync.md), branch `upstream-sync-2026-06-20`) stalled without landing.
+
+- [ADR index](/adrs/index.md): ADR 0004 promoted to Accepted; ADR 0003 moved to Superseded.
+- Retired the ADR 0003 specs — [closure spec](/specs/2026-06-20-upstream-sync-closure.md) and [resume handoff](/specs/2026-06-20-upstream-sync-handoff.md) marked Superseded; [strategy analysis](/specs/2026-06-21-upstream-sync-strategy-analysis.md) (Option D) marked Accepted as ADR 0004's rationale.
+- [specs roadmap](/specs/index.md) Active item → "Upstream sync (first scan)"; bundle [index](/index.md) fork-status summary updated to vendor-pull.
+- [FORK.md](../../FORK.md): "Last upstream sync" → "Last upstream scan" block; Phase 3 runbook rewritten for vendor-pull; post-port checklist; Watched clusters (Effect migration) + Ported changes log; agent instructions point at ADR 0004.
+- Docs-only change. Next action (separate): re-add the local `upstream` remote and run the first scan (Step 0 of the [guide](/guides/upstream-sync.md)).
+
 ## 2026-06-23 (mobile local dev slice — OKF update for PR #9)
 
 - Updated [build completion report](/specs/2026-06-22-mobile-local-dev-slice-build-report.md) with all post-build hardening: kanji brand rebrand (icon composer JSON, rasters, `generate-prod-brand-rasters.mjs`), splash screen gate (`splashScreen.ts`, `_layout.tsx`, cache-clearing script), iOS widget build-settings plugin (`withIosWidgetTargetBuildSettings.cjs`), Metro resolver fix, and PR #9 review fixes (5 comments from CodeRabbit, Greptile, Codex — all resolved).

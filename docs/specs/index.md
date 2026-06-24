@@ -4,9 +4,11 @@ Work map for Kata Code.
 
 ## Active / next
 
-| Item                        | Status                                                      | Document                                                                                                                                                                                                                                                                                           |
-| --------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Upstream sync (first merge) | **Active** — pre-merge tooling complete; bulk merge pending | [Resume handoff](/specs/2026-06-20-upstream-sync-handoff.md) · [Closure spec](/specs/2026-06-20-upstream-sync-closure.md) · [upstream-sync guide](/guides/upstream-sync.md) · [ADR 0003](/adrs/0003-episodic-upstream-sync.md) · [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook) |
+| Item                       | Status                                                                | Document                                                                                                                                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Upstream sync (first scan) | **Active** — selective vendor-pull policy adopted; first scan pending | [ADR 0004](/adrs/0004-selective-vendor-pull.md) · [upstream-sync guide](/guides/upstream-sync.md) · [Strategy analysis](/specs/2026-06-21-upstream-sync-strategy-analysis.md) · [FORK.md — upstream sync](../../FORK.md) |
+
+> **Retired 2026-06-21:** the episodic bulk-merge plan ([ADR 0003](/adrs/0003-episodic-upstream-sync.md), superseded) and its [closure spec](/specs/2026-06-20-upstream-sync-closure.md) / [resume handoff](/specs/2026-06-20-upstream-sync-handoff.md) are abandoned. The bulk merge was never landed; durable pre-merge tooling survives on `origin/upstream-sync-2026-06-20` for selective porting. See the [strategy analysis](/specs/2026-06-21-upstream-sync-strategy-analysis.md).
 
 ## Completed
 
