@@ -40,7 +40,7 @@ uat-evidence/
 .husky/_
 
 # Local agent skills (installed per developer/machine)
-.agents/skills/
+# .agents/skills/
 # Project-authored skills are tracked as exceptions.
 !.agents/skills/kata-code-e2e-testing/
 !.agents/skills/kata-code-e2e-testing/**
