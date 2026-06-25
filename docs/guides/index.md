@@ -20,6 +20,7 @@ Setup, user workflows, providers, cloud, and integrations.
 
 | Document                                                                                  | Summary                                                                    |
 | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| [E2E test catalog](/guides/e2e-test-catalog.md)                                           | Single index of all desktop + mobile E2E tests, with tags and run commands |
 | [e2e/README](../../e2e/README.md)                                                         | Local Playwright Electron E2E commands, env vars, and artifact paths       |
 | [E2E foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md)               | Spec, acceptance criteria, implementation notes, and verification evidence |
 | [E2E foundation adoption](/guides/e2e-foundation-adoption.md)                             | Rollout guide for Kata Agents, Skillr App, and future Electron repos       |

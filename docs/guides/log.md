@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-06-25 (E2E test catalog)
+
+- Added [E2E test catalog](/guides/e2e-test-catalog.md) — single index of every desktop ([`e2e/tests/`](../../e2e/tests/)) and mobile ([`mobile-e2e/maestro/`](../../mobile-e2e/maestro/)) E2E test with tags and run commands; consolidates inventory that was scattered across READMEs and design specs. Linked from [guides index](/guides/index.md) Testing section.
+
 ## 2026-06-24 (mobile local dev guide — automated E2E cross-links + command fixes)
 
 - Added "Automated E2E" section to [Mobile local dev (iOS Simulator)](/guides/mobile-local-dev-ios-simulator.md) mapping the three manual dev terminals to what the mobile E2E harness automates vs checks, with commands and cross-links to the [design spec](/specs/2026-06-24-mobile-e2e-testing-foundation-design.md), [operator reference](../../mobile-e2e/README.md), and [authoring skill](../../.agents/skills/mobile-e2e-test-author/SKILL.md).
