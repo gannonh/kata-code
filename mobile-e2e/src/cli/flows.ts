@@ -42,12 +42,22 @@ function maestroDir(): string {
   return join(resolveMobileE2eRoot(), "maestro");
 }
 
+/**
+ * Directories under `maestro/` that hold reusable `runFlow` subflows rather than
+ * runnable top-level flows. They are composed by tagged flows via `runFlow` and
+ * must not be discovered as standalone flows (they have no `launchApp`/tags).
+ */
+const SUBFLOW_DIRS = new Set(["shared"]);
+
 function walkYaml(dir: string, base: string): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const abs = join(dir, entry.name);
     const rel = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
+      if (base === "" && SUBFLOW_DIRS.has(entry.name)) {
+        continue;
+      }
       found.push(...walkYaml(abs, rel));
     } else if (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml")) {
       found.push(rel);
