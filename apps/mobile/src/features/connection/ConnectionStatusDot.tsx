@@ -83,8 +83,8 @@ export function ConnectionStatusDot(props: {
       // E2E test contract: a stable accessibility id keyed to connection state lets
       // Maestro assert readiness deterministically (e.g. `connection-status-ready`)
       // instead of matching the localized status text. See the mobile E2E design spec.
-      accessible
-      accessibilityLabel={`connection-status-${props.state}`}
+      // testID alone is the E2E selector; this visual-only dot is deliberately not
+      // exposed to the screen-reader tree (no `accessible`/`accessibilityLabel`).
       testID={`connection-status-${props.state}`}
       style={{
         width: containerSize,

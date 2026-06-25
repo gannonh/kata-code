@@ -33,4 +33,11 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["--studio"]).mode).toBe("studio");
     expect(parseCliArgs(["--help"]).mode).toBe("help");
   });
+
+  it("rejects --include-tags when the next token is another flag or missing", () => {
+    // `--include-tags --list` must not swallow `--list` as a tag value and silently
+    // stay in run mode; fail fast instead.
+    expect(() => parseCliArgs(["--include-tags", "--list"])).toThrow(/Missing value/);
+    expect(() => parseCliArgs(["--include-tags"])).toThrow(/Missing value/);
+  });
 });

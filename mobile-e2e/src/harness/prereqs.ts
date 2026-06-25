@@ -76,7 +76,11 @@ export function requirePrereqs(input: {
 }): ResolvedCredentials {
   assertMacOsHost();
   assertMaestroInstalled();
-  resolveServerBinPath(input.repoRoot);
+  // Only server-backed flows (pairing, agent) need the built `katacode serve`
+  // binary; @smoke and @auth run without it and must not fail on a fresh setup.
+  if (runNeedsServer(input.tags)) {
+    resolveServerBinPath(input.repoRoot);
+  }
 
   const missing = collectMissingCredentials(requiredCredentialGroupsForTags(input.tags));
   if (missing.length === 0) {

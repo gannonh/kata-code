@@ -28,6 +28,12 @@ export function parseFlowTags(yamlText: string): string[] {
       }
       continue;
     }
+    // Skip blank lines and comments inside the tags block so a stray empty line
+    // or `#` note doesn't truncate discovery of later tags.
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) {
+      continue;
+    }
     const item = line.match(/^\s*-\s*(.+?)\s*$/);
     if (item?.[1]) {
       tags.push(item[1].startsWith("@") ? item[1] : `@${item[1]}`);

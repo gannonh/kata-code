@@ -117,7 +117,14 @@ function main(): void {
 
   // Resolve the upstream change set. We diff against upstream/main's tree state
   // so we look at what upstream actually changed, independent of the fork.
-  const { files: upstreamChanged, rangeLabel } = upstreamFiles(arg);
+  let upstreamChanged: string[];
+  let rangeLabel: string;
+  try {
+    ({ files: upstreamChanged, rangeLabel } = upstreamFiles(arg));
+  } catch (e: any) {
+    console.error(`[intersection] ${e.message}`);
+    process.exit(1);
+  }
 
   let forkModified: Set<string>;
   try {

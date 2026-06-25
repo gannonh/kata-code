@@ -101,7 +101,7 @@ export async function ensureSimulator(context: MobileE2ERunContext): Promise<str
 
   if (action.boot) {
     logHarnessPhase(`booting simulator ${device!.name} (${action.udid})`);
-    await runCommandToCompletion({
+    const bootResult = await runCommandToCompletion({
       command: "xcrun",
       args: ["simctl", "bootstatus", action.udid, "-b"],
       env: context.baseEnv,
@@ -110,6 +110,13 @@ export async function ensureSimulator(context: MobileE2ERunContext): Promise<str
       label: "simctl-boot",
       artifactRoot: context.artifactRoot,
     });
+    // A failed boot must not silently set the udid and continue against a
+    // simulator that never became usable.
+    if (bootResult.code !== 0) {
+      throw new Error(
+        `xcrun simctl bootstatus failed for ${action.udid}. See ${context.artifactRoot}/simctl-boot.log.`,
+      );
+    }
   }
 
   context.simulatorUdid = action.udid;
@@ -144,14 +151,23 @@ export interface ScreenRecording {
 }
 
 /** Start recording the simulator screen via `simctl io recordVideo` (KATACODE_E2E_VIDEO=1). */
-export function startScreenRecording(udid: string, outputPath: string): ScreenRecording {
+export async function startScreenRecording(
+  udid: string,
+  outputPath: string,
+): Promise<ScreenRecording> {
   logHarnessPhase(`recording simulator video to ${outputPath}`);
   const child = spawn(
     "xcrun",
     ["simctl", "io", udid, "recordVideo", "--codec=h264", "--force", outputPath],
     { stdio: "ignore" },
   );
-  return { process: child, outputPath };
+  // Wait for the spawn to take (or fail) before returning so an xcrun spawn
+  // failure rejects here and is caught by the surrounding try/finally rather
+  // than crashing the runner with an unhandled `error` event.
+  return await new Promise<ScreenRecording>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("spawn", () => resolve({ process: child, outputPath }));
+  });
 }
 
 /**

@@ -54,6 +54,12 @@ export interface FlowDescriptor {
   readonly needsServer: boolean;
   /** Which pairing-env builder (`buildPairEnv` in run.ts) injects this flow's vars. */
   readonly pairEnv: PairEnvKind;
+  /**
+   * True when the flow composes the bearer-pairing subflow and therefore also
+   * needs KC_HOST/KC_TOKEN injected (e.g. @agent pairs before composing). Pure
+   * pairing flows set this implicitly via pairEnv="pairing".
+   */
+  readonly needsPairingVars: boolean;
   /** Maestro run timeout for flows with this tag. */
   readonly timeoutMs: number;
 }
@@ -69,6 +75,7 @@ export const FLOW_DESCRIPTORS: Readonly<Record<TagKey, FlowDescriptor>> = {
     credentials: [],
     needsServer: false,
     pairEnv: "none",
+    needsPairingVars: false,
     timeoutMs: MOBILE_E2E_TIMEOUTS.maestroFlowMs,
   },
   pairing: {
@@ -76,6 +83,7 @@ export const FLOW_DESCRIPTORS: Readonly<Record<TagKey, FlowDescriptor>> = {
     credentials: [],
     needsServer: true,
     pairEnv: "pairing",
+    needsPairingVars: true,
     timeoutMs: MOBILE_E2E_TIMEOUTS.maestroFlowMs,
   },
   auth: {
@@ -83,13 +91,17 @@ export const FLOW_DESCRIPTORS: Readonly<Record<TagKey, FlowDescriptor>> = {
     credentials: ["clerk", "google"],
     needsServer: false,
     pairEnv: "auth",
+    needsPairingVars: false,
     timeoutMs: MOBILE_E2E_TIMEOUTS.maestroFlowMs,
   },
   agent: {
     tag: MOBILE_E2E_TAGS.agent,
     credentials: ["agent"],
     needsServer: true,
+    // @agent composes bearer-pair.yaml before its deterministic prompt, so it
+    // needs both the pairing vars (KC_HOST/KC_TOKEN) and the agent vars.
     pairEnv: "agent",
+    needsPairingVars: true,
     timeoutMs: MOBILE_E2E_TIMEOUTS.agentFlowMs,
   },
 };
@@ -104,12 +116,20 @@ export function allDescriptors(): readonly FlowDescriptor[] {
 
 /**
  * Selected descriptors for a run. An empty selection resolves to every
- * descriptor (run all). Pure so selection logic is unit-tested.
+ * descriptor (run all). Throws fail-loud when any requested tag is unknown so
+ * a typo like `--include-tags @typo` cannot silently produce an empty run
+ * (which would later yield an invalid `-Infinity` timeout). Pure so selection
+ * logic is unit-tested.
  */
 export function selectedDescriptors(selection: readonly string[]): readonly FlowDescriptor[] {
   const all = allDescriptors();
   if (selection.length === 0) {
     return all;
+  }
+  const known: Set<string> = new Set(all.map((descriptor) => descriptor.tag));
+  const unknown = selection.filter((tag) => !known.has(tag));
+  if (unknown.length > 0) {
+    throw new Error(`Unsupported mobile E2E tag(s): ${unknown.join(", ")}`);
   }
   return all.filter((descriptor) => selection.includes(descriptor.tag));
 }

@@ -1,6 +1,7 @@
 import { loadEnv } from "../config/loadEnv.ts";
 
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { type PairEnvKind, selectedDescriptors, tagMatches } from "../config/tags.ts";
 import { buildAgentMaestroEnv } from "../flows/agent.ts";
@@ -43,7 +44,11 @@ function maestroFlowDir(): string {
 export function resolveFlowPaths(selection: readonly string[]): string[] {
   const dir = maestroFlowDir();
   const flows = discoverFlows();
-  const matching = flows.filter((flow) => flow.tags.some((tag) => tagMatches(selection, tag)));
+  const matching = flows.filter(
+    // An empty selection runs every discovered flow, including untagged ones,
+    // so `[].some(...)` returning false must not silently exclude them.
+    (flow) => selection.length === 0 || flow.tags.some((tag) => tagMatches(selection, tag)),
+  );
   return matching.map((flow) => join(dir, flow.relativePath));
 }
 
@@ -92,6 +97,11 @@ export function buildMaestroEnv(input: {
   };
   const env: Record<string, string> = {};
   for (const descriptor of selectedDescriptors(input.selection)) {
+    // Flows that compose the bearer-pairing subflow (pairing, agent) need
+    // KC_HOST/KC_TOKEN injected alongside their own env.
+    if (descriptor.needsPairingVars && input.pairing) {
+      Object.assign(env, buildPairingMaestroEnv(input.pairing));
+    }
     Object.assign(env, builders[descriptor.pairEnv]());
   }
   return env;
@@ -153,7 +163,7 @@ async function runFlows(options: CliOptions): Promise<number> {
     }
 
     if (isVideoEnabled() && context.simulatorUdid) {
-      recording = startScreenRecording(
+      recording = await startScreenRecording(
         context.simulatorUdid,
         join(context.artifactRoot, "recording.mp4"),
       );
@@ -179,12 +189,33 @@ async function runFlows(options: CliOptions): Promise<number> {
 
     return result.code ?? 1;
   } finally {
+    // Run every cleanup step even if an earlier one throws, so a recording
+    // flush failure can't skip the manifest write or run-state teardown.
+    const cleanupErrors: unknown[] = [];
     if (recording) {
-      await stopScreenRecording(recording);
+      try {
+        await stopScreenRecording(recording);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
     }
-    const manifestPath = await writeRunManifest(buildManifest(context));
-    logHarnessPhase(`run manifest: ${manifestPath}`);
-    await cleanupRunState(context);
+    try {
+      const manifestPath = await writeRunManifest(buildManifest(context));
+      logHarnessPhase(`run manifest: ${manifestPath}`);
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      await cleanupRunState(context);
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (cleanupErrors.length === 1) {
+      throw cleanupErrors[0]!;
+    }
+    if (cleanupErrors.length > 1) {
+      throw new AggregateError(cleanupErrors, "Mobile E2E cleanup failed");
+    }
   }
 }
 
@@ -204,11 +235,23 @@ async function main(): Promise<number> {
   }
 }
 
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
-  });
+// Run only when invoked as the CLI entrypoint, not when imported (e.g. by tests).
+// The package script (`e2e:mobile`) points directly at this file.
+const entryHref = (() => {
+  try {
+    return fileURLToPath(import.meta.url) === process.argv[1];
+  } catch {
+    return false;
+  }
+})();
+
+if (entryHref) {
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error: unknown) => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    });
+}

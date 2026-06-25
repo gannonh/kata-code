@@ -105,6 +105,24 @@ describe("buildMaestroEnv", () => {
     expect(env.KC_PROVIDER_LABEL).toBe("Codex");
     expect(env.KC_MODEL_LABEL).toBe("GPT-5.4-Mini");
   });
+
+  it("injects KC_HOST/KC_TOKEN for @agent because it composes bearer-pair.yaml", () => {
+    // deterministic-chat.yaml runFlows bearer-pair.yaml first, which reads
+    // KC_HOST/KC_TOKEN; @agent must therefore receive pairing vars too.
+    const env = buildMaestroEnv({
+      selection: ["@agent"],
+      runId: "mobile-e2e-run-1",
+      credentials: { googleEmail: null },
+      pairing: {
+        connectionString: "katacode://127.0.0.1:3773",
+        host: "127.0.0.1:3773",
+        token: "abc",
+      },
+    });
+    expect(env.KC_HOST).toBe("127.0.0.1:3773");
+    expect(env.KC_TOKEN).toBe("abc");
+    expect(env.KC_EXPECTED).toBe("E2E_AGENT_OK_mobile-e2e-run-1");
+  });
 });
 
 describe("resolveRunTimeoutMs", () => {

@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { type MobileE2ERunContext, registerCleanup } from "./isolatedRun.ts";
 
@@ -20,7 +20,11 @@ export async function seedWorkspace(
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), `katacode-mobile-e2e-ws-${name}-`));
   for (const [relativePath, contents] of Object.entries(files)) {
-    await writeFile(join(root, relativePath), contents, "utf8");
+    // Nested relative paths (src/index.ts, .vscode/settings.json) need their
+    // parent directories created before the file write.
+    const absolute = join(root, relativePath);
+    await mkdir(dirname(absolute), { recursive: true });
+    await writeFile(absolute, contents, "utf8");
   }
   registerCleanup(context, async () => {
     await rm(root, { recursive: true, force: true });

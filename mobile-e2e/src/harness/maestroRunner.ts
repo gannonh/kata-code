@@ -63,20 +63,36 @@ export async function runMaestro(
   spawnEnv: NodeJS.ProcessEnv,
 ): Promise<MaestroResult> {
   const args = buildMaestroArgs(options);
-  logHarnessPhase(`maestro ${args.join(" ")}`);
+  // Redact injected `-e KEY=VALUE` pairs (pairing tokens, auth emails) so the
+  // harness log never leaks secrets while still logging the real command shape.
+  const redactedArgs = args.map((arg, index) =>
+    args[index - 1] === "-e" ? `${arg.split("=", 1)[0]}=<redacted>` : arg,
+  );
+  logHarnessPhase(`maestro ${redactedArgs.join(" ")}`);
   return await new Promise<MaestroResult>((resolve, reject) => {
+    let settled = false;
+    let timedOut = false;
+    const finish = (code: number | null): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve({ code });
+    };
+
     const child = spawn("maestro", args, { stdio: "inherit", env: spawnEnv });
     child.once("error", reject);
-    child.once("close", (code) => resolve({ code }));
+    // A timeout must win over a normal close arriving during graceful shutdown,
+    // so the timeout sentinel (124) is preserved rather than the real exit code.
+    child.once("close", (code) => finish(timedOut ? 124 : code));
 
     if (options.timeoutMs) {
       const timer = setTimeout(() => {
+        timedOut = true;
         logHarnessPhase(`maestro timed out after ${options.timeoutMs}ms; killing run`);
-        void gracefulKill({ child, primarySignal: "SIGTERM", graceMs: 5_000 })
-          .catch(() => {
-            /* settled via close below */
-          })
-          .finally(() => resolve({ code: 124 }));
+        void gracefulKill({ child, primarySignal: "SIGTERM", graceMs: 5_000 }).catch(() =>
+          finish(124),
+        );
       }, options.timeoutMs);
       timer.unref();
       child.once("close", () => clearTimeout(timer));

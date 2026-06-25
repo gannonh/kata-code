@@ -116,18 +116,21 @@ export async function gracefulKill(input: {
   readonly graceMs: number;
 }): Promise<void> {
   const { child, primarySignal, graceMs } = input;
-  if (child.exitCode !== null) {
+  // A child that already exited via signal has exitCode === null but a populated
+  // signalCode; treat both as already exited so the promise can't hang waiting
+  // for an `exit` event that already fired.
+  if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }
   await new Promise<void>((resolve) => {
     child.once("exit", () => resolve());
-    if (child.exitCode !== null) {
+    if (child.exitCode !== null || child.signalCode !== null) {
       resolve();
       return;
     }
     child.kill(primarySignal);
     setTimeout(() => {
-      if (child.exitCode === null) {
+      if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
       }
     }, graceMs).unref();

@@ -85,4 +85,11 @@ describe("selectedDescriptors", () => {
     const selected = selectedDescriptors(["@agent", "@smoke"]);
     expect(selected.map((d) => d.tag)).toEqual(["@smoke", "@agent"]);
   });
+
+  it("throws fail-loud on an unknown tag instead of silently producing an empty run", () => {
+    // An empty descriptor list would later yield Math.max(...[]) === -Infinity,
+    // an invalid timeout; a typo like @typo must throw here instead.
+    expect(() => selectedDescriptors(["@typo"])).toThrow(/Unsupported mobile E2E tag/);
+    expect(() => selectedDescriptors(["@smoke", "@bogus"])).toThrow(/@bogus/);
+  });
 });

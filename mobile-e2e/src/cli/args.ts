@@ -35,10 +35,11 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
       mode = "help";
     } else if (arg === "--include-tags") {
       const next = argv[i + 1];
-      if (next) {
-        collectTags(next, tags);
-        i += 1;
+      if (!next || next.startsWith("--")) {
+        throw new Error("Missing value for --include-tags");
       }
+      collectTags(next, tags);
+      i += 1;
     } else if (arg?.startsWith("--include-tags=")) {
       collectTags(arg.slice("--include-tags=".length), tags);
     }

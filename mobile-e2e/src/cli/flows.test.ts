@@ -24,4 +24,18 @@ describe("parseFlowTags", () => {
     const yaml = "tags:\n  - agent\nappId: com.katacode.dev\n---\n";
     expect(parseFlowTags(yaml)).toEqual(["@agent"]);
   });
+
+  it("skips blank lines and comments inside the tags block", () => {
+    // A stray empty line or `#` note must not truncate discovery of later tags.
+    const yaml = [
+      "tags:",
+      "  - smoke",
+      "",
+      "  # pairing flow",
+      "  - pairing",
+      "appId: com.katacode.dev",
+      "---",
+    ].join("\n");
+    expect(parseFlowTags(yaml)).toEqual(["@smoke", "@pairing"]);
+  });
 });

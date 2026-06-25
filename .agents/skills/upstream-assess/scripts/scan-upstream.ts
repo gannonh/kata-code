@@ -74,11 +74,20 @@ function baselineFromForkMd(): string | null {
 
 function parseArgs(argv: string[]): { base?: string; tip?: string; help?: boolean } {
   const out: { base?: string; tip?: string; help?: boolean } = {};
+  // Fail fast when --base/--tip is missing its value or points at another flag,
+  // rather than letting the malformed value reach rev-parse as undefined.
+  const readValue = (flag: string, index: number): string => {
+    const value = argv[index + 1];
+    if (!value || value.startsWith("-")) {
+      throw new Error(`Missing value for ${flag}`);
+    }
+    return value;
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h" || a === "--help") out.help = true;
-    else if (a === "--base") out.base = argv[++i];
-    else if (a === "--tip") out.tip = argv[++i];
+    else if (a === "--base") out.base = readValue("--base", i++);
+    else if (a === "--tip") out.tip = readValue("--tip", i++);
     else if (a?.startsWith("--base=")) out.base = a.slice("--base=".length);
     else if (a?.startsWith("--tip=")) out.tip = a.slice("--tip=".length);
   }
@@ -239,7 +248,13 @@ function buildReport(base: string, tip: string, tipSha: string): string {
 }
 
 function main(): void {
-  const opts = parseArgs(process.argv.slice(2));
+  let opts: { base?: string; tip?: string; help?: boolean };
+  try {
+    opts = parseArgs(process.argv.slice(2));
+  } catch (e: any) {
+    console.error(`[scan-upstream] ${e.message}`);
+    process.exit(1);
+  }
   if (opts.help) {
     console.log(HELP);
     return;
@@ -297,7 +312,7 @@ function main(): void {
     process.exit(1);
   }
 
-  process.stdout.write(buildReport(baseSha, tipSha, tip));
+  process.stdout.write(buildReport(baseSha, tip, tipSha));
 }
 
 main();

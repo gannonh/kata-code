@@ -79,8 +79,21 @@ export function registerCleanup(
 
 /** Run registered cleanup callbacks in reverse order. Safe to call unconditionally in `finally`. */
 export async function cleanupRunState(context: MobileE2ERunContext): Promise<void> {
+  // Run every callback to completion even if one rejects, so a single failing
+  // teardown step can't leak temp state or child processes registered later.
+  const errors: unknown[] = [];
   for (const callback of [...context.cleanupCallbacks].toReversed()) {
-    await callback();
+    try {
+      await callback();
+    } catch (error) {
+      errors.push(error);
+    }
   }
   context.cleanupCallbacks.length = 0;
+  if (errors.length === 1) {
+    throw errors[0]!;
+  }
+  if (errors.length > 1) {
+    throw new AggregateError(errors, "mobile-e2e cleanup failed");
+  }
 }
