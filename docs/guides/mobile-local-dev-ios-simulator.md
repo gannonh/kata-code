@@ -32,7 +32,7 @@ This runbook proves the first local mobile slice: **Kata Code Dev** on the iOS S
 
 ## 1. Start the local server (pairing + runnable project)
 
-`katacode serve` prints headless pairing output but does **not** auto-register a project. Use both steps:
+The server CLI is `node apps/server/dist/bin.mjs` (the `katacode` bin, not a global command). It prints headless pairing output but does **not** auto-register a project. Use both steps:
 
 **Terminal A — headless server with pairing output**
 
@@ -132,8 +132,34 @@ node scripts/mobile-native-static-check.ts
 | Pairing fails / connection not ready                                  | Wrong host scheme, expired token, or no project           | Re-run `serve` for a fresh token; use loopback host; run `project add`                                            |
 | HTTPS errors to localhost                                             | Bare host defaulted to HTTPS on non-loopback patterns     | Use `127.0.0.1:3773` / `localhost:3773` or full `http://127.0.0.1:3773`                                           |
 
+## Automated E2E
+
+The [mobile E2E testing foundation](/specs/2026-06-24-mobile-e2e-testing-foundation-design.md) automates the manual loop above. The TS orchestrator (`vp run e2e:mobile`) reuses the same three services, automating some and checking others:
+
+| Manual step (this guide)                                       | E2E harness                                                                                                                                                                           |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Terminal A — `node apps/server/dist/bin.mjs serve`             | Automated by `startServerStack` (isolated port + `project add`). Skipped for `@smoke`.                                                                                                |
+| Terminal B — `vp run --filter @kata-sh/code-mobile dev:client` | Not automated; keep Metro running (dev client red-screens without it).                                                                                                                |
+| Terminal C — `vp run --filter @kata-sh/code-mobile ios:dev`    | Not rebuilt per run; `assertDevClientInstalled` checks `com.katacode.dev` is present and fails loud if not. Build once with `vp run e2e:mobile:build` (alias for the same `ios:dev`). |
+
+For `@smoke` alone: no server, no credentials. The harness boots the simulator and asserts the home screen. For `@pairing`/`@auth`/`@agent` the harness starts the server and requires the env vars documented in the [operator reference](../../mobile-e2e/README.md).
+
+Run e2e commands from the **repo root** (not `apps/mobile`):
+
+```bash
+vp run e2e:mobile --include-tags @smoke     # launch + home-screen assert
+vp run e2e:mobile --include-tags @pairing   # bearer loopback pairing
+vp run e2e:mobile --list                    # list flows without running
+vp run e2e:mobile:studio                        # maestro studio for locator discovery
+```
+
+See the [design spec](/specs/2026-06-24-mobile-e2e-testing-foundation-design.md) for acceptance criteria and architecture. For Maestro Studio authoring (locators, new flows, editing existing YAML), see [Mobile E2E authoring (Maestro Studio)](/guides/e2e-mobile-authoring-maestro-studio.md).
+
 ## Related docs
 
+- [Mobile E2E authoring (Maestro Studio)](/guides/e2e-mobile-authoring-maestro-studio.md)
+- [Mobile E2E testing foundation design](/specs/2026-06-24-mobile-e2e-testing-foundation-design.md)
+- [Mobile E2E operator reference](../../mobile-e2e/README.md)
 - [Mobile app README](../../apps/mobile/README.md)
 - [Remote access architecture](/architecture/remote.md)
 - [Quick start](/getting-started/quick-start.md)

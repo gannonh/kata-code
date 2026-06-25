@@ -41,6 +41,10 @@
     "e2e:headed": "playwright test --config e2e/playwright.config.ts --project desktop-dev --headed",
     "e2e:ui": "playwright test --config e2e/playwright.config.ts --project desktop-dev --ui",
     "e2e:release": "playwright test --config e2e/playwright.config.ts --project desktop-release",
+    "e2e:mobile": "node mobile-e2e/src/cli/run.ts",
+    "e2e:mobile:build": "vp run --filter @kata-sh/code-mobile ios:dev",
+    "e2e:mobile:test": "vp run --filter @kata-sh/code-mobile-e2e test",
+    "e2e:mobile:studio": "node mobile-e2e/src/cli/run.ts --studio",
     "check:okf": "node scripts/check-okf.mjs",
     "worktree:setup": "bash scripts/worktree-setup.sh"
   },

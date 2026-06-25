@@ -23,7 +23,7 @@ import type {
 } from "@kata-sh/code-contracts";
 import { ServerSettingsError } from "@kata-sh/code-contracts";
 
-import { createModelCapabilities } from "@kata-sh/code-shared/model";
+import { createModelCapabilities, formatModelDisplayName } from "@kata-sh/code-shared/model";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import {
   AUTH_PROBE_TIMEOUT_MS,
@@ -172,10 +172,9 @@ export function mapCodexModelCapabilities(
 }
 
 const toDisplayName = (model: CodexSchema.V2ModelListResponse__Model): string => {
-  // Capitalize 'gpt' to 'GPT-' and capitalize any letter following a dash
-  return model.displayName
-    .replace(/^gpt/i, "GPT") // Handle start with 'gpt' or 'GPT'
-    .replace(/-([a-z])/g, (_, c) => "-" + c.toUpperCase());
+  // Shared formatter (packages/shared) keeps the Codex display rule in lockstep
+  // with the mobile model picker and the mobile E2E harness.
+  return formatModelDisplayName(model.displayName);
 };
 
 function parseCodexModelListResponse(

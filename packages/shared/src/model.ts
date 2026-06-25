@@ -307,6 +307,18 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
   return trimmed || null;
 }
 
+/**
+ * Display name for a model slug: capitalize a leading `gpt` to `GPT` and uppercase
+ * the first letter after each dash (e.g. `gpt-5.4-mini` -> `GPT-5.4-Mini`). The
+ * canonical formatter shared by the server provider layer and the mobile E2E
+ * harness, so the model-picker label the harness taps always matches what the
+ * app renders. Previously duplicated as `toDisplayName` (server) and
+ * `modelMenuLabel` (harness) with a fragile "keep in sync" comment.
+ */
+export function formatModelDisplayName(slug: string): string {
+  return slug.replace(/^gpt/i, "GPT").replace(/-([a-z])/g, (_, c: string) => `-${c.toUpperCase()}`);
+}
+
 function cloneSelections(
   selections: ReadonlyArray<ProviderOptionSelection>,
 ): Array<ProviderOptionSelection> {

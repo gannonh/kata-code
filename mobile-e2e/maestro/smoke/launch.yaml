@@ -1,0 +1,16 @@
+# @smoke — launch the dev client and confirm the app renders without a redbox.
+#
+# clearState: false preserves the saved Metro server URL so the app loads past
+# the Expo Dev Launcher. The dev client loads JS from Metro; extendedWaitUntil
+# gives it up to 90s to bundle and render. "Kata Code" is the app header title,
+# visible on the home screen regardless of saved environments. Use `maestro
+# studio` to verify locators if this anchor changes.
+appId: com.katacode.dev
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "Kata Code"
+    timeout: 90000

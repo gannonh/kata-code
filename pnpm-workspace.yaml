@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - infra/*
+  - mobile-e2e
   - oxlint-plugin-kata-code
   - packages/*
   - scripts
@@ -91,6 +92,7 @@ overrides:
   "@expo/metro-config": 56.0.13
   "@types/node": "catalog:"
   effect: "catalog:"
+  react-native-nitro-modules: 0.35.9
   vite: "catalog:"
   vitest: "catalog:"
   yaml: "catalog:"

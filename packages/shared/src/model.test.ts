@@ -11,6 +11,7 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   createModelCapabilities,
   createModelSelection,
+  formatModelDisplayName,
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
@@ -229,5 +230,20 @@ describe("descriptor helpers", () => {
     ).toBeUndefined();
     expect(getModelSelectionStringOptionValue(selection, "reasoningEffort")).toBe("high");
     expect(getModelSelectionBooleanOptionValue(selection, "fastMode")).toBe(true);
+  });
+});
+
+describe("formatModelDisplayName", () => {
+  it("capitalizes a leading gpt to GPT (Codex display convention)", () => {
+    expect(formatModelDisplayName("gpt-5.4")).toBe("GPT-5.4");
+  });
+
+  it("uppercases each letter following a dash", () => {
+    expect(formatModelDisplayName("gpt-5.4-mini")).toBe("GPT-5.4-Mini");
+    expect(formatModelDisplayName("o3-mini-high")).toBe("o3-Mini-High");
+  });
+
+  it("leaves an already-display slug untouched", () => {
+    expect(formatModelDisplayName("GPT-5.4-Mini")).toBe("GPT-5.4-Mini");
   });
 });

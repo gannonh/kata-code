@@ -1,5 +1,21 @@
 # Guides log
 
+## 2026-06-25 (mobile E2E Maestro Studio authoring guide)
+
+- Added [Mobile E2E authoring (Maestro Studio)](/guides/e2e-mobile-authoring-maestro-studio.md) — canonical guide consolidating scattered Studio/locator/flow-authoring guidance from READMEs, design spec, local dev guide, test catalog, and authoring skill. Linked from [guides index](/guides/index.md) Testing section, [E2E test catalog](/guides/e2e-test-catalog.md), [mobile local dev guide](/guides/mobile-local-dev-ios-simulator.md), [mobile E2E design spec](/specs/2026-06-24-mobile-e2e-testing-foundation-design.md), [mobile-e2e README](../../mobile-e2e/README.md), and [mobile-e2e-test-author skill](../../.agents/skills/mobile-e2e-test-author/SKILL.md).
+
+## 2026-06-25 (E2E test catalog)
+
+- Added [E2E test catalog](/guides/e2e-test-catalog.md) — single index of every desktop ([`e2e/tests/`](../../e2e/tests/)) and mobile ([`mobile-e2e/maestro/`](../../mobile-e2e/maestro/)) E2E test with tags and run commands; consolidates inventory that was scattered across READMEs and design specs. Linked from [guides index](/guides/index.md) Testing section.
+
+## 2026-06-24 (mobile local dev guide — automated E2E cross-links + command fixes)
+
+- Added "Automated E2E" section to [Mobile local dev (iOS Simulator)](/guides/mobile-local-dev-ios-simulator.md) mapping the three manual dev terminals to what the mobile E2E harness automates vs checks, with commands and cross-links to the [design spec](/specs/2026-06-24-mobile-e2e-testing-foundation-design.md), [operator reference](../../mobile-e2e/README.md), and [authoring skill](../../.agents/skills/mobile-e2e-test-author/SKILL.md).
+- Fixed `katacode serve` prose to use the actual command (`node apps/server/dist/bin.mjs`).
+- Fixed `-- --` arg-passing syntax in all e2e:mobile commands (vp run doesn't use `--` for args).
+- Added note that e2e commands run from the repo root, not `apps/mobile`.
+- Expanded "Related docs" with the design spec and operator reference links.
+
 ## 2026-06-23 (mobile local dev guide — cache clearing and env scoping)
 
 - Updated [Mobile local dev (iOS Simulator)](/guides/mobile-local-dev-ios-simulator.md) to document the cache-clearing script (`clear-expo-image-cache.mjs`) and correct `APP_VARIANT`/`EXPO_NO_GIT_STATUS` env var scoping in the `ios:dev` command (PR #9 review fix).

@@ -1,0 +1,78 @@
+# @agent — deterministic real-provider reply.
+#
+# The TS harness starts the loopback server, registers a seeded project, and
+# injects KC_PROMPT, KC_MODEL(+labels), and KC_EXPECTED (see src/flows/agent.ts).
+# This flow first pairs (runFlow ../pairing/bearer-pair.yaml) so a registered
+# environment exists, then starts a new task in the seeded project, selects the
+# configured model, sends the prompt, and asserts the real provider's reply.
+#
+# The green runtime pass is a maintainer responsibility and needs provider
+# credentials (KATACODE_E2E_AGENT_PROVIDER / _MODEL + the provider key).
+#
+# Locators verified with `maestro studio` against the live app:
+#  - compose button: native bottom-toolbar SF Symbol "compose"
+#  - project picker rows: combined node "move, <name>, Forward" (point/substring)
+#  - new-task prompt: autoFocus TextInput (type directly after project select)
+#  - model picker: "Model" trigger -> provider submenu (KC_PROVIDER_LABEL) ->
+#    model row (KC_MODEL_LABEL); native pull-down menu, fully Maestro-drivable
+#  - send: "Start task" on the draft; reply asserted via the composer thread
+appId: com.katacode.dev
+tags:
+  - agent
+---
+- launchApp:
+    clearState: false
+# Pair first so the seeded project's environment is connected and runnable.
+# The pairing subflow ends inside the Settings form-sheet on the Environments
+# screen, so dismiss the sheet (swipe down) to return home before composing.
+- runFlow: ../pairing/bearer-pair.yaml
+- swipe:
+    start: "50%, 38%"
+    end: "50%, 95%"
+    duration: 400
+- extendedWaitUntil:
+    visible: "Kata Code"
+    timeout: 10000
+# Open the new-task composer (native bottom-toolbar compose button).
+- tapOn:
+    text: "compose"
+- extendedWaitUntil:
+    visible: "Choose project"
+    timeout: 10000
+# Pick the seeded project. The harness registers a single freshly-seeded project;
+# its row is the only non-stale entry. Match by the seeded workspace name prefix.
+- tapOn:
+    text: ".*mobile-e2e.*"
+- extendedWaitUntil:
+    visible: "Start task"
+    timeout: 10000
+# The prompt TextInput autoFocuses; type the deterministic instruction directly.
+- inputText: ${KC_PROMPT}
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 3000
+# Select the configured model: open the Model trigger, enter the provider
+# submenu, then tap the model row. Labels are injected by the harness.
+- tapOn:
+    text: "Model"
+- extendedWaitUntil:
+    visible: ${KC_PROVIDER_LABEL}
+    timeout: 8000
+- tapOn:
+    text: ${KC_PROVIDER_LABEL}
+- extendedWaitUntil:
+    visible: ${KC_MODEL_LABEL}
+    timeout: 8000
+- tapOn:
+    text: ${KC_MODEL_LABEL}
+- waitForAnimationToEnd:
+    timeout: 3000
+# Start the task; this creates the thread and sends the first turn.
+- tapOn:
+    text: "Start task"
+# Assert the real provider returned exactly the expected token. Whitespace/wrapper
+# normalization is owned by src/flows/agent.ts; the token is unique per run so it
+# cannot match a stale message. Allow time for a real provider round-trip.
+- extendedWaitUntil:
+    visible: ${KC_EXPECTED}
+    timeout: 120000
