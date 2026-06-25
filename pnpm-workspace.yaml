@@ -92,6 +92,7 @@ overrides:
   "@expo/metro-config": 56.0.13
   "@types/node": "catalog:"
   effect: "catalog:"
+  react-native-nitro-modules: 0.35.9
   vite: "catalog:"
   vitest: "catalog:"
   yaml: "catalog:"
