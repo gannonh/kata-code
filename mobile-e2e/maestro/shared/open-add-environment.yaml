@@ -1,0 +1,34 @@
+# Reusable subflow: home → Settings → Environments → + → Add Environment form.
+#
+# Leaves the app on the Add Environment screen with the Host / Pairing code
+# fields visible. Callers (pairing, and any flow that needs a fresh environment)
+# compose this with `runFlow` so the navigation lives in one place.
+#
+# Native toolbar buttons (gear, +) are Liquid Glass controls whose accessibility
+# text is the SF Symbol name ("gearshape", "add"); Maestro matches them by that
+# text. The Settings sheet rows are combined accessibility elements, so a
+# substring match ("Environments") selects the row.
+appId: com.katacode.dev
+---
+- extendedWaitUntil:
+    visible: "Kata Code"
+    timeout: 90000
+- tapOn:
+    text: "gearshape"
+# Wait for the Settings sheet to finish its present-animation before tapping a
+# row, so the tap is not dropped. "Configuration" is a standalone section label.
+- extendedWaitUntil:
+    visible: "Configuration"
+    timeout: 10000
+# The Environments row is one combined accessibility element
+# ("Computer, Environments, 1, Forward"); an anchored regex selects it reliably.
+- tapOn:
+    text: ".*Environments.*"
+- extendedWaitUntil:
+    visible: "add"
+    timeout: 10000
+- tapOn:
+    text: "add"
+- extendedWaitUntil:
+    visible: "Add Environment"
+    timeout: 10000
