@@ -125,6 +125,13 @@ describe("makePiAdapter (vertical slice)", () => {
         type: "message_update",
         assistantMessageEvent: { type: "text_delta", delta: "Hi" },
       } as PiSdkSessionEvent);
+
+      // Emit SDK terminal events (turn_end, agent_end) before prompt resolves.
+      // These must NOT produce duplicate turn.completed or item.completed
+      // events — settleTurn is the sole settlement owner.
+      hooks.emit?.({ type: "turn_end", message: null, toolResults: [] } as never);
+      hooks.emit?.({ type: "agent_end", messages: [], willRetry: false } as never);
+
       hooks.resolvePrompt();
       yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
 
@@ -136,9 +143,14 @@ describe("makePiAdapter (vertical slice)", () => {
           "turn.started",
           "item.started",
           "content.delta",
+          "item.completed",
           "turn.completed",
         ]),
       );
+      // B1: exactly one turn.completed and one item.completed — not duplicated
+      // by SDK turn_end/agent_end events.
+      expect(types.filter((t) => t === "turn.completed")).toHaveLength(1);
+      expect(types.filter((t) => t === "item.completed")).toHaveLength(1);
       const delta = recorder.events.find(
         (event) => event.type === "content.delta" && event.payload.streamKind === "assistant_text",
       );
@@ -171,6 +183,42 @@ describe("makePiAdapter (vertical slice)", () => {
       const types = recorder.events.map((event) => event.type);
       expect(types).toContain("turn.aborted");
       expect(types).not.toContain("turn.completed");
+      // B2: item.completed must close the orphaned item.started
+      expect(types).toContain("item.completed");
+      const itemCompleted = recorder.events.find((event) => event.type === "item.completed");
+      expect((itemCompleted?.payload as { readonly status?: string })?.status).toBe("failed");
+    }),
+  );
+
+  it.effect("emits item.completed with failed status on a failed turn", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-fail");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+      yield* adapter.sendTurn({ threadId, input: "broken" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+      hooks.rejectPrompt(new Error("API rate limit exceeded"));
+      yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
+
+      const types = recorder.events.map((event) => event.type);
+      expect(types).toContain("turn.completed");
+      expect(types).toContain("item.completed");
+      const turnCompleted = recorder.events.find((event) => event.type === "turn.completed");
+      expect((turnCompleted?.payload as { readonly state?: string })?.state).toBe("failed");
+      const itemCompleted = recorder.events.find((event) => event.type === "item.completed");
+      expect((itemCompleted?.payload as { readonly status?: string })?.status).toBe("failed");
     }),
   );
 
@@ -195,6 +243,39 @@ describe("makePiAdapter (vertical slice)", () => {
       yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "session.exited"));
 
       expect(recorder.events.some((event) => event.type === "session.exited")).toBe(true);
+    }),
+  );
+
+  it.effect("does not emit stale turn events when stopped during streaming", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-stop-streaming");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+      yield* adapter.sendTurn({ threadId, input: "long running" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+
+      // R1+R2: stopSession during streaming aborts the turn, but the stopped
+      // flag prevents the turn fiber from publishing stale settlement events
+      // after session.exited.
+      yield* adapter.stopSession(threadId);
+
+      // session.exited is published synchronously within stopSession.
+      const types = recorder.events.map((event) => event.type);
+      expect(types).toContain("session.exited");
+      expect(types).not.toContain("turn.aborted");
+      expect(types).not.toContain("turn.completed");
     }),
   );
 

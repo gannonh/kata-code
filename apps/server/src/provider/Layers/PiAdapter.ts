@@ -33,6 +33,7 @@ import {
 } from "@kata-sh/code-contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import type * as Fiber from "effect/Fiber";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 
@@ -70,7 +71,7 @@ interface PiSessionContext {
   readonly sdk: PiSdkSession;
   unsubscribe: () => void;
   activeTurnId: TurnId | undefined;
-  turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  turnFiber: Fiber.Fiber<void, never> | undefined;
   stopped: boolean;
 }
 
@@ -112,13 +113,10 @@ export function makePiAdapter(
       createdAt: DateTime.formatIso(DateTime.nowUnsafe()),
     });
 
-    const makeEvent = (
+    const makeEvent = <E extends ProviderRuntimeEvent>(
       threadId: ThreadId,
-      partial: Omit<
-        ProviderRuntimeEvent,
-        "eventId" | "createdAt" | "provider" | "providerInstanceId" | "threadId"
-      >,
-    ): ProviderRuntimeEvent => {
+      partial: Omit<E, "eventId" | "createdAt" | "provider" | "providerInstanceId" | "threadId">,
+    ): E => {
       const event: Record<string, unknown> = {
         ...partial,
         ...stampSync(),
@@ -128,10 +126,10 @@ export function makePiAdapter(
       };
       // exactOptionalPropertyTypes: optional branded fields must be absent,
       // not explicitly undefined.
-      for (const key of ["turnId", "itemId", "requestId", "raw"]) {
+      for (const key of ["turnId", "itemId", "requestId", "raw"] as const) {
         if (event[key] === undefined) delete event[key];
       }
-      return event as unknown as ProviderRuntimeEvent;
+      return event as E;
     };
 
     const publish = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
@@ -183,42 +181,24 @@ export function makePiAdapter(
           ];
         }
       }
-      if (event.type === "turn_end" || event.type === "agent_end") {
-        return [
-          makeEvent(ctx.threadId, {
-            type: "item.completed",
-            turnId,
-            itemId: RuntimeItemId.make(`${turnId ?? ctx.threadId}:assistant`),
-            payload: { itemType: "assistant_message", status: "completed" },
-          }),
-          makeEvent(ctx.threadId, {
-            type: "turn.completed",
-            turnId,
-            payload: { state: "completed" },
-          }),
-        ];
-      }
+      // Turn and item settlement are owned solely by settleTurn (called when
+      // prompt() resolves/rejects). SDK turn_end/agent_end events are not
+      // mapped here to avoid duplicate turn.completed emissions.
       return [];
     };
+
+    const availableModels = (options?.availableModels ??
+      (modelRegistry.getAvailable() as ReadonlyArray<PiModelShape>)) as ReadonlyArray<PiModelShape>;
 
     const resolveModel = (
       modelSelection: ProviderSessionStartInput["modelSelection"],
     ): PiModelShape | undefined => {
-      const override = options?.availableModels;
       const slug = modelSelection?.model;
       if (slug) {
         const slash = slug.indexOf("/");
-        if (slash > 0) {
-          if (override) {
-            return override.find((model) => piModelSlug(model) === slug);
-          }
-          return modelRegistry.find(slug.slice(0, slash), slug.slice(slash + 1)) as
-            | PiModelShape
-            | undefined;
-        }
+        if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
       }
-      if (override) return override[0];
-      return (modelRegistry.getAvailable() as ReadonlyArray<PiModelShape>)[0];
+      return availableModels[0];
     };
 
     const resolveThinkingLevel = (
@@ -234,7 +214,16 @@ export function makePiAdapter(
       outcome: TurnOutcome,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
+        const itemId = RuntimeItemId.make(`${turnId}:assistant`);
         if (outcome.state === "aborted") {
+          yield* publish(
+            makeEvent(threadId, {
+              type: "item.completed",
+              turnId,
+              itemId,
+              payload: { itemType: "assistant_message", status: "failed" },
+            }),
+          );
           yield* publish(
             makeEvent(threadId, {
               type: "turn.aborted",
@@ -244,6 +233,17 @@ export function makePiAdapter(
           );
           return;
         }
+        yield* publish(
+          makeEvent(threadId, {
+            type: "item.completed",
+            turnId,
+            itemId,
+            payload: {
+              itemType: "assistant_message",
+              status: outcome.state === "failed" ? "failed" : "completed",
+            },
+          }),
+        );
         yield* publish(
           makeEvent(threadId, {
             type: "turn.completed",
@@ -258,18 +258,34 @@ export function makePiAdapter(
 
     /**
      * Tear down a session's SDK resources without publishing a lifecycle
-     * event. Used both by {@link stopSession} (which adds the
-     * `session.exited` event) and by {@link startSession} when restarting an
-     * existing thread (model switch), where a synthetic exit would confuse
-     * the UI.
+     * event. Aborts an in-flight turn before disposing so the SDK stops
+     * cleanly. The `stopped` flag prevents the detached turn fiber from
+     * publishing stale settlement events after teardown.
+     *
+     * Used both by {@link stopSession} (which adds the `session.exited`
+     * event) and by {@link startSession} when restarting an existing thread
+     * (model switch), where a synthetic exit would confuse the UI.
      */
-    const teardownSession = (ctx: PiSessionContext) => {
-      ctx.unsubscribe();
-      ctx.sdk.dispose();
-      ctx.stopped = true;
-      ctx.activeTurnId = undefined;
-      sessions.delete(ctx.threadId);
-    };
+    const teardownSession = (ctx: PiSessionContext): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        ctx.stopped = true;
+        if (ctx.activeTurnId && ctx.sdk.isStreaming) {
+          // Abort the in-flight turn. Errors during teardown are non-fatal —
+          // the stopped flag prevents stale settlement events from the
+          // detached turn fiber.
+          yield* Effect.promise(() =>
+            ctx.sdk.abort().then(
+              () => {},
+              () => {},
+            ),
+          );
+        }
+        ctx.unsubscribe();
+        ctx.sdk.dispose();
+        ctx.activeTurnId = undefined;
+        ctx.turnFiber = undefined;
+        sessions.delete(ctx.threadId);
+      });
 
     const startSession = (input: ProviderSessionStartInput) =>
       Effect.gen(function* () {
@@ -278,19 +294,7 @@ export function makePiAdapter(
         // creation, so restart it rather than rejecting the request.
         const existing = sessions.get(input.threadId);
         if (existing) {
-          if (existing.activeTurnId && existing.sdk.isStreaming) {
-            yield* Effect.tryPromise({
-              try: () => existing.sdk.abort(),
-              catch: (cause) =>
-                new ProviderAdapterRequestError({
-                  provider: PROVIDER,
-                  method: "startSession",
-                  detail: `Failed to stop the active Pi turn before restart: ${cause instanceof Error ? cause.message : String(cause)}.`,
-                  cause,
-                }),
-            });
-          }
-          teardownSession(existing);
+          yield* teardownSession(existing);
         }
 
         const cwd = input.cwd?.trim() || process.cwd();
@@ -347,7 +351,7 @@ export function makePiAdapter(
           sdk: created.session as unknown as PiSdkSession,
           unsubscribe: () => {},
           activeTurnId: undefined,
-          turns: [],
+          turnFiber: undefined,
           stopped: false,
         };
         ctx.unsubscribe = created.session.subscribe((event) => {
@@ -382,7 +386,6 @@ export function makePiAdapter(
         const text = input.input?.trim() ?? "";
         const turnId = TurnId.make(randomUUID());
         ctx.activeTurnId = turnId;
-        ctx.turns.push({ id: turnId, items: [] });
 
         yield* publish(
           makeEvent(input.threadId, {
@@ -402,7 +405,8 @@ export function makePiAdapter(
 
         // Drive the prompt on a detached fiber so sendTurn returns the turn id
         // immediately while content streams. Settlement (completed / failed /
-        // aborted) is emitted when the prompt resolves.
+        // aborted) is emitted when the prompt resolves. The `ctx.stopped` flag
+        // is checked before settling so teardown doesn't produce stale events.
         const turnRunner = Effect.tryPromise({
           try: () => ctx.sdk.prompt(text),
           catch: (cause) =>
@@ -415,6 +419,7 @@ export function makePiAdapter(
         }).pipe(
           Effect.matchEffect({
             onFailure: (cause) => {
+              if (ctx.stopped) return Effect.void;
               const classification = classifyPiTurnFailure(cause);
               return classification.kind === "interrupted"
                 ? settleTurn(input.threadId, turnId, {
@@ -426,11 +431,14 @@ export function makePiAdapter(
                     reason: classification.reason,
                   });
             },
-            onSuccess: () => settleTurn(input.threadId, turnId, { state: "completed" }),
+            onSuccess: () => {
+              if (ctx.stopped) return Effect.void;
+              return settleTurn(input.threadId, turnId, { state: "completed" });
+            },
           }),
           Effect.asVoid,
         );
-        Effect.runFork(turnRunner);
+        ctx.turnFiber = Effect.runFork(turnRunner);
 
         return { threadId: input.threadId, turnId } satisfies ProviderTurnStartResult;
       });
@@ -454,7 +462,7 @@ export function makePiAdapter(
       Effect.gen(function* () {
         const ctx = sessions.get(threadId);
         if (!ctx) return;
-        teardownSession(ctx);
+        yield* teardownSession(ctx);
         yield* publish(
           makeEvent(threadId, {
             type: "session.exited",
@@ -490,11 +498,11 @@ export function makePiAdapter(
       hasSession: (threadId: ThreadId) => Effect.succeed(sessions.has(threadId)),
       readThread: (threadId: ThreadId) =>
         Effect.gen(function* () {
-          const ctx = yield* requireSession(threadId);
-          return {
-            threadId,
-            turns: ctx.turns.map((turn) => ({ id: turn.id, items: turn.items })),
-          };
+          yield* requireSession(threadId);
+          // Vertical slice: thread history is not yet tracked. Tool lifecycle
+          // and full readThread support are layered on after the driver is
+          // wired end-to-end.
+          return { threadId, turns: [] };
         }),
       rollbackThread: () =>
         Effect.fail(
