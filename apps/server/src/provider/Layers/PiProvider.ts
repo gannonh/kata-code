@@ -23,7 +23,6 @@ import {
   type PromptTemplate,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
-import type { Model } from "@earendil-works/pi-ai";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -71,6 +70,20 @@ const PI_THINKING_LEVEL_LABELS: Readonly<Record<PiThinkingLevel, string>> = {
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
 
+/**
+ * Structural view of a Pi SDK model. The real `Model<Api>` from
+ * `@earendil-works/pi-ai` is generic over its API transport; we only need the
+ * routing/identity/thinking fields here, so this narrow shape avoids leaking
+ * the transport generic across the adapter boundary.
+ */
+export interface PiModelShape {
+  readonly id: string;
+  readonly name: string;
+  readonly provider: string;
+  readonly reasoning: boolean;
+  readonly thinkingLevelMap?: Record<string, string | null>;
+}
+
 export interface PiDiscoveryInput {
   readonly agentDir: string;
   readonly binaryPath: string;
@@ -92,7 +105,7 @@ export interface PiDiscoveryResult {
  * Pi model slugs are provider-qualified (`provider/model`) so the model
  * picker can disambiguate models that share an id across providers.
  */
-export function piModelSlug(model: Pick<Model, "provider" | "id">): string {
+export function piModelSlug(model: Pick<PiModelShape, "provider" | "id">): string {
   return `${model.provider}/${model.id}`;
 }
 
@@ -103,14 +116,14 @@ export function piModelSlug(model: Pick<Model, "provider" | "id">): string {
  * always available — it simply disables thinking.
  */
 function isThinkingLevelSupported(
-  model: Pick<Model, "reasoning" | "thinkingLevelMap">,
+  model: Pick<PiModelShape, "reasoning" | "thinkingLevelMap">,
   level: PiThinkingLevel,
 ): boolean {
   if (level === "off") return true;
   if (!model.reasoning) return false;
   const map = model.thinkingLevelMap;
   if (!map) return true;
-  const mapped = (map as Record<string, string | null>)[level];
+  const mapped = map[level];
   return mapped === undefined ? true : mapped !== null;
 }
 
@@ -120,7 +133,7 @@ function isThinkingLevelSupported(
  * model. See acceptance criterion 4.
  */
 export function piModelCapabilities(
-  model: Pick<Model, "reasoning" | "thinkingLevelMap">,
+  model: Pick<PiModelShape, "reasoning" | "thinkingLevelMap">,
 ): ModelCapabilities {
   const supported = PI_THINKING_LEVELS.filter((level) => isThinkingLevelSupported(model, level));
   if (supported.length <= 1) {
@@ -146,7 +159,7 @@ export function piModelCapabilities(
  * discovery layer, so the picker never offers a model the user cannot run.
  */
 export function mapPiModels(
-  models: ReadonlyArray<Model>,
+  models: ReadonlyArray<PiModelShape>,
   customModels: ReadonlyArray<string>,
 ): ReadonlyArray<ServerProviderModel> {
   const discovered: ServerProviderModel[] = models.map((model) => ({
@@ -169,32 +182,26 @@ export function mapPiModels(
 }
 
 export function mapPiSkills(skills: ReadonlyArray<Skill>): ReadonlyArray<ServerProviderSkill> {
-  return skills.map((skill) => {
-    const mapped: ServerProviderSkill = {
-      name: skill.name,
-      path: skill.filePath,
-      enabled: true,
-    };
-    if (skill.description) mapped.description = skill.description;
-    if (skill.source) mapped.scope = skill.source;
-    return mapped;
-  });
+  return skills.map((skill) => ({
+    name: skill.name,
+    path: skill.filePath,
+    enabled: !skill.disableModelInvocation,
+    ...(skill.description ? { description: skill.description } : {}),
+  }));
 }
 
 export function mapPiSlashCommands(
   prompts: ReadonlyArray<PromptTemplate>,
 ): ReadonlyArray<ServerProviderSlashCommand> {
-  return prompts
-    .filter((prompt) => prompt.name.startsWith("/"))
-    .map((prompt) => {
-      const name = prompt.name.replace(/^\//, "");
-      const command: ServerProviderSlashCommand = {
-        name,
-        input: { hint: "Message" },
-      };
-      if (prompt.description) command.description = prompt.description;
-      return command;
-    });
+  return prompts.map((prompt) => {
+    const name = prompt.name.replace(/^\//, "");
+    const hint = prompt.argumentHint?.trim();
+    return {
+      name,
+      input: { hint: hint && hint.length > 0 ? hint : "Message" },
+      ...(prompt.description ? { description: prompt.description } : {}),
+    };
+  });
 }
 
 /** Resolve the effective agent directory, expanding `~` and falling back to the SDK default. */
@@ -206,26 +213,22 @@ export function resolvePiAgentDir(agentDir: string): string {
 const probePiVersion = (
   binaryPath: string,
   environment: NodeJS.ProcessEnv,
-): Effect.Effect<string | null, unknown, ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<string | null, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const command = binaryPath || "pi";
     const spawnCommand = yield* resolveSpawnCommand(command, ["--version"], {
       env: environment,
     });
-    return yield* spawnAndCollect(
+    const result = yield* spawnAndCollect(
       command,
       ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         env: environment,
         shell: spawnCommand.shell,
       }),
-    ).pipe(
-      Effect.timeout(Duration.millis(VERSION_PROBE_TIMEOUT_MS)),
-      Effect.flatMap((result) =>
-        Effect.succeed(parseGenericCliVersion(`${result.stdout}\n${result.stderr}`)),
-      ),
-      Effect.catchAll(() => Effect.succeed<string | null>(null)),
-    );
-  });
+    ).pipe(Effect.timeoutOption(Duration.millis(VERSION_PROBE_TIMEOUT_MS)));
+    if (Option.isNone(result)) return null;
+    return parseGenericCliVersion(`${result.value.stdout}\n${result.value.stderr}`);
+  }).pipe(Effect.catchCause(() => Effect.succeed<string | null>(null)));
 
 /**
  * Real SDK discovery: CLI version probe + `ModelRegistry.getAvailable()` for
@@ -241,9 +244,7 @@ export const discoverPiProvider = Effect.fn("discoverPiProvider")(function* (inp
   readonly environment?: NodeJS.ProcessEnv;
 }): Effect.fn.Return<PiDiscoveryResult, never, ChildProcessSpawner.ChildProcessSpawner> {
   const environment = input.environment ?? process.env;
-  const version = yield* probePiVersion(input.binaryPath, environment).pipe(
-    Effect.catchAll(() => Effect.succeed<string | null>(null)),
-  );
+  const version = yield* probePiVersion(input.binaryPath, environment);
 
   const raw = yield* Effect.promise(async () => {
     const authStorage = input.agentDir
@@ -259,16 +260,19 @@ export const discoverPiProvider = Effect.fn("discoverPiProvider")(function* (inp
     });
     await loader.reload();
 
+    const skillsResult = loader.getSkills();
+    const promptsResult = loader.getPrompts();
+
     return {
       models: modelRegistry.getAvailable(),
-      skills: loader.getSkills(),
-      prompts: loader.getPrompts(),
+      skills: skillsResult.skills,
+      prompts: promptsResult.prompts,
     };
   });
 
   return {
     version,
-    models: mapPiModels(raw.models as ReadonlyArray<Model>, input.customModels),
+    models: mapPiModels(raw.models as ReadonlyArray<PiModelShape>, input.customModels),
     skills: mapPiSkills(raw.skills as ReadonlyArray<Skill>),
     slashCommands: mapPiSlashCommands(raw.prompts as ReadonlyArray<PromptTemplate>),
   };

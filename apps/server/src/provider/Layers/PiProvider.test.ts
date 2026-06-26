@@ -3,7 +3,6 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { PiSettings, type ServerProviderModel } from "@kata-sh/code-contracts";
-import type { Model } from "@earendil-works/pi-ai";
 
 import {
   checkPiProviderStatus,
@@ -13,20 +12,19 @@ import {
   mapPiSkills,
   piModelCapabilities,
   piModelSlug,
+  type PiModelShape,
 } from "./PiProvider.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
 const enabledSettings = decodePiSettings({});
 
-const sampleModel = (): Model =>
-  ({
-    id: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
-    provider: "anthropic",
-    reasoning: true,
-    thinkingLevelMap: { xhigh: "max" },
-    input: ["text", "image"],
-  }) as unknown as Model;
+const sampleModel = (): PiModelShape => ({
+  id: "claude-opus-4-6",
+  name: "Claude Opus 4.6",
+  provider: "anthropic",
+  reasoning: true,
+  thinkingLevelMap: { xhigh: "max" },
+});
 
 describe("PiProvider mappers", () => {
   it("qualifies pi model slugs as provider/model", () => {
@@ -55,15 +53,16 @@ describe("PiProvider mappers", () => {
   it("surfaces exactly the SDK-supported thinking levels, defaulting to off", () => {
     const caps = piModelCapabilities(sampleModel());
     const descriptor = caps.optionDescriptors?.[0];
-    expect(descriptor?.id).toBe("thinkingLevel");
+    expect(descriptor?.type).toBe("select");
+    if (descriptor?.type !== "select") return;
     // xhigh maps to "max" (supported); all other levels fall back to defaults.
-    const ids = descriptor?.options.map((o) => o.id);
+    const ids = descriptor.options.map((o) => o.id);
     expect(ids).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
-    expect(descriptor?.options.find((o) => o.isDefault)?.id).toBe("off");
+    expect(descriptor.options.find((o) => o.isDefault)?.id).toBe("off");
   });
 
   it("omits the thinking descriptor for non-reasoning models", () => {
-    const caps = piModelCapabilities({ reasoning: false, thinkingLevelMap: undefined });
+    const caps = piModelCapabilities({ reasoning: false });
     expect(caps.optionDescriptors ?? []).toEqual([]);
   });
 
@@ -73,18 +72,26 @@ describe("PiProvider mappers", () => {
         name: "librarian",
         description: "Research libraries",
         filePath: "/skills/librarian/SKILL.md",
-        source: "global",
+        baseDir: "/skills/librarian",
+        sourceInfo: { source: "local", scope: "user", baseDir: "/skills/librarian" },
+        disableModelInvocation: false,
       } as never,
     ]);
     expect(skills[0]).toMatchObject({
       name: "librarian",
       path: "/skills/librarian/SKILL.md",
       enabled: true,
-      scope: "global",
+      description: "Research libraries",
     });
 
     const commands = mapPiSlashCommands([
-      { name: "/deploy", description: "Deploy the app", source: "(custom)", content: "" } as never,
+      {
+        name: "deploy",
+        description: "Deploy the app",
+        content: "",
+        filePath: "/p/deploy.md",
+        sourceInfo: { source: "local" },
+      } as never,
     ]);
     expect(commands[0]).toMatchObject({ name: "deploy", description: "Deploy the app" });
   });
