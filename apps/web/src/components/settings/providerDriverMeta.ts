@@ -40,6 +40,7 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     value: ProviderDriverKind.make("pi"),
     label: "Pi",
     icon: PiIcon,
+    badgeLabel: "Early Access",
     settingsSchema: PiSettings,
   },
   {
