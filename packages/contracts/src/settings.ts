@@ -388,7 +388,7 @@ export const PiSettings = makeProviderSettingsSchema(
         title: "Project trust policy",
         description:
           "Controls whether project-local .pi resources and project .agents/skills are loaded. 'never' (default) ignores them; 'always' loads them.",
-        providerSettingsForm: { clearWhenEmpty: "omit" },
+        providerSettingsForm: { hidden: true },
       }),
     ),
     customModels: Schema.Array(Schema.String).pipe(

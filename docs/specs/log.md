@@ -1,5 +1,12 @@
 # Specs log
 
+## 2026-06-26 (Pi provider — strict quality review fixes)
+
+- Fixed blockers from strict quality review: duplicate `turn.completed` emissions (single settlement owner in `settleTurn`), orphaned `item.started` on abort/fail (item closure on all exit paths).
+- Fixed high-priority issues: `stopSession` abort-before-dispose asymmetry (centralized in `teardownSession`), unsupervised turn fiber (tracked on context, `stopped` flag guards stale events), `projectTrustPolicy` dead config hidden from settings UI, `withInstanceIdentity` duplication extracted to shared `stampProviderInstanceIdentity` across all 6 drivers.
+- Fixed medium-priority issues: `makeEvent` generic type safety, `resolveModel` test-override branching eliminated, dead `turns` state removed from `readThread`.
+- Added [Pi provider strict quality review follow-ups](/specs/deferred-work.md) deferred-work entry (issue [#14](https://github.com/gannonh/kata-code/issues/14)).
+
 ## 2026-06-26 (Pi provider — vertical slice + branch doc sweep)
 
 - Recorded the [Pi provider build progress](/specs/2026-06-25-pi-coding-agent-support-design.md#build-progress): vertical slice landed (snapshot discovery, session start/send/stream/interrupt/stop, driver registration, gated `@pi` e2e green), plus post-slice fixes (pi.dev logo, provider ordering, Early Access badge, model-switch session restart, error banner layout).
