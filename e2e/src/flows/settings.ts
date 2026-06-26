@@ -30,6 +30,14 @@ export async function openSettings(page: Page): Promise<void> {
   await themePreference.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.authMs });
 }
 
+export async function openProviderSettings(page: Page): Promise<void> {
+  await openSettings(page);
+  await page.getByRole("button", { name: "Providers" }).click();
+  await expect(page.getByRole("heading", { name: "Providers" })).toBeVisible({
+    timeout: E2E_TIMEOUTS.authMs,
+  });
+}
+
 export async function setTheme(page: Page, theme: ThemePreference): Promise<void> {
   await dismissBlockingToasts(page);
   const trigger = page.getByLabel("Theme preference");
