@@ -4,14 +4,14 @@ title: "Pi coding agent provider support"
 description: "Design for adding Pi as a first-party Kata Code provider using a Kata-native driver while using Synara as a reference implementation."
 tags: [providers, pi, agent-runtime, sdk]
 timestamp: 2026-06-25T00:00:00Z
-status: Draft
+status: Approved
 ---
 
 # Pi coding agent provider support
 
 ## Status
 
-Draft
+Approved
 
 ## Goal
 
