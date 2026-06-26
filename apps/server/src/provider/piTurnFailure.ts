@@ -16,13 +16,7 @@ export interface PiTurnFailureClassification {
   readonly reason: string;
 }
 
-const INTERRUPTED_MARKERS = [
-  "aborted",
-  "abort",
-  "interrupted",
-  "the operation was aborted",
-  "this operation was aborted",
-] as const;
+const INTERRUPTED_MARKERS = ["abort", "interrupted"] as const;
 
 function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;

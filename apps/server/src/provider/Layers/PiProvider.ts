@@ -211,7 +211,7 @@ export function mapPiSlashCommands(
     const hint = prompt.argumentHint?.trim();
     return {
       name,
-      input: { hint: hint && hint.length > 0 ? hint : "Message" },
+      input: { hint: hint || "Message" },
       ...(prompt.description ? { description: prompt.description } : {}),
     };
   });
@@ -221,6 +221,22 @@ export function mapPiSlashCommands(
 export function resolvePiAgentDir(agentDir: string): string {
   const trimmed = agentDir.trim();
   return trimmed.length > 0 ? expandHomePath(trimmed) : getAgentDir();
+}
+
+/**
+ * Build the Pi SDK auth + model registries for an agent directory. When
+ * `agentDir` is empty the SDK default locations are used. Shared by the
+ * discovery layer and the live adapter so both resolve registries identically.
+ */
+export function createPiRegistries(agentDir: string): {
+  readonly authStorage: AuthStorage;
+  readonly modelRegistry: ModelRegistry;
+} {
+  const authStorage = agentDir ? AuthStorage.create(`${agentDir}/auth.json`) : AuthStorage.create();
+  const modelRegistry = agentDir
+    ? ModelRegistry.create(authStorage, `${agentDir}/models.json`)
+    : ModelRegistry.create(authStorage);
+  return { authStorage, modelRegistry };
 }
 
 const probePiVersion = (
@@ -260,12 +276,7 @@ export const discoverPiProvider = Effect.fn("discoverPiProvider")(function* (inp
   const version = yield* probePiVersion(input.binaryPath, environment);
 
   const raw = yield* Effect.promise(async () => {
-    const authStorage = input.agentDir
-      ? AuthStorage.create(`${input.agentDir}/auth.json`)
-      : AuthStorage.create();
-    const modelRegistry = input.agentDir
-      ? ModelRegistry.create(authStorage, `${input.agentDir}/models.json`)
-      : ModelRegistry.create(authStorage);
+    const { modelRegistry } = createPiRegistries(input.agentDir);
 
     const loader = new DefaultResourceLoader({
       cwd: input.cwd,

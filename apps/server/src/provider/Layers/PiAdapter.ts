@@ -14,9 +14,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type AgentSessionEvent,
-  AuthStorage,
   createAgentSession,
-  ModelRegistry,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -46,7 +44,12 @@ import {
 } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { classifyPiTurnFailure } from "../piTurnFailure.ts";
-import { type PiModelShape, resolvePiAgentDir } from "./PiProvider.ts";
+import {
+  type PiModelShape,
+  createPiRegistries,
+  piModelSlug,
+  resolvePiAgentDir,
+} from "./PiProvider.ts";
 
 const PROVIDER = ProviderDriverKind.make("pi");
 
@@ -102,12 +105,7 @@ export function makePiAdapter(
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const agentDir = resolvePiAgentDir(piSettings.agentDir);
-    const authStorage = agentDir
-      ? AuthStorage.create(`${agentDir}/auth.json`)
-      : AuthStorage.create();
-    const modelRegistry = agentDir
-      ? ModelRegistry.create(authStorage, `${agentDir}/models.json`)
-      : ModelRegistry.create(authStorage);
+    const { authStorage, modelRegistry } = createPiRegistries(agentDir);
 
     const stampSync = () => ({
       eventId: EventId.make(randomUUID()),
@@ -212,7 +210,7 @@ export function makePiAdapter(
         const slash = slug.indexOf("/");
         if (slash > 0) {
           if (override) {
-            return override.find((model) => `${model.provider}/${model.id}` === slug);
+            return override.find((model) => piModelSlug(model) === slug);
           }
           return modelRegistry.find(slug.slice(0, slash), slug.slice(slash + 1)) as
             | PiModelShape
