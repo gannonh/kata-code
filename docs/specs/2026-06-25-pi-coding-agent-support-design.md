@@ -347,6 +347,29 @@ Run the app locally with a Pi-authenticated environment:
 - `vp run release:smoke` before push or CI parity review
 - `KATACODE_E2E_ENABLE_PI=1 KATACODE_E2E_PI_AGENT_DIR=<path> KATACODE_E2E_PI_MODEL=<model> vp run e2e --project desktop-dev --grep @pi` for credentialed Pi E2E smoke
 
+## Build progress
+
+2026-06-26 vertical slice completed:
+
+- Contracts/settings/web metadata: `PiSettings`, `providers.pi`, Pi display/model metadata, and `pi.sdk.event` raw event source are implemented.
+- Snapshot discovery: Pi SDK-backed model, skill, and slash-command discovery is implemented with tests for SDK failure, missing CLI binary with authenticated models, no authenticated models, and authenticated models with skills/commands.
+- Driver shell: `PiDriver` is registered in `BUILT_IN_DRIVERS`; settings hydration synthesizes the default `providerInstances.pi`; custom Pi provider instances can be added from the settings UI.
+- Adapter slice: Pi sessions support start, send turn, assistant/reasoning deltas, interrupt, stop, list/read basic thread state, and typed errors for unsupported rollback, approvals, UI bridge, and compaction paths.
+- Text generation: Pi currently returns typed `TextGenerationError` for all git text-generation operations. Full parity remains required by acceptance criterion 11.
+- E2E coverage: `e2e/tests/settings/pi-provider.spec.ts` verifies Pi is an enabled first-party provider option and a custom Pi instance can be added.
+
+Verified commands during this slice:
+
+- `npx vp test apps/server/src/provider/Layers/PiAdapter.test.ts apps/server/src/provider/Layers/PiProvider.test.ts apps/server/src/provider/Layers/ProviderInstanceRegistryHydration.test.ts` - passed, 16 tests.
+- `npx vp run --filter @kata-sh/code-cli typecheck` - passed, Effect diagnostics suggestions only.
+- `npx playwright test --config e2e/playwright.config.ts --project desktop-dev --grep "Pi provider"` - passed, 3 tests.
+
+Remaining acceptance work:
+
+- Full tool lifecycle, image attachments, resume cursor, rollback, compaction, extension UI bridge, runtime mode mapping, project trust controls, and Pi text-generation parity.
+- Credential-gated Pi smoke E2E with `@pi` and `KATACODE_E2E_ENABLE_PI`, `KATACODE_E2E_PI_AGENT_DIR`, `KATACODE_E2E_PI_MODEL` gates.
+- Manual Pi-authenticated validation for real model selection, streaming prompt output, interrupt, and stop.
+
 ## Implementation phases
 
 1. **Contracts and metadata**
