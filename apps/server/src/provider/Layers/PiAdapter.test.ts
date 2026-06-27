@@ -624,62 +624,96 @@ describe("makePiAdapter (vertical slice)", () => {
       }),
   );
 
-  it.effect("compactThread calls session.compact and emits compaction lifecycle events", () =>
-    Effect.gen(function* () {
-      const recorder = makeEventRecorder();
-      const { session, hooks } = makeFakeSession({
-        // The real SDK emits compaction_start/compaction_end through the
-        // subscribed listener while compact() is in flight. The fake mirrors
-        // that by emitting both events before resolving the compact promise.
-        compact: () => {
-          hooks.emit?.({ type: "compaction_start", reason: "manual" } as PiSdkSessionEvent);
-          hooks.emit?.({
-            type: "compaction_end",
-            reason: "manual",
-            result: undefined,
-            aborted: false,
-            willRetry: false,
-          } as PiSdkSessionEvent);
-          return Promise.resolve();
-        },
-      });
-      const adapter = yield* makePiAdapter(decodePiSettings({}), {
-        instanceId: ProviderInstanceId.make("pi"),
-        availableModels: [SAMPLE_MODEL],
-        createSession: (() => Promise.resolve({ session })) as never,
-        onEvent: recorder.onEvent,
-      });
+  it.effect(
+    "compactThread calls session.compact and emits compaction lifecycle via thread.state.changed",
+    () =>
+      Effect.gen(function* () {
+        const recorder = makeEventRecorder();
+        const { session, hooks } = makeFakeSession({
+          // The real SDK emits compaction_start/compaction_end through the
+          // subscribed listener while compact() is in flight. The fake mirrors
+          // that by emitting both events before resolving the compact promise.
+          compact: () => {
+            hooks.emit?.({ type: "compaction_start", reason: "manual" } as PiSdkSessionEvent);
+            hooks.emit?.({
+              type: "compaction_end",
+              reason: "manual",
+              result: undefined,
+              aborted: false,
+              willRetry: false,
+            } as PiSdkSessionEvent);
+            return Promise.resolve();
+          },
+        });
+        const adapter = yield* makePiAdapter(decodePiSettings({}), {
+          instanceId: ProviderInstanceId.make("pi"),
+          availableModels: [SAMPLE_MODEL],
+          createSession: (() => Promise.resolve({ session })) as never,
+          onEvent: recorder.onEvent,
+        });
 
-      const threadId = ThreadId.make("pi-thread-compact");
-      yield* adapter.startSession({
-        threadId,
-        runtimeMode: "full-access",
-        modelSelection: MODEL_SELECTION,
-      });
+        const threadId = ThreadId.make("pi-thread-compact");
+        yield* adapter.startSession({
+          threadId,
+          runtimeMode: "full-access",
+          modelSelection: MODEL_SELECTION,
+        });
 
-      // compactThread awaits session.compact(); the fake emits the compaction
-      // events synchronously inside compact, so by the time compactThread
-      // resolves both lifecycle items have been published.
-      yield* adapter.compactThread(threadId);
+        // compactThread awaits session.compact(); the fake emits the compaction
+        // events synchronously inside compact, so by the time compactThread
+        // resolves both thread.state.changed events have been published.
+        yield* adapter.compactThread(threadId);
 
-      expect(hooks.compactCalls).toBe(1);
+        expect(hooks.compactCalls).toBe(1);
 
-      const updated = recorder.events.find(
-        (event) => event.type === "item.updated" && event.payload.itemType === "context_compaction",
-      );
-      expect(updated).toBeDefined();
-      expect((updated?.payload as { status?: string })?.status).toBe("inProgress");
-      expect((updated?.payload as { title?: string })?.title).toBe("Compacting context");
-      expect((updated?.raw as { source?: string })?.source).toBe("pi.sdk.event");
+        // compaction_start -> thread.state.changed with state "active" and a
+        // human-readable detail. This signals the thread is actively
+        // compacting without producing an unpaired item lifecycle.
+        const activeStateChanged = recorder.events.find(
+          (event) => event.type === "thread.state.changed" && event.payload.state === "active",
+        );
+        expect(activeStateChanged).toBeDefined();
+        expect((activeStateChanged?.payload as { detail?: unknown })?.detail).toBe(
+          "Compacting context",
+        );
+        expect((activeStateChanged?.raw as { source?: string })?.source).toBe("pi.sdk.event");
 
-      const completed = recorder.events.find(
-        (event) =>
-          event.type === "item.completed" && event.payload.itemType === "context_compaction",
-      );
-      expect(completed).toBeDefined();
-      expect((completed?.payload as { status?: string })?.status).toBe("completed");
-      expect((completed?.payload as { title?: string })?.title).toBe("Context compacted");
-    }),
+        // compaction_end -> thread.state.changed with state "compacted". The
+        // ingestion layer admits this state and renders a context-compaction
+        // projection item, so compaction is visible end-to-end. The abort/
+        // retry context is carried in `detail` so it reaches the UI.
+        const compactedStateChanged = recorder.events.find(
+          (event) => event.type === "thread.state.changed" && event.payload.state === "compacted",
+        );
+        expect(compactedStateChanged).toBeDefined();
+        expect((compactedStateChanged?.raw as { source?: string })?.source).toBe("pi.sdk.event");
+        const compactedDetail = (
+          compactedStateChanged?.payload as { detail?: Record<string, unknown> }
+        )?.detail;
+        expect(compactedDetail?.aborted).toBe(false);
+        expect(compactedDetail?.willRetry).toBe(false);
+        // errorMessage/result are omitted when absent/falsy.
+        expect(compactedDetail?.errorMessage).toBeUndefined();
+        expect(compactedDetail?.result).toBeUndefined();
+
+        // No item.* events with context_compaction itemType remain —
+        // compaction now flows through thread.state.changed, which ingestion
+        // admits, instead of item.* events that the tool-lifecycle filter
+        // drops.
+        const compactionItemEvents = recorder.events.filter(
+          (event) =>
+            (event.type === "item.updated" || event.type === "item.completed") &&
+            event.payload.itemType === "context_compaction",
+        );
+        expect(compactionItemEvents).toHaveLength(0);
+
+        // Emitted compaction events pass ProviderRuntimeEvent schema
+        // validation (thread.state.changed with state/detail and raw source).
+        const isSchema = Schema.is(ProviderRuntimeEvent);
+        for (const event of recorder.events) {
+          expect(isSchema(event)).toBe(true);
+        }
+      }),
   );
 
   it.effect("maps tool_execution_start/update/end to item lifecycle events", () =>

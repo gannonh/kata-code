@@ -314,34 +314,38 @@ export function makePiAdapter(
         ];
       }
       if (event.type === "compaction_start") {
-        const itemId = RuntimeItemId.make(`pi-compaction-${randomUUID()}`);
+        // Pi compaction flows through the canonical `thread.state.changed`
+        // path: ingestion admits `state === "compacted"` and renders a
+        // context-compaction projection item, so the lifecycle is visible
+        // end-to-end. The `active` state signals compaction is in progress;
+        // `compaction_end` below flips it to `compacted`. This avoids the
+        // `item.*` mapping, which ingestion drops because
+        // `context_compaction` is not a tool-lifecycle item type, and avoids
+        // the unpaired-random-itemId problem the item mapping had.
         return [
           makeEvent(ctx.threadId, {
-            type: "item.updated",
+            type: "thread.state.changed",
             turnId,
-            itemId,
-            payload: {
-              itemType: "context_compaction",
-              status: "inProgress",
-              title: "Compacting context",
-            },
+            payload: { state: "active", detail: "Compacting context" },
             raw: toolEventRaw(event),
           }),
         ];
       }
       if (event.type === "compaction_end") {
-        const itemId = RuntimeItemId.make(`pi-compaction-${randomUUID()}`);
+        // Carry abort/error/retry context in `detail` so it reaches the UI
+        // via the context-compaction projection item. Falsy fields are
+        // omitted to keep the payload compact.
+        const detail: Record<string, unknown> = {
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+        };
+        if (event.errorMessage) detail.errorMessage = event.errorMessage;
+        if (event.result) detail.result = event.result;
         return [
           makeEvent(ctx.threadId, {
-            type: "item.completed",
+            type: "thread.state.changed",
             turnId,
-            itemId,
-            payload: {
-              itemType: "context_compaction",
-              status: event.aborted ? "failed" : "completed",
-              title: "Context compacted",
-              data: event,
-            },
+            payload: { state: "compacted", detail },
             raw: toolEventRaw(event),
           }),
         ];
