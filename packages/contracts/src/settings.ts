@@ -6,6 +6,10 @@ import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import { DEFAULT_GIT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
 import { ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
+import {
+  SandboxProviderInstanceConfig,
+  SandboxProviderInstanceId,
+} from "./sandboxProviderInstance.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -452,6 +456,15 @@ export const ServerSettings = Schema.Struct({
   providerInstances: Schema.Record(ProviderInstanceId, ProviderInstanceConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  // Deployment targets (Phase 1: local container; later: cloud). Same
+  // forward/backward-compat invariant as `providerInstances`: unknown driver
+  // kinds round-trip verbatim; the runtime registry marks them unavailable.
+  // Adding a `withDecodingDefault({})` field is backward-compatible: existing
+  // settings JSON without the key decodes to `{}` (AC-1.4).
+  sandboxProviderInstances: Schema.Record(
+    SandboxProviderInstanceId,
+    SandboxProviderInstanceConfig,
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
@@ -560,6 +573,11 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // The web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
+  // Whole-map replacement for sandbox deployment targets (same discipline as
+  // `providerInstances` above: small map, full map on every edit).
+  sandboxProviderInstances: Schema.optionalKey(
+    Schema.Record(SandboxProviderInstanceId, SandboxProviderInstanceConfig),
+  ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

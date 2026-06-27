@@ -1,0 +1,43 @@
+{
+  "name": "@kata-sh/code-sandbox-contracts",
+  "version": "0.0.1",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./instance": {
+      "types": "./src/instance.ts",
+      "import": "./src/instance.ts"
+    },
+    "./environmentConfig": {
+      "types": "./src/environmentConfig.ts",
+      "import": "./src/environmentConfig.ts"
+    },
+    "./sessionState": {
+      "types": "./src/sessionState.ts",
+      "import": "./src/sessionState.ts"
+    },
+    "./reachability": {
+      "types": "./src/reachability.ts",
+      "import": "./src/reachability.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@kata-sh/code-contracts": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

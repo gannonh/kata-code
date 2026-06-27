@@ -430,14 +430,16 @@ proceed in parallel with steps 1–2 once the contract names are fixed; step 6 i
 
 ## Spike findings
 
-_To be completed when `scripts/sandbox-spike/container-reachability.ts` runs (AC-1.7)._
+_Recorded 2026-06-27 from a live run of `scripts/sandbox-spike/container-reachability.ts`
+against OrbStack (Docker Engine REST API over `/var/run/docker.sock`). Image
+`node:22-alpine` (auto-pulled by the spike if absent)._
 
-- Provision (local container): _pending_
-- Port publish to `localhost`: _pending_
-- Sustained `ws`/`wss` to `localhost:<port>`: _pending_
-- Long-lived server process runs cleanly + reachable: _pending_
-- Verified Docker/OrbStack runtime API surface: _pending_
-- Phase 1 gate decision: _pending_
+- Provision (local container): **pass** — `POST /containers/create` + `POST /containers/{id}/start`.
+- Port publish to `localhost`: **pass** — `HostConfig.PortBindings` `HostPort: 0` (ephemeral host port), resolved via `GET /containers/{id}/json` `NetworkSettings.Ports["3000/tcp"][0].HostPort`.
+- Sustained `ws` to `localhost:<port>`: **pass** — host global `WebSocket` (Node 24) to `ws://localhost:<hostPort>/ws`; in-container hand-rolled RFC 6455 echo (Node built-ins only, no `ws` npm package in the image).
+- Long-lived server process runs cleanly + reachable: **pass** — in-container `node /tmp/srv.mjs` served `/healthz` 200 after readiness poll.
+- Verified Docker/OrbStack runtime API surface: **Docker Engine REST API over Unix socket** — `GET /_ping`, `POST /images/create`, `GET /images/{name}/json`, `POST /containers/create`, `POST /containers/{id}/start`, `GET /containers/{id}/json`, `DELETE /containers/{id}?force=true`. No `dockerode`; Node built-ins only.
+- Phase 1 gate decision: **unblocked** — raw-socket transport is viable for provision + port mapping + reachability. `packages/sandbox-docker` (Part B) reuses this transport; no `docker` CLI fallback needed.
 
 ## Part A build handoff (foundations slice)
 
