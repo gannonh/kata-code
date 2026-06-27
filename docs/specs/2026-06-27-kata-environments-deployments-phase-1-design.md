@@ -1,40 +1,48 @@
 ---
 type: Spec
-title: "Kata Environments / Deployments Phase 1 — Milestone A: SandboxProvider foundations"
-description: "Detailed design for the SandboxProvider SPI, schema-only contracts, settings map, registry, test-only stub driver, and a local-container feasibility spike. This is the Milestone A gate of Phase 1 (container driver + foundations); no user-facing surface, no driver shipped."
-status: Approved
+title: "Kata Environments / Deployments Phase 1 — Container driver + foundations (deep-dive)"
+description: "Deep-dive design for Phase 1: the SandboxProvider SPI substrate (Part A) and the first demoable surface, the local Docker/OrbStack container driver with Settings UI, Connect auto-registration, and an e2e-proven demo (Part B)."
+status: Draft (Part A Approved; Part B in progress)
 approved_at: 2026-06-27T20:55:20Z
-tags: [specs, phase-1-milestone-a, environments, deployments, sandbox, spi, contracts, docker]
+tags: [specs, phase-1, environments, deployments, sandbox, spi, contracts, docker, container-driver]
 timestamp: 2026-06-27T16:35:04Z
 ---
 
-<!-- Path-slug note: this file's path/tag retain the historical `phase-0` slug for link
-     stability. Phase 0 was merged into Phase 1 as Milestone A (see master roadmap). The
-     document content uses the Phase 1 Milestone A scheme throughout. -->
-
-# Kata Environments / Deployments Phase 1 — Milestone A: SandboxProvider foundations
+# Kata Environments / Deployments Phase 1 — Container driver + foundations
 
 ## Status
 
-Approved — Milestone A (the foundations gate) of [Phase 1](/specs/2026-06-27-kata-environments-deployments-design.md). Milestone A has no standalone demo; the user-facing Phase 1 demo is Milestone B (the container driver).
+This is the Phase 1 deep-dive (one spec per phase; see the
+[roadmap](/specs/2026-06-27-kata-environments-deployments-design.md)). It has two parts:
+
+- **Part A — Foundations (Approved).** The non-demoable substrate: contracts, the capability-based
+  `SandboxProvider` SPI, registry, `sandboxProviderInstances` settings field, test-only stub, and
+  the container-feasibility spike. Part A freezes the SPI before the driver ships.
+- **Part B — Container driver + demo (in progress).** The `packages/sandbox-docker` driver, the
+  Settings → Environments UI, Connect auto-registration on provision, and the Phase 1 demo
+  (AC-1.13) proven by walkthrough then encoded as `@environments-deploy` e2e.
+
+Phase 1 is complete only when its demo (AC-1.13) passes. Part A and Part B ship together as one
+phase; Part A is an internal checkpoint (SPI freeze), not a standalone deliverable.
 
 ## Goal
 
-Establish the modular sandbox-provider substrate. Milestone A ships the schema-only contracts,
-the capability-based `SandboxProvider` driver SPI, a registry that materializes instances from
-settings and downgrades unknown drivers gracefully, the `sandboxProviderInstances` settings
-field, a test-only stub driver, and a recorded local-container feasibility spike. No production
-driver is registered and the server boots unchanged. This is the gate that freezes the SPI
-before the container driver (Milestone B) ships.
+Ship the first demoable surface of the deployments roadmap: a user configures a local container
+deployment target in Settings → Environments, provisions it, and runs a Kata session inside an
+isolated container with its own ports, reached directly over loopback and auto-joined to the
+Connect pool. To get there, Part A first establishes the modular `SandboxProvider` substrate
+(schema-only contracts + SPI + registry + settings field + stub + spike) and freezes the SPI;
+Part B implements the container driver on that substrate, wires the UI and Connect registration,
+and proves the flow end to end.
 
-This is the first per-phase spec under the
+This is the first per-phase deep-dive under the
 [Kata Environments — deployments (BYOC) roadmap](/specs/2026-06-27-kata-environments-deployments-design.md).
-It implements roadmap Phase 1 Milestone A and freezes the SPI shape every later phase depends on.
+It implements roadmap Phase 1.
 
 ## Source of truth
 
 - Master roadmap: [2026-06-27-kata-environments-deployments-design.md](/specs/2026-06-27-kata-environments-deployments-design.md)
-  (Phase 1 Milestone A requirements, AC-1.1…AC-1.7; capability-based SandboxProvider SPI; container-first).
+  (Phase 1 Part A requirements, AC-1.1…AC-1.7; capability-based SandboxProvider SPI; container-first).
 - Existing provider-instance pattern to mirror: `packages/contracts/src/providerInstance.ts`
   (`ProviderDriverKind` open slug, `ProviderInstanceId`, `ProviderInstanceConfig` envelope,
   `defaultInstanceIdForDriver`), `packages/contracts/src/settings.ts`
@@ -52,12 +60,12 @@ It implements roadmap Phase 1 Milestone A and freezes the SPI shape every later 
 
 ## Locked decisions (from roadmap + planning)
 
-1. **New packages, no server wiring.** Phase 1 Milestone A adds `packages/sandbox-contracts` and
+1. **New packages, no server wiring.** Phase 1 Part A adds `packages/sandbox-contracts` and
    `packages/sandbox`, plus `sandboxProviderInstances` in `ServerSettings`. No
    `environments.deploy.*`/`sandbox.*` RPCs, no registry wiring into running server layers. The
    server boots unchanged (AC-1.4).
 2. **Distinct from `apps/server/src/cloud/`.** That directory is **Kata Code Connect** (relay
-   CLI state, endpoints, environment keys) — a different concern. Phase 1 Milestone A does not touch it.
+   CLI state, endpoints, environment keys) — a different concern. Phase 1 Part A does not touch it.
    The new packages are `@kata-sh/code-sandbox-contracts` and `@kata-sh/code-sandbox`.
 3. **Capability-based SPI.** Required primitives + optional capabilities; registry checks
    presence and degrades gracefully. Frozen in this spec (see SPI section).
@@ -83,7 +91,7 @@ It implements roadmap Phase 1 Milestone A and freezes the SPI shape every later 
    `providerInstances`. No plaintext in settings JSON. The existing
    `materializeProviderEnvironmentSecrets` / `persistProviderEnvironmentSecrets` helpers are
    hardcoded to iterate `settings.providerInstances`; a later phase generalizes them to also
-   walk `sandboxProviderInstances` (extract to a shared helper — no duplication). Phase 1 Milestone A only
+   walk `sandboxProviderInstances` (extract to a shared helper — no duplication). Phase 1 Part A only
    fixes the contract shape so that generalization is mechanical and ships no writer for the
    field, so "no plaintext in settings" is a contract decision here, not yet an enforced/tested
    invariant.
@@ -98,7 +106,7 @@ It implements roadmap Phase 1 Milestone A and freezes the SPI shape every later 
   field and decodes unknown driver kinds without loss (documented invariant in
   `providerInstance.ts`).
 - `AdvertisedEndpoint` + `AdvertisedEndpointReachability` (`loopback | lan | private-network |
-public`) already exist in `packages/contracts/src/remoteAccess.ts` — Phase 1 Milestone A's
+public`) already exist in `packages/contracts/src/remoteAccess.ts` — Phase 1 Part A's
   `SandboxReachabilityKind` maps onto these, not a new axis.
 - `ServerSecretStore` persists secrets as `<secretsDir>/<name>.bin` (dir `0o700`, files `0o600`,
   atomic temp-write+rename) and backs provider-instance sensitive env vars via redaction in
@@ -107,6 +115,13 @@ public`) already exist in `packages/contracts/src/remoteAccess.ts` — Phase 1 M
   `vite-plus` (`vp test`) for tests, `effect` from the workspace catalog. New packages follow
   the same conventions. `pnpm-workspace.yaml` already globs `packages/*`.
 - `apps/server/src/cloud/` exists and is Kata Code Connect; out of scope here.
+
+## Part A — Foundations
+
+_Approved. Covers the non-demoable substrate: contracts, the capability-based SandboxProvider SPI,
+registry, the `sandboxProviderInstances` settings field, a test-only stub driver, and the
+container-feasibility spike. Satisfies AC-1.1 … AC-1.7 and freezes the SPI before Part B ships a
+real driver on it._
 
 ## Architecture
 
@@ -179,7 +194,7 @@ snapshot?, install?, start?, terminals? }`. All fields optional; unknown fields 
   `unknown` for forward-compat). Used by later phases; defined now so the contract is stable.
 - `SandboxReachabilityKind` — maps onto the existing `AdvertisedEndpointReachability`:
   `loopback` (local-container) | `public` (cloud tunnel) | `private-network` (future ssh/tailnet).
-  Phase 1 Milestone A defines the literal; drivers map it to an `AdvertisedEndpoint` in later phases.
+  Phase 1 Part A defines the literal; drivers map it to an `AdvertisedEndpoint` in later phases.
 
 The `environment` field reuses the provider env shape deliberately: it lets a later phase
 generalize the existing `materializeProviderEnvironmentSecrets`-style logic to also walk the
@@ -234,7 +249,7 @@ change required signatures without a spec amendment.
   `ProviderInstanceRegistry` and the contract invariant).
 - `get(instanceId)` returns the materialized instance or an unavailable marker.
 - `list()` returns all materialized instances (available + unavailable) for UI/diagnostics.
-- No process/resource lifecycle in Phase 1 Milestone A (no real driver runs); the registry is pure
+- No process/resource lifecycle in Phase 1 Part A (no real driver runs); the registry is pure
   resolution over config + driver set.
 
 #### Stub driver (test-only)
@@ -263,9 +278,9 @@ dependency.
 Decoding an unknown driver kind in this map must succeed and round-trip the envelope verbatim
 (AC-1.2). No server-layer reads this field yet (AC-1.4). **Connect auto-registration is a
 Phase 1+ enforced constraint** (roadmap key decision 4; tested by AC-1.4 for containers and
-AC-3.4 for cloud), not a Phase 1 Milestone A invariant — Phase 1 Milestone A ships no driver and no provision path.
+AC-3.4 for cloud), not a Phase 1 Part A invariant — Phase 1 Part A ships no driver and no provision path.
 
-### Container feasibility spike (gates Phase 1 risk, not Phase 1 Milestone A merge)
+### Container feasibility spike (gates Part B's risk, not Part A's merge)
 
 A throwaway script `scripts/sandbox-spike/container-reachability.ts` (run locally; no
 credentials) that:
@@ -273,12 +288,12 @@ credentials) that:
 **Transport (pinned).** The spike talks to the Docker/OrbStack daemon over the **raw Docker
 Engine HTTP API on the Unix socket** (`/var/run/docker.sock`, or `$DOCKER_HOST`) using Node's
 built-in `http`/`undici` over a socket path — **no Docker client npm dependency** (`dockerode`
-et al.). This keeps Phase 1 Milestone A dependency-free (no lockfile/`allowBuilds` churn) and adds the script
+et al.). This keeps Phase 1 Part A dependency-free (no lockfile/`allowBuilds` churn) and adds the script
 to the existing `@kata-sh/code-scripts` package, which already compiles under `vp run typecheck`.
 The Engine API endpoints exercised (`POST /containers/create`, `POST /containers/{id}/start`,
 `GET /containers/{id}/json`, `DELETE /containers/{id}`) are cited in **Spike findings** as the
 verified runtime API surface. Phase 1's `packages/sandbox-docker` may later adopt a typed client;
-that is a Phase 1 decision, not a Phase 1 Milestone A dependency.
+that is a Phase 1 decision, not a Phase 1 Part A dependency.
 
 **Lint directive required.** This repo enforces an `nodeBuiltinImport` lint rule: any module
 importing Node built-ins (`node:http`, `node:net`, etc.) must suppress it with
@@ -335,11 +350,11 @@ all present)` and likewise for `renewTimeout`, across at least one driver varian
    section records pass/fail for provision, port publish to `localhost`, sustained `ws`/`wss`, and
    long-lived process, with the verified Docker Engine API endpoints cited. If Docker/OrbStack is unavailable in the run
    environment, a "blocked: needs local Docker" finding satisfies this AC (the script still
-   must typecheck); Milestone B is then blocked until the spike actually runs. No credentials
-   required; the script is runnable locally and in CI. A refutation blocks Milestone B until
-   re-planned. (This gates Milestone B's risk, not Milestone A's merge.)
+   must typecheck); Part B is then blocked until the spike actually runs. No credentials
+   required; the script is runnable locally and in CI. A refutation blocks Part B until
+   re-planned. (This gates Part B's risk, not Part A's merge.)
 
-> The master roadmap lists Phase 1 Milestone A's gate as AC-1.1 … AC-1.7 — identical numbering
+> The master roadmap lists Phase 1 Part A's gate as AC-1.1 … AC-1.7 — identical numbering
 > to this spec, so there is no roadmap/spec AC reconciliation gap.
 
 ## Implementation plan
@@ -380,13 +395,13 @@ proceed in parallel with steps 1–2 once the contract names are fixed; step 6 i
 - Any `environments.deploy.*`/`sandbox.*` RPC or server-layer registry wiring (Phase 1+).
 - The Docker/OrbStack driver implementation (`packages/sandbox-docker`) beyond the throwaway
   spike script (Phase 1).
-- The `.kata/environment.json` resolver and execution (Phase 2) — Phase 1 Milestone A defines the schema
+- The `.kata/environment.json` resolver and execution (Phase 2) — Phase 1 Part A defines the schema
   only.
 - The Cloudflare driver (`packages/sandbox-cloudflare`) (Phase 3).
 - Any UI (Settings/composer) — Phase 1+.
 - Touching `apps/server/src/cloud/` (Kata Code Connect).
 - Generalizing the secret-redaction helpers to walk `sandboxProviderInstances` (a later phase;
-  Phase 1 Milestone A only fixes the contract shape).
+  Phase 1 Part A only fixes the contract shape).
 
 ## Risks and mitigations
 
@@ -404,9 +419,9 @@ proceed in parallel with steps 1–2 once the contract names are fixed; step 6 i
 - **Spike can't run without Docker/OrbStack.** Mitigation: the spike is local and needs no
   credentials; if Docker is unavailable in a given environment, AC-1.7 is satisfied by the
   committed + typechecking script and a "blocked: needs local Docker" finding, and Phase 1
-  cannot complete until the spike runs (it gates Phase 1 risk, not Phase 1 Milestone A merge).
+  cannot complete until the spike runs (it gates Phase 1 risk, not Phase 1 Part A merge).
 - **Spike adding a heavyweight dependency.** Mitigation: the spike uses the raw Docker Engine
-  HTTP API over the Unix socket via Node built-ins — no `dockerode`/client package — so Phase 1 Milestone A
+  HTTP API over the Unix socket via Node built-ins — no `dockerode`/client package — so Phase 1 Part A
   adds no lockfile or `allowBuilds` churn. A typed client is a Phase 1 (`sandbox-docker`) choice.
 
 ## Spike findings
@@ -420,14 +435,26 @@ _To be completed when `scripts/sandbox-spike/container-reachability.ts` runs (AC
 - Verified Docker/OrbStack runtime API surface: _pending_
 - Phase 1 gate decision: _pending_
 
-## Build handoff
+## Part A build handoff (foundations slice)
 
 - **Approved scope:** two new packages (`sandbox-contracts`, `sandbox`), `sandboxProviderInstances`
   settings field, test-only stub driver, frozen capability-based SandboxProvider SPI,
   container-spike script + findings. No server wiring, no driver, no UI.
-- **Non-goals:** RPCs, registry wiring, Docker driver, Cloudflare driver, resolver, UI, Connect
-  changes, secret-redaction generalization.
+- **Part A non-goals (deferred to Part B or later phases):** RPCs, registry wiring, Docker
+  driver, Cloudflare driver, resolver, UI, Connect changes, secret-redaction generalization.
 - **Required verification:** AC-1.1…AC-1.7 + CI parity (`vp check`, `vp run typecheck`,
   `vp run test`).
-- **Blocking questions:** none — all Phase 1 Milestone A decisions locked. The spike result feeds Phase 1
-  planning, not Phase 1 Milestone A completion.
+- **Blocking questions:** none — all Part A decisions locked. The spike result feeds Part B
+  planning, not Part A completion.
+
+---
+
+## Part B — Container driver + demo (in progress)
+
+_In progress — detailed architecture, implementation plan, and AC-1.8 … AC-1.13 land here. Until
+this section is filled in, treat the roadmap's Phase 1 requirements and AC-1.8 … AC-1.13 as the
+authoritative Part B scope. Part B covers: the `packages/sandbox-docker` driver
+(`validate`/`provision`/`exec`/`reachability`/`dispose`/`describe`), the Settings → Environments
+UI (list/add/edit/remove + Test connection + minimal Start session), Connect auto-registration on
+provision (reusing the existing "publish a local server" relay path for non-loopback clients),
+and the Phase 1 demo (AC-1.13) proven by walkthrough then encoded as `@environments-deploy` e2e._

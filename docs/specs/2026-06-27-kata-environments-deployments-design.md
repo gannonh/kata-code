@@ -203,7 +203,7 @@ methods are present.
 Optional: `createSnapshot`/`deleteSnapshot`/`snapshotExists` (snapshot lifecycle),
 `renewTimeout` (extend session), `signedPreviewUrl`, `networkPolicy`, `pause`/`resume`.
 
-Exact method signatures are frozen in Phase 1 Milestone A's spec before driver implementation
+Exact method signatures are frozen in the Phase 1 deep-dive (Part A) before driver implementation
 begins.
 
 ### Environment configuration (`.kata/environment.json`)
@@ -239,16 +239,16 @@ in Settings → Environments, provisions it, and runs a Kata session inside an i
 with its own ports — reached directly over loopback and auto-joined to the Connect pool. Also
 builds the modular `SandboxProvider` substrate every later driver plugs into.
 
-**Two milestones.** Phase 1 ships in two internal milestones. **Milestone A** is the non-demoable
-gate that freezes the SPI; **Milestone B** is the user-facing demo. The phase is complete only
-when its demo (AC-1.13) passes — there is no standalone foundations phase.
+**Two parts.** Phase 1 has two internal parts. **Part A** is the non-demoable gate that
+freezes the SPI; **Part B** is the user-facing demo. The phase is complete only when its demo
+(AC-1.13) passes — there is no standalone foundations phase.
 
-- **Milestone A — Foundations (gate, no standalone demo).** The modular substrate:
+- **Part A — Foundations (gate, no standalone demo).** The modular substrate:
   `packages/sandbox-contracts` + `packages/sandbox` (SPI + registry + test-only stub), the
   `sandboxProviderInstances` settings field, the frozen capability-based SPI, and the
-  container-feasibility spike. Detailed design lives in the Phase 1 Milestone A spec (AC-1.1 …
-  AC-1.7). The SPI is frozen here before any driver ships; the spike gates Milestone B's risk.
-- **Milestone B — Container driver (the phase demo).** Implement `packages/sandbox-docker`
+  container-feasibility spike. Detailed design lives in the Phase 1 deep-dive, Part A (AC-1.1 …
+  AC-1.7). The SPI is frozen here before any driver ships; the spike gates Part B's risk.
+- **Part B — Container driver (the phase demo).** Implement `packages/sandbox-docker`
   (`validate`/`provision`/`exec`/`reachability`/`dispose`/`describe`) against a local
   Docker/OrbStack runtime. Provision boots `katacode serve` in the container; reachability
   advertises a `loopback` endpoint (`localhost:port`). **Auto-register with Connect** so paired
@@ -257,7 +257,7 @@ when its demo (AC-1.13) passes — there is no standalone foundations phase.
   add/edit/remove, and stores credentials via the reused `ServerSecretStore` path. "Test
   connection" provisions + disposes a minimal container. A minimal **"Start session"** affordance
   on the deployment target opens a thread bound to the container (this is superseded by the
-  composer "Run on" picker in Phase 4; it exists only so Milestone B's agent-turn demo is
+  composer "Run on" picker in Phase 4; it exists only so Part B's agent-turn demo is
   reachable without the composer).
 
 **Demo & e2e (AC-1.13).** Add a container target → Test Connection (provision + dispose +
@@ -265,7 +265,7 @@ success) → Start session → `katacode serve` boots container-side and is reac
 `localhost` → an agent turn completes container-side → a second paired client reaches it via
 Connect → dispose removes it from the pool, and two concurrent containers don't collide.
 
-**Acceptance criteria.** AC-1.1 … AC-1.13 (Milestone A gate AC-1.1 … AC-1.7; Milestone B
+**Acceptance criteria.** AC-1.1 … AC-1.13 (Part A gate AC-1.1 … AC-1.7; Part B
 AC-1.8 … AC-1.12; demo AC-1.13).
 
 ### Phase 2 — Manual environment configuration & execution
@@ -369,7 +369,7 @@ else is e2e-automated. A phase is not complete until its demo AC passes.
 
 **Phase 1 — Container driver + foundations**
 
-_Milestone A — Foundations gate (no standalone demo; detailed in the Phase 1 Milestone A spec):_
+_Part A — Foundations gate (no standalone demo; detailed in the Phase 1 deep-dive, Part A):_
 
 1. **AC-1.1** `packages/sandbox-contracts` and `packages/sandbox` build and pass `vp run
 typecheck`; `vp check` is clean. Both resolve via subpath exports.
@@ -398,10 +398,10 @@ snapshotExists all present)` and likewise for `renewTimeout`, across at least on
    via Node built-ins; no Docker client npm dependency). The **Spike findings** section records
    pass/fail (or a "blocked: needs local Docker" outcome) for provision, port publish to
    `localhost`, sustained `ws`/`wss`, and long-lived process, with the verified Engine API cited.
-   No credentials required; runnable locally and in CI. A refutation blocks Milestone B until
-   re-planned. (This gates Milestone B's risk, not Milestone A's merge.)
+   No credentials required; runnable locally and in CI. A refutation blocks Part B until
+   re-planned. (This gates Part B's risk, not Part A's merge.)
 
-_Milestone B — Container driver:_
+_Part B — Container driver:_
 
 8. **AC-1.8** A user can add a local container deployment target in Settings → Environments and
    any credentials persist via the reused `ServerSecretStore` path (no plaintext in settings).
@@ -416,7 +416,7 @@ _Milestone B — Container driver:_
 12. **AC-1.12** Disposing the container releases it and the deployment disappears from the
     Connect pool; a container with its own published ports does not collide with a second
     concurrent container (isolation verified).
-13. **AC-1.13 (Demo & e2e)** The Milestone B demo flow (AC-1.8 … AC-1.12) is proven by a
+13. **AC-1.13 (Demo & e2e)** The Part B demo flow (AC-1.8 … AC-1.12) is proven by a
     `playwright-cli`/`agent-browser` walkthrough against the running desktop app, then encoded
     as a Playwright Electron e2e test under `e2e/tests/` tagged `@environments-deploy`, passing
     via `vp run e2e --project desktop-dev --grep @environments-deploy`.
@@ -519,13 +519,13 @@ _Milestone B — Container driver:_
 ## Sequencing
 
 - **Hard order:** 1 → 2 → 4. Each depends on the prior. (Phase 2's env config is exercised
-  by the composer in 4.) Phase 1 is the merged foundations+container-driver phase (Milestone A
-  freezes the SPI, Milestone B ships the first demo).
+  by the composer in 4.) Phase 1 is the merged foundations+container-driver phase (Part A
+  freezes the SPI, Part B ships the first demo).
 - **3 (cloud)** depends on 1 and 2 and a Cloudflare tunnels spike; it can proceed in parallel
   with the container driver once the SPI is frozen, but lands after 1.
 - **5** depends on 2 (needs `install`) and is best validated after 1 or 3.
 - **6** depends on 2, a running driver, and 5.
-- Parallelizable: once the SPI is frozen (Phase 1 Milestone A), driver scaffolding can proceed
+- Parallelizable: once the SPI is frozen (Phase 1 Part A), driver scaffolding can proceed
   alongside later work.
 
 ## Constraints
@@ -582,14 +582,14 @@ _Milestone B — Container driver:_
   API that superseded the deprecated `exposePort()`. Mitigation: a tunnels spike gates Phase 3;
   the Connect relay is the re-plan fallback.
 - **SPI churn.** Freezing the SPI too late forces rework in `sandbox-docker`. Mitigation: lock
-  the SPI in Phase 1 Milestone A's spec before driver implementation; validate the shape against
+  the SPI in the Phase 1 deep-dive (Part A) before driver implementation; validate the shape against
   AgentBox's `CloudBackend`.
 
 ## Prior art / references
 
 - **AgentBox** (`madarco/agentbox`, MIT; local checkout `/Volumes/EVO/repos/agentbox`). A working
   multi-provider agent-sandbox tool with **local Docker as a first-class sibling** of Vercel,
-  Hetzner, Daytona, and E2B behind one `CloudBackend` SPI. Most relevant before Phase 1 Milestone A:
+  Hetzner, Daytona, and E2B behind one `CloudBackend` SPI. Most relevant before Phase 1 Part A:
   - `packages/core/src/cloud-backend.ts` — the SPI (required + optional capabilities).
   - `packages/sandbox-cloud/src/cloud-provider.ts` — `createCloudProvider(backend)` scaffolding
     (workspace/git seeding, snapshot/checkpoint restore with stale-snapshot fallback, credential
@@ -635,7 +635,7 @@ _Milestone B — Container driver:_
 ## Build handoff
 
 - **Approved scope:** six phases (Phase 1 merges the former foundations phase into the
-  container-driver phase as two milestones); **BYOC, free and open source**; container driver
+  container-driver phase as two parts); **BYOC, free and open source**; container driver
   first (Docker/OrbStack), Cloudflare cloud driver second; one capability-based SandboxProvider
   SPI (AgentBox-shaped, local + cloud under one SPI); ephemeral + snapshot; repo-file-first env
   config; full Kata server in sandbox reached via Connect (loopback for container, tunnel for
@@ -645,6 +645,6 @@ _Milestone B — Container driver:_
 - **Non-goals:** managed Kata Cloud product, other cloud drivers, live session migration,
   persistent disk, multi-repo, OAuth forwarding, billing.
 - **Required verification:** each phase's ACs + CI parity gates; `@environments-deploy` e2e tag.
-- **Blocking questions for the Phase 1 Milestone A spec:** final SPI method signatures;
+- **Blocking questions for the Phase 1 deep-dive (Part A):** final SPI method signatures;
   exact `.kata/environment.json` schema fields; secret-storage generalization (reuse
   `ServerSecretStore` + provider-instance redaction); container-spike result (AC-1.7).
