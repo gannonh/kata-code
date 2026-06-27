@@ -68,3 +68,4 @@ e2e/.auth/
 mobile-e2e/test-results/
 mobile-e2e/artifacts/
 mobile-e2e/.auth/
+kata-code.code-workspace
