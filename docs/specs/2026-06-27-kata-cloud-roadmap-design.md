@@ -1,10 +1,10 @@
 ---
 type: Spec
 title: "Kata Cloud roadmap"
-description: "High-level, multi-phase roadmap for running Kata Code projects in cloud sandboxes via a modular cloud-provider driver SPI, with Vercel Sandbox as the first driver."
-status: Approved
+description: "High-level, multi-phase roadmap for running Kata Code projects in cloud sandboxes via a modular cloud-provider driver SPI, with Cloudflare Sandbox SDK as the first driver."
+status: Draft
 approved_at: 2026-06-27T16:27:44Z
-tags: [specs, roadmap, cloud, vercel, providers, environments]
+tags: [specs, roadmap, cloud, cloudflare, providers, environments]
 timestamp: 2026-06-27T15:12:43Z
 ---
 
@@ -12,7 +12,7 @@ timestamp: 2026-06-27T15:12:43Z
 
 ## Status
 
-Approved
+Draft (revised 2026-06-27: V1 driver switched from Vercel to Cloudflare — see Key decisions 4–5 and the Cloudflare rationale section).
 
 ## Goal
 
@@ -38,12 +38,12 @@ plans, or UI pixel specs; those belong in per-phase specs.
 - Existing provider-instance pattern: [providers.md](/architecture/providers.md),
   `packages/contracts/src/providerInstance.ts`, `packages/contracts/src/settings.ts`
   (`providerInstances`, driver-specific settings, `ProviderInstanceConfig` envelope).
-- Vercel skills (vendored under `.agents/skills/`): `vercel-sandbox`,
-  `vercel-cli-with-tokens`, `deploy-to-vercel`. Note: the vendored `vercel-sandbox` skill
-  documents only `Sandbox.create`/`runCommand`/`snapshot`/`stop` and caps `timeout` at 5 min
-  in examples. Inbound port exposure, `wss` ingress, and true max VM lifetime are **not**
-  evidenced by the skill and must be verified against the live `@vercel/sandbox` API (Phase 0
-  spike, AC-0.5).
+- Cloudflare Sandbox SDK docs: <https://developers.cloudflare.com/sandbox/> (RPC transport,
+  tunnels API, sessions, snapshots). The June 2026 deprecation of `exposePort()` and
+  HTTP/WebSocket transports in favor of RPC + the tunnels API is reflected in Key decision 5;
+  see the [deprecation guide](https://developers.cloudflare.com/sandbox/guides/2026-deprecation/).
+  Vercel skills (vendored under `.agents/skills/`): `vercel-sandbox`, `vercel-cli-with-tokens`,
+  `deploy-to-vercel` — kept as reference for the future Vercel driver, not V1.
 - Cursor cloud environment model: <https://cursor.com/docs/cloud-agent/setup>
   (resolution order, `install`/`start`/`terminals`, snapshots, agent-driven setup, secrets).
 - Prior art — AgentBox (`madarco/agentbox`, MIT, local checkout at `/Volumes/EVO/repos/agentbox`):
@@ -90,21 +90,26 @@ plans, or UI pixel specs; those belong in per-phase specs.
    and which reachability kind a driver supports. This is **not** two separate lifecycle
    archetypes; ephemeral behavior is the default and persistence is out of scope for V1. The
    canonical required/optional split is defined in the Architecture “CloudProvider driver SPI
-   (shape)” section below. Vercel is the first driver; Hetzner, DigitalOcean, Cloudflare,
+   (shape)” section below. Cloudflare is the first driver; Hetzner, DigitalOcean, Vercel,
    Daytona, and E2B (plus a future Kata Agent driver) plug into the same SPI later.
 
-5. **Reachability — a capability axis on the SPI; V1 uses `public-route`.** Each driver
-   declares a reachability kind:
-   - `public-route` (Vercel) — sandbox exposes the Kata server port via a public HTTPS route;
-     client connects over `wss` with the existing WebSocket auth token. **V1.**
-   - `ssh-tunnel` (Hetzner) — no public URL; reachability is an SSH ControlMaster + `ssh -L`
-     forward, reusing the **desktop-managed SSH access method** already described in
+5. **Reachability — a capability axis on the SPI; V1 uses `worker-proxied` via Cloudflare
+   Tunnel.** Each driver declares a reachability kind:
+   - `worker-proxied` (Cloudflare Sandbox SDK) — **V1.** Reachability is via the Sandbox SDK
+     **tunnels API** (`sandbox.tunnels.get(port)`), which yields a public URL for an in-sandbox
+     port. Quick tunnels (`*.trycloudflare.com`) for dev; **named tunnels** for production on a
+     Cloudflare zone the operator already controls. The client connects over `wss` with the
+     existing WebSocket auth token. (The older `exposePort()` + `proxyToSandbox()` + wildcard-
+     DNS path was deprecated by Cloudflare in June 2026 in favor of the tunnels API; this roadmap
+     targets tunnels from the start.)
+   - `public-route` (Vercel) — sandbox exposes the Kata server port via a native public HTTPS
+     route; client connects over `wss` with the existing WebSocket auth token. Future driver.
+   - `ssh-tunnel` (Hetzner, DigitalOcean) — no public URL; reachability is an SSH ControlMaster +
+     `ssh -L` forward, reusing the **desktop-managed SSH access method** already described in
      [remote.md](/architecture/remote.md). Reduced hosted-web support (needs a desktop host to
      own the forward).
-   - `worker-proxied` (Cloudflare Sandbox SDK) — preview URLs route through a Worker
-     (`proxyToSandbox`) and require a custom domain with wildcard DNS in production.
-   V1 implements only `public-route`. Tunneled/worker kinds are modeled now so later drivers
-   are not a retrofit, but are not built in this roadmap.
+     V1 implements only `worker-proxied`. Other kinds are modeled now so later drivers are not a
+     retrofit, but are not built in this roadmap.
 
 6. **Agent credentials — injected secrets, per session.** Provider auth (e.g.
    `ANTHROPIC_API_KEY`, Codex API key) and repo env secrets are stored in Kata settings and
@@ -124,16 +129,46 @@ plans, or UI pixel specs; those belong in per-phase specs.
 are distinct:
 
 - **Kata Code Connect** is the existing hosted **relay + Clerk auth + pairing** layer
-  (`infra/relay/`, `KATACODE_CLERK_*`). It helps a client *reach* a Kata server across NAT
+  (`infra/relay/`, `KATACODE_CLERK_*`). It helps a client _reach_ a Kata server across NAT
   and authenticates hosted-web pairing. It is a transport/control-plane concern.
 - **Kata Cloud** is **where a Kata server runs**: a sandbox VM provisioned and booted by a
   cloud-provider driver. It is a launch concern.
 
-They compose. Kata Cloud's V1 reachability standardizes on the sandbox public route URL +
-`wss` token (Key decision 5). The Connect relay is the intended **future reachability
-fallback** when direct public routes are unsuitable (e.g. private-network egress); it is not
-implemented in this roadmap. To avoid clobbering the existing `docs/cloud/` bundle, Kata
-Cloud docs live at `docs/architecture/cloud-sandbox.md` and `docs/guides/cloud-sandbox/*`.
+They compose. Kata Cloud's V1 reachability standardizes on the sandbox tunnel URL
+(`worker-proxied`) + `wss` token (Key decision 5). The Connect relay is the intended **future
+reachability fallback** when direct tunnel reachability is unsuitable (e.g. private-network
+egress); it is not implemented in this roadmap. To avoid clobbering the existing `docs/cloud/`
+bundle, Kata Cloud docs live at `docs/architecture/cloud-sandbox.md` and
+`docs/guides/cloud-sandbox/*`.
+
+## Why Cloudflare for V1
+
+V1 uses the Cloudflare Sandbox SDK rather than Vercel Sandbox. The deciding factor is
+**consolidation on the operator's existing Cloudflare stack**: the project already runs a
+Cloudflare zone and Workers for Kata Code Connect, so the reachability prerequisite for
+Cloudflare (a Worker + a named tunnel on an operator-controlled zone) is infrastructure that
+already exists rather than new surface to stand up. Adding Vercel would mean a second
+provider dashboard, billing relationship, and auth flow for what is conceptually one cloud
+surface.
+
+Cost/performance tradeoffs (verified from both providers' docs, 2026-06-27):
+
+- **Cost:** Cloudflare bills per second with scale-to-zero on a Workers Paid floor ($5/mo);
+  Vercel has a free Hobby tier (5 hrs active CPU + 420 GB-hrs memory/mo included) then per-use on
+  Pro. Cloudflare is cheaper per unit at low/intermittent volume; Vercel can cost nothing for
+  light use. For a product in active development the consolidation argument outweighs the free
+  Hobby tier.
+- **Performance:** Vercel gives a full Firecracker microVM with root (can run Docker/FUSE/VPN)
+  and larger max instances (up to 32 vCPU/64 GB), but is single-region (`iad1`) and caps Hobby at
+  45 min runtime. Cloudflare runs a Linux container (less privileged, smaller max) but is
+  globally distributed and fits scale-to-zero intermittent agent use.
+
+Cloudflare's June 2026 deprecation of `exposePort()` and HTTP/WebSocket transports in favor of
+RPC transport + the tunnels API is a focused, documented migration with a stable forward path,
+not instability — this roadmap targets RPC + tunnels from the start (Key decision 5).
+
+Vercel remains the simplest future driver (`public-route`, native public URL, no Worker/DNS
+prerequisite) and is revisited if consolidation priorities change.
 
 ## Architecture
 
@@ -148,8 +183,8 @@ The existing remote architecture already separates three concerns:
 
 Kata Cloud adds:
 
-- a new **launch method** `vercel-sandbox` (provision VM, boot `katacode serve`), and
-- a new **`AccessEndpoint` kind** `vercel-route` (public sandbox HTTPS route → `wss`).
+- a new **launch method** `cloudflare-sandbox` (provision sandbox container, boot `katacode serve`), and
+- a new **`AccessEndpoint` kind** `worker-proxied` (Cloudflare Worker + named tunnel → `wss`).
 
 The cloud server is otherwise an ordinary `ExecutionEnvironment`. Threads, orchestration,
 checkpoints, and the React UI need no provider-specific cloud paths.
@@ -157,33 +192,35 @@ checkpoints, and the React UI need no provider-specific cloud paths.
 ```mermaid
 flowchart TB
   Client["Client (desktop / web / mobile)"]
-  subgraph Cloud["Cloud provider (Vercel Sandbox)"]
-    VM["Sandbox VM"]
+  subgraph Cloud["Cloud provider (Cloudflare Sandbox SDK)"]
+    VM["Sandbox container (Durable Object)"]
+    Worker["Cloudflare Worker + named tunnel"]
     Serve["katacode serve"]
     Prov["coding-agent provider\n(codex / claude / ...)"]
     Repo["repo checkout + terminals + git + fs"]
     VM --> Serve --> Prov
     Serve --> Repo
   end
-  Client -- "wss + token (vercel-route AccessEndpoint)" --> Serve
+  Client -- "wss + token (worker-proxied AccessEndpoint)" --> Worker
+  Worker -- "tunnels.get(port)" --> Serve
   Reg["CloudProviderRegistry"] -- "provision / boot / snapshot / dispose" --> VM
 ```
 
 ### Package layout (modular by design)
 
-| Package | Role | Notes |
-| --- | --- | --- |
-| `packages/cloud-contracts` | Schema-only contracts: `CloudProviderDriverKind`, `CloudProviderInstanceId`, `CloudProviderInstanceConfig` envelope, `EnvironmentConfig` (`.kata/environment.json` schema), `CloudSessionState`, RPC shapes. | Mirrors `packages/contracts` discipline: no runtime logic; open driver-kind slug; unknown drivers round-trip without loss. |
-| `packages/cloud` | Driver SPI, `CloudProviderRegistry`, environment-config resolver, session lifecycle orchestration, snapshot cache policy. Provider-agnostic. | Consumed by `apps/server` and (later) Kata Agent. |
-| `packages/cloud-vercel` | The Vercel Sandbox driver implementing the SPI via `@vercel/sandbox` + Vercel API/CLI. | First and only V1 driver. |
-| `apps/server` | Wires the registry into server layers; exposes `cloud.*` RPC methods; owns secret storage/injection and git branch sync. | No Vercel-specific logic beyond registration. |
-| `apps/web` | Settings UI for cloud providers + environments; composer "Run on" control; cloud session status. | Reuses provider-settings form rendering where possible. |
+| Package                     | Role                                                                                                                                                                                                         | Notes                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `packages/cloud-contracts`  | Schema-only contracts: `CloudProviderDriverKind`, `CloudProviderInstanceId`, `CloudProviderInstanceConfig` envelope, `EnvironmentConfig` (`.kata/environment.json` schema), `CloudSessionState`, RPC shapes. | Mirrors `packages/contracts` discipline: no runtime logic; open driver-kind slug; unknown drivers round-trip without loss. |
+| `packages/cloud`            | Driver SPI, `CloudProviderRegistry`, environment-config resolver, session lifecycle orchestration, snapshot cache policy. Provider-agnostic.                                                                 | Consumed by `apps/server` and (later) Kata Agent.                                                                          |
+| `packages/cloud-cloudflare` | The Cloudflare Sandbox SDK driver implementing the SPI via `@cloudflare/sandbox` (RPC transport, tunnels API).                                                                                               | First and only V1 driver.                                                                                                  |
+| `apps/server`               | Wires the registry into server layers; exposes `cloud.*` RPC methods; owns secret storage/injection and git branch sync.                                                                                     | No Cloudflare-specific logic beyond registration.                                                                          |
+| `apps/web`                  | Settings UI for cloud providers + environments; composer "Run on" control; cloud session status.                                                                                                             | Reuses provider-settings form rendering where possible.                                                                    |
 
 The CloudProvider driver SPI intentionally parallels `ProviderDriver`: a factory keyed by
 an open `CloudProviderDriverKind` slug, configured by an envelope in a
 `cloudProviderInstances` settings map, materialized by a registry that downgrades unknown
 drivers to "unavailable" rather than crashing. The `packages/cloud` (scaffolding) +
-`packages/cloud-vercel` (driver) split mirrors AgentBox's `sandbox-cloud` +
+`packages/cloud-cloudflare` (driver) split mirrors AgentBox's `sandbox-cloud` +
 `sandbox-<provider>` layout, where shared seeding/lifecycle/URL logic lives once in the
 scaffolding and each provider is “~one file implementing the backend.”
 
@@ -210,7 +247,7 @@ Optional capabilities (driver may omit):
 - `signedPreviewUrl` — browser-bound signed URL where the route model needs one.
 - `networkPolicy` — native egress control (drivers without it may enforce via firewall).
 
-Exact method signatures are frozen in Phase 0's per-phase spec before `cloud-vercel` work
+Exact method signatures are frozen in Phase 0's per-phase spec before `cloud-cloudflare` work
 begins (see Phase 0 requirements).
 
 ### Environment configuration (`.kata/environment.json`)
@@ -220,10 +257,10 @@ Modeled on Cursor's `environment.json`. Indicative shape:
 ```jsonc
 {
   "build": { "dockerfile": ".kata/Dockerfile", "context": ".." }, // optional
-  "snapshot": "snapshot-...",                                       // optional
-  "install": "pnpm install",                                        // idempotent
-  "start": "",                                                       // optional long-lived processes
-  "terminals": []                                                    // optional named app processes
+  "snapshot": "snapshot-...", // optional
+  "install": "pnpm install", // idempotent
+  "start": "", // optional long-lived processes
+  "terminals": [], // optional named app processes
 }
 ```
 
@@ -243,31 +280,36 @@ earlier ones landed.
 **Goal.** Establish the modular cloud-provider substrate with no user-facing surface.
 
 **Requirements.**
+
 - Create `packages/cloud-contracts` with: open `CloudProviderDriverKind` slug,
   `CloudProviderInstanceId`, `CloudProviderInstanceConfig` envelope (driver + opaque config
-  + optional displayName/enabled), `EnvironmentConfig` schema, and `CloudSessionState`.
+  - optional displayName/enabled), `EnvironmentConfig` schema, and `CloudSessionState`.
 - Create `packages/cloud` with the driver SPI interface and a `CloudProviderRegistry` that
   materializes instances from a settings map and marks unknown drivers unavailable.
 - Add a `cloudProviderInstances` map to `ServerSettings` (mirrors `providerInstances`),
   parsing unknown drivers without loss.
 - Ship a stub/in-memory driver used only by tests (not registered in production).
-- **Vercel feasibility spike (gates Phase 3).** Verify against the live `@vercel/sandbox`
-  API: (a) a stable inbound HTTPS route to an arbitrary listening port, (b) a sustained `wss`
-  upgrade through that route, and (c) the actual maximum VM lifetime. Record the verified API
-  surface and limits; correct this roadmap's lifetime figure to the measured value.
-- **Freeze the driver SPI method signatures** before `cloud-vercel` implementation begins.
+- **Cloudflare feasibility spike (gates Phase 3).** Verify against the live `@cloudflare/sandbox`
+  API (RPC transport + tunnels): (a) `sandbox.tunnels.get(port)` yields a reachable public URL,
+  (b) a sustained `wss` upgrade through that tunnel (quick tunnel for dev, named tunnel for
+  production), and (c) the actual maximum sandbox lifetime. Record the verified API surface and
+  limits; correct this roadmap's lifetime figure to the measured value.
+- **Freeze the driver SPI method signatures** before `cloud-cloudflare` implementation begins.
 
 **Acceptance criteria.** (see numbered global list below: AC-0.1 … AC-0.5)
 
-### Phase 1 — Settings: add & configure the Vercel cloud provider
+### Phase 1 — Settings: add & configure the Cloudflare cloud provider
 
-**Goal.** A user adds and configures a Vercel cloud provider in Settings, like an AI provider.
+**Goal.** A user adds and configures a Cloudflare cloud provider in Settings, like an AI provider.
 
 **Requirements.**
-- Implement `packages/cloud-vercel` `validate`/`describe` against `@vercel/sandbox` + Vercel
-  API using token/team/project credentials (per `vercel-cli-with-tokens` skill).
-- Settings UI lists cloud providers, supports add/edit/remove of a Vercel instance, and
-  stores credentials as encrypted secrets.
+
+- Implement `packages/cloud-cloudflare` `validate`/`describe` against `@cloudflare/sandbox`
+  (RPC transport) using Cloudflare account/zone credentials. The driver assumes the operator
+  already runs a Cloudflare zone + Worker for Connect; production reachability uses a **named
+  tunnel** on that zone, dev uses a quick tunnel (`*.trycloudflare.com`).
+- Settings UI lists cloud providers, supports add/edit/remove of a Cloudflare instance, and
+  stores credentials as out-of-band secrets (via the reused `ServerSecretStore` path).
 - "Test connection" provisions a minimal sandbox and disposes it, reporting success/failure.
 - Information architecture references comp `SCR-20260627-hpyw.png` (Environments table,
   Defaults such as branch prefix, Secrets list with per-repo scope).
@@ -280,6 +322,7 @@ earlier ones landed.
 are injected — all manually authored.
 
 **Requirements.**
+
 - Implement the resolver (repo file → saved env → provider default).
 - Execute `install` (idempotent) and optional `start`/`terminals` in a booted sandbox.
 - Inject Kata-stored secrets (provider auth + repo env secrets) as environment variables.
@@ -293,13 +336,17 @@ are injected — all manually authored.
 **Goal.** Boot `katacode serve` inside the sandbox and reach it as a remote
 `ExecutionEnvironment` over `wss`.
 
-**Depends on the Phase 0 Vercel spike (AC-0.5) passing.** If the spike shows public-route
-`wss` is unworkable, this phase re-plans onto the Connect relay fallback before proceeding.
+**Depends on the Phase 0 Cloudflare spike (AC-0.5) passing.** If the spike shows
+worker-proxied `wss` is unworkable, this phase re-plans onto the Connect relay fallback
+before proceeding.
 
 **Requirements.**
-- Launch method `vercel-sandbox`: provision/boot, install Kata server, start `katacode serve`.
-- Access endpoint `vercel-route`: expose the server port via the sandbox public HTTPS route;
-  connect over `wss` with the required WebSocket auth token.
+
+- Launch method `cloudflare-sandbox`: provision/boot a sandbox container, install Kata server,
+  start `katacode serve`.
+- Access endpoint `worker-proxied`: expose the server port via `sandbox.tunnels.get(port)`;
+  connect over `wss` (quick tunnel for dev, named tunnel on the operator's zone for
+  production) with the required WebSocket auth token.
 - The cloud server appears in the client as an `ExecutionEnvironment`; an agent turn,
   terminal command, and git/fs operation all execute cloud-side.
 - Explicit failure surfaces for provision/boot/connect (no silent fallback to local).
@@ -312,6 +359,7 @@ are injected — all manually authored.
 the environment provisioned automatically from its repo config.
 
 **Requirements.**
+
 - Composer "Run on" control (This Mac / Cloud / Worktree) per comp `SCR-20260627-hpes.png`.
 - "Start in cloud": provision a cloud env from the resolved repo environment config and open
   a thread bound to it.
@@ -327,6 +375,7 @@ the environment provisioned automatically from its repo config.
 fallback.
 
 **Requirements.**
+
 - Capture a snapshot after a successful `install` and persist its id with the saved env
   (Snapshot ID surfaced per comp `SCR-20260627-hqeu.png`).
 - Boot subsequent sessions from the snapshot; re-run idempotent `install` to repair drift.
@@ -341,6 +390,7 @@ fallback.
 `.kata/environment.json` and saves a snapshot — the recommended Cursor flow.
 
 **Requirements.**
+
 - "Start Setup Agent" boots a base sandbox and runs an agent session in a shared terminal to
   install dependencies and verify the build/tests.
 - On success, the agent writes/updates `.kata/environment.json` (proposing a commit) and a
@@ -355,6 +405,7 @@ Each criterion is observable via a test, command, API response, or manual UAT st
 specs may add finer criteria but must not weaken these.
 
 **Phase 0 — Foundations**
+
 1. **AC-0.1** `packages/cloud-contracts` and `packages/cloud` build and pass `vp run typecheck`;
    `vp check` is clean.
 2. **AC-0.2** Decoding a `cloudProviderInstances` map that contains an unknown driver kind
@@ -363,101 +414,80 @@ specs may add finer criteria but must not weaken these.
    instance and marks an unknown-driver instance "unavailable" without throwing (unit test).
 4. **AC-0.4** No production driver is registered yet; server boots unchanged with the new
    settings field present and empty.
-5. **AC-0.5** The Vercel feasibility spike produces a recorded result confirming (or refuting)
-   (a) inbound HTTPS port routing, (b) sustained `wss` through that route, and (c) the measured
-   max VM lifetime, with the verified `@vercel/sandbox` API surface cited. A refutation blocks
-   Phase 3 until reachability is re-planned.
+5. **AC-0.5** The Cloudflare feasibility spike produces a recorded result confirming (or
+   refuting) (a) `sandbox.tunnels.get(port)` yields a reachable public URL, (b) sustained `wss`
+   through that tunnel (quick tunnel for dev, named tunnel on an operator zone for production),
+   and (c) the measured max sandbox lifetime, with the verified `@cloudflare/sandbox` API
+   surface (RPC transport + tunnels) cited. A refutation blocks Phase 3 until reachability is
+   re-planned.
 
-**Phase 1 — Settings: Vercel provider**
-6. **AC-1.1** A user can add a Vercel cloud provider instance in Settings, supplying
-   token/team/project, and the credentials persist via the secret-storage bar chosen in the
-   Phase 1 spec. If that bar is encryption-at-rest, a test asserts no plaintext credential in
-   the settings file; if the bar is plaintext-with-redaction (matching today's provider
-   settings), a test asserts the value is redacted in API responses and logs. The chosen bar
-   is recorded in the Phase 1 spec before this AC is graded.
-7. **AC-1.2** "Test connection" provisions a real sandbox and disposes it, returning a
-   visible success result; invalid credentials return a visible, specific failure (manual UAT
-   + e2e where feasible).
+**Phase 1 — Settings: Cloudflare provider** 6. **AC-1.1** A user can add a Cloudflare cloud provider instance in Settings, supplying
+account/zone credentials, and the credentials persist via the secret-storage bar chosen in
+the Phase 1 spec. If that bar is encryption-at-rest, a test asserts no plaintext credential in
+the settings file; if the bar is plaintext-with-redaction (matching today's provider settings
+via the reused `ServerSecretStore` path), a test asserts the value is redacted in API
+responses and logs. The chosen bar is recorded in the Phase 1 spec before this AC is graded. 7. **AC-1.2** "Test connection" provisions a real sandbox and disposes it, returning a
+visible success result; invalid credentials return a visible, specific failure (manual UAT
+
+- e2e where feasible).
+
 8. **AC-1.3** The cloud provider list renders add/edit/remove following the IA of comp
    `SCR-20260627-hpyw.png` (Environments/Defaults/Secrets sections present).
 9. **AC-1.4** Removing a provider instance tears down stored credentials and the instance no
    longer appears in selection surfaces.
 
-**Phase 2 — Manual environment config**
-10. **AC-2.1** Given a repo with `.kata/environment.json`, the resolver selects it over a
-    saved env and over the provider default; the saved env is keyed by `RepositoryIdentity`
-    canonical key (unit test covering all three orderings and the key derivation).
-11. **AC-2.2** Running setup in a booted sandbox invokes the `install` command; re-invoking it
-    unchanged on the same sandbox succeeds, and a non-zero exit surfaces as an explicit error
-    (integration/UAT). User-script idempotency is documented as the user's responsibility, not
-    asserted by Kata.
-12. **AC-2.3** When `start`/`terminals` are configured, the corresponding processes appear in
-    the sandbox process list; when the config sets are empty, the launcher reports the empty
-    set and no corresponding process appears.
-13. **AC-2.4** Kata-stored secrets are injected as environment variables visible to the
-    `install`/`start` commands; secret values are not written to the repo and are redacted in
-    logs.
-14. **AC-2.5** The saved-environment editor (Update Script, network access, secrets) persists
-    edits and reflects them on next boot, per comps `SCR-20260627-hqeu.png` / `hpyw.png`.
+**Phase 2 — Manual environment config** 10. **AC-2.1** Given a repo with `.kata/environment.json`, the resolver selects it over a
+saved env and over the provider default; the saved env is keyed by `RepositoryIdentity`
+canonical key (unit test covering all three orderings and the key derivation). 11. **AC-2.2** Running setup in a booted sandbox invokes the `install` command; re-invoking it
+unchanged on the same sandbox succeeds, and a non-zero exit surfaces as an explicit error
+(integration/UAT). User-script idempotency is documented as the user's responsibility, not
+asserted by Kata. 12. **AC-2.3** When `start`/`terminals` are configured, the corresponding processes appear in
+the sandbox process list; when the config sets are empty, the launcher reports the empty
+set and no corresponding process appears. 13. **AC-2.4** Kata-stored secrets are injected as environment variables visible to the
+`install`/`start` commands; secret values are not written to the repo and are redacted in
+logs. 14. **AC-2.5** The saved-environment editor (Update Script, network access, secrets) persists
+edits and reflects them on next boot, per comps `SCR-20260627-hqeu.png` / `hpyw.png`.
 
-**Phase 3 — Boot + connect**
-15. **AC-3.1** Launching `vercel-sandbox` boots `katacode serve` inside the VM and the server
-    becomes reachable on its exposed port (integration/UAT).
-16. **AC-3.2** The client connects to the sandbox over `wss` using the required auth token; an
-    unauthenticated connection is rejected.
-17. **AC-3.3** The cloud server appears as an `ExecutionEnvironment` in the client and a coding
-    agent turn completes cloud-side (manual UAT; e2e where feasible).
-18. **AC-3.4** A terminal command and a git operation (e.g. status/commit) execute inside the
-    sandbox and reflect in the UI.
-19. **AC-3.5** Provision/boot/connect failures surface explicit errors; the client does not
-    silently fall back to a local environment.
+**Phase 3 — Boot + connect** 15. **AC-3.1** Launching `cloudflare-sandbox` boots `katacode serve` inside the sandbox
+container and the server becomes reachable on its exposed port via a tunnel
+(integration/UAT). 16. **AC-3.2** The client connects to the sandbox over `wss` (quick tunnel for dev, named
+tunnel for production) using the required auth token; an unauthenticated connection is
+rejected. 17. **AC-3.3** The cloud server appears as an `ExecutionEnvironment` in the client and a coding
+agent turn completes cloud-side (manual UAT; e2e where feasible). 18. **AC-3.4** A terminal command and a git operation (e.g. status/commit) execute inside the
+sandbox and reflect in the UI. 19. **AC-3.5** Provision/boot/connect failures surface explicit errors; the client does not
+silently fall back to a local environment.
 
-**Phase 4 — Composer start/move**
-20. **AC-4.1** The composer "Run on" control offers This Mac / Cloud (and existing Worktree)
-    per comp `SCR-20260627-hpes.png`.
-21. **AC-4.2** "Start in cloud" provisions a cloud env from the resolved repo environment
-    config and opens a thread bound to that environment.
-22. **AC-4.3** "Move to cloud" with a dirty working tree commits WIP to `kata/cloud/<id>`,
-    pushes, and clones in the sandbox; the cloud checkout contains the WIP commit. If the repo
-    has no writable push remote, the move is blocked with an explicit error before any teardown
-    of local state.
-23. **AC-4.4** "Move back" pushes from the sandbox and fetches locally so the local branch
-    contains cloud-side commits.
-24. **AC-4.5** Cloud session status (provisioning/ready/error/disposed) is visible in the UI
-    and updates on state change.
-25. **AC-4.6** Disposing/idle-timing-out a cloud session releases the VM and surfaces the
-    disposed state without data loss of pushed commits.
-26. **AC-4.7** Disposal/idle-timeout with un-pushed cloud-side WIP either auto-commits and
-    pushes to `kata/cloud/<id>` before teardown, or surfaces an explicit blocking warning that
-    requires user action before the VM is released. WIP is never discarded silently.
+**Phase 4 — Composer start/move** 20. **AC-4.1** The composer "Run on" control offers This Mac / Cloud (and existing Worktree)
+per comp `SCR-20260627-hpes.png`. 21. **AC-4.2** "Start in cloud" provisions a cloud env from the resolved repo environment
+config and opens a thread bound to that environment. 22. **AC-4.3** "Move to cloud" with a dirty working tree commits WIP to `kata/cloud/<id>`,
+pushes, and clones in the sandbox; the cloud checkout contains the WIP commit. If the repo
+has no writable push remote, the move is blocked with an explicit error before any teardown
+of local state. 23. **AC-4.4** "Move back" pushes from the sandbox and fetches locally so the local branch
+contains cloud-side commits. 24. **AC-4.5** Cloud session status (provisioning/ready/error/disposed) is visible in the UI
+and updates on state change. 25. **AC-4.6** Disposing/idle-timing-out a cloud session releases the VM and surfaces the
+disposed state without data loss of pushed commits. 26. **AC-4.7** Disposal/idle-timeout with un-pushed cloud-side WIP either auto-commits and
+pushes to `kata/cloud/<id>` before teardown, or surfaces an explicit blocking warning that
+requires user action before the VM is released. WIP is never discarded silently.
 
-**Phase 5 — Snapshots**
-27. **AC-5.1** A snapshot is captured after a successful `install` and its id is persisted with
-    the saved environment (visible per comp `SCR-20260627-hqeu.png`).
-28. **AC-5.2** A subsequent session boots from the snapshot at least 50% faster than the first
-    cold boot for the same repo; both timings are recorded in UAT. (The 50% target may be
-    revised in the Phase 5 spec against measured cold-boot baselines.)
-29. **AC-5.3** Booting from the snapshot still re-invokes `install` unchanged to repair drift,
-    surfacing a non-zero exit as an explicit error.
-30. **AC-5.4** An expired/invalid/inaccessible snapshot falls back to the base image with a
-    visible warning and a successful boot (not a hard failure).
+**Phase 5 — Snapshots** 27. **AC-5.1** A snapshot is captured after a successful `install` and its id is persisted with
+the saved environment (visible per comp `SCR-20260627-hqeu.png`). 28. **AC-5.2** A subsequent session boots from the snapshot at least 50% faster than the first
+cold boot for the same repo; both timings are recorded in UAT. (The 50% target may be
+revised in the Phase 5 spec against measured cold-boot baselines.) 29. **AC-5.3** Booting from the snapshot still re-invokes `install` unchanged to repair drift,
+surfacing a non-zero exit as an explicit error. 30. **AC-5.4** An expired/invalid/inaccessible snapshot falls back to the base image with a
+visible warning and a successful boot (not a hard failure).
 
-**Phase 6 — Agent-driven setup**
-31. **AC-6.1** "Start Setup Agent" boots a base sandbox and runs an agent session whose
-    progress is visible in a shared terminal.
-32. **AC-6.2** On a successful setup, the agent writes/updates `.kata/environment.json` and
-    proposes a commit containing it.
-33. **AC-6.3** A snapshot is saved at the end of a successful agent-driven setup and is reused
-    on the next boot (ties to AC-5.2).
-34. **AC-6.4** Setup runs/history are viewable per comp `SCR-20260627-hqeu.png`; a failed setup
-    surfaces logs and does not write a broken config.
+**Phase 6 — Agent-driven setup** 31. **AC-6.1** "Start Setup Agent" boots a base sandbox and runs an agent session whose
+progress is visible in a shared terminal. 32. **AC-6.2** On a successful setup, the agent writes/updates `.kata/environment.json` and
+proposes a commit containing it. 33. **AC-6.3** A snapshot is saved at the end of a successful agent-driven setup and is reused
+on the next boot (ties to AC-5.2). 34. **AC-6.4** Setup runs/history are viewable per comp `SCR-20260627-hqeu.png`; a failed setup
+surfaces logs and does not write a broken config.
 
 ## Sequencing
 
 - **Hard order:** 0 → 1 → 2 → 3 → 4. Each depends on the prior.
 - **5** depends on 2 (needs `install` execution) and is best validated after 3.
 - **6** depends on 2, 3, and 5 (agent setup writes config and saves a snapshot).
-- Parallelizable within a phase: contracts/SPI work (Phase 0) can proceed alongside Vercel
+- Parallelizable within a phase: contracts/SPI work (Phase 0) can proceed alongside Cloudflare
   driver scaffolding (Phase 1) once the SPI interface is frozen.
 
 ## Constraints
@@ -466,7 +496,7 @@ specs may add finer criteria but must not weaken these.
   for cloud.
 - Mirror the provider-instance pattern (open driver-kind slug, envelope config, registry,
   graceful unknown-driver downgrade). Contracts packages stay schema-only.
-- Required WebSocket auth token (the existing Kata server token, not a Vercel token) for any
+- Required WebSocket auth token (the existing Kata server token, not a Cloudflare token) for any
   cloud (publicly reachable) environment.
 - Secrets never committed to repos; never logged in clear text. At-rest storage bar (encrypted
   vs plaintext-with-redaction) is decided in the Phase 1 spec; today's settings store secrets
@@ -480,12 +510,11 @@ specs may add finer criteria but must not weaken these.
 ## Out of scope (deferred to later specs)
 
 - **Other cloud drivers.** The capability-based SPI must accommodate them; this roadmap
-  implements only Vercel (reachability `public-route`). Future drivers, tagged by reachability
-  kind and snapshot capability (AgentBox proves all of these behind one SPI):
-  - **Cloudflare Sandbox SDK** — `worker-proxied`; snapshot-capable. **Preferred vendor;**
-    deferred because production preview URLs require a Worker (`proxyToSandbox`) + a custom
-    domain with wildcard DNS, and the SDK is undergoing active feature deprecation. Revisit
-    when onboarding and the SDK surface stabilize.
+  implements only Cloudflare (reachability `worker-proxied` via tunnels). Future drivers, tagged
+  by reachability kind and snapshot capability (AgentBox proves all of these behind one SPI):
+  - **Vercel Sandbox** — `public-route`; native public preview route, Firecracker microVM with
+    root, free Hobby tier (5 hrs active CPU/mo included) for light use. **Simplest future
+    driver**; deferred only because V1 consolidates on the operator's existing Cloudflare stack.
   - **Hetzner** — `ssh-tunnel`; **ephemeral-capable** (per-box VPS from a base snapshot via
     cloud-init; `create_image` snapshots; `destroy` deletes server + firewall). Reduced
     hosted-web support (desktop-managed SSH forward).
@@ -509,11 +538,12 @@ specs may add finer criteria but must not weaken these.
   figure until then. Long agent runs may outlive a VM. Mitigation: surface remaining lifetime;
   rely on git branch sync so disposal never loses pushed work (AC-4.7); fast boot via snapshots
   (Phase 5).
-- **Public route URL reliability / mixed content / feasibility (highest technical risk).**
-  HTTPS hosted web must reach `wss`, and the vendored `vercel-sandbox` skill does not document
-  inbound port routing or `wss` ingress at all. Mitigation: the Phase 0 spike (AC-0.5) verifies
-  these against the live API and gates Phase 3; standardize on the sandbox public route
-  (HTTPS→wss); the existing Kata Code Connect relay is the documented re-plan fallback, not V1.
+- **Tunnel reachability / mixed content / feasibility (highest technical risk).** HTTPS
+  hosted web must reach `wss`, and reachability depends on the Cloudflare Sandbox tunnels API
+  (`sandbox.tunnels.get(port)`) which superseded the deprecated `exposePort()`. Mitigation: the
+  Phase 0 spike (AC-0.5) verifies tunnels + `wss` against the live SDK and gates Phase 3; use
+  quick tunnels for dev and named tunnels on the operator's existing zone for production; the
+  existing Kata Code Connect relay is the documented re-plan fallback, not V1.
 - **Secret handling.** Injecting provider/API secrets into a remote VM is sensitive, and the
   current settings store keeps secrets in plaintext. Mitigation: decide the at-rest bar in the
   Phase 1 spec; inject only at boot as env vars; never log; never commit; redact in API/logs;
@@ -522,8 +552,8 @@ specs may add finer criteria but must not weaken these.
   Mitigation: Phase 5 snapshots; pre-baked base image with Kata server.
 - **Git WIP loss during move.** Mitigation: explicit auto-commit to `kata/cloud/<id>` before
   clone; never discard uncommitted changes silently.
-- **SPI churn.** Freezing the SPI too late forces rework in `cloud-vercel`. Mitigation: lock
-  the SPI interface in Phase 0's per-phase spec before Vercel driver implementation; validate
+- **SPI churn.** Freezing the SPI too late forces rework in `cloud-cloudflare`. Mitigation: lock
+  the SPI interface in Phase 0's per-phase spec before Cloudflare driver implementation; validate
   the shape against AgentBox's `CloudBackend` (prior art) so the required/optional split is
   right the first time.
 
@@ -540,14 +570,14 @@ specs may add finer criteria but must not weaken these.
     fallback, credential injection, lifecycle re-ensure on wake.
   - `packages/sandbox-vercel/src/backend.ts` and `packages/sandbox-hetzner/src/backend.ts` —
     two reachability models (`public-route` vs `ssh-tunnel`) implementing the same SPI.
-  Use as a pattern reference only; do not import or copy code (AGENTS.md reference-repo
-  policy). It is a different product (multi-agent box runner, not a Kata `ExecutionEnvironment`
-  host), so adapt rather than transplant.
+    Use as a pattern reference only; do not import or copy code (AGENTS.md reference-repo
+    policy). It is a different product (multi-agent box runner, not a Kata `ExecutionEnvironment`
+    host), so adapt rather than transplant.
 
 ## Verification (roadmap-level)
 
 - Per-phase specs carry the detailed test plans. At minimum each phase must satisfy its ACs
-  via: unit tests (contracts/resolver/registry), integration/UAT against a real Vercel
+  via: unit tests (contracts/resolver/registry), integration/UAT against a real Cloudflare
   sandbox (provision/boot/connect/install/snapshot), and Playwright Electron e2e for
   composer/settings flows where feasible (`vp run e2e`), tagged with a new `@cloud` feature
   tag.
@@ -556,7 +586,7 @@ specs may add finer criteria but must not weaken these.
 
 ## Key files (anticipated, not exhaustive)
 
-- New: `packages/cloud-contracts/src/*`, `packages/cloud/src/*`, `packages/cloud-vercel/src/*`.
+- New: `packages/cloud-contracts/src/*`, `packages/cloud/src/*`, `packages/cloud-cloudflare/src/*`.
 - Edit: `packages/contracts/src/settings.ts` (`cloudProviderInstances`),
   `apps/server/src/serverLayers.ts` (registry wiring), `apps/server/src/wsServer.ts` /
   contracts `ws.ts` (`cloud.*` RPCs), `apps/server/src/provider`/remote launch + access glue.
@@ -568,15 +598,15 @@ specs may add finer criteria but must not weaken these.
 
 ## Build handoff
 
-- **Approved scope:** seven phases above; Vercel-only (reachability `public-route`); one
-  capability-based cloud SPI (required primitives + optional capabilities, AgentBox-shaped);
-  ephemeral + snapshot; repo-file-first env config; full Kata server in sandbox reached via
-  public route + token; injected secrets; git branch-sync move semantics.
-- **Non-goals:** other drivers (Cloudflare/Hetzner/DO/Daytona/E2B), persistent disk,
-  multi-repo, OAuth forwarding, billing. Cloudflare is the preferred future vendor but is
-  deferred on SDK maturity + custom-domain onboarding.
+- **Approved scope:** seven phases above; Cloudflare-only (reachability `worker-proxied` via
+  tunnels); one capability-based cloud SPI (required primitives + optional capabilities,
+  AgentBox-shaped); ephemeral + snapshot; repo-file-first env config; full Kata server in sandbox
+  reached via Worker + tunnel + token; injected secrets; git branch-sync move semantics.
+- **Non-goals:** other drivers (Vercel/Hetzner/DO/Daytona/E2B), persistent disk, multi-repo,
+  OAuth forwarding, billing. Vercel is the simplest future driver (`public-route`); Cloudflare is
+  V1 per the consolidation rationale.
 - **Required verification:** each phase's ACs + CI parity gates; `@cloud` e2e tag.
 - **Blocking questions for Phase 0 spec:** final SPI method signatures; exact
   `.kata/environment.json` schema fields; secret-storage bar (encrypted vs
-  plaintext-with-redaction) reused vs new; and the Phase 0 Vercel spike result (AC-0.5)
-  confirming public-route `wss` reachability before Phase 3 is planned.
+  plaintext-with-redaction) reused vs new; and the Phase 0 Cloudflare spike result (AC-0.5)
+  confirming tunnel `wss` reachability before Phase 3 is planned.

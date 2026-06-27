@@ -1,10 +1,10 @@
 ---
 type: Spec
 title: "Kata Cloud Phase 0 — cloud-provider foundations"
-description: "Detailed design for the cloud-provider SPI, schema-only contracts, settings map, registry, test-only stub driver, and the Vercel feasibility spike that gates Phase 3."
-status: Approved
+description: "Detailed design for the cloud-provider SPI, schema-only contracts, settings map, registry, test-only stub driver, and the Cloudflare feasibility spike that gates Phase 3."
+status: Draft
 approved_at: 2026-06-27T17:22:26Z
-tags: [specs, cloud, phase-0, providers, spi, contracts]
+tags: [specs, cloud, phase-0, providers, spi, contracts, cloudflare]
 timestamp: 2026-06-27T16:35:04Z
 ---
 
@@ -12,14 +12,14 @@ timestamp: 2026-06-27T16:35:04Z
 
 ## Status
 
-Approved
+Draft (revised 2026-06-27: spike switched from Vercel to Cloudflare per roadmap V1 change — tunnels-based reachability, `worker-proxied`).
 
 ## Goal
 
 Establish the modular cloud-provider substrate with no user-facing surface. Phase 0 ships the
 schema-only contracts, the capability-based driver SPI, a registry that materializes instances
 from settings and downgrades unknown drivers gracefully, the `cloudProviderInstances` settings
-field, a test-only stub driver, and a recorded Vercel feasibility spike. No production driver
+field, a test-only stub driver, and a recorded Cloudflare feasibility spike. No production driver
 is registered; the server boots unchanged.
 
 This is the first per-phase spec under the [Kata Cloud roadmap](/specs/2026-06-27-kata-cloud-roadmap-design.md).
@@ -38,8 +38,9 @@ It implements roadmap Phase 0 and freezes the SPI shape that every later phase d
   (`materializeProviderEnvironmentSecrets` / `persistProviderEnvironmentSecrets` redaction).
 - Prior-art SPI shape: AgentBox `packages/core/src/cloud-backend.ts`
   (`/Volumes/EVO/repos/agentbox`; pattern reference only, do not copy code).
-- Vercel SDK for the spike: vendored skill `.agents/skills/vercel-sandbox`; live
-  `@vercel/sandbox` API.
+- Cloudflare Sandbox SDK for the spike: <https://developers.cloudflare.com/sandbox/> (RPC
+  transport, tunnels API). Vercel skills (`.agents/skills/vercel-sandbox`) kept as reference for
+  the future Vercel driver, not V1.
 
 ## Locked decisions (from roadmap + planning)
 
@@ -61,7 +62,7 @@ It implements roadmap Phase 0 and freezes the SPI shape that every later phase d
    duplication, per AGENTS.md). Phase 0 only fixes the contract shape so that generalization is
    mechanical. Phase 0 ships no writer for the cloud env field, so the "no plaintext in
    settings" bar is a contract decision here, not yet an enforced/tested invariant.
-5. **Vercel spike is a throwaway script + recorded findings.** Lives under
+5. **Cloudflare spike is a throwaway script + recorded findings.** Lives under
    `scripts/cloud-spike/`, not shipped as product code. Findings recorded in this spec.
 
 ## Current state (verified)
@@ -219,21 +220,24 @@ reuses the provider env-var shape, so Phase 1 reuses the existing
 `{ sensitive: true, valueRedacted: true, value: "" }`.** No plaintext secrets in settings, no
 new encryption module.
 
-### Vercel feasibility spike (gates Phase 3)
+### Cloudflare feasibility spike (gates Phase 3)
 
-A throwaway script `scripts/cloud-spike/vercel-reachability.ts` (run manually with Vercel
-credentials from env per the `vercel-cli-with-tokens` skill) that:
+A throwaway script `scripts/cloud-spike/cloudflare-reachability.ts` (run manually with
+Cloudflare account/zone credentials in env) that:
 
-1. Provisions a sandbox via `@vercel/sandbox`.
-2. Starts a trivial listener (HTTP + WebSocket) on a port inside the sandbox.
-3. Exposes/obtains the public route URL for that port.
-4. Opens a `wss` connection through that route and exchanges a message.
-5. Measures the actual maximum VM lifetime (or documents the SDK-imposed cap).
+1. Provisions a sandbox via `@cloudflare/sandbox` using **RPC transport**.
+2. Starts a trivial listener (HTTP + WebSocket) on a port inside the sandbox (`startProcess`).
+3. Obtains a public URL for that port via `sandbox.tunnels.get(port)` — quick tunnel
+   (`*.trycloudflare.com`) for the dev probe, named tunnel on an operator zone for the
+   production probe.
+4. Opens a `wss` connection through that tunnel URL and exchanges a message.
+5. Measures the actual maximum sandbox lifetime (or documents the SDK-imposed cap).
 
 Findings (pass/fail per step, the verified API surface used, and the measured/observed max
 lifetime) are recorded in this spec's **Spike findings** section and the roadmap's lifetime
 figure corrected. A refutation of step 3 or 4 blocks Phase 3 until reachability is re-planned
-(roadmap Connect-relay fallback).
+(roadmap Connect-relay fallback). The script uses the tunnels API (not the deprecated
+`exposePort()`).
 
 ## Acceptance criteria
 
@@ -265,16 +269,16 @@ all present)` and likewise for `renewTimeout`, across at least one driver varian
    the interface) so an accidental change to a required signature breaks the build. The actual
    freeze is the process rule ("no change to a required signature without a spec amendment");
    this test is a drift guard, not a substitute for that rule.
-7. **AC-0.7** Vercel spike delivered: `scripts/cloud-spike/vercel-reachability.ts` exists and
-   **typechecks under `vp run typecheck`** (so `@vercel/sandbox` is a real, resolved
-   dependency and the script compiles). The **Spike findings** section records pass/fail for
-   provision, port exposure, sustained `wss`, and measured max VM lifetime, with the verified
-   `@vercel/sandbox` API surface cited. If the run is blocked on credentials, a "blocked"
-   finding must name the missing input and the unblock owner (the user), and Phase 1 cannot
-   complete until the spike actually runs. If `wss`-through-public-route is refuted, the spec
-   records that Phase 3 is blocked pending reachability re-plan.
+7. **AC-0.7** Cloudflare spike delivered: `scripts/cloud-spike/cloudflare-reachability.ts`
+   exists and **typechecks under `vp run typecheck`** (so `@cloudflare/sandbox` is a real,
+   resolved dependency and the script compiles). The **Spike findings** section records pass/fail
+   for provision, tunnel URL, sustained `wss`, and measured max sandbox lifetime, with the
+   verified `@cloudflare/sandbox` API surface (RPC + tunnels) cited. If the run is blocked on
+   credentials, a "blocked" finding must name the missing input and the unblock owner (the
+   user), and Phase 1 cannot complete until the spike actually runs. If `wss`-through-tunnel is
+   refuted, the spec records that Phase 3 is blocked pending reachability re-plan.
 
-AC-0.1…AC-0.4 map to the roadmap's AC-0.1…AC-0.4. The roadmap's AC-0.5 (the Vercel spike) is
+AC-0.1…AC-0.4 map to the roadmap's AC-0.1…AC-0.4. The roadmap's AC-0.5 (the Cloudflare spike) is
 implemented here as **AC-0.7**; the roadmap's "AC-0.5" cross-references (Phase 3 dependency,
 risk entries) therefore point to this spec's AC-0.7. AC-0.5 (descriptor flags) and AC-0.6
 (SPI freeze) are Phase-0-local additions not present in the roadmap.
@@ -296,7 +300,7 @@ risk entries) therefore point to this spec's AC-0.7. AC-0.5 (descriptor flags) a
 4. **Tests** — contracts round-trip (incl. unknown driver), registry materialization
    (available/unknown/disabled), descriptor↔method-presence agreement, settings decode with
    unknown cloud driver, type-level SPI conformance. _(AC-0.2, AC-0.3, AC-0.4, AC-0.5, AC-0.6)_
-5. **Vercel spike** — `scripts/cloud-spike/vercel-reachability.ts`; run; record findings.
+5. **Cloudflare spike** — `scripts/cloud-spike/cloudflare-reachability.ts`; run; record findings.
    _(AC-0.7)_
 6. **Gate** — `vp check`, `vp run typecheck`, `vp run test`; record results. _(AC-0.1)_
 
@@ -306,8 +310,8 @@ Steps 1–2 can proceed in parallel after the contract names are fixed; step 5 i
 ## Out of scope
 
 - Any `cloud.*` RPC or server-layer registry wiring (Phase 1+).
-- The Vercel driver implementation (`packages/cloud-vercel`) beyond the throwaway spike script
-  (Phase 1).
+- The Cloudflare driver implementation (`packages/cloud-cloudflare`) beyond the throwaway spike
+  script (Phase 1).
 - The `.kata/environment.json` resolver and execution (Phase 2) — Phase 0 defines the schema
   only.
 - Any UI (Settings/composer) — Phase 1+.
@@ -318,8 +322,8 @@ Steps 1–2 can proceed in parallel after the contract names are fixed; step 5 i
 - **SPI mis-design forces later churn.** Mitigation: validate the required/optional split
   against AgentBox's `CloudBackend` before finalizing; lock with a type-level conformance test
   (AC-0.6).
-- **Spike can't run without Vercel credentials.** Mitigation: script reads creds from env per
-  `vercel-cli-with-tokens`; if unavailable at build time, AC-0.7 is satisfied by the committed
+- **Spike can't run without Cloudflare credentials.** Mitigation: script reads creds from env;
+  if unavailable at build time, AC-0.7 is satisfied by the committed
   script + a recorded "blocked: needs credentials" finding, and Phase 1 cannot complete until
   the spike runs (it gates Phase 3, not Phase 0 merge).
 - **Contract drift from `providerInstance.ts`.** Mitigation: import/reuse the existing
@@ -328,21 +332,21 @@ Steps 1–2 can proceed in parallel after the contract names are fixed; step 5 i
 
 ## Spike findings
 
-_To be completed when `scripts/cloud-spike/vercel-reachability.ts` runs (AC-0.7)._
+_To be completed when `scripts/cloud-spike/cloudflare-reachability.ts` runs (AC-0.7)._
 
 - Provision: _pending_
-- Port exposure / public route: _pending_
-- Sustained `wss` through route: _pending_
-- Measured max VM lifetime: _pending_
-- Verified `@vercel/sandbox` API surface: _pending_
+- Tunnel URL (`sandbox.tunnels.get(port)`, quick + named): _pending_
+- Sustained `wss` through tunnel: _pending_
+- Measured max sandbox lifetime: _pending_
+- Verified `@cloudflare/sandbox` API surface (RPC + tunnels): _pending_
 - Phase 3 gate decision: _pending_
 
 ## Build handoff
 
 - **Approved scope:** two new packages (`cloud-contracts`, `cloud`), `cloudProviderInstances`
-  settings field, test-only stub driver, frozen capability-based SPI, Vercel spike script +
+  settings field, test-only stub driver, frozen capability-based SPI, Cloudflare spike script +
   findings. No server wiring, no driver, no UI.
-- **Non-goals:** RPCs, registry wiring, Vercel driver, resolver, UI, Connect changes.
+- **Non-goals:** RPCs, registry wiring, Cloudflare driver, resolver, UI, Connect changes.
 - **Required verification:** AC-0.1…AC-0.7 + CI parity (`vp check`, `vp run typecheck`,
   `vp run test`).
 - **Blocking questions:** none — all Phase 0 decisions locked. The spike result feeds Phase 1/3
