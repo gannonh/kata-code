@@ -20,7 +20,10 @@ import {
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makePiAdapter, type PiSdkSession } from "./PiAdapter.ts";
+import type { PiExtensionUIContext } from "./piExtensionUi.ts";
 import type { PiModelShape } from "./PiProvider.ts";
+import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import type { ProviderAdapterError } from "../Errors.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
 
@@ -101,6 +104,7 @@ function makeFakeSession(options?: FakeSessionOptions): {
       return Promise.resolve();
     },
     dispose: () => {},
+    bindExtensions: () => Promise.resolve(),
   };
   return { session, hooks };
 }
@@ -912,4 +916,256 @@ describe("makePiAdapter (vertical slice)", () => {
       yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
     }).pipe(Effect.provide(servicesLayer));
   });
+});
+
+describe("makePiAdapter extension UI bridge", () => {
+  // Bridge tests grab the uiContext via the `onUiContext` hook, invoke a
+  // bridged method, then resolve the pending request through the public
+  // `adapter.respondToUserInput` surface. Events are recorded for assertion.
+  async function startBridgedSession(piSettings: ReturnType<typeof decodePiSettings>): Promise<{
+    adapter: ProviderAdapterShape<ProviderAdapterError>;
+    uiContext: PiExtensionUIContext;
+    recorder: ReturnType<typeof makeEventRecorder>;
+    threadId: ReturnType<typeof ThreadId.make>;
+    resolveUserInput: (
+      requestId: string,
+      answers: Record<string, unknown>,
+    ) => Effect.Effect<void, ProviderAdapterError>;
+  }> {
+    const recorder = makeEventRecorder();
+    const { session } = makeFakeSession();
+    let capturedUiContext: PiExtensionUIContext | undefined;
+    const adapter = await Effect.runPromise(
+      Effect.scoped(
+        makePiAdapter(piSettings, {
+          instanceId: ProviderInstanceId.make("pi"),
+          availableModels: [SAMPLE_MODEL],
+          createSession: (() => Promise.resolve({ session })) as never,
+          onEvent: recorder.onEvent,
+          onUiContext: (uiContext) => {
+            capturedUiContext = uiContext;
+          },
+        }),
+      ),
+    );
+    const threadId = ThreadId.make("pi-ui-thread");
+    await Effect.runPromise(
+      adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      }),
+    );
+    if (!capturedUiContext) throw new Error("onUiContext was not invoked during startSession");
+    return {
+      adapter,
+      uiContext: capturedUiContext,
+      recorder,
+      threadId,
+      resolveUserInput: (requestId, answers) =>
+        adapter.respondToUserInput(threadId, requestId as never, answers as never),
+    };
+  }
+
+  it.effect("bridges select onto user-input.requested and resolves the chosen option", () =>
+    Effect.gen(function* () {
+      const { uiContext, recorder, resolveUserInput } = yield* Effect.tryPromise(() =>
+        startBridgedSession(decodePiSettings({})),
+      );
+
+      const selectPromise = uiContext.select("Pick a tool", ["bash", "edit", "grep"]);
+      yield* Effect.tryPromise(() =>
+        recorder.waitFor((event) => event.type === "user-input.requested"),
+      );
+
+      const requested = recorder.events.find((event) => event.type === "user-input.requested");
+      const payload = requested?.payload as unknown as
+        | { questions: Array<{ id: string; options: Array<{ label: string }> }> }
+        | undefined;
+      const question = payload?.questions[0];
+      expect(question?.id).toBe("selection");
+      expect(question?.options.map((o) => o.label)).toEqual(["bash", "edit", "grep"]);
+      expect((requested?.raw as { source?: string })?.source).toBe("pi.sdk.event");
+      const requestId = requested?.requestId as unknown as string;
+
+      yield* resolveUserInput(requestId, { selection: "edit" });
+      const answer = yield* Effect.tryPromise(() => selectPromise);
+      expect(answer).toBe("edit");
+
+      const resolved = recorder.events.find((event) => event.type === "user-input.resolved");
+      expect((resolved?.payload as { answers: Record<string, unknown> })?.answers).toEqual({
+        selection: "edit",
+      });
+    }),
+  );
+
+  it.effect("bridges confirm onto a Yes/No question and resolves to a boolean", () =>
+    Effect.gen(function* () {
+      const { uiContext, recorder, resolveUserInput } = yield* Effect.tryPromise(() =>
+        startBridgedSession(decodePiSettings({})),
+      );
+
+      const confirmPromise = uiContext.confirm("Run tests?", "This will execute the suite");
+      yield* Effect.tryPromise(() =>
+        recorder.waitFor((event) => event.type === "user-input.requested"),
+      );
+      const requested = recorder.events.find((event) => event.type === "user-input.requested");
+      const payload = requested?.payload as unknown as
+        | { questions: Array<{ id: string; options: Array<{ label: string }> }> }
+        | undefined;
+      const question = payload?.questions[0];
+      expect(question?.id).toBe("confirmation");
+      expect(question?.options.map((o) => o.label)).toEqual(["Yes", "No"]);
+      const requestId = requested?.requestId as unknown as string;
+
+      yield* resolveUserInput(requestId, { confirmation: "Yes" });
+      const confirmed = yield* Effect.tryPromise(() => confirmPromise);
+      expect(confirmed).toBe(true);
+    }),
+  );
+
+  it.effect("bridges input onto a free-text question and resolves the string", () =>
+    Effect.gen(function* () {
+      const { uiContext, recorder, resolveUserInput } = yield* Effect.tryPromise(() =>
+        startBridgedSession(decodePiSettings({})),
+      );
+
+      const inputPromise = uiContext.input("Branch name", "feat/...");
+      yield* Effect.tryPromise(() =>
+        recorder.waitFor((event) => event.type === "user-input.requested"),
+      );
+      const requested = recorder.events.find((event) => event.type === "user-input.requested");
+      const question = (
+        requested?.payload as unknown as
+          | { questions: Array<{ id: string; options: unknown[] }> }
+          | undefined
+      )?.questions[0];
+      expect(question?.id).toBe("input");
+      expect(question?.options).toEqual([]);
+      const requestId = requested?.requestId as unknown as string;
+
+      yield* resolveUserInput(requestId, { input: "feat/pi-bridge" });
+      const value = yield* Effect.tryPromise(() => inputPromise);
+      expect(value).toBe("feat/pi-bridge");
+    }),
+  );
+
+  it.effect("resolves a pre-aborted select immediately without publishing a request", () =>
+    Effect.gen(function* () {
+      const { uiContext, recorder } = yield* Effect.tryPromise(() =>
+        startBridgedSession(decodePiSettings({})),
+      );
+      const controller = new AbortController();
+      controller.abort();
+
+      const answer = yield* Effect.tryPromise(() =>
+        uiContext.select("Pick", ["a", "b"], { signal: controller.signal }),
+      );
+      expect(answer).toBeUndefined();
+      expect(recorder.events.some((event) => event.type === "user-input.requested")).toBe(false);
+    }),
+  );
+
+  it.effect(
+    "resolves to a cancelled value after the timeout and publishes user-input.resolved",
+    () =>
+      Effect.gen(function* () {
+        const { uiContext, recorder } = yield* Effect.tryPromise(() =>
+          startBridgedSession(decodePiSettings({})),
+        );
+
+        const answer = yield* Effect.tryPromise(() =>
+          uiContext.select("Pick", ["a", "b"], { timeout: 10 }),
+        );
+        expect(answer).toBeUndefined();
+        yield* Effect.tryPromise(() =>
+          recorder.waitFor((event) => event.type === "user-input.resolved"),
+        );
+        const resolved = recorder.events.find((event) => event.type === "user-input.resolved");
+        expect((resolved?.payload as { answers: Record<string, unknown> })?.answers).toEqual({});
+      }),
+  );
+
+  it.effect("maps notify(warning/error) to runtime.warning and notify(info) to tool.progress", () =>
+    Effect.gen(function* () {
+      const { uiContext, recorder } = yield* Effect.tryPromise(() =>
+        startBridgedSession(decodePiSettings({})),
+      );
+
+      uiContext.notify("careful", "warning");
+      uiContext.notify("boom", "error");
+      uiContext.notify("hi", "info");
+      uiContext.notify("also info");
+
+      const warnings = recorder.events.filter((event) => event.type === "runtime.warning");
+      expect(warnings).toHaveLength(2);
+      const progress = recorder.events.filter((event) => event.type === "tool.progress");
+      expect(progress).toHaveLength(2);
+      const firstProgress = progress[0];
+      expect((firstProgress?.payload as { summary?: string })?.summary).toBe("hi");
+    }),
+  );
+
+  it.effect("emits one runtime.warning per TUI-only method per session and no-ops", () =>
+    Effect.gen(function* () {
+      const { uiContext, recorder } = yield* Effect.tryPromise(() =>
+        startBridgedSession(decodePiSettings({})),
+      );
+
+      uiContext.setWidget("w", ["x"]);
+      uiContext.setWidget("w", ["y"]);
+      uiContext.setFooter(undefined);
+      uiContext.setHeader(undefined);
+      uiContext.pasteToEditor("text");
+      uiContext.setEditorComponent(undefined);
+      uiContext.addAutocompleteProvider(undefined as never);
+      const termUnsub = uiContext.onTerminalInput(() => undefined);
+      expect(typeof termUnsub).toBe("function");
+      expect(termUnsub()).toBeUndefined();
+      yield* Effect.tryPromise(() => uiContext.custom(undefined as never));
+
+      const warnings = recorder.events.filter((event) => event.type === "runtime.warning");
+      // One per method: setWidget, setFooter, setHeader, pasteToEditor,
+      // setEditorComponent, addAutocompleteProvider, onTerminalInput, custom.
+      expect(warnings).toHaveLength(8);
+      // Calling a method again does not emit a second warning.
+      uiContext.setWidget("w", ["z"]);
+      const warningsAfterRepeat = recorder.events.filter(
+        (event) => event.type === "runtime.warning",
+      );
+      expect(warningsAfterRepeat).toHaveLength(8);
+    }),
+  );
+
+  it.effect("fails loud when respondToUserInput targets an unknown request id", () =>
+    Effect.gen(function* () {
+      const { adapter, threadId } = yield* Effect.tryPromise(() =>
+        startBridgedSession(decodePiSettings({})),
+      );
+      const result = yield* Effect.exit(
+        adapter.respondToUserInput(threadId, "unknown-request-id" as never, {} as never),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+    }),
+  );
+
+  it.effect("emits schema-valid runtime events for the select bridge", () =>
+    Effect.gen(function* () {
+      const { uiContext, recorder, resolveUserInput } = yield* Effect.tryPromise(() =>
+        startBridgedSession(decodePiSettings({})),
+      );
+      const selectPromise = uiContext.select("Pick", ["a", "b"]);
+      yield* Effect.tryPromise(() =>
+        recorder.waitFor((event) => event.type === "user-input.requested"),
+      );
+      const requested = recorder.events.find((event) => event.type === "user-input.requested");
+      const requestId = requested?.requestId as unknown as string;
+      yield* resolveUserInput(requestId, { selection: "a" });
+      yield* Effect.tryPromise(() => selectPromise);
+
+      for (const event of recorder.events) {
+        expect(Schema.is(ProviderRuntimeEvent)(event)).toBe(true);
+      }
+    }),
+  );
 });

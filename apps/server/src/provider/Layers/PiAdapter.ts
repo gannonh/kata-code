@@ -4,8 +4,11 @@
  *
  * Implements: start (with resume cursor), send turn, stream assistant text
  * and reasoning deltas, tool lifecycle, interrupt, stop, readThread,
- * rollbackThread, and compactThread. The extension-UI bridge and
- * runtime-mode enforcement remain typed errors, layered on later.
+ * rollbackThread, and compactThread. The extension-UI bridge translates Pi
+ * `select`/`confirm`/`input`/`notify`/status/progress onto Kata user-input
+ * and runtime events, and emits one visible warning per unsupported
+ * TUI-only method per session. Runtime-mode enforcement remains a typed
+ * error, layered on later.
  *
  * @module provider/Layers/PiAdapter
  */
@@ -17,6 +20,7 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+  ApprovalRequestId,
   type ChatAttachment,
   EventId,
   type PiSettings,
@@ -29,8 +33,11 @@ import {
   type ProviderSendTurnInput,
   type ProviderTurnStartResult,
   RuntimeItemId,
+  RuntimeRequestId,
   type ThreadId,
   TurnId,
+  type ProviderUserInputAnswers,
+  type UserInputQuestion,
 } from "@kata-sh/code-contracts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -51,6 +58,15 @@ import {
 } from "../Errors.ts";
 import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import { classifyPiTurnFailure } from "../piTurnFailure.ts";
+import {
+  type PiExtensionUIContext,
+  type PiExtensionUIDialogOptions,
+  PLAIN_PI_EXTENSION_THEME,
+  firstPiUserInputAnswer,
+  makePiUserInputOption,
+  makePiUserInputOptions,
+  trimToUndefined,
+} from "./piExtensionUi.ts";
 import {
   type PiModelShape,
   createPiRegistries,
@@ -77,6 +93,10 @@ export interface PiAdapterLiveOptions {
   readonly availableModels?: ReadonlyArray<PiModelShape>;
   /** Observe published runtime events without subscribing to the stream (tests). */
   readonly onEvent?: (event: ProviderRuntimeEvent) => void;
+  /** Observe the extension UI context bound to each started session (tests).
+   *  Lets a test invoke `uiContext.select(...)` then call
+   *  `adapter.respondToUserInput(...)` through the public adapter interface. */
+  readonly onUiContext?: (uiContext: PiExtensionUIContext) => void;
 }
 
 interface PiTrackedTurn {
@@ -95,6 +115,14 @@ interface PiSessionContext {
   activeToolItems: Map<string, PiTrackedToolCall>;
   /** Completed turns in order, each with the SDK leaf id at settlement. */
   turns: PiTrackedTurn[];
+  /** Pending extension-UI dialog requests keyed by ApprovalRequestId. */
+  pendingUserInputs: Map<string, { resolve: (answers: ProviderUserInputAnswers) => void }>;
+  /** TUI-only extension methods that have already emitted a warning this session. */
+  unsupportedWarnings: Set<string>;
+  /** Last status text per key (dedupe so repeated setStatus calls don't spam). */
+  statusTexts: Map<string, string>;
+  /** Last working message (dedupe so repeated setWorkingMessage calls don't spam). */
+  workingMessage: string | undefined;
 }
 
 /**
@@ -119,6 +147,11 @@ export interface PiSdkSession {
   dispose(): void;
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   readonly isStreaming: boolean;
+  /** Bind an extension UI context (and other extension bindings) to the
+   *  session. The real `AgentSession.bindExtensions` is async; the adapter
+   *  calls it after subscribing to events so extension UI requests route
+   *  through the Kata user-input runtime event channel. */
+  bindExtensions(bindings: { uiContext?: unknown }): Promise<void>;
 }
 
 /** The `SessionManager` surface this adapter uses for rollback and reads. */
@@ -471,6 +504,15 @@ export function makePiAdapter(
         ctx.turnFiber = undefined;
         ctx.activeToolItems.clear();
         ctx.turns = [];
+        // Resolve any pending extension-UI dialogs as cancelled so the bridged
+        // promises don't hang after the session tears down.
+        for (const pending of Array.from(ctx.pendingUserInputs.values())) {
+          pending.resolve({});
+        }
+        ctx.pendingUserInputs.clear();
+        ctx.unsupportedWarnings.clear();
+        ctx.statusTexts.clear();
+        ctx.workingMessage = undefined;
         sessions.delete(ctx.threadId);
       });
 
@@ -569,6 +611,10 @@ export function makePiAdapter(
           stopped: false,
           activeToolItems: new Map(),
           turns: [],
+          pendingUserInputs: new Map(),
+          unsupportedWarnings: new Set(),
+          statusTexts: new Map(),
+          workingMessage: undefined,
         };
         ctx.unsubscribe = created.session.subscribe((event) => {
           for (const mapped of mapSdkEvent(event, ctx)) {
@@ -576,6 +622,24 @@ export function makePiAdapter(
           }
         });
         sessions.set(input.threadId, ctx);
+
+        // Bind the Kata extension UI bridge so Pi extension `select`/`confirm`/
+        // `input`/`notify`/status/progress calls route through the user-input
+        // and runtime event channel. TUI-only APIs warn once per session.
+        const uiContext = makePiExtensionUIContext(ctx);
+        options?.onUiContext?.(uiContext);
+        yield* Effect.tryPromise({
+          try: () => sdkSession.bindExtensions({ uiContext }),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "extension/bind",
+              detail: `Failed to bind Pi extension UI: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }.`,
+              cause,
+            }),
+        });
 
         yield* publish(makeEvent(input.threadId, { type: "session.started", payload: {} }));
         yield* publish(
@@ -842,6 +906,327 @@ export function makePiAdapter(
         });
       });
 
+    /**
+     * Resolve a pending extension-UI dialog request. Publishes
+     * `user-input.resolved` and resolves the bridged promise. Fails loud when
+     * no pending request matches `requestId` so a stale or mismatched response
+     * is surfaced instead of silently dropped.
+     */
+    const respondToUserInput = (
+      threadId: ThreadId,
+      requestId: ApprovalRequestId,
+      answers: ProviderUserInputAnswers,
+    ) =>
+      Effect.gen(function* () {
+        const ctx = yield* requireSession(threadId);
+        const key = requestId as unknown as string;
+        const pending = ctx.pendingUserInputs.get(key);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "respondToUserInput",
+            detail: `No pending Pi user-input request for id '${key}'.`,
+          });
+        }
+        ctx.pendingUserInputs.delete(key);
+        pending.resolve(answers);
+        yield* publish(
+          makeEvent(threadId, {
+            type: "user-input.resolved",
+            requestId: RuntimeRequestId.make(key),
+            payload: { answers },
+            raw: {
+              source: "pi.sdk.event",
+              method: "extension/ui/answered",
+              payload: { requestId: key, answers },
+            },
+          }),
+        );
+      });
+
+    /**
+     * Bridge a Pi extension UI dialog method (`select`/`confirm`/`input`/`editor`)
+     * onto a `user-input.requested` event and wait for `respondToUserInput`.
+     * Honors `opts.signal` (pre-aborted resolves immediately) and `opts.timeout`
+     * (resolves cancelled after the timeout). Returns the cancelled result on
+     * cancellation/timeout.
+     */
+    const requestExtensionUserInput = <T>(
+      ctx: PiSessionContext,
+      input: {
+        readonly method: string;
+        readonly question: UserInputQuestion;
+        readonly cancelled: T;
+        readonly opts?: PiExtensionUIDialogOptions;
+        readonly rawPayload?: Record<string, unknown>;
+      },
+    ): Promise<T> => {
+      const opts = input.opts;
+      if (ctx.stopped || opts?.signal?.aborted) {
+        return Promise.resolve(input.cancelled);
+      }
+      const requestId = randomUUID();
+      const key = requestId;
+      return new Promise<T>((resolve) => {
+        let settled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        let onAbort: (() => void) | undefined;
+        const cleanup = () => {
+          if (timeoutId !== undefined) {
+            clearTimeout(timeoutId);
+            timeoutId = undefined;
+          }
+          if (onAbort && opts?.signal) {
+            opts.signal.removeEventListener("abort", onAbort);
+          }
+        };
+        const finish = (answers: ProviderUserInputAnswers) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          ctx.pendingUserInputs.delete(key);
+          // The answered case publishes `user-input.resolved` from
+          // `respondToUserInput`. Cancellation/timeout paths publish it here.
+          if (Object.keys(answers).length === 0) {
+            offerFromListener(
+              makeEvent(ctx.threadId, {
+                type: "user-input.resolved",
+                requestId: RuntimeRequestId.make(key),
+                payload: { answers },
+                raw: {
+                  source: "pi.sdk.event",
+                  method: `${input.method}/cancelled`,
+                  payload: { requestId: key },
+                },
+              }),
+            );
+          }
+          resolve(input.cancelled);
+        };
+        onAbort = () => finish({});
+        ctx.pendingUserInputs.set(key, {
+          resolve: (answers) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(answers as unknown as T);
+          },
+        });
+        if (typeof opts?.timeout === "number" && opts.timeout > 0) {
+          // The Pi extension UI dialog timeout is a plain wall-clock bound; an
+          // Effect scheduler would require a runtime the synchronous SDK
+          // listener does not own, so setTimeout is intentional here.
+          // @effect-diagnostics-next-line globalTimers:off
+          timeoutId = setTimeout(onAbort, opts.timeout);
+        }
+        if (opts?.signal) {
+          opts.signal.addEventListener("abort", onAbort, { once: true });
+        }
+        offerFromListener(
+          makeEvent(ctx.threadId, {
+            type: "user-input.requested",
+            requestId: RuntimeRequestId.make(key),
+            payload: { questions: [input.question] },
+            raw: {
+              source: "pi.sdk.event",
+              method: input.method,
+              payload: input.rawPayload ?? { requestId: key, question: input.question },
+            },
+          }),
+        );
+      });
+    };
+
+    /**
+     * Build the Kata `ExtensionUIContext` for a Pi session. Dialog methods
+     * route through `requestExtensionUserInput`; `notify`/`setStatus`/
+     * `setWorkingMessage`/`setTitle` map to `runtime.warning` or `tool.progress`;
+     * TUI-only methods emit one `runtime.warning` per method per session then
+     * return safe no-op values; harmless getters/state return plain defaults.
+     */
+    const makePiExtensionUIContext = (ctx: PiSessionContext): PiExtensionUIContext => {
+      const emitPluginProgress = (summary: string) => {
+        const normalized = trimToUndefined(summary);
+        if (!normalized) return;
+        offerFromListener(
+          makeEvent(ctx.threadId, {
+            type: "tool.progress",
+            payload: { toolName: "Pi plugin", summary: normalized },
+            raw: {
+              source: "pi.sdk.event",
+              method: "extension/ui-progress",
+              payload: { summary: normalized },
+            },
+          }),
+        );
+      };
+      const warnUnsupported = (method: string) => {
+        if (ctx.unsupportedWarnings.has(method)) return;
+        ctx.unsupportedWarnings.add(method);
+        offerFromListener(
+          makeEvent(ctx.threadId, {
+            type: "runtime.warning",
+            payload: {
+              message: `Pi extension UI API '${method}' is not supported in Kata Code yet.`,
+              detail: { method },
+            },
+            raw: {
+              source: "pi.sdk.event",
+              method: "extension/ui-unsupported",
+              payload: { method },
+            },
+          }),
+        );
+      };
+      const uiContext: PiExtensionUIContext = {
+        async select(title, options, opts) {
+          const questionId = "selection";
+          const mappings = makePiUserInputOptions(options);
+          const answers = await requestExtensionUserInput<ProviderUserInputAnswers>(ctx, {
+            method: "extension/ui/select",
+            ...(opts ? { opts } : {}),
+            cancelled: {},
+            question: {
+              id: questionId,
+              header: trimToUndefined(title) ?? "Pi plugin",
+              question: trimToUndefined(title) ?? "Choose an option.",
+              options: mappings.map((mapping) => mapping.option),
+            },
+            rawPayload: { title, options },
+          });
+          const answer = firstPiUserInputAnswer(answers, questionId);
+          return mappings.find((mapping) => mapping.option.label === answer)?.value;
+        },
+        async confirm(title, message, opts) {
+          const questionId = "confirmation";
+          const answers = await requestExtensionUserInput<ProviderUserInputAnswers>(ctx, {
+            method: "extension/ui/confirm",
+            ...(opts ? { opts } : {}),
+            cancelled: {},
+            question: {
+              id: questionId,
+              header: trimToUndefined(title) ?? "Pi plugin",
+              question:
+                trimToUndefined(message) ?? trimToUndefined(title) ?? "Confirm this action?",
+              options: [makePiUserInputOption("Yes"), makePiUserInputOption("No")],
+            },
+            rawPayload: { title, message },
+          });
+          return firstPiUserInputAnswer(answers, questionId) === "Yes";
+        },
+        async input(title, placeholder, opts) {
+          const questionId = "input";
+          const answers = await requestExtensionUserInput<ProviderUserInputAnswers>(ctx, {
+            method: "extension/ui/input",
+            ...(opts ? { opts } : {}),
+            cancelled: {},
+            question: {
+              id: questionId,
+              header: trimToUndefined(title) ?? "Pi plugin",
+              question:
+                trimToUndefined(placeholder) ?? trimToUndefined(title) ?? "Type a response.",
+              options: [],
+            },
+            rawPayload: { title, placeholder },
+          });
+          return firstPiUserInputAnswer(answers, questionId);
+        },
+        notify(message, type) {
+          const normalized = trimToUndefined(message);
+          if (!normalized) return;
+          if (type === "warning" || type === "error") {
+            offerFromListener(
+              makeEvent(ctx.threadId, {
+                type: "runtime.warning",
+                payload: { message: normalized, detail: { type: type ?? "info" } },
+                raw: {
+                  source: "pi.sdk.event",
+                  method: "extension/ui/notify",
+                  payload: { message: normalized, type },
+                },
+              }),
+            );
+            return;
+          }
+          emitPluginProgress(normalized);
+        },
+        onTerminalInput() {
+          warnUnsupported("onTerminalInput");
+          return () => undefined;
+        },
+        setStatus(key, text) {
+          const normalizedKey = trimToUndefined(key) ?? "status";
+          const normalizedText = trimToUndefined(text);
+          if (!normalizedText) {
+            ctx.statusTexts.delete(normalizedKey);
+            return;
+          }
+          if (ctx.statusTexts.get(normalizedKey) === normalizedText) return;
+          ctx.statusTexts.set(normalizedKey, normalizedText);
+          emitPluginProgress(`${normalizedKey}: ${normalizedText}`);
+        },
+        setWorkingMessage(message) {
+          const normalized = trimToUndefined(message);
+          if (!normalized || normalized === ctx.workingMessage) return;
+          ctx.workingMessage = normalized;
+          emitPluginProgress(normalized);
+        },
+        setWorkingVisible() {},
+        setWorkingIndicator() {},
+        setHiddenThinkingLabel() {},
+        setWidget() {
+          warnUnsupported("setWidget");
+        },
+        setFooter() {
+          warnUnsupported("setFooter");
+        },
+        setHeader() {
+          warnUnsupported("setHeader");
+        },
+        setTitle(title) {
+          if (title) emitPluginProgress(title);
+        },
+        async custom() {
+          warnUnsupported("custom");
+          return undefined as never;
+        },
+        pasteToEditor() {
+          warnUnsupported("pasteToEditor");
+        },
+        setEditorText() {},
+        getEditorText() {
+          return "";
+        },
+        editor(title, prefill) {
+          return uiContext.input(title, prefill);
+        },
+        addAutocompleteProvider() {
+          warnUnsupported("addAutocompleteProvider");
+        },
+        setEditorComponent() {
+          warnUnsupported("setEditorComponent");
+        },
+        getEditorComponent() {
+          return undefined;
+        },
+        theme: PLAIN_PI_EXTENSION_THEME,
+        getAllThemes() {
+          return [];
+        },
+        getTheme() {
+          return undefined;
+        },
+        setTheme() {
+          return { success: false, error: "Kata Code does not expose Pi themes." };
+        },
+        getToolsExpanded() {
+          return false;
+        },
+        setToolsExpanded() {},
+      };
+      return uiContext;
+    };
+
     // Tear down SDK sessions and the runtime event PubSub when the adapter's
     // scope closes (instance removal/rebuild or registry shutdown). Without
     // this finalizer, old Pi SDK sessions survive rebuilds and
@@ -870,14 +1255,7 @@ export function makePiAdapter(
             detail: "Pi approval requests are not yet wired in this build.",
           }),
         ),
-      respondToUserInput: () =>
-        Effect.fail(
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "respondToUserInput",
-            detail: "Pi extension UI bridge is not yet wired in this build.",
-          }),
-        ),
+      respondToUserInput,
       stopSession,
       listSessions: () => Effect.succeed(Array.from(sessions.values()).map((ctx) => ctx.session)),
       hasSession: (threadId: ThreadId) => Effect.succeed(sessions.has(threadId)),
