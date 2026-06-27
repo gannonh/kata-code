@@ -2,7 +2,8 @@
 type: Spec
 title: "Kata Cloud Phase 0 — cloud-provider foundations"
 description: "Detailed design for the cloud-provider SPI, schema-only contracts, settings map, registry, test-only stub driver, and the Vercel feasibility spike that gates Phase 3."
-status: Draft
+status: Approved
+approved_at: 2026-06-27T17:22:26Z
 tags: [specs, cloud, phase-0, providers, spi, contracts]
 timestamp: 2026-06-27T16:35:04Z
 ---
@@ -11,7 +12,7 @@ timestamp: 2026-06-27T16:35:04Z
 
 ## Status
 
-Draft
+Approved
 
 ## Goal
 
@@ -115,12 +116,12 @@ drivers round-trip. Exports (each as a subpath export):
 - `defaultInstanceIdForDriver(kind)` — canonical back-compat instance id (mirrors the provider
   helper).
 - `CloudProviderInstanceConfig` — envelope: `{ driver, displayName?, enabled?, environment?,
-  config? }` where `config` is `Schema.Unknown` (driver owns its schema) and `environment`
+config? }` where `config` is `Schema.Unknown` (driver owns its schema) and `environment`
   reuses the **same** `ProviderInstanceEnvironment` shape (`name`, `value`, `sensitive`,
   `valueRedacted?`) so the existing secret redaction path applies unchanged.
 - `CloudProviderInstanceConfigMap` — `Record<CloudProviderInstanceId, CloudProviderInstanceConfig>`.
 - `EnvironmentConfig` — schema for `.kata/environment.json`: `{ build?: { dockerfile, context? },
-  snapshot?, install?, start?, terminals? }`. All fields optional; unknown fields tolerated
+snapshot?, install?, start?, terminals? }`. All fields optional; unknown fields tolerated
   (forward-compat). Schema only; no resolver logic here (resolver is Phase 2).
 - `CloudSessionState` — literal union: `provisioning | ready | error | disposed`
   (plus `unknown` for forward-compat). Used by later phases; defined now so the contract is
@@ -140,26 +141,26 @@ contract single-sourced (declared in the scaffold step below).
 
 Required (every driver implements):
 
-| Member | Signature (indicative) | Purpose |
-| --- | --- | --- |
-| `kind` | `CloudProviderDriverKind` | Driver identity. |
-| `validate` | `(config) => Effect<ValidateResult, CloudProviderError>` | Credential/connectivity check ("Test connection"). |
-| `provision` | `(req) => Effect<CloudHandle, CloudProviderError>` | Create/boot a VM, apply base image/snapshot, run `install`. |
-| `exec` | `(handle, cmd, opts?) => Effect<CloudExecResult, CloudProviderError>` | Run a command in the VM. |
-| `reachability` | `(handle, port) => Effect<CloudReachability, CloudProviderError>` | Resolve how the client reaches a port, per the driver's `describe().reachabilityKind`. |
-| `dispose` | `(handle) => Effect<void, CloudProviderError>` | Tear down the VM. |
-| `describe` | `() => CloudProviderDescriptor` | Capabilities, `reachabilityKind`, limits, which optional members exist. |
+| Member         | Signature (indicative)                                                | Purpose                                                                                |
+| -------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `kind`         | `CloudProviderDriverKind`                                             | Driver identity.                                                                       |
+| `validate`     | `(config) => Effect<ValidateResult, CloudProviderError>`              | Credential/connectivity check ("Test connection").                                     |
+| `provision`    | `(req) => Effect<CloudHandle, CloudProviderError>`                    | Create/boot a VM, apply base image/snapshot, run `install`.                            |
+| `exec`         | `(handle, cmd, opts?) => Effect<CloudExecResult, CloudProviderError>` | Run a command in the VM.                                                               |
+| `reachability` | `(handle, port) => Effect<CloudReachability, CloudProviderError>`     | Resolve how the client reaches a port, per the driver's `describe().reachabilityKind`. |
+| `dispose`      | `(handle) => Effect<void, CloudProviderError>`                        | Tear down the VM.                                                                      |
+| `describe`     | `() => CloudProviderDescriptor`                                       | Capabilities, `reachabilityKind`, limits, which optional members exist.                |
 
 Optional (driver may omit; registry exposes presence via `describe()` and callers guard with
 capability checks):
 
-| Member | Purpose | Used by |
-| --- | --- | --- |
-| `createSnapshot` / `deleteSnapshot` / `snapshotExists` | VM snapshot lifecycle. | Phase 5 |
-| `renewTimeout` | Extend session before idle/timeout death. | Phase 3/4 |
-| `signedPreviewUrl` | Browser-bound signed URL where the route model needs one. | Phase 4 |
-| `networkPolicy` | Native egress control. | later |
-| `pause` / `resume` | Cold-store lifecycle where the provider supports it. | later |
+| Member                                                 | Purpose                                                   | Used by   |
+| ------------------------------------------------------ | --------------------------------------------------------- | --------- |
+| `createSnapshot` / `deleteSnapshot` / `snapshotExists` | VM snapshot lifecycle.                                    | Phase 5   |
+| `renewTimeout`                                         | Extend session before idle/timeout death.                 | Phase 3/4 |
+| `signedPreviewUrl`                                     | Browser-bound signed URL where the route model needs one. | Phase 4   |
+| `networkPolicy`                                        | Native egress control.                                    | later     |
+| `pause` / `resume`                                     | Cold-store lifecycle where the provider supports it.      | later     |
 
 `describe()` returns a `CloudProviderDescriptor`: `{ kind, reachabilityKind, maxLifetimeMs?,
 supportsSnapshot, supportsRenewTimeout, baseImages? }`. Each boolean capability flag is `true`
@@ -255,7 +256,7 @@ figure corrected. A refutation of step 3 or 4 blocks Phase 3 until reachability 
    pass and no production cloud driver is registered.
 5. **AC-0.5** `describe()` capability flags match method presence: a unit test asserts that for
    the stub driver, `supportsSnapshot === (createSnapshot && deleteSnapshot && snapshotExists
-   all present)` and likewise for `renewTimeout`, across at least one driver variant with the
+all present)` and likewise for `renewTimeout`, across at least one driver variant with the
    capability and one without. (A capability flag is true only when **all** of its methods are
    present.)
 6. **AC-0.6** SPI freeze (process + drift guard): `CloudProviderDriver` required members
@@ -286,18 +287,18 @@ risk entries) therefore point to this spec's AC-0.7. AC-0.5 (descriptor flags) a
    `environmentConfig.ts`, `sessionState.ts`, `reachability.ts`, `index.ts`. **Import and
    reuse `ProviderInstanceEnvironment` from `@kata-sh/code-contracts`** for the `environment`
    field — do not redefine the shape (keeps the redaction contract single-sourced).
-   *(AC-0.1, AC-0.2)*
+   _(AC-0.1, AC-0.2)_
 2. **Scaffold `packages/cloud`** — package.json/tsconfig; `CloudProviderDriver.ts` (SPI types
-   + `CloudProviderError`), `CloudProviderRegistry.ts`, `descriptor.ts`, a test-only
-   `testing/stubDriver.ts`, `index.ts`. *(AC-0.3, AC-0.5, AC-0.6)*
+   - `CloudProviderError`), `CloudProviderRegistry.ts`, `descriptor.ts`, a test-only
+     `testing/stubDriver.ts`, `index.ts`. _(AC-0.3, AC-0.5, AC-0.6)_
 3. **Add `cloudProviderInstances`** to `ServerSettings` and `ServerSettingsPatch`
-   (`packages/contracts/src/settings.ts`), with default `{}` and whole-map patch. *(AC-0.4)*
+   (`packages/contracts/src/settings.ts`), with default `{}` and whole-map patch. _(AC-0.4)_
 4. **Tests** — contracts round-trip (incl. unknown driver), registry materialization
    (available/unknown/disabled), descriptor↔method-presence agreement, settings decode with
-   unknown cloud driver, type-level SPI conformance. *(AC-0.2, AC-0.3, AC-0.4, AC-0.5, AC-0.6)*
+   unknown cloud driver, type-level SPI conformance. _(AC-0.2, AC-0.3, AC-0.4, AC-0.5, AC-0.6)_
 5. **Vercel spike** — `scripts/cloud-spike/vercel-reachability.ts`; run; record findings.
-   *(AC-0.7)*
-6. **Gate** — `vp check`, `vp run typecheck`, `vp run test`; record results. *(AC-0.1)*
+   _(AC-0.7)_
+6. **Gate** — `vp check`, `vp run typecheck`, `vp run test`; record results. _(AC-0.1)_
 
 Steps 1–2 can proceed in parallel after the contract names are fixed; step 5 is independent of
 1–4 and can run anytime credentials are available.
