@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { describe, expect, it } from "@effect/vitest";
+import { describe, expect, it, vi } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,17 @@ const decodePiSettings = Schema.decodeSync(PiSettings);
 
 type PiSdkSessionEvent = Parameters<Parameters<PiSdkSession["subscribe"]>[0]>[0];
 
+interface FakeSessionOptions {
+  /** Session file path exposed as the resume cursor. */
+  readonly sessionFile?: string;
+  /** Session manager double for rollback/readThread tests. */
+  readonly sessionManager?: PiSdkSession["sessionManager"];
+  /** Resolved message history for readThread snapshots. */
+  readonly messages?: unknown[];
+  /** Implementation of compact() for compaction tests. */
+  readonly compact?: () => Promise<void>;
+}
+
 interface FakeSessionHooks {
   emit: ((event: PiSdkSessionEvent) => void) | undefined;
   promptStarted: Promise<void>;
@@ -37,9 +49,14 @@ interface FakeSessionHooks {
         options?: { images?: unknown[]; streamingBehavior?: "steer" | "followUp" } | undefined;
       }
     | undefined;
+  /** Spy for compact() invocations. */
+  compactCalls: number;
 }
 
-function makeFakeSession(): { session: PiSdkSession; hooks: FakeSessionHooks } {
+function makeFakeSession(options?: FakeSessionOptions): {
+  session: PiSdkSession;
+  hooks: FakeSessionHooks;
+} {
   let markPromptStarted: () => void = () => {};
   const promptStarted = new Promise<void>((resolve) => {
     markPromptStarted = resolve;
@@ -50,16 +67,29 @@ function makeFakeSession(): { session: PiSdkSession; hooks: FakeSessionHooks } {
     resolvePrompt: () => {},
     rejectPrompt: () => {},
     lastPromptArgs: undefined,
+    compactCalls: 0,
   };
   const session: PiSdkSession = {
     sessionId: "pi-session-1",
+    ...(options?.sessionFile ? { sessionFile: options.sessionFile } : {}),
+    ...(options?.sessionManager ? { sessionManager: options.sessionManager } : {}),
+    ...(options?.messages ? { messages: options.messages } : {}),
+    compact: options?.compact
+      ? () => {
+          hooks.compactCalls += 1;
+          return options.compact!();
+        }
+      : () => {
+          hooks.compactCalls += 1;
+          return Promise.resolve();
+        },
     isStreaming: true,
     subscribe: (listener) => {
       hooks.emit = listener;
       return () => {};
     },
-    prompt: (text, options) => {
-      hooks.lastPromptArgs = { text, options };
+    prompt: (text, opts) => {
+      hooks.lastPromptArgs = { text, options: opts };
       markPromptStarted();
       return new Promise<void>((resolve, reject) => {
         hooks.resolvePrompt = resolve;
@@ -395,10 +425,90 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
-  it.effect("fails readThread with an unsupported-operation error", () =>
+  it.effect(
+    "includes a resumeCursor on the returned session and opens the session file when resuming",
+    () =>
+      Effect.gen(function* () {
+        const recorder = makeEventRecorder();
+        const { session } = makeFakeSession({ sessionFile: "/tmp/pi-session.jsonl" });
+        // Spy on the real SessionManager factory methods so the test verifies
+        // which construction path the adapter took, through the public
+        // startSession interface.
+        const openSpy = vi
+          .spyOn(SessionManager, "open")
+          .mockImplementation(() => ({ getCwd: () => "/tmp" }) as never);
+        const inMemorySpy = vi
+          .spyOn(SessionManager, "inMemory")
+          .mockImplementation(() => ({ getCwd: () => "/tmp" }) as never);
+        const adapter = yield* makePiAdapter(decodePiSettings({}), {
+          instanceId: ProviderInstanceId.make("pi"),
+          availableModels: [SAMPLE_MODEL],
+          createSession: (() => Promise.resolve({ session })) as never,
+          onEvent: recorder.onEvent,
+        });
+
+        const threadId = ThreadId.make("pi-thread-resume-1");
+        const started = yield* adapter.startSession({
+          threadId,
+          runtimeMode: "full-access",
+          modelSelection: MODEL_SELECTION,
+        });
+        // A fresh in-memory session still surfaces its session file as a
+        // resume cursor so callers can persist it for later resumption.
+        expect(started.resumeCursor).toBe("/tmp/pi-session.jsonl");
+        expect(inMemorySpy).toHaveBeenCalledTimes(1);
+        expect(openSpy).not.toHaveBeenCalled();
+
+        // Resuming with the captured cursor opens the session file instead of
+        // creating a fresh in-memory session.
+        const resumed = yield* adapter.startSession({
+          threadId: ThreadId.make("pi-thread-resume-2"),
+          runtimeMode: "full-access",
+          modelSelection: MODEL_SELECTION,
+          resumeCursor: "/tmp/pi-session.jsonl",
+        });
+        expect(resumed.resumeCursor).toBe("/tmp/pi-session.jsonl");
+        expect(openSpy).toHaveBeenCalledTimes(1);
+        expect(openSpy).toHaveBeenCalledWith(
+          "/tmp/pi-session.jsonl",
+          undefined,
+          expect.any(String),
+        );
+        // inMemory is still only the first (fresh) call.
+        expect(inMemorySpy).toHaveBeenCalledTimes(1);
+
+        openSpy.mockRestore();
+        inMemorySpy.mockRestore();
+      }),
+  );
+
+  it.effect("readThread maps session message history into a single-turn snapshot", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();
-      const { session } = makeFakeSession();
+      const messages = [
+        { role: "user", content: "hello", timestamp: 1 },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Hi there" },
+            { type: "toolCall", id: "call-1", name: "bash", arguments: { command: "npm test" } },
+          ],
+          api: "anthropic-messages",
+          provider: "anthropic",
+          model: "claude",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop",
+          timestamp: 2,
+        },
+      ];
+      const { session } = makeFakeSession({ messages });
       const adapter = yield* makePiAdapter(decodePiSettings({}), {
         instanceId: ProviderInstanceId.make("pi"),
         availableModels: [SAMPLE_MODEL],
@@ -413,8 +523,162 @@ describe("makePiAdapter (vertical slice)", () => {
         modelSelection: MODEL_SELECTION,
       });
 
-      const result = yield* Effect.exit(adapter.readThread(threadId));
-      expect(Exit.isFailure(result)).toBe(true);
+      const snapshot = yield* adapter.readThread(threadId);
+      expect(snapshot.threadId).toBe(threadId);
+      expect(snapshot.turns).toHaveLength(1);
+      const items = snapshot.turns[0]?.items as Array<{ type: string }> | undefined;
+      expect(items?.map((item) => item.type)).toEqual([
+        "user_message",
+        "assistant_message",
+        "tool_call",
+      ]);
+    }),
+  );
+
+  it.effect("readThread returns an empty turns array when the session has no messages", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-read-empty");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+
+      const snapshot = yield* adapter.readThread(threadId);
+      expect(snapshot.threadId).toBe(threadId);
+      expect(snapshot.turns).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "rollbackThread branches the session manager to the target leaf and truncates tracked turns",
+    () =>
+      Effect.gen(function* () {
+        const recorder = makeEventRecorder();
+        const branchCalls: string[] = [];
+        let resetLeafCalls = 0;
+        let leafId = "leaf-0";
+        const sessionManager = {
+          getLeafId: () => leafId,
+          branch: (fromId: string) => {
+            branchCalls.push(fromId);
+            leafId = fromId;
+          },
+          resetLeaf: () => {
+            resetLeafCalls += 1;
+            leafId = null as unknown as string;
+          },
+          getEntries: () => [],
+        };
+        const { session, hooks } = makeFakeSession({ sessionManager });
+        const adapter = yield* makePiAdapter(decodePiSettings({}), {
+          instanceId: ProviderInstanceId.make("pi"),
+          availableModels: [SAMPLE_MODEL],
+          createSession: (() => Promise.resolve({ session })) as never,
+          onEvent: recorder.onEvent,
+        });
+
+        const threadId = ThreadId.make("pi-thread-rollback");
+        yield* adapter.startSession({
+          threadId,
+          runtimeMode: "full-access",
+          modelSelection: MODEL_SELECTION,
+        });
+
+        // Complete two turns; each settlement records the session leaf id.
+        yield* adapter.sendTurn({ threadId, input: "first" });
+        yield* Effect.tryPromise(() => hooks.promptStarted);
+        leafId = "leaf-1";
+        hooks.resolvePrompt();
+        yield* Effect.tryPromise(() =>
+          recorder.waitFor((event) => event.type === "turn.completed"),
+        );
+
+        yield* adapter.sendTurn({ threadId, input: "second" });
+        yield* Effect.tryPromise(() => hooks.promptStarted);
+        leafId = "leaf-2";
+        hooks.resolvePrompt();
+        yield* Effect.tryPromise(() =>
+          recorder.waitFor((event) => event.type === "turn.completed"),
+        );
+
+        // Roll back one turn: branch back to the first turn's leaf.
+        const snapshot = yield* adapter.rollbackThread(threadId, 1);
+        expect(branchCalls).toEqual(["leaf-1"]);
+        expect(resetLeafCalls).toBe(0);
+        expect(snapshot.threadId).toBe(threadId);
+
+        // Rolling back all remaining turns resets the leaf.
+        const allSnapshot = yield* adapter.rollbackThread(threadId, 1);
+        expect(resetLeafCalls).toBe(1);
+        expect(allSnapshot.turns).toEqual([]);
+      }),
+  );
+
+  it.effect("compactThread calls session.compact and emits compaction lifecycle events", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession({
+        // The real SDK emits compaction_start/compaction_end through the
+        // subscribed listener while compact() is in flight. The fake mirrors
+        // that by emitting both events before resolving the compact promise.
+        compact: () => {
+          hooks.emit?.({ type: "compaction_start", reason: "manual" } as PiSdkSessionEvent);
+          hooks.emit?.({
+            type: "compaction_end",
+            reason: "manual",
+            result: undefined,
+            aborted: false,
+            willRetry: false,
+          } as PiSdkSessionEvent);
+          return Promise.resolve();
+        },
+      });
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-compact");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+
+      // compactThread awaits session.compact(); the fake emits the compaction
+      // events synchronously inside compact, so by the time compactThread
+      // resolves both lifecycle items have been published.
+      yield* adapter.compactThread(threadId);
+
+      expect(hooks.compactCalls).toBe(1);
+
+      const updated = recorder.events.find(
+        (event) => event.type === "item.updated" && event.payload.itemType === "context_compaction",
+      );
+      expect(updated).toBeDefined();
+      expect((updated?.payload as { status?: string })?.status).toBe("inProgress");
+      expect((updated?.payload as { title?: string })?.title).toBe("Compacting context");
+      expect((updated?.raw as { source?: string })?.source).toBe("pi.sdk.event");
+
+      const completed = recorder.events.find(
+        (event) =>
+          event.type === "item.completed" && event.payload.itemType === "context_compaction",
+      );
+      expect(completed).toBeDefined();
+      expect((completed?.payload as { status?: string })?.status).toBe("completed");
+      expect((completed?.payload as { title?: string })?.title).toBe("Context compacted");
     }),
   );
 

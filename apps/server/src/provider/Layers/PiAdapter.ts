@@ -2,12 +2,10 @@
  * PiAdapter — maps the in-process Pi SDK (`AgentSession`) onto Kata's
  * `ProviderAdapterShape`.
  *
- * Vertical slice (this file): start a session, send a turn, stream assistant
- * text and reasoning deltas, interrupt, and stop. Tool-lifecycle detail,
- * compaction, the extension-UI bridge, runtime-mode enforcement, rollback,
- * and resume cursors are layered on after the driver is wired end-to-end;
- * their operations exist here as typed errors so the adapter is never
- * silently half-implemented.
+ * Implements: start (with resume cursor), send turn, stream assistant text
+ * and reasoning deltas, tool lifecycle, interrupt, stop, readThread,
+ * rollbackThread, and compactThread. The extension-UI bridge and
+ * runtime-mode enforcement remain typed errors, layered on later.
  *
  * @module provider/Layers/PiAdapter
  */
@@ -51,7 +49,7 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import { classifyPiTurnFailure } from "../piTurnFailure.ts";
 import {
   type PiModelShape,
@@ -59,6 +57,7 @@ import {
   piModelSlug,
   resolvePiAgentDir,
 } from "./PiProvider.ts";
+import { mapPiMessageHistory } from "./piThreadHistory.ts";
 import {
   type PiTrackedToolCall,
   toolItemType,
@@ -80,6 +79,11 @@ export interface PiAdapterLiveOptions {
   readonly onEvent?: (event: ProviderRuntimeEvent) => void;
 }
 
+interface PiTrackedTurn {
+  readonly id: TurnId;
+  leafId?: string;
+}
+
 interface PiSessionContext {
   readonly threadId: ThreadId;
   session: ProviderSession;
@@ -89,6 +93,8 @@ interface PiSessionContext {
   turnFiber: Fiber.Fiber<void, never> | undefined;
   stopped: boolean;
   activeToolItems: Map<string, PiTrackedToolCall>;
+  /** Completed turns in order, each with the SDK leaf id at settlement. */
+  turns: PiTrackedTurn[];
 }
 
 /**
@@ -97,6 +103,14 @@ interface PiSessionContext {
  */
 export interface PiSdkSession {
   readonly sessionId: string;
+  /** Session file path, when the session is backed by a file (resume cursor). */
+  readonly sessionFile?: string;
+  /** Session manager: exposes leaf ids, branching, and entries for rollback/read. */
+  readonly sessionManager?: PiSdkSessionManager;
+  /** Compact the session's context (emits compaction_start/compaction_end). */
+  compact(customInstructions?: string): Promise<void>;
+  /** Resolved message history for readThread snapshots. */
+  readonly messages?: unknown[];
   prompt(
     text: string,
     options?: { images?: unknown[]; streamingBehavior?: "steer" | "followUp" },
@@ -105,6 +119,14 @@ export interface PiSdkSession {
   dispose(): void;
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   readonly isStreaming: boolean;
+}
+
+/** The `SessionManager` surface this adapter uses for rollback and reads. */
+export interface PiSdkSessionManager {
+  getLeafId(): string | null;
+  branch(branchFromId: string): void;
+  resetLeaf(): void;
+  getEntries(): unknown[];
 }
 
 type TurnOutcome =
@@ -291,6 +313,39 @@ export function makePiAdapter(
           }),
         ];
       }
+      if (event.type === "compaction_start") {
+        const itemId = RuntimeItemId.make(`pi-compaction-${randomUUID()}`);
+        return [
+          makeEvent(ctx.threadId, {
+            type: "item.updated",
+            turnId,
+            itemId,
+            payload: {
+              itemType: "context_compaction",
+              status: "inProgress",
+              title: "Compacting context",
+            },
+            raw: toolEventRaw(event),
+          }),
+        ];
+      }
+      if (event.type === "compaction_end") {
+        const itemId = RuntimeItemId.make(`pi-compaction-${randomUUID()}`);
+        return [
+          makeEvent(ctx.threadId, {
+            type: "item.completed",
+            turnId,
+            itemId,
+            payload: {
+              itemType: "context_compaction",
+              status: event.aborted ? "failed" : "completed",
+              title: "Context compacted",
+              data: event,
+            },
+            raw: toolEventRaw(event),
+          }),
+        ];
+      }
       // Turn and item settlement are owned solely by settleTurn (called when
       // prompt() resolves/rejects). SDK turn_end/agent_end events are not
       // mapped here to avoid duplicate turn.completed emissions.
@@ -364,6 +419,14 @@ export function makePiAdapter(
                 : { state: "completed" },
           }),
         );
+        // Record the completed turn with the SDK session leaf id at
+        // settlement so rollbackThread can branch back to this point. Aborted
+        // turns are not recorded: they produced no committed history.
+        const ctx = sessions.get(threadId);
+        if (ctx && outcome.state === "completed") {
+          const leafId = ctx.sdk.sessionManager?.getLeafId() ?? undefined;
+          ctx.turns.push({ id: turnId, ...(leafId ? { leafId } : {}) });
+        }
       });
 
     /**
@@ -403,6 +466,7 @@ export function makePiAdapter(
         ctx.activeTurnId = undefined;
         ctx.turnFiber = undefined;
         ctx.activeToolItems.clear();
+        ctx.turns = [];
         sessions.delete(ctx.threadId);
       });
 
@@ -444,6 +508,16 @@ export function makePiAdapter(
               resolveProjectTrust: () =>
                 Promise.resolve(piSettings.projectTrustPolicy === "always"),
             });
+            // A resume cursor is a Pi session file path. Open the existing
+            // session file instead of creating a fresh in-memory one so the
+            // resumed session inherits the prior conversation history.
+            const resumeCursor =
+              typeof input.resumeCursor === "string" && input.resumeCursor.length > 0
+                ? input.resumeCursor
+                : undefined;
+            const sessionManager = resumeCursor
+              ? SessionManager.open(resumeCursor, undefined, cwd)
+              : SessionManager.inMemory(cwd);
             return factory({
               cwd,
               ...(agentDir ? { agentDir } : {}),
@@ -452,7 +526,7 @@ export function makePiAdapter(
               authStorage,
               modelRegistry,
               resourceLoader,
-              sessionManager: SessionManager.inMemory(cwd),
+              sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
             });
           },
@@ -465,6 +539,8 @@ export function makePiAdapter(
             }),
         });
 
+        const sdkSession = created.session as unknown as PiSdkSession;
+        const resumeCursor = sdkSession.sessionFile;
         const createdAt = DateTime.formatIso(DateTime.nowUnsafe());
         const providerSession: ProviderSession = {
           provider: PROVIDER,
@@ -474,6 +550,7 @@ export function makePiAdapter(
           ...(input.cwd ? { cwd: input.cwd } : {}),
           model: `${model.provider}/${model.id}`,
           threadId: input.threadId,
+          ...(resumeCursor ? { resumeCursor } : {}),
           createdAt,
           updatedAt: createdAt,
         };
@@ -481,12 +558,13 @@ export function makePiAdapter(
         const ctx: PiSessionContext = {
           threadId: input.threadId,
           session: providerSession,
-          sdk: created.session as unknown as PiSdkSession,
+          sdk: sdkSession,
           unsubscribe: () => {},
           activeTurnId: undefined,
           turnFiber: undefined,
           stopped: false,
           activeToolItems: new Map(),
+          turns: [],
         };
         ctx.unsubscribe = created.session.subscribe((event) => {
           for (const mapped of mapSdkEvent(event, ctx)) {
@@ -499,7 +577,7 @@ export function makePiAdapter(
         yield* publish(
           makeEvent(input.threadId, {
             type: "thread.started",
-            payload: { providerThreadId: created.session.sessionId },
+            payload: { providerThreadId: sdkSession.sessionId },
           }),
         );
 
@@ -653,7 +731,12 @@ export function makePiAdapter(
         );
         ctx.turnFiber = Effect.runFork(turnRunner);
 
-        return { threadId: input.threadId, turnId } satisfies ProviderTurnStartResult;
+        const resumeCursor = ctx.sdk.sessionFile;
+        return {
+          threadId: input.threadId,
+          turnId,
+          ...(resumeCursor ? { resumeCursor } : {}),
+        } satisfies ProviderTurnStartResult;
       });
 
     const interruptTurn = (threadId: ThreadId) =>
@@ -688,6 +771,71 @@ export function makePiAdapter(
       Effect.gen(function* () {
         const threadIds = Array.from(sessions.keys());
         yield* Effect.forEach(threadIds, (threadId) => stopSession(threadId), { discard: true });
+      });
+
+    /**
+     * Build a {@link ProviderThreadSnapshot} from the SDK session's message
+     * history. The history is rendered as a single synthetic turn so the
+     * snapshot preserves message order without needing SDK turn boundaries.
+     */
+    const snapshotThread = (ctx: PiSessionContext): ProviderThreadSnapshot => {
+      const historyItems = mapPiMessageHistory(ctx.sdk.messages ?? []);
+      const turns =
+        historyItems.length > 0
+          ? [
+              {
+                id: TurnId.make(`pi-history-${ctx.sdk.sessionId}`),
+                items: historyItems,
+              },
+            ]
+          : [];
+      return { threadId: ctx.threadId, turns };
+    };
+
+    const readThread = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        const ctx = yield* requireSession(threadId);
+        return snapshotThread(ctx);
+      });
+
+    const rollbackThread = (threadId: ThreadId, numTurns: number) =>
+      Effect.gen(function* () {
+        const ctx = yield* requireSession(threadId);
+        const sessionManager = ctx.sdk.sessionManager;
+        if (!sessionManager) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "rollbackThread",
+            detail: "Pi session does not support rollback (no session manager).",
+          });
+        }
+        const rollbackCount = Math.max(0, Math.floor(numTurns));
+        const nextLength = Math.max(0, ctx.turns.length - rollbackCount);
+        ctx.turns = ctx.turns.slice(0, nextLength);
+        const targetLeafId = ctx.turns[nextLength - 1]?.leafId;
+        if (targetLeafId) {
+          sessionManager.branch(targetLeafId);
+        } else if (nextLength === 0) {
+          // Rolling back every tracked turn resets the session leaf to the
+          // root so the next turn starts a fresh branch.
+          sessionManager.resetLeaf();
+        }
+        return snapshotThread(ctx);
+      });
+
+    const compactThread = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        const ctx = yield* requireSession(threadId);
+        yield* Effect.tryPromise({
+          try: () => ctx.sdk.compact(),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "thread/compact",
+              detail: `Failed to compact Pi thread: ${cause instanceof Error ? cause.message : String(cause)}.`,
+              cause,
+            }),
+        });
       });
 
     // Tear down SDK sessions and the runtime event PubSub when the adapter's
@@ -729,31 +877,9 @@ export function makePiAdapter(
       stopSession,
       listSessions: () => Effect.succeed(Array.from(sessions.values()).map((ctx) => ctx.session)),
       hasSession: (threadId: ThreadId) => Effect.succeed(sessions.has(threadId)),
-      readThread: (threadId: ThreadId) =>
-        Effect.gen(function* () {
-          yield* requireSession(threadId);
-          return yield* new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "readThread",
-            detail: "Pi thread history is not yet wired in this build.",
-          });
-        }),
-      rollbackThread: () =>
-        Effect.fail(
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "rollbackThread",
-            detail: "Pi thread rollback is not yet wired in this build.",
-          }),
-        ),
-      compactThread: () =>
-        Effect.fail(
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "thread/compact",
-            detail: "Pi thread compaction is not yet wired in this build.",
-          }),
-        ),
+      readThread,
+      rollbackThread,
+      compactThread,
       stopAll,
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     } satisfies ProviderAdapterShape<ProviderAdapterError>;
