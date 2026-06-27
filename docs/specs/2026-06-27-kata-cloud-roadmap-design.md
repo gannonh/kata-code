@@ -2,7 +2,8 @@
 type: Spec
 title: "Kata Cloud roadmap"
 description: "High-level, multi-phase roadmap for running Kata Code projects in cloud sandboxes via a modular cloud-provider driver SPI, with Vercel Sandbox as the first driver."
-status: Draft
+status: Approved
+approved_at: 2026-06-27T16:27:44Z
 tags: [specs, roadmap, cloud, vercel, providers, environments]
 timestamp: 2026-06-27T15:12:43Z
 ---
@@ -11,7 +12,7 @@ timestamp: 2026-06-27T15:12:43Z
 
 ## Status
 
-Draft
+Approved
 
 ## Goal
 
