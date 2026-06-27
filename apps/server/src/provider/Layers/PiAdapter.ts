@@ -84,6 +84,24 @@ import {
 
 const PROVIDER = ProviderDriverKind.make("pi");
 
+/**
+ * Human-readable descriptions of the Pi extension UI capabilities that only
+ * work in Pi's terminal (TUI) mode and have no equivalent in Kata Code's
+ * graphical interface. Used to phrase the one-time "skipped" warning a Pi
+ * extension triggers when it calls one of these APIs. Keyed by the SDK method
+ * name passed to `warnUnsupported`.
+ */
+const PI_TUI_ONLY_CAPABILITY_LABELS: Readonly<Record<string, string>> = {
+  onTerminalInput: "to read raw terminal keystrokes",
+  setWidget: "to draw a custom terminal widget",
+  setFooter: "to replace the terminal footer",
+  setHeader: "to replace the terminal header",
+  custom: "to render a custom terminal screen",
+  pasteToEditor: "to paste text into a terminal editor",
+  setEditorComponent: "to replace the input editor",
+  addAutocompleteProvider: "to add terminal input autocomplete",
+};
+
 export interface PiAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly instanceId?: ProviderInstanceId;
@@ -1125,11 +1143,13 @@ export function makePiAdapter(
       const warnUnsupported = (method: string) => {
         if (ctx.unsupportedWarnings.has(method)) return;
         ctx.unsupportedWarnings.add(method);
+        const capability =
+          PI_TUI_ONLY_CAPABILITY_LABELS[method] ?? "a terminal-only display feature";
         offerFromListener(
           makeEvent(ctx.threadId, {
             type: "runtime.warning",
             payload: {
-              message: `Pi extension UI API '${method}' is not supported in Kata Code yet.`,
+              message: `A Pi extension requested ${capability}, which Kata Code's interface can't show. It was skipped; the conversation continues normally.`,
               detail: { method },
             },
             raw: {
