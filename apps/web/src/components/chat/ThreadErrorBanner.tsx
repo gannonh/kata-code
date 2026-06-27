@@ -12,16 +12,21 @@ function shouldOfferErrorDetails(error: string): boolean {
 
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
+  threadId,
   onDismiss,
 }: {
   error: string | null;
+  threadId?: string;
   onDismiss?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
+  // Reset the expander when the error text or the active thread changes, so
+  // switching to another thread with the same error doesn't preserve the old
+  // expanded/collapsed state.
   useEffect(() => {
     setExpanded(false);
-  }, [error]);
+  }, [error, threadId]);
 
   if (!error) return null;
 
