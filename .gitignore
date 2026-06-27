@@ -72,3 +72,4 @@ mobile-e2e/.auth/
 # miscellaneous
 kata-code.code-workspace
 session*.jsonl
+SCRATCH.md
