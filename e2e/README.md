@@ -79,7 +79,24 @@ From the repo root:
 > Electron). A separately-running dev server collides on ports and shared
 > resources and causes every E2E test to fail with pairing/auth or model-picker
 > errors that look unrelated to the real cause. If the full suite fails,
-> `pkill -f dev-runner` / `pkill -f vite+` and re-run.
+> run `pnpm run e2e:clean` and re-run.
+
+### Cleaning up leaked dev servers
+
+E2E dev stacks are reaped automatically on teardown (process-group kill) and on
+abort (signal handlers + global teardown). If an aborted run still leaves
+strays, two scripts clean them safely without touching unrelated node
+processes:
+
+```bash
+pnpm run e2e:clean         # reap leaked E2E dev stacks + dev Electron apps
+pnpm run kill-dev-ports    # kill Kata Code dev servers on the dev port ranges
+pnpm run kill-dev-ports -- --all   # also kill the default foreground dev server (5733/13773)
+```
+
+Both match the kata-code repo command signature and dev port ranges, so a
+foreground `pnpm run dev` (and unrelated system listeners) are spared unless you
+pass `--all`.
 
 ```bash
 # List tests
