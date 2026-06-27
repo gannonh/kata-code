@@ -32,12 +32,30 @@ Each entry should include:
 
 ### Pi provider full adapter parity
 
-- **Status:** deferred
+- **Status:** closed
 - **Area:** providers, pi, agent-runtime
 - **Source:** [Pi coding agent provider support](/specs/2026-06-25-pi-coding-agent-support-design.md)
 - **Rationale:** The approved build shipped a verified vertical slice (snapshot discovery, session start/send/stream/interrupt/stop, driver registration, gated `@pi` e2e). Full parity was sequenced after the slice to keep each capability independently verifiable.
 - **Revisit trigger:** Before marking the Pi spec complete or before Pi is promoted out of early-access status.
-- **Notes:** Remaining work maps to acceptance criteria 5,6,8,9,10,11: tool lifecycle events, image attachments, resume cursor, rollback, compaction contract (`compactThread`), extension UI bridge (`select`/`confirm`/`input`/`notify`/status/progress), runtime mode mapping, project trust controls, and real `PiTextGeneration` parity (currently a fail-loud placeholder).
+- **Notes:** Completed 2026-06-27 on `feat/pi-phase2`. AC 5 (tool lifecycle, image attachments, resume cursor, readThread, rollback), AC 6 (`compactThread` + canonical `thread.state.changed` compaction lifecycle), AC 8 (extension UI bridge), AC 9 (runtime mode warnings), AC 10 (project trust surfacing), AC 11/12 (real `PiTextGeneration` parity), AC 13 (instance isolation), AC 14 (existing-provider regression) all implemented and verified. See the [Build completion report](/specs/2026-06-25-pi-coding-agent-support-design.md#build-completion-report). Remaining: AC 15 manual Pi-authenticated validation (requires maintainer environment).
+
+### Pi provider manual-authenticated validation (AC 15)
+
+- **Status:** deferred
+- **Area:** providers, pi, testing, validation
+- **Source:** [Pi coding agent provider support](/specs/2026-06-25-pi-coding-agent-support-design.md#acceptance-criteria)
+- **Rationale:** AC 15 requires a maintainer-authenticated Pi `agentDir` + model to capture browser snapshots proving a Pi instance appears in settings, a runtime-discovered model can be selected, a Pi prompt streams, and interrupt/stop works. This cannot be automated without maintainer credentials.
+- **Revisit trigger:** Before Pi is promoted out of early-access, or when a shared Pi-authenticated CI environment exists.
+- **Notes:** The credentialed `@pi` E2E smoke (`e2e/tests/agent/pi-smoke.spec.ts`, gated by `KATACODE_E2E_ENABLE_PI`/`KATACODE_E2E_PI_AGENT_DIR`/`KATACODE_E2E_PI_MODEL`) is green and covers the gated path; the remaining manual validation is the unautomated AC 15 surface.
+
+### Pi compaction transport + UI surface
+
+- **Status:** deferred
+- **Area:** providers, pi, orchestration, ui
+- **Source:** [Pi coding agent provider support](/specs/2026-06-25-pi-coding-agent-support-design.md#build-completion-report)
+- **Rationale:** `ProviderService.compactConversation` is wired (mirroring `rollbackConversation`'s internal-caller pattern) but no orchestration `thread.compact` command + reactor or web/desktop UI surface invokes it yet.
+- **Revisit trigger:** When compaction is exposed in the Kata UI (web/desktop), mirroring the `thread.checkpoint.revert` → `rollbackConversation` precedent.
+- **Notes:** Add a `thread.compact` orchestration command + `CheckpointsReactor`-style reactor that calls `providerService.compactConversation`. The adapter already emits the canonical `thread.state.changed`/`compacted` lifecycle events.
 
 ### Pi provider strict quality review follow-ups
 

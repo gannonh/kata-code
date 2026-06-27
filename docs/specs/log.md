@@ -1,5 +1,15 @@
 # Specs log
 
+## 2026-06-27 (Pi coding agent provider — Build complete, status → Implemented)
+
+- Completed the Pi provider Build (`feat/pi-phase2`, base `7bfe7d769`, head `3fbeb0209`): implemented AC 5 (tool lifecycle, image attachments, resume cursor, readThread, rollback), AC 6 (`compactThread` + `thread.state.changed` compaction lifecycle), AC 8 (extension UI bridge), AC 9 (runtime-mode warnings), AC 10 (project-trust surfacing), AC 11/12 (PiTextGeneration parity), AC 13 (instance isolation), AC 14 (existing-provider regression), AC 17 (`vp check`/`typecheck`/`test`/`release:smoke` all green).
+- Added a provider compact contract: `ProviderCompactThreadInput` ([provider.ts](../../packages/contracts/src/provider.ts)), required `ProviderAdapterShape.compactThread`, `ProviderServiceShape.compactConversation` + live routing, and typed `thread/compact` stubs in Codex/Claude/Cursor/Grok/OpenCode/Pi adapters.
+- Flipped the [Pi design spec](/specs/2026-06-25-pi-coding-agent-support-design.md) frontmatter and body status Approved → Implemented; appended a [Build completion report](/specs/2026-06-25-pi-coding-agent-support-design.md#build-completion-report) with task-by-task evidence, exact verification results, approved deviations, and known follow-ups.
+- Updated the [specs roadmap](/specs/index.md) Pi entry from "In progress" to "Implemented".
+- Closed the [Pi provider full adapter parity](/specs/deferred-work.md#pi-provider-full-adapter-parity) deferred-work entry; added [Pi provider manual-authenticated validation (AC 15)](/specs/deferred-work.md#pi-provider-manual-authenticated-validation-ac-15) and [Pi compaction transport + UI surface](/specs/deferred-work.md#pi-compaction-transport-and-ui-surface).
+- Approved deviation R1: `compactConversation` mirrors `rollbackConversation`'s internal-caller transport pattern (no direct rpc.ts/ws.ts entry); a `thread.compact` orchestration command + reactor is deferred to a future UI task.
+- Outstanding: AC 15 manual Pi-authenticated validation requires a maintainer-authenticated Pi environment; the credentialed `@pi` E2E smoke remains green.
+
 ## 2026-06-26 (E2E — web test authentication and Pi provider locator fix)
 
 - Fixed Pi provider E2E test: updated radio locator from `name: "Pi", exact: true` to `name: "Pi Early Access"` to match the accessible name (badge included).
