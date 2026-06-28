@@ -10,6 +10,7 @@ import {
 import { createModelSelection } from "@kata-sh/code-shared/model";
 
 import { makePiTextGeneration } from "./PiTextGeneration.ts";
+import type { PiModelShape } from "../provider/Layers/PiProvider.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
 
@@ -17,6 +18,16 @@ const MODEL_SELECTION = createModelSelection(
   ProviderInstanceId.make("pi"),
   "anthropic/claude-opus-4-6",
 ) as ModelSelection;
+
+/** Fixture model matching the MODEL_SELECTION slug so resolveModel succeeds
+ *  without relying on real Pi auth/model discovery (CI has no Pi credentials). */
+const SAMPLE_MODEL: PiModelShape = {
+  id: "claude-opus-4-6",
+  name: "Claude Opus 4.6",
+  provider: "anthropic",
+  reasoning: true,
+};
+const SAMPLE_MODELS: ReadonlyArray<PiModelShape> = [SAMPLE_MODEL];
 
 // Fixture JSON strings for the fake Pi session's assistant output. Pre-built
 // as string literals so the structured-output decoders exercise the real
@@ -67,6 +78,7 @@ describe("makePiTextGeneration", () => {
       const { session } = makeFakeTextSession(TITLE_JSON);
       const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
         createSession: (() => Promise.resolve({ session })) as never,
+        availableModels: SAMPLE_MODELS,
       });
 
       const result = yield* textGeneration.generateThreadTitle({
@@ -84,6 +96,7 @@ describe("makePiTextGeneration", () => {
       const { session } = makeFakeTextSession(BRANCH_JSON);
       const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
         createSession: (() => Promise.resolve({ session })) as never,
+        availableModels: SAMPLE_MODELS,
       });
 
       const result = yield* textGeneration.generateBranchName({
@@ -101,6 +114,7 @@ describe("makePiTextGeneration", () => {
       const { session } = makeFakeTextSession(COMMIT_JSON);
       const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
         createSession: (() => Promise.resolve({ session })) as never,
+        availableModels: SAMPLE_MODELS,
       });
 
       const result = yield* textGeneration.generateCommitMessage({
@@ -121,6 +135,7 @@ describe("makePiTextGeneration", () => {
       const { session } = makeFakeTextSession(PR_JSON);
       const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
         createSession: (() => Promise.resolve({ session })) as never,
+        availableModels: SAMPLE_MODELS,
       });
 
       const result = yield* textGeneration.generatePrContent({
@@ -143,6 +158,7 @@ describe("makePiTextGeneration", () => {
       const { session } = makeFakeTextSession(BAD_JSON);
       const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
         createSession: (() => Promise.resolve({ session })) as never,
+        availableModels: SAMPLE_MODELS,
       });
 
       const error = yield* Effect.flip(
