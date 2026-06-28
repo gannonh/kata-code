@@ -68,4 +68,7 @@ e2e/.auth/
 mobile-e2e/test-results/
 mobile-e2e/artifacts/
 mobile-e2e/.auth/
+
+# miscellaneous
 kata-code.code-workspace
+session*.jsonl
