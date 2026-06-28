@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-06-27 (E2E test catalog — Pi finalize harness notes)
+
+- [E2E test catalog](/guides/e2e-test-catalog.md): documented per-file shared Electron session model, `pnpm run e2e:clean` for leaked dev servers, and credentialed `@pi` gate env vars with a link to [verification evidence](../../e2e/verify-evidence/README.md).
+
 ## 2026-06-26 (E2E test catalog — web test authentication update)
 
 - Updated the web section of [E2E test catalog](/guides/e2e-test-catalog.md): replaced the "Web codegen" stub with a full "Web E2E" section documenting the `web-dev` Playwright project, the [`webSetup.ts`](../../e2e/src/harness/webSetup.ts) fixture (dev server startup, pairing URL capture, authenticated `webPage` fixture), run commands for both main and codegen configs, and a code example for writing new web tests.

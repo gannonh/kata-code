@@ -1,5 +1,9 @@
 # Providers log
 
+## 2026-06-27 (Pi provider — Finalize)
+
+- [Pi provider guide](/providers/pi.md): documented amber timeline rendering for `runtime.warning` events; linked [verification evidence](../../e2e/verify-evidence/README.md) (manual walkthrough screenshots + `@pi` E2E matrix).
+
 ## 2026-06-27
 
 Updated [Pi provider guide](/providers/pi.md) to reflect completed adapter parity: tool lifecycle, image attachments, resume cursor, rollback, compaction (`thread.state.changed`), extension UI bridge, runtime-mode warnings, project-trust surfacing, and Pi-backed git text generation are now supported. Rewrote the Limitations section to document the real remaining limits (no enforceable approval/sandbox gate, compaction has no UI surface yet, TUI-only extension APIs warn-and-no-op, AC 15 manual validation outstanding). Linked the [Build completion report](/specs/2026-06-25-pi-coding-agent-support-design.md#build-completion-report).

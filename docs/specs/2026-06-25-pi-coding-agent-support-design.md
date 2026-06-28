@@ -373,11 +373,7 @@ Verified commands during this slice:
 - The thread error banner no longer clips or collapses long provider errors; it renders full-width with an expandable details disclosure (`apps/web/src/components/chat/ThreadErrorBanner.tsx`).
 - Credentialed `@pi` smoke now passes end to end against a real Pi model after fixing model-picker provider scoping and slug tokenization (`e2e/src/flows/agentChat.ts`, `e2e/src/flows/piProvider.ts`).
 
-Remaining acceptance work:
-
-- Full tool lifecycle, image attachments, resume cursor, rollback, compaction, extension UI bridge, runtime mode mapping, project trust controls, and Pi text-generation parity.
-- Manual Pi-authenticated validation for real model selection, streaming prompt output, interrupt, and stop.
-- CI parity run of `vp run test` and `vp run release:smoke` before push, with exact output recorded per acceptance criterion 17.
+> **Superseded 2026-06-27.** Remaining slice work landed in the [Build completion report](#build-completion-report). Post-build finalize work is recorded in [Finalize outcome](#finalize-outcome). Only AC 15 manual Pi-authenticated validation remains outstanding.
 
 ## Implementation phases
 
@@ -490,3 +486,28 @@ Build should implement a Kata-native `PiDriver` and use Synara only as reference
 ### Acceptance criteria status
 
 1-4, 6-14, 16, 17: **Implemented and verified.** 5: **Implemented** (tool lifecycle, image attachments, resume cursor, readThread, rollback, interruption, stop, streaming assistant/reasoning all covered by tests). 15: **Outstanding** (manual Pi-authenticated validation requires maintainer environment; credentialed E2E smoke is green).
+
+## Finalize outcome
+
+**Branch:** `feat/pi-phase2`
+**Build head SHA:** `3fbeb0209475b74662e6baf4c43fefbcf33fef03`
+**Final head SHA:** `f8c2b5f5fe799a69704f88e1516c550e529447d8`
+**Passes:** simplify (`fc240c85c`), strict-quality-review (`f8c2b5f5f`), OKF update
+
+### Post-build landed work
+
+- **Credentialed `@pi` E2E + evidence** (`58e8e26c0`): expanded `e2e/tests/agent/pi-smoke.spec.ts`; manual walkthrough screenshots in [`e2e/verify-evidence/`](../../e2e/verify-evidence/README.md) (settings, model picker, runtime warnings, interrupt, tool/extension UI).
+- **Runtime warning UX** (`f7584b948`): `runtime.warning` events render as amber timeline alerts, not destructive error styling (`MessagesTimeline.tsx`).
+- **E2E harness** (`1e21ef689`, `82e5028c8`, `5d45eaf5c`): per-file shared session (`fileSession.ts`), fail-fast provider turn errors in agent-chat flows, process-group reaping on teardown/abort, `pnpm run e2e:clean` and `pnpm run kill-dev-ports`; documented in [`e2e/README.md`](../../e2e/README.md) and the [E2E test catalog](/guides/e2e-test-catalog.md).
+- **Simplify** (`fc240c85c`): removed redundant casts in `PiAdapter`/`PiTextGeneration`; `mapError` instead of identity `matchEffect` in `PiTextGeneration`; shared rate-limit hint constant in `agentChat.ts`; deduped port-scan loop in `scripts/lib/dev-ports.ts`.
+- **Strict quality review** (`f8c2b5f5f`): extracted `piRuntimeWarning` helper in `PiAdapter.ts` to dedupe `runtime.warning` scaffolding; typecheck fixes in `scripts/e2e-clean.ts` and `scripts/kill-dev-ports.ts`.
+
+### Finalize verification
+
+- `vp check` and `vp run typecheck` re-run at finalize head — pass (0 errors).
+- OKF validation (`validate_okf.py`) — pass.
+- Outstanding acceptance item unchanged: **AC 15** manual Pi-authenticated browser validation (maintainer environment). Credentialed `@pi` E2E and `e2e/verify-evidence/` screenshots cover the automated and walkthrough surfaces.
+
+### Known follow-ups (unchanged)
+
+See [deferred-work registry](/specs/deferred-work.md): AC 15 manual validation, compaction transport + UI, strict-quality-review follow-ups ([issue #14](https://github.com/gannonh/kata-code/issues/14)).

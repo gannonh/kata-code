@@ -19,7 +19,8 @@ and update checks.
 > rollback, compaction, the extension UI bridge, runtime-mode warnings,
 > project-trust surfacing, and Pi-backed git text generation are supported.
 > Pi's SDK exposes no enforceable approval/sandbox gate, so `auto-accept-edits`
-> and `approval-required` run as `full-access` with a visible runtime warning.
+> and `approval-required` run as `full-access` with a visible runtime warning
+> (amber timeline alert, not destructive error styling).
 > See the [design spec](/specs/2026-06-25-pi-coding-agent-support-design.md) and
 > the [Build completion report](/specs/2026-06-25-pi-coding-agent-support-design.md#build-completion-report).
 
@@ -71,7 +72,7 @@ registry, auth storage, and event stream.
 - Pi's SDK has no enforceable approval/sandbox gate (`ToolExecutionMode` is
   only `sequential`/`parallel`). `auto-accept-edits` and `approval-required`
   run as `full-access` and emit a `runtime.warning` at session start so the
-  limitation is visible, not hidden.
+  limitation is visible, not hidden. Warnings render as amber timeline alerts.
 - Compaction is wired through the adapter and `ProviderService.compactConversation`,
   but no web/desktop UI surface invokes it yet (mirrors `rollbackConversation`).
 - Extension TUI-only APIs (`setWidget`/`setFooter`/`setHeader`/`custom`/
@@ -85,6 +86,7 @@ registry, auth storage, and event stream.
 
 - [Architecture — providers](/architecture/providers.md) — driver/instance model
 - [Pi provider design spec](/specs/2026-06-25-pi-coding-agent-support-design.md)
+- [Pi verification evidence](../../e2e/verify-evidence/README.md) — manual walkthrough screenshots and `@pi` E2E matrix
 
 ## History
 

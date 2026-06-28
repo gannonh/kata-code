@@ -1,5 +1,12 @@
 # Specs log
 
+## 2026-06-27 (Pi coding agent provider — Finalize outcome)
+
+- Recorded [Finalize outcome](/specs/2026-06-25-pi-coding-agent-support-design.md#finalize-outcome) on `feat/pi-phase2` (build head `3fbeb0209`, final head `f8c2b5f5f`): simplify and strict-quality-review passes, credentialed `@pi` E2E + manual walkthrough evidence, runtime-warning amber UX, E2E harness improvements (`fileSession.ts`, `e2e:clean`, `kill-dev-ports`), `piRuntimeWarning` extraction.
+- Moved Pi from Active to Completed on [specs roadmap](/specs/index.md); added links to finalize outcome, [Pi provider guide](/providers/pi.md), and [verification evidence](../../e2e/verify-evidence/README.md).
+- Superseded stale slice "Remaining acceptance work" in the Pi spec [Build progress](/specs/2026-06-25-pi-coding-agent-support-design.md#build-progress) with a pointer to the build and finalize reports.
+- Updated [deferred-work](/specs/deferred-work.md#pi-provider-strict-quality-review-follow-ups) strict-review notes for the finalize pass.
+
 ## 2026-06-27 (Pi coding agent provider — Build complete, status → Implemented)
 
 - Completed the Pi provider Build (`feat/pi-phase2`, base `7bfe7d769`, head `3fbeb0209`): implemented AC 5 (tool lifecycle, image attachments, resume cursor, readThread, rollback), AC 6 (`compactThread` + `thread.state.changed` compaction lifecycle), AC 8 (extension UI bridge), AC 9 (runtime-mode warnings), AC 10 (project-trust surfacing), AC 11/12 (PiTextGeneration parity), AC 13 (instance isolation), AC 14 (existing-provider regression), AC 17 (`vp check`/`typecheck`/`test`/`release:smoke` all green).
