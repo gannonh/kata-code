@@ -446,45 +446,47 @@ describe("makePiAdapter (vertical slice)", () => {
         const inMemorySpy = vi
           .spyOn(SessionManager, "inMemory")
           .mockImplementation(() => ({ getCwd: () => "/tmp" }) as never);
-        const adapter = yield* makePiAdapter(decodePiSettings({}), {
-          instanceId: ProviderInstanceId.make("pi"),
-          availableModels: [SAMPLE_MODEL],
-          createSession: (() => Promise.resolve({ session })) as never,
-          onEvent: recorder.onEvent,
-        });
+        try {
+          const adapter = yield* makePiAdapter(decodePiSettings({}), {
+            instanceId: ProviderInstanceId.make("pi"),
+            availableModels: [SAMPLE_MODEL],
+            createSession: (() => Promise.resolve({ session })) as never,
+            onEvent: recorder.onEvent,
+          });
 
-        const threadId = ThreadId.make("pi-thread-resume-1");
-        const started = yield* adapter.startSession({
-          threadId,
-          runtimeMode: "full-access",
-          modelSelection: MODEL_SELECTION,
-        });
-        // A fresh in-memory session still surfaces its session file as a
-        // resume cursor so callers can persist it for later resumption.
-        expect(started.resumeCursor).toBe("/tmp/pi-session.jsonl");
-        expect(inMemorySpy).toHaveBeenCalledTimes(1);
-        expect(openSpy).not.toHaveBeenCalled();
+          const threadId = ThreadId.make("pi-thread-resume-1");
+          const started = yield* adapter.startSession({
+            threadId,
+            runtimeMode: "full-access",
+            modelSelection: MODEL_SELECTION,
+          });
+          // A fresh in-memory session still surfaces its session file as a
+          // resume cursor so callers can persist it for later resumption.
+          expect(started.resumeCursor).toBe("/tmp/pi-session.jsonl");
+          expect(inMemorySpy).toHaveBeenCalledTimes(1);
+          expect(openSpy).not.toHaveBeenCalled();
 
-        // Resuming with the captured cursor opens the session file instead of
-        // creating a fresh in-memory session.
-        const resumed = yield* adapter.startSession({
-          threadId: ThreadId.make("pi-thread-resume-2"),
-          runtimeMode: "full-access",
-          modelSelection: MODEL_SELECTION,
-          resumeCursor: "/tmp/pi-session.jsonl",
-        });
-        expect(resumed.resumeCursor).toBe("/tmp/pi-session.jsonl");
-        expect(openSpy).toHaveBeenCalledTimes(1);
-        expect(openSpy).toHaveBeenCalledWith(
-          "/tmp/pi-session.jsonl",
-          undefined,
-          expect.any(String),
-        );
-        // inMemory is still only the first (fresh) call.
-        expect(inMemorySpy).toHaveBeenCalledTimes(1);
-
-        openSpy.mockRestore();
-        inMemorySpy.mockRestore();
+          // Resuming with the captured cursor opens the session file instead of
+          // creating a fresh in-memory session.
+          const resumed = yield* adapter.startSession({
+            threadId: ThreadId.make("pi-thread-resume-2"),
+            runtimeMode: "full-access",
+            modelSelection: MODEL_SELECTION,
+            resumeCursor: "/tmp/pi-session.jsonl",
+          });
+          expect(resumed.resumeCursor).toBe("/tmp/pi-session.jsonl");
+          expect(openSpy).toHaveBeenCalledTimes(1);
+          expect(openSpy).toHaveBeenCalledWith(
+            "/tmp/pi-session.jsonl",
+            undefined,
+            expect.any(String),
+          );
+          // inMemory is still only the first (fresh) call.
+          expect(inMemorySpy).toHaveBeenCalledTimes(1);
+        } finally {
+          openSpy.mockRestore();
+          inMemorySpy.mockRestore();
+        }
       }),
   );
 
@@ -708,7 +710,9 @@ describe("makePiAdapter (vertical slice)", () => {
         // drops.
         const compactionItemEvents = recorder.events.filter(
           (event) =>
-            (event.type === "item.updated" || event.type === "item.completed") &&
+            (event.type === "item.started" ||
+              event.type === "item.updated" ||
+              event.type === "item.completed") &&
             event.payload.itemType === "context_compaction",
         );
         expect(compactionItemEvents).toHaveLength(0);
@@ -1070,7 +1074,7 @@ describe("makePiAdapter extension UI bridge", () => {
         const { uiContext, recorder } = yield* startBridgedSession(decodePiSettings({}));
 
         const answer = yield* Effect.tryPromise(() =>
-          uiContext.select("Pick", ["a", "b"], { timeout: 10 }),
+          uiContext.select("Pick", ["a", "b"], { timeout: 50 }),
         );
         expect(answer).toBeUndefined();
         yield* Effect.tryPromise(() =>

@@ -17,6 +17,7 @@ import { PiSettings, TextGenerationError, type ModelSelection } from "@kata-sh/c
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import {
@@ -188,13 +189,18 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
               cause,
             ),
         }).pipe(
-          Effect.timeout(Duration.millis(PI_TEXT_GENERATION_TIMEOUT_MS)),
-          Effect.mapError((cause) =>
-            fail(
-              operation,
-              `Pi text generation timed out after ${PI_TEXT_GENERATION_TIMEOUT_MS}ms.`,
-              cause,
-            ),
+          Effect.timeoutOption(Duration.millis(PI_TEXT_GENERATION_TIMEOUT_MS)),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  fail(
+                    operation,
+                    `Pi text generation timed out after ${PI_TEXT_GENERATION_TIMEOUT_MS}ms.`,
+                  ),
+                ),
+              onSome: () => Effect.void,
+            }),
           ),
         );
 

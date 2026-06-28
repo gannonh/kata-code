@@ -1013,7 +1013,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const routed = yield* resolveRoutableSession({
         threadId: input.threadId,
         operation: "ProviderService.compactConversation",
-        allowRecovery: true,
+        // Compaction is an operation on an active session. Allowing recovery
+        // here would resurrect stopped external sessions (Claude/Codex/etc)
+        // just to immediately fail on adapters that stub compaction, recording
+        // recovery side effects for an unsupported operation.
+        allowRecovery: false,
       });
       metricProvider = routed.adapter.provider;
       yield* Effect.annotateCurrentSpan({

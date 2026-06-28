@@ -19,6 +19,7 @@ import {
   DefaultResourceLoader,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { APP_BASE_NAME } from "@kata-sh/code-shared/branding";
 import {
   ApprovalRequestId,
   type ChatAttachment,
@@ -667,6 +668,25 @@ export function makePiAdapter(
         });
         sessions.set(input.threadId, ctx);
 
+        // Seed the tracked turn list with the resumed session's current leaf
+        // so rollback math is anchored to real history. Without this, a
+        // resumed session starts with an empty turn list and the first
+        // rollback would reset the SDK leaf to the root, discarding the
+        // entire resumed branch. The seed is a single synthetic turn at the
+        // current leaf; rolling it back is an explicit user action.
+        const resumedLeafId =
+          resumeCursor && sdkSession.sessionManager
+            ? typeof sdkSession.sessionManager.getLeafId === "function"
+              ? sdkSession.sessionManager.getLeafId()
+              : null
+            : null;
+        if (resumeCursor && resumedLeafId) {
+          ctx.turns.push({
+            id: TurnId.make(`pi-resumed-${createdAt}`),
+            leafId: resumedLeafId,
+          });
+        }
+
         // Bind the Kata extension UI bridge so Pi extension `select`/`confirm`/
         // `input`/`notify`/status/progress calls route through the user-input
         // and runtime event channel. TUI-only APIs warn once per session.
@@ -683,7 +703,14 @@ export function makePiAdapter(
               }.`,
               cause,
             }),
-        });
+        }).pipe(
+          // Tear down the newly created session if extension binding fails,
+          // so a retry on the same thread does not hit leaked session state
+          // (live subscription + entry in `sessions`).
+          Effect.catch((error: ProviderAdapterRequestError) =>
+            teardownSession(ctx).pipe(Effect.andThen(Effect.fail(error))),
+          ),
+        );
 
         yield* publish(makeEvent(input.threadId, { type: "session.started", payload: {} }));
         yield* publish(
@@ -955,6 +982,13 @@ export function makePiAdapter(
     const rollbackThread = (threadId: ThreadId, numTurns: number) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
+        if (ctx.activeTurnId) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "rollbackThread",
+            issue: `Cannot roll back thread ${threadId} while a Pi turn is active.`,
+          });
+        }
         const sessionManager = ctx.sdk.sessionManager;
         if (!sessionManager) {
           return yield* new ProviderAdapterRequestError({
@@ -980,6 +1014,13 @@ export function makePiAdapter(
     const compactThread = (threadId: ThreadId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
+        if (ctx.activeTurnId) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "compactThread",
+            issue: `Cannot compact thread ${threadId} while a Pi turn is active.`,
+          });
+        }
         yield* Effect.tryPromise({
           try: () => ctx.sdk.compact(),
           catch: (cause) =>
@@ -1154,7 +1195,7 @@ export function makePiAdapter(
         offerFromListener(
           piRuntimeWarning(ctx.threadId, {
             method: "extension/ui-unsupported",
-            message: `A Pi extension requested ${capability}, which Kata Code's interface can't show. It was skipped; the conversation continues normally.`,
+            message: `A Pi extension requested ${capability}, which ${APP_BASE_NAME}'s interface can't show. It was skipped; the conversation continues normally.`,
             detail: { method },
           }),
         );
@@ -1245,7 +1286,13 @@ export function makePiAdapter(
         },
         setWorkingMessage(message) {
           const normalized = trimToUndefined(message);
-          if (!normalized || normalized === ctx.workingMessage) return;
+          if (!normalized) {
+            // Clear the dedupe cache so a later repeat of the same message
+            // emits tool.progress again instead of being suppressed.
+            ctx.workingMessage = undefined;
+            return;
+          }
+          if (normalized === ctx.workingMessage) return;
           ctx.workingMessage = normalized;
           emitPluginProgress(normalized);
         },
@@ -1295,7 +1342,7 @@ export function makePiAdapter(
           return undefined;
         },
         setTheme() {
-          return { success: false, error: "Kata Code does not expose Pi themes." };
+          return { success: false, error: `${APP_BASE_NAME} does not expose Pi themes.` };
         },
         getToolsExpanded() {
           return false;
