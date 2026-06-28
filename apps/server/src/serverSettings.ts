@@ -21,6 +21,7 @@ import {
   type ProviderInstanceEnvironmentVariable,
   ProviderDriverKind,
   ProviderInstanceId,
+  type SandboxProviderInstanceConfig,
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
@@ -76,7 +77,23 @@ function providerEnvironmentSecretName(input: {
   readonly instanceId: string;
   readonly name: string;
 }): string {
-  return `provider-env-${Buffer.from(input.instanceId, "utf8").toString("base64url")}-${Buffer.from(input.name, "utf8").toString("base64url")}`;
+  return instanceEnvironmentSecretName("provider-env", input);
+}
+
+/** Secret-store key for a sandbox instance sensitive env var (distinct prefix
+ *  so sandbox secrets never collide with provider-instance secrets). */
+function sandboxProviderEnvironmentSecretName(input: {
+  readonly instanceId: string;
+  readonly name: string;
+}): string {
+  return instanceEnvironmentSecretName("sandbox-env", input);
+}
+
+function instanceEnvironmentSecretName(
+  prefix: string,
+  input: { readonly instanceId: string; readonly name: string },
+): string {
+  return `${prefix}-${Buffer.from(input.instanceId, "utf8").toString("base64url")}-${Buffer.from(input.name, "utf8").toString("base64url")}`;
 }
 
 function redactProviderEnvironmentVariable(
@@ -105,7 +122,18 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
         : instance,
     ]),
   );
-  return { ...settings, providerInstances };
+  const sandboxProviderInstances = Object.fromEntries(
+    Object.entries(settings.sandboxProviderInstances).map(([instanceId, instance]) => [
+      instanceId,
+      instance.environment
+        ? {
+            ...instance,
+            environment: instance.environment.map(redactProviderEnvironmentVariable),
+          }
+        : instance,
+    ]),
+  );
+  return { ...settings, providerInstances, sandboxProviderInstances };
 }
 
 export interface ServerSettingsShape {
@@ -323,14 +351,17 @@ const makeServerSettings = Effect.gen(function* () {
       cause,
     });
 
-  const materializeProviderEnvironmentSecrets = (
-    settings: ServerSettings,
-  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+  const materializeInstanceEnvironmentSecrets = <
+    T extends {
+      readonly environment?: readonly ProviderInstanceEnvironmentVariable[];
+    },
+  >(
+    instances: Record<string, T>,
+    secretNameFor: (input: { readonly instanceId: string; readonly name: string }) => string,
+  ): Effect.Effect<Record<string, T>, ServerSettingsError> =>
     Effect.gen(function* () {
-      const providerInstances: Record<string, ProviderInstanceConfig> = {
-        ...settings.providerInstances,
-      };
-      for (const [instanceId, instance] of Object.entries(settings.providerInstances)) {
+      const result: Record<string, T> = { ...instances };
+      for (const [instanceId, instance] of Object.entries(instances)) {
         if (!instance.environment) continue;
         const environment: ProviderInstanceEnvironmentVariable[] = [];
         for (const variable of instance.environment) {
@@ -339,7 +370,7 @@ const makeServerSettings = Effect.gen(function* () {
             continue;
           }
           const secret = yield* secretStore
-            .get(providerEnvironmentSecretName({ instanceId, name: variable.name }))
+            .get(secretNameFor({ instanceId, name: variable.name }))
             .pipe(
               Effect.mapError((cause) =>
                 toSettingsError(
@@ -353,32 +384,55 @@ const makeServerSettings = Effect.gen(function* () {
             value: secret ? textDecoder.decode(secret) : "",
           });
         }
-        providerInstances[instanceId] = {
-          ...instance,
-          environment,
-        } satisfies ProviderInstanceConfig;
+        result[instanceId] = { ...instance, environment } as T;
       }
-      return {
-        ...settings,
-        providerInstances: providerInstances as ServerSettings["providerInstances"],
-      };
+      return result;
     });
 
-  const persistProviderEnvironmentSecrets = (
-    current: ServerSettings,
-    next: ServerSettings,
+  const materializeProviderEnvironmentSecrets = (
+    settings: ServerSettings,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
-    Effect.gen(function* () {
-      const providerInstances: Record<string, ProviderInstanceConfig> = {
-        ...next.providerInstances,
-      };
+    materializeInstanceEnvironmentSecrets(
+      { ...settings.providerInstances } as Record<string, ProviderInstanceConfig>,
+      providerEnvironmentSecretName,
+    ).pipe(
+      Effect.map((providerInstances) => ({
+        ...settings,
+        providerInstances: providerInstances as ServerSettings["providerInstances"],
+      })),
+    );
 
+  const materializeSandboxProviderEnvironmentSecrets = (
+    settings: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    materializeInstanceEnvironmentSecrets(
+      { ...settings.sandboxProviderInstances } as Record<string, SandboxProviderInstanceConfig>,
+      sandboxProviderEnvironmentSecretName,
+    ).pipe(
+      Effect.map((sandboxProviderInstances) => ({
+        ...settings,
+        sandboxProviderInstances:
+          sandboxProviderInstances as ServerSettings["sandboxProviderInstances"],
+      })),
+    );
+
+  const persistInstanceEnvironmentSecrets = <
+    T extends {
+      readonly environment?: readonly ProviderInstanceEnvironmentVariable[];
+    },
+  >(
+    currentInstances: Record<string, T>,
+    nextInstances: Record<string, T>,
+    secretNameFor: (input: { readonly instanceId: string; readonly name: string }) => string,
+  ): Effect.Effect<Record<string, T>, ServerSettingsError> =>
+    Effect.gen(function* () {
+      const result: Record<string, T> = { ...nextInstances };
       const nextSecretKeys = new Set<string>();
-      for (const [instanceId, instance] of Object.entries(next.providerInstances)) {
+      for (const [instanceId, instance] of Object.entries(nextInstances)) {
         if (!instance.environment) continue;
         const environment: ProviderInstanceEnvironmentVariable[] = [];
         for (const variable of instance.environment) {
-          const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
+          const secretName = secretNameFor({ instanceId, name: variable.name });
           if (!variable.sensitive) {
             yield* secretStore
               .remove(secretName)
@@ -418,16 +472,13 @@ const makeServerSettings = Effect.gen(function* () {
 
           environment.push(redactProviderEnvironmentVariable(variable));
         }
-        providerInstances[instanceId] = {
-          ...instance,
-          environment,
-        } satisfies ProviderInstanceConfig;
+        result[instanceId] = { ...instance, environment } as T;
       }
 
-      for (const [instanceId, instance] of Object.entries(current.providerInstances)) {
+      for (const [instanceId, instance] of Object.entries(currentInstances)) {
         for (const variable of instance.environment ?? []) {
           if (!variable.sensitive) continue;
-          const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
+          const secretName = secretNameFor({ instanceId, name: variable.name });
           if (nextSecretKeys.has(secretName)) continue;
           yield* secretStore
             .remove(secretName)
@@ -441,12 +492,39 @@ const makeServerSettings = Effect.gen(function* () {
             );
         }
       }
+      return result;
+    });
 
-      return {
+  const persistProviderEnvironmentSecrets = (
+    current: ServerSettings,
+    next: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    persistInstanceEnvironmentSecrets(
+      { ...current.providerInstances } as Record<string, ProviderInstanceConfig>,
+      { ...next.providerInstances } as Record<string, ProviderInstanceConfig>,
+      providerEnvironmentSecretName,
+    ).pipe(
+      Effect.map((providerInstances) => ({
         ...next,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
-      };
-    });
+      })),
+    );
+
+  const persistSandboxProviderEnvironmentSecrets = (
+    current: ServerSettings,
+    next: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    persistInstanceEnvironmentSecrets(
+      { ...current.sandboxProviderInstances } as Record<string, SandboxProviderInstanceConfig>,
+      { ...next.sandboxProviderInstances } as Record<string, SandboxProviderInstanceConfig>,
+      sandboxProviderEnvironmentSecretName,
+    ).pipe(
+      Effect.map((sandboxProviderInstances) => ({
+        ...next,
+        sandboxProviderInstances:
+          sandboxProviderInstances as ServerSettings["sandboxProviderInstances"],
+      })),
+    );
 
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
@@ -545,6 +623,7 @@ const makeServerSettings = Effect.gen(function* () {
     ready: Deferred.await(startedDeferred),
     getSettings: getSettingsFromCache.pipe(
       Effect.flatMap(materializeProviderEnvironmentSecrets),
+      Effect.flatMap(materializeSandboxProviderEnvironmentSecrets),
       Effect.map(resolveTextGenerationProvider),
     ),
     updateSettings: (patch) =>
@@ -554,12 +633,14 @@ const makeServerSettings = Effect.gen(function* () {
           const nextPersisted = yield* persistProviderEnvironmentSecrets(
             current,
             applyServerSettingsPatch(current, patch),
-          );
+          ).pipe(Effect.flatMap((p) => persistSandboxProviderEnvironmentSecrets(current, p)));
           const next = yield* normalizeServerSettings(nextPersisted);
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
-          const materialized = yield* materializeProviderEnvironmentSecrets(next);
+          const materialized = yield* materializeProviderEnvironmentSecrets(next).pipe(
+            Effect.flatMap(materializeSandboxProviderEnvironmentSecrets),
+          );
           return resolveTextGenerationProvider(materialized);
         }),
       ),
@@ -567,6 +648,7 @@ const makeServerSettings = Effect.gen(function* () {
       return Stream.fromPubSub(changesPubSub).pipe(
         Stream.mapEffect((settings) =>
           materializeProviderEnvironmentSecrets(settings).pipe(
+            Effect.flatMap(materializeSandboxProviderEnvironmentSecrets),
             Effect.catch((error: ServerSettingsError) =>
               Effect.logWarning("failed to materialize provider environment secrets", {
                 detail: error.detail,
