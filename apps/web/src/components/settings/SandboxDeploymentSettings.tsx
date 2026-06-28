@@ -368,9 +368,14 @@ interface AddDeploymentTargetDialogBodyProps {
 }
 
 function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTargetDialogBodyProps) {
+  // Defaults match the driver's DEFAULT_DOCKER_CONFIG: a node http stub that
+  // responds 200 on /healthz, so Add -> Test connection works out of the box.
+  // Swap image + command for a real `katacode` image once one is published.
   const [label, setLabel] = useState("");
   const [image, setImage] = useState("node:22-alpine");
-  const [command, setCommand] = useState("katacode serve --port 13773");
+  const [command, setCommand] = useState(
+    "node -e \"require('http').createServer((q,s)=>{s.end('katacode-serve-stub')}).listen(13773)\"",
+  );
   const [port, setPort] = useState("13773");
   const [error, setError] = useState<string | null>(null);
 
@@ -427,6 +432,10 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
         <div className="flex flex-col gap-1">
           <Label htmlFor="sandbox-image">Image</Label>
           <Input id="sandbox-image" value={image} onChange={(e) => setImage(e.target.value)} />
+          <p className="text-xs text-muted-foreground">
+            Must contain your start command's runtime. Use a <code>katacode</code> image once
+            published.
+          </p>
         </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor="sandbox-command">Start command</Label>
@@ -435,6 +444,11 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
             value={command}
             onChange={(e) => setCommand(e.target.value)}
           />
+          <p className="text-xs text-muted-foreground">
+            Launches the Kata server inside the container. The default is a stub that answers{" "}
+            <code>/healthz</code>; use <code>katacode serve --port 13773</code> with a real{" "}
+            <code>katacode</code> image.
+          </p>
         </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor="sandbox-port">Container port</Label>
