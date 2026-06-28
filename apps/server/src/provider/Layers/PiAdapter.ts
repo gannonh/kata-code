@@ -233,6 +233,32 @@ export function makePiAdapter(
       Effect.runFork(publish(event));
     };
 
+    /** Build a canonical `runtime.warning` event. Callers emit via `publish`
+     *  (inside an Effect) or `offerFromListener` (from the sync SDK listener).
+     *  Centralizes the `pi.sdk.event` raw envelope so each warning site states
+     *  only its `method`, `message`, and `detail`. */
+    const piRuntimeWarning = (
+      threadId: ThreadId,
+      input: {
+        readonly method: string;
+        readonly message: string;
+        readonly detail?: Record<string, unknown>;
+        readonly payload?: Record<string, unknown>;
+      },
+    ): ProviderRuntimeEvent =>
+      makeEvent(threadId, {
+        type: "runtime.warning",
+        payload: {
+          message: input.message,
+          ...(input.detail ? { detail: input.detail } : {}),
+        },
+        raw: {
+          source: "pi.sdk.event",
+          method: input.method,
+          payload: input.payload ?? input.detail ?? {},
+        },
+      });
+
     const requireSession = (
       threadId: ThreadId,
     ): Effect.Effect<PiSessionContext, ProviderAdapterSessionNotFoundError> =>
@@ -675,34 +701,21 @@ export function makePiAdapter(
         // startSession so it is visible before the first turn.
         if (input.runtimeMode === "auto-accept-edits") {
           yield* publish(
-            makeEvent(input.threadId, {
-              type: "runtime.warning",
-              payload: {
-                message:
-                  "Pi cannot enforce auto-accept-edits mode; this session runs as full-access.",
-                detail: { runtimeMode: input.runtimeMode, treatedAs: "full-access" },
-              },
-              raw: {
-                source: "pi.sdk.event",
-                method: "runtime-mode/auto-accept-edits",
-                payload: { runtimeMode: input.runtimeMode },
-              },
+            piRuntimeWarning(input.threadId, {
+              method: "runtime-mode/auto-accept-edits",
+              message:
+                "Pi cannot enforce auto-accept-edits mode; this session runs as full-access.",
+              detail: { runtimeMode: input.runtimeMode, treatedAs: "full-access" },
+              payload: { runtimeMode: input.runtimeMode },
             }),
           );
         } else if (input.runtimeMode === "approval-required") {
           yield* publish(
-            makeEvent(input.threadId, {
-              type: "runtime.warning",
-              payload: {
-                message:
-                  "Pi cannot enforce approval-required mode; tool calls will run without Kata approval gates. Review tool output before relying on this session.",
-                detail: { runtimeMode: input.runtimeMode },
-              },
-              raw: {
-                source: "pi.sdk.event",
-                method: "runtime-mode/approval-required",
-                payload: { runtimeMode: input.runtimeMode },
-              },
+            piRuntimeWarning(input.threadId, {
+              method: "runtime-mode/approval-required",
+              message:
+                "Pi cannot enforce approval-required mode; tool calls will run without Kata approval gates. Review tool output before relying on this session.",
+              detail: { runtimeMode: input.runtimeMode },
             }),
           );
         }
@@ -713,18 +726,11 @@ export function makePiAdapter(
         // no warning; "always" is security-sensitive and states it is loaded.
         if (piSettings.projectTrustPolicy === "always") {
           yield* publish(
-            makeEvent(input.threadId, {
-              type: "runtime.warning",
-              payload: {
-                message:
-                  "Pi project trust policy is 'always': project-local .pi resources and project .agents/skills are loaded for this session.",
-                detail: { projectTrustPolicy: piSettings.projectTrustPolicy },
-              },
-              raw: {
-                source: "pi.sdk.event",
-                method: "project-trust/always",
-                payload: { projectTrustPolicy: piSettings.projectTrustPolicy },
-              },
+            piRuntimeWarning(input.threadId, {
+              method: "project-trust/always",
+              message:
+                "Pi project trust policy is 'always': project-local .pi resources and project .agents/skills are loaded for this session.",
+              detail: { projectTrustPolicy: piSettings.projectTrustPolicy },
             }),
           );
         }
@@ -1146,17 +1152,10 @@ export function makePiAdapter(
         const capability =
           PI_TUI_ONLY_CAPABILITY_LABELS[method] ?? "a terminal-only display feature";
         offerFromListener(
-          makeEvent(ctx.threadId, {
-            type: "runtime.warning",
-            payload: {
-              message: `A Pi extension requested ${capability}, which Kata Code's interface can't show. It was skipped; the conversation continues normally.`,
-              detail: { method },
-            },
-            raw: {
-              source: "pi.sdk.event",
-              method: "extension/ui-unsupported",
-              payload: { method },
-            },
+          piRuntimeWarning(ctx.threadId, {
+            method: "extension/ui-unsupported",
+            message: `A Pi extension requested ${capability}, which Kata Code's interface can't show. It was skipped; the conversation continues normally.`,
+            detail: { method },
           }),
         );
       };
@@ -1218,14 +1217,11 @@ export function makePiAdapter(
           if (!normalized) return;
           if (type === "warning" || type === "error") {
             offerFromListener(
-              makeEvent(ctx.threadId, {
-                type: "runtime.warning",
-                payload: { message: normalized, detail: { type: type ?? "info" } },
-                raw: {
-                  source: "pi.sdk.event",
-                  method: "extension/ui/notify",
-                  payload: { message: normalized, type },
-                },
+              piRuntimeWarning(ctx.threadId, {
+                method: "extension/ui/notify",
+                message: normalized,
+                detail: { type: type ?? "info" },
+                payload: { message: normalized, type },
               }),
             );
             return;

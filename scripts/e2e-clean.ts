@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @effect-diagnostics nodeBuiltinImport:off - imperative CLI reaper, not an Effect service.
 /**
  * Reap leaked Kata Code E2E dev stacks and dev Electron apps.
  *
@@ -16,6 +17,9 @@
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import * as Console from "effect/Console";
+import * as Effect from "effect/Effect";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -65,8 +69,9 @@ function pidsMatchingCommand(): Map<number, string> {
   for (const line of out.split("\n")) {
     const match = /^\s*(\d+)\s+(.*)$/.exec(line);
     if (!match) continue;
-    const pid = Number.parseInt(match[1], 10);
+    const pid = Number.parseInt(match[1] ?? "", 10);
     const command = match[2];
+    if (typeof command !== "string") continue;
     if (COMMAND_MARKERS.some((marker) => command.includes(marker))) {
       matched.set(pid, command);
     }
@@ -93,7 +98,7 @@ for (const pid of byPort) {
 }
 
 if (targets.size === 0) {
-  console.log("[e2e:clean] No leaked E2E dev stacks or Electron apps found.");
+  Effect.runSync(Console.log("[e2e:clean] No leaked E2E dev stacks or Electron apps found."));
   process.exit(0);
 }
 
@@ -102,10 +107,12 @@ for (const [pid, command] of targets) {
   try {
     process.kill(pid, "SIGKILL");
     killed += 1;
-    console.log(`[e2e:clean] killed pid ${pid}: ${command.slice(0, 100)}`);
+    Effect.runSync(Console.log(`[e2e:clean] killed pid ${pid}: ${command.slice(0, 100)}`));
   } catch (error) {
-    console.warn(`[e2e:clean] could not kill pid ${pid}: ${(error as Error).message}`);
+    Effect.runSync(
+      Console.warn(`[e2e:clean] could not kill pid ${pid}: ${(error as Error).message}`),
+    );
   }
 }
 
-console.log(`[e2e:clean] Reaped ${killed} leaked process(es).`);
+Effect.runSync(Console.log(`[e2e:clean] Reaped ${killed} leaked process(es).`));

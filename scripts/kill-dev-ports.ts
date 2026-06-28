@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @effect-diagnostics nodeBuiltinImport:off - imperative CLI reaper, not an Effect service.
 /**
  * Kill Kata Code dev-server node processes listening on the dev port ranges,
  * without touching unrelated node processes elsewhere on the machine.
@@ -18,6 +19,9 @@
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import * as Console from "effect/Console";
+import * as Effect from "effect/Effect";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const killAll = process.argv.includes("--all");
@@ -77,10 +81,12 @@ for (const [start, end] of PORT_RANGES) {
 }
 
 if (targets.size === 0) {
-  console.log(
-    killAll
-      ? "[kill-dev-ports] No Kata Code dev servers listening on the dev port ranges."
-      : "[kill-dev-ports] No Kata Code dev servers found (default ports 5733/13773 spared; pass --all to include them).",
+  Effect.runSync(
+    Console.log(
+      killAll
+        ? "[kill-dev-ports] No Kata Code dev servers listening on the dev port ranges."
+        : "[kill-dev-ports] No Kata Code dev servers found (default ports 5733/13773 spared; pass --all to include them).",
+    ),
   );
   process.exit(0);
 }
@@ -90,10 +96,12 @@ for (const [pid, command] of targets) {
   try {
     process.kill(pid, "SIGKILL");
     killed += 1;
-    console.log(`[kill-dev-ports] killed pid ${pid}: ${command.slice(0, 100)}`);
+    Effect.runSync(Console.log(`[kill-dev-ports] killed pid ${pid}: ${command.slice(0, 100)}`));
   } catch (error) {
-    console.warn(`[kill-dev-ports] could not kill pid ${pid}: ${(error as Error).message}`);
+    Effect.runSync(
+      Console.warn(`[kill-dev-ports] could not kill pid ${pid}: ${(error as Error).message}`),
+    );
   }
 }
 
-console.log(`[kill-dev-ports] Reaped ${killed} Kata Code dev server process(es).`);
+Effect.runSync(Console.log(`[kill-dev-ports] Reaped ${killed} Kata Code dev server process(es).`));
