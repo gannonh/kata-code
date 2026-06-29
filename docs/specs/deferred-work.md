@@ -175,3 +175,12 @@ Each entry should include:
 - **Rationale:** `DockerConfigFields` in `apps/web/src/components/settings/SandboxDeploymentSettings.tsx` duplicates the `providerSettingsForm` annotations on `DockerSandboxConfig` (`packages/sandbox-docker/src/config.ts`) because the web cannot import the server-only driver package. The definitions are in sync today but will drift when a field is added. Moving the schema into `packages/sandbox-contracts` and rendering via `ProviderSettingsForm` is a contracts-boundary change out of Phase 1 scope.
 - **Revisit trigger:** Before adding a new Docker config field (e.g. `memory`, `cpus`), or during the Phase 2 sandbox config refactor.
 - **Notes:** Suggested home `packages/sandbox-contracts/src/dockerConfig.ts`; render via the existing `ProviderSettingsForm`.
+
+### Sandbox: Connect managed-tunnel origin must use container port
+
+- **Status:** deferred
+- **Area:** sandbox, relay, cloud
+- **Source:** chatgpt-codex-connector review of `feat/kata-cloud` PR #20 (P1) — [#21](https://github.com/gannonh/kata-code/issues/21)
+- **Rationale:** `registerSandboxWithConnect` (`apps/server/src/sandbox/SandboxService.ts`) derives the relay link proof `origin.localHttpPort` from the host-published endpoint port, but the managed tunnel ingress (set from that origin in `infra/relay/src/environments/ManagedEndpointProvider.ts`) routes to `http://<host>:<port>` as seen by cloudflared inside the container, where the Kata server listens on the container port. The container-side `isAllowedEndpointOrigin` validation requires the origin port to match the incoming request URL port (host-published), which conflicts with the container-internal port the tunnel needs. Fixing it requires an architecture decision on sandbox origin attestation that touches the shared relay linking contract.
+- **Revisit trigger:** Before end-to-end sandbox Connect pairing UAT (paired client reaching the in-container server through the managed tunnel), or when reviewing the relay managed-endpoint origin contract.
+- **Notes:** See [#21](https://github.com/gannonh/kata-code/issues/21) for the two candidate approaches.

@@ -70,6 +70,22 @@ function engine(
   );
 }
 
+/** Best-effort forced removal of a container after a post-start provisioning
+ * failure. `AutoRemove` only reaps the container when its process exits, so a
+ * misconfigured long-running command would otherwise leak. Failures are logged
+ * and swallowed so the original provisioning error reaches the caller. */
+function bestEffortDispose(containerId: string): Effect.Effect<void, never> {
+  return dockerRequest(`/containers/${containerId}?force=true`, { method: "DELETE" }).pipe(
+    Effect.catch((cause: DockerEngineError) =>
+      Effect.logWarning("Best-effort dispose after provisioning failure failed", {
+        containerId,
+        cause: cause.message,
+      }),
+    ),
+    Effect.asVoid,
+  );
+}
+
 /**
  * Resolve the docker runtime config (port, command, extraEnv) from the
  * decoded payload the registry already validated. `image` is intentionally
@@ -222,6 +238,7 @@ export const DockerSandboxProvider: SandboxProvider = {
         "start failed",
       );
       if (startRes.status >= 300) {
+        yield* bestEffortDispose(containerId);
         return yield* new SandboxProviderError({
           reason: "provision-failed",
           message: `start failed: ${startRes.status}`,
@@ -234,6 +251,7 @@ export const DockerSandboxProvider: SandboxProvider = {
         "inspect",
       );
       if (inspect.status >= 400) {
+        yield* bestEffortDispose(containerId);
         return yield* new SandboxProviderError({
           reason: "provision-failed",
           message: `container inspect ${inspect.status}: ${inspect.body.slice(0, 200)}`,
@@ -260,6 +278,7 @@ export const DockerSandboxProvider: SandboxProvider = {
           "provision-failed",
           "logs",
         );
+        yield* bestEffortDispose(containerId);
         const tail = logs.body.slice(-512).trim();
         return yield* new SandboxProviderError({
           reason: "provision-failed",
@@ -269,12 +288,17 @@ export const DockerSandboxProvider: SandboxProvider = {
       const binding = info.NetworkSettings.Ports[containerPort]?.[0];
       const hostPort = Number(binding?.HostPort);
       if (!Number.isFinite(hostPort) || hostPort === 0) {
+        yield* bestEffortDispose(containerId);
         return yield* new SandboxProviderError({
           reason: "provision-failed",
           message: "no published host port",
         });
       }
-      yield* waitForReady(hostPort);
+      yield* waitForReady(hostPort).pipe(
+        Effect.catch((error: SandboxProviderError) =>
+          bestEffortDispose(containerId).pipe(Effect.andThen(Effect.fail(error))),
+        ),
+      );
       const state: DockerSandboxHandleState = {
         containerId,
         hostPort,

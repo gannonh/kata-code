@@ -72,6 +72,11 @@ const SANDBOX_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
   isAddon: false,
 };
 
+/** Deadline for Connect/container HTTP fetches (bootstrap token exchange,
+ * well-known descriptor, relay link/config calls). A hung network call aborts
+ * and surfaces as a `connect-failed` SandboxRpcError instead of pending. */
+const SANDBOX_FETCH_TIMEOUT_MS = 30_000;
+
 function buildRegistry(): SandboxProviderRegistry {
   const registry = new SandboxProviderRegistry();
   registry.register(DockerSandboxProvider, dockerConfigDecoder);
@@ -158,6 +163,21 @@ function errorToMessage(e: unknown): string {
   return String(e);
 }
 
+/** Resolve the base image for a provision request from the decoded driver
+ * config, falling back to the Docker default when the config omits one.
+ * The driver treats `req.image` as authoritative, so passing the configured
+ * image (rather than always the default) honors user-configured targets. */
+function resolveProvisionImage(config: unknown): string {
+  if (
+    config !== null &&
+    typeof config === "object" &&
+    typeof (config as { image?: unknown }).image === "string"
+  ) {
+    return (config as { image: string }).image;
+  }
+  return DEFAULT_DOCKER_CONFIG.image;
+}
+
 async function readResponseBody(response: Response): Promise<string> {
   const text = await response.text();
   if (!text) return `${response.status} ${response.statusText}`;
@@ -185,8 +205,13 @@ async function fetchAndDecodeJson<S extends Schema.Decoder<unknown>>(
   url: string,
   init?: RequestInit,
 ): Promise<S["Type"]> {
+  // Bound every Connect/container fetch so a hung network call fails loudly
+  // instead of leaving startSession/testConnection pending indefinitely.
   // @effect-diagnostics-next-line globalFetch:off - probes another Kata server endpoint from the sandbox orchestrator.
-  const response = await fetch(url, init);
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(SANDBOX_FETCH_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`${url} failed: ${await readResponseBody(response)}`);
   }
@@ -444,7 +469,7 @@ export const SandboxServiceLive = {
                 inst.driver.provision({
                   instanceId: instanceId as string,
                   config: inst.config,
-                  image: DEFAULT_DOCKER_CONFIG.image,
+                  image: resolveProvisionImage(inst.config),
                   env: [],
                 }),
               ).pipe(
@@ -530,7 +555,7 @@ export const SandboxServiceLive = {
           .provision({
             instanceId: instanceId as string,
             config: inst.config,
-            image: DEFAULT_DOCKER_CONFIG.image,
+            image: resolveProvisionImage(inst.config),
             env: [["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", bootstrapToken]],
           })
           .pipe(Effect.mapError(mapDriverError));
