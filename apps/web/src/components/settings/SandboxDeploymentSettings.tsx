@@ -53,9 +53,8 @@ function slugifyLabel(value: string): string {
     .slice(0, 48);
 }
 
-function rpcClient() {
-  return getPrimaryEnvironmentConnection().client;
-}
+/** Per-instance busy state for the long-running RPCs. */
+type BusyOp = "test" | "start" | "dispose";
 
 /**
  * Settings panel for sandbox deployment targets (Phase 1: local Docker
@@ -79,11 +78,30 @@ export function SandboxDeploymentSettings() {
   const [activeSession, setActiveSession] = useState<
     Record<string, { environmentId: string; httpBaseUrl: string }>
   >({});
-  const [busy, setBusy] = useState<Record<string, "test" | "start" | "dispose">>({});
+  const [busy, setBusy] = useState<Record<string, BusyOp>>({});
+
+  /** Mark an instance busy for `op` while `fn` runs, then clear it. Centralizes
+   * the `finally { setBusy ... delete }` cleanup that every long-running
+   * handler otherwise duplicates. */
+  const withBusy = useCallback(
+    async <T,>(instanceId: string, op: BusyOp, fn: () => Promise<T>): Promise<T> => {
+      setBusy((prev) => ({ ...prev, [instanceId]: op }));
+      try {
+        return await fn();
+      } finally {
+        setBusy((prev) => {
+          const next = { ...prev };
+          delete next[instanceId];
+          return next;
+        });
+      }
+    },
+    [],
+  );
 
   const refreshList = useCallback(async () => {
     try {
-      const result = await rpcClient().sandbox.listInstances();
+      const result = await getPrimaryEnvironmentConnection().client.sandbox.listInstances();
       setSummaries(result.instances);
     } catch (error) {
       toastManager.add({
@@ -106,128 +124,118 @@ export function SandboxDeploymentSettings() {
     return map;
   }, [summaries]);
 
-  const handleTest = useCallback(async (instanceId: string) => {
-    setBusy((prev) => ({ ...prev, [instanceId]: "test" }));
-    setTestProgress((prev) => ({ ...prev, [instanceId]: [] }));
-    try {
-      await rpcClient().sandbox.testConnection(
-        instanceId as never,
-        (event: SandboxTestConnectionProgressEvent) => {
-          setTestProgress((prev) => ({
-            ...prev,
-            [instanceId]: [
-              ...(prev[instanceId] ?? []),
-              `${event.stage}: ${event.ok ? "ok" : "failed"}${
-                "detail" in event && event.detail ? ` — ${event.detail}` : ""
-              }`,
-            ],
-          }));
-        },
-      );
-      toastManager.add({
-        type: "success",
-        title: "Test connection complete",
-        description: `Sandbox '${instanceId}' validated.`,
-      });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Test connection failed",
-        description: error instanceof Error ? error.message : "Unknown error.",
-      });
-    } finally {
-      setBusy((prev) => {
-        const next = { ...prev };
-        delete next[instanceId];
-        return next;
-      });
-    }
-  }, []);
-
-  const handleStart = useCallback(
-    async (instanceId: string) => {
-      if (hasCloudPublicConfig() && !isSignedIn) {
-        openAuthPrompt();
-        return;
-      }
-      setBusy((prev) => ({ ...prev, [instanceId]: "start" }));
-      try {
-        const connectAuthToken = hasCloudPublicConfig()
-          ? await getToken(resolveRelayClerkTokenOptions())
-          : null;
-        if (hasCloudPublicConfig() && !connectAuthToken) {
-          throw new Error("Sign in to Kata Code Connect before starting a deployment session.");
+  const handleTest = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "test", async () => {
+        setTestProgress((prev) => ({ ...prev, [instanceId]: [] }));
+        try {
+          await getPrimaryEnvironmentConnection().client.sandbox.testConnection(
+            instanceId as never,
+            (event: SandboxTestConnectionProgressEvent) => {
+              setTestProgress((prev) => ({
+                ...prev,
+                [instanceId]: [
+                  ...(prev[instanceId] ?? []),
+                  `${event.stage}: ${event.ok ? "ok" : "failed"}${
+                    "detail" in event && event.detail ? ` — ${event.detail}` : ""
+                  }`,
+                ],
+              }));
+            },
+          );
+          toastManager.add({
+            type: "success",
+            title: "Test connection complete",
+            description: `Sandbox '${instanceId}' validated.`,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Test connection failed",
+            description: error instanceof Error ? error.message : "Unknown error.",
+          });
         }
-        const result = await rpcClient().sandbox.startSession({
-          instanceId: instanceId as never,
-          ...(connectAuthToken ? { connectAuthToken } : {}),
-        });
-        setActiveSession((prev) => ({
-          ...prev,
-          [instanceId]: {
-            environmentId: result.environmentId,
-            httpBaseUrl: result.endpoint.httpBaseUrl,
-          },
-        }));
-        setTestProgress((prev) => ({
-          ...prev,
-          [instanceId]: [...(prev[instanceId] ?? []), "start: ok"],
-        }));
-        toastManager.add({
-          type: "success",
-          title: "Sandbox session started",
-          description: `Reachable at ${result.endpoint.httpBaseUrl}.`,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error.";
-        setTestProgress((prev) => ({
-          ...prev,
-          [instanceId]: [...(prev[instanceId] ?? []), `start: failed — ${message}`],
-        }));
-        toastManager.add({
-          type: "error",
-          title: "Start session failed",
-          description: message,
-        });
-      } finally {
-        setBusy((prev) => {
-          const next = { ...prev };
-          delete next[instanceId];
-          return next;
-        });
-      }
-    },
-    [getToken, isSignedIn, openAuthPrompt],
+      }),
+    [withBusy],
   );
 
-  const handleDispose = useCallback(async (instanceId: string) => {
-    setBusy((prev) => ({ ...prev, [instanceId]: "dispose" }));
-    try {
-      await rpcClient().sandbox.disposeSession({ instanceId: instanceId as never });
-      setActiveSession((prev) => {
-        const next = { ...prev };
-        delete next[instanceId];
-        return next;
-      });
-      toastManager.add({
-        type: "success",
-        title: "Sandbox disposed",
-        description: `Sandbox '${instanceId}' released.`,
-      });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Dispose failed",
-        description: error instanceof Error ? error.message : "Unknown error.",
-      });
-    } finally {
-      setBusy((prev) => {
-        const next = { ...prev };
-        delete next[instanceId];
-        return next;
-      });
-    }
-  }, []);
+  const handleStart = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "start", async () => {
+        if (hasCloudPublicConfig() && !isSignedIn) {
+          openAuthPrompt();
+          return;
+        }
+        try {
+          const connectAuthToken = hasCloudPublicConfig()
+            ? await getToken(resolveRelayClerkTokenOptions())
+            : null;
+          if (hasCloudPublicConfig() && !connectAuthToken) {
+            throw new Error("Sign in to Kata Code Connect before starting a deployment session.");
+          }
+          const result = await getPrimaryEnvironmentConnection().client.sandbox.startSession({
+            instanceId: instanceId as never,
+            ...(connectAuthToken ? { connectAuthToken } : {}),
+          });
+          setActiveSession((prev) => ({
+            ...prev,
+            [instanceId]: {
+              environmentId: result.environmentId,
+              httpBaseUrl: result.endpoint.httpBaseUrl,
+            },
+          }));
+          setTestProgress((prev) => ({
+            ...prev,
+            [instanceId]: [...(prev[instanceId] ?? []), "start: ok"],
+          }));
+          toastManager.add({
+            type: "success",
+            title: "Sandbox session started",
+            description: `Reachable at ${result.endpoint.httpBaseUrl}.`,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error.";
+          setTestProgress((prev) => ({
+            ...prev,
+            [instanceId]: [...(prev[instanceId] ?? []), `start: failed — ${message}`],
+          }));
+          toastManager.add({
+            type: "error",
+            title: "Start session failed",
+            description: message,
+          });
+        }
+      }),
+    [getToken, isSignedIn, openAuthPrompt, withBusy],
+  );
+
+  const handleDispose = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "dispose", async () => {
+        try {
+          await getPrimaryEnvironmentConnection().client.sandbox.disposeSession({
+            instanceId: instanceId as never,
+          });
+          setActiveSession((prev) => {
+            const next = { ...prev };
+            delete next[instanceId];
+            return next;
+          });
+          toastManager.add({
+            type: "success",
+            title: "Sandbox disposed",
+            description: `Sandbox '${instanceId}' released.`,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Dispose failed",
+            description: error instanceof Error ? error.message : "Unknown error.",
+          });
+        }
+      }),
+    [withBusy],
+  );
 
   const handleRemove = useCallback(
     (instanceId: string) => {
