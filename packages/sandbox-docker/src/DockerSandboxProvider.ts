@@ -70,13 +70,17 @@ function engine(
   );
 }
 
+/**
+ * Resolve the docker runtime config (port, command, extraEnv) from the
+ * decoded payload the registry already validated. `image` is intentionally
+ * not resolved here: the SPI contract makes `req.image` the authoritative
+ * base image (the service layer supplies it; a future Phase may supply an
+ * image built from `.kata/environment.json`). Fails loudly on malformed
+ * config rather than silently substituting defaults (AGENTS.md fail-loud).
+ */
 function resolveConfig(raw: unknown): DockerSandboxConfig {
   if (raw === undefined || raw === null) return { ...DEFAULT_DOCKER_CONFIG };
-  try {
-    return { ...DEFAULT_DOCKER_CONFIG, ...decodeDockerSandboxConfig(raw) };
-  } catch {
-    return { ...DEFAULT_DOCKER_CONFIG };
-  }
+  return { ...DEFAULT_DOCKER_CONFIG, ...decodeDockerSandboxConfig(raw) };
 }
 
 function buildContainerEnv(
@@ -132,6 +136,10 @@ export const DockerSandboxProvider: SandboxProvider = {
   validate: (config) =>
     Effect.gen(function* () {
       const resolved = resolveConfig(config);
+      // `validate` has no provisioning `req.image` to draw from; the registry
+      // guarantees `config` is already decoded, so `resolved.image` is the
+      // configured image (or the default when the envelope omits one).
+      const image = resolved.image;
       const ping = yield* engine("/_ping", {}, "unreachable", "Docker daemon unreachable");
       if (ping.status !== 200) {
         return yield* new SandboxProviderError({
@@ -140,14 +148,14 @@ export const DockerSandboxProvider: SandboxProvider = {
         });
       }
       const img = yield* engine(
-        `/images/${encodeURIComponent(resolved.image)}/json`,
+        `/images/${encodeURIComponent(image)}/json`,
         {},
         "unreachable",
         "image inspect",
       );
       if (img.status === 404) {
         yield* engine(
-          `/images/create?fromImage=${encodeURIComponent(resolved.image)}`,
+          `/images/create?fromImage=${encodeURIComponent(image)}`,
           { method: "POST" },
           "unreachable",
           "image pull",
@@ -158,13 +166,18 @@ export const DockerSandboxProvider: SandboxProvider = {
   provision: (req) =>
     Effect.gen(function* () {
       const resolved = resolveConfig(req.config);
+      // The service layer supplies the authoritative base image (the SPI
+      // contract for `SandboxProvisionRequest.image`); fall back to the
+      // configured/default image only when the caller omits it (e.g. the
+      // registry's own validate path does not pass one).
+      const image = req.image ?? resolved.image;
       const containerPort = `${resolved.port}/tcp`;
       // @effect-diagnostics-next-line effect(globalDateInEffect):off - unique container name; no Effect Clock in the driver.
       const name = `kata-sandbox-${req.instanceId}-${Date.now()}`;
       const env = buildContainerEnv(resolved, req);
       // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - ad-hoc Docker Engine create body, not a typed codec.
       const createBody = JSON.stringify({
-        Image: resolved.image,
+        Image: image,
         // Override any image ENTRYPOINT so `Cmd: ["sh", "-c", command]` runs the
         // shell command directly (the katacode image's entrypoint is
         // `node bin.mjs`; without this, `sh -c ...` would be appended to it).
@@ -311,11 +324,18 @@ export const DockerSandboxProvider: SandboxProvider = {
       const res: DockerResponse | null = yield* Effect.matchEffect(
         dockerRequest(`/containers/${state.containerId}?force=true`, { method: "DELETE" }),
         {
-          onFailure: () => Effect.succeed<DockerResponse | null>(null),
+          onFailure: (cause) =>
+            // Log the daemon error so operators can see health issues; the
+            // container is most likely already gone (AutoRemove), so dispose
+            // still succeeds rather than surfacing a stale-not-found.
+            Effect.logWarning("Docker dispose daemon error; container may be orphaned", {
+              containerId: state.containerId,
+              cause,
+            }).pipe(Effect.as<DockerResponse | null>(null)),
           onSuccess: (r) => Effect.succeed<DockerResponse | null>(r),
         },
       );
-      if (res === null) return; // daemon error mid-delete: container likely already gone
+      if (res === null) return;
       if (res.status >= 400 && res.status !== 404) {
         return yield* new SandboxProviderError({
           reason: "dispose-failed",

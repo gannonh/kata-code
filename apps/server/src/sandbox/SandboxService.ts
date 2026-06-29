@@ -44,7 +44,11 @@ import {
   SandboxRpcError,
 } from "@kata-sh/code-contracts/sandboxRpc";
 import { SandboxProviderRegistry } from "@kata-sh/code-sandbox/registry";
-import { SandboxProviderError, type SandboxHandle } from "@kata-sh/code-sandbox/driver";
+import {
+  SandboxProviderError,
+  type SandboxHandle,
+  type SandboxProvider,
+} from "@kata-sh/code-sandbox/driver";
 import {
   DEFAULT_DOCKER_CONFIG,
   DockerSandboxProvider,
@@ -98,7 +102,13 @@ function toSummary(inst: Materialized): Effect.Effect<SandboxInstanceSummary, ne
   });
 }
 
-/** Turn an effect into an Either-shaped { _tag: "Left"|"Right" } without `Effect.either`. */
+/**
+ * Turn an effect into an Either-shaped `{ _tag: "Left"|"Right" }` value.
+ * `Effect.either` is not exported in the installed Effect (4.0.0-beta.78);
+ * `Effect.matchEffect` is the canonical primitive for collapsing the error
+ * channel into a value. The explicit `_tag` union is what the `testConnection`
+ * stream pipeline narrows on per step.
+ */
 function either<A, E>(
   eff: Effect.Effect<A, E>,
 ): Effect.Effect<{ _tag: "Left"; left: E } | { _tag: "Right"; right: A }, never> {
@@ -129,15 +139,15 @@ function mapDriverError(e: SandboxProviderError): SandboxRpcError {
   return new SandboxRpcError({ reason, message: e.message });
 }
 
-/** Map a registry unavailable reason to an RPC error. */
+/** Map a registry unavailable reason to an RPC error. `SandboxRpcError`
+ * already lists every registry reason, so the reason is passed through verbatim
+ * (a deliberately-disabled instance must surface as `disabled`, not
+ * `invalid-config`). */
 function registryError(
   reason: "unknown-driver" | "disabled" | "invalid-config",
   message: string,
 ): SandboxRpcError {
-  return new SandboxRpcError({
-    reason: reason === "disabled" ? "invalid-config" : reason,
-    message,
-  });
+  return new SandboxRpcError({ reason, message });
 }
 
 /** Best-effort message from any error value (Connect/relay errors are a union). */
@@ -355,8 +365,17 @@ function registerSandboxWithConnect(input: {
 
 const RelayConfigResponse = Schema.Struct({ ok: Schema.Boolean });
 
-/** In-memory map of running sessions (instanceId → handle). Phase 1; not durable. */
-const runningSessions = new Map<string, SandboxHandle>();
+/** A running sandbox session: the provisioned handle plus the driver that
+ * created it, so `disposeSession` routes to the correct driver rather than a
+ * hardcoded one. Phase 1; not durable (server restart cannot reclaim these —
+ * see deferred-work for a startup container sweep). */
+interface RunningSession {
+  readonly handle: SandboxHandle;
+  readonly driver: SandboxProvider;
+}
+
+/** In-memory map of running sessions (instanceId → handle + driver). Phase 1; not durable. */
+const runningSessions = new Map<string, RunningSession>();
 
 /**
  * The live sandbox service. `startSession` requires the Kata Code Connect
@@ -394,10 +413,11 @@ export const SandboxServiceLive = {
         return inst;
       }),
     ).pipe(
+      // Stream level 1 — resolve the instance from settings. Errors here are
+      // terminal (raised as `SandboxRpcError`); per-step progress below uses
+      // `either()` so a step failure is encoded as `{ ok: false }` and the
+      // stream stops emitting further steps for that instance.
       Stream.flatMap((inst) => {
-        const image = String(
-          (inst.config as { image?: string } | null)?.image ?? DEFAULT_DOCKER_CONFIG.image,
-        );
         const validate = Stream.fromEffect(
           either(inst.driver.validate(inst.config)).pipe(
             Effect.map(
@@ -409,6 +429,8 @@ export const SandboxServiceLive = {
             ),
           ),
         );
+        // Stream level 2 — if validate failed, emit just the validate event;
+        // otherwise run provision and carry both the result and its event.
         return validate.pipe(
           Stream.flatMap((validateEvent) => {
             if (!validateEvent.ok) return Stream.make(validateEvent);
@@ -417,7 +439,7 @@ export const SandboxServiceLive = {
                 inst.driver.provision({
                   instanceId: instanceId as string,
                   config: inst.config,
-                  image,
+                  image: DEFAULT_DOCKER_CONFIG.image,
                   env: [],
                 }),
               ).pipe(
@@ -431,6 +453,9 @@ export const SandboxServiceLive = {
                 })),
               ),
             );
+            // Stream level 3 — on provision success, dispose the throwaway
+            // container and emit provision + dispose + done. On failure, emit
+            // just the provision event.
             return Stream.concat(
               Stream.make(validateEvent),
               provision.pipe(
@@ -466,6 +491,16 @@ export const SandboxServiceLive = {
     options?: { readonly connectAuthToken?: SandboxStartSessionInput["connectAuthToken"] },
   ) =>
     Effect.gen(function* () {
+      // Idempotency guard: a concurrent `startSession` for the same instance
+      // (e.g. a double-click during the up-to-60s provision window) would
+      // boot a second container and orphan the first one with no handle to
+      // dispose. Fail fast instead.
+      if (runningSessions.has(instanceId as string)) {
+        return yield* new SandboxRpcError({
+          reason: "provision-failed",
+          message: "A session is already running for this deployment target.",
+        });
+      }
       const registry = buildRegistry();
       const config = (settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap)[
         instanceId as SandboxProviderInstanceId
@@ -483,18 +518,15 @@ export const SandboxServiceLive = {
       // Per-session Kata WebSocket auth token (required for non-loopback clients).
       // @effect-diagnostics-next-line effect(globalDateInEffect):off - random token, not a clock read.
       const bootstrapToken = NodeCrypto.randomBytes(24).toString("hex");
-      const image = String(
-        (inst.config as { image?: string } | null)?.image ?? DEFAULT_DOCKER_CONFIG.image,
-      );
       const handle = yield* inst.driver
         .provision({
           instanceId: instanceId as string,
           config: inst.config,
-          image,
+          image: DEFAULT_DOCKER_CONFIG.image,
           env: [["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", bootstrapToken]],
         })
         .pipe(Effect.mapError(mapDriverError));
-      runningSessions.set(instanceId as string, handle);
+      runningSessions.set(instanceId as string, { handle, driver: inst.driver });
       const reach = yield* inst.driver
         .reachability(handle, 13773)
         .pipe(Effect.mapError(mapDriverError));
@@ -548,9 +580,12 @@ export const SandboxServiceLive = {
 
   disposeSession: (instanceId: SandboxProviderInstanceId) =>
     Effect.gen(function* () {
-      const handle = runningSessions.get(instanceId as string);
-      if (handle === undefined) return false;
-      yield* DockerSandboxProvider.dispose(handle).pipe(Effect.mapError(mapDriverError));
+      const entry = runningSessions.get(instanceId as string);
+      if (entry === undefined) return false;
+      // Route through the driver that created the handle rather than a
+      // hardcoded one, so a future non-Docker driver disposes its own
+      // sandboxes correctly (the handle's `driverKind` is the routing key).
+      yield* entry.driver.dispose(entry.handle).pipe(Effect.mapError(mapDriverError));
       runningSessions.delete(instanceId as string);
       return true;
       // Connect unlink: the existing cloud/ entry points expose no per-origin
