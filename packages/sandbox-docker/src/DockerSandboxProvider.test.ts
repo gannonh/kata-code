@@ -241,6 +241,27 @@ describe("DockerSandboxProvider exec/copyInto integration (Docker-guarded, AC-2.
     }),
   );
 
+  vitIt.live("exec returns promptly for a setsid-detached background command (AC-2.3 spike)", () =>
+    Effect.gen(function* () {
+      const handle = yield* startAlpineContainer("detached");
+      yield* Effect.gen(function* () {
+        const started = Date.now();
+        const detached = yield* DockerSandboxProvider.exec(
+          handle,
+          "setsid sh -c 'sleep 8 > /tmp/kata-detached-spike.log 2>&1 &'",
+        );
+        const elapsed = Date.now() - started;
+        expect(detached.exitCode).toBe(0);
+        // The spike proved the outer exec must not block on the backgrounded child.
+        expect(elapsed).toBeLessThan(5_000);
+        // Brief real-time pause so the detached child is visible in ps.
+        yield* Effect.sleep("300 millis");
+        const ps = yield* DockerSandboxProvider.exec(handle, "ps -eo pid,ppid,sid,args");
+        expect(ps.stdout).toContain("sleep 8");
+      }).pipe(Effect.ensuring(removeContainer(handle)));
+    }),
+  );
+
   vitIt.effect("copyInto uploads a tar that is then readable in-container (AC-2.2 seeding)", () =>
     Effect.gen(function* () {
       const handle = yield* startAlpineContainer("copyinto");

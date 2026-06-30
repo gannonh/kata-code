@@ -118,10 +118,20 @@ export function dockerRequestBuffer(
     contentType?: string;
     socketPath?: string;
     timeoutMs?: number;
+    /** Hijacked Docker attach stream (e.g. `POST /exec/{id}/start`). Disables the
+     *  socket inactivity timeout and sets `Connection: close` so the stream
+     *  resolves when the exec process exits instead of waiting for idle timeout. */
+    hijacked?: boolean;
   } = {},
 ): Effect.Effect<DockerBufferResponse, DockerEngineError> {
   const socketPath = init.socketPath ?? resolveDockerSocket();
-  const timeoutMs = init.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const hijacked = init.hijacked ?? false;
+  // Hijacked exec streams must not use the default inactivity timeout: a
+  // detached/quick-exiting process can leave the socket idle while the
+  // connection stays open, and a long-running foreground exec may emit no
+  // bytes for longer than the default window. The stream ends when the
+  // exec'd process exits (or the connection closes).
+  const timeoutMs = hijacked ? 0 : (init.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
   return Effect.tryPromise({
     try: () =>
       new Promise<DockerBufferResponse>((resolve, reject) => {
@@ -130,33 +140,43 @@ export function dockerRequestBuffer(
             socketPath,
             path,
             method: init.method ?? "GET",
-            headers: init.body
-              ? {
-                  "Content-Type": "application/json",
-                  "Content-Length": Buffer.byteLength(init.body),
-                }
-              : init.bodyBytes
+            headers: {
+              ...(init.body
                 ? {
-                    "Content-Type": init.contentType ?? "application/x-tar",
-                    "Content-Length": Buffer.byteLength(init.bodyBytes),
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(init.body),
                   }
-                : {},
+                : init.bodyBytes
+                  ? {
+                      "Content-Type": init.contentType ?? "application/x-tar",
+                      "Content-Length": Buffer.byteLength(init.bodyBytes),
+                    }
+                  : {}),
+              ...(hijacked ? { Connection: "close" } : {}),
+            },
             timeout: timeoutMs,
           },
           (res) => {
             // Do NOT set utf8 encoding: the multiplexed stream is binary frames.
             const chunks: Buffer[] = [];
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks) });
+            };
             res.on("data", (c: Buffer) => chunks.push(c));
-            res.on("end", () =>
-              resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks) }),
-            );
+            res.on("end", finish);
+            res.on("close", finish);
           },
         );
-        req.on("timeout", () => {
-          req.destroy(
-            new DockerEngineError(`Docker request to ${path} timed out after ${timeoutMs}ms`),
-          );
-        });
+        if (timeoutMs > 0) {
+          req.on("timeout", () => {
+            req.destroy(
+              new DockerEngineError(`Docker request to ${path} timed out after ${timeoutMs}ms`),
+            );
+          });
+        }
         req.on("error", (err) =>
           reject(err instanceof DockerEngineError ? err : new DockerEngineError(err.message)),
         );

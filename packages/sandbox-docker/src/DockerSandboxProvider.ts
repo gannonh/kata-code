@@ -98,6 +98,7 @@ function engineBuffer(
     body?: string;
     bodyBytes?: Uint8Array;
     contentType?: string;
+    hijacked?: boolean;
   } = {},
   reason: SandboxProviderError["reason"] = "provision-failed",
   msg: string,
@@ -445,6 +446,7 @@ export const DockerSandboxProvider: SandboxProvider = {
         {
           method: "POST",
           body: JSON.stringify({ Detach: false, Tty: false }),
+          hijacked: true,
         },
         "exec-failed",
         "exec start",

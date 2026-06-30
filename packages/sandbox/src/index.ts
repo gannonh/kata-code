@@ -8,3 +8,4 @@ export * from "./SandboxProviderDriver.ts";
 export * from "./SandboxProviderRegistry.ts";
 export * from "./descriptor.ts";
 export * from "./environmentResolver.ts";
+export * from "./redactSecrets.ts";

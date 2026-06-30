@@ -22,6 +22,10 @@
     "./descriptor": {
       "types": "./src/descriptor.ts",
       "import": "./src/descriptor.ts"
+    },
+    "./redactSecrets": {
+      "types": "./src/redactSecrets.ts",
+      "import": "./src/redactSecrets.ts"
     }
   },
   "scripts": {
