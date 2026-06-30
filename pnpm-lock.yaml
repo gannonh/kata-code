@@ -431,6 +431,9 @@ importers:
       '@kata-sh/code-sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox
+      '@kata-sh/code-sandbox-contracts':
+        specifier: workspace:*
+        version: link:../../packages/sandbox-contracts
       '@kata-sh/code-sandbox-docker':
         specifier: workspace:*
         version: link:../../packages/sandbox-docker
