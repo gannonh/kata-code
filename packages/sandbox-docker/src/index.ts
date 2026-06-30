@@ -12,5 +12,10 @@ export {
   type DockerSandboxHandleState,
 } from "./DockerSandboxProvider.ts";
 export { DockerSandboxConfig, DEFAULT_DOCKER_CONFIG } from "./config.ts";
-export { dockerRequest, DockerEngineError, resolveDockerSocket } from "./dockerEngine.ts";
-export type { DockerResponse } from "./dockerEngine.ts";
+export {
+  dockerRequest,
+  dockerRequestBuffer,
+  DockerEngineError,
+  resolveDockerSocket,
+} from "./dockerEngine.ts";
+export type { DockerResponse, DockerBufferResponse } from "./dockerEngine.ts";

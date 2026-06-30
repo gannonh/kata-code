@@ -18,6 +18,8 @@ export const SandboxProviderDescriptor = Schema.Struct({
   maxLifetimeMs: Schema.optional(Schema.Number),
   supportsSnapshot: Schema.Boolean,
   supportsRenewTimeout: Schema.Boolean,
+  /** Phase 2: driver can copy a tar archive into a running sandbox (`copyInto`). */
+  supportsCopyInto: Schema.Boolean,
   baseImages: Schema.optional(Schema.Array(Schema.String)),
 });
 export type SandboxProviderDescriptor = typeof SandboxProviderDescriptor.Type;
