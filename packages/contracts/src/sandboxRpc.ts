@@ -8,6 +8,7 @@
 import * as Schema from "effect/Schema";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { RepositoryIdentity } from "./environment.ts";
 import { SandboxProviderInstanceId } from "./sandboxProviderInstance.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 
@@ -75,11 +76,22 @@ export const SandboxTestConnectionProgressEvent = Schema.Union([
 ]);
 export type SandboxTestConnectionProgressEvent = typeof SandboxTestConnectionProgressEvent.Type;
 
+/** Repo selection for Phase 2 setup (host read + saved-env lookup + seed). */
+export const SandboxStartSessionRepository = Schema.Struct({
+  /** Host path to the repo working tree (where `.kata/environment.json` lives). */
+  repoRoot: TrimmedNonEmptyString,
+  /** Keys the saved-env lookup via `canonicalKey`. */
+  repositoryIdentity: RepositoryIdentity,
+});
+export type SandboxStartSessionRepository = typeof SandboxStartSessionRepository.Type;
+
 /** Start session: provision + Connect-register; return the endpoint to bind a thread to. */
 export const SandboxStartSessionInput = Schema.Struct({
   instanceId: SandboxProviderInstanceId,
   /** Relay Clerk JWT from the desktop/web session; falls back to the CLI token when omitted. */
   connectAuthToken: Schema.optional(TrimmedNonEmptyString),
+  /** When present, resolve + seed + run setup for this repo before Connect registration. */
+  repository: Schema.optionalKey(SandboxStartSessionRepository),
 });
 export type SandboxStartSessionInput = typeof SandboxStartSessionInput.Type;
 export const SandboxStartSessionResult = Schema.Struct({
