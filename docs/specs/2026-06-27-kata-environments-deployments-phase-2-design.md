@@ -500,7 +500,20 @@ server-side and depend on 1–2; 7 depends on 1; 8 depends on the rest.
 
 ## Spike findings (detached-exec)
 
-_To be recorded during Build (implementation plan step 0), before the setup runner is built._
-Record pass/fail for: a `setsid`-detached process survives the driver `exec` return; the `exec`
-return does not block on the backgrounded child; the process is visible via an `exec` `ps`. A
-refutation forces an optional `spawn` SPI capability (re-plan).
+**Status: PASS (all three claims verified 2026-06-30).** No `spawn` SPI capability needed; the runner uses detached `exec` via `setsid sh -c '<cmd>' >logfile 2>&1 &`.
+
+Method: ran the exact Engine API path the driver uses against an `alpine:3.20` container (`POST /containers/{id}/exec` then `POST /exec/{id}/start` with `Detach:false`, `Tty:false`), plus a second exec running `ps`.
+
+Results:
+
+1. **Detached process survives the `exec` return — PASS.** `setsid sh -c "sleep 30 > /tmp/spike.log 2>&1 &"` launched through the exec API was visible afterward in `ps -eo pid,ppid,sid,args` as `sleep 30` with PID 14, PPID 1 (reparented to the container init), SID 13 (the new session `setsid` created). The child outlived the outer `sh`.
+2. **`exec` return does not block on the backgrounded child — PASS.** The start call returned in 0.173s with HTTP 200, `ExitCode: 0`, `Running: false`. The hijacked stream reached EOF when the outer `sh` exited, so the driver's read-to-EOF returns promptly.
+3. **Process visible via an `exec` `ps` — PASS.** The follow-up `ps` exec returned the detached `sleep 30` row.
+
+Additional findings relevant to the driver fixes (Task 1b):
+
+- **`WorkingDir` honors `cwd` — PASS.** A `pwd` exec with `WorkingDir: /workspace` returned `/workspace`, confirming the `exec` `cwd` fix (set `WorkingDir` in the exec create body).
+- **Demultiplex is required.** The raw Engine stream uses 8-byte frame headers: 1 byte stream type (1=stdout, 2=stderr), 3 bytes padding, 4-byte big-endian payload length. The current driver returns `startRes.body` raw (frame headers included) and `stderr: ""` always — confirmed by the `ps` output arriving on stream type 2 with a `0200 0000 0000 0085` header. Demultiplexing by stream type into `stdout`/`stderr` is straightforward and is the required fix.
+  Record pass/fail for: a `setsid`-detached process survives the driver `exec` return; the `exec`
+  return does not block on the backgrounded child; the process is visible via an `exec` `ps`. A
+  refutation forces an optional `spawn` SPI capability (re-plan).
