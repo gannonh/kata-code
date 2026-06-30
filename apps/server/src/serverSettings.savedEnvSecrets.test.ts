@@ -94,29 +94,25 @@ it.layer(NodeServices.layer)("ServerSettings.savedSandboxEnvironments secrets", 
       }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("redacts saved-env secrets for the client (AC-2.4)", () =>
-    Effect.gen(function* () {
-      const redacted = redactServerSettingsForClient({
-        ...DEFAULT_SERVER_SETTINGS,
-        savedSandboxEnvironments: {
-          [repoKey]: {
-            environment: [
-              { name: "DEPLOY_TOKEN", value: "super-secret-token", sensitive: true },
-              { name: "LOG_LEVEL", value: "debug", sensitive: false, valueRedacted: true },
-            ],
-          },
+  it("redacts saved-env secrets for the client (AC-2.4)", () => {
+    const redacted = redactServerSettingsForClient({
+      ...DEFAULT_SERVER_SETTINGS,
+      savedSandboxEnvironments: {
+        [repoKey]: {
+          environment: [
+            { name: "DEPLOY_TOKEN", value: "super-secret-token", sensitive: true },
+            { name: "LOG_LEVEL", value: "debug", sensitive: false, valueRedacted: true },
+          ],
         },
-      });
+      },
+    });
 
-      const saved = redacted.savedSandboxEnvironments[repoKey] as
-        | SavedSandboxEnvironment
-        | undefined;
-      assert.deepEqual(saved?.environment, [
-        { name: "DEPLOY_TOKEN", value: "", sensitive: true, valueRedacted: true },
-        { name: "LOG_LEVEL", value: "debug", sensitive: false },
-      ]);
-    }),
-  );
+    const saved = redacted.savedSandboxEnvironments[repoKey] as SavedSandboxEnvironment | undefined;
+    assert.deepEqual(saved?.environment, [
+      { name: "DEPLOY_TOKEN", value: "", sensitive: true, valueRedacted: true },
+      { name: "LOG_LEVEL", value: "debug", sensitive: false },
+    ]);
+  });
 
   it.effect("removes a saved-env secret when its sensitive entry is dropped (AC-2.5)", () =>
     Effect.gen(function* () {

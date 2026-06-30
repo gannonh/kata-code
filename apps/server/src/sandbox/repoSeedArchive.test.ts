@@ -5,7 +5,7 @@ import * as path from "node:path";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildRepoSeedArchive, SeedArchiveError } from "./repoSeedArchive.ts";
+import { buildRepoSeedArchive } from "./repoSeedArchive.ts";
 
 /** Parse a ustar tar archive into a map of `name -> content` (files only). */
 function parseTarEntries(archive: Uint8Array): Map<string, string> {
@@ -16,10 +16,11 @@ function parseTarEntries(archive: Uint8Array): Map<string, string> {
     const header = buf.subarray(i, i + 512);
     // Two consecutive zero blocks terminate the archive.
     if (header.every((b) => b === 0)) break;
-    // name is the first 100 bytes, null-terminated.
-    const name = header.subarray(0, 100).toString("utf8").replace(/\0+$/, "");
+    // name is the first 100 bytes, null-terminated. Split on the NUL byte
+    // instead of a control-char regex (oxlint no-control-regex).
+    const name = header.subarray(0, 100).toString("utf8").split("\0")[0] ?? "";
     // size is octal at offset 124, 11 digits + null.
-    const sizeOct = header.subarray(124, 135).toString("utf8").replace(/\0+$/, "").trim();
+    const sizeOct = (header.subarray(124, 135).toString("utf8").split("\0")[0] ?? "").trim();
     const size = parseInt(sizeOct || "0", 8);
     const typeflag = String.fromCharCode(header[156] ?? 0x30);
     i += 512;
