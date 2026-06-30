@@ -10,6 +10,7 @@ import {
   SandboxProviderInstanceConfig,
   SandboxProviderInstanceId,
 } from "./sandboxProviderInstance.ts";
+import { SavedSandboxEnvironment, RepositoryCanonicalKey } from "./savedSandboxEnvironment.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -465,6 +466,13 @@ export const ServerSettings = Schema.Struct({
     SandboxProviderInstanceId,
     SandboxProviderInstanceConfig,
   ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  // Saved per-repo environments (Phase 2). Keyed by `RepositoryCanonicalKey`
+  // (derived from `RepositoryIdentity.canonicalKey`). Same backward-compat
+  // invariant as `sandboxProviderInstances`: a `withDecodingDefault({})` field
+  // means existing settings JSON without the key decodes to `{}` (AC-2.5).
+  savedSandboxEnvironments: Schema.Record(RepositoryCanonicalKey, SavedSandboxEnvironment).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
@@ -577,6 +585,11 @@ export const ServerSettingsPatch = Schema.Struct({
   // `providerInstances` above: small map, full map on every edit).
   sandboxProviderInstances: Schema.optionalKey(
     Schema.Record(SandboxProviderInstanceId, SandboxProviderInstanceConfig),
+  ),
+  // Whole-map replacement for saved per-repo environments (same discipline as
+  // `sandboxProviderInstances` above: small map, full map on every edit).
+  savedSandboxEnvironments: Schema.optionalKey(
+    Schema.Record(RepositoryCanonicalKey, SavedSandboxEnvironment),
   ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;

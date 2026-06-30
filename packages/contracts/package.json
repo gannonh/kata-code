@@ -31,6 +31,10 @@
       "types": "./src/sandboxProviderInstance.ts",
       "import": "./src/sandboxProviderInstance.ts"
     },
+    "./savedSandboxEnvironment": {
+      "types": "./src/savedSandboxEnvironment.ts",
+      "import": "./src/savedSandboxEnvironment.ts"
+    },
     "./baseSchemas": {
       "types": "./src/baseSchemas.ts",
       "import": "./src/baseSchemas.ts"
