@@ -86,6 +86,9 @@ export function applyServerSettingsPatch(
     ...(patch.sandboxProviderInstances !== undefined
       ? { sandboxProviderInstances: patch.sandboxProviderInstances }
       : {}),
+    ...(patch.savedSandboxEnvironments !== undefined
+      ? { savedSandboxEnvironments: patch.savedSandboxEnvironments }
+      : {}),
     ...(automaticGitFetchInterval !== undefined ? { automaticGitFetchInterval } : {}),
   };
   if (!selectionPatch) {
