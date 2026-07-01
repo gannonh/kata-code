@@ -414,6 +414,10 @@ const makeCursorAcpProbeRuntime = (
         cwd: process.cwd(),
         clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
         authMethodId: "cursor_login",
+        // Under `CURSOR_API_KEY`, the Cursor Agent CLI authenticates via the
+        // API key and `authenticate` with `cursor_login` would trigger an
+        // interactive OAuth login. Skip it so headless/CI runs proceed.
+        ...(environment?.CURSOR_API_KEY ? { skipAuthenticate: true } : {}),
         clientCapabilities: CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES,
       }).pipe(Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner))),
     );
@@ -804,7 +808,20 @@ export function getCursorParameterizedModelPickerUnsupportedMessage(input: {
  * User Email          Not logged in
  * ```
  */
-export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult {
+export interface ParseCursorAboutOutputOptions {
+  /**
+   * True when the Cursor Agent CLI was spawned with `CURSOR_API_KEY` (or
+   * `--api-key`). Under API-key auth, `agent about` reports `userEmail: null`
+   * even though the CLI is authenticated and functional, so a null email must
+   * not be treated as unauthenticated.
+   */
+  readonly hasApiKeyAuth?: boolean;
+}
+
+export function parseCursorAboutOutput(
+  result: CommandResult,
+  options: ParseCursorAboutOutputOptions = {},
+): CursorAboutResult {
   const jsonPayload = parseCursorAboutJsonPayload(result.stdout);
   if (jsonPayload) {
     const version =
@@ -819,6 +836,14 @@ export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult
     const authMetadata = cursorAuthMetadata(subscriptionType);
 
     if (hasUserEmailField && jsonPayload.userEmail == null) {
+      if (options.hasApiKeyAuth) {
+        return {
+          version,
+          status: "ready",
+          auth: { status: "authenticated", ...authMetadata },
+          message: "Authenticated via Cursor API key.",
+        };
+      }
       return {
         version,
         status: "error",
@@ -912,6 +937,14 @@ export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult
     lowerEmail.includes("login required") ||
     lowerEmail.includes("authentication required")
   ) {
+    if (options.hasApiKeyAuth) {
+      return {
+        version,
+        status: "ready",
+        auth: { status: "authenticated" },
+        message: "Authenticated via Cursor API key.",
+      };
+    }
     return {
       version,
       status: "error",
@@ -1042,7 +1075,9 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
     });
   }
 
-  const parsed = parseCursorAboutOutput(aboutProbe.success.value);
+  const parsed = parseCursorAboutOutput(aboutProbe.success.value, {
+    hasApiKeyAuth: Boolean(environment?.CURSOR_API_KEY),
+  });
   const cursorCliConfigChannel = yield* readCursorCliConfigChannel();
   const parameterizedModelPickerUnsupportedMessage =
     getCursorParameterizedModelPickerUnsupportedMessage({

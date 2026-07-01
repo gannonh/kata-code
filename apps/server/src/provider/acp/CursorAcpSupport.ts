@@ -59,6 +59,10 @@ export const makeCursorAcpRuntime = (
         ...input,
         spawn: buildCursorAcpSpawnInput(input.cursorSettings, input.cwd, input.environment),
         authMethodId: "cursor_login",
+        // Under `CURSOR_API_KEY`, the Cursor Agent CLI authenticates via the
+        // API key and `authenticate` with `cursor_login` would trigger an
+        // interactive OAuth login. Skip it for headless/API-key sessions.
+        ...(input.environment?.CURSOR_API_KEY ? { skipAuthenticate: true } : {}),
         clientCapabilities: CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES,
       }).pipe(
         Layer.provide(

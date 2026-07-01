@@ -19,7 +19,11 @@ export interface CursorSkillFixtures {
   readonly uniqueToken: string;
 }
 
-const REQUIRED_CURSOR_ENV = ["KATACODE_E2E_ENABLE_CURSOR", "KATACODE_E2E_CURSOR_MODEL"] as const;
+const REQUIRED_CURSOR_ENV = [
+  "KATACODE_E2E_ENABLE_CURSOR",
+  "KATACODE_E2E_CURSOR_MODEL",
+  "KATACODE_E2E_CURSOR_API_KEY",
+] as const;
 
 export function readCursorSkillsConfig():
   | { readonly ok: true; readonly config: CursorSkillsConfig }
@@ -135,7 +139,10 @@ export async function configureCursorProviderForSkills(
   await customModelInput.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
   await customModelInput.fill(config.model);
   await customModelInput.press("Enter");
-  await expect(page.locator("code", { hasText: config.model })).toBeVisible({
+  // Custom models render as a span with a `Remove <slug>` button; assert the
+  // saved row appeared rather than a `<code>` element, which only renders
+  // inside the details tooltip when the model has capabilities.
+  await expect(page.getByRole("button", { name: `Remove ${config.model}` })).toBeVisible({
     timeout: E2E_TIMEOUTS.assertionMs,
   });
 
@@ -158,7 +165,9 @@ export async function expectComposerSkillMenuEntries(
   const editor = page.getByTestId("composer-editor");
   await editor.click();
   await editor.fill(`$${skillName}`);
-  await expect(page.getByText("Skills")).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
+  await expect(
+    page.locator('[data-slot="command-group-label"]', { hasText: "Skills" }),
+  ).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
   await expect(page.locator('[data-slot="command-item"]', { hasText: skillName })).toHaveCount(
     count,
     {

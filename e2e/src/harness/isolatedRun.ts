@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { tmpdir, platform } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import { claimAvailablePortOffset, resolveStartOffsetFromEnv } from "./ports.ts";
 import { resolveArtifactRoot } from "./artifacts.ts";
+
+/* oxlint-disable kata-code/no-global-process-runtime -- E2E harness runs outside Effect runtime; platform gate for keychain provisioning. */
 
 export type LaunchTarget = "dev" | "release";
 
@@ -35,6 +39,36 @@ function createRunId(): string {
   return `e2e-${Date.now()}-${randomUUID().slice(0, 8)}`;
 }
 
+const execFileAsync = promisify(execFile);
+
+/**
+ * Provision a login keychain inside an isolated E2E HOME so macOS Electron
+ * `safeStorage` can encrypt/decrypt secrets without popping the native
+ * "Keychain Not Found" dialog. Creates `Library/Keychains/login.keychain-db`,
+ * unlocks it, and sets it as the default keychain for processes inheriting
+ * `HOME=homePath`. The default-keychain preference is per-HOME, so the real
+ * user's keychain default is not affected.
+ */
+async function provisionIsolatedKeychain(homePath: string): Promise<void> {
+  const keychainsDir = join(homePath, "Library", "Keychains");
+  await mkdir(keychainsDir, { recursive: true });
+  const keychainPath = join(keychainsDir, "login.keychain-db");
+  // Use a fixed password; the keychain is destroyed with the temp home on
+  // cleanup and holds only ephemeral E2E secrets.
+  const password = "katacode-e2e";
+  const runSecurity = (args: ReadonlyArray<string>) =>
+    execFileAsync("security", [...args], {
+      env: { ...process.env, HOME: homePath },
+    });
+
+  await runSecurity(["create-keychain", "-p", password, keychainPath]);
+  // Suppress the GUI password prompt by unlocking the keychain and disabling
+  // auto-lock timeouts for the lifetime of the run.
+  await runSecurity(["unlock-keychain", "-p", password, keychainPath]);
+  await runSecurity(["set-keychain-settings", "-lut", "7200", keychainPath]);
+  await runSecurity(["default-keychain", "-s", keychainPath]);
+}
+
 export async function createIsolatedRun(input: {
   readonly projectName: string;
   readonly launchTarget: LaunchTarget;
@@ -61,11 +95,29 @@ export async function createIsolatedRun(input: {
   const artifactRoot = join(resolveArtifactRoot(), runId);
   const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
+  // On macOS, Electron safeStorage backs onto the Keychain. The isolated
+  // HOME has no login keychain, so the first encrypted-secret write pops a
+  // native "Keychain Not Found" dialog that blocks the test. Provision a
+  // login keychain inside the temp home and make it the default for any
+  // process that inherits HOME=katacodeHome. The default-keychain setting
+  // lives in the per-user Security preferences under HOME, so the real
+  // user's keychain default is untouched. Skip on non-darwin.
+  if (platform() === "darwin") {
+    await provisionIsolatedKeychain(katacodeHome);
+  }
+
+  // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
+  // name. The isolated HOME has no macOS login keychain, so interactive
+  // `agent login` token storage is unavailable; the API-key auth path skips
+  // the keychain entirely and works on all platforms including CI.
+  const cursorApiKey = process.env.KATACODE_E2E_CURSOR_API_KEY?.trim();
+
   const baseEnv = {
     ...process.env,
     KATACODE_HOME: katacodeHome,
     HOME: katacodeHome,
     USERPROFILE: katacodeHome,
+    ...(cursorApiKey ? { CURSOR_API_KEY: cursorApiKey } : {}),
     KATACODE_PORT_OFFSET: String(offset),
     KATACODE_ELECTRON_RUNTIME_DIR: electronRuntimeDir,
     // Unique per-worker dev app bundle ID so macOS Launch Services treats each

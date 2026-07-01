@@ -544,6 +544,28 @@ describe("parseCursorAboutOutput", () => {
       message: "Cursor Agent is not authenticated. Run `agent login` and try again.",
     });
   });
+
+  it("treats json about output with a null email as authenticated under API-key auth", () => {
+    expect(
+      parseCursorAboutOutput(
+        {
+          code: 0,
+          stdout: JSON.stringify({
+            cliVersion: "2026.04.09-f2b0fcd",
+            subscriptionTier: null,
+            userEmail: null,
+          }),
+          stderr: "",
+        },
+        { hasApiKeyAuth: true },
+      ),
+    ).toEqual({
+      version: "2026.04.09-f2b0fcd",
+      status: "ready",
+      auth: { status: "authenticated" },
+      message: "Authenticated via Cursor API key.",
+    });
+  });
 });
 
 describe("Cursor parameterized model picker preview gating", () => {
