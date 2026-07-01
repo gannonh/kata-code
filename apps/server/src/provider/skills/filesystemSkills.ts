@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - Pi SDK skill loader uses sync node fs; this module mirrors that pattern.
 import type { ServerProviderSkill } from "@kata-sh/code-contracts";
 import {
+  PROVIDER_SKILL_TOKEN_REGEX,
   isPathQualifiedProviderSkillToken,
   makeProviderSkillInvocationToken,
 } from "@kata-sh/code-shared/providerSkills";
@@ -16,8 +17,6 @@ export const CURSOR_SKILL_DIRECTORY_NAMES = [
   ".claude/skills",
   ".codex/skills",
 ] as const;
-
-const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
 
 export interface FilesystemSkillDiscoveryOptions {
   readonly cwd: string;
@@ -158,7 +157,7 @@ export function expandSkillTokensInText(
   let result = "";
   let cursor = 0;
 
-  for (const match of text.matchAll(SKILL_TOKEN_REGEX)) {
+  for (const match of text.matchAll(PROVIDER_SKILL_TOKEN_REGEX)) {
     const prefix = match[1] ?? "";
     const skillName = match[2] ?? "";
     const matchIndex = match.index ?? 0;

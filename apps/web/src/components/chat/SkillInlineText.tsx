@@ -1,6 +1,9 @@
 import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 import type { ServerProviderSkill } from "@kata-sh/code-contracts";
-import { makeProviderSkillInvocationToken } from "@kata-sh/code-shared/providerSkills";
+import {
+  PROVIDER_SKILL_TOKEN_REGEX,
+  makeProviderSkillInvocationToken,
+} from "@kata-sh/code-shared/providerSkills";
 
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import {
@@ -11,8 +14,6 @@ import {
 } from "../composerInlineChip";
 import { cn } from "~/lib/utils";
 
-const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
-
 type InlineSkill = Pick<ServerProviderSkill, "name" | "displayName"> &
   Partial<Pick<ServerProviderSkill, "path">>;
 
@@ -20,7 +21,7 @@ export function SkillInlineText(props: { text: string; skills: ReadonlyArray<Inl
   const nodes: ReactNode[] = [];
   let cursor = 0;
 
-  for (const match of props.text.matchAll(SKILL_TOKEN_REGEX)) {
+  for (const match of props.text.matchAll(PROVIDER_SKILL_TOKEN_REGEX)) {
     const prefix = match[1] ?? "";
     const name = match[2] ?? "";
     const start = (match.index ?? 0) + prefix.length;
