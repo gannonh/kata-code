@@ -7,16 +7,20 @@ import {
   SandboxProviderDriverKind,
   SandboxProviderInstanceId,
   type ProviderInstanceEnvironmentVariable,
+  type SavedSandboxEnvironmentMap,
   type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
   type SandboxProviderInstanceConfigMap,
   type SandboxTestConnectionProgressEvent,
 } from "@kata-sh/code-contracts";
+import { useShallow } from "zustand/react/shallow";
 
 import { resolveRelayClerkTokenOptions, hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
 import { cn } from "../../lib/utils";
+import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import type { Project } from "../../types";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -38,6 +42,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt";
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
+import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
 import { SettingsSection } from "./settingsLayout";
 
 const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
@@ -69,12 +74,19 @@ export function SandboxDeploymentSettings() {
   const { updateSettings } = useUpdateSettings();
   const { getToken, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useHostedConnectAuthPrompt();
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const instanceMap = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
+  const savedSandboxEnvironments = settings.savedSandboxEnvironments as
+    | SavedSandboxEnvironmentMap
+    | undefined;
 
   const [summaries, setSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [testProgress, setTestProgress] = useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [selectedRepositoryKeyByInstance, setSelectedRepositoryKeyByInstance] = useState<
+    Record<string, string>
+  >({});
   const [activeSession, setActiveSession] = useState<
     Record<string, { environmentId: string; httpBaseUrl: string }>
   >({});
@@ -124,6 +136,25 @@ export function SandboxDeploymentSettings() {
     return map;
   }, [summaries]);
 
+  const repositoryProjects = useMemo(
+    () => projects.filter((project) => Boolean(project.repositoryIdentity?.canonicalKey)),
+    [projects],
+  );
+
+  const resolveSelectedProject = useCallback(
+    (instanceId: string): Project | undefined => {
+      const selectedKey = selectedRepositoryKeyByInstance[instanceId];
+      if (selectedKey) {
+        const selectedProject = repositoryProjects.find(
+          (project) => project.repositoryIdentity?.canonicalKey === selectedKey,
+        );
+        if (selectedProject) return selectedProject;
+      }
+      return repositoryProjects[0];
+    },
+    [repositoryProjects, selectedRepositoryKeyByInstance],
+  );
+
   const handleTest = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "test", async () => {
@@ -168,7 +199,7 @@ export function SandboxDeploymentSettings() {
   );
 
   const handleStart = useCallback(
-    (instanceId: string) =>
+    (instanceId: string, project: Project | undefined) =>
       withBusy(instanceId, "start", async () => {
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
@@ -184,6 +215,14 @@ export function SandboxDeploymentSettings() {
           const result = await getPrimaryEnvironmentConnection().client.sandbox.startSession({
             instanceId: instanceId as never,
             ...(connectAuthToken ? { connectAuthToken } : {}),
+            ...(project?.repositoryIdentity
+              ? {
+                  repository: {
+                    repoRoot: project.cwd,
+                    repositoryIdentity: project.repositoryIdentity,
+                  },
+                }
+              : {}),
           });
           setActiveSession((prev) => ({
             ...prev,
@@ -333,6 +372,10 @@ export function SandboxDeploymentSettings() {
             const isOpen = expanded[id] ?? false;
             const displayName = config.displayName ?? id;
             const enabled = config.enabled ?? true;
+            const selectedProject = resolveSelectedProject(id);
+            const selectedRepositoryKey =
+              selectedRepositoryKeyByInstance[id] ??
+              (selectedProject?.repositoryIdentity?.canonicalKey as string | undefined);
             return (
               <DeploymentTargetCard
                 key={id}
@@ -346,11 +389,20 @@ export function SandboxDeploymentSettings() {
                 progress={progress}
                 instanceBusy={instanceBusy}
                 isExpanded={isOpen}
+                projects={projects}
+                savedSandboxEnvironments={savedSandboxEnvironments}
+                selectedRepositoryKey={selectedRepositoryKey}
                 onExpandedChange={(open) => setExpanded((prev) => ({ ...prev, [id]: open }))}
                 onUpdate={(next) => updateInstance(id, next)}
+                onSavedEnvironmentChange={(next) =>
+                  updateSettings({ savedSandboxEnvironments: next })
+                }
+                onSelectedRepositoryKeyChange={(repositoryKey) =>
+                  setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }))
+                }
                 onDelete={() => handleRemove(id)}
                 onTest={() => void handleTest(id)}
-                onStart={() => void handleStart(id)}
+                onStart={() => void handleStart(id, selectedProject)}
                 onDispose={() => void handleDispose(id)}
               />
             );
@@ -373,8 +425,13 @@ interface DeploymentTargetCardProps {
   readonly progress: string[];
   readonly instanceBusy: "test" | "start" | "dispose" | undefined;
   readonly isExpanded: boolean;
+  readonly projects: ReadonlyArray<Project>;
+  readonly savedSandboxEnvironments: SavedSandboxEnvironmentMap | undefined;
+  readonly selectedRepositoryKey: string | undefined;
   readonly onExpandedChange: (open: boolean) => void;
   readonly onUpdate: (next: SandboxProviderInstanceConfig) => void;
+  readonly onSavedEnvironmentChange: (next: SavedSandboxEnvironmentMap) => void;
+  readonly onSelectedRepositoryKeyChange: (repositoryKey: string) => void;
   readonly onDelete: () => void;
   readonly onTest: () => void;
   readonly onStart: () => void;
@@ -398,8 +455,13 @@ function DeploymentTargetCard({
   progress,
   instanceBusy,
   isExpanded,
+  projects,
+  savedSandboxEnvironments,
+  selectedRepositoryKey,
   onExpandedChange,
   onUpdate,
+  onSavedEnvironmentChange,
+  onSelectedRepositoryKeyChange,
   onDelete,
   onTest,
   onStart,
@@ -530,6 +592,16 @@ function DeploymentTargetCard({
               <ProviderEnvironmentSection
                 environment={instance.environment ?? []}
                 onChange={updateEnvironment}
+              />
+            </div>
+
+            <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+              <SavedEnvironmentEditor
+                projects={projects}
+                savedSandboxEnvironments={savedSandboxEnvironments}
+                selectedRepositoryKey={selectedRepositoryKey}
+                onSelectedRepositoryKeyChange={onSelectedRepositoryKeyChange}
+                onChange={onSavedEnvironmentChange}
               />
             </div>
 
