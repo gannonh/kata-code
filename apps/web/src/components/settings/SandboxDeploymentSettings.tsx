@@ -199,8 +199,9 @@ export function SandboxDeploymentSettings() {
   );
 
   const handleStart = useCallback(
-    (instanceId: string, project: Project | undefined) =>
+    (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
+        const project = resolveSelectedProject(instanceId);
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
           return;
@@ -253,7 +254,7 @@ export function SandboxDeploymentSettings() {
           });
         }
       }),
-    [getToken, isSignedIn, openAuthPrompt, withBusy],
+    [getToken, isSignedIn, openAuthPrompt, resolveSelectedProject, withBusy],
   );
 
   const handleDispose = useCallback(
@@ -402,7 +403,7 @@ export function SandboxDeploymentSettings() {
                 }
                 onDelete={() => handleRemove(id)}
                 onTest={() => void handleTest(id)}
-                onStart={() => void handleStart(id, selectedProject)}
+                onStart={() => void handleStart(id)}
                 onDispose={() => void handleDispose(id)}
               />
             );

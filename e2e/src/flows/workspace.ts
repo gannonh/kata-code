@@ -1,3 +1,5 @@
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import type { Page } from "@playwright/test";
 
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
@@ -6,6 +8,7 @@ import { seedWorkspace } from "../harness/seededWorkspace.ts";
 import { openCommandPalette } from "./navigation.ts";
 
 const ADD_PROJECT_SUBMENU_PLACEHOLDER = "Enter path (e.g. ~/projects/my-app)";
+const execFile = promisify(execFileCallback);
 
 export async function createSeededWorkspace(context: E2ERunContext, name: string): Promise<string> {
   return seedWorkspace({
@@ -16,6 +19,26 @@ export async function createSeededWorkspace(context: E2ERunContext, name: string
       "README.md": "# E2E seeded workspace\n",
     },
   });
+}
+
+export async function createSeededGitWorkspace(
+  context: E2ERunContext,
+  input: {
+    readonly name: string;
+    readonly remoteUrl: string;
+    readonly files: Record<string, string>;
+  },
+): Promise<string> {
+  const workspacePath = await seedWorkspace({
+    name: input.name,
+    root: context.workspaceRoot,
+    files: input.files,
+  });
+
+  await execFile("git", ["init"], { cwd: workspacePath });
+  await execFile("git", ["remote", "add", "origin", input.remoteUrl], { cwd: workspacePath });
+
+  return workspacePath;
 }
 
 export async function createOrOpenProject(page: Page, workspacePath: string): Promise<void> {

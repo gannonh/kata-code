@@ -148,7 +148,7 @@ export function SavedEnvironmentEditor({
   };
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4" data-testid="saved-environment-editor">
       <div className="grid gap-1.5">
         <label
           className="text-xs font-medium text-foreground"
@@ -234,6 +234,7 @@ export function SavedEnvironmentEditor({
             size="sm"
             variant="outline"
             className="h-7 gap-1.5 px-2 text-xs"
+            aria-label="Add saved environment terminal"
             onClick={() =>
               setTerminalDrafts([
                 ...terminalDrafts,

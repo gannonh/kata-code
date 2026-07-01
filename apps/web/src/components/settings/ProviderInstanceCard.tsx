@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   isProviderDriverKind,
   type ProviderInstanceConfig,
@@ -157,13 +157,26 @@ export function ProviderEnvironmentSection(props: {
   readonly environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>;
   readonly onChange: (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => void;
 }) {
+  const focusedWithinRef = useRef(false);
+  const latestEnvironmentRef = useRef(props.environment);
   const [rows, setRows] = useState<ReadonlyArray<EnvironmentDraftRow>>(() =>
     props.environment.map(makeEnvironmentDraftRow),
   );
+  const rowsRef = useRef(rows);
 
   useEffect(() => {
-    setRows(props.environment.map(makeEnvironmentDraftRow));
+    latestEnvironmentRef.current = props.environment;
+    if (!focusedWithinRef.current) {
+      const nextRows = props.environment.map(makeEnvironmentDraftRow);
+      rowsRef.current = nextRows;
+      setRows(nextRows);
+    }
   }, [props.environment]);
+
+  const setDraftRows = (nextRows: ReadonlyArray<EnvironmentDraftRow>) => {
+    rowsRef.current = nextRows;
+    setRows(nextRows);
+  };
 
   const publishRows = (nextRows: ReadonlyArray<EnvironmentDraftRow>) => {
     const published: ProviderInstanceEnvironmentVariable[] = [];
@@ -196,18 +209,32 @@ export function ProviderEnvironmentSection(props: {
           }
         : row,
     );
-    setRows(nextRows);
-    publishRows(nextRows);
+    setDraftRows(nextRows);
+    if (!focusedWithinRef.current) {
+      publishRows(nextRows);
+    }
   };
 
   const removeVariable = (id: string) => {
     const nextRows = rows.filter((row) => row.id !== id);
-    setRows(nextRows);
+    setDraftRows(nextRows);
     publishRows(nextRows);
   };
 
   return (
-    <div className="grid gap-2">
+    <div
+      className="grid gap-2"
+      onFocus={() => {
+        focusedWithinRef.current = true;
+      }}
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          focusedWithinRef.current = false;
+          publishRows(rowsRef.current);
+        }
+      }}
+    >
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-medium text-foreground">Environment variables</span>
         <Button
@@ -216,7 +243,7 @@ export function ProviderEnvironmentSection(props: {
           variant="outline"
           className="h-7 gap-1.5 px-2 text-xs"
           onClick={() =>
-            setRows([
+            setDraftRows([
               ...rows,
               {
                 id: nextEnvironmentVariableDraftId(),
