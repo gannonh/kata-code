@@ -294,6 +294,9 @@ function makeMutableServerSettingsService(
       get streamChanges() {
         return Stream.fromPubSub(changes);
       },
+      get subscribeChanges() {
+        return PubSub.subscribe(changes);
+      },
     } satisfies ServerSettingsShape;
   });
 }
@@ -1236,6 +1239,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                 codex: { enabled: true, binaryPath: secondMissing },
               },
             });
+            // The settings watcher runs in a live fiber; give it one real
+            // scheduler turn before virtual-clock polling below.
+            yield* Effect.sleep("25 millis");
 
             // Poll until the injected process boundary observes the new
             // executable. This verifies the public settings-to-probe behavior

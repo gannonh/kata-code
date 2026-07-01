@@ -176,6 +176,13 @@ export interface ServerSettingsShape {
 
   /** Stream of settings change events. */
   readonly streamChanges: Stream.Stream<ServerSettings>;
+
+  /** Acquire a settings-change subscription synchronously when available. */
+  readonly subscribeChanges?: Effect.Effect<
+    PubSub.Subscription<ServerSettings>,
+    never,
+    Scope.Scope
+  >;
 }
 
 export class ServerSettingsService extends Context.Service<
@@ -717,6 +724,9 @@ const makeServerSettings = Effect.gen(function* () {
         ),
         Stream.map(resolveTextGenerationProvider),
       );
+    },
+    get subscribeChanges() {
+      return PubSub.subscribe(changesPubSub);
     },
   } satisfies ServerSettingsShape;
 });
