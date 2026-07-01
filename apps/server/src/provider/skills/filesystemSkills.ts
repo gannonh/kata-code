@@ -73,6 +73,15 @@ function mapSkillToServerProviderSkill(
   };
 }
 
+function toIndexedFilesystemSkill(skill: Skill, scope: "project" | "user"): IndexedFilesystemSkill {
+  return {
+    name: skill.name,
+    filePath: skill.filePath,
+    baseDir: skill.baseDir,
+    scope,
+  };
+}
+
 function indexSkillByName(
   indexed: Map<string, IndexedFilesystemSkill>,
   skill: Skill,
@@ -81,12 +90,7 @@ function indexSkillByName(
   if (indexed.has(skill.name)) {
     return;
   }
-  indexed.set(skill.name, {
-    name: skill.name,
-    filePath: skill.filePath,
-    baseDir: skill.baseDir,
-    scope,
-  });
+  indexed.set(skill.name, toIndexedFilesystemSkill(skill, scope));
 }
 
 /**
@@ -117,12 +121,7 @@ export function discoverCursorFilesystemSkills(options: FilesystemSkillDiscovery
       }
       seenPaths.add(skill.filePath);
       const serverSkill = mapSkillToServerProviderSkill(skill, location.scope);
-      const indexedSkill = {
-        name: skill.name,
-        filePath: skill.filePath,
-        baseDir: skill.baseDir,
-        scope: location.scope,
-      } satisfies IndexedFilesystemSkill;
+      const indexedSkill = toIndexedFilesystemSkill(skill, location.scope);
       skills.push(serverSkill);
       indexSkillByName(indexedByName, skill, location.scope);
       indexedByInvocationToken.set(makeProviderSkillInvocationToken(serverSkill), indexedSkill);
@@ -137,7 +136,13 @@ export function formatSkillInvocationBlock(
   rawContent: string,
 ): string {
   const body = stripFrontmatter(rawContent).trim();
-  return `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
+  return [
+    `<skill name="${skill.name}" location="${skill.filePath}">`,
+    `References are relative to ${skill.baseDir}.`,
+    "",
+    body,
+    "</skill>",
+  ].join("\n");
 }
 
 /**

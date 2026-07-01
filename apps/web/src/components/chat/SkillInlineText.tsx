@@ -25,14 +25,13 @@ export function SkillInlineText(props: { text: string; skills: ReadonlyArray<Inl
     const name = match[2] ?? "";
     const start = (match.index ?? 0) + prefix.length;
     const rawText = `$${name}`;
-    const skill = props.skills.find(
-      (candidate) =>
-        candidate.name === name ||
-        (candidate.path
-          ? makeProviderSkillInvocationToken({ name: candidate.name, path: candidate.path }) ===
-            name
-          : false),
-    );
+    const skill = props.skills.find((candidate) => {
+      if (candidate.name === name) return true;
+      if (!candidate.path) return false;
+      return (
+        makeProviderSkillInvocationToken({ name: candidate.name, path: candidate.path }) === name
+      );
+    });
     if (!skill) {
       continue;
     }
