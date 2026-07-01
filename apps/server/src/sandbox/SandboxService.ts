@@ -648,11 +648,23 @@ export const SandboxServiceLive = {
 
         let setupProcesses: ReadonlyArray<SetupProcessRecord> = [];
         if (options?.repository !== undefined) {
+          // The container is already provisioned and running at this point, so a
+          // loader failure (a malformed .kata/environment.json) must dispose it
+          // the same way every other post-provision failure in this function
+          // does; otherwise a bad repo-local config file orphans a running
+          // container with no handle retained anywhere to dispose it later.
           const loaded = yield* loadEnvironmentConfig({
             repoRoot: options.repository.repoRoot,
             repositoryIdentity: options.repository.repositoryIdentity,
             savedSandboxEnvironments: settings.savedSandboxEnvironments,
-          }).pipe(Effect.mapError(mapLoadError));
+          }).pipe(
+            Effect.mapError(mapLoadError),
+            Effect.catch((error: SandboxRpcError) =>
+              disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+                Effect.andThen(Effect.fail(error)),
+              ),
+            ),
+          );
 
           const setup = yield* runSandboxSetup({
             driver: inst.driver,
