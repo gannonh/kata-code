@@ -7,6 +7,7 @@ import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import { type ServerProviderSkill } from "@kata-sh/code-contracts";
 import { serializeComposerFileLink } from "@kata-sh/code-shared/composerTrigger";
+import { makeProviderSkillInvocationToken } from "@kata-sh/code-shared/providerSkills";
 import {
   $applyNodeReplacement,
   $createRangeSelection,
@@ -223,20 +224,29 @@ type ComposerSkillMetadata = {
   description: string | null;
 };
 
+/** Map bare skill names and path-qualified tokens to composer chip metadata. */
 function skillMetadataByName(
   skills: ReadonlyArray<ServerProviderSkill>,
 ): ReadonlyMap<string, ComposerSkillMetadata> {
-  return new Map(
-    skills.map((skill) => [
-      skill.name,
-      {
-        label: formatProviderSkillDisplayName(skill),
-        description: resolveSkillDescription(skill),
-      },
-    ]),
-  );
+  const entries: Array<readonly [string, ComposerSkillMetadata]> = [];
+  const seenBareNames = new Set<string>();
+
+  for (const skill of skills) {
+    const metadata = {
+      label: formatProviderSkillDisplayName(skill),
+      description: resolveSkillDescription(skill),
+    };
+    if (!seenBareNames.has(skill.name)) {
+      seenBareNames.add(skill.name);
+      entries.push([skill.name, metadata] as const);
+    }
+    entries.push([makeProviderSkillInvocationToken(skill), metadata] as const);
+  }
+
+  return new Map(entries);
 }
 
+/** Non-editable skill chip rendered inside the Lexical composer editor. */
 function ComposerSkillDecorator(props: { skillLabel: string; skillDescription: string | null }) {
   const chip = (
     <span

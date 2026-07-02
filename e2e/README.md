@@ -40,6 +40,15 @@ Canonical `KATACODE_CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` are al
 | `OPENAI_API_KEY`              | Required when provider is OpenAI                                |
 | `ANTHROPIC_API_KEY`           | Required when provider is Anthropic                             |
 
+### Cursor skill tests (`@cursor`)
+
+| Variable                          | Purpose                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------ |
+| `KATACODE_E2E_ENABLE_CURSOR`      | Set to `1` to opt in to Cursor-specific E2E tests                              |
+| `KATACODE_E2E_CURSOR_MODEL`       | Cursor model id to add/select in the Composer model picker                     |
+| `KATACODE_E2E_CURSOR_API_KEY`     | Cursor API key forwarded to `CURSOR_API_KEY` for headless Cursor auth in E2E   |
+| `KATACODE_E2E_CURSOR_BINARY_PATH` | Optional path to the Cursor `agent` binary when it is not available as `agent` |
+
 ### Release target (`desktop-release` project)
 
 | Variable                   | Purpose                                                                           |
@@ -119,12 +128,13 @@ On macOS, Playwright Electron launches always open a visible app window. **`e2e:
 
 ### Feature tags
 
-| Tag         | Coverage                            |
-| ----------- | ----------------------------------- |
-| `@smoke`    | Electron launch + signed-in surface |
-| `@auth`     | Clerk Google test-user sign-in      |
-| `@settings` | Settings theme persistence          |
-| `@agent`    | Real LLM deterministic reply        |
+| Tag         | Coverage                              |
+| ----------- | ------------------------------------- |
+| `@smoke`    | Electron launch + signed-in surface   |
+| `@auth`     | Clerk Google test-user sign-in        |
+| `@settings` | Settings theme persistence            |
+| `@agent`    | Real LLM deterministic reply          |
+| `@cursor`   | Cursor skill discovery and invocation |
 
 Filter with `--grep`, for example `vp run e2e --project desktop-dev --grep @settings`.
 

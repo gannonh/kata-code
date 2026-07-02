@@ -20,6 +20,7 @@ import {
 } from "@kata-sh/code-contracts";
 import { serializeComposerFileLink } from "@kata-sh/code-shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@kata-sh/code-shared/model";
+import { makeProviderSkillInvocationToken } from "@kata-sh/code-shared/providerSkills";
 import {
   memo,
   useCallback,
@@ -975,7 +976,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (composerTrigger.kind === "skill") {
       return searchProviderSkills(selectedProviderStatus?.skills ?? [], composerTrigger.query).map(
         (skill) => ({
-          id: `skill:${selectedProvider}:${skill.name}`,
+          id: `skill:${selectedProvider}:${skill.path}`,
           type: "skill" as const,
           provider: selectedProvider,
           skill,
@@ -1610,7 +1611,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "skill") {
-        const replacement = `$${item.skill.name} `;
+        const replacement = `$${makeProviderSkillInvocationToken(item.skill)} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,
           trigger.rangeEnd,

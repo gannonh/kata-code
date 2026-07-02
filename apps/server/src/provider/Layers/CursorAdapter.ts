@@ -75,6 +75,7 @@ import {
   extractTodosAsPlan,
 } from "../acp/CursorAcpExtension.ts";
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
+import { expandCursorSkillTokensInPrompt } from "../skills/filesystemSkills.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
@@ -957,8 +958,27 @@ export function makeCursorAdapter(
           }
 
           const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
-          if (input.input?.trim()) {
-            promptParts.push({ type: "text", text: input.input.trim() });
+          const promptText = input.input?.trim();
+          if (promptText) {
+            const skillCwd = ctx.session.cwd?.trim()
+              ? path.resolve(ctx.session.cwd.trim())
+              : process.cwd();
+            const homeDir = options?.environment?.HOME ?? process.env.HOME;
+            let expandedPromptText: string;
+            try {
+              expandedPromptText = expandCursorSkillTokensInPrompt(promptText, {
+                cwd: skillCwd,
+                ...(homeDir ? { homeDir } : {}),
+              });
+            } catch (error) {
+              return yield* new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session/prompt",
+                detail: error instanceof Error ? error.message : String(error),
+                ...(error instanceof Error ? { cause: error } : {}),
+              });
+            }
+            promptParts.push({ type: "text", text: expandedPromptText });
           }
           if (input.attachments && input.attachments.length > 0) {
             for (const attachment of input.attachments) {

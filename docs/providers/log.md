@@ -1,5 +1,9 @@
 # Providers log
 
+## 2026-07-01 (Cursor provider guide)
+
+- Added [Cursor provider guide](/providers/cursor.md) (early access): Cursor Agent CLI over ACP, prerequisites (`agent login` or `agent set-channel lab && agent update` for the parameterized model picker), settings reference (binary path, API endpoint), API-key auth via `CURSOR_API_KEY` (skips interactive ACP `authenticate`; `agent about` null email treated as authenticated), and a Provider skills section covering discovery directories, `$skillname` / path-qualified `$skill:name:hash` Composer tokens, and server-side `<skill>` block prompt expansion. Linked from the [providers index](/providers/index.md) and cross-linked to [provider architecture — Provider skills](/architecture/providers.md#provider-skills) and [E2E test catalog — Cursor gates](/guides/e2e-test-catalog.md#cursor-e2e-gates).
+
 ## 2026-06-28 (Pi provider — removed duplicate roadmap section)
 
 - Removed the "Roadmap — what's next for Pi" section from the [Pi provider guide](/providers/pi.md) that was added the prior day. [docs/specs/index.md](/specs/index.md) is now the single roadmap source of truth; deferred follow-ups (compaction UI [#16](https://github.com/gannonh/kata-code/issues/16), strict-review polish [#14](https://github.com/gannonh/kata-code/issues/14)) live in the [deferred-work registry](/specs/deferred-work.md), not the provider guide.

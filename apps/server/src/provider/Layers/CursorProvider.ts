@@ -45,6 +45,7 @@ import {
 } from "../providerMaintenance.ts";
 import { AcpSessionRuntime } from "../acp/AcpSessionRuntime.ts";
 import { CursorListAvailableModelsResponse } from "../acp/CursorAcpExtension.ts";
+import { discoverCursorFilesystemSkills } from "../skills/filesystemSkills.ts";
 
 const decodeCursorListAvailableModelsResponse = Schema.decodeUnknownEffect(
   CursorListAvailableModelsResponse,
@@ -413,6 +414,10 @@ const makeCursorAcpProbeRuntime = (
         cwd: process.cwd(),
         clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
         authMethodId: "cursor_login",
+        // Under `CURSOR_API_KEY`, the Cursor Agent CLI authenticates via the
+        // API key and `authenticate` with `cursor_login` would trigger an
+        // interactive OAuth login. Skip it so headless/CI runs proceed.
+        ...(environment?.CURSOR_API_KEY ? { skipAuthenticate: true } : {}),
         clientCapabilities: CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES,
       }).pipe(Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner))),
     );
@@ -610,6 +615,7 @@ export function buildCursorProviderSnapshot(input: {
   readonly cursorSettings: CursorSettings;
   readonly parsed: CursorAboutResult;
   readonly discoveredModels?: ReadonlyArray<ServerProviderModel>;
+  readonly discoveredSkills?: ReturnType<typeof discoverCursorFilesystemSkills>["skills"];
   readonly discoveryWarning?: string;
 }): ServerProviderDraft {
   const message = joinProviderMessages(input.parsed.message, input.discoveryWarning);
@@ -623,6 +629,7 @@ export function buildCursorProviderSnapshot(input: {
       input.cursorSettings.customModels,
       EMPTY_CAPABILITIES,
     ),
+    skills: [...(input.discoveredSkills ?? [])],
     probe: {
       installed: true,
       version: input.parsed.version,
@@ -801,7 +808,20 @@ export function getCursorParameterizedModelPickerUnsupportedMessage(input: {
  * User Email          Not logged in
  * ```
  */
-export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult {
+export interface ParseCursorAboutOutputOptions {
+  /**
+   * True when the Cursor Agent CLI was spawned with `CURSOR_API_KEY` (or
+   * `--api-key`). Under API-key auth, `agent about` reports `userEmail: null`
+   * even though the CLI is authenticated and functional, so a null email must
+   * not be treated as unauthenticated.
+   */
+  readonly hasApiKeyAuth?: boolean;
+}
+
+export function parseCursorAboutOutput(
+  result: CommandResult,
+  options: ParseCursorAboutOutputOptions = {},
+): CursorAboutResult {
   const jsonPayload = parseCursorAboutJsonPayload(result.stdout);
   if (jsonPayload) {
     const version =
@@ -816,6 +836,14 @@ export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult
     const authMetadata = cursorAuthMetadata(subscriptionType);
 
     if (hasUserEmailField && jsonPayload.userEmail == null) {
+      if (options.hasApiKeyAuth) {
+        return {
+          version,
+          status: "ready",
+          auth: { status: "authenticated", ...authMetadata },
+          message: "Authenticated via Cursor API key.",
+        };
+      }
       return {
         version,
         status: "error",
@@ -849,6 +877,14 @@ export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult
       lowerEmail.includes("login required") ||
       lowerEmail.includes("authentication required")
     ) {
+      if (options.hasApiKeyAuth) {
+        return {
+          version,
+          status: "ready",
+          auth: { status: "authenticated", ...authMetadata },
+          message: "Authenticated via Cursor API key.",
+        };
+      }
       return {
         version,
         status: "error",
@@ -909,6 +945,14 @@ export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult
     lowerEmail.includes("login required") ||
     lowerEmail.includes("authentication required")
   ) {
+    if (options.hasApiKeyAuth) {
+      return {
+        version,
+        status: "ready",
+        auth: { status: "authenticated" },
+        message: "Authenticated via Cursor API key.",
+      };
+    }
     return {
       version,
       status: "error",
@@ -978,6 +1022,11 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
 > {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const fallbackModels = getCursorFallbackModels(cursorSettings);
+  const homeDir = environment?.HOME ?? process.env.HOME;
+  const { skills: discoveredSkills } = discoverCursorFilesystemSkills({
+    cwd: process.cwd(),
+    ...(homeDir ? { homeDir } : {}),
+  });
 
   if (!cursorSettings.enabled) {
     return buildServerProvider({
@@ -1008,6 +1057,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       enabled: cursorSettings.enabled,
       checkedAt,
       models: fallbackModels,
+      skills: discoveredSkills,
       probe: {
         installed: !isCommandMissingCause(error),
         version: null,
@@ -1026,6 +1076,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       enabled: cursorSettings.enabled,
       checkedAt,
       models: fallbackModels,
+      skills: discoveredSkills,
       probe: {
         installed: true,
         version: null,
@@ -1036,7 +1087,9 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
     });
   }
 
-  const parsed = parseCursorAboutOutput(aboutProbe.success.value);
+  const parsed = parseCursorAboutOutput(aboutProbe.success.value, {
+    hasApiKeyAuth: Boolean(environment?.CURSOR_API_KEY),
+  });
   const cursorCliConfigChannel = yield* readCursorCliConfigChannel();
   const parameterizedModelPickerUnsupportedMessage =
     getCursorParameterizedModelPickerUnsupportedMessage({
@@ -1049,6 +1102,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       enabled: cursorSettings.enabled,
       checkedAt,
       models: fallbackModels,
+      skills: discoveredSkills,
       probe: {
         installed: true,
         version: parsed.version,
@@ -1090,6 +1144,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       Option.filter(discoveredModels, (models) => models.length > 0),
       () => [] as const,
     ),
+    discoveredSkills,
     ...(discoveryWarning ? { discoveryWarning } : {}),
   });
 });

@@ -77,6 +77,43 @@ Each **driver** is a factory. Settings can define multiple **instances** of the 
 
 Instance materialization lives in `ProviderInstanceRegistry`. Tearing down an instance releases child processes and refresh fibers for that instance only.
 
+### Provider skills
+
+A **provider skill** is a filesystem-discovered agent skill surfaced in the
+Composer so a user can invoke it by name in a prompt. Each instance snapshot
+carries a `skills: ReadonlyArray<ServerProviderSkill>` (`name`, `description`,
+`path`, `scope`, `enabled`) in addition to its models.
+
+**Discovery** (`apps/server/src/provider/skills/filesystemSkills.ts`) scans
+Cursor-compatible skill directories in order: project scope (session cwd) then
+user scope (`$HOME`), each across `.cursor/skills`, `.agents/skills`,
+`.claude/skills`, `.codex/skills`. The first skill found for a name wins for
+bare-token expansion; later duplicates stay in the list. The shared scan uses
+the Pi SDK's `loadSkillsFromDir`/`stripFrontmatter` loader so skill frontmatter
+parsing is consistent across providers.
+
+**Invocation tokens** (`@kata-sh/code-shared/providerSkills`, subpath export
+`./providerSkills`) let the Composer reference a skill inline:
+
+- `$skillname` expands to the first skill with that name.
+- `$skill:name:hash` is a **path-qualified** token that selects a specific
+  skill by a stable FNV-1a-32 hash of its filesystem path. The Composer menu
+  inserts path-qualified tokens so project/user name collisions are
+  unambiguous.
+
+The shared `PROVIDER_SKILL_TOKEN_REGEX` matches tokens preceded by
+start-of-string/whitespace and followed by whitespace/end-of-string, and is
+reused by the web `SkillInlineText` renderer and the server expander.
+
+**Prompt expansion** runs server-side in the adapter before the turn is
+delivered: recognized tokens are replaced with inline
+`<skill name="…" location="…">` blocks containing the skill body (frontmatter
+stripped), prefixed with the skill's base directory so reference paths resolve.
+Unknown tokens are left unchanged. Expansion is currently wired into the Cursor adapter (`apps/server/src/provider/Layers/CursorAdapter.ts`); the
+token model and scan directories are cross-provider compatible so other drivers
+can adopt the same mechanism. See the [Cursor provider guide](/providers/cursor.md#provider-skills)
+for the operator-facing skill workflow.
+
 ### Canonical runtime events
 
 Adapters translate provider-native output into **`ProviderRuntimeEvent`** (`packages/contracts/src/providerRuntime.ts`): turn items, tool calls, approval prompts, errors, and related metadata in one schema.
@@ -107,16 +144,17 @@ All three use `DrainableWorker` internally and expose `drain()` for deterministi
 
 ## Code map
 
-| Area                 | Path                                                                            |
-| -------------------- | ------------------------------------------------------------------------------- |
-| Built-in driver list | `apps/server/src/provider/builtInDrivers.ts`                                    |
-| Driver SPI           | `apps/server/src/provider/ProviderDriver.ts`                                    |
-| Per-driver factories | `apps/server/src/provider/Drivers/*Driver.ts`                                   |
-| Adapter contract     | `apps/server/src/provider/Services/ProviderAdapter.ts`                          |
-| Routing layer        | `apps/server/src/provider/Layers/ProviderService.ts`                            |
-| Instance registry    | `apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts`               |
-| Contracts            | `packages/contracts/src/providerInstance.ts`, `providerRuntime.ts`              |
-| Settings schema      | `packages/contracts/src/settings.ts` (`providerInstances`, per-driver settings) |
+| Area                 | Path                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| Built-in driver list | `apps/server/src/provider/builtInDrivers.ts`                                                   |
+| Driver SPI           | `apps/server/src/provider/ProviderDriver.ts`                                                   |
+| Per-driver factories | `apps/server/src/provider/Drivers/*Driver.ts`                                                  |
+| Adapter contract     | `apps/server/src/provider/Services/ProviderAdapter.ts`                                         |
+| Routing layer        | `apps/server/src/provider/Layers/ProviderService.ts`                                           |
+| Instance registry    | `apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts`                              |
+| Provider skills      | `apps/server/src/provider/skills/filesystemSkills.ts`, `packages/shared/src/providerSkills.ts` |
+| Contracts            | `packages/contracts/src/providerInstance.ts`, `providerRuntime.ts`                             |
+| Settings schema      | `packages/contracts/src/settings.ts` (`providerInstances`, per-driver settings)                |
 
 ## Related
 

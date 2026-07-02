@@ -48,6 +48,13 @@ export interface AcpSessionRuntimeOptions {
     readonly version: string;
   };
   readonly authMethodId: string;
+  /**
+   * Skip the ACP `authenticate` call during session start. Used when the
+   * agent CLI is already authenticated out-of-band (e.g. Cursor Agent spawned
+   * with `CURSOR_API_KEY`), where calling `authenticate` with the login
+   * method would trigger an interactive OAuth flow instead of a no-op.
+   */
+  readonly skipAuthenticate?: boolean;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
@@ -392,11 +399,13 @@ const makeAcpSessionRuntime = (
         methodId: options.authMethodId,
       } satisfies EffectAcpSchema.AuthenticateRequest;
 
-      yield* runLoggedRequest(
-        "authenticate",
-        authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
-      );
+      if (!options.skipAuthenticate) {
+        yield* runLoggedRequest(
+          "authenticate",
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        );
+      }
 
       let sessionId: string;
       let sessionSetupResult:
