@@ -125,11 +125,13 @@ export function discoverCursorFilesystemSkills(options: FilesystemSkillDiscovery
       seenPaths.add(skill.filePath);
       const serverSkill = mapSkillToServerProviderSkill(skill, location.scope);
       skills.push(serverSkill);
-      if (serverSkill.enabled) {
-        const indexedSkill = toIndexedFilesystemSkill(skill, location.scope);
-        indexSkillByName(indexedByName, skill, location.scope);
-        indexedByInvocationToken.set(makeProviderSkillInvocationToken(serverSkill), indexedSkill);
-      }
+      // Always index skills for `$skillname` token expansion. Explicit
+      // `$`-token invocations are user-initiated, not model-initiated, so
+      // `disable-model-invocation: true` must not block them. The `enabled`
+      // flag on the published skill already prevents model auto-invocation.
+      const indexedSkill = toIndexedFilesystemSkill(skill, location.scope);
+      indexSkillByName(indexedByName, skill, location.scope);
+      indexedByInvocationToken.set(makeProviderSkillInvocationToken(serverSkill), indexedSkill);
     }
   }
 
