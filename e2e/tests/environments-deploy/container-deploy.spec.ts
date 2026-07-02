@@ -13,7 +13,7 @@ import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/w
 import { expect, test } from "../../src/harness/testFixtures.ts";
 
 /**
- * Container deployment target — provisions the real `katacode:local` image
+ * Container sandbox environment — provisions the real `katacode:local` image
  * (built by `pnpm run build:docker-image`) running `katacode serve`, then
  * verifies the in-container Kata server boots and is reachable over loopback
  * (AC-1.10: server boots container-side; the full agent-turn slice needs a
@@ -76,7 +76,7 @@ interface DockerExecResult {
 
 function deploymentTargetCard(page: Page, label: string): Locator {
   const section = page
-    .getByRole("heading", { name: "Deployment targets", level: 2 })
+    .getByRole("heading", { name: "Sandbox environments", level: 2 })
     .locator("xpath=ancestor::section[1]");
   return section.locator("div.border-t").filter({
     has: page.getByRole("heading", { name: label, level: 3 }),
@@ -84,8 +84,8 @@ function deploymentTargetCard(page: Page, label: string): Locator {
 }
 
 async function addContainerDeploymentTarget(page: Page, label: string): Promise<Locator> {
-  await page.getByRole("button", { name: "Add deployment target" }).click();
-  const dialog = page.getByRole("dialog", { name: "Add container deployment target" });
+  await page.getByRole("button", { name: "Add sandbox environment" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add container sandbox environment" });
   await expect(dialog).toBeVisible();
   await dialog.getByLabel("Label").fill(label);
   // Fill image + command explicitly (the dialog defaults to these, but set
@@ -228,7 +228,7 @@ const REAL_IMAGE_E2E_TIMEOUT_MS = Math.max(E2E_TIMEOUTS.agentTestMs, 240_000);
 test.describe(`Environments/deployments container target ${E2E_TAGS.environmentsDeploy}`, () => {
   test.describe.configure({ timeout: REAL_IMAGE_E2E_TIMEOUT_MS });
 
-  test("add deployment target, test connection + start session boot the real katacode image", async ({
+  test("add sandbox environment, test connection + start session boot the real katacode image", async ({
     appWindow,
   }, testInfo) => {
     // Fail loud if Docker or the katacode image isn't available — the flow
@@ -284,7 +284,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
 
     // Clean up the target via the trash button on the card row.
     await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete deployment target/ }).click();
+    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
     await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
   });
 
@@ -395,7 +395,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
     await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete deployment target/ }).click();
+    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
     await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
   });
 });

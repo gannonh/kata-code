@@ -1,5 +1,5 @@
 /**
- * `SandboxService` — server-side orchestration for sandbox deployment targets.
+ * `SandboxService` — server-side orchestration for sandbox environments.
  * Builds a `SandboxProviderRegistry` with the Docker driver registered,
  * materializes instances from settings, and implements the `sandbox.*` RPC
  * handlers: list, test connection (streaming), start session (provision +
@@ -327,7 +327,7 @@ function exchangeBootstrapToken(input: {
     subject_token_type: AuthEnvironmentBootstrapTokenType,
     requested_token_type: AuthAccessTokenType,
     scope: encodeOAuthScope(AuthAdministrativeScopes),
-    client_label: "Kata Code deployment target",
+    client_label: "Kata Code sandbox environment",
     client_device_type: "desktop",
   });
   return fetchJson(AuthAccessTokenResult, `${input.httpBaseUrl}/oauth/token`, {
@@ -601,7 +601,7 @@ export const SandboxServiceLive = {
       if (runningSessions.has(sessionKey) || startingSessions.has(sessionKey)) {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
-          message: "A session is already running for this deployment target.",
+          message: "A session is already running for this sandbox environment.",
         });
       }
       startingSessions.add(sessionKey);

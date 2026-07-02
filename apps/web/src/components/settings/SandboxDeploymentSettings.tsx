@@ -62,7 +62,7 @@ function slugifyLabel(value: string): string {
 type BusyOp = "test" | "start" | "dispose";
 
 /**
- * Settings panel for sandbox deployment targets (Phase 1: local Docker
+ * Settings panel for sandbox environments (Phase 1: local Docker
  * containers). Lists configured targets with their materialized status, and
  * provides Add / Test connection (streaming) / Start session / Dispose /
  * Remove. Writes go through `useUpdateSettings` against the
@@ -290,7 +290,7 @@ export function SandboxDeploymentSettings() {
       if (activeSession[instanceId]) {
         toastManager.add({
           type: "error",
-          title: "Cannot remove deployment target",
+          title: "Cannot remove sandbox environment",
           description: `Dispose the active session for '${instanceId}' before removing it.`,
         });
         return;
@@ -300,7 +300,7 @@ export function SandboxDeploymentSettings() {
       updateSettings({ sandboxProviderInstances: nextMap });
       toastManager.add({
         type: "success",
-        title: "Deployment target removed",
+        title: "Sandbox environment removed",
         description: `'${instanceId}' removed from Environments.`,
       });
     },
@@ -321,7 +321,7 @@ export function SandboxDeploymentSettings() {
   return (
     <>
       <SettingsSection
-        title="Deployment targets"
+        title="Sandbox environments"
         headerAction={
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <Tooltip>
@@ -333,16 +333,16 @@ export function SandboxDeploymentSettings() {
                         size="xs"
                         variant="ghost"
                         className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
-                        aria-label="Add deployment target"
+                        aria-label="Add sandbox environment"
                       >
                         <PlusIcon className="size-3" />
-                        <span>Add deployment target</span>
+                        <span>Add sandbox environment</span>
                       </Button>
                     }
                   />
                 }
               />
-              <TooltipPopup side="top">Add deployment target</TooltipPopup>
+              <TooltipPopup side="top">Add sandbox environment</TooltipPopup>
             </Tooltip>
             <AddDeploymentTargetDialogBody
               existingIds={new Set(instanceEntries.map(([id]) => id))}
@@ -359,7 +359,7 @@ export function SandboxDeploymentSettings() {
         {instanceEntries.length === 0 ? (
           <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
             <p className="text-xs text-muted-foreground">
-              No deployment targets configured. Add one to provision a container.
+              No sandbox environments configured. Add one to provision a container.
             </p>
           </div>
         ) : (
@@ -527,13 +527,13 @@ function DeploymentTargetCard({
                       variant="ghost"
                       className="size-5 rounded-sm p-0 text-muted-foreground hover:text-destructive"
                       onClick={onDelete}
-                      aria-label={`Delete deployment target ${instanceId}`}
+                      aria-label={`Delete sandbox environment ${instanceId}`}
                     >
                       <Trash2Icon className="size-3" />
                     </Button>
                   }
                 />
-                <TooltipPopup side="top">Delete deployment target</TooltipPopup>
+                <TooltipPopup side="top">Delete sandbox environment</TooltipPopup>
               </Tooltip>
             </div>
             <p className="text-xs text-muted-foreground/80">
@@ -830,7 +830,7 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
   return (
     <DialogPopup className="max-w-xl overflow-hidden">
       <DialogHeader>
-        <DialogTitle>Add container deployment target</DialogTitle>
+        <DialogTitle>Add container sandbox environment</DialogTitle>
         <DialogDescription>
           Provisions an isolated Docker container running a Kata server, reached over localhost.
         </DialogDescription>
