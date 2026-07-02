@@ -40,6 +40,7 @@ const REQUIRED_CURSOR_ENV = [
   "KATACODE_E2E_CURSOR_API_KEY",
 ] as const;
 
+/** Read Cursor E2E gate env vars and return config or the missing variable names. */
 export function readCursorSkillsConfig():
   | { readonly ok: true; readonly config: CursorSkillsConfig }
   | { readonly ok: false; readonly missing: ReadonlyArray<(typeof REQUIRED_CURSOR_ENV)[number]> } {
@@ -61,10 +62,12 @@ export function readCursorSkillsConfig():
   };
 }
 
+/** Human-readable skip reason when Cursor skills E2E gates are not satisfied. */
 export function formatCursorSkillsSkipReason(missing: ReadonlyArray<string>): string {
   return `Cursor skills E2E skipped. Missing or disabled: ${missing.join(", ")}.`;
 }
 
+/** Write a minimal `SKILL.md` fixture under a Cursor-compatible skills directory. */
 async function writeSkill(input: {
   readonly root: string;
   readonly directoryName: ".cursor/skills" | ".agents/skills";
@@ -92,6 +95,7 @@ async function writeSkill(input: {
   return skillPath;
 }
 
+/** Seed duplicate and unique Cursor skill fixtures into the isolated E2E home. */
 export async function seedCursorSkillFixtures(
   context: E2ERunContext,
 ): Promise<CursorSkillFixtures> {
@@ -127,6 +131,7 @@ export async function seedCursorSkillFixtures(
   };
 }
 
+/** Enable Cursor in settings and refresh provider status for skills E2E. */
 export async function configureCursorProviderForSkills(
   page: Page,
   config: CursorSkillsConfig,
@@ -162,6 +167,7 @@ export async function configureCursorProviderForSkills(
     .waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
 }
 
+/** Assert the Composer skills menu shows the expected number of entries for a name. */
 export async function expectComposerSkillMenuEntries(
   page: Page,
   skillName: string,
@@ -185,6 +191,7 @@ export async function expectComposerSkillMenuEntries(
   );
 }
 
+/** Select a Composer skill from the `$` menu and return the serialized prompt text. */
 export async function selectComposerSkill(page: Page, skillName: string): Promise<string> {
   const editor = page.getByTestId("composer-editor");
   await editor.click();
@@ -243,6 +250,7 @@ export async function selectComposerSkill(page: Page, skillName: string): Promis
   return serialized.trim();
 }
 
+/** Assert server-side prompt expansion produces the expected inline `<skill>` block. */
 export function expectCursorSkillPromptExpansion(
   fixtures: CursorSkillFixtures,
   context: E2ERunContext,

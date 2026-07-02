@@ -9,6 +9,7 @@ const PROVIDER_SKILL_TOKEN_PREFIX = "skill";
  */
 export const PROVIDER_SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
 
+/** FNV-1a 32-bit hash encoded as base-36 for compact path-qualified skill tokens. */
 function fnv1a32(input: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < input.length; index += 1) {
@@ -18,16 +19,19 @@ function fnv1a32(input: string): string {
   return hash.toString(36);
 }
 
+/** Stable hash of a skill filesystem path for path-qualified invocation tokens. */
 export function providerSkillPathHash(path: string): string {
   return fnv1a32(path);
 }
 
+/** Build a path-qualified Composer token (`skill:name:hash`) for a provider skill. */
 export function makeProviderSkillInvocationToken(
   skill: Pick<ServerProviderSkill, "name" | "path">,
 ): string {
   return `${PROVIDER_SKILL_TOKEN_PREFIX}:${skill.name}:${providerSkillPathHash(skill.path)}`;
 }
 
+/** True when `token` is a `skill:name:hash` path-qualified invocation token. */
 export function isPathQualifiedProviderSkillToken(token: string): boolean {
   if (!token.startsWith(`${PROVIDER_SKILL_TOKEN_PREFIX}:`)) {
     return false;

@@ -224,6 +224,7 @@ type ComposerSkillMetadata = {
   description: string | null;
 };
 
+/** Map bare skill names and path-qualified tokens to composer chip metadata. */
 function skillMetadataByName(
   skills: ReadonlyArray<ServerProviderSkill>,
 ): ReadonlyMap<string, ComposerSkillMetadata> {
@@ -245,6 +246,7 @@ function skillMetadataByName(
   return new Map(entries);
 }
 
+/** Non-editable skill chip rendered inside the Lexical composer editor. */
 function ComposerSkillDecorator(props: { skillLabel: string; skillDescription: string | null }) {
   const chip = (
     <span

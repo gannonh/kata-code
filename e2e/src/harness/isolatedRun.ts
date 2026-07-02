@@ -35,6 +35,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
 
 const cleanupCallbacksByRunId = new Map<string, Array<() => Promise<void> | void>>();
 
+/** Create a unique run id for an isolated E2E worker. */
 function createRunId(): string {
   return `e2e-${Date.now()}-${randomUUID().slice(0, 8)}`;
 }
@@ -69,6 +70,7 @@ async function provisionIsolatedKeychain(homePath: string): Promise<void> {
   await runSecurity(["default-keychain", "-s", keychainPath]);
 }
 
+/** Provision an isolated E2E home, ports, and dev env for one Playwright worker. */
 export async function createIsolatedRun(input: {
   readonly projectName: string;
   readonly launchTarget: LaunchTarget;
@@ -172,6 +174,7 @@ export async function createIsolatedRun(input: {
   };
 }
 
+/** Tear down temp directories, port claims, and registered cleanup callbacks for a run. */
 export async function cleanupRunState(context: E2ERunContext): Promise<void> {
   const callbacks = cleanupCallbacksByRunId.get(context.runId) ?? [];
   for (const callback of [...callbacks].toReversed()) {
@@ -180,6 +183,7 @@ export async function cleanupRunState(context: E2ERunContext): Promise<void> {
   cleanupCallbacksByRunId.delete(context.runId);
 }
 
+/** Register an extra cleanup callback to run when an isolated E2E run finishes. */
 export function registerCleanup(
   context: E2ERunContext,
   callback: () => Promise<void> | void,

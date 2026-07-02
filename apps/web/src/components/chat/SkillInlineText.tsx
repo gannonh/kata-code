@@ -17,6 +17,7 @@ import { cn } from "~/lib/utils";
 type InlineSkill = Pick<ServerProviderSkill, "name" | "displayName"> &
   Partial<Pick<ServerProviderSkill, "path">>;
 
+/** Render Composer `$skill` tokens as inline skill chips in assistant message text. */
 export function SkillInlineText(props: { text: string; skills: ReadonlyArray<InlineSkill> }) {
   const nodes: ReactNode[] = [];
   let cursor = 0;
@@ -53,6 +54,7 @@ export function SkillInlineText(props: { text: string; skills: ReadonlyArray<Inl
   return <>{nodes}</>;
 }
 
+/** Recursively replace skill tokens inside markdown-rendered chat message children. */
 export function renderSkillInlineMarkdownChildren(
   children: ReactNode,
   skills: ReadonlyArray<InlineSkill>,
@@ -78,6 +80,7 @@ export function renderSkillInlineMarkdownChildren(
   });
 }
 
+/** Compact skill chip shown inside rendered chat markdown. */
 function SkillChip(props: { skill: InlineSkill; rawText: string }) {
   return (
     <span className="inline-flex align-middle leading-none" data-markdown-copy={props.rawText}>

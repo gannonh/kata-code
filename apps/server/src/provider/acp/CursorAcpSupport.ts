@@ -34,6 +34,7 @@ export interface CursorAcpModelSelectionErrorContext {
   readonly configId?: string;
 }
 
+/** Build the ACP subprocess spawn input for a Cursor Agent CLI session. */
 export function buildCursorAcpSpawnInput(
   cursorSettings: CursorAcpRuntimeCursorSettings | null | undefined,
   cwd: string,
@@ -50,6 +51,7 @@ export function buildCursorAcpSpawnInput(
   };
 }
 
+/** Create a Cursor-backed ACP session runtime with API-key auth skipping when configured. */
 export const makeCursorAcpRuntime = (
   input: CursorAcpRuntimeInput,
 ): Effect.Effect<AcpSessionRuntimeShape, EffectAcpErrors.AcpError, Scope.Scope> =>
@@ -82,6 +84,7 @@ interface CursorAcpModelSelectionRuntime {
   readonly setModel: (model: string) => Effect.Effect<unknown, EffectAcpErrors.AcpError>;
 }
 
+/** Apply Cursor model slug and parameterized config options to an ACP session runtime. */
 export function applyCursorAcpModelSelection<E>(input: {
   readonly runtime: CursorAcpModelSelectionRuntime;
   readonly model: string | null | undefined;

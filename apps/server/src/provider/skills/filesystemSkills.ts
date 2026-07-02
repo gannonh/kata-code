@@ -36,6 +36,7 @@ interface SkillScanLocation {
   readonly source: string;
 }
 
+/** Resolve project- and user-scope skill directories to scan for discovery. */
 function resolveSkillScanLocations(options: FilesystemSkillDiscoveryOptions): SkillScanLocation[] {
   const cwd = NodePath.resolve(options.cwd);
   const homeDir = NodePath.resolve(options.homeDir ?? NodeOs.homedir());
@@ -59,6 +60,7 @@ function resolveSkillScanLocations(options: FilesystemSkillDiscoveryOptions): Sk
   return locations;
 }
 
+/** Map a Pi SDK skill record into a Kata `ServerProviderSkill` snapshot entry. */
 function mapSkillToServerProviderSkill(
   skill: Skill,
   scope: "project" | "user",
@@ -72,6 +74,7 @@ function mapSkillToServerProviderSkill(
   };
 }
 
+/** Build the indexed skill shape used for token expansion lookups. */
 function toIndexedFilesystemSkill(skill: Skill, scope: "project" | "user"): IndexedFilesystemSkill {
   return {
     name: skill.name,
@@ -81,6 +84,7 @@ function toIndexedFilesystemSkill(skill: Skill, scope: "project" | "user"): Inde
   };
 }
 
+/** Index a skill by bare name, keeping the first discovered match for collisions. */
 function indexSkillByName(
   indexed: Map<string, IndexedFilesystemSkill>,
   skill: Skill,
@@ -132,6 +136,7 @@ export function discoverCursorFilesystemSkills(options: FilesystemSkillDiscovery
   return { skills, indexedByName, indexedByInvocationToken };
 }
 
+/** Escape a value for safe interpolation into XML attribute strings. */
 function escapeXmlAttribute(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -140,6 +145,7 @@ function escapeXmlAttribute(value: string): string {
     .replaceAll(">", "&gt;");
 }
 
+/** Format a discovered skill as an inline Agent Skills `<skill>` XML block. */
 export function formatSkillInvocationBlock(
   skill: IndexedFilesystemSkill,
   rawContent: string,
