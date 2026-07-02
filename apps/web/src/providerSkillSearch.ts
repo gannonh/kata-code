@@ -71,11 +71,13 @@ export function searchProviderSkills(
   query: string,
   limit = Number.POSITIVE_INFINITY,
 ): ServerProviderSkill[] {
-  const enabledSkills = skills.filter((skill) => skill.enabled);
+  // Include all skills — `disable-model-invocation` (enabled: false) only
+  // prevents model auto-invocation. Explicit `$`-token autocomplete is
+  // user-initiated, so those skills must remain searchable.
   const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ });
 
   if (!normalizedQuery) {
-    return enabledSkills;
+    return [...skills];
   }
 
   const ranked: Array<{
@@ -84,7 +86,7 @@ export function searchProviderSkills(
     tieBreaker: string;
   }> = [];
 
-  for (const skill of enabledSkills) {
+  for (const skill of skills) {
     const score = scoreProviderSkill(skill, normalizedQuery);
     if (score === null) {
       continue;
