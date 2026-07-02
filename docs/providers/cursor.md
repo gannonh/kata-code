@@ -1,0 +1,141 @@
+---
+type: Guide
+title: "Cursor"
+description: "Use the Cursor Agent CLI as a first-party Kata Code provider over ACP, with filesystem skill discovery and path-qualified skill invocation in the Composer."
+tags: [providers, cursor, guide, early-access, skills]
+timestamp: 2026-07-01T00:00:00Z
+status: early-access
+---
+
+# Cursor
+
+Cursor is a first-party Kata Code provider backed by the Cursor **Agent CLI**
+(`agent`). Sessions run as an [ACP](https://agentclientprotocol.com/)
+subprocess spawned by `katacode serve`; the server speaks ACP over the
+subprocess stdio and translates Cursor events into Kata Code's canonical
+`ProviderRuntimeEvent` stream.
+
+> **Early access.** Cursor is disabled by default. Session start, send,
+> streaming, interrupt, stop, ACP model discovery (`cursor/list_available_models`),
+> parameterized model picker (reasoning effort, context window, fast mode,
+> thinking), API-key auth, and filesystem skill discovery + invocation are
+> supported. See [provider architecture](/architecture/providers.md) for the
+> driver/instance model and the [Provider skills](#provider-skills) section
+> below.
+
+## Prerequisites
+
+- Install the Cursor Agent CLI and authenticate it. From a terminal:
+
+  ```bash
+  agent --version
+  agent login
+  ```
+
+  Alternatively, authenticate with a Cursor API key by exporting
+  `CURSOR_API_KEY` in the provider instance's environment variables (see
+  [API-key auth](#api-key-auth)). Under API-key auth the server skips the
+  interactive ACP `authenticate` call so headless and CI runs proceed without
+  an OAuth prompt.
+
+- For the parameterized model picker (reasoning effort, context window, fast
+  mode, thinking), the Cursor Agent CLI must be on the `lab` channel and
+  version `2026.04.08` or newer:
+
+  ```bash
+  agent set-channel lab && agent update
+  ```
+
+If Cursor is not authenticated, the provider snapshot reports installed but
+unauthenticated and the model picker shows no Cursor models.
+
+## Add Cursor in Settings
+
+1. Open **Settings → Providers**. Cursor is listed with an **Early Access**
+   badge and is **disabled by default**; enable it to use it.
+2. Expand the Cursor card.
+3. Leave **Binary path** as `agent` unless your CLI lives elsewhere.
+4. Set **API endpoint** only if you need to override the Cursor API endpoint
+   for this instance.
+5. Refresh provider status. Authenticated Cursor models appear in the model
+   picker with the slugs reported by `cursor/list_available_models`.
+
+## Settings reference
+
+| Field            | Purpose                                                                          |
+| ---------------- | -------------------------------------------------------------------------------- |
+| **Binary path**  | Path to the Cursor Agent CLI (`agent`). Used to spawn the ACP subprocess.        |
+| **API endpoint** | Override the Cursor API endpoint for this instance (passed as `agent -e <url>`). |
+
+`enabled` and `customModels` are hidden from the settings form. Custom models,
+display name, accent color, and per-instance environment variables are
+configured through the generic provider-instance controls, the same as other
+providers.
+
+## API-key auth
+
+Set `CURSOR_API_KEY` in the Cursor provider instance's **Environment
+variables** section (mark it **Sensitive**) to authenticate without an
+interactive `agent login`. When `CURSOR_API_KEY` is present:
+
+- The server skips the ACP `authenticate` call, which would otherwise trigger
+  an interactive OAuth flow.
+- `agent about` reports a null user email even though the CLI is
+  authenticated; the provider snapshot treats this as **authenticated** and
+  surfaces the message "Authenticated via Cursor API key."
+
+This is the recommended path for headless, CI, and E2E runs (see
+[Cursor E2E gates](/guides/e2e-test-catalog.md#cursor-e2e-gates)).
+
+## Provider skills
+
+Cursor discovers **filesystem skills** from skill directories on disk and
+surfaces them in the Composer so you can invoke a skill by name in a prompt.
+Skills are discovered from these directories, in order:
+
+1. **Project scope** (relative to the session working directory): `.cursor/skills`,
+   `.agents/skills`, `.claude/skills`, `.codex/skills`.
+2. **User scope** (relative to your home directory): the same four directory
+   names.
+
+The first skill discovered for a given name wins; later duplicates are kept in
+the list but the bare `$skillname` token expands to the first match. Each
+skill is published in the provider snapshot as a `ServerProviderSkill`
+(`name`, `description`, `path`, `scope`, `enabled`).
+
+### Invoking skills
+
+In the Composer, type `$` and pick a skill from the menu, or type a token
+directly:
+
+- **`$skillname`** expands to the first skill with that name.
+- **`$skill:name:hash`** (a **path-qualified** token) selects a specific skill
+  by its filesystem path. The Composer menu inserts path-qualified tokens so
+  name collisions between project and user skills are unambiguous. The hash is
+  a stable FNV-1a-32 of the skill path, generated by
+  `@kata-sh/code-shared/providerSkills`.
+
+When the turn is sent, the server expands recognized tokens into inline
+`<skill name="…" location="…">` blocks containing the skill body (frontmatter
+stripped) and injects them into the prompt delivered to Cursor. Unknown tokens
+are left unchanged.
+
+### Where the skill model lives
+
+The shared token regex, path-hash, and token construction/validation live in
+`@kata-sh/code-shared/providerSkills` (`packages/shared/src/providerSkills.ts`,
+subpath export `./providerSkills`). Filesystem discovery and prompt expansion
+live in `apps/server/src/provider/skills/filesystemSkills.ts`. Prompt expansion
+is currently wired into the Cursor adapter; the token model and scan
+directories are cross-provider compatible so other drivers can adopt the same
+mechanism.
+
+## Related
+
+- [Architecture — providers](/architecture/providers.md) — driver/instance model, ACP runtimes, provider skills
+- [E2E test catalog — Cursor gates](/guides/e2e-test-catalog.md#cursor-e2e-gates) — credentialed `@cursor` E2E env vars
+- [e2e/README](../../e2e/README.md) — desktop operator reference (env vars, artifact paths)
+
+## History
+
+See [log.md](/providers/log.md).

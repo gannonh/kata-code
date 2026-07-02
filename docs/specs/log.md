@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-01 (Cursor filesystem skills + invocation — roadmap entry)
+
+- Added a Completed row to the [specs roadmap](/specs/index.md) for the `feat/cursor-skills` feature: filesystem skill discovery (`.cursor`/`.agents`/`.claude`/`.codex` skills, project + user scope, first-match-wins), shared `@kata-sh/code-shared/providerSkills` token model (regex, FNV-1a path hash, `makeProviderSkillInvocationToken`/`isPathQualifiedProviderSkillToken`), path-qualified `$skill:name:hash` Composer tokens, server-side `<skill>` block prompt expansion wired into the Cursor adapter, Cursor API-key auth (`CURSOR_API_KEY`, skips ACP `authenticate`), and credentialed `@cursor` E2E. Links to the [Cursor provider guide](/providers/cursor.md#provider-skills), [provider architecture — Provider skills](/architecture/providers.md#provider-skills), and [E2E test catalog — Cursor gates](/guides/e2e-test-catalog.md#cursor-e2e-gates). No design spec was authored for this feature; durable technical knowledge lives in the architecture note and provider guide.
+
 ## 2026-06-29 (Environments / Deployments Phase 1 — Part B built, strict-quality-review fixes)
 
 - Flipped the [Phase 1 deep-dive](/specs/2026-06-27-kata-environments-deployments-phase-1-design.md) status from Draft (blocked) to **Implemented** (frontmatter + `## Status`): Part A foundations approved and frozen, Part B container driver + Settings UI + `@environments-deploy` e2e built. Resolved the three Part B open questions in the status text (one `docker` kind; `validate` pulls a missing image; relay managed endpoint fronts loopback, no per-container tunnel).

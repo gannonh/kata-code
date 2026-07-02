@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-07-01 (E2E test catalog — Cursor gates correction)
+
+- Corrected the [E2E test catalog](/guides/e2e-test-catalog.md#cursor-e2e-gates) Cursor E2E gates section (added in `feat/cursor-skills`) to include the required `KATACODE_E2E_CURSOR_API_KEY` env var alongside `KATACODE_E2E_ENABLE_CURSOR` and `KATACODE_E2E_CURSOR_MODEL`. The `@cursor` flow (`e2e/src/flows/cursorSkills.ts`) authenticates the Cursor Agent CLI via API key, which skips interactive OAuth; the API key is a hard requirement in `readCursorSkillsConfig`.
+
 ## 2026-06-27 (E2E test catalog — Pi finalize harness notes)
 
 - [E2E test catalog](/guides/e2e-test-catalog.md): documented per-file shared Electron session model, `pnpm run e2e:clean` for leaked dev servers, and credentialed `@pi` gate env vars with a link to [verification evidence](../../e2e/verify-evidence/README.md).

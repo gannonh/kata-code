@@ -143,6 +143,10 @@
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"
     },
+    "./providerSkills": {
+      "types": "./src/providerSkills.ts",
+      "import": "./src/providerSkills.ts"
+    },
     "./terminalLabels": {
       "types": "./src/terminalLabels.ts",
       "import": "./src/terminalLabels.ts"
