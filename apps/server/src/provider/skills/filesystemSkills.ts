@@ -120,14 +120,24 @@ export function discoverCursorFilesystemSkills(options: FilesystemSkillDiscovery
       }
       seenPaths.add(skill.filePath);
       const serverSkill = mapSkillToServerProviderSkill(skill, location.scope);
-      const indexedSkill = toIndexedFilesystemSkill(skill, location.scope);
       skills.push(serverSkill);
-      indexSkillByName(indexedByName, skill, location.scope);
-      indexedByInvocationToken.set(makeProviderSkillInvocationToken(serverSkill), indexedSkill);
+      if (serverSkill.enabled) {
+        const indexedSkill = toIndexedFilesystemSkill(skill, location.scope);
+        indexSkillByName(indexedByName, skill, location.scope);
+        indexedByInvocationToken.set(makeProviderSkillInvocationToken(serverSkill), indexedSkill);
+      }
     }
   }
 
   return { skills, indexedByName, indexedByInvocationToken };
+}
+
+function escapeXmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 export function formatSkillInvocationBlock(
@@ -136,7 +146,7 @@ export function formatSkillInvocationBlock(
 ): string {
   const body = stripFrontmatter(rawContent).trim();
   return [
-    `<skill name="${skill.name}" location="${skill.filePath}">`,
+    `<skill name="${escapeXmlAttribute(skill.name)}" location="${escapeXmlAttribute(skill.filePath)}">`,
     `References are relative to ${skill.baseDir}.`,
     "",
     body,
@@ -170,8 +180,12 @@ export function expandSkillTokensInText(
     result += text.slice(cursor, tokenStart);
 
     if (skill) {
-      const rawContent = readSkillContent(skill);
-      result += formatSkillInvocationBlock(skill, rawContent);
+      try {
+        const rawContent = readSkillContent(skill);
+        result += formatSkillInvocationBlock(skill, rawContent);
+      } catch {
+        result += tokenText;
+      }
     } else {
       result += tokenText;
     }

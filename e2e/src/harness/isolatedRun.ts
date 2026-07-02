@@ -95,43 +95,6 @@ export async function createIsolatedRun(input: {
   const artifactRoot = join(resolveArtifactRoot(), runId);
   const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
-  // On macOS, Electron safeStorage backs onto the Keychain. The isolated
-  // HOME has no login keychain, so the first encrypted-secret write pops a
-  // native "Keychain Not Found" dialog that blocks the test. Provision a
-  // login keychain inside the temp home and make it the default for any
-  // process that inherits HOME=katacodeHome. The default-keychain setting
-  // lives in the per-user Security preferences under HOME, so the real
-  // user's keychain default is untouched. Skip on non-darwin.
-  if (platform() === "darwin") {
-    await provisionIsolatedKeychain(katacodeHome);
-  }
-
-  // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
-  // name. The isolated HOME has no macOS login keychain, so interactive
-  // `agent login` token storage is unavailable; the API-key auth path skips
-  // the keychain entirely and works on all platforms including CI.
-  const cursorApiKey = process.env.KATACODE_E2E_CURSOR_API_KEY?.trim();
-
-  const baseEnv = {
-    ...process.env,
-    KATACODE_HOME: katacodeHome,
-    HOME: katacodeHome,
-    USERPROFILE: katacodeHome,
-    ...(cursorApiKey ? { CURSOR_API_KEY: cursorApiKey } : {}),
-    KATACODE_PORT_OFFSET: String(offset),
-    KATACODE_ELECTRON_RUNTIME_DIR: electronRuntimeDir,
-    // Unique per-worker dev app bundle ID so macOS Launch Services treats each
-    // parallel worker's Electron as a distinct app (same bundle ID = single
-    // instance = second launch exits before opening a window).
-    KATACODE_DEV_BUNDLE_ID_SUFFIX: runId.replaceAll(/[^a-z0-9]+/gi, ""),
-    // Each worker is an independent isolated instance; the desktop app's
-    // single-instance lock would otherwise quit every worker past the first.
-    KATACODE_DESKTOP_DISABLE_SINGLE_INSTANCE_LOCK: "1",
-    HOST: "127.0.0.1",
-    KATACODE_NO_BROWSER: "1",
-    KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "0",
-  } satisfies NodeJS.ProcessEnv;
-
   // Make the port-claim release idempotent so it's safe to call both from the
   // dev stack (before bind) and from cleanup (on failure). If the dev stack
   // already released the claim, the cleanup call is a no-op.
@@ -149,6 +112,49 @@ export async function createIsolatedRun(input: {
     await rm(electronRuntimeDir, { recursive: true, force: true });
   });
   cleanupCallbacksByRunId.set(runId, cleanupCallbacks);
+
+  // On macOS, Electron safeStorage backs onto the Keychain. The isolated
+  // HOME has no login keychain, so the first encrypted-secret write pops a
+  // native "Keychain Not Found" dialog that blocks the test. Provision a
+  // login keychain inside the temp home and make it the default for any
+  // process that inherits HOME=katacodeHome. The default-keychain setting
+  // lives in the per-user Security preferences under HOME, so the real
+  // user's keychain default is untouched. Skip on non-darwin.
+  if (platform() === "darwin") {
+    try {
+      await provisionIsolatedKeychain(katacodeHome);
+    } catch (error) {
+      await Promise.allSettled(cleanupCallbacks.map((callback) => callback()));
+      throw error;
+    }
+  }
+
+  // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
+  // name. The isolated HOME has no macOS login keychain, so interactive
+  // `agent login` token storage is unavailable; the API-key auth path skips
+  // the keychain entirely and works on all platforms including CI.
+  const cursorApiKey = process.env.KATACODE_E2E_CURSOR_API_KEY?.trim();
+  const { CURSOR_API_KEY: _ambientCursorApiKey, ...inheritedEnv } = process.env;
+
+  const baseEnv = {
+    ...inheritedEnv,
+    KATACODE_HOME: katacodeHome,
+    HOME: katacodeHome,
+    USERPROFILE: katacodeHome,
+    ...(cursorApiKey ? { CURSOR_API_KEY: cursorApiKey } : {}),
+    KATACODE_PORT_OFFSET: String(offset),
+    KATACODE_ELECTRON_RUNTIME_DIR: electronRuntimeDir,
+    // Unique per-worker dev app bundle ID so macOS Launch Services treats each
+    // parallel worker's Electron as a distinct app (same bundle ID = single
+    // instance = second launch exits before opening a window).
+    KATACODE_DEV_BUNDLE_ID_SUFFIX: runId.replaceAll(/[^a-z0-9]+/gi, ""),
+    // Each worker is an independent isolated instance; the desktop app's
+    // single-instance lock would otherwise quit every worker past the first.
+    KATACODE_DESKTOP_DISABLE_SINGLE_INSTANCE_LOCK: "1",
+    HOST: "127.0.0.1",
+    KATACODE_NO_BROWSER: "1",
+    KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "0",
+  } satisfies NodeJS.ProcessEnv;
 
   return {
     runId,

@@ -29,5 +29,9 @@ export function makeProviderSkillInvocationToken(
 }
 
 export function isPathQualifiedProviderSkillToken(token: string): boolean {
-  return token.startsWith(`${PROVIDER_SKILL_TOKEN_PREFIX}:`) && token.split(":").length === 3;
+  if (!token.startsWith(`${PROVIDER_SKILL_TOKEN_PREFIX}:`)) {
+    return false;
+  }
+  const parts = token.split(":");
+  return parts.length >= 3 && parts[0] === PROVIDER_SKILL_TOKEN_PREFIX;
 }

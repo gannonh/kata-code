@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, type Page } from "@playwright/test";
 
+import { expandCursorSkillTokensInPrompt } from "../../../apps/server/src/provider/skills/filesystemSkills.ts";
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
 import type { E2ERunContext } from "../harness/isolatedRun.ts";
 import { dismissBlockingToasts } from "./navigation.ts";
@@ -16,6 +17,7 @@ export interface CursorSkillsConfig {
 export interface CursorSkillFixtures {
   readonly duplicateName: string;
   readonly uniqueName: string;
+  readonly uniquePath: string;
   readonly uniqueToken: string;
 }
 
@@ -120,6 +122,7 @@ export async function seedCursorSkillFixtures(
   return {
     duplicateName,
     uniqueName,
+    uniquePath,
     uniqueToken: makeProviderSkillInvocationToken({ name: uniqueName, path: uniquePath }),
   };
 }
@@ -238,4 +241,20 @@ export async function selectComposerSkill(page: Page, skillName: string): Promis
     return parts.join("");
   });
   return serialized.trim();
+}
+
+export function expectCursorSkillPromptExpansion(
+  fixtures: CursorSkillFixtures,
+  context: E2ERunContext,
+  workspaceRoot: string,
+): void {
+  const expanded = expandCursorSkillTokensInPrompt(`Please $${fixtures.uniqueToken} now`, {
+    cwd: workspaceRoot,
+    homeDir: context.katacodeHome,
+  });
+
+  expect(expanded).toContain(`<skill name="${fixtures.uniqueName}"`);
+  expect(expanded).toContain(`location="${fixtures.uniquePath}"`);
+  expect(expanded).toContain("Unique Cursor E2E skill for path-qualified token insertion.");
+  expect(expanded.endsWith("now")).toBe(true);
 }

@@ -46,6 +46,7 @@ Canonical `KATACODE_CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` are al
 | --------------------------------- | ------------------------------------------------------------------------------ |
 | `KATACODE_E2E_ENABLE_CURSOR`      | Set to `1` to opt in to Cursor-specific E2E tests                              |
 | `KATACODE_E2E_CURSOR_MODEL`       | Cursor model id to add/select in the Composer model picker                     |
+| `KATACODE_E2E_CURSOR_API_KEY`     | Cursor API key forwarded to `CURSOR_API_KEY` for headless Cursor auth in E2E   |
 | `KATACODE_E2E_CURSOR_BINARY_PATH` | Optional path to the Cursor `agent` binary when it is not available as `agent` |
 
 ### Release target (`desktop-release` project)

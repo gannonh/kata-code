@@ -20,6 +20,7 @@ function writeSkill(
   name: string,
   description: string,
   body: string,
+  extraFrontmatter = "",
 ): string {
   const skillDir = NodePath.join(root, relativePath);
   NodeFs.mkdirSync(skillDir, { recursive: true });
@@ -29,7 +30,7 @@ function writeSkill(
     `---
 name: ${name}
 description: ${description}
----
+${extraFrontmatter ? `${extraFrontmatter}\n` : ""}---
 
 ${body}
 `,
@@ -186,5 +187,71 @@ describe("formatSkillInvocationBlock", () => {
 
     expect(block).not.toContain("description: Review");
     expect(block).toContain("Review the diff.");
+  });
+
+  it("escapes XML-sensitive characters in skill metadata attributes", () => {
+    const block = formatSkillInvocationBlock(
+      {
+        name: 'review" onclick="<',
+        filePath: '/tmp/review" onclick="<',
+        baseDir: "/tmp/review",
+        scope: "user",
+      },
+      "Review the diff.",
+    );
+
+    expect(block).toContain('name="review&quot; onclick=&quot;&lt;"');
+    expect(block).toContain('location="/tmp/review&quot; onclick=&quot;&lt;"');
+  });
+});
+
+describe("expandSkillTokensInText resilience", () => {
+  it("leaves the token unchanged when skill content cannot be read", () => {
+    const skill = {
+      name: "devbox",
+      filePath: "/tmp/project/.cursor/skills/devbox/SKILL.md",
+      baseDir: "/tmp/project/.cursor/skills/devbox",
+      scope: "project" as const,
+    };
+    const expanded = expandSkillTokensInText(
+      "Please $devbox now",
+      new Map([[skill.name, skill]]),
+      new Map(),
+      () => {
+        throw new Error("ENOENT");
+      },
+    );
+
+    expect(expanded).toBe("Please $devbox now");
+  });
+
+  it("does not expand disabled skills", () => {
+    const root = NodeFs.mkdtempSync(NodePath.join(NodeOs.tmpdir(), "cursor-skills-disabled-"));
+    const skillPath = writeSkill(
+      root,
+      ".cursor/skills/manual-only",
+      "manual-only",
+      "Manual only",
+      "Do not auto invoke.",
+      "disable-model-invocation: true",
+    );
+
+    const discovered = discoverCursorFilesystemSkills({ cwd: root, homeDir: root });
+    expect(discovered.skills).toEqual([
+      {
+        name: "manual-only",
+        path: skillPath,
+        scope: "project",
+        enabled: false,
+        description: "Manual only",
+      },
+    ]);
+    expect(discovered.indexedByName.has("manual-only")).toBe(false);
+
+    const expanded = expandCursorSkillTokensInPrompt("Try $manual-only now", {
+      cwd: root,
+      homeDir: root,
+    });
+    expect(expanded).toBe("Try $manual-only now");
   });
 });

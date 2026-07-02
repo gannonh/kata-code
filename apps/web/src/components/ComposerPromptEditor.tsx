@@ -227,18 +227,22 @@ type ComposerSkillMetadata = {
 function skillMetadataByName(
   skills: ReadonlyArray<ServerProviderSkill>,
 ): ReadonlyMap<string, ComposerSkillMetadata> {
-  return new Map(
-    skills.flatMap((skill) => {
-      const metadata = {
-        label: formatProviderSkillDisplayName(skill),
-        description: resolveSkillDescription(skill),
-      };
-      return [
-        [skill.name, metadata],
-        [makeProviderSkillInvocationToken(skill), metadata],
-      ] as const;
-    }),
-  );
+  const entries: Array<readonly [string, ComposerSkillMetadata]> = [];
+  const seenBareNames = new Set<string>();
+
+  for (const skill of skills) {
+    const metadata = {
+      label: formatProviderSkillDisplayName(skill),
+      description: resolveSkillDescription(skill),
+    };
+    if (!seenBareNames.has(skill.name)) {
+      seenBareNames.add(skill.name);
+      entries.push([skill.name, metadata] as const);
+    }
+    entries.push([makeProviderSkillInvocationToken(skill), metadata] as const);
+  }
+
+  return new Map(entries);
 }
 
 function ComposerSkillDecorator(props: { skillLabel: string; skillDescription: string | null }) {

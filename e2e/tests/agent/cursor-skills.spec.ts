@@ -3,6 +3,7 @@ import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
   configureCursorProviderForSkills,
   expectComposerSkillMenuEntries,
+  expectCursorSkillPromptExpansion,
   formatCursorSkillsSkipReason,
   readCursorSkillsConfig,
   seedCursorSkillFixtures,
@@ -57,5 +58,6 @@ test.describe(`Cursor skills ${E2E_TAGS.cursor}`, () => {
 
     const serializedPrompt = await selectComposerSkill(page, fixtures.uniqueName);
     expect(serializedPrompt).toContain(`$${fixtures.uniqueToken}`);
+    expectCursorSkillPromptExpansion(fixtures, runContext, seededPath);
   });
 });

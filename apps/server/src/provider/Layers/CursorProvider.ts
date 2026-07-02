@@ -877,6 +877,14 @@ export function parseCursorAboutOutput(
       lowerEmail.includes("login required") ||
       lowerEmail.includes("authentication required")
     ) {
+      if (options.hasApiKeyAuth) {
+        return {
+          version,
+          status: "ready",
+          auth: { status: "authenticated", ...authMetadata },
+          message: "Authenticated via Cursor API key.",
+        };
+      }
       return {
         version,
         status: "error",
@@ -1014,9 +1022,10 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
 > {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const fallbackModels = getCursorFallbackModels(cursorSettings);
+  const homeDir = environment?.HOME ?? process.env.HOME;
   const { skills: discoveredSkills } = discoverCursorFilesystemSkills({
     cwd: process.cwd(),
-    ...(process.env.HOME ? { homeDir: process.env.HOME } : {}),
+    ...(homeDir ? { homeDir } : {}),
   });
 
   if (!cursorSettings.enabled) {

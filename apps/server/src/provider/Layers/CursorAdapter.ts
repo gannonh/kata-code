@@ -963,9 +963,21 @@ export function makeCursorAdapter(
             const skillCwd = ctx.session.cwd?.trim()
               ? path.resolve(ctx.session.cwd.trim())
               : process.cwd();
-            const expandedPromptText = expandCursorSkillTokensInPrompt(promptText, {
-              cwd: skillCwd,
-            });
+            const homeDir = options?.environment?.HOME ?? process.env.HOME;
+            let expandedPromptText: string;
+            try {
+              expandedPromptText = expandCursorSkillTokensInPrompt(promptText, {
+                cwd: skillCwd,
+                ...(homeDir ? { homeDir } : {}),
+              });
+            } catch (error) {
+              return yield* new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session/prompt",
+                detail: error instanceof Error ? error.message : String(error),
+                ...(error instanceof Error ? { cause: error } : {}),
+              });
+            }
             promptParts.push({ type: "text", text: expandedPromptText });
           }
           if (input.attachments && input.attachments.length > 0) {
