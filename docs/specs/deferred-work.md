@@ -184,3 +184,21 @@ Each entry should include:
 - **Rationale:** `registerSandboxWithConnect` (`apps/server/src/sandbox/SandboxService.ts`) derives the relay link proof `origin.localHttpPort` from the host-published endpoint port, but the managed tunnel ingress (set from that origin in `infra/relay/src/environments/ManagedEndpointProvider.ts`) routes to `http://<host>:<port>` as seen by cloudflared inside the container, where the Kata server listens on the container port. The container-side `isAllowedEndpointOrigin` validation requires the origin port to match the incoming request URL port (host-published), which conflicts with the container-internal port the tunnel needs. Fixing it requires an architecture decision on sandbox origin attestation that touches the shared relay linking contract.
 - **Revisit trigger:** Before end-to-end sandbox Connect pairing UAT (paired client reaching the in-container server through the managed tunnel), or when reviewing the relay managed-endpoint origin contract.
 - **Notes:** See [#21](https://github.com/gannonh/kata-code/issues/21) for the two candidate approaches.
+
+### Sandbox: surface pairing URL and token in deployment target UI
+
+- **Status:** deferred
+- **Area:** sandbox, web, contracts, connect
+- **Source:** Phase 2 Verify UAT — [#23](https://github.com/gannonh/kata-code/issues/23)
+- **Rationale:** The pairing URL and token are printed to container stdout but not propagated through the `SandboxStartSessionResult` RPC to the web UI. A user who wants to pair an external client must inspect container logs. Out of Phase 2 scope (environment configuration and setup execution); fits Phase 4 (composer "Run on" / cross-device connecting).
+- **Revisit trigger:** Phase 4 composer work, or as a quick win if pairing is needed before Phase 4.
+- **Notes:** Extend `SandboxStartSessionResult` (`packages/contracts/src/sandboxRpc.ts`) with optional `pairingUrl`/`pairingToken`; render on the deployment card in `SandboxDeploymentSettings.tsx`.
+
+### Sandbox: HTTP pairing URL triggers browser security warning
+
+- **Status:** deferred
+- **Area:** sandbox, relay, connect, security
+- **Source:** Phase 2 Verify UAT — [#24](https://github.com/gannonh/kata-code/issues/24)
+- **Rationale:** The in-container `katacode serve` listens on HTTP (no TLS in the container). The relay tunnel provides HTTPS for remote clients, but the local pairing URL remains HTTP and triggers a browser security warning. Fixing requires TLS termination in-container or always routing through the relay tunnel — an architecture decision outside Phase 2 scope.
+- **Revisit trigger:** Before end-to-end sandbox Connect pairing UAT, or when the pairing URL is surfaced in the UI (#23) and the HTTPS relay URL should be preferred.
+- **Notes:** Related to [#23](https://github.com/gannonh/kata-code/issues/23). Once the pairing URL is in the UI, prefer the relay HTTPS endpoint as the primary pairing surface.
