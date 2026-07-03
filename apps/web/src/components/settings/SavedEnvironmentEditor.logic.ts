@@ -104,17 +104,6 @@ export function applySavedEnvironmentTerminalPatch(
   });
 }
 
-export function addSavedEnvironmentTerminal(
-  current: SavedSandboxEnvironmentMap | undefined,
-  repositoryKey: string,
-): SavedSandboxEnvironmentMap {
-  const previous = current?.[RepositoryCanonicalKey.make(repositoryKey)];
-  return setSavedEnvironment(current, repositoryKey, {
-    ...previous,
-    terminals: [...(previous?.terminals ?? []), { name: "", command: "" }],
-  });
-}
-
 export function removeSavedEnvironmentTerminal(
   current: SavedSandboxEnvironmentMap | undefined,
   repositoryKey: string,
@@ -122,7 +111,7 @@ export function removeSavedEnvironmentTerminal(
 ): SavedSandboxEnvironmentMap {
   const previous = current?.[RepositoryCanonicalKey.make(repositoryKey)];
   const terminals = (previous?.terminals ?? []).filter(
-    (_terminal: SavedEnvironmentTerminal, index: number) => index !== terminalIndex,
+    (_terminal, index) => index !== terminalIndex,
   );
   return setSavedEnvironment(current, repositoryKey, {
     ...previous,

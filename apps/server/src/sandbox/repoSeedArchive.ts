@@ -21,6 +21,7 @@
  */
 // @effect-diagnostics nodeBuiltinImport:off - host-side bounded tar builder uses node:fs for synchronous tree walks; not an Effect FileSystem consumer.
 import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import * as path from "node:path";
 
 import * as Data from "effect/Data";
@@ -262,8 +263,6 @@ function packUstar(files: ReadonlyArray<SelectedFile>): Uint8Array {
   return Buffer.concat(chunks);
 }
 
-// Synchronous read inside the packer so the writer stays a single pass.
-import * as fsSync from "node:fs";
 function fsSyncRead(p: string): Buffer {
   return fsSync.readFileSync(p);
 }

@@ -90,9 +90,8 @@ export function SavedEnvironmentEditor({
   );
   const selectedProject = findSelectedProject(repositoryProjects, selectedRepositoryKey);
   const repositoryKey = selectedProject ? projectRepositoryKey(selectedProject) : undefined;
-  const brandedRepositoryKey = repositoryKey as RepositoryCanonicalKey | undefined;
   const savedEnvironment: SavedSandboxEnvironment | undefined = repositoryKey
-    ? savedSandboxEnvironments?.[brandedRepositoryKey as RepositoryCanonicalKey]
+    ? savedSandboxEnvironments?.[repositoryKey as RepositoryCanonicalKey]
     : undefined;
 
   const [terminalDrafts, setTerminalDrafts] = useState<ReadonlyArray<TerminalDraftRow>>(() =>
