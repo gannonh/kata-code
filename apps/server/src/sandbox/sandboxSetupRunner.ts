@@ -109,7 +109,10 @@ export function runSandboxSetup(
     // 3. Detached start + terminals (no waiting; recorded for teardown).
     // Detached-process output is redirected to in-container log files (not
     // captured here), so secret redaction does not apply to this stage.
-    const processes = yield* runDetachedProcesses(driver, handle, resolved);
+    // cwd is /workspace only when the repo was seeded there; without seeding,
+    // /workspace may not exist in the container.
+    const cwd = input.seed ? WORKSPACE : undefined;
+    const processes = yield* runDetachedProcesses(driver, handle, resolved, cwd);
 
     return { processes, installOutput } satisfies SetupRunnerResult;
   });
@@ -205,12 +208,13 @@ function runDetachedProcesses(
   driver: SandboxProvider,
   handle: SandboxHandle,
   resolved: ResolvedEnvironmentConfig,
+  cwd?: string,
 ): Effect.Effect<ReadonlyArray<SetupProcessRecord>, SetupFailed | SandboxProviderError> {
   return Effect.gen(function* () {
     const processes: SetupProcessRecord[] = [];
 
     if (resolved.start !== undefined) {
-      yield* launchDetached(driver, handle, "start", resolved.start).pipe(
+      yield* launchDetached(driver, handle, "start", resolved.start, cwd).pipe(
         Effect.mapError(
           (e) =>
             new SetupFailed({
@@ -224,7 +228,7 @@ function runDetachedProcesses(
     }
 
     for (const terminal of resolved.terminals ?? []) {
-      yield* launchDetached(driver, handle, terminal.name, terminal.command).pipe(
+      yield* launchDetached(driver, handle, terminal.name, terminal.command, cwd).pipe(
         Effect.mapError(
           (e) =>
             new SetupFailed({
@@ -252,14 +256,15 @@ function launchDetached(
   handle: SandboxHandle,
   name: string,
   command: string,
+  cwd?: string,
 ): Effect.Effect<void, SandboxProviderError> {
   const logFile = `/tmp/kata-${uniqueLogSlug(name)}.log`;
   // Match the detached-exec spike: redirect + background the inner shell command
   // so setsid's child exits promptly and the outer exec returns without waiting.
-  // cwd is /workspace so relative paths resolve against the seeded repo.
-  const inner = `cd ${WORKSPACE} && ${command} > ${logFile} 2>&1 &`;
+  // cwd is /workspace (when seeded) so relative paths resolve against the repo.
+  const inner = `${command} > ${logFile} 2>&1 &`;
   const detached = `setsid sh -c ${shellQuote(inner)}`;
-  return driver.exec(handle, detached, { cwd: WORKSPACE }).pipe(Effect.asVoid);
+  return driver.exec(handle, detached, cwd !== undefined ? { cwd } : undefined).pipe(Effect.asVoid);
 }
 
 /**
