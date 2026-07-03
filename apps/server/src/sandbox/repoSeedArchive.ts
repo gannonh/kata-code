@@ -218,8 +218,9 @@ interface GitignoreMatcher {
 function createGitignoreMatcher(patterns: ReadonlyArray<string>, _root: string): GitignoreMatcher {
   if (patterns.length === 0) return { isIgnored: () => false };
   const compiled = patterns.map(gitignorePatternToRegex);
-  // First-match-wins: the first pattern (in file order) whose regex matches
-  // decides, with negations un-ignoring. This mirrors git's precedence.
+  // Last-match-wins: iterate every pattern in file order and let the final
+  // matching pattern decide, with negations un-ignoring. This mirrors git's
+  // precedence (a later `!` pattern overrides an earlier ignore).
   return {
     isIgnored(relativePath: string): boolean {
       let ignored = false;

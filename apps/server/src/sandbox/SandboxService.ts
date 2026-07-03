@@ -674,12 +674,10 @@ export const SandboxServiceLive = {
             seed: { repoRoot: options.repository.repoRoot },
           }).pipe(
             Effect.catch((error: SetupFailed | SandboxProviderError) =>
-              inst.driver.dispose(handle).pipe(
-                Effect.catch((disposeError) =>
-                  Effect.logWarning("Could not dispose sandbox after setup failure", {
-                    cause: disposeError,
-                  }),
-                ),
+              // Reuse the canonical post-provision dispose helper. The
+              // session is not in `runningSessions` yet at this point, so the
+              // helper's `runningSessions.delete` is a harmless no-op here.
+              disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
                 Effect.andThen(
                   Effect.fail(
                     error._tag === "SetupFailed" ? mapSetupFailed(error) : mapDriverError(error),

@@ -26,8 +26,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-import type { RepositoryIdentity } from "@kata-sh/code-contracts";
-import { RepositoryCanonicalKey, type SavedSandboxEnvironment } from "@kata-sh/code-contracts";
+import type { RepositoryIdentity, SavedSandboxEnvironment } from "@kata-sh/code-contracts";
 import { EnvironmentConfig } from "@kata-sh/code-sandbox-contracts/environmentConfig";
 import { resolveEnvironmentConfig, type ResolvedEnvironmentConfig } from "@kata-sh/code-sandbox";
 
@@ -150,8 +149,11 @@ export function loadEnvironmentConfig(
     const repoFileConfig = yield* readRepoFileConfig(input.repoRoot);
     const repoFilePresent = repoFileConfig !== undefined;
 
-    const key = input.repositoryIdentity.canonicalKey as unknown as RepositoryCanonicalKey;
-    const saved = input.savedSandboxEnvironments[key as unknown as string];
+    // `SavedSandboxEnvironments` is keyed by plain string (the
+    // `RepositoryCanonicalKey` brand is the settings-layer concern); the
+    // repo identity's `canonicalKey` is a `TrimmedNonEmptyString` (a plain
+    // `string` at the type level), so it indexes the map directly.
+    const saved = input.savedSandboxEnvironments[input.repositoryIdentity.canonicalKey];
     const savedEnvConfig = saved !== undefined ? savedEnvToConfig(saved) : undefined;
 
     // Locked decision 8: the provider default is an empty no-op config, not

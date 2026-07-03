@@ -107,7 +107,9 @@ export function runSandboxSetup(
     const installOutput = yield* runInstall(driver, handle, resolved, secretValues);
 
     // 3. Detached start + terminals (no waiting; recorded for teardown).
-    const processes = yield* runDetachedProcesses(driver, handle, resolved, secretValues);
+    // Detached-process output is redirected to in-container log files (not
+    // captured here), so secret redaction does not apply to this stage.
+    const processes = yield* runDetachedProcesses(driver, handle, resolved);
 
     return { processes, installOutput } satisfies SetupRunnerResult;
   });
@@ -203,7 +205,6 @@ function runDetachedProcesses(
   driver: SandboxProvider,
   handle: SandboxHandle,
   resolved: ResolvedEnvironmentConfig,
-  _secretValues: ReadonlyArray<string>,
 ): Effect.Effect<ReadonlyArray<SetupProcessRecord>, SetupFailed | SandboxProviderError> {
   return Effect.gen(function* () {
     const processes: SetupProcessRecord[] = [];
