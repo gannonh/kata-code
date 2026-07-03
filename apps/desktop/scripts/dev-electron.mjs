@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import * as NodeOS from "node:os";
 import { dirname, join } from "node:path";
@@ -64,18 +65,55 @@ function logDevElectron(message, details = {}) {
   process.stderr.write(`[dev-electron] ${message}${payload}\n`);
 }
 
-function describeWatchedFile(directory, filename) {
+function watchedFileKey(directory, filename) {
+  return `${directory}/${filename}`;
+}
+
+function readWatchedFileSnapshot(directory, filename) {
   try {
-    const stat = statSync(join(desktopDir, directory, filename));
+    const filePath = join(desktopDir, directory, filename);
+    const stat = statSync(filePath);
+    const bytes = readFileSync(filePath);
     return {
+      exists: true,
       size: stat.size,
       mtimeMs: Math.round(stat.mtimeMs),
+      sha256: createHash("sha256").update(bytes).digest("hex"),
     };
   } catch (error) {
     return {
+      exists: false,
       statError: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function initializeWatchedFileFingerprints() {
+  for (const { directory, files } of watchedDirectories) {
+    for (const filename of files) {
+      const snapshot = readWatchedFileSnapshot(directory, filename);
+      if (snapshot.exists) {
+        watchedFileFingerprints.set(watchedFileKey(directory, filename), snapshot.sha256);
+      }
+    }
+  }
+}
+
+function shouldRestartForWatchedFileChange(directory, filename) {
+  const key = watchedFileKey(directory, filename);
+  const snapshot = readWatchedFileSnapshot(directory, filename);
+  if (!snapshot.exists) {
+    return { restart: false, changed: false, snapshot };
+  }
+
+  const previous = watchedFileFingerprints.get(key);
+  watchedFileFingerprints.set(key, snapshot.sha256);
+  return {
+    restart: previous !== undefined && previous !== snapshot.sha256,
+    changed: previous !== undefined && previous !== snapshot.sha256,
+    previousSha256: previous ?? null,
+    snapshot,
+  };
 }
 
 function acquireSingletonOrExit() {
@@ -140,6 +178,7 @@ let currentApp = null;
 let restartQueue = Promise.resolve();
 const expectedExits = new WeakSet();
 const watchers = [];
+const watchedFileFingerprints = new Map();
 
 function killChildTreeByPid(pid, signal) {
   if (hostPlatform === "win32" || typeof pid !== "number") {
@@ -296,13 +335,17 @@ function startWatchers() {
           return;
         }
 
-        scheduleRestart("watched-file-changed");
+        const decision = shouldRestartForWatchedFileChange(directory, filename);
         logDevElectron("watched file changed", {
           eventType,
           directory,
           filename,
-          ...describeWatchedFile(directory, filename),
+          contentChanged: decision.changed,
+          ...decision.snapshot,
         });
+        if (decision.restart) {
+          scheduleRestart("watched-file-content-changed");
+        }
       },
     );
 
@@ -342,6 +385,7 @@ async function shutdown(exitCode) {
   process.exit(exitCode);
 }
 
+initializeWatchedFileFingerprints();
 startWatchers();
 startApp();
 
