@@ -1103,7 +1103,7 @@ describe("makePiAdapter extension UI bridge", () => {
     }),
   );
 
-  it.effect("emits one runtime.warning per TUI-only method per session and no-ops", () =>
+  it.effect("silently no-ops TUI-only methods without runtime.warning", () =>
     Effect.gen(function* () {
       const { uiContext, recorder } = yield* startBridgedSession(decodePiSettings({}));
 
@@ -1120,15 +1120,13 @@ describe("makePiAdapter extension UI bridge", () => {
       yield* Effect.tryPromise(() => uiContext.custom(undefined as never));
 
       const warnings = recorder.events.filter((event) => event.type === "runtime.warning");
-      // One per method: setWidget, setFooter, setHeader, pasteToEditor,
-      // setEditorComponent, addAutocompleteProvider, onTerminalInput, custom.
-      expect(warnings).toHaveLength(8);
-      // Calling a method again does not emit a second warning.
+      expect(warnings).toHaveLength(0);
+      // Calling a method again does not emit a warning.
       uiContext.setWidget("w", ["z"]);
       const warningsAfterRepeat = recorder.events.filter(
         (event) => event.type === "runtime.warning",
       );
-      expect(warningsAfterRepeat).toHaveLength(8);
+      expect(warningsAfterRepeat).toHaveLength(0);
     }),
   );
 

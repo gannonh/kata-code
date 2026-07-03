@@ -1168,8 +1168,8 @@ export function makePiAdapter(
      * Build the Kata `ExtensionUIContext` for a Pi session. Dialog methods
      * route through `requestExtensionUserInput`; `notify`/`setStatus`/
      * `setWorkingMessage`/`setTitle` map to `runtime.warning` or `tool.progress`;
-     * TUI-only methods emit one `runtime.warning` per method per session then
-     * return safe no-op values; harmless getters/state return plain defaults.
+     * TUI-only methods return safe no-op values and log the skipped call at
+     * INFO; harmless getters/state return plain defaults.
      */
     const makePiExtensionUIContext = (ctx: PiSessionContext): PiExtensionUIContext => {
       const emitPluginProgress = (summary: string) => {
@@ -1192,12 +1192,13 @@ export function makePiAdapter(
         ctx.unsupportedWarnings.add(method);
         const capability =
           PI_TUI_ONLY_CAPABILITY_LABELS[method] ?? "a terminal-only display feature";
-        offerFromListener(
-          piRuntimeWarning(ctx.threadId, {
-            method: "extension/ui-unsupported",
-            message: `A Pi extension requested ${capability}, which ${APP_BASE_NAME}'s interface can't show. It was skipped; the conversation continues normally.`,
-            detail: { method },
-          }),
+        // TUI-only Pi extension APIs have no equivalent in Kata Code's graphical
+        // interface. Log at INFO so the call is observable without alarming the
+        // user with a runtime.warning; the conversation continues normally.
+        Effect.runFork(
+          Effect.logInfo(
+            `Pi extension requested ${capability}; skipped (TUI-only, no GUI equivalent).`,
+          ),
         );
       };
       const uiContext: PiExtensionUIContext = {
