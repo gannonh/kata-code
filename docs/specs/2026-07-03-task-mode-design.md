@@ -2,7 +2,8 @@
 type: Spec
 title: "Task mode — workflow-driven tasks with a live plan artifact panel"
 description: "First-class Task entity that executes a staged workflow (Setup → Questions → Plan → Build → Verify), codifying the plan-build-verify skill into the product with a dynamic right-side artifact panel, anchored comments, approval gates, and thread-per-stage fresh context."
-status: Draft
+status: Approved
+approved_at: 2026-07-03T16:22:31Z
 tags: [specs, task-mode, workflow, artifact, orchestration, contracts, web, server]
 timestamp: 2026-07-03T00:00:00Z
 ---
@@ -11,7 +12,7 @@ timestamp: 2026-07-03T00:00:00Z
 
 ## Status
 
-Draft
+Approved
 
 ## Goal
 
