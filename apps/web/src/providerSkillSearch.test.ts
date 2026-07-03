@@ -56,4 +56,14 @@ describe("searchProviderSkills", () => {
 
     expect(searchProviderSkills(skills, "ui").map((skill) => skill.name)).toEqual(["ui"]);
   });
+
+  it("honors limit on the blank-query fast path", () => {
+    const skills = [
+      makeSkill({ name: "alpha", displayName: "Alpha" }),
+      makeSkill({ name: "beta", displayName: "Beta" }),
+      makeSkill({ name: "gamma", displayName: "Gamma" }),
+    ];
+
+    expect(searchProviderSkills(skills, "", 2)).toHaveLength(2);
+  });
 });

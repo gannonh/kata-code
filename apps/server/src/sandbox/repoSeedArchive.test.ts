@@ -136,4 +136,25 @@ describe("buildRepoSeedArchive (bounded copy + gitignore subset)", () => {
       });
     });
   });
+
+  it("skips symlinks without following them", async () => {
+    await withTempDir("symlink", async (dir) => {
+      // Create an external target outside the repo root.
+      const outside = await fs.mkdtemp(path.join(os.tmpdir(), "kata-seed-outside-"));
+      try {
+        await fs.writeFile(path.join(outside, "outside.txt"), "outside-content");
+        await fs.writeFile(path.join(dir, "real.txt"), "real-content");
+        // Symlink to an external directory and an external file.
+        await fs.symlink(outside, path.join(dir, "extlink"));
+        await fs.symlink(path.join(outside, "outside.txt"), path.join(dir, "filelink"));
+        const archive = await buildRepoSeedArchive(dir, {});
+        const entries = parseTarEntries(archive);
+        expect(entries.get("real.txt")).toBe("real-content");
+        expect(entries.has("extlink/outside.txt")).toBe(false);
+        expect(entries.has("filelink")).toBe(false);
+      } finally {
+        await fs.rm(outside, { recursive: true, force: true }).catch(() => {});
+      }
+    });
+  });
 });

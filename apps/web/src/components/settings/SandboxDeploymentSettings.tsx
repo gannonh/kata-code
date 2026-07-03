@@ -201,7 +201,8 @@ export function SandboxDeploymentSettings() {
   const handleStart = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
-        const project = resolveSelectedProject(instanceId);
+        const explicitRepositoryKey = selectedRepositoryKeyByInstance[instanceId];
+        const project = explicitRepositoryKey ? resolveSelectedProject(instanceId) : undefined;
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
           return;
@@ -254,7 +255,14 @@ export function SandboxDeploymentSettings() {
           });
         }
       }),
-    [getToken, isSignedIn, openAuthPrompt, resolveSelectedProject, withBusy],
+    [
+      getToken,
+      isSignedIn,
+      openAuthPrompt,
+      resolveSelectedProject,
+      selectedRepositoryKeyByInstance,
+      withBusy,
+    ],
   );
 
   const handleDispose = useCallback(
@@ -876,7 +884,7 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
       </div>
       <DialogFooter>
         <DialogClose render={<Button variant="ghost">Cancel</Button>} />
-        <Button onClick={handleSubmit}>Add target</Button>
+        <Button onClick={handleSubmit}>Add sandbox environment</Button>
       </DialogFooter>
     </DialogPopup>
   );

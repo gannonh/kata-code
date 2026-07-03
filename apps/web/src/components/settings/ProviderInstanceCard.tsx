@@ -183,14 +183,8 @@ export function ProviderEnvironmentSection(props: {
     for (const row of nextRows) {
       const name = row.name.trim();
       if (!ENVIRONMENT_VARIABLE_NAME_PATTERN.test(name)) {
-        if (
-          name.length > 0 ||
-          row.value.length > 0 ||
-          row.sensitive !== true ||
-          row.valueRedacted !== undefined
-        ) {
-          return;
-        }
+        // Skip invalid rows individually rather than aborting the entire
+        // batch, so unrelated valid edits are still published.
         continue;
       }
       const { id: _id, ...rest } = row;

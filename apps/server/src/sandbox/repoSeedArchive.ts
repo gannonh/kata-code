@@ -21,7 +21,6 @@
  */
 // @effect-diagnostics nodeBuiltinImport:off - host-side bounded tar builder uses node:fs for synchronous tree walks; not an Effect FileSystem consumer.
 import * as fs from "node:fs/promises";
-import * as fsSync from "node:fs";
 import * as path from "node:path";
 
 import * as Data from "effect/Data";
@@ -71,7 +70,7 @@ export async function buildRepoSeedArchive(
       message: `seed archive for ${repoRoot} contains no files (everything ignored or empty repo)`,
     });
   }
-  return packUstar(selected);
+  return await packUstar(selected);
 }
 
 // ── File selection (bounded walk + .gitignore subset) ────────────────
@@ -115,7 +114,7 @@ async function selectFiles(
       if (matcher.isIgnored(relativePath)) continue;
       let stat;
       try {
-        stat = await fs.stat(absolutePath);
+        stat = await fs.lstat(absolutePath);
       } catch (cause) {
         throw new SeedArchiveError({
           reason: "read-failed",
@@ -123,6 +122,9 @@ async function selectFiles(
           cause,
         });
       }
+      // Skip symlinks explicitly — lstat detects them without following, so
+      // a symlink to ~/.ssh or an external directory is never archived/copied.
+      if (stat.isSymbolicLink()) continue;
       if (stat.isFile()) {
         if (selected.length >= maxFiles) {
           throw new SeedArchiveError({
@@ -205,7 +207,7 @@ function gitignorePatternToRegex(pattern: string): {
   // against the full repo-relative path.
   const hasSlash = p.includes("/");
   const body = hasSlash || anchored ? re : `(^|/)${re}`;
-  const suffix = dirOnly ? "(/|$)" : "(/|$)";
+  const suffix = dirOnly ? "/" : "(/|$)";
   const source = hasSlash || anchored ? `^${body}${suffix}` : `${body}${suffix}`;
   return { regex: new RegExp(source), negate };
 }
@@ -242,12 +244,12 @@ function createGitignoreMatcher(patterns: ReadonlyArray<string>, _root: string):
  * The archive ends with two 512-byte zero blocks. Docker accepts this for
  * `PUT /containers/{id}/archive`.
  */
-function packUstar(files: ReadonlyArray<SelectedFile>): Uint8Array {
+async function packUstar(files: ReadonlyArray<SelectedFile>): Promise<Uint8Array> {
   const chunks: Buffer[] = [];
   for (const file of files) {
     let content: Buffer;
     try {
-      content = fsSyncRead(file.absolutePath);
+      content = await fs.readFile(file.absolutePath);
     } catch (cause) {
       throw new SeedArchiveError({
         reason: "read-failed",
@@ -264,10 +266,6 @@ function packUstar(files: ReadonlyArray<SelectedFile>): Uint8Array {
   return Buffer.concat(chunks);
 }
 
-function fsSyncRead(p: string): Buffer {
-  return fsSync.readFileSync(p);
-}
-
 /** Build a 512-byte ustar header for a regular file. */
 function makeUstarHeader(relativePath: string, size: number): Buffer {
   const header = Buffer.alloc(512, 0);
@@ -276,7 +274,7 @@ function makeUstarHeader(relativePath: string, size: number): Buffer {
   const nameBuf = Buffer.from(relativePath, "utf8");
   if (nameBuf.length > 100) {
     throw new SeedArchiveError({
-      reason: "read-failed",
+      reason: "limit-exceeded",
       message: `seed archive path too long for ustar (>100 bytes): ${relativePath}`,
     });
   }

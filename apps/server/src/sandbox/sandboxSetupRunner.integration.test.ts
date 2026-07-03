@@ -45,6 +45,17 @@ function assertDockerDaemonReachable(): Effect.Effect<void, Error> {
   });
 }
 
+/** Pull INTEGRATION_IMAGE if absent (idempotent; Docker no-ops when cached). */
+function ensureIntegrationImage(): Effect.Effect<void, Error> {
+  return dockerRequest(
+    `/images/create?fromImage=${encodeURIComponent("alpine")}&tag=${encodeURIComponent("3.20")}`,
+    { method: "POST", timeoutMs: 120_000 },
+  ).pipe(
+    Effect.mapError((err) => new Error(`image pull failed: ${err.message}`)),
+    Effect.asVoid,
+  );
+}
+
 /**
  * Start a long-lived `alpine` container via the raw Engine API and return a
  * `SandboxHandle` for it. The caller MUST remove the container via
@@ -53,6 +64,7 @@ function assertDockerDaemonReachable(): Effect.Effect<void, Error> {
 function startAlpineContainer(label: string): Effect.Effect<SandboxHandle, Error> {
   return Effect.gen(function* () {
     yield* assertDockerDaemonReachable();
+    yield* ensureIntegrationImage();
     const name = `kata-setup-test-${label}-${Date.now()}`;
     const create = yield* dockerRequest("/containers/create", {
       method: "POST",

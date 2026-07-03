@@ -725,9 +725,6 @@ const makeServerSettings = Effect.gen(function* () {
         Stream.map(resolveTextGenerationProvider),
       );
     },
-    get subscribeChanges() {
-      return PubSub.subscribe(changesPubSub);
-    },
   } satisfies ServerSettingsShape;
 });
 

@@ -344,19 +344,23 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await page.keyboard.insertText(secret);
     await expect(secretInput).toHaveValue(secret);
     await secretInput.press("Enter");
-    await page.waitForTimeout(1_000);
+    // Wait for the env-var value to be committed (saved state visible) before proceeding.
+    await expect(editor.getByLabel("Environment variable value 1")).toHaveValue(secret);
 
     await dismissBlockingToasts(page);
     await card.getByRole("button", { name: "Start session" }).click();
     const sessionLine = card.getByText(/Session ready:/);
     await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+
+    // Assert secret redaction BEFORE capturing the screenshot so a regression
+    // can't persist sensitive text into a CI artifact.
+    const progress = card.locator("pre");
+    await expect(progress).not.toContainText(secret);
+
     await page.screenshot({
       path: testInfo.outputPath("phase2-session-ready.png"),
       fullPage: true,
     });
-
-    const progress = card.locator("pre");
-    await expect(progress).not.toContainText(secret);
 
     let containerId = "";
     await expect

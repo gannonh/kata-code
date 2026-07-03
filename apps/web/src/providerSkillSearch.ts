@@ -77,7 +77,7 @@ export function searchProviderSkills(
   const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ });
 
   if (!normalizedQuery) {
-    return [...skills];
+    return skills.slice(0, limit);
   }
 
   const ranked: Array<{

@@ -238,7 +238,7 @@ export const DockerSandboxProvider: SandboxProvider = {
           ),
         );
         // Docker returns 204 (No Content) on a successful archive upload.
-        if (put.status !== 204 && put.status >= 300) {
+        if (put.status >= 300) {
           return yield* new SandboxProviderError({
             reason: "provision-failed",
             message: `copyInto: archive upload ${put.status}: ${put.body.slice(0, 200)}`,

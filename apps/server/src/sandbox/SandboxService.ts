@@ -162,7 +162,7 @@ function buildProvisionEnvironment(input: {
   const env: Array<readonly [string, string]> = [
     ["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", input.bootstrapToken],
   ];
-  const secretValues: string[] = [];
+  const secretValues: string[] = [input.bootstrapToken];
   for (const variable of byName.values()) {
     env.push([variable.name, variable.value]);
     if (variable.sensitive && variable.value.length > 0) {

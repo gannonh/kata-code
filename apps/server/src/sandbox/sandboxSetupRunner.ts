@@ -253,12 +253,13 @@ function launchDetached(
   name: string,
   command: string,
 ): Effect.Effect<void, SandboxProviderError> {
-  const logFile = `/tmp/kata-${slugifyName(name)}.log`;
+  const logFile = `/tmp/kata-${uniqueLogSlug(name)}.log`;
   // Match the detached-exec spike: redirect + background the inner shell command
   // so setsid's child exits promptly and the outer exec returns without waiting.
-  const inner = `${command} > ${logFile} 2>&1 &`;
+  // cwd is /workspace so relative paths resolve against the seeded repo.
+  const inner = `cd ${WORKSPACE} && ${command} > ${logFile} 2>&1 &`;
   const detached = `setsid sh -c ${shellQuote(inner)}`;
-  return driver.exec(handle, detached).pipe(Effect.asVoid);
+  return driver.exec(handle, detached, { cwd: WORKSPACE }).pipe(Effect.asVoid);
 }
 
 /**
@@ -273,4 +274,19 @@ function shellQuote(value: string): string {
 function slugifyName(name: string): string {
   const slug = name.replace(/[^A-Za-z0-9_-]/g, "").toLowerCase();
   return slug.length > 0 ? slug : "process";
+}
+
+/** Unique slug map to avoid log file collisions when names share a slug. */
+const usedLogSlugs = new Map<string, number>();
+
+/** Return a unique slug for a log filename, appending an index on collision. */
+function uniqueLogSlug(name: string): string {
+  const base = slugifyName(name);
+  const count = usedLogSlugs.get(base);
+  if (count === undefined) {
+    usedLogSlugs.set(base, 1);
+    return base;
+  }
+  usedLogSlugs.set(base, count + 1);
+  return `${base}-${count}`;
 }
