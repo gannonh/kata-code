@@ -131,13 +131,17 @@ export function assertMacOsHost(): void {
   }
 }
 
+export function readDockerSocketPath(): string {
+  return process.env.DOCKER_HOST?.replace(/^unix:\/\//, "") ?? "/var/run/docker.sock";
+}
+
 /**
  * Fail loud if the local Docker/OrbStack daemon isn't reachable over the raw
  * Engine API (Unix socket). The `@environments-deploy` container flow provisions
  * real containers, so a missing daemon is a hard prerequisite, not a skip.
  */
 export async function assertDockerDaemonReachable(): Promise<void> {
-  const socketPath = process.env.DOCKER_HOST?.replace(/^unix:\/\//, "") ?? "/var/run/docker.sock";
+  const socketPath = readDockerSocketPath();
   await new Promise<void>((resolve, reject) => {
     const req = request({ socketPath, path: "/_ping", method: "GET", timeout: 3_000 }, (res) => {
       res.resume();
@@ -165,7 +169,7 @@ export async function assertDockerDaemonReachable(): Promise<void> {
  * with a confusing reason. Assert it up front so the failure names the fix.
  */
 export async function assertKatacodeImageBuilt(image = "katacode:local"): Promise<void> {
-  const socketPath = process.env.DOCKER_HOST?.replace(/^unix:\/\//, "") ?? "/var/run/docker.sock";
+  const socketPath = readDockerSocketPath();
   await new Promise<void>((resolve, reject) => {
     const req = request(
       {

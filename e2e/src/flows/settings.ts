@@ -41,7 +41,7 @@ export async function openProviderSettings(page: Page): Promise<void> {
 export async function openConnectionsSettings(page: Page): Promise<void> {
   await openSettings(page);
   await page.getByRole("button", { name: "Connections" }).click();
-  await expect(page.getByRole("button", { name: "Add deployment target" })).toBeVisible({
+  await expect(page.getByRole("button", { name: "Add sandbox environment" })).toBeVisible({
     timeout: E2E_TIMEOUTS.authMs,
   });
 }

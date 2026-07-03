@@ -16,6 +16,7 @@ import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/insta
 import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachability";
 
 import {
+  type SandboxCopyIntoCapability,
   type SandboxExecResult,
   type SandboxHandle,
   type SandboxProvisionRequest,
@@ -40,6 +41,7 @@ const decodeStubConfig = Schema.decodeUnknownSync(StubSandboxConfig);
 export interface StubDriverOptions {
   readonly withSnapshot?: boolean;
   readonly withRenewTimeout?: boolean;
+  readonly withCopyInto?: boolean;
 }
 
 /**
@@ -62,11 +64,16 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
     ? { renewTimeout: () => Effect.void }
     : undefined;
 
+  const copyInto: SandboxCopyIntoCapability | undefined = options.withCopyInto
+    ? { copyInto: () => Effect.void }
+    : undefined;
+
   const descriptor: SandboxProviderDescriptor = {
     kind,
     reachabilityKind: SandboxReachabilityKind.make("loopback"),
     supportsSnapshot: options.withSnapshot === true,
     supportsRenewTimeout: options.withRenewTimeout === true,
+    supportsCopyInto: options.withCopyInto === true,
   };
 
   return {
@@ -109,5 +116,6 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
     describe: () => Effect.succeed(descriptor),
     ...(snapshot !== undefined ? { snapshot } : {}),
     ...(renewTimeout !== undefined ? { renewTimeout } : {}),
+    ...(copyInto !== undefined ? { copyInto } : {}),
   };
 }

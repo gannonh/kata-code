@@ -24,6 +24,7 @@ import * as Schema from "effect/Schema";
 import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/instance";
 import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachability";
 import {
+  type SandboxCopyIntoCapability,
   type SandboxExecResult,
   type SandboxHandle,
   SandboxProviderError,
@@ -34,7 +35,13 @@ import {
 } from "@kata-sh/code-sandbox/driver";
 import type { SandboxProviderDescriptor } from "@kata-sh/code-sandbox/descriptor";
 
-import { dockerRequest, type DockerResponse, DockerEngineError } from "./dockerEngine.ts";
+import {
+  dockerRequest,
+  dockerRequestBuffer,
+  type DockerResponse,
+  type DockerBufferResponse,
+  DockerEngineError,
+} from "./dockerEngine.ts";
 import { DockerSandboxConfig, DEFAULT_DOCKER_CONFIG } from "./config.ts";
 
 export const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
@@ -54,6 +61,55 @@ export interface DockerSandboxHandleState {
 
 const parseJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
 const HEALTHZ_PATH = "/healthz";
+
+/**
+ * Demultiplex a raw Docker Engine exec-start stream into `stdout`/`stderr`.
+ * The hijacked stream is a sequence of frames: an 8-byte header (1 byte stream
+ * type — 1=stdout, 2=stderr — 3 bytes padding, 4-byte big-endian payload
+ * length) followed by that many payload bytes. Stops at the last complete
+ * frame so a truncated tail is ignored defensively rather than crashing.
+ */
+function demultiplexExecStream(buffer: Buffer): {
+  readonly stdout: string;
+  readonly stderr: string;
+} {
+  let stdout = "";
+  let stderr = "";
+  let i = 0;
+  while (i + 8 <= buffer.length) {
+    const streamType = buffer[i];
+    // bytes 1..3 are padding
+    const payloadLength = buffer.readUInt32BE(i + 4);
+    i += 8;
+    if (i + payloadLength > buffer.length) break; // truncated final frame
+    const chunk = buffer.subarray(i, i + payloadLength);
+    i += payloadLength;
+    if (streamType === 1) stdout += chunk.toString("utf8");
+    else if (streamType === 2) stderr += chunk.toString("utf8");
+  }
+  return { stdout, stderr };
+}
+
+/** Wrap a raw binary engine request so its error channel is `SandboxProviderError`. */
+function engineBuffer(
+  path: string,
+  init: {
+    method?: string;
+    body?: string;
+    bodyBytes?: Uint8Array;
+    contentType?: string;
+    hijacked?: boolean;
+  } = {},
+  reason: SandboxProviderError["reason"] = "provision-failed",
+  msg: string,
+): Effect.Effect<DockerBufferResponse, SandboxProviderError> {
+  return dockerRequestBuffer(path, init).pipe(
+    Effect.mapError(
+      (e: DockerEngineError) =>
+        new SandboxProviderError({ reason, message: `${msg}: ${e.message}` }),
+    ),
+  );
+}
 
 /** Wrap a raw engine request so its error channel is `SandboxProviderError`. */
 function engine(
@@ -148,6 +204,48 @@ function waitForReady(hostPort: number): Effect.Effect<void, SandboxProviderErro
 
 export const DockerSandboxProvider: SandboxProvider = {
   kind: DOCKER_KIND,
+
+  /**
+   * Phase 2 seeding capability: upload a host-built tar archive into a running
+   * container at `destPath`. The destination is created first (`mkdir -p` via
+   * exec) because `PUT /containers/{id}/archive` fails on a missing path.
+   * Implemented via the Docker Engine `PUT /containers/{id}/archive` endpoint
+   * with a binary tar body (`Content-Type: application/x-tar`).
+   */
+  copyInto: {
+    copyInto: (handle, archive, destPath) =>
+      Effect.gen(function* () {
+        const state = handle.handle as DockerSandboxHandleState;
+        // Ensure the destination directory exists before uploading; the
+        // `archive` PUT does not create intermediate directories.
+        const mkdir = yield* DockerSandboxProvider.exec(handle, `mkdir -p ${destPath}`);
+        if (mkdir.exitCode !== 0) {
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `copyInto: mkdir -p ${destPath} failed (exit ${mkdir.exitCode}): ${mkdir.stderr}`,
+          });
+        }
+        const put = yield* dockerRequest(
+          `/containers/${state.containerId}/archive?path=${encodeURIComponent(destPath)}`,
+          { method: "PUT", bodyBytes: archive, contentType: "application/x-tar" },
+        ).pipe(
+          Effect.mapError(
+            (e: DockerEngineError) =>
+              new SandboxProviderError({
+                reason: "provision-failed",
+                message: `copyInto: ${e.message}`,
+              }),
+          ),
+        );
+        // Docker returns 204 (No Content) on a successful archive upload.
+        if (put.status >= 300) {
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `copyInto: archive upload ${put.status}: ${put.body.slice(0, 200)}`,
+          });
+        }
+      }),
+  } satisfies SandboxCopyIntoCapability,
 
   validate: (config) =>
     Effect.gen(function* () {
@@ -311,7 +409,7 @@ export const DockerSandboxProvider: SandboxProvider = {
       } satisfies SandboxHandle;
     }),
 
-  exec: (handle, command) =>
+  exec: (handle, command, opts) =>
     Effect.gen(function* () {
       const state = handle.handle as DockerSandboxHandleState;
       // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - Docker Engine exec body, not a typed codec.
@@ -321,6 +419,9 @@ export const DockerSandboxProvider: SandboxProvider = {
           method: "POST",
           body: JSON.stringify({
             Cmd: ["sh", "-c", command],
+            // Phase 2: honor `opts.cwd` so `install` runs in `/workspace`. The
+            // spike verified the Engine API honors `WorkingDir` for exec.
+            ...(opts?.cwd !== undefined ? { WorkingDir: opts.cwd } : {}),
             AttachStdout: true,
             AttachStderr: true,
           }),
@@ -336,11 +437,16 @@ export const DockerSandboxProvider: SandboxProvider = {
       }
       const execId = (parseJson(createExec.body) as { Id: string }).Id;
       // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - Docker Engine exec start body.
-      const startRes = yield* engine(
+      // Read the start response as a raw buffer so the multiplexed stream can
+      // be demultiplexed into clean stdout/stderr (Phase 2 demux fix). The
+      // previous implementation returned the raw framed bytes as `stdout` and
+      // always-empty `stderr`.
+      const startRes = yield* engineBuffer(
         `/exec/${execId}/start`,
         {
           method: "POST",
           body: JSON.stringify({ Detach: false, Tty: false }),
+          hijacked: true,
         },
         "exec-failed",
         "exec start",
@@ -348,9 +454,10 @@ export const DockerSandboxProvider: SandboxProvider = {
       if (startRes.status >= 300) {
         return yield* new SandboxProviderError({
           reason: "exec-failed",
-          message: `exec start: ${startRes.status} ${startRes.body.slice(0, 200)}`,
+          message: `exec start: ${startRes.status}`,
         });
       }
+      const { stdout, stderr } = demultiplexExecStream(startRes.body);
       const exitRes = yield* engine(`/exec/${execId}/json`, {}, "exec-failed", "exec inspect");
       if (exitRes.status >= 300) {
         return yield* new SandboxProviderError({
@@ -359,7 +466,7 @@ export const DockerSandboxProvider: SandboxProvider = {
         });
       }
       const exitCode = Number((parseJson(exitRes.body) as { ExitCode?: number }).ExitCode ?? 0);
-      return { exitCode, stdout: startRes.body, stderr: "" } satisfies SandboxExecResult;
+      return { exitCode, stdout, stderr } satisfies SandboxExecResult;
     }),
 
   reachability: (handle) => {
@@ -403,6 +510,7 @@ export const DockerSandboxProvider: SandboxProvider = {
       reachabilityKind: SandboxReachabilityKind.make("loopback"),
       supportsSnapshot: false,
       supportsRenewTimeout: false,
+      supportsCopyInto: true,
       baseImages: [DEFAULT_DOCKER_CONFIG.image],
     } satisfies SandboxProviderDescriptor),
 };

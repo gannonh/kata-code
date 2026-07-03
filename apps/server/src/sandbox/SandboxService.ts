@@ -1,5 +1,5 @@
 /**
- * `SandboxService` — server-side orchestration for sandbox deployment targets.
+ * `SandboxService` — server-side orchestration for sandbox environments.
  * Builds a `SandboxProviderRegistry` with the Docker driver registered,
  * materializes instances from settings, and implements the `sandbox.*` RPC
  * handlers: list, test connection (streaming), start session (provision +
@@ -37,6 +37,11 @@ import {
   type SandboxProviderInstanceConfigMap,
   SandboxProviderInstanceId,
 } from "@kata-sh/code-contracts/sandboxProviderInstance";
+import type {
+  ProviderInstanceEnvironment,
+  ProviderInstanceEnvironmentVariable,
+} from "@kata-sh/code-contracts";
+import { RepositoryCanonicalKey } from "@kata-sh/code-contracts";
 import {
   type SandboxInstanceSummary,
   type SandboxStartSessionInput,
@@ -63,6 +68,8 @@ import {
 import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
 import { relayUrlConfig } from "../cloud/publicConfig.ts";
+import { EnvironmentConfigLoadError, loadEnvironmentConfig } from "./environmentConfigLoader.ts";
+import { type SetupProcessRecord, SetupFailed, runSandboxSetup } from "./sandboxSetupRunner.ts";
 
 /** A sandbox `AdvertisedEndpointProvider` (manual kind; container-sourced). */
 const SANDBOX_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
@@ -121,6 +128,67 @@ function either<A, E>(
     onFailure: (left) => Effect.succeed<{ _tag: "Left"; left: E }>({ _tag: "Left", left }),
     onSuccess: (right) => Effect.succeed<{ _tag: "Right"; right: A }>({ _tag: "Right", right }),
   });
+}
+
+/** Map a loader failure to the RPC error channel. */
+function mapLoadError(e: EnvironmentConfigLoadError): SandboxRpcError {
+  return new SandboxRpcError({ reason: "invalid-config", message: e.message });
+}
+
+/** Map a setup-runner failure to the RPC error channel. */
+function mapSetupFailed(e: SetupFailed): SandboxRpcError {
+  return new SandboxRpcError({
+    reason: "provision-failed",
+    message: `Setup failed (${e.stage}): ${e.message}`,
+  });
+}
+
+/** Collect provision env tuples and secret values for setup-output redaction. */
+function buildProvisionEnvironment(input: {
+  readonly bootstrapToken: string;
+  readonly instanceEnvironment?: ProviderInstanceEnvironment | undefined;
+  readonly savedEnvironment?: ProviderInstanceEnvironment | undefined;
+}): {
+  readonly env: ReadonlyArray<readonly [string, string]>;
+  readonly secretValues: ReadonlyArray<string>;
+} {
+  const byName = new Map<string, ProviderInstanceEnvironmentVariable>();
+  for (const variable of input.instanceEnvironment ?? []) {
+    byName.set(variable.name, variable);
+  }
+  for (const variable of input.savedEnvironment ?? []) {
+    byName.set(variable.name, variable);
+  }
+  const env: Array<readonly [string, string]> = [
+    ["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", input.bootstrapToken],
+  ];
+  const secretValues: string[] = [input.bootstrapToken];
+  for (const variable of byName.values()) {
+    env.push([variable.name, variable.value]);
+    if (variable.sensitive && variable.value.length > 0) {
+      secretValues.push(variable.value);
+    }
+  }
+  return { env, secretValues };
+}
+
+/** Dispose a provisioned sandbox after a post-provision failure. */
+function disposeAfterFailure(
+  sessionKey: string,
+  driver: SandboxProvider,
+  handle: SandboxHandle,
+): Effect.Effect<void, never> {
+  return Effect.sync(() => runningSessions.delete(sessionKey)).pipe(
+    Effect.andThen(
+      driver.dispose(handle).pipe(
+        Effect.catch((disposeError) =>
+          Effect.logWarning("Could not dispose sandbox after startSession failure", {
+            cause: disposeError,
+          }),
+        ),
+      ),
+    ),
+  );
 }
 
 /** Map a driver `SandboxProviderError` to the RPC `SandboxRpcError`. */
@@ -259,7 +327,7 @@ function exchangeBootstrapToken(input: {
     subject_token_type: AuthEnvironmentBootstrapTokenType,
     requested_token_type: AuthAccessTokenType,
     scope: encodeOAuthScope(AuthAdministrativeScopes),
-    client_label: "Kata Code deployment target",
+    client_label: "Kata Code sandbox environment",
     client_device_type: "desktop",
   });
   return fetchJson(AuthAccessTokenResult, `${input.httpBaseUrl}/oauth/token`, {
@@ -397,6 +465,7 @@ const RelayConfigResponse = Schema.Struct({ ok: Schema.Boolean });
 interface RunningSession {
   readonly handle: SandboxHandle;
   readonly driver: SandboxProvider;
+  readonly setupProcesses: ReadonlyArray<SetupProcessRecord>;
 }
 
 /** In-memory map of running sessions (instanceId → handle + driver). Phase 1; not durable. */
@@ -518,7 +587,10 @@ export const SandboxServiceLive = {
   startSession: (
     instanceId: SandboxProviderInstanceId,
     settings: ServerSettings,
-    options?: { readonly connectAuthToken?: SandboxStartSessionInput["connectAuthToken"] },
+    options?: {
+      readonly connectAuthToken?: SandboxStartSessionInput["connectAuthToken"];
+      readonly repository?: SandboxStartSessionInput["repository"];
+    },
   ) =>
     Effect.gen(function* () {
       // Idempotency guard: a concurrent `startSession` for the same instance
@@ -529,7 +601,7 @@ export const SandboxServiceLive = {
       if (runningSessions.has(sessionKey) || startingSessions.has(sessionKey)) {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
-          message: "A session is already running for this deployment target.",
+          message: "A session is already running for this sandbox environment.",
         });
       }
       startingSessions.add(sessionKey);
@@ -551,28 +623,77 @@ export const SandboxServiceLive = {
         // Per-session Kata WebSocket auth token (required for non-loopback clients).
         // @effect-diagnostics-next-line effect(globalDateInEffect):off - random token, not a clock read.
         const bootstrapToken = NodeCrypto.randomBytes(24).toString("hex");
+
+        const savedEnvKey =
+          options?.repository !== undefined
+            ? RepositoryCanonicalKey.make(options.repository.repositoryIdentity.canonicalKey)
+            : undefined;
+        const savedEnv =
+          savedEnvKey !== undefined ? settings.savedSandboxEnvironments[savedEnvKey] : undefined;
+
+        const { env, secretValues } = buildProvisionEnvironment({
+          bootstrapToken,
+          instanceEnvironment: config.environment,
+          savedEnvironment: savedEnv?.environment,
+        });
+
         const handle = yield* inst.driver
           .provision({
             instanceId: instanceId as string,
             config: inst.config,
             image: resolveProvisionImage(inst.config),
-            env: [["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", bootstrapToken]],
+            env,
           })
           .pipe(Effect.mapError(mapDriverError));
-        runningSessions.set(sessionKey, { handle, driver: inst.driver });
-        const reach = yield* inst.driver.reachability(handle, 13773).pipe(
-          Effect.mapError(mapDriverError),
-          Effect.catch((error: SandboxRpcError) =>
-            Effect.sync(() => runningSessions.delete(sessionKey)).pipe(
-              Effect.andThen(
-                inst.driver.dispose(handle).pipe(
-                  Effect.catch((disposeError) =>
-                    Effect.logWarning("Could not dispose sandbox after reachability failure", {
-                      cause: disposeError,
-                    }),
+
+        let setupProcesses: ReadonlyArray<SetupProcessRecord> = [];
+        if (options?.repository !== undefined) {
+          // The container is already provisioned and running at this point, so a
+          // loader failure (a malformed .kata/environment.json) must dispose it
+          // the same way every other post-provision failure in this function
+          // does; otherwise a bad repo-local config file orphans a running
+          // container with no handle retained anywhere to dispose it later.
+          const loaded = yield* loadEnvironmentConfig({
+            repoRoot: options.repository.repoRoot,
+            repositoryIdentity: options.repository.repositoryIdentity,
+            savedSandboxEnvironments: settings.savedSandboxEnvironments,
+          }).pipe(
+            Effect.mapError(mapLoadError),
+            Effect.catch((error: SandboxRpcError) =>
+              disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+                Effect.andThen(Effect.fail(error)),
+              ),
+            ),
+          );
+
+          const setup = yield* runSandboxSetup({
+            driver: inst.driver,
+            handle,
+            resolved: loaded.resolved,
+            secretValues,
+            seed: { repoRoot: options.repository.repoRoot },
+          }).pipe(
+            Effect.catch((error: SetupFailed | SandboxProviderError) =>
+              // Reuse the canonical post-provision dispose helper. The
+              // session is not in `runningSessions` yet at this point, so the
+              // helper's `runningSessions.delete` is a harmless no-op here.
+              disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    error._tag === "SetupFailed" ? mapSetupFailed(error) : mapDriverError(error),
                   ),
                 ),
               ),
+            ),
+          );
+          setupProcesses = setup.processes;
+        }
+
+        runningSessions.set(sessionKey, { handle, driver: inst.driver, setupProcesses });
+        const reach = yield* inst.driver.reachability(handle, 13773).pipe(
+          Effect.mapError(mapDriverError),
+          Effect.catch((error: SandboxRpcError) =>
+            disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
               Effect.andThen(Effect.fail(error)),
             ),
           ),
@@ -598,19 +719,7 @@ export const SandboxServiceLive = {
           connectAuthToken: options?.connectAuthToken,
         }).pipe(
           Effect.catch((error: SandboxRpcError) =>
-            Effect.sync(() => runningSessions.delete(sessionKey)).pipe(
-              Effect.andThen(
-                inst.driver.dispose(handle).pipe(
-                  Effect.catch((disposeError) =>
-                    Effect.logWarning(
-                      "Could not dispose sandbox after Connect registration failure",
-                      {
-                        cause: disposeError,
-                      },
-                    ),
-                  ),
-                ),
-              ),
+            disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
               Effect.andThen(
                 Effect.fail(
                   new SandboxRpcError({

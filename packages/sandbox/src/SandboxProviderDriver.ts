@@ -106,6 +106,22 @@ export interface SandboxRenewTimeoutCapability {
 }
 
 /**
+ * Optional capability: copy a tar archive into a running sandbox (Phase 2).
+ * Used to seed a repo working tree at `/workspace` before `install`/`start`.
+ * The driver receives a host-built tar blob and a destination path; a driver
+ * lacking this capability cannot be seeded (cloud drivers in Phase 3 seed via
+ * git clone or native upload, so the capability is genuinely driver-specific,
+ * not portable through `exec`). Absent ⇒ `describe().supportsCopyInto === false`.
+ */
+export interface SandboxCopyIntoCapability {
+  copyInto(
+    handle: SandboxHandle,
+    archive: Uint8Array,
+    destPath: string,
+  ): Effect.Effect<void, SandboxProviderError>;
+}
+
+/**
  * `SandboxProvider` — the frozen driver SPI.
  *
  * Required (every driver implements): `kind`, `validate`, `provision`, `exec`,
@@ -113,7 +129,8 @@ export interface SandboxRenewTimeoutCapability {
  *
  * Optional (driver may omit; registry exposes presence via `describe()` and
  * callers guard with capability checks): `snapshot` (snapshot lifecycle),
- * `renewTimeout` (extend session).
+ * `renewTimeout` (extend session), `copyInto` (seed a repo archive into the
+ * sandbox — Phase 2).
  */
 export interface SandboxProvider {
   readonly kind: SandboxProviderDriverKind;
@@ -140,6 +157,8 @@ export interface SandboxProvider {
   readonly snapshot?: SandboxSnapshotCapability;
   /** Optional renew-timeout capability. Absent ⇒ `describe().supportsRenewTimeout === false`. */
   readonly renewTimeout?: SandboxRenewTimeoutCapability;
+  /** Optional copy-into capability (Phase 2 seeding). Absent ⇒ `describe().supportsCopyInto === false`. */
+  readonly copyInto?: SandboxCopyIntoCapability;
 }
 
 /**

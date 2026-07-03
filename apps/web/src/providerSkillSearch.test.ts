@@ -48,12 +48,22 @@ describe("searchProviderSkills", () => {
     expect(searchProviderSkills(skills, "gfc").map((skill) => skill.name)).toEqual(["gh-fix-ci"]);
   });
 
-  it("omits disabled skills from results", () => {
+  it("includes disable-model-invocation skills in $-token autocomplete results", () => {
     const skills = [
       makeSkill({ name: "ui", displayName: "Ui", enabled: false }),
       makeSkill({ name: "frontend-design", displayName: "Frontend Design" }),
     ];
 
-    expect(searchProviderSkills(skills, "ui").map((skill) => skill.name)).toEqual([]);
+    expect(searchProviderSkills(skills, "ui").map((skill) => skill.name)).toEqual(["ui"]);
+  });
+
+  it("honors limit on the blank-query fast path", () => {
+    const skills = [
+      makeSkill({ name: "alpha", displayName: "Alpha" }),
+      makeSkill({ name: "beta", displayName: "Beta" }),
+      makeSkill({ name: "gamma", displayName: "Gamma" }),
+    ];
+
+    expect(searchProviderSkills(skills, "", 2)).toHaveLength(2);
   });
 });

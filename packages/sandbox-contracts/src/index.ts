@@ -6,6 +6,7 @@
  * `SandboxSessionState`, `SandboxReachabilityKind`). No runtime logic.
  */
 export * from "./instance.ts";
+export * from "@kata-sh/code-contracts/savedSandboxEnvironment";
 export * from "./environmentConfig.ts";
 export * from "./sessionState.ts";
 export * from "./reachability.ts";

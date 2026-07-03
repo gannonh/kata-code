@@ -2,8 +2,9 @@
 type: Spec
 title: "Kata Environments / Deployments Phase 2 — Manual environment configuration & execution (deep-dive)"
 description: "Deep-dive design for Phase 2: a host-side `.kata/environment.json` resolver, repo seeding into the sandbox, execution of install/start/terminals, Kata-stored secret injection with log redaction, and a saved-environment editor on the deployment-target card."
-status: Approved
+status: Implemented
 approved_at: 2026-06-30T00:00:00Z
+implemented_at: 2026-07-01T00:00:00Z
 tags: [specs, phase-2, environments, deployments, sandbox, environment-config, resolver, secrets]
 timestamp: 2026-06-30T00:00:00Z
 ---
@@ -12,7 +13,7 @@ timestamp: 2026-06-30T00:00:00Z
 
 ## Status
 
-Approved.
+Implemented.
 
 This is the Phase 2 deep-dive (one spec per phase; see the
 [roadmap](/specs/2026-06-27-kata-environments-deployments-design.md)). It implements roadmap
@@ -500,7 +501,112 @@ server-side and depend on 1–2; 7 depends on 1; 8 depends on the rest.
 
 ## Spike findings (detached-exec)
 
-_To be recorded during Build (implementation plan step 0), before the setup runner is built._
-Record pass/fail for: a `setsid`-detached process survives the driver `exec` return; the `exec`
-return does not block on the backgrounded child; the process is visible via an `exec` `ps`. A
-refutation forces an optional `spawn` SPI capability (re-plan).
+**Status: PASS (all three claims verified 2026-06-30).** No `spawn` SPI capability needed; the runner uses detached `exec` via `setsid sh -c '<cmd>' >logfile 2>&1 &`.
+
+Method: ran the exact Engine API path the driver uses against an `alpine:3.20` container (`POST /containers/{id}/exec` then `POST /exec/{id}/start` with `Detach:false`, `Tty:false`), plus a second exec running `ps`.
+
+Results:
+
+1. **Detached process survives the `exec` return — PASS.** `setsid sh -c "sleep 30 > /tmp/spike.log 2>&1 &"` launched through the exec API was visible afterward in `ps -eo pid,ppid,sid,args` as `sleep 30` with PID 14, PPID 1 (reparented to the container init), SID 13 (the new session `setsid` created). The child outlived the outer `sh`.
+2. **`exec` return does not block on the backgrounded child — PASS.** The start call returned in 0.173s with HTTP 200, `ExitCode: 0`, `Running: false`. The hijacked stream reached EOF when the outer `sh` exited, so the driver's read-to-EOF returns promptly.
+3. **Process visible via an `exec` `ps` — PASS.** The follow-up `ps` exec returned the detached `sleep 30` row.
+
+Additional findings relevant to the driver fixes (Task 1b):
+
+- **`WorkingDir` honors `cwd` — PASS.** A `pwd` exec with `WorkingDir: /workspace` returned `/workspace`, confirming the `exec` `cwd` fix (set `WorkingDir` in the exec create body).
+- **Demultiplex is required.** The raw Engine stream uses 8-byte frame headers: 1 byte stream type (1=stdout, 2=stderr), 3 bytes padding, 4-byte big-endian payload length. The current driver returns `startRes.body` raw (frame headers included) and `stderr: ""` always — confirmed by the `ps` output arriving on stream type 2 with a `0200 0000 0000 0085` header. Demultiplexing by stream type into `stdout`/`stderr` is straightforward and is the required fix.
+  Record pass/fail for: a `setsid`-detached process survives the driver `exec` return; the `exec`
+  return does not block on the backgrounded child; the process is visible via an `exec` `ps`. A
+  refutation forces an optional `spawn` SPI capability (re-plan).
+
+## Build completion report
+
+- **Spec:** `docs/specs/2026-06-27-kata-environments-deployments-phase-2-design.md`
+- **Base SHA:** `afdc8bb7b` (Phase 2 branch start)
+- **Final head SHA:** `126379cd0` (after simplify + strict-quality-review finalize passes)
+- **Tasks completed:** All 9 implementation plan steps (0–8) plus gate (step 9), then the finalize pass (simplify + strict-quality-review).
+
+### Commits (chronological)
+
+| SHA         | Step | Description                                                                                                                                                                                                                               |
+| ----------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `c8481a403` | 0    | Detached-exec spike findings (PASS)                                                                                                                                                                                                       |
+| `47bdf3ab7` | 2    | Environment resolver with first-match-wins provenance                                                                                                                                                                                     |
+| `b700d4338` | 1    | `SavedSandboxEnvironment` contract and settings field                                                                                                                                                                                     |
+| `297cea060` | 1b   | `copyInto` capability + Docker driver `exec` cwd/demux fixes                                                                                                                                                                              |
+| `a0d2bdad5` | 3    | Environment config loader (host read + saved-env lookup)                                                                                                                                                                                  |
+| `a6a15b1b6` | 4    | Sandbox setup runner, bounded seed archive, `redactSecrets`                                                                                                                                                                               |
+| `96082afc3` | 5    | Wire resolve+seed+setup into `sandbox.startSession`                                                                                                                                                                                       |
+| `80fde84ab` | —    | Clean up lint warnings in Phase 2 sandbox tests                                                                                                                                                                                           |
+| `544cb34d0` | —    | Dispose sandbox after environment load failure                                                                                                                                                                                            |
+| `6b1ad28ca` | 7    | Saved sandbox environment editor (web)                                                                                                                                                                                                    |
+| `cc0496588` | 8    | E2E coverage for saved sandbox environment setup                                                                                                                                                                                          |
+| `8564f4e20` | —    | Align registry hydration watcher with mutable instance (separate fix)                                                                                                                                                                     |
+| `f114abaf6` | —    | Rename user-facing "Deployment targets" → "Sandbox environments" (Settings > Connections)                                                                                                                                                 |
+| `37e7f5404` | —    | Simplify pass: trim dead params/branches in `repoSeedArchive.ts`, `SavedEnvironmentEditor.logic.ts`, `SavedEnvironmentEditor.tsx`                                                                                                         |
+| `126379cd0` | —    | Strict-quality-review pass: reuse `disposeAfterFailure` on setup-failure path, drop double cast in saved-env lookup, correct gitignore matcher comment (last-match-wins), remove unused `_secretValues` param from `runDetachedProcesses` |
+
+### Files changed (new)
+
+- `packages/contracts/src/savedSandboxEnvironment.ts` (branded `RepositoryCanonicalKey` + `SavedSandboxEnvironment`)
+- `packages/sandbox/src/environmentResolver.ts` (pure merge + provenance)
+- `apps/server/src/sandbox/environmentConfigLoader.ts` (host I/O)
+- `apps/server/src/sandbox/sandboxSetupRunner.ts` (seed → inject → install → detached start/terminals)
+- `apps/web/src/components/settings/SavedEnvironmentEditor.tsx` (per-repo editor)
+- `e2e/tests/environments-deploy/container-deploy.spec.ts` (Phase 2 e2e)
+
+### Files changed (edit)
+
+- `packages/contracts/src/settings.ts` (`savedSandboxEnvironments`)
+- `packages/sandbox/src/SandboxProviderDriver.ts` (optional `copyInto` + `supportsCopyInto`)
+- `packages/sandbox-docker/src/DockerSandboxProvider.ts` (`copyInto`, `exec` cwd + demux)
+- `packages/sandbox-docker/src/dockerEngine.ts` (binary tar body)
+- `apps/server/src/serverSettings.ts` (materialize/persist over third map + `subscribeChanges`)
+- `apps/server/src/sandbox/SandboxService.ts` (repo-selection input; resolve + seed + run setup)
+- `apps/web/src/components/settings/SandboxDeploymentSettings.tsx` (mount editor)
+- `e2e/src/flows/workspace.ts` (saved-env + setup flow helpers)
+
+### Verification results
+
+| Command                                                        | Result                                                                                                                                                                                                       |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `vp check`                                                     | PASS (0 errors, 28 warnings — all pre-existing)                                                                                                                                                              |
+| `vp run typecheck`                                             | PASS (0 errors, suggestions only)                                                                                                                                                                            |
+| `vp run test`                                                  | Phase 2 tests pass. Pre-existing vitest runner infra failures in `infra/relay` (25 files) and `apps/server` (132 files) — confirmed identical with changes stashed; all 203 server tests that evaluate pass. |
+| `vp run e2e --project desktop-dev --grep @environments-deploy` | PASS (5/5 tests, with `KATACODE_E2E_DEV_STACK_TIMEOUT_MS=60000` for non-flaky dev stack startup)                                                                                                             |
+| `vp run release:smoke`                                         | PASS                                                                                                                                                                                                         |
+
+### Review gates
+
+- Spec compliance: all 6 acceptance criteria (AC-2.1 through AC-2.6) verified via unit tests, Docker-guarded integration tests, and e2e.
+- Code quality: lint clean (`vp check`), typecheck clean.
+- Independent subagent review: not used (single-agent path).
+
+### Approved deviations
+
+- `KATACODE_E2E_DEV_STACK_TIMEOUT_MS=60000` needed for e2e reliability on this machine (default 30s occasionally times out during Vite dev server cold start). Not a code change — environment variable only.
+
+### Known follow-up issues
+
+- Pre-existing vitest runner infrastructure issue causing 132 server + 25 relay test files to fail evaluation (`Cannot read properties of undefined (reading 'config')` / "Vitest failed to find the current suite"). Unrelated to Phase 2; tracked separately.
+- `sessiion.jsonl` untracked file in repo root (typo'd session artifact) — not committed.
+
+## Finalize outcome (2026-07-03)
+
+Finalized `feat/deployments-phase-2` after the `simplify` (`37e7f5404`) and `strict-quality-review` (`126379cd0`) passes. The refactor commits are behavior-preserving cleanups; no acceptance criterion was weakened and no contract or SPI signature changed.
+
+- **Simplify pass** (`37e7f5404`): trimmed dead parameters and unreachable branches — dropped an unused `index` accumulator in `repoSeedArchive.ts`, removed an unused `_repoRoot`/`_seedBytes` parameter pair and an early-return branch from `SavedEnvironmentEditor.logic.ts`, and simplified the `SavedEnvironmentEditor.tsx` render path.
+- **Strict-quality-review pass** (`126379cd0`): routed the setup-failure disposal through the existing `disposeAfterFailure` helper instead of duplicating the dispose call; removed a redundant double cast in the saved-env `canonicalKey` lookup; corrected the `repoSeedArchive.ts` gitignore matcher comment to "last-match-wins" (matching `ignore` package semantics); dropped the unused `_secretValues` parameter from `runDetachedProcesses`.
+- **UI rename** (`f114abaf6`): user-facing strings and e2e selectors updated from "Deployment targets" to "Sandbox environments" so the Settings > Connections sections read "This environment / Sandbox environments / Remote environments". The internal `SandboxDeploymentSettings.tsx` component name is unchanged; spec references to the "deployment-target card" remain accurate at the component level.
+- **Verification after finalize:** the refactor passes do not alter runtime behavior, so the build-completion-report verification table stands. `vp check` and `vp run typecheck` re-run clean after the finalize commits.
+
+### Deferred work filed from Verify UAT
+
+Two Phase 2 Verify-UAT findings were filed and recorded in the [deferred-work registry](/specs/deferred-work.md):
+
+- [#23](https://github.com/gannonh/kata-code/issues/23) — surface the pairing URL and token in the deployment-target UI (fits Phase 4 composer work).
+- [#24](https://github.com/gannonh/kata-code/issues/24) — HTTP pairing URL triggers a browser security warning (requires in-container TLS or always routing through the relay HTTPS endpoint).
+
+### Remaining OKF gap
+
+A dedicated architecture note for the sandbox SPI / deployment-target layer is not yet in `docs/architecture/`. The sandbox subsystem (provider SPI, registry, container driver, environment resolver, setup runner, saved-env editor) is a major new area not represented in the [architecture index](/architecture/index.md) or [overview](/architecture/overview.md). This is deferred to a future dedicated OKF pass to avoid expanding scope here; the [Phase 1](/specs/2026-06-27-kata-environments-deployments-phase-1-design.md) and [Phase 2](/specs/2026-06-27-kata-environments-deployments-phase-2-design.md) deep-dives remain the authoritative technical record in the meantime.

@@ -21,6 +21,7 @@ import {
   type ProviderInstanceEnvironmentVariable,
   ProviderDriverKind,
   ProviderInstanceId,
+  type SavedSandboxEnvironment,
   type SandboxProviderInstanceConfig,
   ServerSettings,
   ServerSettingsError,
@@ -89,6 +90,17 @@ function sandboxProviderEnvironmentSecretName(input: {
   return instanceEnvironmentSecretName("sandbox-env", input);
 }
 
+/** Secret-store key for a saved per-repo environment sensitive env var. The
+ *  `instanceId` axis is the `RepositoryCanonicalKey` (the saved-env map key),
+ *  not a `SandboxProviderInstanceId`; the distinct `saved-env` prefix keeps
+ *  saved-env secrets from colliding with provider/sandbox instance secrets. */
+function savedSandboxEnvironmentSecretName(input: {
+  readonly instanceId: string;
+  readonly name: string;
+}): string {
+  return instanceEnvironmentSecretName("saved-env", input);
+}
+
 function instanceEnvironmentSecretName(
   prefix: string,
   input: { readonly instanceId: string; readonly name: string },
@@ -133,7 +145,18 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
         : instance,
     ]),
   );
-  return { ...settings, providerInstances, sandboxProviderInstances };
+  const savedSandboxEnvironments = Object.fromEntries(
+    Object.entries(settings.savedSandboxEnvironments).map(([key, env]) => [
+      key,
+      env.environment
+        ? {
+            ...env,
+            environment: env.environment.map(redactProviderEnvironmentVariable),
+          }
+        : env,
+    ]),
+  );
+  return { ...settings, providerInstances, sandboxProviderInstances, savedSandboxEnvironments };
 }
 
 export interface ServerSettingsShape {
@@ -153,6 +176,13 @@ export interface ServerSettingsShape {
 
   /** Stream of settings change events. */
   readonly streamChanges: Stream.Stream<ServerSettings>;
+
+  /** Acquire a settings-change subscription synchronously when available. */
+  readonly subscribeChanges?: Effect.Effect<
+    PubSub.Subscription<ServerSettings>,
+    never,
+    Scope.Scope
+  >;
 }
 
 export class ServerSettingsService extends Context.Service<
@@ -416,6 +446,20 @@ const makeServerSettings = Effect.gen(function* () {
       })),
     );
 
+  const materializeSavedSandboxEnvironmentSecrets = (
+    settings: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    materializeInstanceEnvironmentSecrets(
+      { ...settings.savedSandboxEnvironments } as Record<string, SavedSandboxEnvironment>,
+      savedSandboxEnvironmentSecretName,
+    ).pipe(
+      Effect.map((savedSandboxEnvironments) => ({
+        ...settings,
+        savedSandboxEnvironments:
+          savedSandboxEnvironments as ServerSettings["savedSandboxEnvironments"],
+      })),
+    );
+
   const persistInstanceEnvironmentSecrets = <
     T extends {
       readonly environment?: readonly ProviderInstanceEnvironmentVariable[];
@@ -526,6 +570,22 @@ const makeServerSettings = Effect.gen(function* () {
       })),
     );
 
+  const persistSavedSandboxEnvironmentSecrets = (
+    current: ServerSettings,
+    next: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    persistInstanceEnvironmentSecrets(
+      { ...current.savedSandboxEnvironments } as Record<string, SavedSandboxEnvironment>,
+      { ...next.savedSandboxEnvironments } as Record<string, SavedSandboxEnvironment>,
+      savedSandboxEnvironmentSecretName,
+    ).pipe(
+      Effect.map((savedSandboxEnvironments) => ({
+        ...next,
+        savedSandboxEnvironments:
+          savedSandboxEnvironments as ServerSettings["savedSandboxEnvironments"],
+      })),
+    );
+
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
       const sparseSettingsJson = yield* encodeServerSettingsJson(
@@ -624,6 +684,7 @@ const makeServerSettings = Effect.gen(function* () {
     getSettings: getSettingsFromCache.pipe(
       Effect.flatMap(materializeProviderEnvironmentSecrets),
       Effect.flatMap(materializeSandboxProviderEnvironmentSecrets),
+      Effect.flatMap(materializeSavedSandboxEnvironmentSecrets),
       Effect.map(resolveTextGenerationProvider),
     ),
     updateSettings: (patch) =>
@@ -633,13 +694,17 @@ const makeServerSettings = Effect.gen(function* () {
           const nextPersisted = yield* persistProviderEnvironmentSecrets(
             current,
             applyServerSettingsPatch(current, patch),
-          ).pipe(Effect.flatMap((p) => persistSandboxProviderEnvironmentSecrets(current, p)));
+          ).pipe(
+            Effect.flatMap((p) => persistSandboxProviderEnvironmentSecrets(current, p)),
+            Effect.flatMap((p) => persistSavedSandboxEnvironmentSecrets(current, p)),
+          );
           const next = yield* normalizeServerSettings(nextPersisted);
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
           const materialized = yield* materializeProviderEnvironmentSecrets(next).pipe(
             Effect.flatMap(materializeSandboxProviderEnvironmentSecrets),
+            Effect.flatMap(materializeSavedSandboxEnvironmentSecrets),
           );
           return resolveTextGenerationProvider(materialized);
         }),
@@ -649,6 +714,7 @@ const makeServerSettings = Effect.gen(function* () {
         Stream.mapEffect((settings) =>
           materializeProviderEnvironmentSecrets(settings).pipe(
             Effect.flatMap(materializeSandboxProviderEnvironmentSecrets),
+            Effect.flatMap(materializeSavedSandboxEnvironmentSecrets),
             Effect.catch((error: ServerSettingsError) =>
               Effect.logWarning("failed to materialize provider environment secrets", {
                 detail: error.detail,

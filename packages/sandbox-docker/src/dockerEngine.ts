@@ -34,10 +34,26 @@ export interface DockerResponse {
   readonly body: string;
 }
 
+/** Response with a raw binary body (used for the multiplexed exec stream). */
+export interface DockerBufferResponse {
+  readonly status: number;
+  readonly body: Buffer;
+}
+
 /** Issue a Docker Engine API request over the Unix socket. */
 export function dockerRequest(
   path: string,
-  init: { method?: string; body?: string; socketPath?: string; timeoutMs?: number } = {},
+  init: {
+    method?: string;
+    /** JSON string body (sets `Content-Type: application/json`). */
+    body?: string;
+    /** Binary body (e.g. a tar archive). When set, `contentType` defaults to `application/x-tar`. */
+    bodyBytes?: Uint8Array;
+    /** `Content-Type` for a `bodyBytes` request (ignored for JSON `body`). */
+    contentType?: string;
+    socketPath?: string;
+    timeoutMs?: number;
+  } = {},
 ): Effect.Effect<DockerResponse, DockerEngineError> {
   const socketPath = init.socketPath ?? resolveDockerSocket();
   const timeoutMs = init.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -54,7 +70,12 @@ export function dockerRequest(
                   "Content-Type": "application/json",
                   "Content-Length": Buffer.byteLength(init.body),
                 }
-              : {},
+              : init.bodyBytes
+                ? {
+                    "Content-Type": init.contentType ?? "application/x-tar",
+                    "Content-Length": Buffer.byteLength(init.bodyBytes),
+                  }
+                : {},
             timeout: timeoutMs,
           },
           (res) => {
@@ -75,6 +96,92 @@ export function dockerRequest(
           reject(err instanceof DockerEngineError ? err : new DockerEngineError(err.message)),
         );
         if (init.body) req.write(init.body);
+        else if (init.bodyBytes) req.write(Buffer.from(init.bodyBytes));
+        req.end();
+      }),
+    catch: (err) => (err instanceof DockerEngineError ? err : new DockerEngineError(String(err))),
+  });
+}
+
+/**
+ * Issue a Docker Engine API request and return the response body as a raw
+ * `Buffer`. Used for the multiplexed exec stream, where the bytes are framed
+ * (8-byte headers per Docker's hijacked stream protocol) and must not be
+ * utf8-decoded before demultiplexing.
+ */
+export function dockerRequestBuffer(
+  path: string,
+  init: {
+    method?: string;
+    body?: string;
+    bodyBytes?: Uint8Array;
+    contentType?: string;
+    socketPath?: string;
+    timeoutMs?: number;
+    /** Hijacked Docker attach stream (e.g. `POST /exec/{id}/start`). Disables the
+     *  socket inactivity timeout and sets `Connection: close` so the stream
+     *  resolves when the exec process exits instead of waiting for idle timeout. */
+    hijacked?: boolean;
+  } = {},
+): Effect.Effect<DockerBufferResponse, DockerEngineError> {
+  const socketPath = init.socketPath ?? resolveDockerSocket();
+  const hijacked = init.hijacked ?? false;
+  // Hijacked exec streams must not use the default inactivity timeout: a
+  // detached/quick-exiting process can leave the socket idle while the
+  // connection stays open, and a long-running foreground exec may emit no
+  // bytes for longer than the default window. The stream ends when the
+  // exec'd process exits (or the connection closes).
+  const timeoutMs = hijacked ? 0 : (init.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  return Effect.tryPromise({
+    try: () =>
+      new Promise<DockerBufferResponse>((resolve, reject) => {
+        const req = http.request(
+          {
+            socketPath,
+            path,
+            method: init.method ?? "GET",
+            headers: {
+              ...(init.body
+                ? {
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(init.body),
+                  }
+                : init.bodyBytes
+                  ? {
+                      "Content-Type": init.contentType ?? "application/x-tar",
+                      "Content-Length": Buffer.byteLength(init.bodyBytes),
+                    }
+                  : {}),
+              ...(hijacked ? { Connection: "close" } : {}),
+            },
+            timeout: timeoutMs,
+          },
+          (res) => {
+            // Do NOT set utf8 encoding: the multiplexed stream is binary frames.
+            const chunks: Buffer[] = [];
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks) });
+            };
+            res.on("data", (c: Buffer) => chunks.push(c));
+            res.on("end", finish);
+            res.on("close", finish);
+          },
+        );
+        if (timeoutMs > 0) {
+          req.on("timeout", () => {
+            req.destroy(
+              new DockerEngineError(`Docker request to ${path} timed out after ${timeoutMs}ms`),
+            );
+          });
+        }
+        req.on("error", (err) =>
+          reject(err instanceof DockerEngineError ? err : new DockerEngineError(err.message)),
+        );
+        if (init.body) req.write(init.body);
+        else if (init.bodyBytes) req.write(Buffer.from(init.bodyBytes));
         req.end();
       }),
     catch: (err) => (err instanceof DockerEngineError ? err : new DockerEngineError(String(err))),

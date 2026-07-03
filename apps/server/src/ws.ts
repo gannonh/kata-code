@@ -1090,12 +1090,15 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             ),
             { "rpc.aggregate": "sandbox" },
           ),
-        [WS_METHODS.sandboxStartSession]: ({ instanceId, connectAuthToken }) =>
+        [WS_METHODS.sandboxStartSession]: ({ instanceId, connectAuthToken, repository }) =>
           observeRpcEffect(
             WS_METHODS.sandboxStartSession,
             serverSettings.getSettings.pipe(
               Effect.flatMap((settings) =>
-                SandboxServiceLive.startSession(instanceId, settings, { connectAuthToken }),
+                SandboxServiceLive.startSession(instanceId, settings, {
+                  connectAuthToken,
+                  repository,
+                }),
               ),
             ),
             { "rpc.aggregate": "sandbox" },

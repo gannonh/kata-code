@@ -294,6 +294,9 @@ function makeMutableServerSettingsService(
       get streamChanges() {
         return Stream.fromPubSub(changes);
       },
+      get subscribeChanges() {
+        return PubSub.subscribe(changes);
+      },
     } satisfies ServerSettingsShape;
   });
 }
@@ -1236,6 +1239,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                 codex: { enabled: true, binaryPath: secondMissing },
               },
             });
+            // The settings watcher runs in a live fiber; give it real wall-clock
+            // time to process the change before virtual-clock polling below.
+            // `Effect.sleep` under TestClock would block on the test clock latch
+            // (which only the same fiber's `TestClock.adjust` can release), so
+            // run the sleep against the live clock via `TestClock.withLive`.
+            yield* TestClock.withLive(Effect.sleep("50 millis"));
 
             // Poll until the injected process boundary observes the new
             // executable. This verifies the public settings-to-probe behavior

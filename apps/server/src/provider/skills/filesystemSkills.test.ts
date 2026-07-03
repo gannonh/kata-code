@@ -225,7 +225,7 @@ describe("expandSkillTokensInText resilience", () => {
     expect(expanded).toBe("Please $devbox now");
   });
 
-  it("does not expand disabled skills", () => {
+  it("expands disable-model-invocation skills via explicit $-token invocation", () => {
     const root = NodeFs.mkdtempSync(NodePath.join(NodeOs.tmpdir(), "cursor-skills-disabled-"));
     const skillPath = writeSkill(
       root,
@@ -237,6 +237,7 @@ describe("expandSkillTokensInText resilience", () => {
     );
 
     const discovered = discoverCursorFilesystemSkills({ cwd: root, homeDir: root });
+    // Published as disabled so the model will not auto-invoke it.
     expect(discovered.skills).toEqual([
       {
         name: "manual-only",
@@ -246,12 +247,15 @@ describe("expandSkillTokensInText resilience", () => {
         description: "Manual only",
       },
     ]);
-    expect(discovered.indexedByName.has("manual-only")).toBe(false);
+    // Indexed so explicit `$manual-only` user invocations expand.
+    expect(discovered.indexedByName.has("manual-only")).toBe(true);
 
     const expanded = expandCursorSkillTokensInPrompt("Try $manual-only now", {
       cwd: root,
       homeDir: root,
     });
-    expect(expanded).toBe("Try $manual-only now");
+    expect(expanded).toContain('<skill name="manual-only"');
+    expect(expanded).toContain("Do not auto invoke.");
+    expect(expanded.endsWith("now")).toBe(true);
   });
 });

@@ -10,6 +10,7 @@ export * from "./terminal.ts";
 export * from "./provider.ts";
 export * from "./providerInstance.ts";
 export * from "./sandboxProviderInstance.ts";
+export * from "./savedSandboxEnvironment.ts";
 export * from "./sandboxRpc.ts";
 export * from "./providerRuntime.ts";
 export * from "./model.ts";

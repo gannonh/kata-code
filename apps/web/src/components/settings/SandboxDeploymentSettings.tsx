@@ -7,16 +7,20 @@ import {
   SandboxProviderDriverKind,
   SandboxProviderInstanceId,
   type ProviderInstanceEnvironmentVariable,
+  type SavedSandboxEnvironmentMap,
   type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
   type SandboxProviderInstanceConfigMap,
   type SandboxTestConnectionProgressEvent,
 } from "@kata-sh/code-contracts";
+import { useShallow } from "zustand/react/shallow";
 
 import { resolveRelayClerkTokenOptions, hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
 import { cn } from "../../lib/utils";
+import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import type { Project } from "../../types";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -38,6 +42,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt";
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
+import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
 import { SettingsSection } from "./settingsLayout";
 
 const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
@@ -57,7 +62,7 @@ function slugifyLabel(value: string): string {
 type BusyOp = "test" | "start" | "dispose";
 
 /**
- * Settings panel for sandbox deployment targets (Phase 1: local Docker
+ * Settings panel for sandbox environments (Phase 1: local Docker
  * containers). Lists configured targets with their materialized status, and
  * provides Add / Test connection (streaming) / Start session / Dispose /
  * Remove. Writes go through `useUpdateSettings` against the
@@ -69,12 +74,19 @@ export function SandboxDeploymentSettings() {
   const { updateSettings } = useUpdateSettings();
   const { getToken, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useHostedConnectAuthPrompt();
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const instanceMap = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
+  const savedSandboxEnvironments = settings.savedSandboxEnvironments as
+    | SavedSandboxEnvironmentMap
+    | undefined;
 
   const [summaries, setSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [testProgress, setTestProgress] = useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [selectedRepositoryKeyByInstance, setSelectedRepositoryKeyByInstance] = useState<
+    Record<string, string>
+  >({});
   const [activeSession, setActiveSession] = useState<
     Record<string, { environmentId: string; httpBaseUrl: string }>
   >({});
@@ -124,6 +136,25 @@ export function SandboxDeploymentSettings() {
     return map;
   }, [summaries]);
 
+  const repositoryProjects = useMemo(
+    () => projects.filter((project) => Boolean(project.repositoryIdentity?.canonicalKey)),
+    [projects],
+  );
+
+  const resolveSelectedProject = useCallback(
+    (instanceId: string): Project | undefined => {
+      const selectedKey = selectedRepositoryKeyByInstance[instanceId];
+      if (selectedKey) {
+        const selectedProject = repositoryProjects.find(
+          (project) => project.repositoryIdentity?.canonicalKey === selectedKey,
+        );
+        if (selectedProject) return selectedProject;
+      }
+      return repositoryProjects[0];
+    },
+    [repositoryProjects, selectedRepositoryKeyByInstance],
+  );
+
   const handleTest = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "test", async () => {
@@ -170,6 +201,8 @@ export function SandboxDeploymentSettings() {
   const handleStart = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
+        const explicitRepositoryKey = selectedRepositoryKeyByInstance[instanceId];
+        const project = explicitRepositoryKey ? resolveSelectedProject(instanceId) : undefined;
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
           return;
@@ -184,6 +217,14 @@ export function SandboxDeploymentSettings() {
           const result = await getPrimaryEnvironmentConnection().client.sandbox.startSession({
             instanceId: instanceId as never,
             ...(connectAuthToken ? { connectAuthToken } : {}),
+            ...(project?.repositoryIdentity
+              ? {
+                  repository: {
+                    repoRoot: project.cwd,
+                    repositoryIdentity: project.repositoryIdentity,
+                  },
+                }
+              : {}),
           });
           setActiveSession((prev) => ({
             ...prev,
@@ -214,7 +255,14 @@ export function SandboxDeploymentSettings() {
           });
         }
       }),
-    [getToken, isSignedIn, openAuthPrompt, withBusy],
+    [
+      getToken,
+      isSignedIn,
+      openAuthPrompt,
+      resolveSelectedProject,
+      selectedRepositoryKeyByInstance,
+      withBusy,
+    ],
   );
 
   const handleDispose = useCallback(
@@ -250,7 +298,7 @@ export function SandboxDeploymentSettings() {
       if (activeSession[instanceId]) {
         toastManager.add({
           type: "error",
-          title: "Cannot remove deployment target",
+          title: "Cannot remove sandbox environment",
           description: `Dispose the active session for '${instanceId}' before removing it.`,
         });
         return;
@@ -260,7 +308,7 @@ export function SandboxDeploymentSettings() {
       updateSettings({ sandboxProviderInstances: nextMap });
       toastManager.add({
         type: "success",
-        title: "Deployment target removed",
+        title: "Sandbox environment removed",
         description: `'${instanceId}' removed from Environments.`,
       });
     },
@@ -281,7 +329,7 @@ export function SandboxDeploymentSettings() {
   return (
     <>
       <SettingsSection
-        title="Deployment targets"
+        title="Sandbox environments"
         headerAction={
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <Tooltip>
@@ -293,16 +341,16 @@ export function SandboxDeploymentSettings() {
                         size="xs"
                         variant="ghost"
                         className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
-                        aria-label="Add deployment target"
+                        aria-label="Add sandbox environment"
                       >
                         <PlusIcon className="size-3" />
-                        <span>Add deployment target</span>
+                        <span>Add sandbox environment</span>
                       </Button>
                     }
                   />
                 }
               />
-              <TooltipPopup side="top">Add deployment target</TooltipPopup>
+              <TooltipPopup side="top">Add sandbox environment</TooltipPopup>
             </Tooltip>
             <AddDeploymentTargetDialogBody
               existingIds={new Set(instanceEntries.map(([id]) => id))}
@@ -319,7 +367,7 @@ export function SandboxDeploymentSettings() {
         {instanceEntries.length === 0 ? (
           <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
             <p className="text-xs text-muted-foreground">
-              No deployment targets configured. Add one to provision a container.
+              No sandbox environments configured. Add one to provision a container.
             </p>
           </div>
         ) : (
@@ -333,6 +381,10 @@ export function SandboxDeploymentSettings() {
             const isOpen = expanded[id] ?? false;
             const displayName = config.displayName ?? id;
             const enabled = config.enabled ?? true;
+            const selectedProject = resolveSelectedProject(id);
+            const selectedRepositoryKey =
+              selectedRepositoryKeyByInstance[id] ??
+              (selectedProject?.repositoryIdentity?.canonicalKey as string | undefined);
             return (
               <DeploymentTargetCard
                 key={id}
@@ -346,8 +398,17 @@ export function SandboxDeploymentSettings() {
                 progress={progress}
                 instanceBusy={instanceBusy}
                 isExpanded={isOpen}
+                projects={projects}
+                savedSandboxEnvironments={savedSandboxEnvironments}
+                selectedRepositoryKey={selectedRepositoryKey}
                 onExpandedChange={(open) => setExpanded((prev) => ({ ...prev, [id]: open }))}
                 onUpdate={(next) => updateInstance(id, next)}
+                onSavedEnvironmentChange={(next) =>
+                  updateSettings({ savedSandboxEnvironments: next })
+                }
+                onSelectedRepositoryKeyChange={(repositoryKey) =>
+                  setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }))
+                }
                 onDelete={() => handleRemove(id)}
                 onTest={() => void handleTest(id)}
                 onStart={() => void handleStart(id)}
@@ -373,8 +434,13 @@ interface DeploymentTargetCardProps {
   readonly progress: string[];
   readonly instanceBusy: "test" | "start" | "dispose" | undefined;
   readonly isExpanded: boolean;
+  readonly projects: ReadonlyArray<Project>;
+  readonly savedSandboxEnvironments: SavedSandboxEnvironmentMap | undefined;
+  readonly selectedRepositoryKey: string | undefined;
   readonly onExpandedChange: (open: boolean) => void;
   readonly onUpdate: (next: SandboxProviderInstanceConfig) => void;
+  readonly onSavedEnvironmentChange: (next: SavedSandboxEnvironmentMap) => void;
+  readonly onSelectedRepositoryKeyChange: (repositoryKey: string) => void;
   readonly onDelete: () => void;
   readonly onTest: () => void;
   readonly onStart: () => void;
@@ -398,8 +464,13 @@ function DeploymentTargetCard({
   progress,
   instanceBusy,
   isExpanded,
+  projects,
+  savedSandboxEnvironments,
+  selectedRepositoryKey,
   onExpandedChange,
   onUpdate,
+  onSavedEnvironmentChange,
+  onSelectedRepositoryKeyChange,
   onDelete,
   onTest,
   onStart,
@@ -464,13 +535,13 @@ function DeploymentTargetCard({
                       variant="ghost"
                       className="size-5 rounded-sm p-0 text-muted-foreground hover:text-destructive"
                       onClick={onDelete}
-                      aria-label={`Delete deployment target ${instanceId}`}
+                      aria-label={`Delete sandbox environment ${instanceId}`}
                     >
                       <Trash2Icon className="size-3" />
                     </Button>
                   }
                 />
-                <TooltipPopup side="top">Delete deployment target</TooltipPopup>
+                <TooltipPopup side="top">Delete sandbox environment</TooltipPopup>
               </Tooltip>
             </div>
             <p className="text-xs text-muted-foreground/80">
@@ -530,6 +601,16 @@ function DeploymentTargetCard({
               <ProviderEnvironmentSection
                 environment={instance.environment ?? []}
                 onChange={updateEnvironment}
+              />
+            </div>
+
+            <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+              <SavedEnvironmentEditor
+                projects={projects}
+                savedSandboxEnvironments={savedSandboxEnvironments}
+                selectedRepositoryKey={selectedRepositoryKey}
+                onSelectedRepositoryKeyChange={onSelectedRepositoryKeyChange}
+                onChange={onSavedEnvironmentChange}
               />
             </div>
 
@@ -757,7 +838,7 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
   return (
     <DialogPopup className="max-w-xl overflow-hidden">
       <DialogHeader>
-        <DialogTitle>Add container deployment target</DialogTitle>
+        <DialogTitle>Add container sandbox environment</DialogTitle>
         <DialogDescription>
           Provisions an isolated Docker container running a Kata server, reached over localhost.
         </DialogDescription>
@@ -803,7 +884,7 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
       </div>
       <DialogFooter>
         <DialogClose render={<Button variant="ghost">Cancel</Button>} />
-        <Button onClick={handleSubmit}>Add target</Button>
+        <Button onClick={handleSubmit}>Add sandbox environment</Button>
       </DialogFooter>
     </DialogPopup>
   );
