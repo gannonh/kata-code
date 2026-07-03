@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import * as NodeOS from "node:os";
 import { dirname, join } from "node:path";
 
@@ -56,6 +56,25 @@ function processExists(pid) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function logDevElectron(message, details = {}) {
+  const payload = Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : "";
+  process.stderr.write(`[dev-electron] ${message}${payload}\n`);
+}
+
+function describeWatchedFile(directory, filename) {
+  try {
+    const stat = statSync(join(desktopDir, directory, filename));
+    return {
+      size: stat.size,
+      mtimeMs: Math.round(stat.mtimeMs),
+    };
+  } catch (error) {
+    return {
+      statError: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -130,12 +149,17 @@ function killChildTreeByPid(pid, signal) {
   spawnSync("pkill", [`-${signal}`, "-P", String(pid)], { stdio: "ignore" });
 }
 
-function cleanupStaleDevApps() {
+function cleanupStaleDevApps(reason = "startup") {
   if (hostPlatform === "win32") {
     return;
   }
 
-  spawnSync("pkill", ["-f", "--", `--katacode-dev-root=${desktopDir}`], { stdio: "ignore" });
+  const result = spawnSync("pkill", ["-f", "--", `--katacode-dev-root=${desktopDir}`], {
+    stdio: "ignore",
+  });
+  if (result.status === 0) {
+    logDevElectron("cleaned stale dev app processes", { reason });
+  }
 }
 
 function startApp() {
@@ -161,14 +185,19 @@ function startApp() {
   });
 
   currentApp = app;
+  logDevElectron("started app", { pid: app.pid ?? null });
 
-  app.once("error", () => {
+  app.once("error", (error) => {
     if (currentApp === app) {
       currentApp = null;
     }
 
+    logDevElectron("app process error", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
     if (!shuttingDown) {
-      scheduleRestart();
+      scheduleRestart("app-process-error");
     }
   });
 
@@ -177,9 +206,17 @@ function startApp() {
       currentApp = null;
     }
 
+    const wasExpected = expectedExits.has(app);
     const exitedAbnormally = signal !== null || code !== 0;
-    if (!shuttingDown && !expectedExits.has(app) && exitedAbnormally) {
-      scheduleRestart();
+    logDevElectron("app exited", {
+      pid: app.pid ?? null,
+      code,
+      signal,
+      expected: wasExpected,
+      shuttingDown,
+    });
+    if (!shuttingDown && !wasExpected && exitedAbnormally) {
+      scheduleRestart("app-exited-abnormally");
     }
   });
 }
@@ -192,6 +229,8 @@ async function stopApp() {
 
   currentApp = null;
   expectedExits.add(app);
+
+  logDevElectron("stopping app", { pid: app.pid ?? null });
 
   await new Promise((resolve) => {
     let settled = false;
@@ -208,7 +247,7 @@ async function stopApp() {
     app.once("exit", finish);
     app.kill("SIGTERM");
     killChildTreeByPid(app.pid, "TERM");
-    cleanupStaleDevApps();
+    cleanupStaleDevApps("stop-app");
 
     setTimeout(() => {
       if (settled) {
@@ -217,16 +256,18 @@ async function stopApp() {
 
       app.kill("SIGKILL");
       killChildTreeByPid(app.pid, "KILL");
-      cleanupStaleDevApps();
+      cleanupStaleDevApps("stop-app-timeout");
       finish();
     }, forcedShutdownTimeoutMs).unref();
   });
 }
 
-function scheduleRestart() {
+function scheduleRestart(reason) {
   if (shuttingDown) {
     return;
   }
+
+  logDevElectron("restart scheduled", { reason });
 
   if (restartTimer) {
     clearTimeout(restartTimer);
@@ -250,12 +291,18 @@ function startWatchers() {
     const watcher = watch(
       join(desktopDir, directory),
       { persistent: true },
-      (_eventType, filename) => {
+      (eventType, filename) => {
         if (typeof filename !== "string" || !files.has(filename)) {
           return;
         }
 
-        scheduleRestart();
+        scheduleRestart("watched-file-changed");
+        logDevElectron("watched file changed", {
+          eventType,
+          directory,
+          filename,
+          ...describeWatchedFile(directory, filename),
+        });
       },
     );
 
