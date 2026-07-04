@@ -2,8 +2,8 @@
 type: Spec
 title: "Kata Environments / Deployments Phase 3 — Vercel cloud sandbox driver (deep-dive)"
 description: "Deep-dive design for Phase 3: the first BYOC cloud driver on Vercel Sandbox — base snapshot bake, public wss reachability via sandbox.domain(port), session-lifetime keepalive with lapse/resume UX, secret-backed access-token auth, and Connect auto-registration."
-status: Approved
-approved_at: 2026-07-03T00:00:00Z
+status: Cancelled
+cancelled_at: 2026-07-04T00:00:00Z
 tags: [specs, phase-3, environments, deployments, sandbox, vercel, cloud-driver, byoc]
 timestamp: 2026-07-03T00:00:00Z
 ---
@@ -11,6 +11,14 @@ timestamp: 2026-07-03T00:00:00Z
 # Kata Environments / Deployments Phase 3 — Vercel cloud sandbox driver
 
 ## Status
+
+Cancelled 2026-07-04. Superseded by [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) and [Phase 3b](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) per [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). Vercel moves to the future BYOC cloud-drivers list; the snapshot-bake / keepalive / lapse-resume design in this spec is retired (Railway runs real Docker images, so it does not apply). Retained as a historical record of the Vercel decision and the constraints that drove it.
+
+---
+
+The text below is the original approved spec, preserved for history.
+
+---
 
 Approved. The three open questions were resolved at approval (see Resolved questions).
 

@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-04 (Environments / Deployments — Vercel Phase 3 spec cancelled)
+
+- Marked [2026-07-03-kata-environments-deployments-phase-3-design.md](/specs/2026-07-03-kata-environments-deployments-phase-3-design.md) (the Vercel cloud sandbox driver deep-dive) as `Cancelled`. Superseded by [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) and [Phase 3b](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) per [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). The Vercel snapshot-bake / keepalive / lapse-resume design is retired (Railway runs real Docker images, so it does not apply); the spec is retained as a historical record of the Vercel decision and the constraints that drove it.
+
 ## 2026-07-04 (Environments / Deployments Phase 3 — Railway first cloud driver + sandbox auth model)
 
 - Added [ADR 0006 — Sandbox provider auth model and Railway as the first cloud driver](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md): adopts the AgentBox provider-auth pattern (bind-mount host credential dirs for local Docker, seed credential files from a host-side encrypted store for cloud, env-var API keys as alternative) and selects Railway Service (Docker image) as the first cloud driver. Supersedes [ADR 0005](/adrs/0005-vercel-first-cloud-driver.md); Vercel moves to the future-drivers list.
