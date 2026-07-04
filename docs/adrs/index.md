@@ -7,6 +7,7 @@
 | [0001](/adrs/0001-connected-fork-upstream-merge.md) | Connected fork with merge-based upstream sync |
 | [0002](/adrs/0002-katacode-product-identity.md)     | Kata Code product identity and npm scope      |
 | [0004](/adrs/0004-selective-vendor-pull.md)         | Selective vendor-pull upstream sync           |
+| [0005](/adrs/0005-vercel-first-cloud-driver.md)     | Vercel Sandbox as the first cloud driver      |
 
 ## Proposed
 

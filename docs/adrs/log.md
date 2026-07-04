@@ -1,5 +1,9 @@
 # ADR log
 
+## 2026-07-03 (ADR 0005 — Vercel first cloud driver)
+
+- Added [ADR 0005 — Vercel Sandbox as the first cloud driver](/adrs/0005-vercel-first-cloud-driver.md): reverses the Phase 3 driver order in the [Environments/Deployments roadmap](/specs/2026-06-27-kata-environments-deployments-design.md). Vercel's `sandbox.domain(port)` public URL carries `wss` (live-verified in the AgentBox checkout), deleting the Cloudflare tunnels spike and its re-plan branch; Cloudflare moves to the future-drivers list. Session-lifetime handling (keepalive, lapse/resume UX) becomes a first-class Phase 3 requirement.
+
 ## 2026-06-24 (ADR 0004 promoted; ADR 0003 superseded)
 
 - Promoted [ADR 0004 — Selective vendor-pull](/adrs/0004-selective-vendor-pull.md) to the active upstream strategy; moved [ADR 0003](/adrs/0003-episodic-upstream-sync.md) to Superseded in the [ADR index](/adrs/index.md).

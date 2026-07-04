@@ -405,7 +405,7 @@ proceed in parallel with steps 1–2 once the contract names are fixed; step 6 i
   spike script (Phase 1).
 - The `.kata/environment.json` resolver and execution (Phase 2) — Phase 1 Part A defines the schema
   only.
-- The Cloudflare driver (`packages/sandbox-cloudflare`) (Phase 3).
+- The cloud driver (`packages/sandbox-vercel`, per [ADR 0005](/adrs/0005-vercel-first-cloud-driver.md)) (Phase 3).
 - Any UI (Settings/composer) — Phase 1+.
 - Touching `apps/server/src/cloud/` (Kata Code Connect).
 - Generalizing the secret-redaction helpers to walk `sandboxProviderInstances` (a later phase;
@@ -451,7 +451,7 @@ against OrbStack (Docker Engine REST API over `/var/run/docker.sock`). Image
   settings field, test-only stub driver, frozen capability-based SandboxProvider SPI,
   container-spike script + findings. No server wiring, no driver, no UI.
 - **Part A non-goals (deferred to Part B or later phases):** RPCs, registry wiring, Docker
-  driver, Cloudflare driver, resolver, UI, Connect changes, secret-redaction generalization.
+  driver, cloud driver, resolver, UI, Connect changes, secret-redaction generalization.
 - **Required verification:** AC-1.1…AC-1.7 + CI parity (`vp check`, `vp run typecheck`,
   `vp run test`).
 - **Blocking questions:** none — all Part A decisions locked. The spike result feeds Part B
