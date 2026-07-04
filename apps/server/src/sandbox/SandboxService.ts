@@ -24,7 +24,6 @@ import {
   AuthAccessTokenType,
   AuthAdministrativeScopes,
   AuthEnvironmentBootstrapTokenType,
-  AuthPairingCredentialResult,
   AuthTokenExchangeGrantType,
   type AdvertisedEndpoint,
   type AdvertisedEndpointProvider,
@@ -466,6 +465,13 @@ function registerSandboxWithConnect(input: {
   });
 }
 
+/** Wire shape of the pairing-token response. Decoded from raw JSON, so
+ * `expiresAt` stays a string here (the full `AuthPairingCredentialResult`
+ * schema expects a decoded DateTime). Only `credential` is used. */
+const SandboxPairingCredentialWire = Schema.Struct({
+  credential: Schema.String,
+});
+
 /** Mint a fresh pairing credential from the in-container server. The desktop
  * bootstrap token is single-use and is consumed by Connect registration, so
  * the deploying client needs its own credential to save the sandbox as an
@@ -475,7 +481,7 @@ function issueSandboxPairingCredential(input: {
   readonly adminAccessToken: string;
 }): Effect.Effect<string, SandboxRpcError> {
   return postJson(
-    AuthPairingCredentialResult,
+    SandboxPairingCredentialWire,
     `${input.httpBaseUrl}/api/auth/pairing-token`,
     { label: "Deploying desktop" },
     input.adminAccessToken,
