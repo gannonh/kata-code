@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/react";
 import { ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  EnvironmentId,
   SandboxProviderDriverKind,
   SandboxProviderInstanceId,
   type ProviderInstanceEnvironmentVariable,
@@ -11,13 +12,28 @@ import {
   type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
   type SandboxProviderInstanceConfigMap,
+  type SandboxStartSessionResult,
   type SandboxTestConnectionProgressEvent,
 } from "@kata-sh/code-contracts";
+import type {
+  RelayClientEnvironmentRecord,
+  RelayManagedEndpointProviderKind,
+} from "@kata-sh/code-contracts/relay";
 import { useShallow } from "zustand/react/shallow";
 
+import {
+  connectManagedCloudEnvironment,
+  listManagedCloudEnvironments,
+} from "../../cloud/linkEnvironment";
+import { refreshManagedRelayEnvironments } from "../../cloud/managedRelayState";
 import { resolveRelayClerkTokenOptions, hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
-import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
+import {
+  addManagedRelayEnvironment,
+  getPrimaryEnvironmentConnection,
+  removeSavedEnvironment,
+} from "../../environments/runtime";
+import { webRuntime } from "../../lib/runtime";
 import { cn } from "../../lib/utils";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import type { Project } from "../../types";
@@ -46,6 +62,8 @@ import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
 import { SettingsSection } from "./settingsLayout";
 
 const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
+const SANDBOX_MANAGED_ENDPOINT_PROVIDER_KIND =
+  "cloudflare_tunnel" satisfies RelayManagedEndpointProviderKind;
 
 /** Slugify a label into a sandbox instance id suffix (mirrors provider dialog). */
 function slugifyLabel(value: string): string {
@@ -56,6 +74,31 @@ function slugifyLabel(value: string): string {
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "")
     .slice(0, 48);
+}
+
+function normalizeSandboxRelayBaseUrl(value: string): string {
+  const url = new URL(value);
+  if (url.hostname === "localhost") {
+    url.hostname = "127.0.0.1";
+  }
+  return url.toString();
+}
+
+function toSandboxRelayEnvironmentRecord(
+  result: SandboxStartSessionResult,
+): RelayClientEnvironmentRecord {
+  const httpBaseUrl = normalizeSandboxRelayBaseUrl(result.endpoint.httpBaseUrl);
+  const wsBaseUrl = normalizeSandboxRelayBaseUrl(result.endpoint.wsBaseUrl);
+  return {
+    environmentId: EnvironmentId.make(result.environmentId),
+    label: result.endpoint.label,
+    endpoint: {
+      httpBaseUrl,
+      wsBaseUrl,
+      providerKind: SANDBOX_MANAGED_ENDPOINT_PROVIDER_KIND,
+    },
+    linkedAt: new Date().toISOString(),
+  };
 }
 
 /** Per-instance busy state for the long-running RPCs. */
@@ -237,10 +280,50 @@ export function SandboxDeploymentSettings() {
             ...prev,
             [instanceId]: [...(prev[instanceId] ?? []), "start: ok"],
           }));
+
+          let savedForProjectPicker = false;
+          if (connectAuthToken) {
+            try {
+              const relayEnvironments = await webRuntime.runPromise(
+                listManagedCloudEnvironments({ clerkToken: connectAuthToken }),
+              );
+              const relayEnvironment =
+                relayEnvironments.find(
+                  (environment) => environment.environmentId === result.environmentId,
+                ) ?? toSandboxRelayEnvironmentRecord(result);
+              const connection = await webRuntime.runPromise(
+                connectManagedCloudEnvironment({
+                  clerkToken: connectAuthToken,
+                  environment: relayEnvironment,
+                }),
+              );
+              await addManagedRelayEnvironment(connection);
+              refreshManagedRelayEnvironments();
+              savedForProjectPicker = true;
+              setTestProgress((prev) => ({
+                ...prev,
+                [instanceId]: [...(prev[instanceId] ?? []), "connect: ok"],
+              }));
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "Unknown error.";
+              setTestProgress((prev) => ({
+                ...prev,
+                [instanceId]: [...(prev[instanceId] ?? []), `connect: failed — ${message}`],
+              }));
+              toastManager.add({
+                type: "error",
+                title: "Sandbox started but was not added",
+                description: message,
+              });
+            }
+          }
+
           toastManager.add({
             type: "success",
             title: "Sandbox session started",
-            description: `Reachable at ${result.endpoint.httpBaseUrl}.`,
+            description: savedForProjectPicker
+              ? "Available from Add project."
+              : `Reachable at ${result.endpoint.httpBaseUrl}.`,
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown error.";
@@ -269,9 +352,22 @@ export function SandboxDeploymentSettings() {
     (instanceId: string) =>
       withBusy(instanceId, "dispose", async () => {
         try {
+          const session = activeSession[instanceId];
           await getPrimaryEnvironmentConnection().client.sandbox.disposeSession({
             instanceId: instanceId as never,
           });
+          if (session) {
+            await removeSavedEnvironment(EnvironmentId.make(session.environmentId)).catch(
+              (error) => {
+                toastManager.add({
+                  type: "error",
+                  title: "Sandbox removed but saved environment remains",
+                  description: error instanceof Error ? error.message : "Unknown error.",
+                });
+              },
+            );
+          }
+          refreshManagedRelayEnvironments();
           setActiveSession((prev) => {
             const next = { ...prev };
             delete next[instanceId];
@@ -290,7 +386,7 @@ export function SandboxDeploymentSettings() {
           });
         }
       }),
-    [withBusy],
+    [activeSession, withBusy],
   );
 
   const handleRemove = useCallback(

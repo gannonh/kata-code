@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-03 (Environments / Deployments — sandbox sessions in project picker)
+
+Fixed the Phase 1/2 sandbox session gap: after a sandbox session starts, the web settings flow connects the relay-managed sandbox environment, saves it in the environment registry, and refreshes Connect state so the left-rail Add project picker can target it. Disposing the session removes the saved sandbox environment locally.
+
 ## 2026-07-03 (Environments / Deployments Phase 3 — deep-dive approved)
 
 Approved the [Phase 3 deep-dive](/specs/2026-07-03-kata-environments-deployments-phase-3-design.md). Open questions resolved: credentialed e2e/integration slices are maintainer-local + recorded UAT (no CI secret); default `timeoutMs` is 45 min with a per-target config override (no plan detection in V1); the deployment-target card owns the Resume action, with the session status surface rendering the `lapsed` state read-only. Spec status flipped Draft → Approved; roadmap row updated.
