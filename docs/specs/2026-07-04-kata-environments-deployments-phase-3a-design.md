@@ -2,7 +2,8 @@
 type: Spec
 title: "Kata Environments / Deployments Phase 3a — Docker sandbox gaps (provider-ready image, terminal, host auth)"
 description: "Deep-dive for Phase 3a: close the Docker sandbox gaps surfaced while wiring the session flow — bake provider CLIs and a working shell into the katacode image, fix the in-container terminal and surface terminal.open errors in the UI, bind-mount host provider credential directories for the local Docker driver, and document the env-var API-key auth path. Local-only prerequisite for Phase 3b (Railway cloud driver)."
-status: Draft
+status: Approved
+approved_at: 2026-07-04T00:00:00Z
 tags: [specs, phase-3a, environments, deployments, sandbox, docker, auth, terminal]
 timestamp: 2026-07-04T00:00:00Z
 ---
@@ -11,7 +12,7 @@ timestamp: 2026-07-04T00:00:00Z
 
 ## Status
 
-Draft. Implements roadmap Phase 3a per [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). This is the prerequisite for [Phase 3b — Railway cloud driver](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md). The cloud sandbox cannot ship until the image is provider-ready and the terminal works in-container.
+Approved. Implements roadmap Phase 3a per [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). This is the prerequisite for [Phase 3b — Railway cloud driver](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md). The cloud sandbox cannot ship until the image is provider-ready and the terminal works in-container.
 
 ## Goal
 

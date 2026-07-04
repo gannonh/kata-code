@@ -2,7 +2,8 @@
 type: Spec
 title: "Kata Environments / Deployments Phase 3b — Railway cloud driver (Docker image, credential seeding)"
 description: "Deep-dive for Phase 3b: the first BYOC cloud driver on Railway — provision a Railway Service from the published katacode GHCR image, public wss reachability via the Railway service domain, credential-file seeding from a host-side encrypted store, ephemeral deploy-on-start / delete-on-dispose lifecycle. Builds on Phase 3a (provider-ready image, terminal, auth model)."
-status: Draft
+status: Approved
+approved_at: 2026-07-04T00:00:00Z
 tags: [specs, phase-3b, environments, deployments, sandbox, railway, cloud-driver, byoc, auth]
 timestamp: 2026-07-04T00:00:00Z
 ---
@@ -11,7 +12,7 @@ timestamp: 2026-07-04T00:00:00Z
 
 ## Status
 
-Draft. Implements roadmap Phase 3b per [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). Builds on [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) (provider-ready image, in-container terminal, host credential bind-mounts, env-var auth). Cannot ship until Phase 3a is implemented and the katacode image is published to GHCR.
+Approved. Implements roadmap Phase 3b per [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). Builds on [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) (provider-ready image, in-container terminal, host credential bind-mounts, env-var auth). Cannot ship until Phase 3a is implemented and the katacode image is published to GHCR.
 
 ## Goal
 
