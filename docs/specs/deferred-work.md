@@ -190,9 +190,9 @@ Each entry should include:
 - **Status:** deferred
 - **Area:** sandbox, web, contracts, connect
 - **Source:** Phase 2 Verify UAT — [#23](https://github.com/gannonh/kata-code/issues/23)
-- **Rationale:** The pairing URL and token are printed to container stdout but not propagated through the `SandboxStartSessionResult` RPC to the web UI. A user who wants to pair an external client must inspect container logs. Out of Phase 2 scope (environment configuration and setup execution); fits Phase 4 (composer "Run on" / cross-device connecting).
+- **Rationale:** The pairing URL and token are not rendered in the web UI. A user who wants to pair an external client must inspect container logs. Out of Phase 2 scope (environment configuration and setup execution); fits Phase 4 (composer "Run on" / cross-device connecting).
 - **Revisit trigger:** Phase 4 composer work, or as a quick win if pairing is needed before Phase 4.
-- **Notes:** Extend `SandboxStartSessionResult` (`packages/contracts/src/sandboxRpc.ts`) with optional `pairingUrl`/`pairingToken`; render on the deployment card in `SandboxDeploymentSettings.tsx`.
+- **Notes:** `SandboxStartSessionResult` now returns `pairingToken` for local saved-environment registration; still render a user-facing pairing URL/token on the deployment card.
 
 ### Sandbox: HTTP pairing URL triggers browser security warning
 

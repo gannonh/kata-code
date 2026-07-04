@@ -20,6 +20,13 @@ export const SandboxInstanceUnavailableReason = Schema.Literals([
 ]);
 export type SandboxInstanceUnavailableReason = typeof SandboxInstanceUnavailableReason.Type;
 
+export const SandboxRunningSession = Schema.Struct({
+  /** The in-sandbox Kata server's environment id. */
+  environmentId: TrimmedNonEmptyString,
+  endpoint: AdvertisedEndpoint,
+});
+export type SandboxRunningSession = typeof SandboxRunningSession.Type;
+
 /** A materialized sandbox instance, for UI listing + diagnostics. */
 export const SandboxInstanceSummary = Schema.Union([
   Schema.Struct({
@@ -30,6 +37,7 @@ export const SandboxInstanceSummary = Schema.Union([
     reachabilityKind: Schema.Literals(["loopback", "public", "private-network"]),
     supportsSnapshot: Schema.Boolean,
     supportsRenewTimeout: Schema.Boolean,
+    runningSession: Schema.optional(SandboxRunningSession),
   }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
@@ -98,6 +106,8 @@ export const SandboxStartSessionResult = Schema.Struct({
   instanceId: SandboxProviderInstanceId,
   /** The in-container Kata server's environment id (its own, per-deployment). */
   environmentId: TrimmedNonEmptyString,
+  /** Pairing token for the current client to save and use the loopback sandbox environment. */
+  pairingToken: TrimmedNonEmptyString,
   /** The loopback endpoint the deploying desktop connects to. */
   endpoint: AdvertisedEndpoint,
 });

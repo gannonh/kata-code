@@ -12,28 +12,18 @@ import {
   type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
   type SandboxProviderInstanceConfigMap,
-  type SandboxStartSessionResult,
   type SandboxTestConnectionProgressEvent,
 } from "@kata-sh/code-contracts";
-import type {
-  RelayClientEnvironmentRecord,
-  RelayManagedEndpointProviderKind,
-} from "@kata-sh/code-contracts/relay";
 import { useShallow } from "zustand/react/shallow";
 
-import {
-  connectManagedCloudEnvironment,
-  listManagedCloudEnvironments,
-} from "../../cloud/linkEnvironment";
 import { refreshManagedRelayEnvironments } from "../../cloud/managedRelayState";
 import { resolveRelayClerkTokenOptions, hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import {
-  addManagedRelayEnvironment,
+  addSavedEnvironment,
   getPrimaryEnvironmentConnection,
   removeSavedEnvironment,
 } from "../../environments/runtime";
-import { webRuntime } from "../../lib/runtime";
 import { cn } from "../../lib/utils";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import type { Project } from "../../types";
@@ -62,8 +52,6 @@ import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
 import { SettingsSection } from "./settingsLayout";
 
 const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
-const SANDBOX_MANAGED_ENDPOINT_PROVIDER_KIND =
-  "cloudflare_tunnel" satisfies RelayManagedEndpointProviderKind;
 
 /** Slugify a label into a sandbox instance id suffix (mirrors provider dialog). */
 function slugifyLabel(value: string): string {
@@ -74,31 +62,6 @@ function slugifyLabel(value: string): string {
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "")
     .slice(0, 48);
-}
-
-function normalizeSandboxRelayBaseUrl(value: string): string {
-  const url = new URL(value);
-  if (url.hostname === "localhost") {
-    url.hostname = "127.0.0.1";
-  }
-  return url.toString();
-}
-
-function toSandboxRelayEnvironmentRecord(
-  result: SandboxStartSessionResult,
-): RelayClientEnvironmentRecord {
-  const httpBaseUrl = normalizeSandboxRelayBaseUrl(result.endpoint.httpBaseUrl);
-  const wsBaseUrl = normalizeSandboxRelayBaseUrl(result.endpoint.wsBaseUrl);
-  return {
-    environmentId: EnvironmentId.make(result.environmentId),
-    label: result.endpoint.label,
-    endpoint: {
-      httpBaseUrl,
-      wsBaseUrl,
-      providerKind: SANDBOX_MANAGED_ENDPOINT_PROVIDER_KIND,
-    },
-    linkedAt: new Date().toISOString(),
-  };
 }
 
 /** Per-instance busy state for the long-running RPCs. */
@@ -158,6 +121,22 @@ export function SandboxDeploymentSettings() {
     try {
       const result = await getPrimaryEnvironmentConnection().client.sandbox.listInstances();
       setSummaries(result.instances);
+      setActiveSession(
+        Object.fromEntries(
+          result.instances.flatMap((summary) => {
+            if (summary.kind !== "available" || !summary.runningSession) return [];
+            return [
+              [
+                summary.instanceId as string,
+                {
+                  environmentId: summary.runningSession.environmentId,
+                  httpBaseUrl: summary.runningSession.endpoint.httpBaseUrl,
+                },
+              ],
+            ];
+          }),
+        ),
+      );
     } catch (error) {
       toastManager.add({
         type: "error",
@@ -282,41 +261,31 @@ export function SandboxDeploymentSettings() {
           }));
 
           let savedForProjectPicker = false;
-          if (connectAuthToken) {
-            try {
-              const relayEnvironments = await webRuntime.runPromise(
-                listManagedCloudEnvironments({ clerkToken: connectAuthToken }),
-              );
-              const relayEnvironment =
-                relayEnvironments.find(
-                  (environment) => environment.environmentId === result.environmentId,
-                ) ?? toSandboxRelayEnvironmentRecord(result);
-              const connection = await webRuntime.runPromise(
-                connectManagedCloudEnvironment({
-                  clerkToken: connectAuthToken,
-                  environment: relayEnvironment,
-                }),
-              );
-              await addManagedRelayEnvironment(connection);
-              refreshManagedRelayEnvironments();
-              savedForProjectPicker = true;
-              setTestProgress((prev) => ({
-                ...prev,
-                [instanceId]: [...(prev[instanceId] ?? []), "connect: ok"],
-              }));
-            } catch (error) {
-              const message = error instanceof Error ? error.message : "Unknown error.";
-              setTestProgress((prev) => ({
-                ...prev,
-                [instanceId]: [...(prev[instanceId] ?? []), `connect: failed — ${message}`],
-              }));
-              toastManager.add({
-                type: "error",
-                title: "Sandbox started but was not added",
-                description: message,
-              });
-            }
+          try {
+            await addSavedEnvironment({
+              label: result.endpoint.label,
+              host: result.endpoint.httpBaseUrl,
+              pairingCode: result.pairingToken,
+            });
+            savedForProjectPicker = true;
+            setTestProgress((prev) => ({
+              ...prev,
+              [instanceId]: [...(prev[instanceId] ?? []), "connect: ok"],
+            }));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown error.";
+            setTestProgress((prev) => ({
+              ...prev,
+              [instanceId]: [...(prev[instanceId] ?? []), `connect: failed — ${message}`],
+            }));
+            toastManager.add({
+              type: "error",
+              title: "Sandbox started but was not added",
+              description: message,
+            });
           }
+          refreshManagedRelayEnvironments();
+          await refreshList();
 
           toastManager.add({
             type: "success",
@@ -342,6 +311,7 @@ export function SandboxDeploymentSettings() {
       getToken,
       isSignedIn,
       openAuthPrompt,
+      refreshList,
       resolveSelectedProject,
       selectedRepositoryKeyByInstance,
       withBusy,
@@ -368,6 +338,7 @@ export function SandboxDeploymentSettings() {
             );
           }
           refreshManagedRelayEnvironments();
+          await refreshList();
           setActiveSession((prev) => {
             const next = { ...prev };
             delete next[instanceId];
@@ -386,7 +357,7 @@ export function SandboxDeploymentSettings() {
           });
         }
       }),
-    [activeSession, withBusy],
+    [activeSession, refreshList, withBusy],
   );
 
   const handleRemove = useCallback(

@@ -103,6 +103,7 @@ function toSummary(inst: Materialized): Effect.Effect<SandboxInstanceSummary, ne
   }
   return Effect.gen(function* () {
     const descriptor = yield* inst.driver.describe();
+    const runningSession = runningSessions.get(inst.instanceId as string);
     return {
       kind: "available",
       instanceId: inst.instanceId,
@@ -110,6 +111,14 @@ function toSummary(inst: Materialized): Effect.Effect<SandboxInstanceSummary, ne
       reachabilityKind: descriptor.reachabilityKind,
       supportsSnapshot: descriptor.supportsSnapshot,
       supportsRenewTimeout: descriptor.supportsRenewTimeout,
+      ...(runningSession
+        ? {
+            runningSession: {
+              environmentId: runningSession.environmentId,
+              endpoint: runningSession.endpoint,
+            },
+          }
+        : {}),
     };
   });
 }
@@ -466,9 +475,11 @@ interface RunningSession {
   readonly handle: SandboxHandle;
   readonly driver: SandboxProvider;
   readonly setupProcesses: ReadonlyArray<SetupProcessRecord>;
+  readonly environmentId: string;
+  readonly endpoint: AdvertisedEndpoint;
 }
 
-/** In-memory map of running sessions (instanceId → handle + driver). Phase 1; not durable. */
+/** In-memory map of running sessions (instanceId → handle + driver + endpoint). Phase 1; not durable. */
 const runningSessions = new Map<string, RunningSession>();
 
 /** In-flight provisioning reservations (instanceId). Prevents concurrent startSession
@@ -689,7 +700,6 @@ export const SandboxServiceLive = {
           setupProcesses = setup.processes;
         }
 
-        runningSessions.set(sessionKey, { handle, driver: inst.driver, setupProcesses });
         const reach = yield* inst.driver.reachability(handle, 13773).pipe(
           Effect.mapError(mapDriverError),
           Effect.catch((error: SandboxRpcError) =>
@@ -731,7 +741,19 @@ export const SandboxServiceLive = {
             ),
           ),
         );
-        return { instanceId, environmentId: descriptor.environmentId, endpoint };
+        runningSessions.set(sessionKey, {
+          handle,
+          driver: inst.driver,
+          setupProcesses,
+          environmentId: descriptor.environmentId,
+          endpoint,
+        });
+        return {
+          instanceId,
+          environmentId: descriptor.environmentId,
+          pairingToken: bootstrapToken,
+          endpoint,
+        };
       }).pipe(Effect.ensuring(Effect.sync(() => startingSessions.delete(sessionKey))));
     }),
 
