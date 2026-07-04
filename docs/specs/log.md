@@ -1,5 +1,14 @@
 # Specs log
 
+## 2026-07-04 (Environments / Deployments Phase 3 — Railway first cloud driver + sandbox auth model)
+
+- Added [ADR 0006 — Sandbox provider auth model and Railway as the first cloud driver](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md): adopts the AgentBox provider-auth pattern (bind-mount host credential dirs for local Docker, seed credential files from a host-side encrypted store for cloud, env-var API keys as alternative) and selects Railway Service (Docker image) as the first cloud driver. Supersedes [ADR 0005](/adrs/0005-vercel-first-cloud-driver.md); Vercel moves to the future-drivers list.
+- Split Phase 3 into two staged halves and drafted both deep-dives:
+  - [Phase 3a — Docker sandbox gaps](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md): bake provider CLIs and `SHELL=/bin/sh` into the katacode image, fix the in-container terminal and surface `terminal.open` errors in the UI, bind-mount host provider credential dirs (`~/.codex`, `~/.claude`, `~/.claude.json`, `~/.config/opencode`) for the local Docker driver, document the env-var API-key auth path. Local-only prerequisite for 3b.
+  - [Phase 3b — Railway cloud driver](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md): `packages/sandbox-railway` against the frozen SPI, provision a Railway Service from the published `ghcr.io/gannonh/kata-code:<tag>` image, public `wss` reachability via the Railway service domain, credential-file seeding from a host-side encrypted store, interactive "Sign in <provider>" affordance (PTY-driven OAuth URL + code relay), ephemeral deploy-on-start / delete-on-dispose lifecycle, `RAILWAY_API_TOKEN` auth via `ServerSecretStore`.
+- Updated the [specs roadmap](/specs/index.md) Environments/Deployments row to reference ADR 0006 and the Phase 3a/3b deep-dives.
+- Driven by the gaps surfaced while closing the sandbox session flow: the sandbox container is a fresh host with no provider CLIs and no credentials, and the in-container terminal was broken with errors swallowed by the UI. AgentBox's auth pattern (bind-mount for Docker, host-backup + seed for cloud) is the missing model the Vercel spec never needed because Vercel forbids custom images.
+
 ## 2026-07-03 (Environments / Deployments — sandbox sessions in project picker)
 
 Fixed the Phase 1/2 sandbox session gap: after Connect registration consumes the single-use desktop bootstrap token, `sandbox.startSession` now mints a dedicated pairing credential from the in-container server and returns it as `pairingToken`; the web settings flow uses it to save the loopback sandbox server in the environment registry so the left-rail Add project picker can target it. The sandbox list response reports running-session state so the Settings card keeps showing Dispose after remounts, and disposing the session removes the saved sandbox environment locally.

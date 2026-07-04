@@ -10,7 +10,7 @@ timestamp: 2026-07-03T00:00:00Z
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0006 — Sandbox provider auth model and Railway as the first cloud driver](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md).
 
 ## Context
 

@@ -1,5 +1,9 @@
 # ADR log
 
+## 2026-07-04 (ADR 0006 — sandbox provider auth model + Railway first cloud driver)
+
+- Added [ADR 0006 — Sandbox provider auth model and Railway as the first cloud driver](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md): adopts the AgentBox provider-auth pattern (bind-mount host credential dirs for local Docker, seed credential files from a host-side encrypted store for cloud, env-var API keys as an alternative) and selects Railway Service (Docker image) as the first cloud driver. Supersedes [ADR 0005](/adrs/0005-vercel-first-cloud-driver.md); Vercel moves to the future-drivers list. Splits Phase 3 into 3a (Docker sandbox gaps: provider CLIs in the image, in-container terminal fix + error surfacing, host credential bind-mounts) and 3b (Railway cloud driver: published GHCR image, credential seeding, public wss via Railway service domain, ephemeral deploy/delete lifecycle). Driven by the gaps surfaced while closing the sandbox session flow: the sandbox container is a fresh host with no provider CLIs and no credentials, and the in-container terminal was broken with errors swallowed by the UI.
+
 ## 2026-07-03 (ADR 0005 — Vercel first cloud driver)
 
 - Added [ADR 0005 — Vercel Sandbox as the first cloud driver](/adrs/0005-vercel-first-cloud-driver.md): reverses the Phase 3 driver order in the [Environments/Deployments roadmap](/specs/2026-06-27-kata-environments-deployments-design.md). Vercel's `sandbox.domain(port)` public URL carries `wss` (live-verified in the AgentBox checkout), deleting the Cloudflare tunnels spike and its re-plan branch; Cloudflare moves to the future-drivers list. Session-lifetime handling (keepalive, lapse/resume UX) becomes a first-class Phase 3 requirement.
