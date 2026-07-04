@@ -24,6 +24,7 @@ import {
   AuthAccessTokenType,
   AuthAdministrativeScopes,
   AuthEnvironmentBootstrapTokenType,
+  AuthPairingCredentialResult,
   AuthTokenExchangeGrantType,
   type AdvertisedEndpoint,
   type AdvertisedEndpointProvider,
@@ -379,7 +380,7 @@ function registerSandboxWithConnect(input: {
   readonly bootstrapToken: string;
   readonly connectAuthToken: SandboxStartSessionInput["connectAuthToken"];
 }): Effect.Effect<
-  ExecutionEnvironmentDescriptor,
+  { readonly descriptor: ExecutionEnvironmentDescriptor; readonly adminAccessToken: string },
   SandboxRpcError,
   CliTokenManager.CloudCliTokenManager
 > {
@@ -461,8 +462,24 @@ function registerSandboxWithConnect(input: {
       relayConfig,
       session.access_token,
     );
-    return descriptor;
+    return { descriptor, adminAccessToken: session.access_token };
   });
+}
+
+/** Mint a fresh pairing credential from the in-container server. The desktop
+ * bootstrap token is single-use and is consumed by Connect registration, so
+ * the deploying client needs its own credential to save the sandbox as an
+ * environment. */
+function issueSandboxPairingCredential(input: {
+  readonly httpBaseUrl: string;
+  readonly adminAccessToken: string;
+}): Effect.Effect<string, SandboxRpcError> {
+  return postJson(
+    AuthPairingCredentialResult,
+    `${input.httpBaseUrl}/api/auth/pairing-token`,
+    { label: "Deploying desktop" },
+    input.adminAccessToken,
+  ).pipe(Effect.map((credential) => credential.credential));
 }
 
 const RelayConfigResponse = Schema.Struct({ ok: Schema.Boolean });
@@ -723,8 +740,9 @@ export const SandboxServiceLive = {
         // and endpoint bound to the deployed container rather than the parent
         // desktop server. A missing user/CLI Connect token or relay failure fails
         // the RPC and tears down the just-created container.
-        const descriptor = yield* registerSandboxWithConnect({
-          httpBaseUrl: reach.httpBaseUrl.replace("localhost", "127.0.0.1"),
+        const loopbackHttpBaseUrl = reach.httpBaseUrl.replace("localhost", "127.0.0.1");
+        const { descriptor, adminAccessToken } = yield* registerSandboxWithConnect({
+          httpBaseUrl: loopbackHttpBaseUrl,
           bootstrapToken,
           connectAuthToken: options?.connectAuthToken,
         }).pipe(
@@ -741,6 +759,25 @@ export const SandboxServiceLive = {
             ),
           ),
         );
+        // The desktop bootstrap token was consumed by registration above, so
+        // issue a dedicated pairing credential for the deploying client.
+        const pairingToken = yield* issueSandboxPairingCredential({
+          httpBaseUrl: loopbackHttpBaseUrl,
+          adminAccessToken,
+        }).pipe(
+          Effect.catch((error: SandboxRpcError) =>
+            disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new SandboxRpcError({
+                    reason: "connect-failed",
+                    message: `Could not issue a sandbox pairing credential: ${error.message}`,
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
         runningSessions.set(sessionKey, {
           handle,
           driver: inst.driver,
@@ -751,7 +788,7 @@ export const SandboxServiceLive = {
         return {
           instanceId,
           environmentId: descriptor.environmentId,
-          pairingToken: bootstrapToken,
+          pairingToken,
           endpoint,
         };
       }).pipe(Effect.ensuring(Effect.sync(() => startingSessions.delete(sessionKey))));

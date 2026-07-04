@@ -67,6 +67,19 @@ function slugifyLabel(value: string): string {
 /** Per-instance busy state for the long-running RPCs. */
 type BusyOp = "test" | "start" | "dispose";
 
+/** Render a non-empty failure message for the progress log and toasts.
+ * Effect fiber failures can surface as objects whose `message` is empty. */
+function failureMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+  const rendered = String(error ?? "").trim();
+  return rendered.length > 0 && rendered !== "[object Object]" ? rendered : "Unknown error.";
+}
+
 /**
  * Settings panel for sandbox environments (Phase 1: local Docker
  * containers). Lists configured targets with their materialized status, and
@@ -273,7 +286,7 @@ export function SandboxDeploymentSettings() {
               [instanceId]: [...(prev[instanceId] ?? []), "connect: ok"],
             }));
           } catch (error) {
-            const message = error instanceof Error ? error.message : "Unknown error.";
+            const message = failureMessage(error);
             setTestProgress((prev) => ({
               ...prev,
               [instanceId]: [...(prev[instanceId] ?? []), `connect: failed — ${message}`],
@@ -287,15 +300,15 @@ export function SandboxDeploymentSettings() {
           refreshManagedRelayEnvironments();
           await refreshList();
 
-          toastManager.add({
-            type: "success",
-            title: "Sandbox session started",
-            description: savedForProjectPicker
-              ? "Available from Add project."
-              : `Reachable at ${result.endpoint.httpBaseUrl}.`,
-          });
+          if (savedForProjectPicker) {
+            toastManager.add({
+              type: "success",
+              title: "Sandbox session started",
+              description: "Available from Add project.",
+            });
+          }
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown error.";
+          const message = failureMessage(error);
           setTestProgress((prev) => ({
             ...prev,
             [instanceId]: [...(prev[instanceId] ?? []), `start: failed — ${message}`],

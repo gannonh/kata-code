@@ -2,7 +2,7 @@
 
 ## 2026-07-03 (Environments / Deployments — sandbox sessions in project picker)
 
-Fixed the Phase 1/2 sandbox session gap: after a sandbox session starts, the web settings flow saves the loopback sandbox server in the environment registry using the returned pairing token, and refreshes Connect state so the left-rail Add project picker can target it. The sandbox list response now reports running-session state so the Settings card keeps showing Dispose after remounts. Disposing the session removes the saved sandbox environment locally.
+Fixed the Phase 1/2 sandbox session gap: after Connect registration consumes the single-use desktop bootstrap token, `sandbox.startSession` now mints a dedicated pairing credential from the in-container server and returns it as `pairingToken`; the web settings flow uses it to save the loopback sandbox server in the environment registry so the left-rail Add project picker can target it. The sandbox list response reports running-session state so the Settings card keeps showing Dispose after remounts, and disposing the session removes the saved sandbox environment locally.
 
 ## 2026-07-03 (Environments / Deployments Phase 3 — deep-dive approved)
 
