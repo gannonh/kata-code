@@ -12,9 +12,10 @@
  * `~/.claude.json` is a file at home root, not inside `~/.claude`, so it is
  * mounted separately (AgentBox pattern). Claude Code writes to `~/.claude` and
  * `~/.claude.json` at runtime (skills, plugins, session state, auth refresh),
- * so both are read-write. Codex and OpenCode config dirs are read-only on the
- * host side; the container owns its own runtime writes under those paths via
- * the driver's `HOME=/home/katacode` layout.
+ * so both are read-write. Codex writes an sqlite state runtime under `~/.codex`
+ * at app-server startup, so that mount is read-write too. OpenCode config is
+ * read-only on the host side; the container owns its own runtime writes under
+ * that path via the driver's `HOME=/home/katacode` layout.
  *
  * `CODEX_HOME` (set by the sandbox instance env or saved-env secret path)
  * overrides the Codex bind-mount target: when set to a shadow home, the host
@@ -93,7 +94,7 @@ export function buildCredentialBindMounts(input: CredentialBindMountInput): Cred
     mounts.push({
       source: codexSource,
       target: codexHome ?? `${input.containerHome}/.codex`,
-      readOnly: true,
+      readOnly: false,
     });
   }
 

@@ -142,8 +142,8 @@ RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai @xai-offi
 # the Cursor Agent installer to write ~/.local/bin/agent.
 RUN addgroup -S katacode \
     && adduser -S -D -G katacode -h /home/katacode katacode \
-    && mkdir -p /home/katacode \
-    && chown -R katacode:katacode /home/katacode
+    && mkdir -p /home/katacode /workspace \
+    && chown -R katacode:katacode /home/katacode /workspace
 ENV HOME=/home/katacode
 USER katacode
 RUN curl -fsSL https://cursor.com/install | bash

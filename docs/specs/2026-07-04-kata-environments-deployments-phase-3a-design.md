@@ -50,7 +50,7 @@ A user starts a local Docker sandbox session, opens the terminal drawer, and get
 3. **Surface `terminal.open` failures in the UI.** Remove the `.catch(() => undefined)` swallow at every call site in `ChatView.tsx`. On failure, write a system message to the terminal drawer (`[terminal] failed to open: <message>`) and surface a non-blocking error toast. The user sees a real error and a retry affordance, not a dead drawer.
 
 4. **Local Docker driver bind-mounts host provider credential directories.** `packages/sandbox-docker` gains bind-mount declarations for:
-   - `~/.codex` → `/home/katacode/.codex` (read-only; respects existing `CODEX_HOME` / shadow-home precedence — if the sandbox instance config sets `CODEX_HOME`, the bind-mount targets that path instead)
+   - `~/.codex` → `/home/katacode/.codex` (read-write; Codex writes an sqlite state runtime under `CODEX_HOME` at app-server startup — read-only breaks `codex app-server`. Respects existing `CODEX_HOME` / shadow-home precedence — if the sandbox instance config sets `CODEX_HOME`, the bind-mount targets that path instead)
    - `~/.config/opencode` → `/home/katacode/.config/opencode` (read-only)
    - `~/.claude` → `/home/katacode/.claude` (read-write; Claude Code writes to this dir at runtime — skills, plugins, session state)
    - `~/.claude.json` → `/home/katacode/.claude.json` (read-write; Claude Code's mutable runtime/auth file)

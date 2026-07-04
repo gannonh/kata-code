@@ -25,7 +25,7 @@ function makeInput(opts: {
 }
 
 describe("buildCredentialBindMounts (Phase 3a credential bind-mounts)", () => {
-  it("mounts ~/.claude rw, ~/.claude.json rw, ~/.codex ro, ~/.config/opencode ro when all exist", () => {
+  it("mounts ~/.claude rw, ~/.claude.json rw, ~/.codex rw, ~/.config/opencode ro when all exist", () => {
     const mounts = buildCredentialBindMounts(
       makeInput({
         existing: [
@@ -58,7 +58,7 @@ describe("buildCredentialBindMounts (Phase 3a credential bind-mounts)", () => {
     expect(codex).toEqual({
       source: "/host-home/.codex",
       target: "/home/katacode/.codex",
-      readOnly: true,
+      readOnly: false,
     });
 
     const opencode = byTarget.get("/home/katacode/.config/opencode");
@@ -94,7 +94,7 @@ describe("buildCredentialBindMounts (Phase 3a credential bind-mounts)", () => {
     const codex = mounts.find((m) => m.source === "/host-home/.codex");
     expect(codex).toBeDefined();
     expect(codex?.target).toBe("/home/katacode/.codex-shadow");
-    expect(codex?.readOnly).toBe(true);
+    expect(codex?.readOnly).toBe(false);
   });
 
   it("ignores an empty CODEX_HOME env value and falls back to the default target", () => {
