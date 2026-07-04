@@ -720,7 +720,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
-  it("maps reasoning-only content deltas into assistant messages", async () => {
+  it("ignores reasoning-only content deltas and surfaces completion detail when present", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
 
@@ -738,19 +738,6 @@ describe("ProviderRuntimeIngestion", () => {
       },
     });
     harness.emit({
-      type: "content.delta",
-      eventId: asEventId("evt-reasoning-delta-2"),
-      provider: ProviderDriverKind.make("pi"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-reasoning"),
-      itemId: asItemId("item-reasoning"),
-      payload: {
-        streamKind: "reasoning_text",
-        delta: " I should greet them back.",
-      },
-    });
-    harness.emit({
       type: "item.completed",
       eventId: asEventId("evt-reasoning-completed"),
       provider: ProviderDriverKind.make("pi"),
@@ -761,6 +748,7 @@ describe("ProviderRuntimeIngestion", () => {
       payload: {
         itemType: "assistant_message",
         status: "completed",
+        detail: "Hello! How can I help?",
       },
     });
 
@@ -773,7 +761,7 @@ describe("ProviderRuntimeIngestion", () => {
     const message = thread.messages.find(
       (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-reasoning",
     );
-    expect(message?.text).toBe("The user said hello. I should greet them back.");
+    expect(message?.text).toBe("Hello! How can I help?");
     expect(message?.streaming).toBe(false);
   });
 

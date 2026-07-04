@@ -64,9 +64,10 @@ export function extractAssistantThinkingFromPiMessage(message: unknown): string 
 }
 
 /**
- * Extract the latest assistant reply from Pi SDK session history. Prefers
- * visible `text` blocks; falls back to `thinking` blocks when the model
- * produced reasoning-only output that never streamed as `assistant_text`.
+ * Extract the latest visible assistant reply text from Pi SDK session
+ * history. Returns only `text` blocks, never `thinking` blocks, so reasoning
+ * output never leaks into the chat message. Reasoning-only turns surface as
+ * `undefined` here and are handled by the adapter's zero-output failure path.
  */
 export function extractLatestAssistantReplyText(
   messages: ReadonlyArray<unknown>,
@@ -76,10 +77,6 @@ export function extractLatestAssistantReplyText(
     const text = extractAssistantTextFromPiMessage(message);
     if (text) {
       return text;
-    }
-    const thinking = extractAssistantThinkingFromPiMessage(message);
-    if (thinking) {
-      return thinking;
     }
   }
   return undefined;

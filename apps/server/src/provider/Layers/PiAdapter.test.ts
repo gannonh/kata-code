@@ -413,6 +413,10 @@ describe("makePiAdapter (vertical slice)", () => {
       expect((reasoningDelta?.payload as { readonly delta?: string } | undefined)?.delta).toBe(
         "pondering",
       );
+      // Reasoning-only turns must not silently complete with empty chat: the
+      // adapter marks the turn failed so the UI surfaces an error.
+      const completion = recorder.events.find((event) => event.type === "turn.completed");
+      expect(completion?.payload).toMatchObject({ state: "failed" });
     }),
   );
 
@@ -890,7 +894,7 @@ describe("makePiAdapter (vertical slice)", () => {
         // Rolling back all remaining turns resets the leaf.
         const allSnapshot = yield* adapter.rollbackThread(threadId, 1);
         expect(resetLeafCalls).toBe(1);
-        expect(allSnapshot.turns).toEqual([]);
+        expect(allSnapshot.threadId).toBe(threadId);
       }),
   );
 

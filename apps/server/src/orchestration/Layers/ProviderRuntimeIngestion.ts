@@ -1360,9 +1360,7 @@ const make = Effect.gen(function* () {
       }
 
       const assistantDelta =
-        event.type === "content.delta" &&
-        (event.payload.streamKind === "assistant_text" ||
-          event.payload.streamKind === "reasoning_text")
+        event.type === "content.delta" && event.payload.streamKind === "assistant_text"
           ? event.payload.delta
           : undefined;
       const proposedPlanDelta =

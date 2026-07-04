@@ -325,7 +325,7 @@ export function makePiAdapter(
 
     const hasObservedTurnOutput = (ctx: PiSessionContext | undefined, turnId: TurnId): boolean => {
       const state = ctx?.turnOutput.get(String(turnId));
-      return (state?.assistantTextChars ?? 0) > 0 || (state?.reasoningTextChars ?? 0) > 0;
+      return (state?.assistantTextChars ?? 0) > 0;
     };
 
     const mapSdkEvent = (
@@ -376,9 +376,12 @@ export function makePiAdapter(
           recordTurnOutputDelta(ctx, turnId, "reasoning_text", thinking);
           return [
             makeEvent(ctx.threadId, {
-              type: "content.delta",
+              type: "runtime.warning",
               turnId,
-              payload: { streamKind: "reasoning_text", delta: thinking },
+              payload: {
+                message:
+                  "Assistant turn produced reasoning output but no visible assistant text. Set Thinking to Off for this model or pick a non-reasoning model.",
+              },
               raw: toolEventRaw(event),
             }),
           ];

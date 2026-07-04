@@ -182,7 +182,7 @@ describe("piThreadHistory", () => {
       ).toBe("Hi there");
     });
 
-    it("falls back to thinking blocks when no text block exists", () => {
+    it("returns undefined for reasoning-only messages so the adapter surfaces a failure", () => {
       expect(
         extractLatestAssistantReplyText([
           {
@@ -190,7 +190,7 @@ describe("piThreadHistory", () => {
             content: [{ type: "thinking", thinking: "The user said hello. I should greet them." }],
           },
         ]),
-      ).toBe("The user said hello. I should greet them.");
+      ).toBeUndefined();
     });
 
     it("prefers text over thinking in the same message", () => {
