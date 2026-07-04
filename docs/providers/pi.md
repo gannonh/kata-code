@@ -51,19 +51,19 @@ unauthenticated and the model picker shows no Pi models.
 
 ## Settings reference
 
-| Field                    | Purpose                                                                                                    |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| **Binary path**          | Path to the Pi CLI. Used only for version/update checks; sessions run through the in-process SDK.          |
-| **Agent directory**      | Pi's global resource root (auth, models, settings, skills, prompts, extensions). Default `~/.pi/agent`.    |
-| **Project trust policy** | `never` (default) ignores project-local `.pi` resources and project `.agents/skills`; `always` loads them. |
+| Field                    | Purpose                                                                                                                    |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| **Binary path**          | Path to the Pi CLI. Used only for version/update checks; sessions run through the in-process SDK.                          |
+| **Agent directory**      | Pi's global resource root (auth, models, settings, skills, prompts, extensions). Default `~/.pi/agent`.                    |
+| **Project trust policy** | Controls Pi project-local prompts/extensions. Provider skill `$` invocation loads project skill directories automatically. |
 
 Custom models, display name, accent color, and per-instance environment
 variables are configured through the generic provider-instance controls, the
 same as other providers.
 
 Provider skills in the Composer can be invoked with `$` tokens. Pi expands those
-tokens against its SDK resource loader, so global skills and trusted
-project-local `.pi/skills` or `.agents/skills` are inserted as inline skill
+tokens against its SDK resource loader, so global skills and project-local
+`.pi/skills`, `.agents/skills`, or `.agent/skills` are inserted as inline skill
 blocks before the turn is sent.
 
 ## Multiple Pi instances

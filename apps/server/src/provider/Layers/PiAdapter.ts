@@ -74,6 +74,7 @@ import {
   createPiRegistries,
   piModelSlug,
   resolvePiAgentDir,
+  resolvePiProjectSkillPaths,
 } from "./PiProvider.ts";
 import { expandProviderSkillTokensInPrompt } from "../skills/filesystemSkills.ts";
 import { mapPiMessageHistory } from "./piThreadHistory.ts";
@@ -594,13 +595,13 @@ export function makePiAdapter(
           try: async () => {
             const factory = options?.createSession ?? createAgentSession;
             // Build the resource loader ourselves so project trust follows
-            // `piSettings.projectTrustPolicy`: "never" (default) keeps
-            // project-local .pi/.agents/skills resources out of the session,
-            // "always" loads them. Without this, the SDK defaults to
-            // projectTrusted=true and bypasses the configured policy.
+            // `piSettings.projectTrustPolicy` for Pi prompts/extensions. Project
+            // skill directories are supplied as explicit additional skill paths
+            // so `$` invocation works consistently with other providers.
             const resourceLoader = new DefaultResourceLoader({
               cwd,
               agentDir,
+              additionalSkillPaths: [...resolvePiProjectSkillPaths(cwd)],
             });
             await resourceLoader.reload({
               resolveProjectTrust: () =>
@@ -757,15 +758,15 @@ export function makePiAdapter(
         }
 
         // Surface the active project trust policy so loading project-local
-        // .pi resources and project .agents/skills is a visible, explicit
-        // decision. The default "never" keeps those resources out and needs
-        // no warning; "always" is security-sensitive and states it is loaded.
+        // Pi prompts/extensions is a visible, explicit decision. Provider
+        // skill `$` invocation uses explicit skill paths and does not require
+        // this policy.
         if (piSettings.projectTrustPolicy === "always") {
           yield* publish(
             piRuntimeWarning(input.threadId, {
               method: "project-trust/always",
               message:
-                "Pi project trust policy is 'always': project-local .pi resources and project .agents/skills are loaded for this session.",
+                "Pi project trust policy is 'always': project-local Pi prompts/extensions are loaded for this session.",
               detail: { projectTrustPolicy: piSettings.projectTrustPolicy },
             }),
           );

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Pi SDK resource loader uses Node filesystem paths; this module prepares compatible skill paths.
 /**
  * PiProvider — builds a `ServerProviderDraft` snapshot for a Pi provider
  * instance by discovering auth, models, skills, and slash commands through
@@ -23,6 +24,8 @@ import {
   type PromptTemplate,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
+import * as NodeFs from "node:fs";
+import * as NodePath from "node:path";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -70,6 +73,7 @@ const PI_THINKING_LEVEL_LABELS: Readonly<Record<PiThinkingLevel, string>> = {
 };
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
+const PI_PROJECT_SKILL_DIRECTORY_NAMES = [".pi/skills", ".agents/skills", ".agent/skills"] as const;
 
 /**
  * Structural view of a Pi SDK model. The real `Model<Api>` from
@@ -230,6 +234,13 @@ export function resolvePiAgentDir(agentDir: string): string {
  * `agentDir` is empty the SDK default locations are used. Shared by the
  * discovery layer and the live adapter so both resolve registries identically.
  */
+export function resolvePiProjectSkillPaths(cwd: string): ReadonlyArray<string> {
+  const resolvedCwd = NodePath.resolve(cwd);
+  return PI_PROJECT_SKILL_DIRECTORY_NAMES.map((directoryName) =>
+    NodePath.join(resolvedCwd, directoryName),
+  ).filter((candidate) => NodeFs.existsSync(candidate));
+}
+
 export function createPiRegistries(agentDir: string): {
   readonly authStorage: AuthStorage;
   readonly modelRegistry: ModelRegistry;
@@ -279,10 +290,11 @@ export const discoverPiProvider = Effect.fn("discoverPiProvider")(function* (
     const loader = new DefaultResourceLoader({
       cwd: input.cwd,
       agentDir: input.agentDir || getAgentDir(),
+      additionalSkillPaths: [...resolvePiProjectSkillPaths(input.cwd)],
     });
-    // Respect the configured project trust policy: "never" (default) keeps
-    // project-local skills/prompt commands out of the provider snapshot;
-    // "always" loads them. Without this the SDK defaults to trusted=true.
+    // Keep prompt commands/extensions behind Pi project trust, while explicit
+    // provider skills are loaded through `additionalSkillPaths` above to match
+    // the other provider skill `$` invocation behavior.
     await loader.reload({
       resolveProjectTrust: () => Promise.resolve(input.projectTrustPolicy === "always"),
     });

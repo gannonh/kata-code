@@ -2,7 +2,7 @@
 
 ## 2026-07-03 (Pi skill token expansion)
 
-- Pi provider `$` skill tokens now expand through the Pi SDK resource loader before a turn is sent, covering global skills and trusted project-local `.pi/skills` or `.agents/skills`. Updated [Pi provider guide](/providers/pi.md) and [provider architecture](/architecture/providers.md#provider-skills).
+- Pi provider `$` skill tokens now expand through the Pi SDK resource loader before a turn is sent, covering global skills and project-local `.pi/skills`, `.agents/skills`, or `.agent/skills`. Updated [Pi provider guide](/providers/pi.md) and [provider architecture](/architecture/providers.md#provider-skills).
 
 ## 2026-07-01 (Cursor provider guide)
 

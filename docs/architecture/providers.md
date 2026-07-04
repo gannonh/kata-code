@@ -113,7 +113,8 @@ Unknown tokens are left unchanged. Expansion is wired into the Cursor adapter
 (`apps/server/src/provider/Layers/CursorAdapter.ts`) and Pi adapter
 (`apps/server/src/provider/Layers/PiAdapter.ts`). Cursor uses the shared
 filesystem scanner; Pi expands against the Pi SDK resource loader so `$` tokens
-respect Pi's agent directory and project trust policy. See the
+respect Pi's agent directory and project-local `.pi/skills`, `.agents/skills`,
+and `.agent/skills`. See the
 [Cursor provider guide](/providers/cursor.md#provider-skills) for the
 operator-facing skill workflow.
 

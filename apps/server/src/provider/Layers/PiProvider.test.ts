@@ -1,5 +1,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+// @effect-diagnostics nodeBuiltinImport:off - Tests create temporary Pi skill directories.
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { PiSettings, type ServerProviderModel } from "@kata-sh/code-contracts";
@@ -13,6 +17,7 @@ import {
   mapPiSkills,
   piModelCapabilities,
   piModelSlug,
+  resolvePiProjectSkillPaths,
   type PiModelShape,
 } from "./PiProvider.ts";
 
@@ -65,6 +70,21 @@ describe("PiProvider mappers", () => {
   it("omits the thinking descriptor for non-reasoning models", () => {
     const caps = piModelCapabilities({ reasoning: false });
     expect(caps.optionDescriptors ?? []).toEqual([]);
+  });
+
+  it("resolves project skill directories without project trust settings", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "pi-agent-skill-dir-"));
+    try {
+      const piSkillDir = path.join(root, ".pi", "skills");
+      const agentsSkillDir = path.join(root, ".agents", "skills");
+      const agentSkillDir = path.join(root, ".agent", "skills");
+      mkdirSync(piSkillDir, { recursive: true });
+      mkdirSync(agentsSkillDir, { recursive: true });
+      mkdirSync(agentSkillDir, { recursive: true });
+      expect(resolvePiProjectSkillPaths(root)).toEqual([piSkillDir, agentsSkillDir, agentSkillDir]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("maps pi skills and prompt templates into kata skills and slash commands", () => {

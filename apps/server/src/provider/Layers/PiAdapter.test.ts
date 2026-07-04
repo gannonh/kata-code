@@ -112,7 +112,7 @@ function makeFakeSession(options?: FakeSessionOptions): {
 }
 
 function writeProjectSkill(root: string, name: string, body: string): string {
-  const skillDir = path.join(root, ".agents", "skills", name);
+  const skillDir = path.join(root, ".agent", "skills", name);
   mkdirSync(skillDir, { recursive: true });
   const skillPath = path.join(skillDir, "SKILL.md");
   writeFileSync(
@@ -224,7 +224,7 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
-  it.effect("expands project-local $ skill tokens before prompting Pi", () =>
+  it.effect("expands project-local .agent $ skill tokens before prompting Pi", () =>
     Effect.gen(function* () {
       const root = mkdtempSync(path.join(os.tmpdir(), "pi-project-skills-"));
       try {
