@@ -135,6 +135,7 @@ interface PiTrackedTurn {
 interface PiTurnOutputState {
   assistantTextChars: number;
   reasoningTextChars: number;
+  toolCallsCompleted: number;
 }
 
 interface PiSessionContext {
@@ -303,7 +304,11 @@ export function makePiAdapter(
       const key = String(turnId);
       const existing = ctx.turnOutput.get(key);
       if (existing) return existing;
-      const next: PiTurnOutputState = { assistantTextChars: 0, reasoningTextChars: 0 };
+      const next: PiTurnOutputState = {
+        assistantTextChars: 0,
+        reasoningTextChars: 0,
+        toolCallsCompleted: 0,
+      };
       ctx.turnOutput.set(key, next);
       return next;
     };
@@ -323,9 +328,15 @@ export function makePiAdapter(
       }
     };
 
+    const recordToolCallCompleted = (ctx: PiSessionContext, turnId: TurnId | undefined) => {
+      const state = turnOutputState(ctx, turnId);
+      if (!state) return;
+      state.toolCallsCompleted += 1;
+    };
+
     const hasObservedTurnOutput = (ctx: PiSessionContext | undefined, turnId: TurnId): boolean => {
       const state = ctx?.turnOutput.get(String(turnId));
-      return (state?.assistantTextChars ?? 0) > 0;
+      return (state?.assistantTextChars ?? 0) > 0 || (state?.toolCallsCompleted ?? 0) > 0;
     };
 
     const mapSdkEvent = (
@@ -445,6 +456,7 @@ export function makePiAdapter(
         ];
       }
       if (event.type === "tool_execution_end") {
+        recordToolCallCompleted(ctx, turnId);
         const tracked = ctx.activeToolItems.get(event.toolCallId);
         ctx.activeToolItems.delete(event.toolCallId);
         const itemId = RuntimeItemId.make(`pi-tool-${event.toolCallId}`);
@@ -682,6 +694,28 @@ export function makePiAdapter(
         }
         const thinkingLevel = resolvePiThinkingLevelForSession(model, input.modelSelection);
 
+        const serverConfigOption = yield* Effect.serviceOption(ServerConfig);
+        const fileSystemOption = yield* Effect.serviceOption(FileSystem.FileSystem);
+        const stateDir =
+          serverConfigOption._tag === "Some" ? serverConfigOption.value.stateDir : undefined;
+        const threadSessionDir =
+          stateDir !== undefined ? `${stateDir}/pi-sessions/${String(input.threadId)}` : undefined;
+        if (threadSessionDir && fileSystemOption._tag === "Some") {
+          yield* fileSystemOption.value.makeDirectory(threadSessionDir, { recursive: true }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "startSession",
+                  detail: `Failed to prepare Pi session directory: ${
+                    cause instanceof Error ? cause.message : String(cause)
+                  }.`,
+                  cause,
+                }),
+            ),
+          );
+        }
+
         const created = yield* Effect.tryPromise({
           try: async () => {
             const factory = options?.createSession ?? createAgentSession;
@@ -706,8 +740,10 @@ export function makePiAdapter(
                 ? input.resumeCursor
                 : undefined;
             const sessionManager = resumeCursor
-              ? SessionManager.open(resumeCursor, undefined, cwd)
-              : SessionManager.inMemory(cwd);
+              ? SessionManager.open(resumeCursor, threadSessionDir, cwd)
+              : threadSessionDir
+                ? SessionManager.continueRecent(cwd, threadSessionDir)
+                : SessionManager.inMemory(cwd);
             const createdSession = await factory({
               cwd,
               ...(agentDir ? { agentDir } : {}),
