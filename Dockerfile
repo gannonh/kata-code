@@ -83,7 +83,7 @@ ARG TARGETARCH
 # inside the deployed container. `git` is required for in-container worktree
 # and source-control operations (Phase 3a AC-3a.1).
 RUN set -eux; \
-    apk add --no-cache libstdc++ ca-certificates curl git; \
+    apk add --no-cache libstdc++ ca-certificates curl git bash; \
     case "${TARGETARCH}" in \
       amd64) \
         cloudflared_url="https://github.com/cloudflare/cloudflared/releases/download/2026.5.2/cloudflared-linux-amd64"; \
