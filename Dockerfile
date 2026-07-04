@@ -80,9 +80,10 @@ ARG TARGETARCH
 # node-pty's native addon is compiled in the builder; the runtime only needs
 # the loader libs the addon links against. The sandbox image also needs
 # cloudflared on PATH so Connect relay config can start the managed tunnel
-# inside the deployed container.
+# inside the deployed container. `git` is required for in-container worktree
+# and source-control operations (Phase 3a AC-3a.1).
 RUN set -eux; \
-    apk add --no-cache libstdc++ ca-certificates curl; \
+    apk add --no-cache libstdc++ ca-certificates curl git; \
     case "${TARGETARCH}" in \
       amd64) \
         cloudflared_url="https://github.com/cloudflare/cloudflared/releases/download/2026.5.2/cloudflared-linux-amd64"; \
@@ -124,13 +125,38 @@ ENV KATACODE_MODE=desktop \
 RUN printf '#!/bin/sh\nexec node /app/apps/server/dist/bin.mjs "$@"\n' > /usr/local/bin/katacode \
     && chmod +x /usr/local/bin/katacode
 
+# Phase 3a: bake provider CLIs into the image so a sandbox session can run
+# `codex`, `agent` (Cursor), `grok`, `claude` (Claude Code), and `opencode`
+# directly. The same image is the provision unit for Phase 3b (Railway cloud
+# driver), so this work is not throwaway. The npm packages ship
+# platform-native prebuilds for linux amd64/arm64, so a plain global install
+# is enough (no native build). Install as root so the binaries land on the
+# system PATH; the unprivileged `katacode` user created below inherits them.
+# Cursor Agent (`agent`) is distributed via the cursor.com installer, not npm:
+# it downloads the platform binary and symlinks `agent` + `cursor-agent` into
+# ~/.local/bin, so it is installed as the katacode user below.
+RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai @xai-official/grok
+
 # Run the server and cloudflared as an unprivileged user instead of root.
-# A writable HOME is required for the Node server's config/cache dirs.
+# A writable HOME is required for the Node server's config/cache dirs and for
+# the Cursor Agent installer to write ~/.local/bin/agent.
 RUN addgroup -S katacode \
     && adduser -S -D -G katacode -h /home/katacode katacode \
     && mkdir -p /home/katacode \
     && chown -R katacode:katacode /home/katacode
 ENV HOME=/home/katacode
+USER katacode
+RUN curl -fsSL https://cursor.com/install | bash
+USER root
+
+# alpine ships no `bash`; the terminal manager resolves `env.SHELL ?? "bash"`
+# (apps/server/src/terminal/Layers/Manager.ts). Set SHELL=/bin/sh so the
+# in-container terminal spawns busybox ash directly instead of falling through
+# to a missing `bash` (Phase 3a AC-3a.2/3a.3). The fallback chain remains as a
+# safety net. Prepend /home/katacode/.local/bin to PATH so the Cursor Agent
+# `agent` symlink resolves in-container.
+ENV SHELL=/bin/sh \
+    PATH=/home/katacode/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 EXPOSE 13773
 
