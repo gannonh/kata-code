@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import { makeProviderSkillInvocationToken } from "@kata-sh/code-shared/providerSkills";
 import {
   PiSettings,
   ProviderDriverKind,
@@ -23,11 +24,10 @@ import { ServerConfig } from "../../config.ts";
 import { makePiAdapter, type PiSdkSession } from "./PiAdapter.ts";
 import type { PiExtensionUIContext } from "./piExtensionUi.ts";
 import type { PiModelShape } from "./PiProvider.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRequestError } from "../Errors.ts";
-import type { ProviderAdapterError } from "../Errors.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
+const isProviderRuntimeEvent = Schema.is(ProviderRuntimeEvent);
 
 type PiSdkSessionEvent = Parameters<Parameters<PiSdkSession["subscribe"]>[0]>[0];
 
@@ -109,6 +109,17 @@ function makeFakeSession(options?: FakeSessionOptions): {
     bindExtensions: () => Promise.resolve(),
   };
   return { session, hooks };
+}
+
+function writeProjectSkill(root: string, name: string, body: string): string {
+  const skillDir = path.join(root, ".agents", "skills", name);
+  mkdirSync(skillDir, { recursive: true });
+  const skillPath = path.join(skillDir, "SKILL.md");
+  writeFileSync(
+    skillPath,
+    [`---`, `name: ${name}`, `description: Project skill`, `---`, body].join("\n"),
+  );
+  return skillPath;
 }
 
 function makeEventRecorder() {
@@ -210,6 +221,51 @@ describe("makePiAdapter (vertical slice)", () => {
         (event) => event.type === "content.delta" && event.payload.streamKind === "assistant_text",
       );
       expect((delta?.payload as { readonly delta?: string } | undefined)?.delta).toBe("Hi");
+    }),
+  );
+
+  it.effect("expands project-local $ skill tokens before prompting Pi", () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(path.join(os.tmpdir(), "pi-project-skills-"));
+      try {
+        const skillPath = writeProjectSkill(
+          root,
+          "project-review",
+          "Use the project review checklist.",
+        );
+        const token = makeProviderSkillInvocationToken({ name: "project-review", path: skillPath });
+        const recorder = makeEventRecorder();
+        const { session, hooks } = makeFakeSession();
+        const adapter = yield* makePiAdapter(decodePiSettings({ projectTrustPolicy: "always" }), {
+          instanceId: ProviderInstanceId.make("pi"),
+          availableModels: [SAMPLE_MODEL],
+          createSession: (() => Promise.resolve({ session })) as never,
+          onEvent: recorder.onEvent,
+        });
+
+        const threadId = ThreadId.make("pi-skill-thread");
+        yield* adapter.startSession({
+          threadId,
+          cwd: root,
+          runtimeMode: "full-access",
+          modelSelection: MODEL_SELECTION,
+        });
+        yield* adapter.sendTurn({ threadId, input: `$${token} inspect this change` });
+        yield* Effect.tryPromise(() => hooks.promptStarted);
+
+        expect(hooks.lastPromptArgs?.text).toContain(
+          `<skill name="project-review" location="${skillPath}">`,
+        );
+        expect(hooks.lastPromptArgs?.text).toContain("Use the project review checklist.");
+        expect(hooks.lastPromptArgs?.text).toContain("inspect this change");
+
+        hooks.resolvePrompt();
+        yield* Effect.tryPromise(() =>
+          recorder.waitFor((event) => event.type === "turn.completed"),
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     }),
   );
 
@@ -1155,7 +1211,7 @@ describe("makePiAdapter extension UI bridge", () => {
       yield* Effect.tryPromise(() => selectPromise);
 
       for (const event of recorder.events) {
-        expect(Schema.is(ProviderRuntimeEvent)(event)).toBe(true);
+        expect(isProviderRuntimeEvent(event)).toBe(true);
       }
     }),
   );

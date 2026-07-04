@@ -200,6 +200,7 @@ export function mapPiSkills(skills: ReadonlyArray<Skill>): ReadonlyArray<ServerP
     name: skill.name,
     path: skill.filePath,
     enabled: !skill.disableModelInvocation,
+    ...(skill.sourceInfo?.scope ? { scope: skill.sourceInfo.scope } : {}),
     ...(skill.description ? { description: skill.description } : {}),
   }));
 }

@@ -18,6 +18,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   SessionManager,
+  type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { APP_BASE_NAME } from "@kata-sh/code-shared/branding";
 import {
@@ -74,6 +75,7 @@ import {
   piModelSlug,
   resolvePiAgentDir,
 } from "./PiProvider.ts";
+import { expandProviderSkillTokensInPrompt } from "../skills/filesystemSkills.ts";
 import { mapPiMessageHistory } from "./piThreadHistory.ts";
 import {
   type PiTrackedToolCall,
@@ -127,6 +129,7 @@ interface PiSessionContext {
   readonly threadId: ThreadId;
   session: ProviderSession;
   readonly sdk: PiSdkSession;
+  readonly resourceLoader: PiResourceLoader;
   unsubscribe: () => void;
   activeTurnId: TurnId | undefined;
   turnFiber: Fiber.Fiber<void, never> | undefined;
@@ -148,6 +151,10 @@ interface PiSessionContext {
  * The slice of the Pi SDK `AgentSession` this adapter depends on. Extracted as
  * a type so unit tests can substitute a minimal double without the full SDK.
  */
+interface PiResourceLoader {
+  getSkills(): { readonly skills: ReadonlyArray<Skill> };
+}
+
 export interface PiSdkSession {
   readonly sessionId: string;
   /** Session file path, when the session is backed by a file (resume cursor). */
@@ -609,7 +616,7 @@ export function makePiAdapter(
             const sessionManager = resumeCursor
               ? SessionManager.open(resumeCursor, undefined, cwd)
               : SessionManager.inMemory(cwd);
-            return factory({
+            const createdSession = await factory({
               cwd,
               ...(agentDir ? { agentDir } : {}),
               model: model as never,
@@ -620,6 +627,7 @@ export function makePiAdapter(
               sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
             });
+            return { ...createdSession, resourceLoader };
           },
           catch: (cause) =>
             new ProviderAdapterRequestError({
@@ -650,6 +658,7 @@ export function makePiAdapter(
           threadId: input.threadId,
           session: providerSession,
           sdk: sdkSession,
+          resourceLoader: created.resourceLoader,
           unsubscribe: () => {},
           activeTurnId: undefined,
           turnFiber: undefined,
@@ -844,7 +853,22 @@ export function makePiAdapter(
           });
         }
 
-        const text = input.input?.trim() ?? "";
+        const rawText = input.input?.trim() ?? "";
+        const text = yield* Effect.try({
+          try: () =>
+            rawText
+              ? expandProviderSkillTokensInPrompt(rawText, ctx.resourceLoader.getSkills().skills)
+              : rawText,
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "sendTurn",
+              detail: `Failed to expand Pi skill invocation: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }.`,
+              ...(cause instanceof Error ? { cause } : {}),
+            }),
+        });
         // Resolve image attachments before starting the turn. Failures (missing
         // services, invalid attachment ids, read errors) surface as typed
         // adapter errors before `turn.started` is published, so no orphaned

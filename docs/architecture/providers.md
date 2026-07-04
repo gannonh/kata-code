@@ -109,10 +109,13 @@ reused by the web `SkillInlineText` renderer and the server expander.
 delivered: recognized tokens are replaced with inline
 `<skill name="…" location="…">` blocks containing the skill body (frontmatter
 stripped), prefixed with the skill's base directory so reference paths resolve.
-Unknown tokens are left unchanged. Expansion is currently wired into the Cursor adapter (`apps/server/src/provider/Layers/CursorAdapter.ts`); the
-token model and scan directories are cross-provider compatible so other drivers
-can adopt the same mechanism. See the [Cursor provider guide](/providers/cursor.md#provider-skills)
-for the operator-facing skill workflow.
+Unknown tokens are left unchanged. Expansion is wired into the Cursor adapter
+(`apps/server/src/provider/Layers/CursorAdapter.ts`) and Pi adapter
+(`apps/server/src/provider/Layers/PiAdapter.ts`). Cursor uses the shared
+filesystem scanner; Pi expands against the Pi SDK resource loader so `$` tokens
+respect Pi's agent directory and project trust policy. See the
+[Cursor provider guide](/providers/cursor.md#provider-skills) for the
+operator-facing skill workflow.
 
 ### Canonical runtime events
 

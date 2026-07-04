@@ -61,6 +61,11 @@ Custom models, display name, accent color, and per-instance environment
 variables are configured through the generic provider-instance controls, the
 same as other providers.
 
+Provider skills in the Composer can be invoked with `$` tokens. Pi expands those
+tokens against its SDK resource loader, so global skills and trusted
+project-local `.pi/skills` or `.agents/skills` are inserted as inline skill
+blocks before the turn is sent.
+
 ## Multiple Pi instances
 
 Add a second Pi provider with a different **Agent directory** to isolate auth,

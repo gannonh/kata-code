@@ -27,7 +27,7 @@ export interface IndexedFilesystemSkill {
   readonly name: string;
   readonly filePath: string;
   readonly baseDir: string;
-  readonly scope: "project" | "user";
+  readonly scope: "project" | "user" | "temporary";
 }
 
 interface SkillScanLocation {
@@ -75,7 +75,10 @@ function mapSkillToServerProviderSkill(
 }
 
 /** Build the indexed skill shape used for token expansion lookups. */
-function toIndexedFilesystemSkill(skill: Skill, scope: "project" | "user"): IndexedFilesystemSkill {
+function toIndexedFilesystemSkill(
+  skill: Skill,
+  scope: "project" | "user" | "temporary" = normalizeSkillScope(skill.sourceInfo?.scope),
+): IndexedFilesystemSkill {
   return {
     name: skill.name,
     filePath: skill.filePath,
@@ -84,11 +87,15 @@ function toIndexedFilesystemSkill(skill: Skill, scope: "project" | "user"): Inde
   };
 }
 
+function normalizeSkillScope(scope: string | undefined): "project" | "user" | "temporary" {
+  return scope === "project" || scope === "user" || scope === "temporary" ? scope : "temporary";
+}
+
 /** Index a skill by bare name, keeping the first discovered match for collisions. */
 function indexSkillByName(
   indexed: Map<string, IndexedFilesystemSkill>,
   skill: Skill,
-  scope: "project" | "user",
+  scope: "project" | "user" | "temporary",
 ): void {
   if (indexed.has(skill.name)) {
     return;
@@ -102,6 +109,29 @@ function indexSkillByName(
  * Scan order is project directories first, then user-level. When multiple
  * skills share a name, the first match wins for `$skillname` expansion.
  */
+export function indexFilesystemSkills(skills: ReadonlyArray<Skill>): {
+  readonly indexedByName: ReadonlyMap<string, IndexedFilesystemSkill>;
+  readonly indexedByInvocationToken: ReadonlyMap<string, IndexedFilesystemSkill>;
+} {
+  const indexedByName = new Map<string, IndexedFilesystemSkill>();
+  const indexedByInvocationToken = new Map<string, IndexedFilesystemSkill>();
+
+  for (const skill of skills) {
+    // Always index skills for `$skillname` token expansion. Explicit
+    // `$`-token invocations are user-initiated, not model-initiated, so
+    // `disable-model-invocation: true` must not block them. The `enabled`
+    // flag on the published skill already prevents model auto-invocation.
+    const indexedSkill = toIndexedFilesystemSkill(skill);
+    indexSkillByName(indexedByName, skill, indexedSkill.scope);
+    indexedByInvocationToken.set(
+      makeProviderSkillInvocationToken({ name: skill.name, path: skill.filePath }),
+      indexedSkill,
+    );
+  }
+
+  return { indexedByName, indexedByInvocationToken };
+}
+
 export function discoverCursorFilesystemSkills(options: FilesystemSkillDiscoveryOptions): {
   readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly indexedByName: ReadonlyMap<string, IndexedFilesystemSkill>;
@@ -109,8 +139,7 @@ export function discoverCursorFilesystemSkills(options: FilesystemSkillDiscovery
 } {
   const seenPaths = new Set<string>();
   const skills: ServerProviderSkill[] = [];
-  const indexedByName = new Map<string, IndexedFilesystemSkill>();
-  const indexedByInvocationToken = new Map<string, IndexedFilesystemSkill>();
+  const loadedSkills: Skill[] = [];
 
   for (const location of resolveSkillScanLocations(options)) {
     const loaded = loadSkillsFromDir({
@@ -123,19 +152,12 @@ export function discoverCursorFilesystemSkills(options: FilesystemSkillDiscovery
         continue;
       }
       seenPaths.add(skill.filePath);
-      const serverSkill = mapSkillToServerProviderSkill(skill, location.scope);
-      skills.push(serverSkill);
-      // Always index skills for `$skillname` token expansion. Explicit
-      // `$`-token invocations are user-initiated, not model-initiated, so
-      // `disable-model-invocation: true` must not block them. The `enabled`
-      // flag on the published skill already prevents model auto-invocation.
-      const indexedSkill = toIndexedFilesystemSkill(skill, location.scope);
-      indexSkillByName(indexedByName, skill, location.scope);
-      indexedByInvocationToken.set(makeProviderSkillInvocationToken(serverSkill), indexedSkill);
+      loadedSkills.push(skill);
+      skills.push(mapSkillToServerProviderSkill(skill, location.scope));
     }
   }
 
-  return { skills, indexedByName, indexedByInvocationToken };
+  return { skills, ...indexFilesystemSkills(loadedSkills) };
 }
 
 /** Escape a value for safe interpolation into XML attribute strings. */
@@ -212,6 +234,16 @@ export function expandSkillTokensInText(
 /**
  * Discover and expand Composer `$skillname` tokens for a Cursor prompt.
  */
+export function expandProviderSkillTokensInPrompt(
+  text: string,
+  skills: ReadonlyArray<Skill>,
+): string {
+  const { indexedByName, indexedByInvocationToken } = indexFilesystemSkills(skills);
+  return expandSkillTokensInText(text, indexedByName, indexedByInvocationToken, (skill) =>
+    NodeFs.readFileSync(skill.filePath, "utf-8"),
+  );
+}
+
 export function expandCursorSkillTokensInPrompt(
   text: string,
   options: FilesystemSkillDiscoveryOptions,

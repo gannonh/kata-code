@@ -1,5 +1,9 @@
 # Providers log
 
+## 2026-07-03 (Pi skill token expansion)
+
+- Pi provider `$` skill tokens now expand through the Pi SDK resource loader before a turn is sent, covering global skills and trusted project-local `.pi/skills` or `.agents/skills`. Updated [Pi provider guide](/providers/pi.md) and [provider architecture](/architecture/providers.md#provider-skills).
+
 ## 2026-07-01 (Cursor provider guide)
 
 - Added [Cursor provider guide](/providers/cursor.md) (early access): Cursor Agent CLI over ACP, prerequisites (`agent login` or `agent set-channel lab && agent update` for the parameterized model picker), settings reference (binary path, API endpoint), API-key auth via `CURSOR_API_KEY` (skips interactive ACP `authenticate`; `agent about` null email treated as authenticated), and a Provider skills section covering discovery directories, `$skillname` / path-qualified `$skill:name:hash` Composer tokens, and server-side `<skill>` block prompt expansion. Linked from the [providers index](/providers/index.md) and cross-linked to [provider architecture — Provider skills](/architecture/providers.md#provider-skills) and [E2E test catalog — Cursor gates](/guides/e2e-test-catalog.md#cursor-e2e-gates).
