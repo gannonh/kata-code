@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-04 (Environments / Deployments Phase 3a — Implemented)
+
+- Marked [Phase 3a — Docker sandbox gaps](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) `Implemented`. Baked provider CLIs (`codex`, `agent`, `grok`, `claude`, `opencode`) and `git` into the `katacode` image runtime stage, set `SHELL=/bin/sh` + `~/.local/bin` on `PATH`, wired host-credential bind-mounts (`~/.codex` ro, `~/.claude`/`~/.claude.json` rw, `~/.config/opencode` ro) into `DockerSandboxProvider.provision` via the new pure `buildCredentialBindMounts()` (with `CODEX_HOME` shadow-home precedence and absent-dir skip), and surfaced `terminal.open` RPC rejections via a non-blocking error toast instead of `.catch(() => undefined)`. Added `scripts/verify-docker-image.ts` and a third `@environments-deploy` e2e test asserting `SHELL=/bin/sh`, `/bin/sh`, an interactive shell, and every provider CLI on PATH. Gate: `vp check` + `vp run typecheck` pass; `pnpm run verify:docker-image` OK; manual UAT for host-credential auth ACs pending.
+
 ## 2026-07-04 (Environments / Deployments — Vercel Phase 3 spec cancelled)
 
 - Marked [2026-07-03-kata-environments-deployments-phase-3-design.md](/specs/2026-07-03-kata-environments-deployments-phase-3-design.md) (the Vercel cloud sandbox driver deep-dive) as `Cancelled`. Superseded by [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) and [Phase 3b](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) per [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). The Vercel snapshot-bake / keepalive / lapse-resume design is retired (Railway runs real Docker images, so it does not apply); the spec is retained as a historical record of the Vercel decision and the constraints that drove it.
