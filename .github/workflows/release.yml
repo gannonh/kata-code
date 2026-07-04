@@ -108,6 +108,9 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @kata-sh/code-desktop ensure:electron
 
+      - name: Pull Docker image for sandbox integration tests
+        run: docker pull alpine:3.20
+
       - id: release_meta
         name: Resolve release version
         shell: bash
