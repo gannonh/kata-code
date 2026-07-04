@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { describe, expect, it } from "@effect/vitest";
 
-import { mapPiMessageHistory } from "./piThreadHistory.ts";
+import { extractLatestAssistantReplyText, mapPiMessageHistory } from "./piThreadHistory.ts";
 
 describe("piThreadHistory", () => {
   describe("mapPiMessageHistory", () => {
@@ -169,6 +169,52 @@ describe("piThreadHistory", () => {
       expect(result.status).toBe("completed");
       expect(result.toolName).toBe("grep");
       expect(result.itemType).toBe("web_search");
+    });
+  });
+
+  describe("extractLatestAssistantReplyText", () => {
+    it("returns the latest assistant text block", () => {
+      expect(
+        extractLatestAssistantReplyText([
+          { role: "user", content: "hello" },
+          { role: "assistant", content: [{ type: "text", text: "Hi there" }] },
+        ]),
+      ).toBe("Hi there");
+    });
+
+    it("falls back to thinking blocks when no text block exists", () => {
+      expect(
+        extractLatestAssistantReplyText([
+          {
+            role: "assistant",
+            content: [{ type: "thinking", thinking: "The user said hello. I should greet them." }],
+          },
+        ]),
+      ).toBe("The user said hello. I should greet them.");
+    });
+
+    it("prefers text over thinking in the same message", () => {
+      expect(
+        extractLatestAssistantReplyText([
+          {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "internal" },
+              { type: "text", text: "visible reply" },
+            ],
+          },
+        ]),
+      ).toBe("visible reply");
+    });
+
+    it("uses the last assistant message when history contains multiple turns", () => {
+      expect(
+        extractLatestAssistantReplyText([
+          { role: "assistant", content: [{ type: "text", text: "first" }] },
+          { role: "user", content: "again" },
+          { role: "assistant", content: [{ type: "text", text: "second" }] },
+        ]),
+      ).toBe("second");
     });
   });
 });

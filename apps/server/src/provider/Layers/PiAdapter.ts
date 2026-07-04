@@ -75,9 +75,15 @@ import {
   piModelSlug,
   resolvePiAgentDir,
   resolvePiProjectSkillPaths,
+  resolvePiThinkingLevelForSession,
 } from "./PiProvider.ts";
 import { expandProviderSkillTokensInPrompt } from "../skills/filesystemSkills.ts";
-import { mapPiMessageHistory } from "./piThreadHistory.ts";
+import {
+  extractAssistantTextFromPiMessage,
+  extractAssistantThinkingFromPiMessage,
+  extractLatestAssistantReplyText,
+  mapPiMessageHistory,
+} from "./piThreadHistory.ts";
 import {
   type PiTrackedToolCall,
   toolItemType,
@@ -126,6 +132,11 @@ interface PiTrackedTurn {
   leafId?: string;
 }
 
+interface PiTurnOutputState {
+  assistantTextChars: number;
+  reasoningTextChars: number;
+}
+
 interface PiSessionContext {
   readonly threadId: ThreadId;
   session: ProviderSession;
@@ -146,6 +157,8 @@ interface PiSessionContext {
   statusTexts: Map<string, string>;
   /** Last working message (dedupe so repeated setWorkingMessage calls don't spam). */
   workingMessage: string | undefined;
+  /** Per-turn assistant output observed from SDK deltas or terminal messages. */
+  turnOutput: Map<string, PiTurnOutputState>;
 }
 
 /**
@@ -285,6 +298,36 @@ export function makePiAdapter(
       payload: event,
     });
 
+    const turnOutputState = (ctx: PiSessionContext, turnId: TurnId | undefined) => {
+      if (!turnId) return undefined;
+      const key = String(turnId);
+      const existing = ctx.turnOutput.get(key);
+      if (existing) return existing;
+      const next: PiTurnOutputState = { assistantTextChars: 0, reasoningTextChars: 0 };
+      ctx.turnOutput.set(key, next);
+      return next;
+    };
+
+    const recordTurnOutputDelta = (
+      ctx: PiSessionContext,
+      turnId: TurnId | undefined,
+      streamKind: "assistant_text" | "reasoning_text",
+      delta: string,
+    ) => {
+      const state = turnOutputState(ctx, turnId);
+      if (!state) return;
+      if (streamKind === "assistant_text") {
+        state.assistantTextChars += delta.length;
+      } else {
+        state.reasoningTextChars += delta.length;
+      }
+    };
+
+    const hasObservedTurnOutput = (ctx: PiSessionContext | undefined, turnId: TurnId): boolean => {
+      const state = ctx?.turnOutput.get(String(turnId));
+      return (state?.assistantTextChars ?? 0) > 0 || (state?.reasoningTextChars ?? 0) > 0;
+    };
+
     const mapSdkEvent = (
       event: AgentSessionEvent,
       ctx: PiSessionContext,
@@ -293,6 +336,7 @@ export function makePiAdapter(
       if (event.type === "message_update") {
         const assistant = event.assistantMessageEvent;
         if (assistant.type === "text_delta" && assistant.delta) {
+          recordTurnOutputDelta(ctx, turnId, "assistant_text", assistant.delta);
           return [
             makeEvent(ctx.threadId, {
               type: "content.delta",
@@ -302,11 +346,40 @@ export function makePiAdapter(
           ];
         }
         if (assistant.type === "thinking_delta" && assistant.delta) {
+          recordTurnOutputDelta(ctx, turnId, "reasoning_text", assistant.delta);
           return [
             makeEvent(ctx.threadId, {
               type: "content.delta",
               turnId,
               payload: { streamKind: "reasoning_text", delta: assistant.delta },
+            }),
+          ];
+        }
+      }
+      if (event.type === "message_end") {
+        const state = turnId ? ctx.turnOutput.get(String(turnId)) : undefined;
+        const text = extractAssistantTextFromPiMessage(event.message);
+        if (text && (state?.assistantTextChars ?? 0) === 0) {
+          recordTurnOutputDelta(ctx, turnId, "assistant_text", text);
+          return [
+            makeEvent(ctx.threadId, {
+              type: "content.delta",
+              turnId,
+              payload: { streamKind: "assistant_text", delta: text },
+              raw: toolEventRaw(event),
+            }),
+          ];
+        }
+        const thinking = extractAssistantThinkingFromPiMessage(event.message);
+        const hasTurnOutput = turnId ? hasObservedTurnOutput(ctx, turnId) : false;
+        if (thinking && !hasTurnOutput) {
+          recordTurnOutputDelta(ctx, turnId, "reasoning_text", thinking);
+          return [
+            makeEvent(ctx.threadId, {
+              type: "content.delta",
+              turnId,
+              payload: { streamKind: "reasoning_text", delta: thinking },
+              raw: toolEventRaw(event),
             }),
           ];
         }
@@ -456,13 +529,6 @@ export function makePiAdapter(
       return availableModels[0];
     };
 
-    const resolveThinkingLevel = (
-      modelSelection: ProviderSessionStartInput["modelSelection"],
-    ): string | undefined => {
-      const selection = modelSelection?.options?.find((option) => option.id === "thinkingLevel");
-      return typeof selection?.value === "string" ? selection.value : undefined;
-    };
-
     const settleTurn = (
       threadId: ThreadId,
       turnId: TurnId,
@@ -488,6 +554,27 @@ export function makePiAdapter(
           );
           return;
         }
+        const ctx = sessions.get(threadId);
+        const settlementDetail =
+          outcome.state === "completed" && ctx
+            ? extractLatestAssistantReplyText(ctx.sdk.messages ?? [])
+            : undefined;
+        const completedWithoutOutput =
+          outcome.state === "completed" && !settlementDetail && !hasObservedTurnOutput(ctx, turnId);
+        const emptyTurnReason =
+          "Pi completed the turn without assistant output. No SDK deltas or assistant message history were produced.";
+        const finalOutcome: TurnOutcome = completedWithoutOutput
+          ? { state: "failed", reason: emptyTurnReason }
+          : outcome;
+        if (completedWithoutOutput) {
+          yield* publish(
+            makeEvent(threadId, {
+              type: "runtime.error",
+              turnId,
+              payload: { message: emptyTurnReason },
+            }),
+          );
+        }
         yield* publish(
           makeEvent(threadId, {
             type: "item.completed",
@@ -495,7 +582,8 @@ export function makePiAdapter(
             itemId,
             payload: {
               itemType: "assistant_message",
-              status: outcome.state === "failed" ? "failed" : "completed",
+              status: finalOutcome.state === "failed" ? "failed" : "completed",
+              ...(settlementDetail ? { detail: settlementDetail } : {}),
             },
           }),
         );
@@ -504,19 +592,19 @@ export function makePiAdapter(
             type: "turn.completed",
             turnId,
             payload:
-              outcome.state === "failed"
-                ? { state: "failed", errorMessage: outcome.reason }
+              finalOutcome.state === "failed"
+                ? { state: "failed", errorMessage: finalOutcome.reason }
                 : { state: "completed" },
           }),
         );
         // Record the completed turn with the SDK session leaf id at
         // settlement so rollbackThread can branch back to this point. Aborted
         // turns are not recorded: they produced no committed history.
-        const ctx = sessions.get(threadId);
-        if (ctx && outcome.state === "completed") {
+        if (ctx && finalOutcome.state === "completed") {
           const leafId = ctx.sdk.sessionManager?.getLeafId() ?? undefined;
           ctx.turns.push({ id: turnId, ...(leafId ? { leafId } : {}) });
         }
+        ctx?.turnOutput.delete(String(turnId));
       });
 
     /**
@@ -589,7 +677,7 @@ export function makePiAdapter(
               "Pi has no authenticated model available for this session. Configure Pi auth or select a runtime-discovered model.",
           });
         }
-        const thinkingLevel = resolveThinkingLevel(input.modelSelection);
+        const thinkingLevel = resolvePiThinkingLevelForSession(model, input.modelSelection);
 
         const created = yield* Effect.tryPromise({
           try: async () => {
@@ -670,6 +758,7 @@ export function makePiAdapter(
           unsupportedWarnings: new Set(),
           statusTexts: new Map(),
           workingMessage: undefined,
+          turnOutput: new Map(),
         };
         ctx.unsubscribe = created.session.subscribe((event) => {
           for (const mapped of mapSdkEvent(event, ctx)) {

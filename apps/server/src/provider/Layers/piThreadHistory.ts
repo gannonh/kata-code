@@ -38,6 +38,53 @@ function arrayContent(content: unknown): ContentBlock[] {
   return Array.isArray(content) ? content.filter(isRecord) : [];
 }
 
+function thinkingFromContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const parts = content.flatMap((block) => {
+    const record = isRecord(block) ? block : undefined;
+    return record?.type === "thinking" && typeof record.thinking === "string"
+      ? [record.thinking]
+      : [];
+  });
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
+export function extractAssistantTextFromPiMessage(message: unknown): string | undefined {
+  if (!isRecord(message) || message.role !== "assistant") {
+    return undefined;
+  }
+  return textFromContent(message.content);
+}
+
+export function extractAssistantThinkingFromPiMessage(message: unknown): string | undefined {
+  if (!isRecord(message) || message.role !== "assistant") {
+    return undefined;
+  }
+  return thinkingFromContent(message.content);
+}
+
+/**
+ * Extract the latest assistant reply from Pi SDK session history. Prefers
+ * visible `text` blocks; falls back to `thinking` blocks when the model
+ * produced reasoning-only output that never streamed as `assistant_text`.
+ */
+export function extractLatestAssistantReplyText(
+  messages: ReadonlyArray<unknown>,
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const text = extractAssistantTextFromPiMessage(message);
+    if (text) {
+      return text;
+    }
+    const thinking = extractAssistantThinkingFromPiMessage(message);
+    if (thinking) {
+      return thinking;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Map a Pi SDK session message history into Kata thread-snapshot items:
  * user messages → `user_message`, assistant text → `assistant_message`,

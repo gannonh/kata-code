@@ -172,6 +172,36 @@ export function piModelCapabilities(
 }
 
 /**
+ * Resolve the Pi SDK `thinkingLevel` for session creation. Reasoning models
+ * default to `"off"` when the user has not chosen a level so provider-specific
+ * defaults (e.g. Hyper GLM-5.2 → `"max"`) do not stream only reasoning deltas
+ * that Kata does not project into assistant messages.
+ */
+export function resolvePiThinkingLevelForSession(
+  model: Pick<PiModelShape, "reasoning" | "thinkingLevelMap"> | undefined,
+  modelSelection: { options?: ReadonlyArray<{ id: string; value: string | boolean }> } | undefined,
+): PiThinkingLevel | undefined {
+  if (!model) {
+    return undefined;
+  }
+
+  const selection = modelSelection?.options?.find((option) => option.id === "thinkingLevel");
+  const requested = typeof selection?.value === "string" ? selection.value.trim() : undefined;
+  if (requested) {
+    const level = requested as PiThinkingLevel;
+    if (PI_THINKING_LEVELS.includes(level) && isThinkingLevelSupported(model, level)) {
+      return level;
+    }
+  }
+
+  if (model.reasoning && isThinkingLevelSupported(model, "off")) {
+    return "off";
+  }
+
+  return undefined;
+}
+
+/**
  * Map Pi SDK models into Kata `ServerProviderModel` entries. Only
  * authenticated models (registry `getAvailable`) are passed in by the
  * discovery layer, so the picker never offers a model the user cannot run.

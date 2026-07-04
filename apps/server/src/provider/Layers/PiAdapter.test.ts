@@ -44,6 +44,8 @@ interface FakeSessionOptions {
 
 interface FakeSessionHooks {
   emit: ((event: PiSdkSessionEvent) => void) | undefined;
+  /** Replace SDK message history (used when simulating post-prompt settlement). */
+  setMessages: (messages: ReadonlyArray<unknown>) => void;
   promptStarted: Promise<void>;
   resolvePrompt: () => void;
   rejectPrompt: (error: Error) => void;
@@ -66,8 +68,12 @@ function makeFakeSession(options?: FakeSessionOptions): {
   const promptStarted = new Promise<void>((resolve) => {
     markPromptStarted = resolve;
   });
+  let messageHistory: unknown[] = options?.messages ? [...options.messages] : [];
   const hooks: FakeSessionHooks = {
     emit: undefined,
+    setMessages: (messages) => {
+      messageHistory = [...messages];
+    },
     promptStarted,
     resolvePrompt: () => {},
     rejectPrompt: () => {},
@@ -78,7 +84,9 @@ function makeFakeSession(options?: FakeSessionOptions): {
     sessionId: "pi-session-1",
     ...(options?.sessionFile ? { sessionFile: options.sessionFile } : {}),
     ...(options?.sessionManager ? { sessionManager: options.sessionManager } : {}),
-    ...(options?.messages ? { messages: options.messages } : {}),
+    get messages() {
+      return messageHistory;
+    },
     compact: options?.compact
       ? () => {
           hooks.compactCalls += 1;
@@ -163,6 +171,39 @@ const MODEL_SELECTION = {
 } as const;
 
 describe("makePiAdapter (vertical slice)", () => {
+  it.effect("defaults reasoning models to thinkingLevel off when unset", () =>
+    Effect.gen(function* () {
+      const { session } = makeFakeSession();
+      let capturedThinkingLevel: string | undefined;
+      const hyperModel: PiModelShape = {
+        id: "glm-5.2",
+        name: "GLM-5.2",
+        provider: "hyper",
+        reasoning: true,
+        thinkingLevelMap: { high: "high", max: "max" },
+      };
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [hyperModel],
+        createSession: ((args: { thinkingLevel?: string }) => {
+          capturedThinkingLevel = args.thinkingLevel;
+          return Promise.resolve({ session });
+        }) as never,
+      });
+
+      yield* adapter.startSession({
+        threadId: ThreadId.make("pi-thread-glm"),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("pi"),
+          model: "hyper/glm-5.2",
+        },
+      });
+
+      expect(capturedThinkingLevel).toBe("off");
+    }),
+  );
+
   it.effect("streams a successful turn as a canonical event sequence", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();
@@ -221,6 +262,157 @@ describe("makePiAdapter (vertical slice)", () => {
         (event) => event.type === "content.delta" && event.payload.streamKind === "assistant_text",
       );
       expect((delta?.payload as { readonly delta?: string } | undefined)?.delta).toBe("Hi");
+    }),
+  );
+
+  it.effect("includes SDK history in item.completed when no content deltas streamed", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-history-fallback");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+      yield* adapter.sendTurn({ threadId, input: "hello" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+
+      hooks.setMessages([
+        { role: "user", content: "hello", timestamp: 1 },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Hello! How can I help?" }],
+          timestamp: 2,
+        },
+      ]);
+
+      hooks.resolvePrompt();
+      yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
+
+      const itemCompleted = recorder.events.find(
+        (event) =>
+          event.type === "item.completed" &&
+          event.payload.itemType === "assistant_message" &&
+          event.payload.status === "completed",
+      );
+      expect((itemCompleted?.payload as { readonly detail?: string } | undefined)?.detail).toBe(
+        "Hello! How can I help?",
+      );
+    }),
+  );
+
+  it.effect("emits final assistant text from SDK message_end when deltas are missing", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-message-end-fallback");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+      yield* adapter.sendTurn({ threadId, input: "hello" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+
+      hooks.emit?.({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Hello from final message." }],
+        },
+      } as PiSdkSessionEvent);
+
+      hooks.resolvePrompt();
+      yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
+
+      const delta = recorder.events.find(
+        (event) => event.type === "content.delta" && event.payload.streamKind === "assistant_text",
+      );
+      expect((delta?.payload as { readonly delta?: string } | undefined)?.delta).toBe(
+        "Hello from final message.",
+      );
+    }),
+  );
+
+  it.effect("marks zero-output Pi completions as failed instead of silently completing", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-empty-completion");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+      yield* adapter.sendTurn({ threadId, input: "hello" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+
+      hooks.resolvePrompt();
+      yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
+
+      const runtimeError = recorder.events.find((event) => event.type === "runtime.error");
+      expect(runtimeError?.payload.message).toContain("without assistant output");
+      const completion = recorder.events.find((event) => event.type === "turn.completed");
+      expect(completion?.payload).toMatchObject({ state: "failed" });
+    }),
+  );
+
+  it.effect("streams reasoning deltas as reasoning_text content events", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-reasoning");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+      yield* adapter.sendTurn({ threadId, input: "hello" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+
+      hooks.emit?.({
+        type: "message_update",
+        assistantMessageEvent: { type: "thinking_delta", delta: "pondering" },
+      } as PiSdkSessionEvent);
+
+      hooks.resolvePrompt();
+      yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
+
+      const reasoningDelta = recorder.events.find(
+        (event) => event.type === "content.delta" && event.payload.streamKind === "reasoning_text",
+      );
+      expect((reasoningDelta?.payload as { readonly delta?: string } | undefined)?.delta).toBe(
+        "pondering",
+      );
     }),
   );
 
@@ -662,17 +854,31 @@ describe("makePiAdapter (vertical slice)", () => {
         yield* adapter.sendTurn({ threadId, input: "first" });
         yield* Effect.tryPromise(() => hooks.promptStarted);
         leafId = "leaf-1";
+        hooks.setMessages([
+          { role: "user", content: "first", timestamp: 1 },
+          { role: "assistant", content: [{ type: "text", text: "First response" }], timestamp: 2 },
+        ]);
         hooks.resolvePrompt();
         yield* Effect.tryPromise(() =>
-          recorder.waitFor((event) => event.type === "turn.completed"),
+          recorder.waitFor(
+            () => recorder.events.filter((event) => event.type === "turn.completed").length >= 1,
+          ),
         );
 
         yield* adapter.sendTurn({ threadId, input: "second" });
         yield* Effect.tryPromise(() => hooks.promptStarted);
         leafId = "leaf-2";
+        hooks.setMessages([
+          { role: "user", content: "first", timestamp: 1 },
+          { role: "assistant", content: [{ type: "text", text: "First response" }], timestamp: 2 },
+          { role: "user", content: "second", timestamp: 3 },
+          { role: "assistant", content: [{ type: "text", text: "Second response" }], timestamp: 4 },
+        ]);
         hooks.resolvePrompt();
         yield* Effect.tryPromise(() =>
-          recorder.waitFor((event) => event.type === "turn.completed"),
+          recorder.waitFor(
+            () => recorder.events.filter((event) => event.type === "turn.completed").length >= 2,
+          ),
         );
 
         // Roll back one turn: branch back to the first turn's leaf.

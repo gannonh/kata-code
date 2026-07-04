@@ -18,6 +18,7 @@ import {
   piModelCapabilities,
   piModelSlug,
   resolvePiProjectSkillPaths,
+  resolvePiThinkingLevelForSession,
   type PiModelShape,
 } from "./PiProvider.ts";
 
@@ -70,6 +71,33 @@ describe("PiProvider mappers", () => {
   it("omits the thinking descriptor for non-reasoning models", () => {
     const caps = piModelCapabilities({ reasoning: false });
     expect(caps.optionDescriptors ?? []).toEqual([]);
+  });
+
+  it("defaults reasoning models to off when thinkingLevel is unset", () => {
+    const hyperGlm: PiModelShape = {
+      id: "glm-5.2",
+      name: "GLM-5.2",
+      provider: "hyper",
+      reasoning: true,
+      thinkingLevelMap: { high: "high", max: "max" },
+    };
+    expect(resolvePiThinkingLevelForSession(hyperGlm, undefined)).toBe("off");
+    expect(resolvePiThinkingLevelForSession(hyperGlm, { options: [] })).toBe("off");
+  });
+
+  it("honors an explicit thinkingLevel selection", () => {
+    const hyperGlm: PiModelShape = {
+      id: "glm-5.2",
+      name: "GLM-5.2",
+      provider: "hyper",
+      reasoning: true,
+      thinkingLevelMap: { high: "high", max: "max" },
+    };
+    expect(
+      resolvePiThinkingLevelForSession(hyperGlm, {
+        options: [{ id: "thinkingLevel", value: "high" }],
+      }),
+    ).toBe("high");
   });
 
   it("resolves project skill directories without project trust settings", () => {
