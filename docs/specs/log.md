@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-03 (Environments / Deployments Phase 3 — deep-dive approved)
+
+Approved the [Phase 3 deep-dive](/specs/2026-07-03-kata-environments-deployments-phase-3-design.md). Open questions resolved: credentialed e2e/integration slices are maintainer-local + recorded UAT (no CI secret); default `timeoutMs` is 45 min with a per-target config override (no plan detection in V1); the deployment-target card owns the Resume action, with the session status surface rendering the `lapsed` state read-only. Spec status flipped Draft → Approved; roadmap row updated.
+
 ## 2026-07-03 (Environments / Deployments Phase 3 — deep-dive drafted)
 
 Drafted the [Phase 3 deep-dive](/specs/2026-07-03-kata-environments-deployments-phase-3-design.md) (`packages/sandbox-vercel` against `@vercel/sandbox` v2, status Draft). Locked decisions: frozen SPI unchanged (implements optional `renewTimeout`/`snapshot`/`copyInto`); lazy fingerprinted base-snapshot bake persisted to `~/.katacode/sandbox-vercel/prepared.json`; access-token-trio auth via existing secret redaction (OIDC rejected explicitly); host-tracked deadline + keepalive with additive `extendTimeout` deltas; explicit lapse state + manual Resume (`Sandbox.get({ resume: true })` + serve restart + Connect re-register); `EnvironmentConfig.build` fails loud (no nested containers); `public` reachability from `sandbox.domain(port)`; AgentBox-posture retry policy (no ambiguous retry on billable calls). Includes a verified-constraints table from the AgentBox live findings, per-AC test plan, and three open questions (CI credentials for credentialed e2e, default `timeoutMs`, Resume affordance placement).

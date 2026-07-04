@@ -2,7 +2,8 @@
 type: Spec
 title: "Kata Environments / Deployments Phase 3 — Vercel cloud sandbox driver (deep-dive)"
 description: "Deep-dive design for Phase 3: the first BYOC cloud driver on Vercel Sandbox — base snapshot bake, public wss reachability via sandbox.domain(port), session-lifetime keepalive with lapse/resume UX, secret-backed access-token auth, and Connect auto-registration."
-status: Draft
+status: Approved
+approved_at: 2026-07-03T00:00:00Z
 tags: [specs, phase-3, environments, deployments, sandbox, vercel, cloud-driver, byoc]
 timestamp: 2026-07-03T00:00:00Z
 ---
@@ -11,7 +12,7 @@ timestamp: 2026-07-03T00:00:00Z
 
 ## Status
 
-Draft — pending approval.
+Approved. The three open questions were resolved at approval (see Resolved questions).
 
 This is the Phase 3 deep-dive (one spec per phase; see the
 [roadmap](/specs/2026-06-27-kata-environments-deployments-design.md)). It implements roadmap
@@ -200,7 +201,8 @@ Roadmap AC-3.1 … AC-3.7 govern; this spec refines how each is proven.
 - **Integration (credentialed, free Hobby tier, maintainer-local or CI secret):** bake → boot →
   serve reachable → `wss` handshake → exec → seed → dispose; `extendTimeout` live; lapse with a
   short timeout; resume.
-- **E2E (`@environments-deploy`):** settings CRUD + validation slices per AC-3.7.
+- **E2E (`@environments-deploy`):** settings CRUD + validation slices per AC-3.7. Credentialed
+  slices are maintainer-local + recorded UAT (no CI secret; see Resolved questions).
 - **Manual UAT (recorded):** cloud agent turn (AC-3.3), second-client Connect reachability
   (AC-3.4).
 - CI parity gates (`vp check`, `vp run typecheck`, `vp run test`, `vp run release:smoke`) pass.
@@ -230,11 +232,13 @@ Roadmap AC-3.1 … AC-3.7 govern; this spec refines how each is proven.
   (`apps/web/src/components/settings/SandboxDeploymentSettings.tsx`), e2e under `e2e/tests/`.
 - Docs: `docs/architecture/environments-deploy.md` (driver matrix), this spec's build report.
 
-## Open questions (resolve at approval)
+## Resolved questions (2026-07-03 approval)
 
-1. **CI credentials for the credentialed e2e slice** — add a repo secret with a dedicated free
-   Hobby team, or keep all credentialed slices maintainer-local + recorded UAT for now?
-2. **Default `timeoutMs`** — ship 45 min (safe everywhere) with a config override, or detect
-   plan and default higher on Pro? (Proposal: 45 min + override; no plan detection in V1.)
-3. **Resume affordance placement** — deployment-target card only, or also inline in the session
-   status surface? (Proposal: both render the same session state; card owns the action in V1.)
+1. **CI credentials for the credentialed e2e slice** — maintainer-local + recorded UAT. No repo
+   secret; the credentialed integration suite and UAT slices run against the maintainer's free
+   Hobby team with evidence recorded per the standing rule. Revisit if a CI secret becomes
+   worthwhile (tracked as deferred work if it does).
+2. **Default `timeoutMs`** — 45 min (the Hobby ceiling, safe on all plans) with a per-target
+   config override. No plan detection in V1.
+3. **Resume affordance placement** — the deployment-target card owns the Resume action in V1;
+   the session status surface renders the same `lapsed` state read-only.
