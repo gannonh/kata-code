@@ -70,6 +70,7 @@ import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireId
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
 import { relayUrlConfig } from "../cloud/publicConfig.ts";
 import { EnvironmentConfigLoadError, loadEnvironmentConfig } from "./environmentConfigLoader.ts";
+import { buildCredentialSeedArchives } from "./credentialSeed.ts";
 import { type SetupProcessRecord, SetupFailed, runSandboxSetup } from "./sandboxSetupRunner.ts";
 
 /** A sandbox `AdvertisedEndpointProvider` (manual kind; container-sourced). */
@@ -150,6 +151,57 @@ function mapSetupFailed(e: SetupFailed): SandboxRpcError {
   return new SandboxRpcError({
     reason: "provision-failed",
     message: `Setup failed (${e.stage}): ${e.message}`,
+  });
+}
+
+/** Seed provider credentials (static config + auth) into the container home.
+ *  Runs unconditionally after provision, before the repo seed. Returns void on
+ *  success; failures map to SetupFailed/SandboxProviderError via the caller. */
+function runCredentialSeed(
+  driver: SandboxProvider,
+  handle: SandboxHandle,
+): Effect.Effect<void, SetupFailed | SandboxProviderError> {
+  return Effect.gen(function* () {
+    const copyIntoCap = driver.copyInto;
+    if (!copyIntoCap) return; // driver without copyInto — cloud drivers seed via their own mechanism
+    const archives = yield* buildCredentialSeedArchives({ hostHome: os.homedir() }).pipe(
+      Effect.mapError(
+        (e) =>
+          new SetupFailed({
+            stage: "seed",
+            message: `credential seed build failed: ${e.message}`,
+            cause: e,
+          }),
+      ),
+    );
+    if (archives.static) {
+      yield* copyIntoCap
+        .copyInto(handle, archives.static, "/home/katacode")
+        .pipe(
+          Effect.mapError(
+            (e) =>
+              new SetupFailed({
+                stage: "seed",
+                message: `credential static copyInto failed: ${e.message}`,
+                cause: e,
+              }),
+          ),
+        );
+    }
+    if (archives.credentials) {
+      yield* copyIntoCap
+        .copyInto(handle, archives.credentials, "/home/katacode")
+        .pipe(
+          Effect.mapError(
+            (e) =>
+              new SetupFailed({
+                stage: "seed",
+                message: `credential auth copyInto failed: ${e.message}`,
+                cause: e,
+              }),
+          ),
+        );
+    }
   });
 }
 
@@ -697,6 +749,22 @@ export const SandboxServiceLive = {
           })
           .pipe(Effect.mapError(mapDriverError));
 
+        // Seed provider credentials (static config + auth) into the container
+        // home before any provider probe re-checks. This runs unconditionally —
+        // credentials are independent of the repo. The repo seed + install below
+        // is conditional on a repository being specified.
+        const credentialSetup = yield* runCredentialSeed(inst.driver, handle).pipe(
+          Effect.catch((error: SetupFailed | SandboxProviderError) =>
+            disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  error._tag === "SetupFailed" ? mapSetupFailed(error) : mapDriverError(error),
+                ),
+              ),
+            ),
+          ),
+        );
+
         let setupProcesses: ReadonlyArray<SetupProcessRecord> = [];
         if (options?.repository !== undefined) {
           // The container is already provisioned and running at this point, so a
@@ -723,7 +791,6 @@ export const SandboxServiceLive = {
             resolved: loaded.resolved,
             secretValues,
             seed: { repoRoot: options.repository.repoRoot },
-            seedCredentials: { hostHome: os.homedir() },
           }).pipe(
             Effect.catch((error: SetupFailed | SandboxProviderError) =>
               // Reuse the canonical post-provision dispose helper. The

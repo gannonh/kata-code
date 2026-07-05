@@ -34,7 +34,6 @@ import type { ResolvedEnvironmentConfig } from "@kata-sh/code-sandbox";
 import { redactSecrets } from "@kata-sh/code-sandbox/redactSecrets";
 
 import { buildRepoSeedArchive, SeedArchiveError } from "./repoSeedArchive.ts";
-import { buildCredentialSeedArchives } from "./credentialSeed.ts";
 
 /** A detached setup process the runner launched (tracked for teardown). */
 export interface SetupProcessRecord {
@@ -80,8 +79,6 @@ export interface RunSandboxSetupInput {
   readonly secretValues: ReadonlyArray<string>;
   /** When present, seed the repo at `repoRoot` into `/workspace` via copyInto. */
   readonly seed?: { readonly repoRoot: string; readonly limits?: SetupSeedLimits };
-  /** When present, seed provider credentials (static + auth) into the container home via copyInto. */
-  readonly seedCredentials?: { readonly hostHome: string };
 }
 
 /** Default install cwd: the seeded repo lives at /workspace in the container. */
@@ -101,14 +98,6 @@ export function runSandboxSetup(
   return Effect.gen(function* () {
     const { driver, handle, resolved, secretValues } = input;
 
-    // 0. Seed provider credentials (static config + auth) into the container
-    //    home before the repo seed and before any provider probe re-checks.
-    //    Credentials must be in place before the sandbox server re-probes
-    //    providers (the caller triggers a refreshProviders after setup).
-    if (input.seedCredentials) {
-      yield* seedCredentialsIntoSandbox(driver, handle, input.seedCredentials);
-    }
-
     // 1. Seed the repo into /workspace (when requested and setup is needed).
     if (input.seed) {
       yield* seedWorkspace(driver, handle, input.seed);
@@ -126,62 +115,6 @@ export function runSandboxSetup(
     const processes = yield* runDetachedProcesses(driver, handle, resolved, cwd);
 
     return { processes, installOutput } satisfies SetupRunnerResult;
-  });
-}
-
-/** Seed provider credentials (static config + auth) into the container home via copyInto. */
-function seedCredentialsIntoSandbox(
-  driver: SandboxProvider,
-  handle: SandboxHandle,
-  input: { readonly hostHome: string },
-): Effect.Effect<void, SetupFailed | SandboxProviderError> {
-  const copyIntoCap = driver.copyInto;
-  if (!copyIntoCap) {
-    return Effect.fail(
-      new SetupFailed({
-        stage: "seed",
-        message: "driver does not support copyInto; cannot seed credentials into the sandbox",
-      }),
-    );
-  }
-  return Effect.gen(function* () {
-    const archives = yield* buildCredentialSeedArchives({ hostHome: input.hostHome }).pipe(
-      Effect.mapError(
-        (e) =>
-          new SetupFailed({
-            stage: "seed",
-            message: `credential seed build failed: ${e.message}`,
-            cause: e,
-          }),
-      ),
-    );
-    // Extract to the container home so ~/.codex, ~/.claude, ~/.pi/agent land at
-    // /home/katacode/.codex etc. The static archive contains directory entries
-    // for the full path, so copyInto's mkdir -p creates the tree.
-    if (archives.static) {
-      yield* copyIntoCap.copyInto(handle, archives.static, "/home/katacode").pipe(
-        Effect.mapError(
-          (e) =>
-            new SetupFailed({
-              stage: "seed",
-              message: `credential static copyInto failed: ${e.message}`,
-              cause: e,
-            }),
-        ),
-      );
-    }
-    if (archives.credentials) {
-      yield* copyIntoCap.copyInto(handle, archives.credentials, "/home/katacode").pipe(
-        Effect.mapError(
-          (e) =>
-            new SetupFailed({
-              stage: "seed",
-              message: `credential auth copyInto failed: ${e.message}`,
-              cause: e,
-            }),
-        ),
-      );
-    }
   });
 }
 
