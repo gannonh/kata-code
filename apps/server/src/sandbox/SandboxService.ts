@@ -736,12 +736,19 @@ export const SandboxServiceLive = {
           savedEnvironment: savedEnv?.environment,
         });
 
+        // Pass the display name into the container so the sandbox server can
+        // use it as its environment descriptor label (instead of the container
+        // hostname, which is a meaningless Docker ID).
+        const envWithLabel = config.displayName
+          ? [...env, ["KATACODE_ENVIRONMENT_LABEL", config.displayName] as const]
+          : env;
+
         const handle = yield* inst.driver
           .provision({
             instanceId: instanceId as string,
             config: inst.config,
             image: resolveProvisionImage(inst.config),
-            env,
+            env: envWithLabel,
           })
           .pipe(Effect.mapError(mapDriverError));
 
