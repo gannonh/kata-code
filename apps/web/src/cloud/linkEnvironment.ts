@@ -547,6 +547,31 @@ export function unlinkPrimaryEnvironmentFromCloud(input: {
   });
 }
 
+export function unlinkManagedRelayEnvironment(input: {
+  readonly clerkToken: string;
+  readonly environmentId: EnvironmentId;
+}): Effect.Effect<void, CloudEnvironmentLinkError, ManagedRelayClient> {
+  return Effect.gen(function* () {
+    const configuredRelayUrl = relayUrl();
+    if (!configuredRelayUrl) {
+      return yield* new CloudEnvironmentLinkError({
+        message: "KATACODE_RELAY_URL is not configured.",
+      });
+    }
+    const relayClient = yield* ManagedRelayClient;
+    yield* relayClient
+      .unlinkEnvironment({
+        clerkToken: input.clerkToken,
+        environmentId: input.environmentId,
+      })
+      .pipe(
+        Effect.mapError(
+          environmentApiError("Could not unlink the environment from Kata Code Connect."),
+        ),
+      );
+  });
+}
+
 export function linkEnvironmentToCloud(input: {
   readonly environment: SavedEnvironmentRecord;
   readonly clerkToken: string;

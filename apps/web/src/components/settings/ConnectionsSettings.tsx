@@ -124,6 +124,7 @@ import {
   connectManagedCloudEnvironment,
   isCloudSessionRejectedError,
   linkPrimaryEnvironmentToCloud,
+  unlinkManagedRelayEnvironment,
   unlinkPrimaryEnvironmentFromCloud,
   updatePrimaryCloudPreferences,
 } from "~/cloud/linkEnvironment";
@@ -1895,6 +1896,7 @@ function ConfiguredCloudRemoteEnvironmentRows({
   const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
+  const [removingEnvironmentId, setRemovingEnvironmentId] = useState<EnvironmentId | null>(null);
   const savedIds = useMemo(() => new Set(savedEnvironmentIds), [savedEnvironmentIds]);
 
   const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
@@ -1924,6 +1926,39 @@ function ConfiguredCloudRemoteEnvironmentRows({
       });
     } finally {
       setConnectingEnvironmentId(null);
+    }
+  };
+
+  const removeEnvironment = async (environment: RelayClientEnvironmentRecord) => {
+    setRemovingEnvironmentId(environment.environmentId);
+    try {
+      const clerkToken = await getToken(resolveRelayClerkTokenOptions());
+      if (!clerkToken) {
+        throw new Error("Sign in to Kata Code Connect before removing this environment.");
+      }
+      await webRuntime.runPromise(
+        unlinkManagedRelayEnvironment({
+          clerkToken,
+          environmentId: environment.environmentId,
+        }),
+      );
+      refreshManagedRelayEnvironments();
+      toastManager.add({
+        type: "success",
+        title: "Environment removed",
+        description: `${environment.label} was unlinked from Kata Code Connect.`,
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Could not remove environment",
+        description:
+          cause instanceof Error
+            ? cause.message
+            : "Could not unlink the Kata Code Connect environment.",
+      });
+    } finally {
+      setRemovingEnvironmentId(null);
     }
   };
 
@@ -1959,13 +1994,23 @@ function ConfiguredCloudRemoteEnvironmentRows({
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">Kata Code Connect</p>
         </div>
-        <Button
-          size="sm"
-          disabled={connectingEnvironmentId !== null}
-          onClick={() => void connectEnvironment(environment)}
-        >
-          {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            disabled={connectingEnvironmentId !== null}
+            onClick={() => void connectEnvironment(environment)}
+          >
+            {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive-outline"
+            disabled={removingEnvironmentId !== null}
+            onClick={() => void removeEnvironment(environment)}
+          >
+            {removingEnvironmentId === environment.environmentId ? "Removing…" : "Remove"}
+          </Button>
+        </div>
       </div>
     </div>
   ));
