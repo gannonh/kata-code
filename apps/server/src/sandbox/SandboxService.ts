@@ -175,32 +175,28 @@ function runCredentialSeed(
       ),
     );
     if (archives.static) {
-      yield* copyIntoCap
-        .copyInto(handle, archives.static, "/home/katacode")
-        .pipe(
-          Effect.mapError(
-            (e) =>
-              new SetupFailed({
-                stage: "seed",
-                message: `credential static copyInto failed: ${e.message}`,
-                cause: e,
-              }),
-          ),
-        );
+      yield* copyIntoCap.copyInto(handle, archives.static, "/home/katacode").pipe(
+        Effect.mapError(
+          (e) =>
+            new SetupFailed({
+              stage: "seed",
+              message: `credential static copyInto failed: ${e.message}`,
+              cause: e,
+            }),
+        ),
+      );
     }
     if (archives.credentials) {
-      yield* copyIntoCap
-        .copyInto(handle, archives.credentials, "/home/katacode")
-        .pipe(
-          Effect.mapError(
-            (e) =>
-              new SetupFailed({
-                stage: "seed",
-                message: `credential auth copyInto failed: ${e.message}`,
-                cause: e,
-              }),
-          ),
-        );
+      yield* copyIntoCap.copyInto(handle, archives.credentials, "/home/katacode").pipe(
+        Effect.mapError(
+          (e) =>
+            new SetupFailed({
+              stage: "seed",
+              message: `credential auth copyInto failed: ${e.message}`,
+              cause: e,
+            }),
+        ),
+      );
     }
   });
 }

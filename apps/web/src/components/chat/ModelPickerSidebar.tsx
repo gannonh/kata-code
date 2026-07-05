@@ -1,7 +1,7 @@
 import { type ProviderInstanceId } from "@kata-sh/code-contracts";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Clock3Icon, SparklesIcon, StarIcon } from "lucide-react";
-import { Gemini, GithubCopilotIcon } from "../Icons";
+import { ACPRegistryIcon } from "../Icons";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -254,7 +254,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
 
           {showComingSoon ? (
             <>
-              {/* Gemini button (coming soon) */}
+              {/* ACP Registry button (coming soon) */}
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -265,10 +265,10 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                         )}
                         disabled
                         type="button"
-                        data-model-picker-provider="gemini-coming-soon"
-                        aria-label="Gemini — coming soon"
+                        data-model-picker-provider="acp-registry-coming-soon"
+                        aria-label="ACP Registry — coming soon"
                       >
-                        <Gemini className="size-5 text-muted-foreground/85" aria-hidden />
+                        <ACPRegistryIcon className="size-5 text-muted-foreground/85" aria-hidden />
                         <span className={SOON_BADGE_CLASS} aria-hidden>
                           <Clock3Icon className="size-2" />
                         </span>
@@ -282,41 +282,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   align="center"
                   className={PICKER_TOOLTIP_CLASS}
                 >
-                  Gemini — Coming soon
-                </TooltipPopup>
-              </Tooltip>
-              {/* Github Copilot button (coming soon) */}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span className="relative block w-full">
-                      <button
-                        className={cn(
-                          "relative isolate flex w-full aspect-square items-center justify-center rounded-md opacity-50 cursor-not-allowed transition-colors hover:bg-transparent",
-                        )}
-                        disabled
-                        type="button"
-                        data-model-picker-provider="github-copilot-coming-soon"
-                        aria-label="Github Copilot — coming soon"
-                      >
-                        <GithubCopilotIcon
-                          className="size-5 text-muted-foreground/85"
-                          aria-hidden
-                        />
-                        <span className={SOON_BADGE_CLASS} aria-hidden>
-                          <Clock3Icon className="size-2" />
-                        </span>
-                      </button>
-                    </span>
-                  }
-                />
-                <TooltipPopup
-                  side={PICKER_TOOLTIP_SIDE}
-                  sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
-                  align="center"
-                  className={PICKER_TOOLTIP_CLASS}
-                >
-                  Github Copilot — Coming soon
+                  ACP Registry — Coming soon
                 </TooltipPopup>
               </Tooltip>
             </>

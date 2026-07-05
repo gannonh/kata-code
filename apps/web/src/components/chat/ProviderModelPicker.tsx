@@ -31,6 +31,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   lockedContinuationGroupKey?: string | null;
   /** Instance entries rendered in the sidebar + used to resolve display name. */
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  /** Instance IDs to disable with a "Coming Soon" tooltip (e.g. sandbox environments
+   *  where some providers aren't supported yet). */
+  comingSoonInstanceIds?: ReadonlySet<ProviderInstanceId>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   activeProviderIconClassName?: string;
@@ -204,6 +207,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           lockedProvider={props.lockedProvider}
           lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
           instanceEntries={props.instanceEntries}
+          {...(props.comingSoonInstanceIds
+            ? { comingSoonInstanceIds: props.comingSoonInstanceIds }
+            : {})}
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByInstance={props.modelOptionsByInstance}
           terminalOpen={props.terminalOpen ?? false}

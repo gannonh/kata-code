@@ -72,6 +72,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    * for the locked-mode header.
    */
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  /** Instance IDs to disable with a "Coming Soon" tooltip (e.g. sandbox environments
+   *  where some providers aren't supported yet). */
+  comingSoonInstanceIds?: ReadonlySet<ProviderInstanceId>;
   keybindings?: ResolvedKeybindingsConfig;
   /**
    * Model options per instance. Keyed by `ProviderInstanceId` so the
@@ -89,6 +92,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     keybindings: providedKeybindings,
     modelOptionsByInstance,
     instanceEntries,
+    comingSoonInstanceIds,
     getModelDisabledReason,
     onInstanceModelChange,
   } = props;
@@ -230,6 +234,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return disabled;
   }, [instanceEntries, isLocked, matchesLockedProvider]);
+  // Merge locked-mode disabled IDs with sandbox "coming soon" disabled IDs.
+  const mergedDisabledInstanceIds = useMemo(() => {
+    if (!lockedDisabledInstanceIds && !comingSoonInstanceIds) return undefined;
+    const merged = new Set(lockedDisabledInstanceIds ?? []);
+    if (comingSoonInstanceIds) {
+      for (const id of comingSoonInstanceIds) merged.add(id);
+    }
+    return merged;
+  }, [lockedDisabledInstanceIds, comingSoonInstanceIds]);
   const sidebarInstanceEntries = useMemo(() => {
     if (!isLocked) {
       return instanceEntries;
@@ -527,11 +540,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             instanceEntries={sidebarInstanceEntries}
             showFavorites
             showComingSoon
-            {...(lockedDisabledInstanceIds
+            {...(mergedDisabledInstanceIds
               ? {
-                  disabledInstanceIds: lockedDisabledInstanceIds,
+                  disabledInstanceIds: mergedDisabledInstanceIds,
                   getDisabledInstanceTooltip: (entry: ProviderInstanceEntry) =>
-                    `${entry.displayName} is unavailable in this thread. Start a new thread to switch providers.`,
+                    comingSoonInstanceIds?.has(entry.instanceId)
+                      ? `${entry.displayName} — Coming soon to sandboxes`
+                      : `${entry.displayName} is unavailable in this thread. Start a new thread to switch providers.`,
                 }
               : {})}
           />
