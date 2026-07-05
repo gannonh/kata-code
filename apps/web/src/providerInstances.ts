@@ -131,7 +131,7 @@ function resolveInstanceDisplayName(
 /** Driver kinds hidden from the UI behind a feature flag. Existing instances
  *  in settings are filtered out of the instance entries so they don't appear
  *  in the Composer or Settings panels. */
-const HIDDEN_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
+export const HIDDEN_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
   ProviderDriverKind.make("grok"),
 ]);
 
