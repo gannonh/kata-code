@@ -115,6 +115,7 @@ import {
   getPrimaryEnvironmentConnection,
   reconnectSavedEnvironment,
   removeSavedEnvironment,
+  resolveSavedEnvironmentDisplayLabel,
 } from "~/environments/runtime";
 import { useUiStateStore } from "~/uiStateStore";
 import { resolveServerConfigVersionMismatch } from "~/versionSkew";
@@ -325,6 +326,21 @@ function getSavedBackendStatusTooltip(
 function formatDesktopSshTarget(target: NonNullable<SavedEnvironmentRecord["desktopSsh"]>): string {
   const authority = target.username ? `${target.username}@${target.hostname}` : target.hostname;
   return target.port ? `${authority}:${target.port}` : authority;
+}
+
+/** Resolve a human-friendly type label for a saved environment.
+ *  - SSH: environments with `desktopSsh`
+ *  - Sandbox: environments with `sandbox` marker (local Docker or cloud provider)
+ *  - Remote Link: everything else (direct pairing / relay) */
+function resolveEnvironmentTypeLabel(record: SavedEnvironmentRecord): string | null {
+  if (record.desktopSsh) return "SSH";
+  if (record.sandbox) {
+    return record.sandbox.providerKind === "local"
+      ? "Sandbox (local)"
+      : `Sandbox (${record.sandbox.providerKind})`;
+  }
+  if (record.relayManaged) return "Remote Link";
+  return "Remote Link";
 }
 
 function parseManualDesktopSshTarget(input: {
@@ -1517,10 +1533,16 @@ function SavedBackendListRow({
           ? "bg-destructive"
           : "bg-muted-foreground/40";
   const descriptorLabel = runtime?.descriptor?.label ?? null;
-  const displayLabel = descriptorLabel ?? record.label;
+  const displayLabel =
+    resolveSavedEnvironmentDisplayLabel({
+      record,
+      descriptorLabel,
+    }) ?? record.label;
   const statusTooltip = getSavedBackendStatusTooltip(runtime, record, nowMs);
   const versionMismatch = resolveServerConfigVersionMismatch(runtime?.serverConfig);
+  const environmentTypeLabel = resolveEnvironmentTypeLabel(record);
   const metadataBits = [
+    environmentTypeLabel,
     record.desktopSsh ? `SSH ${formatDesktopSshTarget(record.desktopSsh)}` : null,
     record.lastConnectedAt
       ? `Last connected ${formatAccessTimestamp(record.lastConnectedAt)}`

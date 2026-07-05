@@ -1872,6 +1872,8 @@ export async function addSavedEnvironment(input: {
   readonly host?: string;
   readonly pairingCode?: string;
   readonly desktopSsh?: DesktopSshEnvironmentTarget;
+  /** Optional sandbox marker (local Docker or cloud provider). */
+  readonly sandbox?: { readonly providerKind: string };
 }): Promise<SavedEnvironmentRecord> {
   const resolvedTarget = resolveRemotePairingTarget({
     ...(input.pairingUrl !== undefined ? { pairingUrl: input.pairingUrl } : {}),
@@ -1911,6 +1913,9 @@ export async function addSavedEnvironment(input: {
     lastConnectedAt: isoNow(),
     ...((input.desktopSsh ?? existingRecord?.desktopSsh)
       ? { desktopSsh: input.desktopSsh ?? existingRecord?.desktopSsh }
+      : {}),
+    ...((input.sandbox ?? existingRecord?.sandbox)
+      ? { sandbox: input.sandbox ?? existingRecord?.sandbox }
       : {}),
   };
 

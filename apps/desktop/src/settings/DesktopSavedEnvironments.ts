@@ -54,6 +54,11 @@ const PersistedSavedEnvironmentStorageRecordSchema = Schema.Struct({
   lastConnectedAt: Schema.NullOr(Schema.String),
   desktopSsh: Schema.optionalKey(DesktopSshTargetSchema),
   relayManaged: Schema.optionalKey(Schema.Struct({ relayUrl: Schema.String })),
+  sandbox: Schema.optionalKey(
+    Schema.Struct({
+      providerKind: Schema.String,
+    }),
+  ),
   encryptedBearerToken: Schema.optionalKey(Schema.String),
 });
 
@@ -139,6 +144,7 @@ function toPersistedSavedEnvironmentRecord(
     ...nextRecord,
     ...(record.desktopSsh ? { desktopSsh: record.desktopSsh } : {}),
     ...(record.relayManaged ? { relayManaged: record.relayManaged } : {}),
+    ...(record.sandbox ? { sandbox: record.sandbox } : {}),
   };
 }
 
@@ -157,6 +163,7 @@ function toSavedEnvironmentStorageRecord(
   const metadata = {
     ...(record.desktopSsh ? { desktopSsh: record.desktopSsh } : {}),
     ...(record.relayManaged ? { relayManaged: record.relayManaged } : {}),
+    ...(record.sandbox ? { sandbox: record.sandbox } : {}),
   };
   return Option.match(encryptedBearerToken, {
     onNone: () => ({ ...nextRecord, ...metadata }),
