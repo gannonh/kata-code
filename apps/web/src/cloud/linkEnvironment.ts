@@ -26,6 +26,7 @@ import {
   fetchRemoteEnvironmentDescriptor,
   makeEnvironmentHttpApiClient,
   ManagedRelayClient,
+  ManagedRelayClientError,
   ManagedRelayDpopSigner,
   type WsRpcClient,
 } from "@kata-sh/code-client-runtime";
@@ -565,8 +566,13 @@ export function unlinkManagedRelayEnvironment(input: {
         environmentId: input.environmentId,
       })
       .pipe(
-        Effect.mapError(
-          environmentApiError("Could not unlink the environment from Kata Code Connect."),
+        Effect.catch((cause: ManagedRelayClientError) =>
+          Effect.fail(
+            new CloudEnvironmentLinkError({
+              message: `Could not unlink the environment from Kata Code Connect: ${cause.message}`,
+              cause,
+            }),
+          ),
         ),
       );
   });
