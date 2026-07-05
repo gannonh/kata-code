@@ -70,7 +70,7 @@ describe("buildRepoSeedArchive (tar writer round-trip)", () => {
 });
 
 describe("buildRepoSeedArchive (bounded copy + gitignore subset)", () => {
-  it("skips .git and node_modules components", async () => {
+  it("includes .git and skips node_modules components", async () => {
     await withTempDir("skip", async (dir) => {
       await fs.writeFile(path.join(dir, "keep.txt"), "keep");
       await fs.mkdir(path.join(dir, ".git"));
@@ -80,7 +80,9 @@ describe("buildRepoSeedArchive (bounded copy + gitignore subset)", () => {
       const archive = await buildRepoSeedArchive(dir, {});
       const entries = parseTarEntries(archive);
       expect(entries.has("keep.txt")).toBe(true);
-      expect(entries.has(".git/config")).toBe(false);
+      // .git is seeded so the sandbox server can resolve the repo identity via
+      // `git rev-parse`/`git remote -v` and group with other environments.
+      expect(entries.has(".git/config")).toBe(true);
       expect(entries.has("node_modules/dep.js")).toBe(false);
     });
   });

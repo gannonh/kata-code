@@ -2,11 +2,14 @@
  * `repoSeedArchive` — build a bounded POSIX tar archive of a repo working tree
  * for seeding into a sandbox at `/workspace` (Phase 2).
  *
- * The seed is a bounded working-tree copy, not a clone: it skips the VCS
- * metadata dir (`.git`/`.jj`) and `node_modules`, honors `.gitignore`, and
- * enforces a concrete cap (default 256 MB / 50k files) that fails loud rather
- * than silently truncating. Only regular files are packed (directories are
- * implied by file paths; symlinks are skipped for Phase 2 simplicity).
+ * The seed is a bounded working-tree copy, not a clone: it skips the Jujutsu
+ * metadata dir (`.jj`) and `node_modules`, honors `.gitignore`, and enforces a
+ * concrete cap (default 256 MB / 50k files) that fails loud rather than silently
+ * truncating. `.git` is included so the seeded repo carries its remote URL and
+ * the sandbox server's `RepositoryIdentityResolver` resolves the same
+ * `canonicalKey` as the host repo, letting sandbox projects group with the
+ * same repo on other environments. Only regular files are packed (directories
+ * are implied by file paths; symlinks are skipped for Phase 2 simplicity).
  *
  * No external tar dependency exists in the repo and Node ships no `tar`
  * module, so a minimal ustar writer is implemented here (~60 lines). Docker's
@@ -75,12 +78,16 @@ export async function buildRepoSeedArchive(
 
 // ── File selection (bounded walk + .gitignore subset) ────────────────
 
-/** Path components that are always skipped (VCS metadata + deps). */
-const SKIP_COMPONENTS = new Set([".git", ".jj", "node_modules"]);
+/** Path components that are always skipped (Jujutsu metadata + deps). */
+const SKIP_COMPONENTS = new Set([".jj", "node_modules"]);
 
 /**
  * Recursively walk `root` and select regular files, skipping
- * `.git`/`.jj`/`node_modules` components and `.gitignore`-matched paths.
+ * `.jj`/`node_modules` components and `.gitignore`-matched paths.
+ * `.git` is included so the seeded repo carries its remote URL and
+ * `RepositoryIdentityResolver` (`git rev-parse`/`git remote -v`) resolves the
+ * same `canonicalKey` as the host repo, letting sandbox projects group with
+ * the same repo on other environments (the env picker).
  * Fails loud over the byte/file caps.
  */
 async function selectFiles(
