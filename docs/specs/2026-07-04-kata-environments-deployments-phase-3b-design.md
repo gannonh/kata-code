@@ -1,97 +1,107 @@
 ---
 type: Spec
-title: "Kata Environments / Deployments Phase 3b — Railway cloud driver (Docker image, credential seeding)"
-description: "Deep-dive for Phase 3b: the first BYOC cloud driver on Railway — provision a Railway Service from the published katacode GHCR image, public wss reachability via the Railway service domain, credential-file seeding from a host-side encrypted store, ephemeral deploy-on-start / delete-on-dispose lifecycle. Builds on Phase 3a (provider-ready image, terminal, auth model)."
+title: "Kata Environments / Deployments Phase 3b — Vercel Sandbox cloud driver"
+description: "Deep-dive for Phase 3b: the first BYOC cloud sandbox driver on Vercel Sandbox — provision an ephemeral Firecracker microVM via @vercel/sandbox, restore from a prepared image/snapshot, public wss reachability via sandbox.domain(port), credential-file seeding from a host-side encrypted store, keepalive/lapse/resume lifecycle, and Connect auto-registration."
 status: Approved
-approved_at: 2026-07-04T00:00:00Z
-tags: [specs, phase-3b, environments, deployments, sandbox, railway, cloud-driver, byoc, auth]
+approved_at: 2026-07-05T00:00:00Z
+tags: [specs, phase-3b, environments, deployments, sandbox, vercel, cloud-driver, byoc, auth]
 timestamp: 2026-07-04T00:00:00Z
 ---
 
-# Kata Environments / Deployments Phase 3b — Railway cloud driver
+# Kata Environments / Deployments Phase 3b — Vercel Sandbox cloud driver
 
 ## Status
 
-Approved. Implements roadmap Phase 3b per [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). Builds on [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) (provider-ready image, in-container terminal, host credential bind-mounts, env-var auth). Cannot ship until Phase 3a is implemented and the katacode image is published to GHCR.
+Approved. Implements roadmap Phase 3b per [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md). Supersedes the Railway Service version of this spec from [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). Builds on [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) (provider-ready image, in-container terminal, host credential bind-mounts, env-var auth).
 
 ## Goal
 
-A user configures a Railway deployment target in Settings → Environments with their Railway API token and a region, starts a session, and gets a Kata server running in a Railway Service from the published `ghcr.io/gannonh/kata-code:<tag>` image — reachable from every paired client over `wss` through the Railway service's public domain, with provider credentials seeded from the host-side encrypted store and the repo seeded and environment config executed exactly as the local Docker driver does it. Dispose deletes the Railway Service. The driver is a thin layer over the frozen `SandboxProvider` SPI; no SPI change.
+A user configures a Vercel Sandbox deployment target in Settings -> Environments with their Vercel token, team id, project id, runtime/image settings, and timeout. Starting a session provisions an ephemeral Vercel Sandbox microVM, seeds the repo and provider credentials, runs the resolved environment config, starts `katacode serve`, exposes the server over `sandbox.domain(port)`, and auto-registers the public endpoint with Connect so every paired client can reach it over `wss`.
+
+The driver remains a thin implementation of the frozen `SandboxProvider` SPI. Phase 3b uses Vercel's sandbox lifecycle directly: persistent filesystem snapshots by default, explicit `snapshot()` support, `extendTimeout()` keepalive, and manual resume after lapse.
 
 ## Source of truth
 
-- Decision: [ADR 0006 — Sandbox provider auth model and Railway as the first cloud driver](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md)
+- Decision: [ADR 0007 — Vercel Sandbox as the first cloud sandbox driver](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md)
+- Superseded decision: [ADR 0006 — Sandbox provider auth model and Railway as the first cloud driver](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md)
 - Master roadmap: [2026-06-27-kata-environments-deployments-design.md](/specs/2026-06-27-kata-environments-deployments-design.md)
-- Phase 3a (prerequisite): [2026-07-04-kata-environments-deployments-phase-3a-design.md](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md)
-- Frozen SPI: `packages/sandbox/src/SandboxProviderDriver.ts` (`validate`/`provision`/`exec`/`reachability`/`dispose`/`describe`; optional capabilities; `SandboxProviderError` reasons). **Phase 3b adds no required member.**
-- Server orchestration: `apps/server/src/sandbox/SandboxService.ts` (`startSession` provision → seed/setup → Connect registration; idempotency guard; `disposeAfterFailure`), `apps/server/src/sandbox/sandboxSetupRunner.ts`, `environmentConfigLoader.ts`.
+- Phase 3a prerequisite: [2026-07-04-kata-environments-deployments-phase-3a-design.md](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md)
+- Frozen SPI: `packages/sandbox/src/SandboxProviderDriver.ts` (`validate`/`provision`/`exec`/`reachability`/`dispose`/`describe`; optional `snapshot`, `renewTimeout`, `copyInto`; `SandboxProviderError` reasons). **Phase 3b adds no required member.**
+- Server orchestration: `apps/server/src/sandbox/SandboxService.ts`, `apps/server/src/sandbox/sandboxSetupRunner.ts`, `environmentConfigLoader.ts`.
 - Secret infra: `apps/server/src/serverSettings.ts` (`materializeSandboxProviderEnvironmentSecrets`), `apps/server/src/auth/ServerSecretStore.ts`.
 - Web UI: `apps/web/src/components/settings/SandboxDeploymentSettings.tsx` (deployment-target card, sandbox start/dispose).
-- Railway platform docs: [Services](https://docs.railway.com/services), [Volumes](https://docs.railway.com/volumes), [Private registries](https://docs.railway.com/builds/private-registries), [Sandboxes](https://docs.railway.com/sandboxes). Railway CLI: `railway` (the [use-railway](/.agents/skills/use-railway/SKILL.md) skill is the operational reference).
+- Vercel platform docs: [Vercel Sandbox](https://vercel.com/docs/sandbox), [Concepts](https://vercel.com/docs/sandbox/concepts), [JS SDK Reference](https://vercel.com/docs/sandbox/sdk-reference), [Duration and persistence](https://vercel.com/kb/guide/vercel-sandbox-duration-and-persistence), [Optimizing Vercel Sandbox snapshots](https://vercel.com/blog/optimizing-vercel-sandbox-snapshots).
 - Prior art (pattern reference only, AGENTS.md reference-repo policy): AgentBox `/Volumes/EVO/repos/agentbox`
-  - `packages/sandbox-docker/src/claude-credentials.ts` — host backup + seed pattern: `CREDENTIALS_BACKUP_FILE`, `CODEX_CREDENTIALS_BACKUP_FILE`, `OPENCODE_CREDENTIALS_BACKUP_FILE`, `isRealAgentCredential`, `extractCloudAgentCredentials`.
-  - `apps/cli/src/commands/_claude-login-worker.ts` — PTY-driven headless OAuth login worker (URL + code relay).
-  - `packages/sandbox-vercel/src/backend.ts` — production cloud driver against the same SPI shape (pattern for provision/reachability/dispose, not for snapshot-bake which Railway does not need).
+  - `packages/sandbox-vercel/src/backend.ts` — production cloud driver against the same SPI shape.
+  - `packages/sandbox-docker/src/claude-credentials.ts` — host backup + seed pattern for provider credential files.
+  - `apps/cli/src/commands/_claude-login-worker.ts` — PTY-driven OAuth URL + code relay.
 
 ## Locked decisions
 
-1. **`packages/sandbox-railway` implements the frozen SPI; no SPI change.** Required members (`validate`, `provision`, `exec`, `reachability`, `dispose`, `describe`) plus the optional capabilities the Railway Service primitive supports. The Railway Service (Docker image) primitive is a persistent process, not an ephemeral microVM, so the Vercel keepalive/lapse/resume UX from the superseded Phase 3 deep-dive does not apply. Dispose deletes the service.
+1. **`packages/sandbox-vercel` implements the frozen SPI; no SPI change.** Required members (`validate`, `provision`, `exec`, `reachability`, `dispose`, `describe`) plus optional `snapshot`, `renewTimeout`, and `copyInto` where the Vercel SDK supports them.
 
-2. **Provision creates a Railway Service from the published image ref.** The driver uses the Railway GraphQL API (`https://backboard.railway.com/graphql/v2`) or the Railway CLI to create a service in the configured project/environment with source = Docker Image, pointing at `ghcr.io/gannonh/kata-code:<tag>`. The tag is resolved from the deploying server's version (or a target-config override for pinned tags). The service is created with the sandbox instance's environment variables (provider API keys, `KATACODE_*` config) and the seeded credential files. `provision` resolves once the service is `RUNNING` and healthy (a healthz probe against the in-container Kata server's HTTP endpoint succeeds).
+2. **Vercel Sandbox is the first cloud sandbox provider.** The product model is an ephemeral task sandbox, not a long-lived service deployment. Vercel's Firecracker microVM, persistent filesystem snapshot, `Sandbox.getOrCreate`, `snapshot()`, `extendTimeout()`, exposed port domain, and file/command APIs match the eventual Kata task-environment shape more closely than Railway Service.
 
-3. **Reachability advertises a `public` endpoint via the Railway service domain.** Railway assigns a public `<service>-<hash>.up.railway.app` domain with HTTPS + WebSocket to a service. The driver reads the assigned domain from the service and returns it as the `AdvertisedEndpoint` with `reachability: "public"`, `source: "server"`. No tunnel provisioning (unlike the Cloudflare plan); no `sandbox.domain(port)` (unlike Vercel). Connect auto-registration proceeds against this public endpoint exactly as the local Docker driver does against the loopback endpoint.
+3. **Provision starts from a Vercel runtime, VCR image, or prepared snapshot.** V1 supports a configured Vercel runtime (`node24` default) and an optional `source` override for a VCR image or snapshot id. A prepared Kata snapshot may be built lazily from the provider-ready Phase 3a setup: install the provider CLIs and `katacode` server bundle, seed immutable base files, capture a snapshot, and reuse that snapshot for later provisions. The configured source is explicit and visible in the target card.
 
-4. **Ephemeral lifecycle: deploy on start, delete on dispose.** `startSession` creates the Railway Service; `disposeSession` deletes it. No stop/resume, no keepalive, no snapshot. A Railway Volume may be mounted at `/home/katacode/.katacode` for session-state persistence across redeploys, but Phase 3b ships without Resume UX — a disposed sandbox is gone. Volume-retained resume is a deferred sub-phase.
+4. **Reachability advertises a `public` endpoint via `sandbox.domain(port)`.** The driver creates the sandbox with the Kata server port in the `ports` list, starts `katacode serve`, reads `sandbox.domain(port)`, and returns an `AdvertisedEndpoint` with `reachability: "public"`, `source: "server"`, and `wss` URL. Connect auto-registration proceeds against this public endpoint.
 
-5. **Credential seeding from a host-side encrypted store.** Phase 3b adds the AgentBox host-backup + seed pattern for cloud drivers:
-   - A host-side encrypted store under `ServerSecretStore` holds provider credential files (`claude-credentials.json`, `codex-credentials.json`, `opencode-credentials.json`), captured once via an interactive in-sandbox login flow (decision 6).
-   - At provision, the driver seeds the credential files into the container at the provider-expected paths (`/home/katacode/.claude/.credentials.json`, `/home/katacode/.codex/auth.json`, `/home/katacode/.config/opencode/auth.json`) via the Railway files API or by baking them into the service environment as base64 env vars decoded at container start. The seed values are redacted in logs.
-   - If no credential is stored for a provider, the provider starts unauthenticated and surfaces its normal error. The user can then run the interactive login flow (decision 6) or use env-var API keys.
+5. **Lifecycle: keepalive, lapse, resume, dispose.** The target config includes `timeoutMs`; default is 45 minutes to work on Hobby. Pro/Enterprise users can raise it up to the Vercel plan maximum. The driver advertises `supportsRenewTimeout: true` and calls `extendTimeout()` while a session is active. If the session lapses, the UI shows `lapsed`; Resume uses `Sandbox.get`/`getOrCreate` and restarts `katacode serve`, then re-registers Connect. Dispose calls `sandbox.delete()` when the session should be permanently removed.
 
-6. **Interactive "Sign in \<provider>" affordance on the sandbox card.** When a provider is unauthenticated in a running Railway sandbox and no credential is seeded, the sandbox card shows a "Sign in \<provider>" button. Clicking it opens a terminal session in the container, runs the provider's login command under a PTY, relays the OAuth URL + code to the web UI (the AgentBox `_claude-login-worker` pattern), and on success captures the resulting credential file back to the host-side encrypted store for future provisions. This is the cloud analogue of Phase 3a's host bind-mount.
+6. **Snapshot support is first-class in Phase 3b.** Vercel persistent sandboxes snapshot the filesystem on stop, and the driver also exposes explicit `snapshot()` for prepared bases and Phase 5 reuse. A created snapshot id is stored with the sandbox session metadata and redacted where needed. Snapshot creation/restoration failures surface visibly and do not silently fall back unless the user explicitly starts from base.
 
-7. **Auth: Railway API token via `ServerSecretStore`.** The deployment target stores a `RAILWAY_API_TOKEN` (account-scoped) or `RAILWAY_TOKEN` (project-scoped) via the existing sandbox-instance secret path. No OIDC, no interactive Railway login from the server. The user creates the token in the Railway dashboard and pastes it into the deployment-target config.
+7. **Credential seeding from a host-side encrypted store.** Cloud provider OAuth files are stored under `ServerSecretStore` and seeded into the Vercel sandbox at provider-expected paths before provider startup:
+   - `/home/katacode/.claude/.credentials.json`
+   - `/home/katacode/.codex/auth.json`
+   - `/home/katacode/.config/opencode/auth.json`
+     Env-var API keys remain an alternative via existing sandbox instance environment secrets. Seed values are redacted in logs and never written to `.kata/environment.json`.
 
-8. **An official katacode image is published to GHCR.** Phase 3b adds a publish step to the release pipeline (`release.yml` / `build:docker-image`) that pushes `ghcr.io/gannonh/kata-code:<version>` and `:latest` on release. The driver pulls the tag matching the deploying server's version. This is a hard prerequisite — the driver cannot pull a tag that does not exist.
+8. **Interactive "Sign in <provider>" affordance on the sandbox card.** When a provider is unauthenticated in a running Vercel sandbox and no stored credential exists, the card shows "Sign in <provider>". The action runs the provider login command in the sandbox under a PTY-like command session, relays the OAuth URL + code to the UI, and captures the resulting credential file into `ServerSecretStore`.
 
-## Verified Railway constraints
+9. **Auth: Vercel token trio via `ServerSecretStore`; OIDC optional later.** V1 stores `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID` using the existing sandbox-instance secret path. Vercel OIDC can be added later for Vercel-hosted Kata, but local desktop BYOC must work with explicit tokens.
 
-| Constraint                                                            | Consequence                                                                                 |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Railway Service supports pre-built Docker image as source             | Provision creates a service pointing at the GHCR image ref (decision 2)                     |
-| Public service domain carries HTTPS + WebSocket                       | Reachability is a direct `public` endpoint; no tunnel (decision 3)                          |
-| Ephemeral filesystem outside a mounted Volume                         | Session state needs a Volume mount or git-branch sync (roadmap's model)                     |
-| Persistent service process model                                      | No keepalive/lapse/resume UX (decision 4); dispose = delete                                 |
-| GraphQL API (`backboard.railway.com/graphql/v2`) for service creation | Driver uses GraphQL (the CLI does not support image-ref service creation)                   |
-| `RAILWAY_API_TOKEN` / `RAILWAY_TOKEN` for headless auth               | Token-only auth (decision 7); no interactive Railway login from the server                  |
-| Service creation + image pull + healthz probe takes 30-90s            | `provision` resolves on healthz success; `startSession` already supports long provision     |
-| Region selection at project/environment level                         | Target config includes region; the driver creates the service in the configured environment |
+10. **Docker-in-sandbox is unsupported for V1 Vercel target configs.** If `.kata/environment.json` needs Docker daemon access, the Vercel driver fails loud during validation/setup with a driver-unsupported message. Local Docker and future Railway/E2B/Hetzner drivers can cover Docker-native tasks.
+
+## Verified Vercel constraints
+
+| Constraint                                                                                  | Consequence                                                                                |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Vercel Sandbox runs Firecracker microVMs with dedicated kernel isolation                    | Better match for untrusted agent/task sandboxes than service containers                    |
+| Sandbox filesystem persistence is snapshot-backed and enabled by default                    | Resume and prepared-base flows are core driver behavior                                    |
+| Vercel documented p75 snapshot restore improvement from >40s to <1s                         | Time-to-usable should be measured against Vercel snapshot restore, not service deploy time |
+| `sandbox.domain(port)` exposes a public URL for declared ports                              | Driver uses direct public `wss`; no tunnel                                                 |
+| Default timeout is 5 minutes; max is 45 minutes on Hobby and 24 hours on Pro/Enterprise     | Default target timeout is 45 minutes; Pro/Enterprise can configure longer                  |
+| Built-in runtimes use Amazon Linux 2023 with `dnf`; VCR custom images are available in beta | Prepared image/snapshot setup uses Linux package installs or a VCR image path              |
+| Built-in provisioning currently runs in `iad1`                                              | Region selection is not a V1 target field                                                  |
+| Vercel Sandbox auth supports OIDC or access tokens                                          | BYOC desktop uses access-token trio; OIDC is future                                        |
 
 ## Acceptance criteria
 
-1. **AC-3b.1** `packages/sandbox-railway` implements the frozen `SandboxProvider` SPI (required members; `describe()` advertises `reachabilityKind: "public"`, no `supportsSnapshot`, no `supportsRenewTimeout`). A type-level conformance test asserts the driver satisfies the interface.
-2. **AC-3b.2** `validate` resolves a Railway API token from `ServerSecretStore` and confirms the configured project/environment is reachable (a GraphQL query against `backboard.railway.com/graphql/v2`). Invalid token or unreachable project returns a `SandboxRpcError` with `reason: "invalid-config"`.
-3. **AC-3b.3** `provision` creates a Railway Service from `ghcr.io/gannonh/kata-code:<tag>` in the configured environment, sets the sandbox instance environment variables, seeds the stored credential files, and resolves once the in-container Kata server's healthz endpoint responds. A unit test covers the provision payload construction; a credentialed integration test (maintainer-local) covers the full provision against a real Railway project.
-4. **AC-3b.4** `reachability` returns the Railway service's public domain as an `AdvertisedEndpoint` with `reachability: "public"`. A unit test covers the domain extraction from the service record.
-5. **AC-3b.5** `dispose` deletes the Railway Service. A subsequent `listInstances` no longer reports a running session for that instance. A credentialed integration test confirms the service is gone.
-6. **AC-3b.6** Starting a Railway sandbox session in the web UI provisions the service, Connect-auto-registers the public endpoint, and the sandbox appears under Environments in the left-rail Add project picker. The existing Phase 1/2 session-flow wiring (saved-environment registration via the returned pairing token) works unchanged. Manual UAT + an e2e test tagged `@environments-deploy` confirms.
-7. **AC-3b.7** A second paired client (mobile or hosted web) reaches the Railway sandbox via the relay with no manual setup (AC-1.11 parity). Manual UAT confirms.
-8. **AC-3b.8** With a stored Claude credential, a started Railway sandbox reports Claude as authenticated without any env-var configuration. A credentialed integration test or manual UAT confirms.
-9. **AC-3b.9** With no stored credential for a provider, the sandbox card shows a "Sign in \<provider>" affordance. Clicking it opens a terminal, runs the provider's login command, relays the OAuth URL + code to the UI, and on success captures the credential to the host-side encrypted store. A manual UAT confirms for at least one OAuth-based provider (Claude or Codex).
-10. **AC-3b.10** Disposing a Railway sandbox removes it from the Connect pool (the relay link lapses when the public origin becomes unreachable). A second paired client can no longer reach it. Manual UAT confirms.
-11. **AC-3b.11** The release pipeline publishes `ghcr.io/gannonh/kata-code:<version>` and `:latest` on release. A CI job or manual release smoke confirms the image is pullable.
-12. **AC-3b.12** `vp check`, `vp run typecheck`, and the `@environments-deploy` e2e suite pass. Credentialed Railway tests are maintainer-local with recorded UAT (no CI secret); the e2e suite covers the uncredentialed path (target config validation, error surfacing).
+1. **AC-3b.1** `packages/sandbox-vercel` implements the frozen `SandboxProvider` SPI. `describe()` advertises `reachabilityKind: "public"`, `supportsSnapshot: true`, `supportsRenewTimeout: true`, and `supportsCopyInto: true` when implemented. A type-level conformance test asserts the driver satisfies the interface.
+2. **AC-3b.2** `validate` resolves Vercel credentials from `ServerSecretStore` and confirms the configured project is reachable through the Vercel Sandbox SDK/API. Invalid token, team, or project returns a `SandboxRpcError` with `reason: "invalid-config"`.
+3. **AC-3b.3** `provision` creates a Vercel Sandbox from the configured runtime/image/snapshot source, sets sandbox env vars, seeds stored credential files, seeds the repo, runs setup, starts `katacode serve`, and resolves once `/healthz` responds.
+4. **AC-3b.4** `reachability` returns `sandbox.domain(port)` as an `AdvertisedEndpoint` with `reachability: "public"` and a working `wss` URL. A unit test covers URL mapping; a credentialed integration/UAT confirms WebSocket connection.
+5. **AC-3b.5** `renewTimeout` extends a running sandbox session and the UI surfaces remaining lifetime. When the plan cap is reached or the sandbox stops, the session enters `lapsed` with an explicit error for any in-flight agent stream.
+6. **AC-3b.6** Resume reattaches to the named sandbox or recreates it from the current snapshot, restarts `katacode serve`, re-registers Connect, and restores the session card to ready. Expired/missing snapshots surface a visible error.
+7. **AC-3b.7** `snapshot.createSnapshot` captures a prepared base or running session and stores the returned snapshot id. Booting from that snapshot skips repeated setup and records time-to-ready for comparison.
+8. **AC-3b.8** Starting a Vercel sandbox session in the web UI provisions the sandbox, Connect-auto-registers the public endpoint, and the sandbox appears under Environments in the left-rail Add project picker.
+9. **AC-3b.9** A second paired client reaches the Vercel sandbox via Connect with no manual setup. Manual UAT confirms.
+10. **AC-3b.10** With a stored Claude or Codex credential, a started Vercel sandbox reports that provider as authenticated without env-var configuration. A credentialed integration test or manual UAT confirms.
+11. **AC-3b.11** With no stored credential for a provider, the sandbox card shows "Sign in <provider>"; the flow relays the OAuth URL + code and stores the resulting credential file for future provisions. Manual UAT confirms for at least one OAuth-based provider.
+12. **AC-3b.12** Disposing a Vercel sandbox deletes it and removes it from the Connect pool. A second paired client can no longer reach it. Manual UAT confirms.
+13. **AC-3b.13** `vp check`, `vp run typecheck`, and the `@environments-deploy` e2e suite pass. Credentialed Vercel tests are maintainer-local with recorded UAT where CI credentials are unavailable.
 
 ## Deferred work
 
-- **Volume-retained resume for Railway sandboxes:** mount a Railway Volume at `/home/katacode/.katacode` and add a Resume affordance so a disposed-but-volume-retained sandbox can be re-provisioned with its session state. Future sub-phase; revisit when session-persistence demand surfaces.
-- **Railway Sandbox VM primitive as an alternative driver:** the TS SDK (`@railwayapp/railway-ts-sdk`) exposes ephemeral VMs with checkpoints/forking/templates/SSH/exec. A future driver could target this for snapshot-resume semantics closer to the Vercel model. Deferred until the Railway Service driver proves the SPI fit and a user need for snapshots surfaces. The SDK is in Priority Boarding and may change.
-- **Multi-region selection:** the target config includes a region field, but Phase 3b creates the service in the environment's configured region. Per-target region override is future.
+- **Railway Sandbox driver:** Railway's VM sandbox primitive has checkpoints, forks, templates, exec, files, and port forwarding, but it is still in Priority Boarding with breaking-change risk. Revisit after Vercel 3b or when Railway Sandbox stabilizes.
+- **Railway Service driver:** Useful as a service-deploy target, but no longer the first cloud sandbox. Revisit when users need long-lived BYOC service hosting.
+- **E2B driver:** Strong candidate for advanced snapshot/pause/resume and isolated agent-computer workflows after Vercel validates the SPI shape.
+- **Vercel OIDC auth:** Add for Vercel-hosted Kata once the desktop BYOC token path is stable.
+- **VCR production image pipeline:** Start with runtime/snapshot support. Add a dedicated VCR image build/publish path if measured cold-start or setup time requires it.
 
 ## Build handoff
 
-- New package: `packages/sandbox-railway` (driver implementation, GraphQL client, credential seeding helpers).
-- Files to touch: `apps/server/src/sandbox/SandboxService.ts` (register the `railway` driver kind in the registry), `apps/server/src/serverSettings.ts` (materialize Railway token secrets), `apps/web/src/components/settings/SandboxDeploymentSettings.tsx` (Railway target config form, "Sign in \<provider>" affordance), `apps/web/src/components/chat/ProviderStatusBanner.tsx` (sign-in affordance for unauthenticated providers in a sandbox), `release.yml` / `build:docker-image` (GHCR publish step).
-- Tests: `packages/sandbox-railway` unit tests (provision payload, reachability extraction, dispose, credential seeding); a credentialed integration test guarded by a `RAILWAY_API_TOKEN` env var (maintainer-local); extend `@environments-deploy` e2e with the Railway target-config + start/dispose flow.
-- Gate: `vp check`, `vp run typecheck`, `vp run test`, `vp run e2e --project desktop-dev --grep @environments-deploy`. Credentialed Railway ACs (3b.3/5/8/9) are maintainer-local with recorded UAT.
-- Prerequisite: Phase 3a implemented and the katacode image published to GHCR (AC-3b.11).
+- New package: `packages/sandbox-vercel` (driver implementation, SDK wrapper, snapshot/source helpers, credential seeding helpers).
+- Files to touch: `apps/server/src/sandbox/SandboxService.ts` (register `vercel` driver kind), `apps/server/src/serverSettings.ts` (materialize Vercel token secrets), `apps/web/src/components/settings/SandboxDeploymentSettings.tsx` (Vercel target config, lifetime/resume/snapshot state, "Sign in <provider>" affordance), `apps/web/src/components/chat/ProviderStatusBanner.tsx` (sign-in affordance for unauthenticated providers in a sandbox).
+- Tests: `packages/sandbox-vercel` unit tests (config decode, source selection, provision payload, reachability URL, timeout extension, dispose, credential seeding); credentialed integration tests guarded by `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`; extend `@environments-deploy` e2e with Vercel target validation/start/dispose where credentials are available.
+- Gate: `vp check`, `vp run typecheck`, `vp run test`, `vp run e2e --project desktop-dev --grep @environments-deploy`. Credentialed Vercel ACs are maintainer-local with recorded UAT.

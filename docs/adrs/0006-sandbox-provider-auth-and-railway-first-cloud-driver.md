@@ -10,7 +10,7 @@ timestamp: 2026-07-04T00:00:00Z
 
 ## Status
 
-Accepted. Supersedes [ADR 0005 — Vercel Sandbox as the first cloud driver](/adrs/0005-vercel-first-cloud-driver.md).
+Superseded by [ADR 0007 — Vercel Sandbox as the first cloud sandbox driver](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md) for the Phase 3b cloud provider choice. The provider-auth model remains accepted unless superseded by a later ADR. Superseded [ADR 0005 — Vercel Sandbox as the first cloud driver](/adrs/0005-vercel-first-cloud-driver.md).
 
 ## Context
 

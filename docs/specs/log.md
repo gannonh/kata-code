@@ -1,5 +1,10 @@
 # Specs log
 
+## 2026-07-05 (Environments / Deployments Phase 3b — Vercel Sandbox restored as first cloud sandbox)
+
+- Rewrote [Phase 3b — Vercel Sandbox cloud driver](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) for [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md): `packages/sandbox-vercel`, Vercel token trio, runtime/VCR image/snapshot source, credential-file seeding, `sandbox.domain(port)` public `wss`, `extendTimeout`, lapsed/resume lifecycle, explicit snapshot support, and time-to-usable measurement.
+- Updated the [Environments/Deployments roadmap](/specs/2026-06-27-kata-environments-deployments-design.md) and [specs index](/specs/index.md) so Phase 3b targets Vercel Sandbox. Railway Sandbox, Railway Service, E2B, Daytona, Hetzner, Cloudflare, and DigitalOcean remain future BYOC drivers. ADR 0006's provider-auth model remains accepted.
+
 ## 2026-07-04 (Environments / Deployments Phase 3a — Implemented)
 
 - Marked [Phase 3a — Docker sandbox gaps](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) `Implemented`. Baked provider CLIs (`codex`, `agent`, `grok`, `claude`, `opencode`) and `git` into the `katacode` image runtime stage, set `SHELL=/bin/sh` + `~/.local/bin` on `PATH`, wired host-credential bind-mounts (`~/.codex` ro, `~/.claude`/`~/.claude.json` rw, `~/.config/opencode` ro) into `DockerSandboxProvider.provision` via the new pure `buildCredentialBindMounts()` (with `CODEX_HOME` shadow-home precedence and absent-dir skip), and surfaced `terminal.open` RPC rejections via a non-blocking error toast instead of `.catch(() => undefined)`. Added `scripts/verify-docker-image.ts` and a third `@environments-deploy` e2e test asserting `SHELL=/bin/sh`, `/bin/sh`, an interactive shell, and every provider CLI on PATH. Gate: `vp check` + `vp run typecheck` pass; `pnpm run verify:docker-image` OK; manual UAT for host-credential auth ACs pending.
