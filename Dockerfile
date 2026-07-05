@@ -140,8 +140,8 @@ RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai @xai-offi
 # Run the server and cloudflared as an unprivileged user instead of root.
 # A writable HOME is required for the Node server's config/cache dirs and for
 # the Cursor Agent installer to write ~/.local/bin/agent.
-RUN addgroup -S katacode \
-    && adduser -S -D -G katacode -h /home/katacode katacode \
+RUN addgroup -S -g 101 katacode \
+    && adduser -S -D -G katacode -h /home/katacode -u 100 katacode \
     && mkdir -p /home/katacode /workspace \
     && chown -R katacode:katacode /home/katacode /workspace
 ENV HOME=/home/katacode

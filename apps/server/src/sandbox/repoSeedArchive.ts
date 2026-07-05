@@ -288,8 +288,14 @@ function makeUstarHeader(relativePath: string, size: number): Buffer {
   }
   nameBuf.copy(header, 0);
   header.write("0000644\0", 100, "ascii"); // mode
-  header.write("0000000\0", 108, "ascii"); // uid
-  header.write("0000000\0", 116, "ascii"); // gid
+  // uid/gid: the local Docker sandbox image runs as the unprivileged
+  // `katacode` user (uid 100, gid 101 on alpine). Docker's archive extract
+  // honors the tar's uid/gid, so writing katacode's ids here makes the seeded
+  // files owned by katacode on extract — no root-owned tree, no `git` dubious-
+  // ownership failure, and no `chown` step needed. Cloud drivers (Phase 3b)
+  // seed via their own mechanism and do not use this archive.
+  header.write("0000144\0", 108, "ascii"); // uid 100 (katacode)
+  header.write("0000145\0", 116, "ascii"); // gid 101 (katacode)
   header.write(`${size.toString(8).padStart(11, "0")}\0`, 124, "ascii"); // size
   header.write("00000000000\0", 136, "ascii"); // mtime
   header.write("        ", 148, "ascii"); // checksum placeholder (8 spaces)
