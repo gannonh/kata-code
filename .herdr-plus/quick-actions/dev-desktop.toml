@@ -1,0 +1,21 @@
+# command (default) — runs immediately
+name = "dev:desktop"
+command = "pnpm kill:dev && pnpm run dev:desktop"
+
+
+# # select — pick from a second fuzzy list; the choice becomes {{.Value}}
+# name = "Open Repo"
+# type = "select"
+# command = "open https://github.com/cloudmanic/{{.Value}}"
+
+# [[options]]
+# label = "Herdr Plus"
+# value = "herdr-plus"
+
+# # form — type a value that becomes {{.Value}}
+# name = "Search Google"
+# type = "form"
+# command = "open 'https://www.google.com/search?q={{.Value | urlquery}}'"
+
+# [form]
+# prompt = "Search Google for"
