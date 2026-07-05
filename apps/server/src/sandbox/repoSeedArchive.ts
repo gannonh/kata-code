@@ -247,13 +247,33 @@ function createGitignoreMatcher(patterns: ReadonlyArray<string>, _root: string):
 // ── Minimal ustar tar writer ──────────────────────────────────────────
 
 /**
- * Pack the selected files into a ustar tar archive (regular files only).
- * Each entry is a 512-byte header + content padded to a 512-byte boundary.
- * The archive ends with two 512-byte zero blocks. Docker accepts this for
+ * Pack the selected files into a ustar tar archive. Each entry is a 512-byte
+ * header + content padded to a 512-byte boundary. Directory entries are
+ * emitted (with katacode uid/gid) for every directory containing a selected
+ * file so Docker's archive extract creates katacode-owned directories —
+ * without them, Docker creates intermediate directories as root and `git`
+ * flags the root-owned `.git` directory as dubious ownership. The archive
+ * ends with two 512-byte zero blocks. Docker accepts this for
  * `PUT /containers/{id}/archive`.
  */
 async function packUstar(files: ReadonlyArray<SelectedFile>): Promise<Uint8Array> {
   const chunks: Buffer[] = [];
+
+  // Emit directory entries (sorted so parents precede children) with katacode
+  // uid/gid so the extracted tree is fully katacode-owned.
+  const dirSet = new Set<string>();
+  for (const file of files) {
+    const parts = file.relativePath.split("/");
+    // Every ancestor directory except the repo root itself ("").
+    for (let i = 1; i < parts.length; i++) {
+      dirSet.add(parts.slice(0, i).join("/"));
+    }
+  }
+  const dirs = [...dirSet].sort();
+  for (const dir of dirs) {
+    chunks.push(makeUstarDirectoryHeader(dir));
+  }
+
   for (const file of files) {
     let content: Buffer;
     try {
@@ -308,6 +328,23 @@ function makeUstarHeader(relativePath: string, size: number): Buffer {
   // prefix (155) left zero.
 
   // Checksum: sum of all header bytes with the checksum field as 8 spaces.
+  let checksum = 0;
+  for (let i = 0; i < 512; i++) checksum += header[i] ?? 0;
+  header.write(checksum.toString(8).padStart(6, "0"), 148, "ascii");
+  header.write("\0 ", 154, "ascii"); // null + space terminator
+  return header;
+}
+
+/** Build a 512-byte ustar header for a directory entry. Same ownership as
+ *  regular files (katacode uid/gid) so Docker's archive extract creates
+ *  katacode-owned directories instead of root-owned ones. */
+function makeUstarDirectoryHeader(relativePath: string): Buffer {
+  const header = makeUstarHeader(relativePath + "/", 0);
+  header.write("5", 156, "ascii"); // typeflag: directory
+  header.write("0000755\0", 100, "ascii"); // mode (dir: rwxr-xr-x)
+  // Blank the checksum field (148-155) to spaces before recomputing, since
+  // `makeUstarHeader` wrote a checksum for the file-mode/typeflag values.
+  header.write("        ", 148, "ascii");
   let checksum = 0;
   for (let i = 0; i < 512; i++) checksum += header[i] ?? 0;
   header.write(checksum.toString(8).padStart(6, "0"), 148, "ascii");
