@@ -26,6 +26,7 @@
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -107,6 +108,7 @@ const CODEX_EXCLUDES: ReadonlyArray<ExcludePattern> = [
   { name: "external_agent_session_imports.json" },
   { name: "shell_snapshots" },
   { name: ".tmp" },
+  { name: "tmp" },
   { name: ".DS_Store" },
   { name: "..codex-global-state.json.bak.tmp", prefix: true },
   { name: "..codex-global-state.json.tmp", prefix: true },
@@ -364,6 +366,24 @@ export function buildCredentialSeedArchives(
       });
     }
 
+    // Claude on macOS stores OAuth credentials in the Keychain, not in
+    // ~/.claude/.credentials.json. Extract from the Keychain and add as an
+    // in-memory file to the credentials archive. On non-macOS or when the
+    // Keychain entry is absent, skip (Claude falls back to ANTHROPIC_API_KEY
+    // or interactive login). This mirrors AgentBox's extract pattern.
+    const hasClaudeCredentials = credentialFiles.some(
+      (f) => f.relativePath === ".claude/.credentials.json",
+    );
+    if (!hasClaudeCredentials && os.platform() === "darwin") {
+      const keychainCreds = yield* extractClaudeKeychainCredentials();
+      if (keychainCreds !== null) {
+        credentialFiles.push({
+          relativePath: ".claude/.credentials.json",
+          absolutePath: keychainCreds,
+        });
+      }
+    }
+
     const staticArchive =
       staticFiles.length > 0 || staticContents.length > 0
         ? yield* Effect.tryPromise({
@@ -395,6 +415,64 @@ export function buildCredentialSeedArchives(
 /** Default host-path-exists predicate using node:fs existsSync. */
 function defaultExistsSync(p: string): boolean {
   return existsSync(p);
+}
+
+/** Parse the Claude Keychain credential blob, returning the refreshToken
+ *  when present and non-empty, or null when the blob is malformed/empty. */
+function parseKeychainBlob(raw: string): { claudeAiOauth?: { refreshToken?: unknown } } | null {
+  try {
+    const parsed = JSON.parse(raw) as { claudeAiOauth?: { refreshToken?: unknown } };
+    if (
+      typeof parsed.claudeAiOauth?.refreshToken !== "string" ||
+      parsed.claudeAiOauth.refreshToken.length === 0
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Extract Claude OAuth credentials from the macOS Keychain.
+ *  Claude Code on macOS stores `~/.claude/.credentials.json` content in the
+ *  Keychain under `Claude Code-credentials`. This runs `security
+ *  find-generic-password -s "Claude Code-credentials" -w`, writes the JSON to
+ *  a temp file, and returns the path for inclusion in the credentials archive.
+ *  Returns `null` on non-macOS, when the Keychain entry is absent, or when the
+ *  user denies Keychain access. */
+function extractClaudeKeychainCredentials(): Effect.Effect<string | null, CredentialSeedError> {
+  return Effect.gen(function* () {
+    if (os.platform() !== "darwin") return null;
+    const { execFile } = yield* Effect.promise(() => import("node:child_process").then((m) => m));
+    const { promisify } = yield* Effect.promise(() => import("node:util").then((m) => m));
+    const execFileAsync = promisify(execFile);
+    try {
+      const { stdout } = yield* Effect.promise(() =>
+        execFileAsync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"]),
+      );
+      const trimmed = stdout.trim();
+      if (trimmed.length === 0) return null;
+      // Validate it's a JSON object with a claudeAiOauth refresh token.
+      const parsed = parseKeychainBlob(trimmed);
+      if (parsed === null) {
+        return null;
+      }
+      // Write to a temp file so the ustar writer can read it as a UstarFile.
+      const { writeFile, mkdtemp } = yield* Effect.promise(() =>
+        import("node:fs/promises").then((m) => m),
+      );
+      const { join } = yield* Effect.promise(() => import("node:path").then((m) => m));
+      const { tmpdir } = yield* Effect.promise(() => import("node:os").then((m) => m));
+      const dir = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "kata-claude-cred-")));
+      const filePath = join(dir, ".credentials.json");
+      yield* Effect.promise(() => writeFile(filePath, trimmed, { mode: 0o600 }));
+      return filePath;
+    } catch {
+      // Keychain access denied or entry absent — fall back to API key.
+      return null;
+    }
+  });
 }
 
 // ── File collection (walk + deref symlinks + exclude + sanitize) ──────

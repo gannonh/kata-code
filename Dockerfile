@@ -126,16 +126,17 @@ RUN printf '#!/bin/sh\nexec node /app/apps/server/dist/bin.mjs "$@"\n' > /usr/lo
     && chmod +x /usr/local/bin/katacode
 
 # Phase 3a: bake provider CLIs into the image so a sandbox session can run
-# `codex`, `agent` (Cursor), `grok`, `claude` (Claude Code), and `opencode`
-# directly. The same image is the provision unit for Phase 3b (Railway cloud
-# driver), so this work is not throwaway. The npm packages ship
-# platform-native prebuilds for linux amd64/arm64, so a plain global install
-# is enough (no native build). Install as root so the binaries land on the
-# system PATH; the unprivileged `katacode` user created below inherits them.
-# Cursor Agent (`agent`) is distributed via the cursor.com installer, not npm:
-# it downloads the platform binary and symlinks `agent` + `cursor-agent` into
-# ~/.local/bin, so it is installed as the katacode user below.
-RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai @xai-official/grok
+# `codex`, `agent` (Cursor), `grok`, `claude` (Claude Code), `opencode`, and
+# `pi` (Pi Coding Agent) directly. The same image is the provision unit for
+# Phase 3b (Railway cloud driver), so this work is not throwaway. The npm
+# packages ship platform-native prebuilds for linux amd64/arm64, so a plain
+# global install is enough (no native build). Install as root so the binaries
+# land on the system PATH; the unprivileged `katacode` user created below
+# inherits them. Cursor Agent (`agent`) is distributed via the cursor.com
+# installer, not npm: it downloads the platform binary and symlinks `agent` +
+# `cursor-agent` into ~/.local/bin, so it is installed as the katacode user
+# below.
+RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai @xai-official/grok @earendil-works/pi-coding-agent
 
 # Run the server and cloudflared as an unprivileged user instead of root.
 # A writable HOME is required for the Node server's config/cache dirs and for
