@@ -53,10 +53,11 @@ interface SelectedFile {
 
 /**
  * Build a bounded ustar tar archive of the regular files under `repoRoot`.
- * Skips `.git`/`.jj`/`node_modules` components, honors a `.gitignore` subset,
- * and fails loud when `maxBytes` (default 256 MB) or `maxFiles` (default 50k)
- * is exceeded. Returns the archive as a `Uint8Array` (Docker accepts an
- * uncompressed tar for `PUT /containers/{id}/archive`).
+ * Skips `.jj`/`node_modules` components (`.git` is included so the seeded
+ * repo carries its remote URL for repo-identity grouping), honors a
+ * `.gitignore` subset, and fails loud when `maxBytes` (default 256 MB) or
+ * `maxFiles` (default 50k) is exceeded. Returns the archive as a `Uint8Array`
+ * (Docker accepts an uncompressed tar for `PUT /containers/{id}/archive`).
  */
 export async function buildRepoSeedArchive(
   repoRoot: string,
