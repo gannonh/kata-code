@@ -65,6 +65,7 @@ import {
   RelayEnvironmentLinkChallengeResponse,
   RelayEnvironmentLinkResponse,
   type RelayLinkProofRequest,
+  RelayOkResponse,
 } from "@kata-sh/code-contracts/relay";
 import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
@@ -375,6 +376,17 @@ function postJson<S extends Schema.Decoder<unknown>>(
   });
 }
 
+function deleteJson<S extends Schema.Decoder<unknown>>(
+  schema: S,
+  url: string,
+  bearerToken?: string,
+): Effect.Effect<S["Type"], SandboxRpcError> {
+  return fetchJson(schema, url, {
+    method: "DELETE",
+    headers: bearerToken ? { authorization: `Bearer ${bearerToken}` } : {},
+  });
+}
+
 function exchangeBootstrapToken(input: {
   readonly httpBaseUrl: string;
   readonly bootstrapToken: string;
@@ -428,7 +440,11 @@ function registerSandboxWithConnect(input: {
   readonly bootstrapToken: string;
   readonly connectAuthToken: SandboxStartSessionInput["connectAuthToken"];
 }): Effect.Effect<
-  { readonly descriptor: ExecutionEnvironmentDescriptor; readonly adminAccessToken: string },
+  {
+    readonly descriptor: ExecutionEnvironmentDescriptor;
+    readonly adminAccessToken: string;
+    readonly relay?: { readonly relayUrl: string; readonly bearerToken: string } | null;
+  },
   SandboxRpcError,
   CliTokenManager.CloudCliTokenManager
 > {
@@ -510,7 +526,11 @@ function registerSandboxWithConnect(input: {
       relayConfig,
       session.access_token,
     );
-    return { descriptor, adminAccessToken: session.access_token };
+    return {
+      descriptor,
+      adminAccessToken: session.access_token,
+      relay: { relayUrl, bearerToken },
+    };
   });
 }
 
@@ -565,6 +585,8 @@ interface RunningSession {
   readonly setupProcesses: ReadonlyArray<SetupProcessRecord>;
   readonly environmentId: string;
   readonly endpoint: AdvertisedEndpoint;
+  /** Relay link info for unlinking on dispose. */
+  readonly relay?: { readonly relayUrl: string; readonly bearerToken: string } | null;
 }
 
 /** In-memory map of running sessions (instanceId → handle + driver + endpoint). Phase 1; not durable. */
@@ -835,7 +857,7 @@ export const SandboxServiceLive = {
         // desktop server. A missing user/CLI Connect token or relay failure fails
         // the RPC and tears down the just-created container.
         const loopbackHttpBaseUrl = reach.httpBaseUrl.replace("localhost", "127.0.0.1");
-        const { descriptor, adminAccessToken } = yield* registerSandboxWithConnect({
+        const { descriptor, adminAccessToken, relay } = yield* registerSandboxWithConnect({
           httpBaseUrl: loopbackHttpBaseUrl,
           bootstrapToken,
           connectAuthToken: options?.connectAuthToken,
@@ -895,6 +917,7 @@ export const SandboxServiceLive = {
           setupProcesses,
           environmentId: descriptor.environmentId,
           endpoint,
+          relay: relay ?? null,
         });
         return {
           instanceId,
@@ -909,16 +932,29 @@ export const SandboxServiceLive = {
     Effect.gen(function* () {
       const entry = runningSessions.get(instanceId as string);
       if (entry === undefined) return false;
+      // Unlink the environment from the relay so it disappears from the
+      // Connect pool immediately. Non-fatal: if the unlink fails, the relay
+      // link lapses when the container becomes unreachable.
+      if (entry.relay) {
+        yield* deleteJson(
+          RelayOkResponse,
+          `${entry.relay.relayUrl}/v1/client/environment-links/${entry.environmentId}`,
+          entry.relay.bearerToken,
+        ).pipe(
+          Effect.catch((error: SandboxRpcError) =>
+            Effect.logWarning("Could not unlink sandbox from relay", {
+              environmentId: entry.environmentId,
+              message: error.message,
+            }).pipe(Effect.asVoid),
+          ),
+        );
+      }
       // Route through the driver that created the handle rather than a
       // hardcoded one, so a future non-Docker driver disposes its own
       // sandboxes correctly (the handle's `driverKind` is the routing key).
       yield* entry.driver.dispose(entry.handle).pipe(Effect.mapError(mapDriverError));
       runningSessions.delete(instanceId as string);
       return true;
-      // Connect unlink: the existing cloud/ entry points expose no per-origin
-      // unlink, so the relay link lapses when this loopback origin becomes
-      // unreachable (container removed). AC-1.12: the deployment disappears from
-      // the Connect pool once the container is gone.
     }),
 };
 
