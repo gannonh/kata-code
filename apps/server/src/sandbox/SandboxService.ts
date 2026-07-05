@@ -14,6 +14,7 @@
  * @module SandboxService
  */
 import * as NodeCrypto from "node:crypto";
+import * as os from "node:os";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -488,6 +489,22 @@ function issueSandboxPairingCredential(input: {
   ).pipe(Effect.map((credential) => credential.credential));
 }
 
+/** Re-probe all providers on the sandbox server via the `/api/providers/refresh`
+ *  HTTP endpoint. Called after credentials are seeded via copyInto so the
+ *  sandbox server re-probes with auth in place. The initial boot probe may
+ *  have fired before credentials were in the container home. */
+function refreshSandboxProviders(input: {
+  readonly httpBaseUrl: string;
+  readonly adminAccessToken: string;
+}): Effect.Effect<void, SandboxRpcError> {
+  // Best-effort: a 200 with any body is a successful refresh. The refreshed
+  // provider statuses flow to clients via the WS serverConfig stream.
+  return fetchJson(Schema.Unknown, `${input.httpBaseUrl}/api/providers/refresh`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${input.adminAccessToken}` },
+  }).pipe(Effect.asVoid);
+}
+
 const RelayConfigResponse = Schema.Struct({ ok: Schema.Boolean });
 
 /** A running sandbox session: the provisioned handle plus the driver that
@@ -706,6 +723,7 @@ export const SandboxServiceLive = {
             resolved: loaded.resolved,
             secretValues,
             seed: { repoRoot: options.repository.repoRoot },
+            seedCredentials: { hostHome: os.homedir() },
           }).pipe(
             Effect.catch((error: SetupFailed | SandboxProviderError) =>
               // Reuse the canonical post-provision dispose helper. The
@@ -782,6 +800,23 @@ export const SandboxServiceLive = {
                 ),
               ),
             ),
+          ),
+        );
+        // Re-probe providers on the sandbox server now that credentials have
+        // been seeded via copyInto during setup. The initial probe at container
+        // boot may have fired before credentials were in place; this refresh
+        // corrects the provider status (e.g. Codex flips from error to ready).
+        yield* refreshSandboxProviders({
+          httpBaseUrl: loopbackHttpBaseUrl,
+          adminAccessToken,
+        }).pipe(
+          Effect.catchTag("SandboxRpcError", (error: SandboxRpcError) =>
+            // Non-fatal: a refresh failure leaves the sandbox running with the
+            // initial probe result. The client re-fetches provider status on
+            // its own interval, so a transient refresh error self-heals.
+            Effect.logWarning("Could not refresh sandbox providers after credential seed", {
+              message: error.message,
+            }).pipe(Effect.asVoid),
           ),
         );
         runningSessions.set(sessionKey, {

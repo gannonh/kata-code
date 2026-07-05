@@ -20,8 +20,6 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join as joinPath } from "node:path";
 
 import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/instance";
@@ -46,7 +44,6 @@ import {
   DockerEngineError,
 } from "./dockerEngine.ts";
 import { DockerSandboxConfig, DEFAULT_DOCKER_CONFIG } from "./config.ts";
-import { buildCredentialBindMounts, type CredentialBindMount } from "./credentialBindMounts.ts";
 
 /** In-container HOME baked into the katacode image (Dockerfile `ENV HOME`). */
 const CONTAINER_HOME = "/home/katacode";
@@ -175,34 +172,6 @@ function buildContainerEnv(
   for (const [k, v] of req.env ?? []) env.push({ name: k, value: v });
   for (const e of config.extraEnv ?? []) env.push({ name: e.name, value: e.value });
   return env;
-}
-
-/**
- * Resolve the Phase 3a host-credential bind-mounts for a provision request.
- * Reads the host home from `os.homedir()` and tests each candidate path with
- * `fs.existsSync`; absent paths are skipped so a missing credential dir is
- * not fatal (the provider starts unauthenticated and surfaces its own
- * error). `CODEX_HOME` in the provision env redirects the Codex mount target.
- */
-function resolveCredentialBindMounts(
-  req: SandboxProvisionRequest,
-): ReadonlyArray<CredentialBindMount> {
-  return buildCredentialBindMounts({
-    hostHome: homedir(),
-    containerHome: CONTAINER_HOME,
-    env: req.env ?? [],
-    hostPathExists: existsSync,
-  });
-}
-
-/** Convert a {@link CredentialBindMount} into a Docker Engine `Mount` entry. */
-function credentialMountToDocker(mount: CredentialBindMount): {
-  readonly Type: "bind";
-  readonly Source: string;
-  readonly Target: string;
-  readonly ReadOnly: boolean;
-} {
-  return { Type: "bind", Source: mount.source, Target: mount.target, ReadOnly: mount.readOnly };
 }
 
 function waitForReady(hostPort: number): Effect.Effect<void, SandboxProviderError> {
@@ -335,7 +304,6 @@ export const DockerSandboxProvider: SandboxProvider = {
       // @effect-diagnostics-next-line effect(globalDateInEffect):off - unique container name; no Effect Clock in the driver.
       const name = `kata-sandbox-${req.instanceId}-${Date.now()}`;
       const env = buildContainerEnv(resolved, req);
-      const credentialMounts = resolveCredentialBindMounts(req);
       // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - ad-hoc Docker Engine create body, not a typed codec.
       const createBody = JSON.stringify({
         Image: image,
@@ -348,12 +316,6 @@ export const DockerSandboxProvider: SandboxProvider = {
         HostConfig: {
           PortBindings: { [containerPort]: [{ HostPort: "0" }] },
           AutoRemove: true,
-          // Phase 3a: bind-mount host provider credential dirs so a sandbox
-          // session reuses the user's existing OAuth/API-key state. Absent
-          // host paths are skipped upstream, so a missing dir is not fatal.
-          ...(credentialMounts.length > 0
-            ? { Mounts: credentialMounts.map(credentialMountToDocker) }
-            : {}),
         },
         ExposedPorts: { [containerPort]: {} },
         Labels: { "kata.sandbox": "true", "kata.sandbox.instance": req.instanceId },
