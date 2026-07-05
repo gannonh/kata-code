@@ -273,6 +273,22 @@ function sanitizeCodexConfig(raw: string, hostHome: string): string | null {
  * to point at `/workspace` so the in-box claude trusts the sandbox workspace.
  * Returns sanitized text or `null` when unchanged/unparseable.
  */
+/** Sanitize Pi `settings.json`: strip the `packages` list so the in-container
+ *  Pi SDK doesn't try to `npm install` host-installed extensions (esbuild,
+ *  koffi, etc.) that have platform-specific binaries and block the provider
+ *  probe past its 10s timeout. Packages are optional extensions; the core
+ *  SDK auth + models work without them. Returns sanitized text or null. */
+function sanitizePiSettings(raw: string, _hostHome: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!Array.isArray(parsed.packages) || parsed.packages.length === 0) return null;
+    delete parsed.packages;
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeClaudeJson(raw: string, _hostHome: string): string | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -317,6 +333,8 @@ const PROVIDER_SPECS: ReadonlyArray<ProviderSpec> = [
     containerRelative: ".pi/agent",
     authFiles: ["auth.json"],
     excludes: PI_EXCLUDES,
+    configFileName: "settings.json",
+    sanitizeConfig: sanitizePiSettings,
   },
 ];
 
