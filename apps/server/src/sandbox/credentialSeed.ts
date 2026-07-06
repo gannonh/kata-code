@@ -33,6 +33,8 @@ import * as Effect from "effect/Effect";
 
 import { packUstarArchive, type UstarFile, type UstarContent } from "./ustarWriter.ts";
 
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
+
 /** The sandbox container's `/workspace` (pre-trusted in sanitized configs). */
 const WORKSPACE = "/workspace";
 
@@ -424,7 +426,7 @@ export function buildCredentialSeedArchives(
     const hasClaudeCredentials = credentialFiles.some(
       (f) => f.relativePath === ".claude/.credentials.json",
     );
-    if (!hasClaudeCredentials && os.platform() === "darwin") {
+    if (!hasClaudeCredentials && (yield* HostProcessPlatform) === "darwin") {
       const keychainCreds = yield* extractClaudeKeychainCredentials();
       if (keychainCreds !== null) {
         credentialFiles.push({
@@ -493,7 +495,7 @@ function parseKeychainBlob(raw: string): { claudeAiOauth?: { refreshToken?: unkn
  *  user denies Keychain access. */
 function extractClaudeKeychainCredentials(): Effect.Effect<string | null, CredentialSeedError> {
   return Effect.gen(function* () {
-    if (os.platform() !== "darwin") return null;
+    if ((yield* HostProcessPlatform) !== "darwin") return null;
     const { execFile } = yield* Effect.promise(() => import("node:child_process").then((m) => m));
     const { promisify } = yield* Effect.promise(() => import("node:util").then((m) => m));
     const execFileAsync = promisify(execFile);
