@@ -56,19 +56,6 @@ export function ProviderSignInDialog({
             case "awaiting-code":
               setStage("awaiting-code");
               break;
-            case "invalid-code":
-              setError(event.detail ?? "Invalid code. Try again.");
-              setStage("awaiting-code");
-              break;
-            case "success":
-              setStage("done");
-              toastManager.add({
-                type: "success",
-                title: "Credential stored",
-                description: "Credential stored for future deployments.",
-              });
-              onClose();
-              break;
             case "error":
               setError(event.message);
               setStage("done");
@@ -98,7 +85,15 @@ export function ProviderSignInDialog({
           code: code as never,
         },
       );
-      if (!result.accepted) {
+      if (result.accepted) {
+        setStage("done");
+        toastManager.add({
+          type: "success",
+          title: "Credential stored",
+          description: "Credential stored for future deployments.",
+        });
+        onClose();
+      } else {
         setError("Invalid code. Try again.");
         setStage("awaiting-code");
       }

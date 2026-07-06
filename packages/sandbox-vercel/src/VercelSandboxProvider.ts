@@ -237,7 +237,7 @@ export function makeVercelSandboxProvider(
         );
         const snap = yield* trySdk(
           "snapshot.createSnapshot",
-          () => sb.snapshot(options?.name !== undefined ? { expiration: 0 } : { expiration: 0 }),
+          () => sb.snapshot({ expiration: 0 }),
           "unknown",
         );
         return { snapshotId: snap.snapshotId };

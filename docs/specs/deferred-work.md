@@ -238,3 +238,12 @@ Each entry should include:
 - **Rationale:** The Vercel Sandbox driver provisions from a runtime, VCR image, or prepared snapshot — not from a published Docker image ref. The official GHCR image publish requirement from the Railway Service plan is no longer a Phase 3b prerequisite. A VCR image pipeline may still be added if measured cold-start or setup time justifies it. The image remains useful for local Docker sandboxes and future Railway Service/E2B/Hetzner drivers.
 - **Revisit trigger:** When a VCR production image pipeline is needed for Vercel cold-start optimization, or when a future driver requires a published image ref.
 - **Notes:** Closer to the future managed Kata Cloud product than to BYOC; the official image is the first step toward a managed registry. The `Dockerfile` with provider CLIs baked in during Phase 3a remains the local Docker provision unit.
+
+### Sandbox: durable RunningSession reclamation across server restarts
+
+- **Status:** deferred
+- **Area:** sandbox, lifecycle, reliability
+- **Source:** [Phase 3b plan](/specs/2026-07-04-kata-environments-deployments-phase-3b-plan.md) — Build completion report, risk #6; [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md)
+- **Rationale:** `RunningSession` in `apps/server/src/sandbox/SandboxService.ts` is an in-memory map (Phase 1 design). Phase 3b cloud sandboxes outlive a server restart and keep running (and billing) with no handle retained to dispose or resume them. A startup sweep that reclaims live Vercel sandboxes by listing the team/project's sandboxes and reattaching known instance ids is the durable-session path. Pre-existing Phase 1 limitation, now more visible.
+- **Revisit trigger:** When sandbox billing or reliability concerns make orphaned-after-restart sessions unacceptable, or alongside a broader sandbox-state persistence effort.
+- **Notes:** Vercel `Sandbox.list` recovers sandbox names/statuses; a reclaim pass would re-fetch and either resume or dispose orphans for configured instances. Requires persisting the instance→sandboxId mapping and the serve env across restarts.
