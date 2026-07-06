@@ -2,7 +2,7 @@
 type: Spec
 title: "Kata Environments / Deployments Phase 3b — Vercel Sandbox cloud driver"
 description: "Deep-dive for Phase 3b: the first BYOC cloud sandbox driver on Vercel Sandbox — provision an ephemeral Firecracker microVM via @vercel/sandbox, restore from a prepared image/snapshot, public wss reachability via sandbox.domain(port), credential-file seeding from a host-side encrypted store, keepalive/lapse/resume lifecycle, and Connect auto-registration."
-status: Approved
+status: Implemented
 approved_at: 2026-07-05T00:00:00Z
 tags: [specs, phase-3b, environments, deployments, sandbox, vercel, cloud-driver, byoc, auth]
 timestamp: 2026-07-04T00:00:00Z
@@ -12,7 +12,7 @@ timestamp: 2026-07-04T00:00:00Z
 
 ## Status
 
-Approved. Implements roadmap Phase 3b per [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md). Supersedes the Railway Service version of this spec from [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). Builds on [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) (provider-ready image, in-container terminal, host credential bind-mounts, env-var auth).
+Implemented. Implements roadmap Phase 3b per [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md). Supersedes the Railway Service version of this spec from [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). Builds on [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) (provider-ready image, in-container terminal, host credential bind-mounts, env-var auth). Credentialed/UAT-gated ACs are maintainer-local; see the Build completion report in `docs/specs/2026-07-04-kata-environments-deployments-phase-3b-plan.md`.
 
 ## Goal
 
