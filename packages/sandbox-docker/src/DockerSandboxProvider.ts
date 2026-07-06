@@ -244,6 +244,16 @@ export const DockerSandboxProvider: SandboxProvider = {
             message: `copyInto: archive upload ${put.status}: ${put.body.slice(0, 200)}`,
           });
         }
+        // Ensure all extracted files and intermediate directories are
+        // katacode-owned — Docker creates parent dirs as root when directory
+        // entries are absent from the tar (see ustarWriter).
+        const chown = yield* DockerSandboxProvider.exec(handle, `chown -R 100:101 ${destPath}`);
+        if (chown.exitCode !== 0) {
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `copyInto: chown ${destPath} failed (exit ${chown.exitCode}): ${chown.stderr}`,
+          });
+        }
       }),
   } satisfies SandboxCopyIntoCapability,
 

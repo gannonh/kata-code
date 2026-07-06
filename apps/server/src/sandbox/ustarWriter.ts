@@ -44,22 +44,12 @@ export async function packUstarArchive(
   const { readFile } = await import("node:fs/promises");
   const chunks: Buffer[] = [];
 
-  // Collect all relative paths (files + pre-loaded contents) for directory entries.
-  const allPaths = [...files.map((f) => f.relativePath), ...contents.map((c) => c.relativePath)];
-
-  // Emit directory entries (sorted so parents precede children) with katacode
-  // uid/gid so the extracted tree is fully katacode-owned.
-  const dirSet = new Set<string>();
-  for (const relativePath of allPaths) {
-    const parts = relativePath.split("/");
-    for (let i = 1; i < parts.length; i++) {
-      dirSet.add(parts.slice(0, i).join("/"));
-    }
-  }
-  const dirs = [...dirSet].sort();
-  for (const dir of dirs) {
-    chunks.push(makeUstarDirectoryHeader(dir));
-  }
+  // Directory entries are NOT emitted: Docker's `PUT /containers/{id}/archive`
+  // calls `mkdir` for each directory entry and fails with "file exists" when
+  // the directory already exists (e.g. from a previous seed or baked into the
+  // image). Docker creates intermediate parent directories automatically when
+  // extracting file entries. Ownership of intermediate directories is handled
+  // by a post-extraction `chown -R` in the copyInto driver.
 
   // Pre-loaded contents first (sanitized configs), then disk-read files.
   for (const { relativePath, content } of contents) {
