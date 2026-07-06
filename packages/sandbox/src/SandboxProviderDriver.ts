@@ -122,6 +122,23 @@ export interface SandboxCopyIntoCapability {
 }
 
 /**
+ * Optional capability: reattach/restart a lapsed sandbox (Phase 3b).
+ *
+ * Cloud sandbox VMs can lapse when their lifetime expires or a snapshot is
+ * taken (which stops the VM). Resume reattaches to the named sandbox (or
+ * recreates it from a snapshot at the server layer's discretion) and restarts
+ * any in-sandbox processes the driver owns. Absent ⇒
+ * `describe().supportsResume === false`; the server layer fails loud with
+ * `not-running` rather than silently recreating.
+ */
+export interface SandboxResumeCapability {
+  resume(
+    handle: SandboxHandle,
+    req: { readonly config: unknown; readonly env?: ReadonlyArray<readonly [string, string]> },
+  ): Effect.Effect<SandboxHandle, SandboxProviderError>;
+}
+
+/**
  * `SandboxProvider` — the frozen driver SPI.
  *
  * Required (every driver implements): `kind`, `validate`, `provision`, `exec`,
@@ -159,6 +176,8 @@ export interface SandboxProvider {
   readonly renewTimeout?: SandboxRenewTimeoutCapability;
   /** Optional copy-into capability (Phase 2 seeding). Absent ⇒ `describe().supportsCopyInto === false`. */
   readonly copyInto?: SandboxCopyIntoCapability;
+  /** Optional resume capability (Phase 3b). Absent ⇒ `describe().supportsResume === false`. */
+  readonly resume?: SandboxResumeCapability;
 }
 
 /**

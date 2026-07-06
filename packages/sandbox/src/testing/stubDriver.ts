@@ -22,6 +22,7 @@ import {
   type SandboxProvisionRequest,
   type SandboxReachability,
   type SandboxProvider,
+  type SandboxResumeCapability,
   type SandboxSnapshotCapability,
   type SandboxRenewTimeoutCapability,
   SandboxProviderError,
@@ -42,6 +43,7 @@ export interface StubDriverOptions {
   readonly withSnapshot?: boolean;
   readonly withRenewTimeout?: boolean;
   readonly withCopyInto?: boolean;
+  readonly withResume?: boolean;
 }
 
 /**
@@ -68,12 +70,17 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
     ? { copyInto: () => Effect.void }
     : undefined;
 
+  const resume: SandboxResumeCapability | undefined = options.withResume
+    ? { resume: (handle) => Effect.succeed(handle) }
+    : undefined;
+
   const descriptor: SandboxProviderDescriptor = {
     kind,
     reachabilityKind: SandboxReachabilityKind.make("loopback"),
     supportsSnapshot: options.withSnapshot === true,
     supportsRenewTimeout: options.withRenewTimeout === true,
     supportsCopyInto: options.withCopyInto === true,
+    supportsResume: options.withResume === true,
   };
 
   return {
@@ -117,5 +124,6 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
     ...(snapshot !== undefined ? { snapshot } : {}),
     ...(renewTimeout !== undefined ? { renewTimeout } : {}),
     ...(copyInto !== undefined ? { copyInto } : {}),
+    ...(resume !== undefined ? { resume } : {}),
   };
 }
