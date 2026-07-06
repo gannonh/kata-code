@@ -207,34 +207,34 @@ Each entry should include:
 
 - **Status:** deferred
 - **Area:** sandbox, web, auth, cloud
-- **Source:** [Phase 3a deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) — [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md)
-- **Rationale:** Phase 3a ships the local Docker bind-mount + env-var auth paths only. The interactive in-sandbox login flow (PTY-driven OAuth URL + code relay, the AgentBox `_claude-login-worker` pattern) that captures a credential file back to a host-side encrypted store is part of the cloud credential-seeding work in Phase 3b. Without it, a cloud sandbox user with no stored credential and no env-var API key must run the provider login manually in the terminal and complete OAuth via the provider CLI's device-code flow.
-- **Revisit trigger:** Phase 3b spec implementation (the affordance is an AC-3b.9 acceptance criterion).
-- **Notes:** Pattern reference: `apps/cli/src/commands/_claude-login-worker.ts` and `packages/sandbox-docker/src/claude-credentials.ts` in the AgentBox checkout.
+- **Source:** [Phase 3a deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) — [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) (provider-auth model), [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md) (Phase 3b provider choice)
+- **Rationale:** Phase 3a ships the local Docker copy+sanitize + env-var auth paths only. The interactive in-sandbox login flow (PTY-driven OAuth URL + code relay, the AgentBox `_claude-login-worker` pattern) that captures a credential file back to a host-side encrypted store is part of the cloud credential-seeding work in Phase 3b. Without it, a cloud sandbox user with no stored credential and no env-var API key must run the provider login manually in the terminal and complete OAuth via the provider CLI's device-code flow.
+- **Revisit trigger:** Phase 3b spec implementation (the affordance is an AC-3b.11 acceptance criterion).
+- **Notes:** Pattern reference: `apps/cli/src/commands/_claude-login-worker.ts` and `packages/sandbox-docker/src/claude-credentials.ts` in the AgentBox checkout. Phase 3a's `credentialSeed.ts` infrastructure is the local analogue and shares the same copy+sanitize pattern.
 
-### Sandbox: volume-retained resume for Railway cloud sandboxes
+### Sandbox: volume-retained resume for Railway Service cloud sandboxes
 
-- **Status:** deferred
+- **Status:** closed (superseded)
 - **Area:** sandbox, railway, cloud
-- **Source:** [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) — [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md)
-- **Rationale:** Phase 3b ships ephemeral deploy-on-start / delete-on-dispose lifecycle. A Railway Volume mounted at `/home/katacode/.katacode` could retain session state across redeploys, enabling a Resume affordance so a disposed-but-volume-retained sandbox can be re-provisioned with its session state. Out of scope for the first cloud driver; the persistent-service process model and git-branch sync cover the primary workflow.
-- **Revisit trigger:** When session-persistence demand surfaces from users of the Railway cloud driver.
-- **Notes:** Related to the superseded Vercel lapse/resume UX (ADR 0005); Railway's persistent service makes the keepalive path unnecessary, but volume-retained resume remains a possible future affordance.
+- **Source:** [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) — [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) (superseded by [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md))
+- **Rationale:** The Railway Service (Docker image) driver was superseded by Vercel Sandbox as the first cloud sandbox driver per ADR 0007. Vercel Sandbox has persistent filesystem snapshots by default and an explicit snapshot/resume lifecycle, so the Railway Volume-retained resume concept is no longer applicable to the active Phase 3b plan.
+- **Revisit trigger:** If a Railway Service driver is implemented as a future service-deploy target.
+- **Notes:** ADR 0007's Vercel Sandbox model handles persistence through snapshot-backed filesystems and `Sandbox.getOrCreate` resume, not volume mounts.
 
 ### Sandbox: Railway Sandbox VM primitive as an alternative driver
 
 - **Status:** deferred
 - **Area:** sandbox, railway, cloud
-- **Source:** [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) — [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md)
-- **Rationale:** Railway also exposes a Sandbox VM primitive via the TS SDK (`@railwayapp/railway-ts-sdk`) with ephemeral lifecycle, checkpoints, forking, templates, SSH, and an exec API. A future driver could target this for snapshot-resume semantics closer to the superseded Vercel model. The Railway Service (Docker image) primitive is chosen first because it reuses the existing image as-is and requires no new snapshot/checkpoint semantics in the frozen SPI. The SDK is in Priority Boarding and may change.
-- **Revisit trigger:** When the Railway Service driver proves the SPI fit and a user need for ephemeral-VM snapshots surfaces.
+- **Source:** [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) — [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md)
+- **Rationale:** Railway also exposes a Sandbox VM primitive via the TS SDK (`@railwayapp/railway-ts-sdk`) with ephemeral lifecycle, checkpoints, forking, templates, SSH, and an exec API. A future driver could target this for snapshot-resume semantics. Vercel Sandbox was selected as the first cloud sandbox driver per ADR 0007; Railway Sandbox remains in the future-drivers list to revisit after Vercel validates the SPI shape or when Railway-native workflows become a near-term priority. The SDK is in Priority Boarding and may change.
+- **Revisit trigger:** After Vercel Sandbox validates the SPI shape, or when Railway Sandbox stabilizes.
 - **Notes:** Railway Sandboxes docs: https://docs.railway.com/sandboxes. The `use-railway` skill references the sandbox CLI in `references/sandbox.md`.
 
 ### Sandbox: publish official katacode image to GHCR
 
-- **Status:** deferred (Phase 3b prerequisite)
-- **Area:** sandbox, release, railway, cloud
-- **Source:** [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) — [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md)
-- **Rationale:** The Railway cloud driver pulls a pinned `ghcr.io/gannonh/kata-code:<tag>` image ref. This requires a publish step in the release pipeline (`release.yml` / `build:docker-image`) that does not exist today. It is a hard prerequisite for Phase 3b — the driver cannot pull a tag that does not exist. The image is the same `Dockerfile` used for local Docker, with provider CLIs baked in during Phase 3a.
-- **Revisit trigger:** Phase 3b implementation (AC-3b.11 is the acceptance criterion).
-- **Notes:** Closer to the future managed Kata Cloud product than to BYOC; the official image is the first step toward a managed registry.
+- **Status:** deferred
+- **Area:** sandbox, release, cloud
+- **Source:** [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) — [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md)
+- **Rationale:** The Vercel Sandbox driver provisions from a runtime, VCR image, or prepared snapshot — not from a published Docker image ref. The official GHCR image publish requirement from the Railway Service plan is no longer a Phase 3b prerequisite. A VCR image pipeline may still be added if measured cold-start or setup time justifies it. The image remains useful for local Docker sandboxes and future Railway Service/E2B/Hetzner drivers.
+- **Revisit trigger:** When a VCR production image pipeline is needed for Vercel cold-start optimization, or when a future driver requires a published image ref.
+- **Notes:** Closer to the future managed Kata Cloud product than to BYOC; the official image is the first step toward a managed registry. The `Dockerfile` with provider CLIs baked in during Phase 3a remains the local Docker provision unit.

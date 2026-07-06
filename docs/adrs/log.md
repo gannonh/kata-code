@@ -1,5 +1,9 @@
 # ADR log
 
+## 2026-07-06 (ADR 0006 — credential model implementation note)
+
+Updated [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) consequences to record that Phase 3a implementation pivoted the local-Docker credential model from bind-mounts to copy+sanitize (`credentialSeed.ts` + `ustarWriter.ts`) after bind-mounts leaked host-absolute paths into the container. The ADR's auth model (local credential access + cloud credential-file seeding + env-var alternative) is unchanged; only the local implementation detail evolved. See the [Phase 3a spec — Credential model deviation](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md#credential-model-deviation).
+
 ## 2026-07-05 (ADR 0007 — Vercel Sandbox first cloud sandbox driver)
 
 - Added [ADR 0007 — Vercel Sandbox as the first cloud sandbox driver](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md): supersedes [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) for the Phase 3b provider choice, keeps ADR 0006's provider-auth model, and selects Vercel Sandbox because its Firecracker microVM, persistent snapshot/resume, `sandbox.domain(port)`, `extendTimeout`, and command/file APIs better match Kata's task-sandbox shape than Railway Service. Railway Sandbox, Railway Service, E2B, Daytona, and Hetzner move to future provider evaluation.
