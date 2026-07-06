@@ -52,6 +52,7 @@ import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
 import { SettingsSection } from "./settingsLayout";
 
 const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
+const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
 /** Slugify a label into a sandbox instance id suffix (mirrors provider dialog). */
 function slugifyLabel(value: string): string {
@@ -236,6 +237,7 @@ export function SandboxDeploymentSettings() {
   const handleStart = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
+        const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
         const explicitRepositoryKey = selectedRepositoryKeyByInstance[instanceId];
         const project = explicitRepositoryKey ? resolveSelectedProject(instanceId) : undefined;
         if (hasCloudPublicConfig() && !isSignedIn) {
@@ -279,7 +281,7 @@ export function SandboxDeploymentSettings() {
               label: result.endpoint.label,
               host: result.endpoint.httpBaseUrl,
               pairingCode: result.pairingToken,
-              sandbox: { providerKind: "local" },
+              sandbox: { providerKind: (instance?.driver as string) ?? "local" },
             });
             savedForProjectPicker = true;
             setTestProgress((prev) => ({
@@ -323,6 +325,7 @@ export function SandboxDeploymentSettings() {
       }),
     [
       getToken,
+      instanceMap,
       isSignedIn,
       openAuthPrompt,
       refreshList,
@@ -372,6 +375,111 @@ export function SandboxDeploymentSettings() {
         }
       }),
     [activeSession, refreshList, withBusy],
+  );
+
+  const resolveConnectAuthToken = useCallback(async (): Promise<string | null> => {
+    if (hasCloudPublicConfig() && !isSignedIn) {
+      openAuthPrompt();
+      return null;
+    }
+    if (!hasCloudPublicConfig()) return null;
+    const token = await getToken(resolveRelayClerkTokenOptions());
+    if (!token) {
+      throw new Error("Sign in to Kata Code Connect before resuming a deployment session.");
+    }
+    return token;
+  }, [getToken, isSignedIn, openAuthPrompt]);
+
+  const handleResume = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "start", async () => {
+        try {
+          const connectAuthToken = await resolveConnectAuthToken();
+          if (connectAuthToken === null) return;
+          const result = await getPrimaryEnvironmentConnection().client.sandbox.resumeSession({
+            instanceId: instanceId as never,
+            connectAuthToken: connectAuthToken as never,
+          });
+          setActiveSession((prev) => ({
+            ...prev,
+            [instanceId]: {
+              environmentId: result.environmentId,
+              httpBaseUrl: result.endpoint.httpBaseUrl,
+            },
+          }));
+          try {
+            await addSavedEnvironment({
+              label: result.endpoint.label,
+              host: result.endpoint.httpBaseUrl,
+              pairingCode: result.pairingToken,
+              sandbox: {
+                providerKind:
+                  ((instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId]
+                    ?.driver as string) ?? "vercel",
+              },
+            });
+          } catch (error) {
+            toastManager.add({
+              type: "error",
+              title: "Resumed but was not re-added",
+              description: error instanceof Error ? error.message : "Unknown error.",
+            });
+          }
+          refreshManagedRelayEnvironments();
+          await refreshList();
+          toastManager.add({ type: "success", title: "Sandbox resumed" });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Resume failed",
+            description: error instanceof Error ? error.message : "Unknown error.",
+          });
+        }
+      }),
+    [instanceMap, refreshList, resolveConnectAuthToken, withBusy],
+  );
+
+  const handleRenew = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "start", async () => {
+        try {
+          await getPrimaryEnvironmentConnection().client.sandbox.renewSession({
+            instanceId: instanceId as never,
+          });
+          await refreshList();
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Extend failed",
+            description: error instanceof Error ? error.message : "Unknown error.",
+          });
+        }
+      }),
+    [refreshList, withBusy],
+  );
+
+  const handleSnapshot = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "start", async () => {
+        try {
+          const result = await getPrimaryEnvironmentConnection().client.sandbox.createSnapshot({
+            instanceId: instanceId as never,
+          });
+          toastManager.add({
+            type: "success",
+            title: "Snapshot created",
+            description: `Snapshot id: ${result.snapshotId}. The session is lapsed; Resume to continue.`,
+          });
+          await refreshList();
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Snapshot failed",
+            description: error instanceof Error ? error.message : "Unknown error.",
+          });
+        }
+      }),
+    [refreshList, withBusy],
   );
 
   const handleRemove = useCallback(
@@ -476,6 +584,7 @@ export function SandboxDeploymentSettings() {
                 available={available}
                 reason={reason}
                 session={session}
+                summary={summary}
                 progress={progress}
                 instanceBusy={instanceBusy}
                 isExpanded={isOpen}
@@ -494,6 +603,9 @@ export function SandboxDeploymentSettings() {
                 onTest={() => void handleTest(id)}
                 onStart={() => void handleStart(id)}
                 onDispose={() => void handleDispose(id)}
+                onResume={() => void handleResume(id)}
+                onRenew={() => void handleRenew(id)}
+                onSnapshot={() => void handleSnapshot(id)}
               />
             );
           })
@@ -512,6 +624,7 @@ interface DeploymentTargetCardProps {
   readonly available: boolean;
   readonly reason: string | undefined;
   readonly session: { environmentId: string; httpBaseUrl: string } | undefined;
+  readonly summary: SandboxInstanceSummary | undefined;
   readonly progress: string[];
   readonly instanceBusy: "test" | "start" | "dispose" | undefined;
   readonly isExpanded: boolean;
@@ -526,6 +639,9 @@ interface DeploymentTargetCardProps {
   readonly onTest: () => void;
   readonly onStart: () => void;
   readonly onDispose: () => void;
+  readonly onResume: () => void;
+  readonly onRenew: () => void;
+  readonly onSnapshot: () => void;
 }
 
 /**
@@ -542,6 +658,7 @@ function DeploymentTargetCard({
   available,
   reason,
   session,
+  summary,
   progress,
   instanceBusy,
   isExpanded,
@@ -556,7 +673,20 @@ function DeploymentTargetCard({
   onTest,
   onStart,
   onDispose,
+  onResume,
+  onRenew,
+  onSnapshot,
 }: DeploymentTargetCardProps) {
+  const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
+  const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
+  const supportsResume = summary?.kind === "available" ? summary.supportsResume : undefined;
+  const supportsSnapshot = summary?.kind === "available" ? summary.supportsSnapshot : undefined;
+  const supportsRenewTimeout =
+    summary?.kind === "available" ? summary.supportsRenewTimeout : undefined;
+  const sessionStatus = runningSession?.status;
+  const deadlineEpochMs = runningSession?.deadlineEpochMs;
+  const lapsedReason = runningSession?.lapsedReason;
+  const snapshotId = runningSession?.snapshotId;
   const updateDisplayName = (value: string) => {
     const trimmed = value.trim();
     const { displayName: _omit, ...rest } = instance;
@@ -628,7 +758,9 @@ function DeploymentTargetCard({
             <p className="text-xs text-muted-foreground/80">
               {session
                 ? `Session ready: ${session.httpBaseUrl} (env ${session.environmentId})`
-                : "Provision an isolated container reached over localhost."}
+                : isVercel
+                  ? "Provisions an ephemeral Vercel Sandbox microVM, reached over a public URL."
+                  : "Provision an isolated container reached over localhost."}
             </p>
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
@@ -672,17 +804,31 @@ function DeploymentTargetCard({
               </label>
             </div>
 
-            <DockerConfigFields
-              config={instance.config}
-              idPrefix={`sandbox-instance-${instanceId}`}
-              onChange={updateConfig}
-            />
+            {isVercel ? (
+              <VercelConfigFields
+                config={instance.config}
+                idPrefix={`sandbox-instance-${instanceId}`}
+                onChange={updateConfig}
+              />
+            ) : (
+              <DockerConfigFields
+                config={instance.config}
+                idPrefix={`sandbox-instance-${instanceId}`}
+                onChange={updateConfig}
+              />
+            )}
 
             <div className="border-t border-border/60 px-4 py-3 sm:px-5">
               <ProviderEnvironmentSection
                 environment={instance.environment ?? []}
                 onChange={updateEnvironment}
               />
+              {isVercel ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Add <code>VERCEL_TOKEN</code>, <code>VERCEL_TEAM_ID</code>, and
+                  <code>VERCEL_PROJECT_ID</code> as sensitive environment variables.
+                </p>
+              ) : null}
             </div>
 
             <div className="border-t border-border/60 px-4 py-3 sm:px-5">
@@ -696,6 +842,60 @@ function DeploymentTargetCard({
             </div>
 
             <div className="space-y-3 border-t border-border/60 px-4 py-3 sm:px-5">
+              {sessionStatus === "lapsed" ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary" className="text-amber-600">
+                    Lapsed
+                  </Badge>
+                  {lapsedReason ? (
+                    <span className="text-xs text-muted-foreground">{lapsedReason}</span>
+                  ) : null}
+                  {supportsResume ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={instanceBusy !== undefined}
+                      onClick={onResume}
+                    >
+                      {instanceBusy === "start" ? "Resuming…" : "Resume"}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              {session && sessionStatus !== "lapsed" ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {deadlineEpochMs !== undefined ? (
+                    <span className="text-xs text-muted-foreground">
+                      Expires in {formatRemaining(deadlineEpochMs)}
+                    </span>
+                  ) : null}
+                  {supportsRenewTimeout ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={instanceBusy !== undefined}
+                      onClick={onRenew}
+                    >
+                      Extend
+                    </Button>
+                  ) : null}
+                  {supportsSnapshot ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={instanceBusy !== undefined}
+                      onClick={onSnapshot}
+                    >
+                      Snapshot
+                    </Button>
+                  ) : null}
+                  {snapshotId ? (
+                    <span className="text-xs text-muted-foreground">
+                      Snapshot: <code>{snapshotId}</code>
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
@@ -770,6 +970,19 @@ function setConfigField(
     base[key] = value;
   }
   return Object.keys(base).length > 0 ? base : undefined;
+}
+
+/** Format the remaining lifetime from an epoch-ms deadline. */
+function formatRemaining(deadlineEpochMs: number): string {
+  const remaining = deadlineEpochMs - Date.now();
+  if (remaining <= 0) return "soon";
+  const minutes = Math.floor(remaining / 60_000);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m`;
+  }
+  return `${minutes}m`;
 }
 
 /** Parse a container port string into a validated integer in 1..65535, or null. */
@@ -869,39 +1082,192 @@ function DockerConfigFields({ config, idPrefix, onChange }: DockerConfigFieldsPr
   );
 }
 
+interface VercelConfigFieldsProps {
+  readonly config: unknown;
+  readonly idPrefix: string;
+  readonly onChange: (nextConfig: Record<string, unknown> | undefined) => void;
+}
+
+/** Inline editor for the Vercel Sandbox driver config (runtime, boot source,
+ *  snapshot id, timeout, port, vCPUs). Mirrors DockerConfigFields' layout. */
+function VercelConfigFields({ config, idPrefix, onChange }: VercelConfigFieldsProps) {
+  const sourceType = readConfigString(config, "sourceType") || "runtime";
+  const timeoutMs = readConfigNumber(config, "timeoutMs");
+  const timeoutMinutes = timeoutMs ? String(Math.round(Number(timeoutMs) / 60_000)) : "";
+  return (
+    <>
+      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+        <label htmlFor={`${idPrefix}-runtime`} className="block">
+          <span className="text-xs font-medium text-foreground">Runtime</span>
+          <DraftInput
+            id={`${idPrefix}-runtime`}
+            className="mt-1.5"
+            value={readConfigString(config, "runtime")}
+            onCommit={(next) => onChange(setConfigField(config, "runtime", next))}
+            placeholder="node24"
+            spellCheck={false}
+          />
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Vercel Sandbox runtime (e.g. node24).
+          </span>
+        </label>
+      </div>
+      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+        <label htmlFor={`${idPrefix}-sourceType`} className="block">
+          <span className="text-xs font-medium text-foreground">Boot source</span>
+          <select
+            id={`${idPrefix}-sourceType`}
+            className="mt-1.5 w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+            value={sourceType}
+            onChange={(e) => onChange(setConfigField(config, "sourceType", e.target.value))}
+          >
+            <option value="runtime">Runtime</option>
+            <option value="snapshot">Snapshot</option>
+          </select>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Boot from a Vercel runtime or a prepared snapshot.
+          </span>
+        </label>
+      </div>
+      {sourceType === "snapshot" ? (
+        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+          <label htmlFor={`${idPrefix}-snapshotId`} className="block">
+            <span className="text-xs font-medium text-foreground">Snapshot id</span>
+            <DraftInput
+              id={`${idPrefix}-snapshotId`}
+              className="mt-1.5"
+              value={readConfigString(config, "snapshotId")}
+              onCommit={(next) => onChange(setConfigField(config, "snapshotId", next))}
+              placeholder="snap_xxx"
+              spellCheck={false}
+            />
+          </label>
+        </div>
+      ) : null}
+      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+        <label htmlFor={`${idPrefix}-timeoutMs`} className="block">
+          <span className="text-xs font-medium text-foreground">Timeout (minutes)</span>
+          <DraftInput
+            id={`${idPrefix}-timeoutMs`}
+            className="mt-1.5"
+            value={timeoutMinutes}
+            onCommit={(next) => {
+              const trimmed = next.trim();
+              if (trimmed.length === 0) {
+                onChange(setConfigField(config, "timeoutMs", ""));
+                return;
+              }
+              const minutes = Number(trimmed);
+              if (!Number.isFinite(minutes)) return;
+              const base =
+                config !== null && typeof config === "object"
+                  ? { ...(config as Record<string, unknown>) }
+                  : {};
+              base.timeoutMs = Math.round(minutes * 60_000);
+              onChange(base);
+            }}
+            placeholder="45"
+            spellCheck={false}
+            inputMode="numeric"
+          />
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Sandbox auto-termination timeout. Hobby max is 45 minutes.
+          </span>
+        </label>
+      </div>
+      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+        <label htmlFor={`${idPrefix}-port`} className="block">
+          <span className="text-xs font-medium text-foreground">Sandbox port</span>
+          <DraftInput
+            id={`${idPrefix}-port`}
+            className="mt-1.5"
+            value={readConfigNumber(config, "port")}
+            onCommit={(next) => onChange(setContainerPort(config, "port", next))}
+            placeholder="13773"
+            spellCheck={false}
+            inputMode="numeric"
+          />
+        </label>
+      </div>
+      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+        <label htmlFor={`${idPrefix}-vcpus`} className="block">
+          <span className="text-xs font-medium text-foreground">vCPUs (optional)</span>
+          <DraftInput
+            id={`${idPrefix}-vcpus`}
+            className="mt-1.5"
+            value={readConfigNumber(config, "vcpus")}
+            onCommit={(next) => {
+              const trimmed = next.trim();
+              if (trimmed.length === 0) {
+                onChange(setConfigField(config, "vcpus", ""));
+                return;
+              }
+              const n = Number(trimmed);
+              if (!Number.isFinite(n)) return;
+              const base =
+                config !== null && typeof config === "object"
+                  ? { ...(config as Record<string, unknown>) }
+                  : {};
+              base.vcpus = n;
+              onChange(base);
+            }}
+            placeholder="1"
+            spellCheck={false}
+            inputMode="numeric"
+          />
+        </label>
+      </div>
+    </>
+  );
+}
+
 interface AddDeploymentTargetDialogBodyProps {
   existingIds: Set<string>;
   onAdd: (id: string, instance: SandboxProviderInstanceConfig) => void;
 }
 
 function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTargetDialogBodyProps) {
-  // Defaults match the driver's DEFAULT_DOCKER_CONFIG: the `katacode:local`
+  const [driver, setDriver] = useState<"docker" | "vercel">("docker");
+  // Defaults match the driver's DEFAULT_*_CONFIG. Docker: the `katacode:local`
   // image built by `pnpm run build:docker-image`, started with
-  // `katacode serve --port 13773`. Add -> Test connection provisions the real
-  // server out of the box (requires the image to be built; the e2e asserts it).
+  // `katacode serve --port 13773`. Vercel: the `node24` runtime with a 45m
+  // timeout. Add -> Test connection provisions the real server.
   const [label, setLabel] = useState("");
   const [image, setImage] = useState("katacode:local");
   const [command, setCommand] = useState("katacode serve --port 13773");
   const [port, setPort] = useState("13773");
   const [error, setError] = useState<string | null>(null);
 
+  const driverKind = driver === "vercel" ? VERCEL_KIND : DOCKER_KIND;
   const instanceId = useMemo(() => {
     const suffix = slugifyLabel(label) || "default";
-    return `${DOCKER_KIND}_${suffix}`;
-  }, [label]);
+    return `${driverKind as string}_${suffix}`;
+  }, [driverKind, label]);
 
   const handleSubmit = useCallback(() => {
     if (existingIds.has(instanceId)) {
       setError(`Instance id '${instanceId}' already exists. Choose a different label.`);
       return;
     }
-    const portNumber = parseContainerPort(port);
-    if (portNumber === null) {
-      setError("Container port must be an integer from 1 to 65535.");
-      return;
-    }
     try {
       const brandedId = SandboxProviderInstanceId.make(instanceId);
+      if (driver === "vercel") {
+        const instance: SandboxProviderInstanceConfig = {
+          driver: VERCEL_KIND,
+          enabled: true,
+          ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
+          config: { runtime: "node24", sourceType: "runtime", timeoutMs: 2_700_000, port: 13773 },
+        };
+        onAdd(brandedId as string, instance);
+        setLabel("");
+        setError(null);
+        return;
+      }
+      const portNumber = parseContainerPort(port);
+      if (portNumber === null) {
+        setError("Container port must be an integer from 1 to 65535.");
+        return;
+      }
       const instance: SandboxProviderInstanceConfig = {
         driver: DOCKER_KIND,
         enabled: true,
@@ -914,17 +1280,30 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid instance id.");
     }
-  }, [existingIds, instanceId, label, image, command, port, onAdd]);
+  }, [driver, existingIds, instanceId, label, image, command, port, onAdd]);
 
   return (
     <DialogPopup className="max-w-xl overflow-hidden">
       <DialogHeader>
-        <DialogTitle>Add container sandbox environment</DialogTitle>
+        <DialogTitle>Add sandbox environment</DialogTitle>
         <DialogDescription>
-          Provisions an isolated Docker container running a Kata server, reached over localhost.
+          Provisions an isolated sandbox running a Kata server. Choose a local container or a Vercel
+          Sandbox cloud microVM.
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-3 p-4">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="sandbox-driver">Driver</Label>
+          <select
+            id="sandbox-driver"
+            className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+            value={driver}
+            onChange={(e) => setDriver(e.target.value as "docker" | "vercel")}
+          >
+            <option value="docker">Local container (Docker)</option>
+            <option value="vercel">Vercel Sandbox</option>
+          </select>
+        </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor="sandbox-label">Label</Label>
           <Input
@@ -935,32 +1314,41 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
           />
           <p className="text-xs text-muted-foreground">Instance id: {instanceId}</p>
         </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-image">Image</Label>
-          <Input id="sandbox-image" value={image} onChange={(e) => setImage(e.target.value)} />
+        {driver === "docker" ? (
+          <>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sandbox-image">Image</Label>
+              <Input id="sandbox-image" value={image} onChange={(e) => setImage(e.target.value)} />
+              <p className="text-xs text-muted-foreground">
+                Must contain your start command's runtime. Use a <code>katacode</code> image once
+                published.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sandbox-command">Start command</Label>
+              <Input
+                id="sandbox-command"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Launches the Kata server inside the container. Defaults to
+                <code>katacode serve --port 13773</code> against the
+                <code>katacode:local</code> image (built by
+                <code>pnpm run build:docker-image</code>).
+              </p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sandbox-port">Container port</Label>
+              <Input id="sandbox-port" value={port} onChange={(e) => setPort(e.target.value)} />
+            </div>
+          </>
+        ) : (
           <p className="text-xs text-muted-foreground">
-            Must contain your start command's runtime. Use a <code>katacode</code> image once
-            published.
+            After creating, add <code>VERCEL_TOKEN</code>, <code>VERCEL_TEAM_ID</code>, and
+            <code>VERCEL_PROJECT_ID</code> as sensitive environment variables on the target.
           </p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-command">Start command</Label>
-          <Input
-            id="sandbox-command"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">
-            Launches the Kata server inside the container. Defaults to
-            <code>katacode serve --port 13773</code> against the
-            <code>katacode:local</code> image (built by
-            <code>pnpm run build:docker-image</code>).
-          </p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-port">Container port</Label>
-          <Input id="sandbox-port" value={port} onChange={(e) => setPort(e.target.value)} />
-        </div>
+        )}
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
       </div>
       <DialogFooter>
