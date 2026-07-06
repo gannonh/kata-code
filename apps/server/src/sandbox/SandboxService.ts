@@ -778,7 +778,7 @@ export const SandboxServiceLive = {
         // home before any provider probe re-checks. This runs unconditionally —
         // credentials are independent of the repo. The repo seed + install below
         // is conditional on a repository being specified.
-        const credentialSetup = yield* runCredentialSeed(inst.driver, handle).pipe(
+        yield* runCredentialSeed(inst.driver, handle).pipe(
           Effect.catch((error: SetupFailed | SandboxProviderError) =>
             disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
               Effect.andThen(

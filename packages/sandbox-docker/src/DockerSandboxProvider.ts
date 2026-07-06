@@ -20,7 +20,6 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { join as joinPath } from "node:path";
 
 import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/instance";
 import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachability";
@@ -44,9 +43,6 @@ import {
   DockerEngineError,
 } from "./dockerEngine.ts";
 import { DockerSandboxConfig, DEFAULT_DOCKER_CONFIG } from "./config.ts";
-
-/** In-container HOME baked into the katacode image (Dockerfile `ENV HOME`). */
-const CONTAINER_HOME = "/home/katacode";
 
 export const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
 

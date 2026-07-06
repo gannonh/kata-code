@@ -36,9 +36,6 @@ import { packUstarArchive, type UstarFile, type UstarContent } from "./ustarWrit
 /** The sandbox container's `/workspace` (pre-trusted in sanitized configs). */
 const WORKSPACE = "/workspace";
 
-/** The katacode container home (where credential dirs are seeded). */
-const CONTAINER_HOME = "/home/katacode";
-
 /** Error raised by the credential seed builder. */
 export class CredentialSeedError extends Data.TaggedError("CredentialSeedError")<{
   readonly message: string;
@@ -57,8 +54,6 @@ export interface CredentialSeedArchives {
 export interface CredentialSeedInput {
   /** Absolute host home directory (e.g. `/Users/foo`). */
   readonly hostHome: string;
-  /** Absolute in-container home directory (e.g. `/home/katacode`). Defaults to the katacode home. */
-  readonly containerHome?: string;
   /** Predicate to test whether a host path exists. Defaults to `fs.existsSync`. */
   readonly hostPathExists?: (path: string) => boolean;
 }

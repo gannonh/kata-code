@@ -12,7 +12,7 @@
  * are implied by file paths; symlinks are skipped for Phase 2 simplicity).
  *
  * No external tar dependency exists in the repo and Node ships no `tar`
- * module, so a minimal ustar writer is implemented here (~60 lines). Docker's
+ * module, so a minimal ustar writer is shared from `ustarWriter.ts`. Docker's
  * `PUT /containers/{id}/archive` accepts an uncompressed ustar tar.
  *
  * `.gitignore` support is a deliberately limited subset (documented inline): a
@@ -27,6 +27,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import * as Data from "effect/Data";
+
+import { packUstarArchive } from "./ustarWriter.ts";
 
 /** Default seed bounds: 256 MB total content, 50k files. Fail loud over either. */
 export const DEFAULT_SEED_MAX_BYTES = 256 * 1024 * 1024;
@@ -74,7 +76,16 @@ export async function buildRepoSeedArchive(
       message: `seed archive for ${repoRoot} contains no files (everything ignored or empty repo)`,
     });
   }
-  return await packUstar(selected);
+  return await packUstarArchive(selected).catch((cause) => {
+    if (cause instanceof SeedArchiveError) throw cause;
+    // The shared ustar writer throws plain Error for path-overflow / read
+    // failures; wrap them in SeedArchiveError so callers get the typed error.
+    throw new SeedArchiveError({
+      reason: "read-failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+      cause,
+    });
+  });
 }
 
 // ── File selection (bounded walk + .gitignore subset) ────────────────
@@ -242,112 +253,4 @@ function createGitignoreMatcher(patterns: ReadonlyArray<string>, _root: string):
       return ignored;
     },
   };
-}
-
-// ── Minimal ustar tar writer ──────────────────────────────────────────
-
-/**
- * Pack the selected files into a ustar tar archive. Each entry is a 512-byte
- * header + content padded to a 512-byte boundary. Directory entries are
- * emitted (with katacode uid/gid) for every directory containing a selected
- * file so Docker's archive extract creates katacode-owned directories —
- * without them, Docker creates intermediate directories as root and `git`
- * flags the root-owned `.git` directory as dubious ownership. The archive
- * ends with two 512-byte zero blocks. Docker accepts this for
- * `PUT /containers/{id}/archive`.
- */
-async function packUstar(files: ReadonlyArray<SelectedFile>): Promise<Uint8Array> {
-  const chunks: Buffer[] = [];
-
-  // Emit directory entries (sorted so parents precede children) with katacode
-  // uid/gid so the extracted tree is fully katacode-owned.
-  const dirSet = new Set<string>();
-  for (const file of files) {
-    const parts = file.relativePath.split("/");
-    // Every ancestor directory except the repo root itself ("").
-    for (let i = 1; i < parts.length; i++) {
-      dirSet.add(parts.slice(0, i).join("/"));
-    }
-  }
-  const dirs = [...dirSet].sort();
-  for (const dir of dirs) {
-    chunks.push(makeUstarDirectoryHeader(dir));
-  }
-
-  for (const file of files) {
-    let content: Buffer;
-    try {
-      content = await fs.readFile(file.absolutePath);
-    } catch (cause) {
-      throw new SeedArchiveError({
-        reason: "read-failed",
-        message: `failed to read file ${file.absolutePath}`,
-        cause,
-      });
-    }
-    chunks.push(makeUstarHeader(file.relativePath, content.length));
-    chunks.push(content);
-    const pad = (512 - (content.length % 512)) % 512;
-    if (pad > 0) chunks.push(Buffer.alloc(pad, 0));
-  }
-  chunks.push(Buffer.alloc(1024, 0)); // two zero-block terminator
-  return Buffer.concat(chunks);
-}
-
-/** Build a 512-byte ustar header for a regular file. */
-function makeUstarHeader(relativePath: string, size: number): Buffer {
-  const header = Buffer.alloc(512, 0);
-  // name (100) — ustar supports a 100-byte name + 155-byte prefix; for Phase 2
-  // repos, relative paths fit in 100 bytes. If a path is longer, fail loud.
-  const nameBuf = Buffer.from(relativePath, "utf8");
-  if (nameBuf.length > 100) {
-    throw new SeedArchiveError({
-      reason: "limit-exceeded",
-      message: `seed archive path too long for ustar (>100 bytes): ${relativePath}`,
-    });
-  }
-  nameBuf.copy(header, 0);
-  header.write("0000644\0", 100, "ascii"); // mode
-  // uid/gid: the local Docker sandbox image runs as the unprivileged
-  // `katacode` user (uid 100, gid 101 on alpine). Docker's archive extract
-  // honors the tar's uid/gid, so writing katacode's ids here makes the seeded
-  // files owned by katacode on extract — no root-owned tree, no `git` dubious-
-  // ownership failure, and no `chown` step needed. Cloud drivers (Phase 3b)
-  // seed via their own mechanism and do not use this archive.
-  header.write("0000144\0", 108, "ascii"); // uid 100 (katacode)
-  header.write("0000145\0", 116, "ascii"); // gid 101 (katacode)
-  header.write(`${size.toString(8).padStart(11, "0")}\0`, 124, "ascii"); // size
-  header.write("00000000000\0", 136, "ascii"); // mtime
-  header.write("        ", 148, "ascii"); // checksum placeholder (8 spaces)
-  header.write("0", 156, "ascii"); // typeflag: regular file
-  // linkname (100) left zero for regular files.
-  header.write("ustar\0", 257, "ascii"); // magic
-  header.write("00", 263, "ascii"); // version
-  // uname/gname (32 each) left zero.
-  // devmajor/devminor (8 each) left zero.
-  // prefix (155) left zero.
-
-  // Checksum: sum of all header bytes with the checksum field as 8 spaces.
-  let checksum = 0;
-  for (let i = 0; i < 512; i++) checksum += header[i] ?? 0;
-  header.write(checksum.toString(8).padStart(6, "0"), 148, "ascii");
-  header.write("\0 ", 154, "ascii"); // null + space terminator
-  return header;
-}
-
-/** Build a 512-byte ustar header for a directory entry. Same ownership as
- *  regular files (katacode uid/gid) so Docker's archive extract creates
- *  katacode-owned directories instead of root-owned ones. */
-function makeUstarDirectoryHeader(relativePath: string): Buffer {
-  const header = makeUstarHeader(relativePath + "/", 0);
-  header.write("5", 156, "ascii"); // typeflag: directory
-  header.write("0000755\0", 100, "ascii"); // mode (dir: rwxr-xr-x)
-  // Blank the checksum field (148-155) to spaces before recomputing, since
-  // `makeUstarHeader` wrote a checksum for the file-mode/typeflag values.
-  header.write("        ", 148, "ascii");
-  let checksum = 0;
-  for (let i = 0; i < 512; i++) checksum += header[i] ?? 0;
-  header.write(checksum.toString(8).padStart(6, "0"), 148, "ascii");
-  header.write("\0 ", 154, "ascii"); // null + space terminator
-  return header;
 }

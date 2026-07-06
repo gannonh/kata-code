@@ -333,14 +333,13 @@ function formatDesktopSshTarget(target: NonNullable<SavedEnvironmentRecord["desk
  *  - SSH: environments with `desktopSsh`
  *  - Sandbox: environments with `sandbox` marker (local Docker or cloud provider)
  *  - Remote Link: everything else (direct pairing / relay) */
-function resolveEnvironmentTypeLabel(record: SavedEnvironmentRecord): string | null {
+function resolveEnvironmentTypeLabel(record: SavedEnvironmentRecord): string {
   if (record.desktopSsh) return "SSH";
   if (record.sandbox) {
     return record.sandbox.providerKind === "local"
       ? "Sandbox (local)"
       : `Sandbox (${record.sandbox.providerKind})`;
   }
-  if (record.relayManaged) return "Remote Link";
   return "Remote Link";
 }
 
