@@ -201,3 +201,20 @@ export async function assertKatacodeImageBuilt(image = "katacode:local"): Promis
     req.end();
   });
 }
+
+/**
+ * Read Vercel Sandbox credentials from the environment. Unlike the Docker
+ * hard-fail helpers, Vercel credentialed checks are maintainer-local: callers
+ * SKIP when any of the trio is absent rather than failing the suite.
+ */
+export function readVercelCredentials(): {
+  readonly token: string;
+  readonly teamId: string;
+  readonly projectId: string;
+} | null {
+  const token = process.env.VERCEL_TOKEN;
+  const teamId = process.env.VERCEL_TEAM_ID;
+  const projectId = process.env.VERCEL_PROJECT_ID;
+  if (!token || !teamId || !projectId) return null;
+  return { token, teamId, projectId };
+}
