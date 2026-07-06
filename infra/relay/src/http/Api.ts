@@ -544,13 +544,15 @@ export const clientApi = HttpApiBuilder.group(
           // Deprovision the managed tunnel (e.g. Cloudflare tunnel teardown).
           // Non-fatal: if the tunnel is already gone or the provider is
           // unavailable, still revoke the link so the environment disappears
-          // from the Connect pool.
+          // from the Connect pool. Bounded by a timeout so stale Cloudflare
+          // resources can't hang the Worker past its wall-clock limit.
           yield* managedEndpointProvider
             .deprovision({
               userId,
               environmentId: params.environmentId,
             })
             .pipe(
+              Effect.timeout(Duration.seconds(5)),
               Effect.catchCause((cause) =>
                 Effect.logWarning("Managed endpoint deprovision failed during unlink", {
                   environmentId: params.environmentId,
