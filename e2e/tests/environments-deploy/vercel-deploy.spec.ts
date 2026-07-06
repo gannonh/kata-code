@@ -8,11 +8,11 @@ import { expect, test } from "../../src/harness/testFixtures.ts";
 
 /**
  * Vercel Sandbox deployment target — credentialed, maintainer-local. SKIP when
- * `VERCEL_TOKEN`/`VERCEL_TEAM_ID`/`VERCEL_PROJECT_ID` are absent (CI runs
+ * `E2E_VERCEL_TOKEN`/`E2E_VERCEL_TEAM_ID`/`E2E_VERCEL_PROJECT_ID` are absent (CI runs
  * uncredentialed; the Docker `container-deploy.spec.ts` covers AC-3b.13).
  *
  * Run locally with the trio exported:
- *   VERCEL_TOKEN=... VERCEL_TEAM_ID=... VERCEL_PROJECT_ID=... vp run e2e ...
+ *   E2E_VERCEL_TOKEN=... E2E_VERCEL_TEAM_ID=... E2E_VERCEL_PROJECT_ID=... vp run e2e ...
  */
 
 function deploymentTargetCard(page: Page, label: string): Locator {

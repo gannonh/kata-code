@@ -156,6 +156,10 @@ function ProviderAuthEmail(props: {
 export function ProviderEnvironmentSection(props: {
   readonly environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>;
   readonly onChange: (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => void;
+  /** Heading label; defaults to "Environment variables". */
+  readonly title?: string;
+  /** Explanatory copy rendered under the heading. */
+  readonly description?: string;
 }) {
   const focusedWithinRef = useRef(false);
   const latestEnvironmentRef = useRef(props.environment);
@@ -230,7 +234,14 @@ export function ProviderEnvironmentSection(props: {
       }}
     >
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium text-foreground">Environment variables</span>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-medium text-foreground">
+            {props.title ?? "Environment variables"}
+          </span>
+          {props.description ? (
+            <span className="text-[11px] text-muted-foreground">{props.description}</span>
+          ) : null}
+        </div>
         <Button
           type="button"
           size="sm"

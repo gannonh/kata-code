@@ -824,13 +824,13 @@ function DeploymentTargetCard({
               <ProviderEnvironmentSection
                 environment={instance.environment ?? []}
                 onChange={updateEnvironment}
+                title="Runtime environment variables"
+                description={
+                  isVercel
+                    ? "Apply to every session on this target. Add VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID here as sensitive variables."
+                    : "Apply to every session on this target (e.g. API keys the sandbox server needs at boot)."
+                }
               />
-              {isVercel ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Add <code>VERCEL_TOKEN</code>, <code>VERCEL_TEAM_ID</code>, and
-                  <code>VERCEL_PROJECT_ID</code> as sensitive environment variables.
-                </p>
-              ) : null}
             </div>
 
             <div className="border-t border-border/60 px-4 py-3 sm:px-5">

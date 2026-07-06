@@ -318,6 +318,8 @@ export function SavedEnvironmentEditor({
       <ProviderEnvironmentSection
         environment={savedEnvironment?.environment ?? []}
         onChange={updateEnvironment}
+        title="Repository environment variables"
+        description="Apply only when starting a session for this repository (merged on top of the target’s runtime variables)."
       />
     </div>
   );

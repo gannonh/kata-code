@@ -16,7 +16,9 @@ import { liveVercelSdk } from "./sdk.ts";
 import type { SandboxHandle, SandboxReachability } from "@kata-sh/code-sandbox/driver";
 
 const creds =
-  process.env.VERCEL_TOKEN && process.env.VERCEL_TEAM_ID && process.env.VERCEL_PROJECT_ID;
+  process.env.E2E_VERCEL_TOKEN &&
+  process.env.E2E_VERCEL_TEAM_ID &&
+  process.env.E2E_VERCEL_PROJECT_ID;
 
 /** Run an effect, returning `null` on failure (for the validate probe). */
 const runOrNull = <A, E>(eff: Effect.Effect<A, E>): Effect.Effect<A | null, never> =>
@@ -27,14 +29,16 @@ const runOrNull = <A, E>(eff: Effect.Effect<A, E>): Effect.Effect<A | null, neve
 
 /**
  * Credentialed Vercel Sandbox integration tests. Maintainer-local: skip when
- * the VERCEL_* trio is absent (CI runs uncredentialed). Run with:
- *   VERCEL_TOKEN=... VERCEL_TEAM_ID=... VERCEL_PROJECT_ID=... pnpm test
+ * the `E2E_VERCEL_*` trio is absent (CI runs uncredentialed). Namespaced
+ * separately from the production `VERCEL_*` trio so a `.env` can hold
+ * test-only credentials without colliding with real dev use. Run with:
+ *   E2E_VERCEL_TOKEN=... E2E_VERCEL_TEAM_ID=... E2E_VERCEL_PROJECT_ID=... pnpm test
  */
 describe.skipIf(!creds)("vercel driver (credentialed)", () => {
   const auth = {
-    token: process.env.VERCEL_TOKEN as string,
-    teamId: process.env.VERCEL_TEAM_ID as string,
-    projectId: process.env.VERCEL_PROJECT_ID as string,
+    token: process.env.E2E_VERCEL_TOKEN as string,
+    teamId: process.env.E2E_VERCEL_TEAM_ID as string,
+    projectId: process.env.E2E_VERCEL_PROJECT_ID as string,
   };
 
   vitIt.effect("validate fails invalid-config with a bad token (AC-3b.2)", () =>
