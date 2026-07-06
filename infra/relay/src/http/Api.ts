@@ -551,7 +551,7 @@ export const clientApi = HttpApiBuilder.group(
               environmentId: params.environmentId,
             })
             .pipe(
-              Effect.catch((cause) =>
+              Effect.catchCause((cause) =>
                 Effect.logWarning("Managed endpoint deprovision failed during unlink", {
                   environmentId: params.environmentId,
                   cause,
@@ -563,7 +563,7 @@ export const clientApi = HttpApiBuilder.group(
               userId,
               environmentId: params.environmentId,
             })
-            .pipe(Effect.catch(() => Effect.succeed(null)));
+            .pipe(Effect.catchCause(() => Effect.succeed(null)));
           if (link === null) {
             return { ok: false };
           }
@@ -572,7 +572,7 @@ export const clientApi = HttpApiBuilder.group(
               userId,
               environmentId: params.environmentId,
             })
-            .pipe(Effect.catch(() => Effect.succeed(false)));
+            .pipe(Effect.catchCause(() => Effect.succeed(false)));
           if (unlinked) {
             yield* credentials
               .revokeForEnvironmentPublicKey({
@@ -580,7 +580,7 @@ export const clientApi = HttpApiBuilder.group(
                 environmentPublicKey: link.environmentPublicKey,
               })
               .pipe(
-                Effect.catch((cause) =>
+                Effect.catchCause((cause) =>
                   Effect.logWarning("Could not revoke environment public key during unlink", {
                     environmentId: params.environmentId,
                     cause,
