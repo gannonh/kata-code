@@ -23,6 +23,7 @@ import {
   relayClientAuthLayer,
   relayDpopClientAuthLayer,
   relayCors,
+  appendRelayCorsHeaders,
   relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
   relayNotFoundRoute,
@@ -264,7 +265,12 @@ export default class Api extends Cloudflare.Worker<Api>()(
     ).pipe(
       HttpRouter.toHttpEffect,
       withoutCapturedParentSpan,
-      Effect.flatMap((httpEffect) => traceRelayHttpRequestWith(httpEffect, relayTraceLayer)),
+      Effect.flatMap((httpEffect) =>
+        traceRelayHttpRequestWith(
+          appendRelayCorsHeaders.pipe(Effect.andThen(httpEffect)),
+          relayTraceLayer,
+        ),
+      ),
     );
 
     return { fetch };
