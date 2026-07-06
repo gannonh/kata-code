@@ -123,6 +123,13 @@ const appendRelayTraceContextResponseHeader = Effect.gen(function* () {
   );
 }).pipe(Effect.ignore);
 
+// Add CORS headers to ALL responses (including errors) via a pre-response
+// handler. This ensures the browser can read error responses instead of
+// blocking them with a generic "Failed to fetch".
+export const appendRelayCorsHeaders = HttpEffect.appendPreResponseHandler((_request, response) =>
+  Effect.succeed(HttpServerResponse.setHeaders(response, relayCorsHeaders)),
+);
+
 export const relayCors = HttpRouter.middleware(
   Effect.fnUntraced(function* <E, R>(
     httpEffect: Effect.Effect<
@@ -551,22 +558,35 @@ export const clientApi = HttpApiBuilder.group(
                 }),
               ),
             );
-          const link = yield* links.getForUser({
-            userId,
-            environmentId: params.environmentId,
-          });
+          const link = yield* links
+            .getForUser({
+              userId,
+              environmentId: params.environmentId,
+            })
+            .pipe(Effect.catch(() => Effect.succeed(null)));
           if (link === null) {
             return { ok: false };
           }
-          const unlinked = yield* links.revokeForUser({
-            userId,
-            environmentId: params.environmentId,
-          });
+          const unlinked = yield* links
+            .revokeForUser({
+              userId,
+              environmentId: params.environmentId,
+            })
+            .pipe(Effect.catch(() => Effect.succeed(false)));
           if (unlinked) {
-            yield* credentials.revokeForEnvironmentPublicKey({
-              environmentId: link.environmentId,
-              environmentPublicKey: link.environmentPublicKey,
-            });
+            yield* credentials
+              .revokeForEnvironmentPublicKey({
+                environmentId: link.environmentId,
+                environmentPublicKey: link.environmentPublicKey,
+              })
+              .pipe(
+                Effect.catch((cause) =>
+                  Effect.logWarning("Could not revoke environment public key during unlink", {
+                    environmentId: params.environmentId,
+                    cause,
+                  }),
+                ),
+              );
           }
           return { ok: unlinked };
         }, mapRelayCommonApiErrors("not_authorized")),
