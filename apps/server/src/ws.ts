@@ -211,6 +211,9 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.sandboxTestConnection, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxStartSession, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxDisposeSession, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxRenewSession, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxResumeSession, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxCreateSnapshot, AuthOrchestrationOperateScope],
 ]);
 
 function toAuthAccessStreamEvent(
@@ -1109,6 +1112,36 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             SandboxServiceLive.disposeSession(instanceId).pipe(
               Effect.map((disposed) => ({ instanceId, disposed })),
             ),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxRenewSession]: ({ instanceId, extendMs }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxRenewSession,
+            SandboxServiceLive.renewSession(
+              instanceId,
+              extendMs !== undefined ? { extendMs } : {},
+            ).pipe(Effect.map((result) => result)),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxResumeSession]: ({ instanceId, connectAuthToken }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxResumeSession,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) =>
+                SandboxServiceLive.resumeSession(instanceId, settings, {
+                  connectAuthToken,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxCreateSnapshot]: ({ instanceId, name }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxCreateSnapshot,
+            SandboxServiceLive.createSessionSnapshot(
+              instanceId,
+              name !== undefined ? { name } : {},
+            ).pipe(Effect.map((result) => result)),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>

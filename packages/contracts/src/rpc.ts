@@ -79,10 +79,16 @@ import {
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
+  SandboxCreateSnapshotInput,
+  SandboxCreateSnapshotResult,
   SandboxDisposeSessionInput,
   SandboxDisposeSessionResult,
   SandboxListInstancesInput,
   SandboxListInstancesResult,
+  SandboxRenewSessionInput,
+  SandboxRenewSessionResult,
+  SandboxResumeSessionInput,
+  SandboxResumeSessionResult,
   SandboxRpcError,
   SandboxStartSessionInput,
   SandboxStartSessionResult,
@@ -247,6 +253,9 @@ export const WS_METHODS = {
   sandboxTestConnection: "sandbox.testConnection",
   sandboxStartSession: "sandbox.startSession",
   sandboxDisposeSession: "sandbox.disposeSession",
+  sandboxRenewSession: "sandbox.renewSession",
+  sandboxResumeSession: "sandbox.resumeSession",
+  sandboxCreateSnapshot: "sandbox.createSnapshot",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -321,6 +330,24 @@ export const WsSandboxStartSessionRpc = Rpc.make(WS_METHODS.sandboxStartSession,
 export const WsSandboxDisposeSessionRpc = Rpc.make(WS_METHODS.sandboxDisposeSession, {
   payload: SandboxDisposeSessionInput,
   success: SandboxDisposeSessionResult,
+  error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+});
+
+export const WsSandboxRenewSessionRpc = Rpc.make(WS_METHODS.sandboxRenewSession, {
+  payload: SandboxRenewSessionInput,
+  success: SandboxRenewSessionResult,
+  error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+export const WsSandboxResumeSessionRpc = Rpc.make(WS_METHODS.sandboxResumeSession, {
+  payload: SandboxResumeSessionInput,
+  success: SandboxResumeSessionResult,
+  error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+export const WsSandboxCreateSnapshotRpc = Rpc.make(WS_METHODS.sandboxCreateSnapshot, {
+  payload: SandboxCreateSnapshotInput,
+  success: SandboxCreateSnapshotResult,
   error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
 });
 
@@ -732,6 +759,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxTestConnectionRpc,
   WsSandboxStartSessionRpc,
   WsSandboxDisposeSessionRpc,
+  WsSandboxRenewSessionRpc,
+  WsSandboxResumeSessionRpc,
+  WsSandboxCreateSnapshotRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,

@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - CLI integration exercises Node HTTP and filesystem boundaries.
+// @effect-diagnostics anyUnknownInErrorContext:off - generic test helpers intentionally accept unconstrained R/E channels for capture plumbing.
 import * as NodeHttp from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

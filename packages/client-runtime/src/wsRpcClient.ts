@@ -188,6 +188,9 @@ export interface WsRpcClient {
     ) => Promise<void>;
     readonly startSession: RpcUnaryMethod<typeof WS_METHODS.sandboxStartSession>;
     readonly disposeSession: RpcUnaryMethod<typeof WS_METHODS.sandboxDisposeSession>;
+    readonly renewSession: RpcUnaryMethod<typeof WS_METHODS.sandboxRenewSession>;
+    readonly resumeSession: RpcUnaryMethod<typeof WS_METHODS.sandboxResumeSession>;
+    readonly createSnapshot: RpcUnaryMethod<typeof WS_METHODS.sandboxCreateSnapshot>;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -435,6 +438,12 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.sandboxStartSession](input)),
       disposeSession: (input) =>
         transport.request((client) => client[WS_METHODS.sandboxDisposeSession](input)),
+      renewSession: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxRenewSession](input)),
+      resumeSession: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxResumeSession](input)),
+      createSnapshot: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxCreateSnapshot](input)),
     },
     orchestration: {
       dispatchCommand: (input) =>

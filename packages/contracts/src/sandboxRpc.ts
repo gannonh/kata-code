@@ -24,6 +24,14 @@ export const SandboxRunningSession = Schema.Struct({
   /** The in-sandbox Kata server's environment id. */
   environmentId: TrimmedNonEmptyString,
   endpoint: AdvertisedEndpoint,
+  /** Session lifecycle status (Phase 3b). `lapsed` indicates the sandbox VM stopped or snapshotted; Resume reattaches. */
+  status: Schema.optional(Schema.Literals(["running", "lapsed"])),
+  /** Host-side deadline (epoch ms) the keepalive scheduler maintains. */
+  deadlineEpochMs: Schema.optional(Schema.Number),
+  /** Snapshot id captured for this session (Phase 3b). */
+  snapshotId: Schema.optional(TrimmedNonEmptyString),
+  /** Why a session lapsed (e.g. `timeout-cap`, `snapshotted`). */
+  lapsedReason: Schema.optional(Schema.String),
 });
 export type SandboxRunningSession = typeof SandboxRunningSession.Type;
 
@@ -37,6 +45,8 @@ export const SandboxInstanceSummary = Schema.Union([
     reachabilityKind: Schema.Literals(["loopback", "public", "private-network"]),
     supportsSnapshot: Schema.Boolean,
     supportsRenewTimeout: Schema.Boolean,
+    /** Phase 3b: driver can resume a lapsed sandbox (`resume`). */
+    supportsResume: Schema.optional(Schema.Boolean),
     runningSession: Schema.optional(SandboxRunningSession),
   }),
   Schema.Struct({
@@ -122,6 +132,47 @@ export const SandboxDisposeSessionResult = Schema.Struct({
   disposed: Schema.Boolean,
 });
 export type SandboxDisposeSessionResult = typeof SandboxDisposeSessionResult.Type;
+
+/** Renew a running sandbox session's lifetime (Phase 3b). */
+export const SandboxRenewSessionInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  /** Extension in ms; defaults to the target's configured `timeoutMs`. */
+  extendMs: Schema.optional(Schema.Number),
+});
+export type SandboxRenewSessionInput = typeof SandboxRenewSessionInput.Type;
+export const SandboxRenewSessionResult = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  deadlineEpochMs: Schema.Number,
+});
+export type SandboxRenewSessionResult = typeof SandboxRenewSessionResult.Type;
+
+/** Resume a lapsed sandbox session (Phase 3b). Same input shape as start (minus repository). */
+export const SandboxResumeSessionInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  /** Relay Clerk JWT from the desktop/web session; falls back to the CLI token when omitted. */
+  connectAuthToken: Schema.optional(TrimmedNonEmptyString),
+});
+export type SandboxResumeSessionInput = typeof SandboxResumeSessionInput.Type;
+/** Resume returns the same shape as start (the deploying client re-binds the environment). */
+export const SandboxResumeSessionResult = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  environmentId: TrimmedNonEmptyString,
+  pairingToken: TrimmedNonEmptyString,
+  endpoint: AdvertisedEndpoint,
+});
+export type SandboxResumeSessionResult = typeof SandboxResumeSessionResult.Type;
+
+/** Create a snapshot from a running sandbox session (Phase 3b). */
+export const SandboxCreateSnapshotInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  name: Schema.optional(TrimmedNonEmptyString),
+});
+export type SandboxCreateSnapshotInput = typeof SandboxCreateSnapshotInput.Type;
+export const SandboxCreateSnapshotResult = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  snapshotId: TrimmedNonEmptyString,
+});
+export type SandboxCreateSnapshotResult = typeof SandboxCreateSnapshotResult.Type;
 
 export class SandboxRpcError extends Schema.TaggedErrorClass<SandboxRpcError>()("SandboxRpcError", {
   reason: Schema.Literals([
