@@ -92,7 +92,7 @@ async function addContainerDeploymentTarget(page: Page, label: string): Promise<
   // them so the test does not depend on default resolution under load).
   await dialog.getByLabel("Image").fill("katacode:local");
   await dialog.getByLabel("Start command").fill("katacode serve --port 13773");
-  await dialog.getByRole("button", { name: "Add target" }).click();
+  await dialog.getByRole("button", { name: "Add sandbox environment" }).click();
   await expect(dialog).toBeHidden();
 
   const card = deploymentTargetCard(page, label);
