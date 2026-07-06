@@ -51,3 +51,41 @@ describe("credentialSeed opencode spec", () => {
       }),
   );
 });
+
+describe("buildCredentialSeedArchives stored credentials", () => {
+  vitIt.effect("stored credential lands in the archive; host file wins on collision", () =>
+    Effect.gen(function* () {
+      const tmpHome = yield* Effect.promise(() =>
+        fs.promises.mkdtemp(path.join(os.tmpdir(), "kata-seed-")),
+      );
+      const codexDir = path.join(tmpHome, ".codex");
+      yield* Effect.promise(() => fs.promises.mkdir(codexDir, { recursive: true }));
+      // Host-collected codex auth (wins over the stored credential).
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(path.join(codexDir, "auth.json"), '{"host":true}', { mode: 0o600 }),
+      );
+      const archives = yield* buildCredentialSeedArchives({
+        hostHome: tmpHome,
+        storedCredentials: [
+          {
+            relativePath: ".codex/auth.json",
+            content: Buffer.from('{"stored":true}'),
+            mode: 0o600,
+          },
+          {
+            relativePath: "custom-provider/auth.json",
+            content: Buffer.from('{"custom":"tok"}'),
+            mode: 0o600,
+          },
+        ],
+      });
+      yield* Effect.promise(() => fs.promises.rm(tmpHome, { recursive: true, force: true }));
+      const tarText = Buffer.from(archives.credentials as Uint8Array).toString("latin1");
+      // Host file wins on collision — stored codex is NOT present.
+      expect(tarText).toContain('{"host":true}');
+      expect(tarText).not.toContain('{"stored":true}');
+      // Non-colliding stored credential IS present.
+      expect(tarText).toContain('{"custom":"tok"}');
+    }),
+  );
+});

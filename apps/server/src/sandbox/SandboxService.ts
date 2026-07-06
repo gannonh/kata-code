@@ -46,6 +46,7 @@ import type { SandboxProviderInstanceConfig } from "@kata-sh/code-contracts/sand
 import { RepositoryCanonicalKey } from "@kata-sh/code-contracts";
 import {
   type SandboxInstanceSummary,
+  type SandboxProviderLoginEvent,
   type SandboxRenewSessionInput,
   type SandboxResumeSessionInput,
   type SandboxStartSessionInput,
@@ -84,6 +85,13 @@ import { EnvironmentConfigLoadError, loadEnvironmentConfig } from "./environment
 import { buildCredentialSeedArchives } from "./credentialSeed.ts";
 import { type SetupProcessRecord, SetupFailed, runSandboxSetup } from "./sandboxSetupRunner.ts";
 import { type KeepaliveHandle, startSessionKeepalive } from "./sessionKeepalive.ts";
+import { loadStoredSandboxCredentials } from "./storedSandboxCredentials.ts";
+import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
+import {
+  startProviderLogin,
+  submitProviderLoginCode,
+  PROVIDER_LOGIN_SPECS,
+} from "./providerLogin.ts";
 
 /** A sandbox `AdvertisedEndpointProvider` (manual kind; container-sourced). */
 const SANDBOX_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
@@ -207,11 +215,19 @@ function mapSetupFailed(e: SetupFailed): SandboxRpcError {
 function runCredentialSeed(
   driver: SandboxProvider,
   handle: SandboxHandle,
-): Effect.Effect<void, SetupFailed | SandboxProviderError> {
+): Effect.Effect<void, SetupFailed | SandboxProviderError, ServerSecretStore> {
   return Effect.gen(function* () {
     const copyIntoCap = driver.copyInto;
     if (!copyIntoCap) return; // driver without copyInto — cloud drivers seed via their own mechanism
-    const archives = yield* buildCredentialSeedArchives({ hostHome: os.homedir() }).pipe(
+    // Load stored credentials (captured via the Sign-in flow) and merge them
+    // into the credentials archive. Host-collected files win on collision.
+    const storedCredentials = yield* loadStoredSandboxCredentials().pipe(
+      Effect.catch(() => Effect.succeed([] as never)),
+    );
+    const archives = yield* buildCredentialSeedArchives({
+      hostHome: os.homedir(),
+      ...(storedCredentials.length > 0 ? { storedCredentials } : {}),
+    }).pipe(
       Effect.mapError(
         (e) =>
           new SetupFailed({
@@ -1389,6 +1405,32 @@ export const SandboxServiceLive = {
       }
       return { instanceId, snapshotId: result.snapshotId };
     }),
+
+  providerLoginStart: (input: {
+    readonly instanceId: SandboxProviderInstanceId;
+    readonly providerId: string;
+  }): Stream.Stream<SandboxProviderLoginEvent, SandboxRpcError> => {
+    const record = runningSessions.get(input.instanceId as string);
+    if (record === undefined) {
+      return Stream.fail(
+        new SandboxRpcError({
+          reason: "not-running",
+          message: "No sandbox session to sign in to.",
+        }),
+      );
+    }
+    return startProviderLogin({
+      driver: record.driver,
+      handle: record.handle,
+      providerId: input.providerId,
+    });
+  },
+
+  providerLoginSubmitCode: (input: {
+    readonly instanceId: SandboxProviderInstanceId;
+    readonly loginSessionId: string;
+    readonly code: string;
+  }) => submitProviderLoginCode(input),
 };
 
 export type SandboxService = typeof SandboxServiceLive;

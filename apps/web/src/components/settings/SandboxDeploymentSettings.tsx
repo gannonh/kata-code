@@ -48,6 +48,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt";
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
+import { ProviderSignInDialog } from "./ProviderSignInDialog";
 import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
 import { SettingsSection } from "./settingsLayout";
 
@@ -687,6 +688,7 @@ function DeploymentTargetCard({
   const deadlineEpochMs = runningSession?.deadlineEpochMs;
   const lapsedReason = runningSession?.lapsedReason;
   const snapshotId = runningSession?.snapshotId;
+  const [signInFor, setSignInFor] = useState<string | null>(null);
   const updateDisplayName = (value: string) => {
     const trimmed = value.trim();
     const { displayName: _omit, ...rest } = instance;
@@ -894,6 +896,16 @@ function DeploymentTargetCard({
                       Snapshot: <code>{snapshotId}</code>
                     </span>
                   ) : null}
+                  {isVercel ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={instanceBusy !== undefined}
+                      onClick={() => setSignInFor("claude")}
+                    >
+                      Sign in Claude
+                    </Button>
+                  ) : null}
                 </div>
               ) : null}
               <div className="flex flex-wrap items-center gap-2">
@@ -933,6 +945,13 @@ function DeploymentTargetCard({
           </div>
         </CollapsibleContent>
       </Collapsible>
+      {signInFor !== null ? (
+        <ProviderSignInDialog
+          instanceId={instanceId}
+          providerId={signInFor}
+          onClose={() => setSignInFor(null)}
+        />
+      ) : null}
     </div>
   );
 }

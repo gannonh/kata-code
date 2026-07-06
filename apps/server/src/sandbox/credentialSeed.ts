@@ -58,6 +58,14 @@ export interface CredentialSeedInput {
   readonly hostHome: string;
   /** Predicate to test whether a host path exists. Defaults to `fs.existsSync`. */
   readonly hostPathExists?: (path: string) => boolean;
+  /** Stored credentials (e.g. captured via the Sign-in flow) appended to the
+   *  credentials archive UNLESS a host-collected file already produces the
+   *  same `relativePath` (host wins; the host file is the live copy). */
+  readonly storedCredentials?: ReadonlyArray<{
+    readonly relativePath: string;
+    readonly content: Uint8Array;
+    readonly mode?: number;
+  }>;
 }
 
 // ── Provider declarations ─────────────────────────────────────────────
@@ -469,6 +477,27 @@ export function buildCredentialSeedArchives(
               }),
           })
         : null;
+
+    // Append stored credentials (e.g. captured via the Sign-in flow) to the
+    // credentials archive UNLESS a host-collected file already produces the
+    // same relative path. Host wins because it is the live copy the user
+    // refreshes; a stored credential is the fallback for providers without a
+    // host credential dir (typical for cloud-only sandboxes).
+    if (input.storedCredentials !== undefined) {
+      const existingPaths = new Set<string>([
+        ...credentialFiles.map((f) => f.relativePath),
+        ...credentialContents.map((c) => c.relativePath),
+      ]);
+      for (const stored of input.storedCredentials) {
+        if (existingPaths.has(stored.relativePath)) continue;
+        credentialContents.push({
+          relativePath: stored.relativePath,
+          content: Buffer.from(stored.content),
+          ...(stored.mode !== undefined ? { mode: stored.mode } : {}),
+        });
+        existingPaths.add(stored.relativePath);
+      }
+    }
 
     const credentialsArchive =
       credentialFiles.length > 0 || credentialContents.length > 0

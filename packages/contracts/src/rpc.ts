@@ -85,6 +85,10 @@ import {
   SandboxDisposeSessionResult,
   SandboxListInstancesInput,
   SandboxListInstancesResult,
+  SandboxProviderLoginEvent,
+  SandboxProviderLoginStartInput,
+  SandboxProviderLoginSubmitCodeInput,
+  SandboxProviderLoginSubmitCodeResult,
   SandboxRenewSessionInput,
   SandboxRenewSessionResult,
   SandboxResumeSessionInput,
@@ -256,6 +260,8 @@ export const WS_METHODS = {
   sandboxRenewSession: "sandbox.renewSession",
   sandboxResumeSession: "sandbox.resumeSession",
   sandboxCreateSnapshot: "sandbox.createSnapshot",
+  sandboxProviderLoginStart: "sandbox.providerLoginStart",
+  sandboxProviderLoginSubmitCode: "sandbox.providerLoginSubmitCode",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -350,6 +356,22 @@ export const WsSandboxCreateSnapshotRpc = Rpc.make(WS_METHODS.sandboxCreateSnaps
   success: SandboxCreateSnapshotResult,
   error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
 });
+
+export const WsSandboxProviderLoginStartRpc = Rpc.make(WS_METHODS.sandboxProviderLoginStart, {
+  payload: SandboxProviderLoginStartInput,
+  success: SandboxProviderLoginEvent,
+  error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+export const WsSandboxProviderLoginSubmitCodeRpc = Rpc.make(
+  WS_METHODS.sandboxProviderLoginSubmitCode,
+  {
+    payload: SandboxProviderLoginSubmitCodeInput,
+    success: SandboxProviderLoginSubmitCodeResult,
+    error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+  },
+);
 
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
   payload: Schema.Struct({}),
@@ -762,6 +784,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxRenewSessionRpc,
   WsSandboxResumeSessionRpc,
   WsSandboxCreateSnapshotRpc,
+  WsSandboxProviderLoginStartRpc,
+  WsSandboxProviderLoginSubmitCodeRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,

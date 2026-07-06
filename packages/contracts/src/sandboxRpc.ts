@@ -174,6 +174,59 @@ export const SandboxCreateSnapshotResult = Schema.Struct({
 });
 export type SandboxCreateSnapshotResult = typeof SandboxCreateSnapshotResult.Type;
 
+/** Start an interactive provider sign-in flow inside a sandbox (Phase 3b). Streaming. */
+export const SandboxProviderLoginStartInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  providerId: TrimmedNonEmptyString,
+});
+export type SandboxProviderLoginStartInput = typeof SandboxProviderLoginStartInput.Type;
+
+/** A sign-in flow event, tagged by `stage`. */
+export const SandboxProviderLoginEvent = Schema.Union([
+  Schema.Struct({
+    stage: Schema.Literal("started"),
+    loginSessionId: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("url"),
+    loginSessionId: TrimmedNonEmptyString,
+    url: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("awaiting-code"),
+    loginSessionId: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("invalid-code"),
+    loginSessionId: TrimmedNonEmptyString,
+    detail: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("success"),
+    loginSessionId: TrimmedNonEmptyString,
+    credentialStored: Schema.Boolean,
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("error"),
+    loginSessionId: TrimmedNonEmptyString,
+    message: Schema.String,
+  }),
+]);
+export type SandboxProviderLoginEvent = typeof SandboxProviderLoginEvent.Type;
+
+/** Submit an OAuth code into a running sign-in flow (Phase 3b). */
+export const SandboxProviderLoginSubmitCodeInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  loginSessionId: TrimmedNonEmptyString,
+  code: TrimmedNonEmptyString,
+});
+export type SandboxProviderLoginSubmitCodeInput = typeof SandboxProviderLoginSubmitCodeInput.Type;
+export const SandboxProviderLoginSubmitCodeResult = Schema.Struct({
+  loginSessionId: TrimmedNonEmptyString,
+  accepted: Schema.Boolean,
+});
+export type SandboxProviderLoginSubmitCodeResult = typeof SandboxProviderLoginSubmitCodeResult.Type;
+
 export class SandboxRpcError extends Schema.TaggedErrorClass<SandboxRpcError>()("SandboxRpcError", {
   reason: Schema.Literals([
     "unknown-driver",

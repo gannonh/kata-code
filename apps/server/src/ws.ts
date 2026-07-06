@@ -214,6 +214,8 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.sandboxRenewSession, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxResumeSession, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxCreateSnapshot, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxProviderLoginStart, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxProviderLoginSubmitCode, AuthOrchestrationOperateScope],
 ]);
 
 function toAuthAccessStreamEvent(
@@ -1142,6 +1144,18 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
               instanceId,
               name !== undefined ? { name } : {},
             ).pipe(Effect.map((result) => result)),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxProviderLoginStart]: ({ instanceId, providerId }) =>
+          observeRpcStream(
+            WS_METHODS.sandboxProviderLoginStart,
+            SandboxServiceLive.providerLoginStart({ instanceId, providerId }),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxProviderLoginSubmitCode]: ({ instanceId, loginSessionId, code }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxProviderLoginSubmitCode,
+            SandboxServiceLive.providerLoginSubmitCode({ instanceId, loginSessionId, code }),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>

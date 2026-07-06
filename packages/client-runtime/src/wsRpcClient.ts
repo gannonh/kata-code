@@ -6,6 +6,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type RelayClientInstallProgressEvent,
   type RelayClientStatus,
+  type SandboxProviderLoginEvent,
   type SandboxTestConnectionProgressEvent,
   type ServerSettingsPatch,
   type VcsStatusResult,
@@ -191,6 +192,13 @@ export interface WsRpcClient {
     readonly renewSession: RpcUnaryMethod<typeof WS_METHODS.sandboxRenewSession>;
     readonly resumeSession: RpcUnaryMethod<typeof WS_METHODS.sandboxResumeSession>;
     readonly createSnapshot: RpcUnaryMethod<typeof WS_METHODS.sandboxCreateSnapshot>;
+    readonly providerLoginStart: (
+      input: RpcInput<typeof WS_METHODS.sandboxProviderLoginStart>,
+      onEvent: (event: SandboxProviderLoginEvent) => void,
+    ) => Promise<void>;
+    readonly providerLoginSubmitCode: RpcUnaryMethod<
+      typeof WS_METHODS.sandboxProviderLoginSubmitCode
+    >;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -444,6 +452,14 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.sandboxResumeSession](input)),
       createSnapshot: (input) =>
         transport.request((client) => client[WS_METHODS.sandboxCreateSnapshot](input)),
+      providerLoginStart: async (input, onEvent) => {
+        await transport.requestStream(
+          (client) => client[WS_METHODS.sandboxProviderLoginStart](input),
+          (event) => onEvent(event),
+        );
+      },
+      providerLoginSubmitCode: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxProviderLoginSubmitCode](input)),
     },
     orchestration: {
       dispatchCommand: (input) =>
