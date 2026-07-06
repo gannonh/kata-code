@@ -237,6 +237,22 @@ function endpointOrigin(httpBaseUrl: string) {
 const MANAGED_ENDPOINT_PROVIDER_KIND =
   "cloudflare_tunnel" satisfies RelayManagedEndpointProviderKind;
 
+/** Recursively extract a human-readable message from a nested error cause. */
+function formatNestedErrorCause(cause: unknown, depth = 0): string {
+  if (depth > 5 || cause === null || cause === undefined) return "";
+  if (cause instanceof Error) {
+    const msg = cause.message.trim();
+    if (!msg) return "";
+    return `: ${msg}${formatNestedErrorCause((cause as { cause?: unknown }).cause, depth + 1)}`;
+  }
+  if (typeof cause === "object" && "message" in cause) {
+    const msg = String((cause as { message: unknown }).message).trim();
+    if (!msg) return "";
+    return `: ${msg}${formatNestedErrorCause((cause as { cause?: unknown }).cause, depth + 1)}`;
+  }
+  return "";
+}
+
 function ensureLinkedEnvironmentMatches(input: {
   readonly expectedEnvironmentId: string;
   readonly expectedProviderKind: RelayManagedEndpointProviderKind;
@@ -569,7 +585,7 @@ export function unlinkManagedRelayEnvironment(input: {
         Effect.catch((cause: ManagedRelayClientError) =>
           Effect.fail(
             new CloudEnvironmentLinkError({
-              message: `Could not unlink the environment from Kata Code Connect: ${cause.message}`,
+              message: `Could not unlink the environment from Kata Code Connect: ${cause.message}${formatNestedErrorCause(cause.cause)}`,
               cause,
             }),
           ),
