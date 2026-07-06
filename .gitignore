@@ -74,3 +74,4 @@ kata-code.code-workspace
 session*.jsonl
 SCRATCH.md
 session*.jsonl
+.pi-subagents/artifacts
