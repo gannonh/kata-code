@@ -42,6 +42,7 @@
     "@kata-sh/code-sandbox": "workspace:*",
     "@kata-sh/code-sandbox-contracts": "workspace:*",
     "@kata-sh/code-sandbox-docker": "workspace:*",
+    "@kata-sh/code-sandbox-vercel": "workspace:*",
     "@kata-sh/code-shared": "workspace:*",
     "@kata-sh/code-tailscale": "workspace:*",
     "@kata-sh/code-web": "workspace:*",

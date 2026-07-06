@@ -42,6 +42,7 @@ import type {
   ProviderInstanceEnvironment,
   ProviderInstanceEnvironmentVariable,
 } from "@kata-sh/code-contracts";
+import type { SandboxProviderInstanceConfig } from "@kata-sh/code-contracts/sandboxProviderInstance";
 import { RepositoryCanonicalKey } from "@kata-sh/code-contracts";
 import {
   type SandboxInstanceSummary,
@@ -61,10 +62,17 @@ import {
   dockerConfigDecoder,
 } from "@kata-sh/code-sandbox-docker";
 import {
+  VercelSandboxProvider,
+  VERCEL_KIND,
+  vercelConfigDecoder,
+  mergeVercelAuthIntoConfig,
+} from "@kata-sh/code-sandbox-vercel";
+import {
   type RelayEnvironmentConfigRequest,
   RelayEnvironmentLinkChallengeResponse,
   RelayEnvironmentLinkResponse,
   type RelayLinkProofRequest,
+  type RelayManagedEndpointProviderKind,
   RelayOkResponse,
 } from "@kata-sh/code-contracts/relay";
 import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
@@ -82,6 +90,14 @@ const SANDBOX_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
   isAddon: false,
 };
 
+/** A Vercel Sandbox `AdvertisedEndpointProvider` (manual kind; public-sourced). */
+const VERCEL_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
+  id: "sandbox-vercel",
+  label: "Vercel Sandbox",
+  kind: "manual",
+  isAddon: false,
+};
+
 /** Deadline for Connect/container HTTP fetches (bootstrap token exchange,
  * well-known descriptor, relay link/config calls). A hung network call aborts
  * and surfaces as a `connect-failed` SandboxRpcError instead of pending. */
@@ -90,7 +106,23 @@ const SANDBOX_FETCH_TIMEOUT_MS = 30_000;
 function buildRegistry(): SandboxProviderRegistry {
   const registry = new SandboxProviderRegistry();
   registry.register(DockerSandboxProvider, dockerConfigDecoder);
+  registry.register(VercelSandboxProvider, vercelConfigDecoder);
   return registry;
+}
+
+/**
+ * Merge materialized Vercel auth secrets into the driver config payload before
+ * the registry decodes it. The trio flows through the generic `sandbox-env-*`
+ * secret path (`materializeSandboxProviderEnvironmentSecrets`); the driver's
+ * `validate` receives only the decoded config, so the server injects `auth`
+ * here. Non-vercel envelopes pass through unchanged.
+ */
+function resolveInstanceEnvelope(
+  config: SandboxProviderInstanceConfig,
+): SandboxProviderInstanceConfig {
+  return (config.driver as string) === (VERCEL_KIND as string)
+    ? mergeVercelAuthIntoConfig(config)
+    : config;
 }
 
 type Materialized = ReturnType<SandboxProviderRegistry["materializeOne"]>;
@@ -305,6 +337,19 @@ function resolveProvisionImage(config: unknown): string {
   return DEFAULT_DOCKER_CONFIG.image;
 }
 
+/** Resolve the in-sandbox port the Kata server listens on from the decoded
+ *  driver config (duck-typed `port` number). Falls back to 13773. */
+function resolveSandboxPort(config: unknown): number {
+  if (
+    config !== null &&
+    typeof config === "object" &&
+    typeof (config as { port?: unknown }).port === "number"
+  ) {
+    return (config as { port: number }).port;
+  }
+  return 13773;
+}
+
 async function readResponseBody(response: Response): Promise<string> {
   const text = await response.text();
   if (!text) return `${response.status} ${response.statusText}`;
@@ -439,6 +484,10 @@ function registerSandboxWithConnect(input: {
   readonly httpBaseUrl: string;
   readonly bootstrapToken: string;
   readonly connectAuthToken: SandboxStartSessionInput["connectAuthToken"];
+  /** Relay endpoint provider kind: `cloudflare_tunnel` for loopback, `manual` for public. */
+  readonly endpointProviderKind: RelayManagedEndpointProviderKind;
+  /** Origin the relay reaches the sandbox at (loopback: 127.0.0.1 + port; public: hostname + 443). */
+  readonly origin: { readonly localHttpHost: string; readonly localHttpPort: number };
 }): Effect.Effect<
   {
     readonly descriptor: ExecutionEnvironmentDescriptor;
@@ -467,9 +516,8 @@ function registerSandboxWithConnect(input: {
     const endpoint = {
       httpBaseUrl: input.httpBaseUrl,
       wsBaseUrl: input.httpBaseUrl.replace(/^http/u, "ws"),
-      providerKind: "cloudflare_tunnel" as const,
+      providerKind: input.endpointProviderKind,
     };
-    const url = new URL(input.httpBaseUrl);
     const challenge = yield* postJson(
       RelayEnvironmentLinkChallengeResponse,
       `${relayUrl}/v1/client/environment-link-challenges`,
@@ -485,8 +533,8 @@ function registerSandboxWithConnect(input: {
       relayIssuer: relayUrl,
       endpoint,
       origin: {
-        localHttpHost: "127.0.0.1",
-        localHttpPort: Number(url.port || (url.protocol === "https:" ? 443 : 80)),
+        localHttpHost: input.origin.localHttpHost,
+        localHttpPort: input.origin.localHttpPort,
       },
     };
     const proof = yield* postJson(
@@ -607,9 +655,14 @@ export const SandboxServiceLive = {
   listInstances: (settings: ServerSettings) =>
     Effect.gen(function* () {
       const registry = buildRegistry();
-      const materialized = registry.materialize(
-        settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap,
-      );
+      const rawMap = settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
+      const resolvedMap: SandboxProviderInstanceConfigMap = Object.fromEntries(
+        Object.entries(rawMap).map(([id, cfg]) => [
+          id,
+          resolveInstanceEnvelope(cfg as SandboxProviderInstanceConfig),
+        ]),
+      ) as SandboxProviderInstanceConfigMap;
+      const materialized = registry.materialize(resolvedMap);
       return yield* Effect.forEach(materialized, toSummary, { concurrency: "unbounded" });
     }),
 
@@ -626,7 +679,7 @@ export const SandboxServiceLive = {
             message: "instance not found",
           });
         }
-        const inst = registry.materializeOne(instanceId, config);
+        const inst = registry.materializeOne(instanceId, resolveInstanceEnvelope(config));
         if (inst.kind !== "available") {
           return yield* registryError(inst.reason, inst.message);
         }
@@ -737,7 +790,7 @@ export const SandboxServiceLive = {
             message: "instance not found",
           });
         }
-        const inst = registry.materializeOne(instanceId, config);
+        const inst = registry.materializeOne(instanceId, resolveInstanceEnvelope(config));
         if (inst.kind !== "available") {
           return yield* registryError(inst.reason, inst.message);
         }
@@ -810,6 +863,27 @@ export const SandboxServiceLive = {
             ),
           );
 
+          // Docker-in-sandbox is unsupported for non-docker drivers (spec
+          // decision 10): a `.kata/environment.json` requesting a Dockerfile
+          // build requires a Docker daemon the Vercel runtime does not have.
+          // Fail loud and tear down the just-provisioned sandbox rather than
+          // attempting a build that will hang or error opaquely inside the VM.
+          if (
+            loaded.resolved.build?.dockerfile !== undefined &&
+            (inst.driver.kind as string) !== "docker"
+          ) {
+            return yield* disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new SandboxRpcError({
+                    reason: "invalid-config",
+                    message: `.kata/environment.json requests a Dockerfile build, which the "${inst.driver.kind as string}" sandbox driver does not support. Use a local Docker deployment target for this repository.`,
+                  }),
+                ),
+              ),
+            );
+          }
+
           const setup = yield* runSandboxSetup({
             driver: inst.driver,
             handle,
@@ -833,7 +907,8 @@ export const SandboxServiceLive = {
           setupProcesses = setup.processes;
         }
 
-        const reach = yield* inst.driver.reachability(handle, 13773).pipe(
+        const sandboxPort = resolveSandboxPort(inst.config);
+        const reach = yield* inst.driver.reachability(handle, sandboxPort).pipe(
           Effect.mapError(mapDriverError),
           Effect.catch((error: SandboxRpcError) =>
             disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
@@ -841,12 +916,16 @@ export const SandboxServiceLive = {
             ),
           ),
         );
+        const isVercel = (inst.driver.kind as string) === (VERCEL_KIND as string);
+        const endpointProvider = isVercel ? VERCEL_ENDPOINT_PROVIDER : SANDBOX_ENDPOINT_PROVIDER;
         const endpoint: AdvertisedEndpoint = createAdvertisedEndpoint({
           id: `sandbox-${instanceId as string}`,
-          label: config.displayName ?? `Container ${instanceId as string}`,
-          provider: SANDBOX_ENDPOINT_PROVIDER,
+          label:
+            config.displayName ??
+            (isVercel ? `Vercel ${instanceId as string}` : `Container ${instanceId as string}`),
+          provider: endpointProvider,
           httpBaseUrl: reach.httpBaseUrl,
-          reachability: "loopback",
+          reachability: reach.reachabilityKind,
           source: "server",
         });
         // Connect auto-registration (AC-1.11): authenticate to the freshly booted
@@ -856,11 +935,28 @@ export const SandboxServiceLive = {
         // and endpoint bound to the deployed container rather than the parent
         // desktop server. A missing user/CLI Connect token or relay failure fails
         // the RPC and tears down the just-created container.
-        const loopbackHttpBaseUrl = reach.httpBaseUrl.replace("localhost", "127.0.0.1");
+        //
+        // Loopback sandboxes reach the relay via 127.0.0.1 + the published port and
+        // register a `cloudflare_tunnel` managed endpoint. Public sandboxes (Vercel)
+        // expose the server via `sandbox.domain(port)`; the relay reaches them at
+        // the public host on 443 and registers a `manual` endpoint.
+        const isLoopback = reach.reachabilityKind === "loopback";
+        const connectBaseUrl = isLoopback
+          ? reach.httpBaseUrl.replace("localhost", "127.0.0.1")
+          : reach.httpBaseUrl;
+        const connectUrl = new URL(connectBaseUrl);
+        const connectOrigin = isLoopback
+          ? { localHttpHost: "127.0.0.1", localHttpPort: Number(connectUrl.port || 80) }
+          : { localHttpHost: connectUrl.hostname, localHttpPort: Number(connectUrl.port || 443) };
+        const endpointProviderKind = (
+          isLoopback ? "cloudflare_tunnel" : "manual"
+        ) as RelayManagedEndpointProviderKind;
         const { descriptor, adminAccessToken, relay } = yield* registerSandboxWithConnect({
-          httpBaseUrl: loopbackHttpBaseUrl,
+          httpBaseUrl: connectBaseUrl,
           bootstrapToken,
           connectAuthToken: options?.connectAuthToken,
+          endpointProviderKind,
+          origin: connectOrigin,
         }).pipe(
           Effect.catch((error: SandboxRpcError) =>
             disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
@@ -878,7 +974,7 @@ export const SandboxServiceLive = {
         // The desktop bootstrap token was consumed by registration above, so
         // issue a dedicated pairing credential for the deploying client.
         const pairingToken = yield* issueSandboxPairingCredential({
-          httpBaseUrl: loopbackHttpBaseUrl,
+          httpBaseUrl: connectBaseUrl,
           adminAccessToken,
         }).pipe(
           Effect.catch((error: SandboxRpcError) =>
@@ -899,7 +995,7 @@ export const SandboxServiceLive = {
         // boot may have fired before credentials were in place; this refresh
         // corrects the provider status (e.g. Codex flips from error to ready).
         yield* refreshSandboxProviders({
-          httpBaseUrl: loopbackHttpBaseUrl,
+          httpBaseUrl: connectBaseUrl,
           adminAccessToken,
         }).pipe(
           Effect.catchTag("SandboxRpcError", (error: SandboxRpcError) =>

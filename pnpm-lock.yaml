@@ -440,6 +440,9 @@ importers:
       '@kata-sh/code-sandbox-docker':
         specifier: workspace:*
         version: link:../../packages/sandbox-docker
+      '@kata-sh/code-sandbox-vercel':
+        specifier: workspace:*
+        version: link:../../packages/sandbox-vercel
       '@kata-sh/code-shared':
         specifier: workspace:*
         version: link:../../packages/shared

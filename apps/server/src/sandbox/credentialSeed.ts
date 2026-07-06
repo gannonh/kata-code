@@ -168,6 +168,19 @@ const PI_EXCLUDES: ReadonlyArray<ExcludePattern> = [
   { name: ".DS_Store" },
 ];
 
+// OpenCode reads auth from XDG data home (`~/.local/share/opencode/auth.json`),
+// not `~/.config/opencode/auth.json` as the Phase 3b spec states. The seed
+// targets the data-home path; the spec discrepancy is recorded in the build log.
+const OPENCODE_EXCLUDES: ReadonlyArray<ExcludePattern> = [
+  { name: "log" },
+  { name: "cache" },
+  { name: "storage" },
+  { name: "snapshot" },
+  { name: "tui" },
+  { name: "node_modules" },
+  { name: ".DS_Store" },
+];
+
 // ── Config sanitizers ─────────────────────────────────────────────────
 
 /** Roots that are guaranteed absent in a Linux container (host-only paths). */
@@ -369,6 +382,13 @@ const PROVIDER_SPECS: ReadonlyArray<ProviderSpec> = [
     excludes: PI_EXCLUDES,
     configFileName: "settings.json",
     sanitizeConfig: sanitizePiSettings,
+  },
+  {
+    name: "opencode",
+    hostDir: ".local/share/opencode",
+    containerRelative: ".local/share/opencode",
+    authFiles: ["auth.json"],
+    excludes: OPENCODE_EXCLUDES,
   },
 ];
 
