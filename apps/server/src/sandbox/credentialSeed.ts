@@ -202,7 +202,14 @@ function isHostOnlyPath(value: unknown, hostHome: string): boolean {
 function sanitizeCodexConfig(raw: string, hostHome: string): string | null {
   const lines = raw.split(/\r?\n/);
   let changed = false;
-  let skipTable: string | null = null;
+  // When non-null, we are inside an mcp_servers.* table whose command line
+  // has not been seen yet. Lines are buffered here and only committed once
+  // we know whether the command is a host-only path.
+  let pendingMcpTable: string | null = null;
+  let mcpTableBuffer: string[] = [];
+  // When non-null, we are dropping all lines (including subtables) of the
+  // named MCP server until a table header outside that server is reached.
+  let droppedMcpServer: string | null = null;
   const result: string[] = [];
 
   for (const line of lines) {
@@ -212,25 +219,49 @@ function sanitizeCodexConfig(raw: string, hostHome: string): string | null {
     const tableMatch = /^\[(.+)\]$/.exec(trimmed);
     if (tableMatch) {
       const table = tableMatch[1] ?? "";
-      // Drop MCP server tables whose command is a host-only path — we need to
-      // look ahead, so mark the table and decide when we see the command line.
-      skipTable = table.startsWith("mcp_servers.") ? table : null;
-      result.push(line);
+      // If we are dropping an MCP server and this is a subtable of it
+      // (e.g. [mcp_servers.foo.env]), keep dropping — don't push the header.
+      if (droppedMcpServer !== null && table.startsWith(droppedMcpServer + ".")) {
+        continue;
+      }
+      // Commit any pending MCP table buffer before starting a new table.
+      if (pendingMcpTable !== null) {
+        result.push(...mcpTableBuffer);
+        mcpTableBuffer = [];
+        pendingMcpTable = null;
+      }
+      // Any other table header ends the drop.
+      droppedMcpServer = null;
+      // Start buffering a new mcp_servers.* table so we can drop it entirely
+      // if the command line turns out to be a host-only path.
+      if (table.startsWith("mcp_servers.")) {
+        pendingMcpTable = table;
+        mcpTableBuffer = [line];
+      } else {
+        result.push(line);
+      }
       continue;
     }
 
-    // Inside an mcp_servers.* table: check the command line.
-    if (skipTable !== null) {
+    // If we are dropping an MCP server table, skip all its remaining lines.
+    if (droppedMcpServer !== null) {
+      continue;
+    }
+
+    // Inside an mcp_servers.* table: buffer lines until we see the command.
+    if (pendingMcpTable !== null) {
+      mcpTableBuffer.push(line);
       const cmdMatch = /^command\s*=\s*"(.+)"$/.exec(trimmed);
       if (cmdMatch && isHostOnlyPath(cmdMatch[1], hostHome)) {
-        // Drop this MCP server table entirely (the header + its lines).
-        // Remove the table header we already pushed.
-        const lastHeader = result.lastIndexOf(`[${skipTable}]`);
-        if (lastHeader >= 0) result.splice(lastHeader, 1);
+        // Command is a host-only path — drop the entire table (header + all
+        // buffered lines) and skip subtables until a table outside this
+        // server is reached.
         changed = true;
-        skipTable = null; // consumed
-        continue;
+        droppedMcpServer = pendingMcpTable;
+        mcpTableBuffer = [];
+        pendingMcpTable = null;
       }
+      continue;
     }
 
     // model_catalog_json = "/host/path" → strip the line
@@ -252,6 +283,12 @@ function sanitizeCodexConfig(raw: string, hostHome: string): string | null {
     }
 
     result.push(line);
+  }
+
+  // Flush any pending MCP table buffer (the last table in the file may be an
+  // mcp_servers.* table that was not dropped).
+  if (pendingMcpTable !== null) {
+    result.push(...mcpTableBuffer);
   }
 
   // Pre-trust /workspace so codex doesn't prompt "trust this folder?" in the box.
@@ -460,31 +497,35 @@ function extractClaudeKeychainCredentials(): Effect.Effect<string | null, Creden
     const { execFile } = yield* Effect.promise(() => import("node:child_process").then((m) => m));
     const { promisify } = yield* Effect.promise(() => import("node:util").then((m) => m));
     const execFileAsync = promisify(execFile);
-    try {
-      const { stdout } = yield* Effect.promise(() =>
-        execFileAsync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"]),
-      );
-      const trimmed = stdout.trim();
-      if (trimmed.length === 0) return null;
-      // Validate it's a JSON object with a claudeAiOauth refresh token.
-      const parsed = parseKeychainBlob(trimmed);
-      if (parsed === null) {
-        return null;
-      }
-      // Write to a temp file so the ustar writer can read it as a UstarFile.
-      const { writeFile, mkdtemp } = yield* Effect.promise(() =>
-        import("node:fs/promises").then((m) => m),
-      );
-      const { join } = yield* Effect.promise(() => import("node:path").then((m) => m));
-      const { tmpdir } = yield* Effect.promise(() => import("node:os").then((m) => m));
-      const dir = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "kata-claude-cred-")));
-      const filePath = join(dir, ".credentials.json");
-      yield* Effect.promise(() => writeFile(filePath, trimmed, { mode: 0o600 }));
-      return filePath;
-    } catch {
-      // Keychain access denied or entry absent — fall back to API key.
+    // Keychain entry absent, access denied, or `security` non-zero exit —
+    // log and return null so Claude falls back to ANTHROPIC_API_KEY.
+    const keychainResult = yield* Effect.tryPromise(() =>
+      execFileAsync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"]),
+    ).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning(
+          `[credentialSeed] Claude Keychain extraction skipped: ${cause instanceof Error ? cause.message : String(cause)}`,
+        ).pipe(Effect.as(null)),
+      ),
+    );
+    if (keychainResult === null) return null;
+    const trimmed = keychainResult.stdout.trim();
+    if (trimmed.length === 0) return null;
+    // Validate it's a JSON object with a claudeAiOauth refresh token.
+    const parsed = parseKeychainBlob(trimmed);
+    if (parsed === null) {
       return null;
     }
+    // Write to a temp file so the ustar writer can read it as a UstarFile.
+    const { writeFile, mkdtemp } = yield* Effect.promise(() =>
+      import("node:fs/promises").then((m) => m),
+    );
+    const { join } = yield* Effect.promise(() => import("node:path").then((m) => m));
+    const { tmpdir } = yield* Effect.promise(() => import("node:os").then((m) => m));
+    const dir = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "kata-claude-cred-")));
+    const filePath = join(dir, ".credentials.json");
+    yield* Effect.promise(() => writeFile(filePath, trimmed, { mode: 0o600 }));
+    return filePath;
   });
 }
 
