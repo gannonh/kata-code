@@ -15,7 +15,7 @@
 import {
   defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
-  type ProviderDriverKind,
+  ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderModel,
@@ -128,30 +128,39 @@ function resolveInstanceDisplayName(
  * first, synthesized defaults after) so callers that want "default first"
  * should sort with `sortProviderInstanceEntries` below.
  */
+/** Driver kinds hidden from the UI behind a feature flag. Existing instances
+ *  in settings are filtered out of the instance entries so they don't appear
+ *  in the Composer or Settings panels. */
+export const HIDDEN_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
+  ProviderDriverKind.make("grok"),
+]);
+
 export function deriveProviderInstanceEntries(
   providers: ReadonlyArray<ServerProvider>,
 ): ReadonlyArray<ProviderInstanceEntry> {
-  return providers.map((snapshot) => {
-    const instanceId = snapshot.instanceId;
-    const driverKind = snapshot.driver;
-    const defaultId = defaultInstanceIdForDriver(driverKind);
-    const isDefault = instanceId === defaultId;
-    const displayName = resolveInstanceDisplayName(snapshot, instanceId, driverKind, isDefault);
-    return {
-      instanceId,
-      driverKind,
-      displayName,
-      accentColor: normalizeProviderAccentColor(snapshot.accentColor),
-      continuationGroupKey: snapshot.continuation?.groupKey,
-      enabled: snapshot.enabled,
-      installed: snapshot.installed,
-      status: snapshot.status,
-      isDefault,
-      isAvailable: snapshot.availability !== "unavailable",
-      snapshot,
-      models: snapshot.models,
-    } satisfies ProviderInstanceEntry;
-  });
+  return providers
+    .filter((snapshot) => !HIDDEN_DRIVER_KINDS.has(snapshot.driver))
+    .map((snapshot) => {
+      const instanceId = snapshot.instanceId;
+      const driverKind = snapshot.driver;
+      const defaultId = defaultInstanceIdForDriver(driverKind);
+      const isDefault = instanceId === defaultId;
+      const displayName = resolveInstanceDisplayName(snapshot, instanceId, driverKind, isDefault);
+      return {
+        instanceId,
+        driverKind,
+        displayName,
+        accentColor: normalizeProviderAccentColor(snapshot.accentColor),
+        continuationGroupKey: snapshot.continuation?.groupKey,
+        enabled: snapshot.enabled,
+        installed: snapshot.installed,
+        status: snapshot.status,
+        isDefault,
+        isAvailable: snapshot.availability !== "unavailable",
+        snapshot,
+        models: snapshot.models,
+      } satisfies ProviderInstanceEntry;
+    });
 }
 
 /**

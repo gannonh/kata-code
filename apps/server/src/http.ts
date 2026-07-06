@@ -39,9 +39,11 @@ import {
   failEnvironmentInternal,
 } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+const PROVIDERS_REFRESH_PATH = "/api/providers/refresh";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
 export const browserApiCorsLayer = Layer.unwrap(
@@ -156,6 +158,31 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           HttpServerResponse.text("Trace export failed.", { status: 502 }),
         ),
       );
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+/** POST /api/providers/refresh — re-probe all providers and return the
+ *  refreshed snapshots. Used by the sandbox orchestrator after seeding
+ *  credentials via copyInto so the sandbox server re-probes with auth in
+ *  place (the initial boot probe may have fired before credentials were
+ *  seeded). Authenticated with `AuthOrchestrationOperateScope` (held by the
+ *  sandbox admin access token from Connect registration). */
+export const providersRefreshRouteLayer = HttpRouter.add(
+  "POST",
+  PROVIDERS_REFRESH_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const providerRegistry = yield* ProviderRegistry;
+    const providers = yield* providerRegistry
+      .refresh()
+      .pipe(Effect.map((snapshot) => ({ providers: snapshot })));
+    return HttpServerResponse.jsonUnsafe(providers);
   }).pipe(
     Effect.catchTags({
       EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,

@@ -22,6 +22,9 @@ export interface SavedEnvironmentRecord {
   readonly lastConnectedAt: string | null;
   readonly desktopSsh?: PersistedSavedEnvironmentRecord["desktopSsh"];
   readonly relayManaged?: PersistedSavedEnvironmentRecord["relayManaged"];
+  /** Marker for sandbox (local Docker or cloud provider) environments.
+   *  Absent on remote-link and SSH environments. */
+  readonly sandbox?: PersistedSavedEnvironmentRecord["sandbox"];
 }
 
 export const SavedEnvironmentCredential = Schema.Union([
@@ -71,6 +74,7 @@ export function toPersistedSavedEnvironmentRecord(
     lastConnectedAt: record.lastConnectedAt,
     ...(record.desktopSsh ? { desktopSsh: record.desktopSsh } : {}),
     ...(record.relayManaged ? { relayManaged: record.relayManaged } : {}),
+    ...(record.sandbox ? { sandbox: record.sandbox } : {}),
   };
 }
 
@@ -222,6 +226,17 @@ export function getSavedEnvironmentRecord(
   environmentId: EnvironmentId,
 ): SavedEnvironmentRecord | null {
   return useSavedEnvironmentRegistryStore.getState().byId[environmentId] ?? null;
+}
+
+/** Resolve a human-friendly display label for a saved environment.
+ *  Prefers the user-chosen saved label (e.g. a sandbox display name) over the
+ *  runtime descriptor label, which for sandboxes is a meaningless container
+ *  hostname. */
+export function resolveSavedEnvironmentDisplayLabel(input: {
+  readonly record: SavedEnvironmentRecord | null;
+  readonly descriptorLabel: string | null;
+}): string | null {
+  return input.record?.label ?? input.descriptorLabel ?? null;
 }
 
 export function getEnvironmentHttpBaseUrl(environmentId: EnvironmentId): string | null {

@@ -105,24 +105,26 @@ describe("instance-scoped model selection", () => {
     ).toBe("openai/gpt-5.5");
   });
 
-  it("includes Grok custom models from the selected provider instance", () => {
-    const providers = [provider({ provider: ProviderDriverKind.make("grok"), instanceId: "grok" })];
+  it("includes custom models from the selected provider instance", () => {
+    const providers = [
+      provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "claude_haiku" }),
+    ];
     const settings: UnifiedSettings = {
       ...settingsWithProviderInstances(),
       providerInstances: {
         ...settingsWithProviderInstances().providerInstances,
-        [ProviderInstanceId.make("grok")]: {
-          driver: ProviderDriverKind.make("grok"),
-          config: { customModels: ["grok-test-custom-model"] },
+        [ProviderInstanceId.make("claude_haiku")]: {
+          driver: ProviderDriverKind.make("claudeAgent"),
+          config: { customModels: ["claude-haiku-test-custom-model"] },
         },
       },
     };
-    const grok = deriveProviderInstanceEntries(providers).find(
-      (entry) => entry.instanceId === "grok",
+    const haiku = deriveProviderInstanceEntries(providers).find(
+      (entry) => entry.instanceId === "claude_haiku",
     )!;
 
-    expect(getAppModelOptionsForInstance(settings, grok).map((option) => option.slug)).toContain(
-      "grok-test-custom-model",
+    expect(getAppModelOptionsForInstance(settings, haiku).map((option) => option.slug)).toContain(
+      "claude-haiku-test-custom-model",
     );
   });
 

@@ -52,7 +52,8 @@
     "e2e:web": "playwright test --config e2e/playwright.codegen.config.ts",
     "check:okf": "node scripts/check-okf.mjs",
     "worktree:setup": "bash scripts/worktree-setup.sh",
-    "build:docker-image": "docker build -t katacode:local ."
+    "build:docker-image": "docker build -t katacode:local .",
+    "verify:docker-image": "node --experimental-strip-types scripts/verify-docker-image.ts"
   },
   "devDependencies": {
     "@babel/plugin-transform-react-jsx": "7.28.6",

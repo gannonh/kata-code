@@ -1,0 +1,2 @@
+name = "build:docker-image"
+command = "pnpm run build:docker-image"

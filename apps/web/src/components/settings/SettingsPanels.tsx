@@ -43,6 +43,7 @@ import {
 } from "../../modelSelection";
 import {
   deriveProviderInstanceEntries,
+  HIDDEN_DRIVER_KINDS,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
@@ -1077,6 +1078,8 @@ export function ProviderSettingsPanel() {
   }
   for (const [driver, list] of instancesByDriver) {
     if (visibleDriverKinds.has(driver)) continue;
+    // Skip instances of hidden (feature-flagged) drivers entirely.
+    if (HIDDEN_DRIVER_KINDS.has(driver)) continue;
     for (const [id, instance] of list) {
       rows.push({
         instanceId: id,

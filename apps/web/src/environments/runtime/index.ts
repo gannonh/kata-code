@@ -7,6 +7,7 @@ export {
   resetSavedEnvironmentRegistryStoreForTests,
   resetSavedEnvironmentRuntimeStoreForTests,
   resolveEnvironmentHttpUrl,
+  resolveSavedEnvironmentDisplayLabel,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
   waitForSavedEnvironmentRegistryHydration,

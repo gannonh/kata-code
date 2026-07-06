@@ -196,6 +196,13 @@ vi.mock("../../environments/runtime", () => {
     resetSavedEnvironmentRuntimeStoreForTests: () => undefined,
     resolveEnvironmentHttpUrl: (_environmentId: unknown, path: string) =>
       new URL(path, "http://localhost:3000").toString(),
+    resolveSavedEnvironmentDisplayLabel: ({
+      record,
+      descriptorLabel,
+    }: {
+      record: { label?: string } | null;
+      descriptorLabel: string | null;
+    }) => record?.label ?? descriptorLabel ?? null,
     waitForSavedEnvironmentRegistryHydration: async () => undefined,
     addManagedRelayEnvironment: vi.fn(),
     addSavedEnvironment: vi.fn(),

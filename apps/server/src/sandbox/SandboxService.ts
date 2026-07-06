@@ -14,6 +14,7 @@
  * @module SandboxService
  */
 import * as NodeCrypto from "node:crypto";
+import * as os from "node:os";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -64,11 +65,13 @@ import {
   RelayEnvironmentLinkChallengeResponse,
   RelayEnvironmentLinkResponse,
   type RelayLinkProofRequest,
+  RelayOkResponse,
 } from "@kata-sh/code-contracts/relay";
 import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
 import { relayUrlConfig } from "../cloud/publicConfig.ts";
 import { EnvironmentConfigLoadError, loadEnvironmentConfig } from "./environmentConfigLoader.ts";
+import { buildCredentialSeedArchives } from "./credentialSeed.ts";
 import { type SetupProcessRecord, SetupFailed, runSandboxSetup } from "./sandboxSetupRunner.ts";
 
 /** A sandbox `AdvertisedEndpointProvider` (manual kind; container-sourced). */
@@ -149,6 +152,53 @@ function mapSetupFailed(e: SetupFailed): SandboxRpcError {
   return new SandboxRpcError({
     reason: "provision-failed",
     message: `Setup failed (${e.stage}): ${e.message}`,
+  });
+}
+
+/** Seed provider credentials (static config + auth) into the container home.
+ *  Runs unconditionally after provision, before the repo seed. Returns void on
+ *  success; failures map to SetupFailed/SandboxProviderError via the caller. */
+function runCredentialSeed(
+  driver: SandboxProvider,
+  handle: SandboxHandle,
+): Effect.Effect<void, SetupFailed | SandboxProviderError> {
+  return Effect.gen(function* () {
+    const copyIntoCap = driver.copyInto;
+    if (!copyIntoCap) return; // driver without copyInto — cloud drivers seed via their own mechanism
+    const archives = yield* buildCredentialSeedArchives({ hostHome: os.homedir() }).pipe(
+      Effect.mapError(
+        (e) =>
+          new SetupFailed({
+            stage: "seed",
+            message: `credential seed build failed: ${e.message}`,
+            cause: e,
+          }),
+      ),
+    );
+    if (archives.static) {
+      yield* copyIntoCap.copyInto(handle, archives.static, "/home/katacode").pipe(
+        Effect.mapError(
+          (e) =>
+            new SetupFailed({
+              stage: "seed",
+              message: `credential static copyInto failed: ${e.message}`,
+              cause: e,
+            }),
+        ),
+      );
+    }
+    if (archives.credentials) {
+      yield* copyIntoCap.copyInto(handle, archives.credentials, "/home/katacode").pipe(
+        Effect.mapError(
+          (e) =>
+            new SetupFailed({
+              stage: "seed",
+              message: `credential auth copyInto failed: ${e.message}`,
+              cause: e,
+            }),
+        ),
+      );
+    }
   });
 }
 
@@ -326,6 +376,17 @@ function postJson<S extends Schema.Decoder<unknown>>(
   });
 }
 
+function deleteJson<S extends Schema.Decoder<unknown>>(
+  schema: S,
+  url: string,
+  bearerToken?: string,
+): Effect.Effect<S["Type"], SandboxRpcError> {
+  return fetchJson(schema, url, {
+    method: "DELETE",
+    headers: bearerToken ? { authorization: `Bearer ${bearerToken}` } : {},
+  });
+}
+
 function exchangeBootstrapToken(input: {
   readonly httpBaseUrl: string;
   readonly bootstrapToken: string;
@@ -379,7 +440,11 @@ function registerSandboxWithConnect(input: {
   readonly bootstrapToken: string;
   readonly connectAuthToken: SandboxStartSessionInput["connectAuthToken"];
 }): Effect.Effect<
-  { readonly descriptor: ExecutionEnvironmentDescriptor; readonly adminAccessToken: string },
+  {
+    readonly descriptor: ExecutionEnvironmentDescriptor;
+    readonly adminAccessToken: string;
+    readonly relay?: { readonly relayUrl: string; readonly bearerToken: string } | null;
+  },
   SandboxRpcError,
   CliTokenManager.CloudCliTokenManager
 > {
@@ -461,7 +526,11 @@ function registerSandboxWithConnect(input: {
       relayConfig,
       session.access_token,
     );
-    return { descriptor, adminAccessToken: session.access_token };
+    return {
+      descriptor,
+      adminAccessToken: session.access_token,
+      relay: { relayUrl, bearerToken },
+    };
   });
 }
 
@@ -488,6 +557,22 @@ function issueSandboxPairingCredential(input: {
   ).pipe(Effect.map((credential) => credential.credential));
 }
 
+/** Re-probe all providers on the sandbox server via the `/api/providers/refresh`
+ *  HTTP endpoint. Called after credentials are seeded via copyInto so the
+ *  sandbox server re-probes with auth in place. The initial boot probe may
+ *  have fired before credentials were in the container home. */
+function refreshSandboxProviders(input: {
+  readonly httpBaseUrl: string;
+  readonly adminAccessToken: string;
+}): Effect.Effect<void, SandboxRpcError> {
+  // Best-effort: a 200 with any body is a successful refresh. The refreshed
+  // provider statuses flow to clients via the WS serverConfig stream.
+  return fetchJson(Schema.Unknown, `${input.httpBaseUrl}/api/providers/refresh`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${input.adminAccessToken}` },
+  }).pipe(Effect.asVoid);
+}
+
 const RelayConfigResponse = Schema.Struct({ ok: Schema.Boolean });
 
 /** A running sandbox session: the provisioned handle plus the driver that
@@ -500,6 +585,8 @@ interface RunningSession {
   readonly setupProcesses: ReadonlyArray<SetupProcessRecord>;
   readonly environmentId: string;
   readonly endpoint: AdvertisedEndpoint;
+  /** Relay link info for unlinking on dispose. */
+  readonly relay?: { readonly relayUrl: string; readonly bearerToken: string } | null;
 }
 
 /** In-memory map of running sessions (instanceId → handle + driver + endpoint). Phase 1; not durable. */
@@ -671,14 +758,37 @@ export const SandboxServiceLive = {
           savedEnvironment: savedEnv?.environment,
         });
 
+        // Pass the display name into the container so the sandbox server can
+        // use it as its environment descriptor label (instead of the container
+        // hostname, which is a meaningless Docker ID).
+        const envWithLabel = config.displayName
+          ? [...env, ["KATACODE_ENVIRONMENT_LABEL", config.displayName] as const]
+          : env;
+
         const handle = yield* inst.driver
           .provision({
             instanceId: instanceId as string,
             config: inst.config,
             image: resolveProvisionImage(inst.config),
-            env,
+            env: envWithLabel,
           })
           .pipe(Effect.mapError(mapDriverError));
+
+        // Seed provider credentials (static config + auth) into the container
+        // home before any provider probe re-checks. This runs unconditionally —
+        // credentials are independent of the repo. The repo seed + install below
+        // is conditional on a repository being specified.
+        yield* runCredentialSeed(inst.driver, handle).pipe(
+          Effect.catch((error: SetupFailed | SandboxProviderError) =>
+            disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  error._tag === "SetupFailed" ? mapSetupFailed(error) : mapDriverError(error),
+                ),
+              ),
+            ),
+          ),
+        );
 
         let setupProcesses: ReadonlyArray<SetupProcessRecord> = [];
         if (options?.repository !== undefined) {
@@ -747,7 +857,7 @@ export const SandboxServiceLive = {
         // desktop server. A missing user/CLI Connect token or relay failure fails
         // the RPC and tears down the just-created container.
         const loopbackHttpBaseUrl = reach.httpBaseUrl.replace("localhost", "127.0.0.1");
-        const { descriptor, adminAccessToken } = yield* registerSandboxWithConnect({
+        const { descriptor, adminAccessToken, relay } = yield* registerSandboxWithConnect({
           httpBaseUrl: loopbackHttpBaseUrl,
           bootstrapToken,
           connectAuthToken: options?.connectAuthToken,
@@ -784,12 +894,30 @@ export const SandboxServiceLive = {
             ),
           ),
         );
+        // Re-probe providers on the sandbox server now that credentials have
+        // been seeded via copyInto during setup. The initial probe at container
+        // boot may have fired before credentials were in place; this refresh
+        // corrects the provider status (e.g. Codex flips from error to ready).
+        yield* refreshSandboxProviders({
+          httpBaseUrl: loopbackHttpBaseUrl,
+          adminAccessToken,
+        }).pipe(
+          Effect.catchTag("SandboxRpcError", (error: SandboxRpcError) =>
+            // Non-fatal: a refresh failure leaves the sandbox running with the
+            // initial probe result. The client re-fetches provider status on
+            // its own interval, so a transient refresh error self-heals.
+            Effect.logWarning("Could not refresh sandbox providers after credential seed", {
+              message: error.message,
+            }).pipe(Effect.asVoid),
+          ),
+        );
         runningSessions.set(sessionKey, {
           handle,
           driver: inst.driver,
           setupProcesses,
           environmentId: descriptor.environmentId,
           endpoint,
+          relay: relay ?? null,
         });
         return {
           instanceId,
@@ -804,16 +932,29 @@ export const SandboxServiceLive = {
     Effect.gen(function* () {
       const entry = runningSessions.get(instanceId as string);
       if (entry === undefined) return false;
+      // Unlink the environment from the relay so it disappears from the
+      // Connect pool immediately. Non-fatal: if the unlink fails, the relay
+      // link lapses when the container becomes unreachable.
+      if (entry.relay) {
+        yield* deleteJson(
+          RelayOkResponse,
+          `${entry.relay.relayUrl}/v1/client/environment-links/${entry.environmentId}`,
+          entry.relay.bearerToken,
+        ).pipe(
+          Effect.catch((error: SandboxRpcError) =>
+            Effect.logWarning("Could not unlink sandbox from relay", {
+              environmentId: entry.environmentId,
+              message: error.message,
+            }).pipe(Effect.asVoid),
+          ),
+        );
+      }
       // Route through the driver that created the handle rather than a
       // hardcoded one, so a future non-Docker driver disposes its own
       // sandboxes correctly (the handle's `driverKind` is the routing key).
       yield* entry.driver.dispose(entry.handle).pipe(Effect.mapError(mapDriverError));
       runningSessions.delete(instanceId as string);
       return true;
-      // Connect unlink: the existing cloud/ entry points expose no per-origin
-      // unlink, so the relay link lapses when this loopback origin becomes
-      // unreachable (container removed). AC-1.12: the deployment disappears from
-      // the Connect pool once the container is gone.
     }),
 };
 

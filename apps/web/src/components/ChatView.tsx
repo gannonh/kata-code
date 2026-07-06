@@ -134,6 +134,7 @@ import { getProviderModelCapabilities, resolveSelectableProvider } from "../prov
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
+import { handleTerminalOpenError } from "../lib/terminalOpenError";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -727,8 +728,8 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
           ...(effectiveWorktreePath != null ? { worktreePath: effectiveWorktreePath } : {}),
           env: runtimeEnv,
         });
-      } catch {
-        // Opening failed; the tab is already in the store — user can retry or close it.
+      } catch (error) {
+        handleTerminalOpenError(error);
       }
     })();
   }, [
@@ -757,7 +758,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         ...(effectiveWorktreePath != null ? { worktreePath: effectiveWorktreePath } : {}),
         env: runtimeEnv,
       })
-      .catch(() => undefined);
+      .catch(handleTerminalOpenError);
   }, [
     bumpFocusRequestId,
     cwd,
@@ -786,8 +787,8 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
           ...(effectiveWorktreePath != null ? { worktreePath: effectiveWorktreePath } : {}),
           env: runtimeEnv,
         });
-      } catch {
-        // Opening failed; the tab is already in the store — user can retry or close it.
+      } catch (error) {
+        handleTerminalOpenError(error);
       }
     })();
   }, [
@@ -2524,7 +2525,7 @@ function ChatViewContent(props: ChatViewProps) {
           worktreePath: activeThreadWorktreePath,
         }),
       })
-      .catch(() => undefined);
+      .catch(handleTerminalOpenError);
   }, [
     activeKnownTerminalIds,
     activeProject,
@@ -2563,7 +2564,7 @@ function ChatViewContent(props: ChatViewProps) {
             worktreePath: activeThreadWorktreePath,
           }),
         })
-        .catch(() => undefined);
+        .catch(handleTerminalOpenError);
     },
     [
       activeKnownTerminalIds,
@@ -2643,8 +2644,8 @@ function ChatViewContent(props: ChatViewProps) {
               worktreePath: activeThreadWorktreePath,
             }),
           });
-        } catch {
-          // Opening failed; the tab is already in the store — user can retry or close it.
+        } catch (error) {
+          handleTerminalOpenError(error);
         }
       })();
     },
@@ -2688,8 +2689,8 @@ function ChatViewContent(props: ChatViewProps) {
             worktreePath: activeThreadWorktreePath,
           }),
         });
-      } catch {
-        // Opening failed; the tab is already in the store — user can retry or close it.
+      } catch (error) {
+        handleTerminalOpenError(error);
       }
     })();
   }, [
@@ -4702,6 +4703,7 @@ function ChatViewContent(props: ChatViewProps) {
                     activeThread={activeThread}
                     isServerThread={isServerThread}
                     isLocalDraftThread={isLocalDraftThread}
+                    isSandboxEnvironment={activeSavedEnvironmentRecord?.sandbox != null}
                     phase={phase}
                     isConnecting={isConnecting}
                     isSendBusy={isSendBusy}

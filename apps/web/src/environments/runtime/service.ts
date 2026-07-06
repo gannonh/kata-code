@@ -1318,9 +1318,14 @@ async function refreshSavedEnvironmentMetadata(
     serverConfig,
     scopes: sessionState.authenticated ? (sessionState.scopes ?? scopeHint ?? null) : null,
   });
-  useSavedEnvironmentRegistryStore
-    .getState()
-    .rename(record.environmentId, serverConfig.environment.label);
+  // Sync the registry label with the server descriptor — but skip for sandbox
+  // environments, where the descriptor label is a meaningless container hostname
+  // and the user-chosen display name (set at creation time) should be preserved.
+  if (!record.sandbox) {
+    useSavedEnvironmentRegistryStore
+      .getState()
+      .rename(record.environmentId, serverConfig.environment.label);
+  }
 }
 
 const resolveManagedRelayWebSocketUrl = Effect.fn(
@@ -1872,6 +1877,8 @@ export async function addSavedEnvironment(input: {
   readonly host?: string;
   readonly pairingCode?: string;
   readonly desktopSsh?: DesktopSshEnvironmentTarget;
+  /** Optional sandbox marker (local Docker or cloud provider). */
+  readonly sandbox?: { readonly providerKind: string };
 }): Promise<SavedEnvironmentRecord> {
   const resolvedTarget = resolveRemotePairingTarget({
     ...(input.pairingUrl !== undefined ? { pairingUrl: input.pairingUrl } : {}),
@@ -1911,6 +1918,9 @@ export async function addSavedEnvironment(input: {
     lastConnectedAt: isoNow(),
     ...((input.desktopSsh ?? existingRecord?.desktopSsh)
       ? { desktopSsh: input.desktopSsh ?? existingRecord?.desktopSsh }
+      : {}),
+    ...((input.sandbox ?? existingRecord?.sandbox)
+      ? { sandbox: input.sandbox ?? existingRecord?.sandbox }
       : {}),
   };
 

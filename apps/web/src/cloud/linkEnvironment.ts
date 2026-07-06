@@ -26,6 +26,7 @@ import {
   fetchRemoteEnvironmentDescriptor,
   makeEnvironmentHttpApiClient,
   ManagedRelayClient,
+  ManagedRelayClientError,
   ManagedRelayDpopSigner,
   type WsRpcClient,
 } from "@kata-sh/code-client-runtime";
@@ -235,6 +236,22 @@ function endpointOrigin(httpBaseUrl: string) {
 
 const MANAGED_ENDPOINT_PROVIDER_KIND =
   "cloudflare_tunnel" satisfies RelayManagedEndpointProviderKind;
+
+/** Recursively extract a human-readable message from a nested error cause. */
+function formatNestedErrorCause(cause: unknown, depth = 0): string {
+  if (depth > 5 || cause === null || cause === undefined) return "";
+  if (cause instanceof Error) {
+    const msg = cause.message.trim();
+    if (!msg) return "";
+    return `: ${msg}${formatNestedErrorCause((cause as { cause?: unknown }).cause, depth + 1)}`;
+  }
+  if (typeof cause === "object" && "message" in cause) {
+    const msg = String((cause as { message: unknown }).message).trim();
+    if (!msg) return "";
+    return `: ${msg}${formatNestedErrorCause((cause as { cause?: unknown }).cause, depth + 1)}`;
+  }
+  return "";
+}
 
 function ensureLinkedEnvironmentMatches(input: {
   readonly expectedEnvironmentId: string;
@@ -544,6 +561,36 @@ export function unlinkPrimaryEnvironmentFromCloud(input: {
           ),
         );
     }
+  });
+}
+
+export function unlinkManagedRelayEnvironment(input: {
+  readonly clerkToken: string;
+  readonly environmentId: EnvironmentId;
+}): Effect.Effect<void, CloudEnvironmentLinkError, ManagedRelayClient> {
+  return Effect.gen(function* () {
+    const configuredRelayUrl = relayUrl();
+    if (!configuredRelayUrl) {
+      return yield* new CloudEnvironmentLinkError({
+        message: "KATACODE_RELAY_URL is not configured.",
+      });
+    }
+    const relayClient = yield* ManagedRelayClient;
+    yield* relayClient
+      .unlinkEnvironment({
+        clerkToken: input.clerkToken,
+        environmentId: input.environmentId,
+      })
+      .pipe(
+        Effect.catch((cause: ManagedRelayClientError) =>
+          Effect.fail(
+            new CloudEnvironmentLinkError({
+              message: `Could not unlink the environment from Kata Code Connect: ${cause.message}${formatNestedErrorCause(cause.cause)}`,
+              cause,
+            }),
+          ),
+        ),
+      );
   });
 }
 

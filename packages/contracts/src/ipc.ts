@@ -381,6 +381,14 @@ export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
       relayUrl: Schema.String,
     }),
   ),
+  /** Marker for sandbox (local Docker or cloud provider) environments.
+   *  Absent on remote-link and SSH environments. */
+  sandbox: Schema.optionalKey(
+    Schema.Struct({
+      /** Provider kind: "local" (Docker) or a cloud provider id (e.g. "cloudflare"). */
+      providerKind: Schema.String,
+    }),
+  ),
 });
 export type PersistedSavedEnvironmentRecord = typeof PersistedSavedEnvironmentRecordSchema.Type;
 

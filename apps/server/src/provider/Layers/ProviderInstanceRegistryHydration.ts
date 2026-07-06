@@ -95,13 +95,23 @@ export const deriveProviderInstanceConfigMap = (
     // built-in driver kinds.
     const legacyKey = driver.driverKind as keyof ServerSettings["providers"];
     const legacyConfig = settings.providers[legacyKey];
-    if (legacyConfig === undefined) {
+    if (legacyConfig !== undefined) {
+      merged[instanceId] = {
+        driver: driver.driverKind,
+        config: legacyConfig,
+      };
       continue;
     }
 
+    // No explicit `providerInstances` entry and no legacy `providers` config —
+    // synthesize a default instance from the driver's `defaultConfig()` so
+    // built-in providers (e.g. Pi, Codex, Claude) are available on a fresh
+    // server with empty settings (e.g. a sandbox container that hasn't had
+    // settings pushed to it yet). The driver's `defaultConfig()` carries the
+    // correct `enabled` default for each provider.
     merged[instanceId] = {
       driver: driver.driverKind,
-      config: legacyConfig,
+      config: driver.defaultConfig(),
     };
   }
 

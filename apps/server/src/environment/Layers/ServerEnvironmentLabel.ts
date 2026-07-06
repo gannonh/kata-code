@@ -90,6 +90,14 @@ const resolveFriendlyHostLabel = Effect.fn("resolveFriendlyHostLabel")(function*
 export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironmentLabel")(function* (
   input: ResolveServerEnvironmentLabelInput,
 ) {
+  // Sandboxes receive KATACODE_ENVIRONMENT_LABEL from the host so the
+  // container's descriptor (and thus the relay record) carries the
+  // user-chosen display name instead of the container hostname.
+  const explicitLabel = normalizeLabel(process.env.KATACODE_ENVIRONMENT_LABEL);
+  if (explicitLabel) {
+    return explicitLabel;
+  }
+
   const friendlyHostLabel = yield* resolveFriendlyHostLabel();
   if (friendlyHostLabel) {
     return friendlyHostLabel;

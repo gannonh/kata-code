@@ -39,7 +39,7 @@ export function resolveEnvironmentOptionLabel(input: {
     return preferredLocalLabel ?? "This device";
   }
 
-  return runtimeLabel ?? savedLabel ?? input.environmentId;
+  return savedLabel ?? runtimeLabel ?? input.environmentId;
 }
 
 export function resolveEnvModeLabel(mode: EnvMode): string {

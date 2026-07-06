@@ -115,6 +115,7 @@ import {
   getPrimaryEnvironmentConnection,
   reconnectSavedEnvironment,
   removeSavedEnvironment,
+  resolveSavedEnvironmentDisplayLabel,
 } from "~/environments/runtime";
 import { useUiStateStore } from "~/uiStateStore";
 import { resolveServerConfigVersionMismatch } from "~/versionSkew";
@@ -123,6 +124,7 @@ import {
   connectManagedCloudEnvironment,
   isCloudSessionRejectedError,
   linkPrimaryEnvironmentToCloud,
+  unlinkManagedRelayEnvironment,
   unlinkPrimaryEnvironmentFromCloud,
   updatePrimaryCloudPreferences,
 } from "~/cloud/linkEnvironment";
@@ -325,6 +327,20 @@ function getSavedBackendStatusTooltip(
 function formatDesktopSshTarget(target: NonNullable<SavedEnvironmentRecord["desktopSsh"]>): string {
   const authority = target.username ? `${target.username}@${target.hostname}` : target.hostname;
   return target.port ? `${authority}:${target.port}` : authority;
+}
+
+/** Resolve a human-friendly type label for a saved environment.
+ *  - SSH: environments with `desktopSsh`
+ *  - Sandbox: environments with `sandbox` marker (local Docker or cloud provider)
+ *  - Remote Link: everything else (direct pairing / relay) */
+function resolveEnvironmentTypeLabel(record: SavedEnvironmentRecord): string {
+  if (record.desktopSsh) return "SSH";
+  if (record.sandbox) {
+    return record.sandbox.providerKind === "local"
+      ? "Sandbox (local)"
+      : `Sandbox (${record.sandbox.providerKind})`;
+  }
+  return "Remote Link";
 }
 
 function parseManualDesktopSshTarget(input: {
@@ -1517,11 +1533,16 @@ function SavedBackendListRow({
           ? "bg-destructive"
           : "bg-muted-foreground/40";
   const descriptorLabel = runtime?.descriptor?.label ?? null;
-  const displayLabel = descriptorLabel ?? record.label;
+  const displayLabel =
+    resolveSavedEnvironmentDisplayLabel({
+      record,
+      descriptorLabel,
+    }) ?? record.label;
   const statusTooltip = getSavedBackendStatusTooltip(runtime, record, nowMs);
   const versionMismatch = resolveServerConfigVersionMismatch(runtime?.serverConfig);
+  const environmentTypeLabel = resolveEnvironmentTypeLabel(record);
   const metadataBits = [
-    record.desktopSsh ? `SSH ${formatDesktopSshTarget(record.desktopSsh)}` : null,
+    record.desktopSsh ? `SSH ${formatDesktopSshTarget(record.desktopSsh)}` : environmentTypeLabel,
     record.lastConnectedAt
       ? `Last connected ${formatAccessTimestamp(record.lastConnectedAt)}`
       : null,
@@ -1873,6 +1894,7 @@ function ConfiguredCloudRemoteEnvironmentRows({
   const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
+  const [removingEnvironmentId, setRemovingEnvironmentId] = useState<EnvironmentId | null>(null);
   const savedIds = useMemo(() => new Set(savedEnvironmentIds), [savedEnvironmentIds]);
 
   const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
@@ -1902,6 +1924,39 @@ function ConfiguredCloudRemoteEnvironmentRows({
       });
     } finally {
       setConnectingEnvironmentId(null);
+    }
+  };
+
+  const removeEnvironment = async (environment: RelayClientEnvironmentRecord) => {
+    setRemovingEnvironmentId(environment.environmentId);
+    try {
+      const clerkToken = await getToken(resolveRelayClerkTokenOptions());
+      if (!clerkToken) {
+        throw new Error("Sign in to Kata Code Connect before removing this environment.");
+      }
+      await webRuntime.runPromise(
+        unlinkManagedRelayEnvironment({
+          clerkToken,
+          environmentId: environment.environmentId,
+        }),
+      );
+      refreshManagedRelayEnvironments();
+      toastManager.add({
+        type: "success",
+        title: "Environment removed",
+        description: `${environment.label} was unlinked from Kata Code Connect.`,
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Could not remove environment",
+        description:
+          cause instanceof Error
+            ? cause.message
+            : "Could not unlink the Kata Code Connect environment.",
+      });
+    } finally {
+      setRemovingEnvironmentId(null);
     }
   };
 
@@ -1937,13 +1992,23 @@ function ConfiguredCloudRemoteEnvironmentRows({
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">Kata Code Connect</p>
         </div>
-        <Button
-          size="sm"
-          disabled={connectingEnvironmentId !== null}
-          onClick={() => void connectEnvironment(environment)}
-        >
-          {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            disabled={connectingEnvironmentId !== null}
+            onClick={() => void connectEnvironment(environment)}
+          >
+            {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive-outline"
+            disabled={removingEnvironmentId !== null}
+            onClick={() => void removeEnvironment(environment)}
+          >
+            {removingEnvironmentId === environment.environmentId ? "Removing…" : "Remove"}
+          </Button>
+        </div>
       </div>
     </div>
   ));

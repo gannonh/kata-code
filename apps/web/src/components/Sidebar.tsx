@@ -367,7 +367,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     (s) => s.byId[thread.environmentId]?.label ?? null,
   );
   const threadEnvironmentLabel = isRemoteThread
-    ? (remoteEnvLabel ?? remoteEnvSavedLabel ?? "Remote")
+    ? (remoteEnvSavedLabel ?? remoteEnvLabel ?? "Remote")
     : null;
   // For grouped projects, the thread may belong to a different environment
   // than the representative project.  Look up the thread's own project cwd
@@ -2910,7 +2910,7 @@ export default function Sidebar() {
       resolveEnvironmentLabel: (environmentId) => {
         const rt = savedEnvironmentRuntimeById[environmentId];
         const saved = savedEnvironmentRegistry[environmentId];
-        return rt?.descriptor?.label ?? saved?.label ?? null;
+        return saved?.label ?? rt?.descriptor?.label ?? null;
       },
     });
   }, [

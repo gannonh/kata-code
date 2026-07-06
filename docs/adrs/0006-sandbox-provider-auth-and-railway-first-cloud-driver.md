@@ -10,7 +10,7 @@ timestamp: 2026-07-04T00:00:00Z
 
 ## Status
 
-Accepted. Supersedes [ADR 0005 — Vercel Sandbox as the first cloud driver](/adrs/0005-vercel-first-cloud-driver.md).
+Superseded by [ADR 0007 — Vercel Sandbox as the first cloud sandbox driver](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md) for the Phase 3b cloud provider choice. The provider-auth model remains accepted unless superseded by a later ADR. Superseded [ADR 0005 — Vercel Sandbox as the first cloud driver](/adrs/0005-vercel-first-cloud-driver.md).
 
 ## Context
 
@@ -54,7 +54,7 @@ In parallel, the cloud-driver choice was re-examined against Railway rather than
 
 - ADR 0005 is superseded. Its Phase 3 deep-dive (`docs/specs/2026-07-03-kata-environments-deployments-phase-3-design.md`) is replaced by the new Phase 3a/3b specs; the roadmap Phase 3 section, risk register, and AC numbering are rewritten for Railway and the auth model.
 - The `katacode` Docker image gains provider CLIs (codex, agent/grok as available) and a working shell (`/bin/sh` as the default `SHELL`), increasing image size. The Dockerfile is updated in Phase 3a.
-- The local Docker sandbox driver gains host credential bind-mounts, touching `packages/sandbox-docker` and the provision env construction in `apps/server/src/sandbox/SandboxService.ts`. The existing `CODEX_HOME` / shadow-home precedence is preserved.
+- The local Docker sandbox driver gains host credential access. The original decision specified bind-mounts; Phase 3a implementation pivoted to a copy+sanitize model (`apps/server/src/sandbox/credentialSeed.ts`) after bind-mounts leaked host-absolute paths into the container (codex `config.toml` `model_catalog_json`, project trust paths, `AGENTS.md` symlink target) causing provider probe failures. The copy+sanitize model builds two tar archives host-side (sanitized static config + credentials), seeds them via `copyInto`, and triggers a provider refresh. The ADR's auth model (local credential access + cloud credential-file seeding + env-var alternative) is unchanged; only the local implementation detail evolved. See the [Phase 3a spec — Credential model deviation](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md#credential-model-deviation).
 - A host-side encrypted credential store for cloud-seeded provider credentials is added to `ServerSecretStore`, parallel to the existing sandbox-instance secret path. Credential files are written mode 0600; plaintext-at-rest matches the existing provider-secret model (the host-side `~/.codex/auth.json` etc. are already plaintext on the user's laptop).
 - A headless in-sandbox login flow (PTY-driven OAuth URL + code relay) is added for OAuth-based providers, surfacing in the web UI as a "Sign in <provider>" affordance on the sandbox card when a provider is unauthenticated and no credential is seeded.
 - `terminal.open` failures are surfaced in the web UI (no more `.catch(() => undefined)`), so a broken in-container terminal shows a real error instead of a dead drawer.

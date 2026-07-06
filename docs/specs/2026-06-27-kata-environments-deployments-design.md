@@ -12,8 +12,9 @@ timestamp: 2026-06-27T15:12:43Z
 
 ## Status
 
-Approved. Amended 2026-07-03: Vercel Sandbox replaces Cloudflare as the first cloud driver
-(Phase 3) per [ADR 0005](/adrs/0005-vercel-first-cloud-driver.md).
+Approved. Amended 2026-07-05: Vercel Sandbox is the Phase 3b cloud sandbox
+driver per [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md),
+superseding the Railway Service choice from [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md).
 
 ## Goal
 
@@ -89,9 +90,10 @@ public`, `AdvertisedEndpointProviderKind: core | private-network | tunnel | manu
    is absent. `describe()` advertises capabilities and reachability kind. Ephemeral behavior is
    the default; persistence is out of scope for this roadmap. The canonical required/optional
    split is defined in the Architecture "SandboxProvider driver SPI (shape)" section. Container
-   is the first driver; Vercel is the first cloud driver ([ADR 0005](/adrs/0005-vercel-first-cloud-driver.md));
-   Cloudflare, Hetzner, and DigitalOcean are future BYOC cloud drivers (AgentBox proves all fit
-   one SPI).
+   is the first driver; Vercel Sandbox is the first cloud sandbox driver
+   ([ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md)).
+   Railway Sandbox, Railway Service, E2B, Daytona, Hetzner, Cloudflare, and DigitalOcean are
+   future BYOC drivers.
 
 4. **Reachability reuses the existing `AdvertisedEndpoint` model; Connect is required for every
    deployment.** A deployed sandbox running `katacode serve` is a Kata server like any other and
@@ -103,8 +105,7 @@ public`, `AdvertisedEndpointProviderKind: core | private-network | tunnel | manu
      via `localhost` port mapping); the existing relay "publish a local server" path fronts it
      for other clients.
    - **cloud (Vercel)** — advertises a `public` endpoint via `sandbox.domain(port)`: a native
-     public HTTPS + WebSocket URL, stable across stop/start cycles (live-verified by AgentBox,
-     `docs/vercel-sandbox-findings.md`). No tunnel provisioning.
+     public HTTPS + WebSocket URL for the declared Kata server port. No tunnel provisioning.
    - **future ssh-tunnel drivers (Hetzner, DO)** — advertise via desktop-managed SSH forward +
      relay, reduced hosted-web support.
      The client connects over `wss` with the existing Kata WebSocket auth token (not a provider
@@ -127,10 +128,11 @@ public`, `AdvertisedEndpointProviderKind: core | private-network | tunnel | manu
    process, terminals) does not carry over. Only the repo/branch carries over. Live session
    migration is deferred future work.
 
-8. **Agent credentials — injected secrets, per session.** Provider auth and repo env secrets
-   stored in Kata settings via the existing `ServerSecretStore` out-of-band file path (reusing
-   the provider-instance `sensitive` + `valueRedacted` redaction) and injected as env vars at
-   boot. No OAuth session forwarding in this roadmap.
+8. **Agent credentials — env vars plus credential-file seeding.** Repo env secrets and API-key
+   provider auth are injected as env vars via the existing `ServerSecretStore` path. OAuth-based
+   provider credentials use the Phase 3a/3b model from ADR 0006: local Docker bind-mounts host
+   credential dirs; cloud drivers capture credential files through an interactive login flow and
+   seed them into the sandbox at provision.
 
 ## Relationship to Kata Code Connect
 
@@ -177,7 +179,7 @@ flowchart TB
 | `packages/sandbox-contracts` | Schema-only contracts. **Re-exports** the settings-referenced contracts (`SandboxProviderDriverKind`, `SandboxProviderInstanceId`, `SandboxProviderInstanceConfig`) from `packages/contracts`, and **owns** `EnvironmentConfig` (`.kata/environment.json` schema), `SandboxSessionState`, `SandboxReachabilityKind`. | Mirrors `packages/contracts` discipline; unknown drivers round-trip without loss. Settings-referenced contracts live in `packages/contracts` (`sandboxProviderInstance.ts`) to keep it a dependency leaf (no `contracts` ⇄ `sandbox-contracts` cycle); the edge is one-directional `sandbox-contracts` → `contracts`. |
 | `packages/sandbox`           | Driver SPI, `SandboxProviderRegistry`, environment-config resolver, session lifecycle orchestration, snapshot cache policy, Connect registration glue. Provider-agnostic.                                                                                                                                            | Consumed by `apps/server` and (later) Kata Agent. Mirrors AgentBox's `sandbox-cloud` scaffolding.                                                                                                                                                                                                                     |
 | `packages/sandbox-docker`    | The local-container driver (Docker/OrbStack) implementing the SPI.                                                                                                                                                                                                                                                   | First driver (Phase 1).                                                                                                                                                                                                                                                                                               |
-| `packages/sandbox-vercel`    | The Vercel Sandbox SDK driver (`@vercel/sandbox` v2: Firecracker microVMs, snapshot-bake provisioning, `sandbox.domain(port)` public URLs).                                                                                                                                                                          | First cloud driver (Phase 3).                                                                                                                                                                                                                                                                                         |
+| `packages/sandbox-vercel`    | The Vercel Sandbox SDK driver (`@vercel/sandbox`: Firecracker microVMs, runtime/VCR image/snapshot sources, persistent filesystem snapshots, `extendTimeout`, `sandbox.domain(port)` public URLs).                                                                                                                   | First cloud sandbox driver (Phase 3b).                                                                                                                                                                                                                                                                                |
 | `apps/server`                | Wires the registry into server layers; exposes `sandbox.*`/`environments.deploy.*` RPCs; owns secret storage/injection, git branch sync, and Connect registration on provision.                                                                                                                                      | No driver-specific logic beyond registration.                                                                                                                                                                                                                                                                         |
 | `apps/web`                   | Settings → Environments UI for deployment targets + env config; composer "Run on" control; deployment/session status.                                                                                                                                                                                                | Reuses provider-settings form rendering where possible.                                                                                                                                                                                                                                                               |
 
@@ -289,30 +291,29 @@ injected — manually authored.
 **Goal.** A user configures a Vercel cloud deployment target (their own account) and starts a
 session in a cloud sandbox, reached via the sandbox's public URL + Connect.
 
-Driver order set by [ADR 0005](/adrs/0005-vercel-first-cloud-driver.md): `wss` reachability on
-Vercel is live-verified (AgentBox findings), so no reachability spike gates this phase.
+Driver order set by [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md):
+Vercel Sandbox's ephemeral Firecracker microVM, snapshot/resume, timeout-extension, command/file
+API, and `sandbox.domain(port)` model fit Kata's task-sandbox direction better than Railway
+Service.
 
 **Requirements.**
 
-- Implement `packages/sandbox-vercel` against `@vercel/sandbox` v2 using the user's access-token
+- Implement `packages/sandbox-vercel` against `@vercel/sandbox` using the user's access-token
   trio (`VERCEL_TOKEN` + `VERCEL_TEAM_ID` + `VERCEL_PROJECT_ID`, BYOC) stored via
-  `ServerSecretStore`. OIDC dev tokens are unsupported (no headless refresh).
-- Launch method: bake a base snapshot once (Vercel has no custom images — boot base `node24`,
-  install the Kata server, `sandbox.snapshot()`), then boot per-session sandboxes from it and
-  start `katacode serve`. Access: `sandbox.domain(port)` (public HTTPS + WebSocket URL),
-  advertise a `public` endpoint, connect over `wss` + Kata token. Constraints: ≤4 exposed
-  ports, none <1024; region `iad1`; no nested containers (an environment config requiring
-  in-sandbox Docker fails loud).
+  `ServerSecretStore`. OIDC is future for Vercel-hosted Kata.
+- Launch method: create a sandbox from a configured runtime, VCR image, or prepared snapshot,
+  seed repo + credential files, run environment setup, and start `katacode serve`. Access:
+  `sandbox.domain(port)` (public HTTPS + WebSocket URL), advertise a `public` endpoint, connect
+  over `wss` + Kata token. V1 fails loud for environment configs requiring in-sandbox Docker.
 - Session lifetime handling (first-class): keepalive loop via the SPI `renewTimeout` capability
-  (`extendTimeout` is additive against a host-tracked deadline; plan caps 45 min Hobby / 5 hr
-  Pro+); surface remaining lifetime; on lapse the sandbox auto-snapshots and resumes via
-  `Sandbox.get({ resume: true })` — a mid-turn agent stream surfaces an explicit error, never a
-  silent hang.
+  (`extendTimeout` against a host-tracked deadline; plan caps 45 min Hobby / 24 hr
+  Pro/Enterprise); surface remaining lifetime; on lapse the sandbox's persistent snapshot is the
+  restore point and Resume restarts `katacode serve` + re-registers Connect. A mid-turn agent
+  stream surfaces an explicit error, never a silent hang.
 - Auto-register with Connect so all paired clients reach it.
 - Explicit failure surfaces for provision/boot/connect (no silent fallback to local).
-- Guard the documented SDK footguns: gate snapshot reuse on `status === 'created'` (tombstones
-  resolve), never delete `currentSnapshotId` when it aliases `sourceSnapshotId`, tolerate
-  `list()`/`get()` lifecycle disagreement on stopped sandboxes.
+- Record time-to-usable (`create -> seed -> setup -> healthz -> Connect registered`) as the
+  Phase 3b performance metric.
 
 **Acceptance criteria.** AC-3.1 … AC-3.7 (incl. demo AC-3.7)
 
@@ -468,13 +469,15 @@ _Part B — Container driver:_
     silently fall back to a local environment.
 24. **AC-3.6** Session-lifetime handling: remaining lifetime is surfaced; the keepalive loop
     extends the deadline while a session is active; a sandbox that lapses at the plan cap
-    pauses (auto-snapshot) and surfaces an explicit lapsed state — a mid-turn agent stream
-    surfaces an explicit error, never a silent hang.
+    persists filesystem state and surfaces an explicit lapsed state; Resume restarts
+    `katacode serve` and re-registers Connect. A mid-turn agent stream surfaces an explicit
+    error, never a silent hang.
 25. **AC-3.7 (Demo & e2e)** Configure a Vercel target (BYOC access-token trio) → start a
     session → boots in cloud, reachable via the public URL over `wss`, agent turn completes
-    cloud-side, Connect-visible. Settings/config validation and (free-tier credentialed)
-    provision/boot slices are e2e-automated (tagged `@environments-deploy`); any slice needing
-    credentials unavailable in CI uses a recorded manual UAT, per the standing rule.
+    cloud-side, Connect-visible, with time-to-usable recorded. Settings/config validation and
+    credentialed provision/boot slices are e2e-automated where credentials are available
+    (tagged `@environments-deploy`); any slice needing credentials unavailable in CI uses a
+    recorded manual UAT, per the standing rule.
 
 **Phase 4 — Composer start/move**
 
@@ -567,16 +570,17 @@ _Part B — Container driver:_
 
 - **Managed Kata Cloud product** (~$20/mo one-click, Kata-provisioned-and-billed infra). This
   roadmap is the open-source BYOC foundation; the managed product builds on it later.
-- **Other cloud drivers (Cloudflare, Hetzner, DigitalOcean).** The SPI accommodates them; Vercel
-  is the first cloud driver ([ADR 0005](/adrs/0005-vercel-first-cloud-driver.md)). Cloudflare
-  (named tunnels on the user's zone) adds a custom-domain story when a user need justifies a
-  tunnels spike; Hetzner/DO (`ssh-tunnel`, ephemeral-capable) suit persistent unattended agents.
-  All are the user's choice under BYOC.
+- **Other cloud and service drivers.** The SPI accommodates them; Vercel Sandbox is the first
+  cloud sandbox driver ([ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md)).
+  Railway Sandbox, Railway Service, E2B, Daytona, Hetzner, Cloudflare, and DigitalOcean remain
+  future BYOC targets.
 - **Live session migration.** V1 move starts a fresh session with a warning; carrying in-flight
   provider/terminal/orchestration state across locations is deferred.
 - **Persistent cloud workspaces / durable disk.** Ephemeral + snapshot reuse only.
 - **Multi-repo environments / repo groups.** One repo per deployment in V1.
-- **OAuth/session forwarding for provider auth.** Injected API-key/token secrets only.
+- **Provider account OAuth inside the host app.** Cloud OAuth credentials are captured through
+  provider CLI login flows and stored as credential files; in-app provider OAuth account linking
+  is deferred.
 - **Team/shared environments, usage/billing dashboards, network egress allowlists** as full
   features (network-access control may appear as a stored setting in Phase 2 without a full
   enforcement engine).
@@ -589,22 +593,20 @@ _Part B — Container driver:_
   cloud; an
   unregistered deployment is treated as a failed provision, not a silent success.
 - **Sandbox lifetime limits.** Cloud sandboxes are ephemeral with provider-imposed caps (Vercel:
-  45 min Hobby / 5 hr Pro+; `extendTimeout` is additive). Mitigation: keepalive loop via
-  `renewTimeout`; surface remaining lifetime; pause/resume on lapse (auto-snapshot +
-  `resume: true`) with explicit mid-turn errors (AC-3.6); rely on git branch sync so disposal
-  never loses pushed work (AC-4.7); fast boot via snapshots (Phase 5).
+  45 min Hobby / 24 hr Pro+). Mitigation: keepalive loop via `renewTimeout`; surface remaining
+  lifetime; explicit lapsed/resume state with filesystem snapshots and mid-turn errors
+  (AC-3.6); rely on git branch sync so disposal never loses pushed work (AC-4.7); fast boot via
+  snapshots (Phase 5).
 - **Container driver port/isolation correctness.** The whole point is no port collisions.
   Mitigation: AC-1.5 verifies two concurrent containers don't collide; the container driver
   allocates isolated port mappings.
 - **Secret handling.** Injecting provider/API secrets into a sandbox is sensitive. Mitigation:
   reuse `ServerSecretStore` + the provider-instance redaction; inject only at boot as env vars;
   never log; never commit; redact in API/logs; scope per instance/repo.
-- **Vercel platform constraints.** No custom images (snapshot-bake only), ≤4 exposed ports
-  (none <1024), region `iad1` only, no nested containers, documented SDK footguns (tombstone
-  snapshots, `currentSnapshotId` aliasing, `list()`/`get()` disagreement). Mitigation: all
-  live-verified with workarounds in the AgentBox findings
-  (`/Volumes/EVO/repos/agentbox/docs/vercel-sandbox-findings.md`); the Phase 3 deep-dive
-  addresses each; environment configs needing in-sandbox Docker fail loud on this driver.
+- **Vercel platform constraints.** Built-in runtimes use Amazon Linux 2023, VCR custom images
+  are beta, built-in provisioning currently runs in `iad1`, and in-sandbox Docker is unsupported
+  for V1. Mitigation: the Phase 3b spec supports runtime/image/snapshot sources explicitly,
+  records time-to-usable, and fails loud for Docker-required environment configs.
 - **SPI churn.** Freezing the SPI too late forces rework in `sandbox-docker`. Mitigation: lock
   the SPI in the Phase 1 deep-dive (Part A) before driver implementation; validate the shape against
   AgentBox's `CloudBackend`.
@@ -619,8 +621,8 @@ _Part B — Container driver:_
     (workspace/git seeding, snapshot/checkpoint restore with stale-snapshot fallback, credential
     injection, lifecycle re-ensure on wake).
   - `packages/sandbox-docker/src/*` — the local-container driver this roadmap's Phase 1 mirrors.
-  - `packages/sandbox-vercel/src/backend.ts` — the production Vercel driver Phase 3 mirrors
-    (keepalive/`renewTimeout`, snapshot-bake prepare, SDK footgun guards);
+  - `packages/sandbox-vercel/src/backend.ts` — the production Vercel driver Phase 3 references
+    for keepalive, `renewTimeout`, snapshot/source handling, and SDK guards;
     `packages/sandbox-hetzner/src/backend.ts` — the ssh-tunnel reachability model for future
     drivers.
   - `docs/vercel-sandbox-findings.md` + `docs/vercel-backlog.md` — live-verified platform
@@ -637,11 +639,11 @@ _Part B — Container driver:_
   passing via `vp run e2e --project desktop-dev --grep @environments-deploy`. This is the standing
   rule codified as each phase's demo AC (AC-1.13, AC-2.6, AC-3.7, AC-4.8, AC-5.5, AC-6.5).
 - **Where full automation isn't possible** (e.g. Phase 3 slices needing credentials unavailable
-  in CI), the demo is a recorded manual UAT with the live walkthrough as evidence; the
-  settings/config-validation and free-tier-credentialed slices stay e2e-automated.
+  in CI), the demo is a recorded manual UAT with the live walkthrough as evidence; settings and
+  config-validation slices stay e2e-automated.
 - Per-phase specs carry detailed test plans. At minimum each phase satisfies its ACs via unit
   tests (contracts/resolver/registry), integration/UAT against a real container (Phase 1, no
-  credentials) and a real Vercel sandbox (Phase 3, user credentials — free Hobby tier works),
+  credentials) and a real Vercel sandbox (Phase 3, maintainer credentials),
   plus the per-phase e2e test above.
 - CI parity gates (`vp check`, `vp run typecheck`, `vp run test`, `vp run release:smoke`) pass
   for every phase before completion (per AGENTS.md).
@@ -665,13 +667,13 @@ _Part B — Container driver:_
 
 - **Approved scope:** six phases (Phase 1 merges the former foundations phase into the
   container-driver phase as two parts); **BYOC, free and open source**; container driver
-  first (Docker/OrbStack), Vercel cloud driver second ([ADR 0005](/adrs/0005-vercel-first-cloud-driver.md));
+  first (Docker/OrbStack), Vercel cloud sandbox driver second ([ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md));
   one capability-based SandboxProvider SPI (AgentBox-shaped, local + cloud under one SPI);
   ephemeral + snapshot; repo-file-first env config; full Kata server in sandbox reached via
   Connect (loopback for container, public sandbox URL for cloud) + Kata token; injected secrets; git branch-sync move with **fresh-session-on-move +
   warning** in V1; every deployment auto-registers with Connect; **every phase ships a
   user-facing demo proven by walkthrough then encoded as `@environments-deploy` e2e.**
-- **Non-goals:** managed Kata Cloud product, other cloud drivers (incl. Cloudflare), live
+- **Non-goals:** managed Kata Cloud product, other cloud/service drivers, live
   session migration,
   persistent disk, multi-repo, OAuth forwarding, billing.
 - **Required verification:** each phase's ACs + CI parity gates; `@environments-deploy` e2e tag.
