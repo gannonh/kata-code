@@ -4,9 +4,11 @@
  * uncompressed ustar tar; Node ships no `tar` module and the repo has no tar
  * dependency, so a ~60-line writer covers both seed paths.
  *
- * All entries (files and directories) carry the `katacode` uid/gid (100/101)
- * so Docker's archive extract creates katacode-owned files in the container —
- * no root-owned tree, no `git` dubious-ownership failure, no `chown` step.
+ * All file entries carry the `katacode` uid/gid (100/101) so Docker's archive
+ * extract creates katacode-owned files in the container — no root-owned tree,
+ * no `git` dubious-ownership failure. Directory entries are not emitted (Docker
+ * creates parent dirs as root), so a post-extraction `chown -R` in the
+ * copyInto driver fixes intermediate directory ownership.
  *
  * @module ustarWriter
  */
@@ -19,19 +21,27 @@ export const KATACODE_GID = 101;
 export interface UstarFile {
   readonly relativePath: string;
   readonly absolutePath: string;
+  /** File mode (e.g. 0o755 for executables). Defaults to 0o644 when omitted. */
+  readonly mode?: number;
 }
 
 /** A pre-loaded file to pack: its in-archive relative path and the content bytes. */
 export interface UstarContent {
   readonly relativePath: string;
   readonly content: Buffer;
+  /** File mode (e.g. 0o755 for executables). Defaults to 0o644 when omitted. */
+  readonly mode?: number;
 }
 
 /**
  * Pack the selected files into a ustar tar archive. Directory entries are
- * emitted (with katacode uid/gid) for every directory containing a selected
- * file so Docker's archive extract creates katacode-owned directories. The
- * archive ends with two 512-byte zero blocks.
+ * NOT emitted: Docker's `PUT /containers/{id}/archive` calls `mkdir` for each
+ * directory entry and fails with "file exists" when the directory already
+ * exists (e.g. from a previous seed or baked into the image). Docker creates
+ * intermediate parent directories automatically when extracting file entries.
+ * Ownership of intermediate directories is handled by a post-extraction
+ * `chown -R` in the copyInto driver. The archive ends with two 512-byte zero
+ * blocks.
  *
  * `files` are read from disk; `contents` are pre-loaded (used by the credential
  * seed for sanitized config files built in-memory). Both are packed the same
@@ -44,24 +54,17 @@ export async function packUstarArchive(
   const { readFile } = await import("node:fs/promises");
   const chunks: Buffer[] = [];
 
-  // Directory entries are NOT emitted: Docker's `PUT /containers/{id}/archive`
-  // calls `mkdir` for each directory entry and fails with "file exists" when
-  // the directory already exists (e.g. from a previous seed or baked into the
-  // image). Docker creates intermediate parent directories automatically when
-  // extracting file entries. Ownership of intermediate directories is handled
-  // by a post-extraction `chown -R` in the copyInto driver.
-
   // Pre-loaded contents first (sanitized configs), then disk-read files.
-  for (const { relativePath, content } of contents) {
-    chunks.push(makeUstarFileHeader(relativePath, content.length));
+  for (const { relativePath, content, mode } of contents) {
+    chunks.push(makeUstarFileHeader(relativePath, content.length, mode));
     chunks.push(content);
     const pad = (512 - (content.length % 512)) % 512;
     if (pad > 0) chunks.push(Buffer.alloc(pad, 0));
   }
 
-  for (const { relativePath, absolutePath } of files) {
+  for (const { relativePath, absolutePath, mode } of files) {
     const content = await readFile(absolutePath);
-    chunks.push(makeUstarFileHeader(relativePath, content.length));
+    chunks.push(makeUstarFileHeader(relativePath, content.length, mode));
     chunks.push(content);
     const pad = (512 - (content.length % 512)) % 512;
     if (pad > 0) chunks.push(Buffer.alloc(pad, 0));
@@ -72,12 +75,12 @@ export async function packUstarArchive(
 }
 
 /** Build a 512-byte ustar header for a regular file. */
-export function makeUstarFileHeader(relativePath: string, size: number): Buffer {
+export function makeUstarFileHeader(relativePath: string, size: number, mode = 0o644): Buffer {
   const header = Buffer.alloc(512, 0);
   const { name, prefix } = splitUstarName(relativePath);
   name.copy(header, 0);
   if (prefix) prefix.copy(header, 345); // prefix (155)
-  header.write("0000644\0", 100, "ascii"); // mode
+  header.write(`${(mode & 0o777).toString(8).padStart(7, "0")}\0`, 100, "ascii"); // mode
   header.write(octal(KATACODE_UID, 7), 108, "ascii"); // uid
   header.write(octal(KATACODE_GID, 7), 116, "ascii"); // gid
   header.write(`${size.toString(8).padStart(11, "0")}\0`, 124, "ascii"); // size

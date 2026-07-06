@@ -6,6 +6,7 @@ export const E2E_TAGS = {
   agent: "@agent",
   pi: "@pi",
   cursor: "@cursor",
+  sandbox: "@sandbox",
   environmentsDeploy: "@environments-deploy",
 } as const;
 

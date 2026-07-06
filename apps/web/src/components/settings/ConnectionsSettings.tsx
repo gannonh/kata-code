@@ -1542,8 +1542,7 @@ function SavedBackendListRow({
   const versionMismatch = resolveServerConfigVersionMismatch(runtime?.serverConfig);
   const environmentTypeLabel = resolveEnvironmentTypeLabel(record);
   const metadataBits = [
-    environmentTypeLabel,
-    record.desktopSsh ? `SSH ${formatDesktopSshTarget(record.desktopSsh)}` : null,
+    record.desktopSsh ? `SSH ${formatDesktopSshTarget(record.desktopSsh)}` : environmentTypeLabel,
     record.lastConnectedAt
       ? `Last connected ${formatAccessTimestamp(record.lastConnectedAt)}`
       : null,

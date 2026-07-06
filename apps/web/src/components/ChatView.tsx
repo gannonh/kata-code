@@ -2525,7 +2525,7 @@ function ChatViewContent(props: ChatViewProps) {
           worktreePath: activeThreadWorktreePath,
         }),
       })
-      .catch(() => undefined);
+      .catch(handleTerminalOpenError);
   }, [
     activeKnownTerminalIds,
     activeProject,
@@ -2564,7 +2564,7 @@ function ChatViewContent(props: ChatViewProps) {
             worktreePath: activeThreadWorktreePath,
           }),
         })
-        .catch(() => undefined);
+        .catch(handleTerminalOpenError);
     },
     [
       activeKnownTerminalIds,

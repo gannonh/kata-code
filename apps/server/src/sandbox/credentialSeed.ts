@@ -18,7 +18,7 @@
  *   lose auth and the two can be uploaded independently.
  *
  * Provider-agnostic: the same archives feed the local Docker driver's
- * `copyInto` now and the Railway cloud driver's file upload later.
+ * `copyInto` now and cloud sandbox drivers' file upload later.
  *
  * @module credentialSeed
  */
@@ -389,6 +389,7 @@ export function buildCredentialSeedArchives(
     const staticFiles: UstarFile[] = [];
     const staticContents: UstarContent[] = [];
     const credentialFiles: UstarFile[] = [];
+    const credentialContents: UstarContent[] = [];
 
     for (const spec of PROVIDER_SPECS) {
       const hostDir = path.join(input.hostHome, spec.hostDir);
@@ -429,9 +430,10 @@ export function buildCredentialSeedArchives(
     if (!hasClaudeCredentials && (yield* HostProcessPlatform) === "darwin") {
       const keychainCreds = yield* extractClaudeKeychainCredentials();
       if (keychainCreds !== null) {
-        credentialFiles.push({
+        credentialContents.push({
           relativePath: ".claude/.credentials.json",
-          absolutePath: keychainCreds,
+          content: keychainCreds,
+          mode: 0o600,
         });
       }
     }
@@ -449,9 +451,9 @@ export function buildCredentialSeedArchives(
         : null;
 
     const credentialsArchive =
-      credentialFiles.length > 0
+      credentialFiles.length > 0 || credentialContents.length > 0
         ? yield* Effect.tryPromise({
-            try: () => packUstarArchive(credentialFiles),
+            try: () => packUstarArchive(credentialFiles, credentialContents),
             catch: (cause) =>
               new CredentialSeedError({
                 message: `failed to pack credentials archive: ${String(cause)}`,
@@ -489,11 +491,11 @@ function parseKeychainBlob(raw: string): { claudeAiOauth?: { refreshToken?: unkn
 /** Extract Claude OAuth credentials from the macOS Keychain.
  *  Claude Code on macOS stores `~/.claude/.credentials.json` content in the
  *  Keychain under `Claude Code-credentials`. This runs `security
- *  find-generic-password -s "Claude Code-credentials" -w`, writes the JSON to
- *  a temp file, and returns the path for inclusion in the credentials archive.
- *  Returns `null` on non-macOS, when the Keychain entry is absent, or when the
- *  user denies Keychain access. */
-function extractClaudeKeychainCredentials(): Effect.Effect<string | null, CredentialSeedError> {
+ *  find-generic-password -s "Claude Code-credentials" -w` and returns the
+ *  JSON as a Buffer for inclusion in the credentials archive as an in-memory
+ *  UstarContent (no temp file on disk). Returns `null` on non-macOS, when the
+ *  Keychain entry is absent, or when the user denies Keychain access. */
+function extractClaudeKeychainCredentials(): Effect.Effect<Buffer | null, CredentialSeedError> {
   return Effect.gen(function* () {
     if ((yield* HostProcessPlatform) !== "darwin") return null;
     const { execFile } = yield* Effect.promise(() => import("node:child_process").then((m) => m));
@@ -518,16 +520,7 @@ function extractClaudeKeychainCredentials(): Effect.Effect<string | null, Creden
     if (parsed === null) {
       return null;
     }
-    // Write to a temp file so the ustar writer can read it as a UstarFile.
-    const { writeFile, mkdtemp } = yield* Effect.promise(() =>
-      import("node:fs/promises").then((m) => m),
-    );
-    const { join } = yield* Effect.promise(() => import("node:path").then((m) => m));
-    const { tmpdir } = yield* Effect.promise(() => import("node:os").then((m) => m));
-    const dir = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "kata-claude-cred-")));
-    const filePath = join(dir, ".credentials.json");
-    yield* Effect.promise(() => writeFile(filePath, trimmed, { mode: 0o600 }));
-    return filePath;
+    return Buffer.from(trimmed, "utf8");
   });
 }
 
@@ -618,6 +611,16 @@ function walkDir(
             }),
         });
         const resolvedTarget = path.isAbsolute(target) ? target : path.resolve(currentDir, target);
+        // Security: reject symlinks that escape the provider's config dir.
+        // A symlink like ~/.codex/AGENTS.md -> ~/.ssh/id_rsa would copy
+        // arbitrary host files into the sandbox. Only allow targets within
+        // the provider's root config directory.
+        if (!isWithinDir(resolvedTarget, root)) {
+          yield* Effect.logWarning(
+            `[credentialSeed] skipping symlink ${absolutePath} -> ${resolvedTarget} (outside ${root})`,
+          );
+          continue;
+        }
         const exists = yield* pathExists(resolvedTarget);
         if (!exists) continue; // broken symlink — skip
         const targetStat = yield* Effect.tryPromise({
@@ -649,6 +652,15 @@ function walkDir(
       }
     }
   });
+}
+
+/** True when `target` is `dir` itself or a descendant of `dir` (lexicographic
+ *  check after normalization — safe for refusing symlinks that escape a
+ *  provider's config directory). */
+function isWithinDir(target: string, dir: string): boolean {
+  const normalizedTarget = path.resolve(target) + path.sep;
+  const normalizedDir = path.resolve(dir) + path.sep;
+  return normalizedTarget === normalizedDir || normalizedTarget.startsWith(normalizedDir);
 }
 
 /** Check whether a path exists (file or dir). Never fails. */

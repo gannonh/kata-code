@@ -403,64 +403,68 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
   });
 
-  test("started sandbox has /bin/sh as SHELL and provider CLIs on PATH (AC-3a.1/2/3)", async ({
-    appWindow,
-  }, testInfo) => {
-    await assertDockerDaemonReachable();
-    await assertKatacodeImageBuilt();
+  test(
+    "started sandbox has /bin/sh as SHELL and provider CLIs on PATH (AC-3a.1/2/3)",
+    { tag: [E2E_TAGS.sandbox] },
+    async ({ appWindow }, testInfo) => {
+      await assertDockerDaemonReachable();
+      await assertKatacodeImageBuilt();
 
-    const page = appWindow;
-    await openConnectionsSettings(page);
-    await dismissBlockingToasts(page);
+      const page = appWindow;
+      await openConnectionsSettings(page);
+      await dismissBlockingToasts(page);
 
-    const card = await addContainerDeploymentTarget(page, "E2E Phase3a");
-    await card.getByRole("button", { name: /Toggle .* details/ }).click();
+      const card = await addContainerDeploymentTarget(page, "E2E Phase3a");
+      await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Start session" }).click();
-    const sessionLine = card.getByText(/Session ready:/);
-    await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
-    await page.screenshot({
-      path: testInfo.outputPath("phase3a-session-ready.png"),
-      fullPage: true,
-    });
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Start session" }).click();
+      const sessionLine = card.getByText(/Session ready:/);
+      await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      await page.screenshot({
+        path: testInfo.outputPath("phase3a-session-ready.png"),
+        fullPage: true,
+      });
 
-    let containerId = "";
-    await expect
-      .poll(
-        async () => {
-          containerId = (await findSandboxContainerId("docker_e2e_phase3a")) ?? "";
-          return containerId;
-        },
-        { timeout: E2E_TIMEOUTS.agentReplyMs },
-      )
-      .not.toBe("");
+      let containerId = "";
+      await expect
+        .poll(
+          async () => {
+            containerId = (await findSandboxContainerId("docker_e2e_phase3a")) ?? "";
+            return containerId;
+          },
+          { timeout: E2E_TIMEOUTS.agentReplyMs },
+        )
+        .not.toBe("");
 
-    // AC-3a.2: SHELL=/bin/sh is set in the runtime stage and /bin/sh exists.
-    const shellEnv = await execInContainer(containerId, 'printf "%s" "$SHELL"');
-    expect(shellEnv.exitCode).toBe(0);
-    expect(shellEnv.stdout).toBe("/bin/sh");
+      // AC-3a.2: SHELL=/bin/sh is set in the runtime stage and /bin/sh exists.
+      const shellEnv = await execInContainer(containerId, 'printf "%s" "$SHELL"');
+      expect(shellEnv.exitCode).toBe(0);
+      expect(shellEnv.stdout).toBe("/bin/sh");
 
-    const shExists = await execInContainer(containerId, "test -e /bin/sh && echo ok");
-    expect(shExists.exitCode).toBe(0);
-    expect(shExists.stdout.trim()).toBe("ok");
+      const shExists = await execInContainer(containerId, "test -e /bin/sh && echo ok");
+      expect(shExists.exitCode).toBe(0);
+      expect(shExists.stdout.trim()).toBe("ok");
 
-    // AC-3a.3: the in-container shell is interactive (echo runs).
-    const echo = await execInContainer(containerId, "echo terminal-alive");
-    expect(echo.exitCode).toBe(0);
-    expect(echo.stdout.trim()).toBe("terminal-alive");
+      // AC-3a.3: the in-container shell is interactive (echo runs).
+      const echo = await execInContainer(containerId, "echo terminal-alive");
+      expect(echo.exitCode).toBe(0);
+      expect(echo.stdout.trim()).toBe("terminal-alive");
 
-    // AC-3a.1: provider CLIs and git resolve on PATH inside the image.
-    for (const binary of ["codex", "agent", "grok", "claude", "opencode", "git"]) {
-      const probe = await execInContainer(containerId, `command -v ${binary}`);
-      expect(probe.exitCode, `${binary} not on PATH in sandbox container: ${probe.stderr}`).toBe(0);
-    }
+      // AC-3a.1: provider CLIs and git resolve on PATH inside the image.
+      for (const binary of ["codex", "agent", "grok", "claude", "opencode", "pi", "git"]) {
+        const probe = await execInContainer(containerId, `command -v ${binary}`);
+        expect(probe.exitCode, `${binary} not on PATH in sandbox container: ${probe.stderr}`).toBe(
+          0,
+        );
+      }
 
-    await card.getByRole("button", { name: "Dispose" }).click();
-    await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await card.getByRole("button", { name: "Dispose" }).click();
+      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-    await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
-  });
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
+      await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+    },
+  );
 });

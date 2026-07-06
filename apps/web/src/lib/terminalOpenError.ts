@@ -23,6 +23,7 @@ export function formatTerminalOpenErrorMessage(error: unknown): string {
  * chain without changing the surrounding control flow.
  */
 export function handleTerminalOpenError(error: unknown): void {
+  console.error("[terminal] failed to open", error);
   toastManager.add({
     type: "error",
     title: "Terminal failed to open",

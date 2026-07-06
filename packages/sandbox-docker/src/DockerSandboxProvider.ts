@@ -247,7 +247,7 @@ export const DockerSandboxProvider: SandboxProvider = {
         // Ensure all extracted files and intermediate directories are
         // katacode-owned — Docker creates parent dirs as root when directory
         // entries are absent from the tar (see ustarWriter).
-        const chown = yield* DockerSandboxProvider.exec(handle, `chown -R 100:101 ${destPath}`);
+        const chown = yield* DockerSandboxProvider.exec(handle, `chown -R 100:101 '${destPath}'`);
         if (chown.exitCode !== 0) {
           return yield* new SandboxProviderError({
             reason: "provision-failed",

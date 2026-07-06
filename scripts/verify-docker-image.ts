@@ -14,13 +14,14 @@ import { spawn } from "node:child_process";
 
 const IMAGE = process.env.KATACODE_DOCKER_IMAGE ?? "katacode:local";
 
-const REQUIRED_BINARIES = ["codex", "agent", "grok", "claude", "opencode", "git"] as const;
+const REQUIRED_BINARIES = ["codex", "agent", "grok", "claude", "opencode", "pi", "git"] as const;
 
 /** Run the probe inside the image and reject with combined stderr on failure. */
 function runDocker(probe: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn("docker", ["run", "--rm", "--entrypoint", "sh", IMAGE, "-c", probe], {
       stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
     });
     let stderr = "";
     child.stdout?.pipe(process.stdout);

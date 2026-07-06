@@ -51,6 +51,7 @@ interface SelectedFile {
   readonly relativePath: string;
   readonly absolutePath: string;
   readonly size: number;
+  readonly mode: number;
 }
 
 /**
@@ -157,7 +158,7 @@ async function selectFiles(
             message: `seed archive exceeded the byte cap (${maxBytes}) at ${relativePath}; reduce the repo size or raise the limit`,
           });
         }
-        selected.push({ relativePath, absolutePath, size: stat.size });
+        selected.push({ relativePath, absolutePath, size: stat.size, mode: stat.mode & 0o777 });
         totalBytes += stat.size;
       } else if (stat.isDirectory()) {
         await walk(absolutePath);
