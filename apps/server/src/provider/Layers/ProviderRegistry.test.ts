@@ -1343,9 +1343,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                     cursor: {
                       enabled: false,
                     },
-                    grok: {
-                      enabled: false,
-                    },
                   },
                 }),
               ),
@@ -1406,7 +1403,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                 "claudeAgent",
                 "codex",
                 "cursor",
-                "grok",
                 "opencode",
                 "pi",
               ]);
