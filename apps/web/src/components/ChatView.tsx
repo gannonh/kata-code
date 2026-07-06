@@ -4703,7 +4703,7 @@ function ChatViewContent(props: ChatViewProps) {
                     activeThread={activeThread}
                     isServerThread={isServerThread}
                     isLocalDraftThread={isLocalDraftThread}
-                    isSandboxEnvironment={activeSavedEnvironmentRecord !== null}
+                    isSandboxEnvironment={activeSavedEnvironmentRecord?.sandbox != null}
                     phase={phase}
                     isConnecting={isConnecting}
                     isSendBusy={isSendBusy}

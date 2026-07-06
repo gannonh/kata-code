@@ -19,8 +19,3 @@ export {
   resolveDockerSocket,
 } from "./dockerEngine.ts";
 export type { DockerResponse, DockerBufferResponse } from "./dockerEngine.ts";
-export {
-  buildCredentialBindMounts,
-  type CredentialBindMount,
-  type CredentialBindMountInput,
-} from "./credentialBindMounts.ts";

@@ -263,11 +263,6 @@ function sanitizeCodexConfig(raw: string, hostHome: string): string | null {
   return changed ? result.join("\n") : null;
 }
 
-/**
- * Sanitize `~/.claude.json`: rewrite `projects` keys that reference host paths
- * to point at `/workspace` so the in-box claude trusts the sandbox workspace.
- * Returns sanitized text or `null` when unchanged/unparseable.
- */
 /** Sanitize Pi `settings.json`: strip the `packages` list so the in-container
  *  Pi SDK doesn't try to `npm install` host-installed extensions (esbuild,
  *  koffi, etc.) that have platform-specific binaries and block the provider
@@ -284,6 +279,11 @@ function sanitizePiSettings(raw: string, _hostHome: string): string | null {
   }
 }
 
+/**
+ * Sanitize `~/.claude.json`: add `/workspace` as a trusted project so the
+ * in-box claude trusts the sandbox workspace. Returns sanitized text or
+ * `null` when unchanged/unparseable.
+ */
 function sanitizeClaudeJson(raw: string, _hostHome: string): string | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
