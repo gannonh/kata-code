@@ -81,13 +81,17 @@ export function SavedEnvironmentEditor({
   onSelectedRepositoryKeyChange,
   onChange,
 }: SavedEnvironmentEditorProps) {
-  const repositoryProjects = useMemo(
-    () =>
-      projects.filter((project): project is RepositoryProject =>
-        Boolean(project.repositoryIdentity?.canonicalKey),
-      ),
-    [projects],
-  );
+  const repositoryProjects = useMemo(() => {
+    const seen = new Set<string>();
+    return projects.filter((project): project is RepositoryProject => {
+      const key = project.repositoryIdentity?.canonicalKey;
+      if (!key) return false;
+      const keyStr = key as string;
+      if (seen.has(keyStr)) return false;
+      seen.add(keyStr);
+      return true;
+    });
+  }, [projects]);
   const selectedProject = findSelectedProject(repositoryProjects, selectedRepositoryKey);
   const repositoryKey = selectedProject ? projectRepositoryKey(selectedProject) : undefined;
   const savedEnvironment: SavedSandboxEnvironment | undefined = repositoryKey
