@@ -613,29 +613,25 @@ function exchangeBootstrapToken(input: {
 function resolveConnectAuthToken(
   connectAuthToken: SandboxStartSessionInput["connectAuthToken"],
 ): Effect.Effect<string, SandboxRpcError, CliTokenManager.CloudCliTokenManager> {
-  if (connectAuthToken) return Effect.succeed(connectAuthToken);
-  return Effect.gen(function* () {
-    const tokens = yield* CliTokenManager.CloudCliTokenManager;
-    const token = yield* tokens.getExisting.pipe(
-      Effect.mapError(
-        (cause) =>
-          new SandboxRpcError({
-            reason: "connect-failed",
-            message: `Could not read Kata Code Connect authorization: ${cause.message}`,
-          }),
-      ),
-    );
-    return yield* Option.match(token, {
-      onNone: () =>
-        Effect.fail(
-          new SandboxRpcError({
-            reason: "connect-failed",
-            message: "Sign in to Kata Code Connect before starting a deployment session.",
-          }),
-        ),
-      onSome: (value) => Effect.succeed(value.accessToken),
-    });
-  });
+  // Prefer the CLI token manager (auto-refreshable OAuth token, persists
+  // across sessions). The CLI token has a refresh mechanism and survives
+  // provisioning delays (Vercel sandboxes take 2-3 min, easily exceeding
+  // a Clerk session JWT's 60 s TTL). Fall back to the UI-provided
+  // short-lived Clerk JWT when no CLI credential exists.
+  return Effect.flatMap(CliTokenManager.CloudCliTokenManager, (tokens) => tokens.getExisting).pipe(
+    Effect.catch(() => Effect.succeed(Option.none<never>())),
+    Effect.flatMap((cliToken): Effect.Effect<string, SandboxRpcError> => {
+      if (Option.isSome(cliToken)) return Effect.succeed(cliToken.value.accessToken);
+      if (connectAuthToken) return Effect.succeed(connectAuthToken);
+      return Effect.fail(
+        new SandboxRpcError({
+          reason: "connect-failed",
+          message:
+            "No Kata Code Connect credential found. Run `npx @kata-sh/code-cli connect login` to authorize, or sign in to Kata Code Connect from the desktop app.",
+        }),
+      );
+    }),
+  );
 }
 
 function registerSandboxWithConnect(input: {
