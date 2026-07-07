@@ -264,6 +264,17 @@ function runCredentialSeed(
   });
 }
 
+/** Append a user-facing hint when a Connect registration error is caused by
+ *  a stale or invalid relay bearer token (e.g. after a relay redeploy). The
+ *  desktop UI passes a Clerk session token as `connectAuthToken`; signing out
+ *  and back in refreshes it. */
+function withConnectAuthHint(message: string): string {
+  if (/invalid_bearer|RelayAuthInvalidError|auth_invalid/i.test(message)) {
+    return `${message} — Sign out and back in to Kata Code Connect to refresh your session, then retry.`;
+  }
+  return message;
+}
+
 /** Collect provision env tuples and secret values for setup-output redaction. */
 function buildProvisionEnvironment(input: {
   readonly bootstrapToken: string;
@@ -385,7 +396,7 @@ function registerAndFinalizeSession(input: {
             Effect.fail(
               new SandboxRpcError({
                 reason: "connect-failed",
-                message: `Connect auto-registration failed: ${error.message}`,
+                message: withConnectAuthHint(`Connect auto-registration failed: ${error.message}`),
               }),
             ),
           ),
@@ -1143,7 +1154,9 @@ export const SandboxServiceLive = {
                 Effect.fail(
                   new SandboxRpcError({
                     reason: "connect-failed",
-                    message: `Connect auto-registration failed: ${error.message}`,
+                    message: withConnectAuthHint(
+                      `Connect auto-registration failed: ${error.message}`,
+                    ),
                   }),
                 ),
               ),
