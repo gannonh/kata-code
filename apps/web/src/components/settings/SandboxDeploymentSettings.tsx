@@ -479,6 +479,28 @@ export function SandboxDeploymentSettings() {
           const result = await getPrimaryEnvironmentConnection().client.sandbox.createSnapshot({
             instanceId: instanceId as never,
           });
+          const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[
+            instanceId
+          ];
+          if (instance !== undefined && (instance.driver as string) === (VERCEL_KIND as string)) {
+            const config =
+              instance.config !== null && typeof instance.config === "object"
+                ? { ...(instance.config as Record<string, unknown>) }
+                : {};
+            updateSettings({
+              sandboxProviderInstances: {
+                ...instanceMap,
+                [instanceId]: {
+                  ...instance,
+                  config: {
+                    ...config,
+                    sourceType: "snapshot",
+                    snapshotId: result.snapshotId,
+                  },
+                },
+              },
+            });
+          }
           toastManager.add({
             type: "success",
             title: "Snapshot created",
@@ -493,7 +515,7 @@ export function SandboxDeploymentSettings() {
           });
         }
       }),
-    [refreshList, withBusy],
+    [instanceMap, refreshList, updateSettings, withBusy],
   );
 
   const handleRemove = useCallback(
