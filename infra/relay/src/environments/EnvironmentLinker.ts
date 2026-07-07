@@ -240,19 +240,29 @@ const make = Effect.gen(function* () {
           reason: "challenge_invalid",
         });
       }
-      if (input.request.managedTunnelsEnabled && !isLoopbackManagedTunnelOrigin(verified.origin)) {
+      // Public sandboxes (providerKind === "manual") have a public hostname and
+      // do not need a loopback origin.  Only enforce the loopback check for
+      // provider kinds that require a loopback tunnel.
+      const LOOPBACK_ONLY_KINDS: ReadonlySet<string> = new Set(["cloudflare_tunnel"]);
+      const requiresLoopback = LOOPBACK_ONLY_KINDS.has(verified.endpoint.providerKind);
+      if (
+        input.request.managedTunnelsEnabled &&
+        requiresLoopback &&
+        !isLoopbackManagedTunnelOrigin(verified.origin)
+      ) {
         return yield* new EnvironmentLinkProofInvalid({
           environmentId: verified.environmentId,
           reason: "origin_not_allowed",
         });
       }
-      const provisioned = input.request.managedTunnelsEnabled
-        ? yield* managedEndpointProvider.provision({
-            userId: input.userId,
-            environmentId: verified.environmentId,
-            origin: verified.origin,
-          })
-        : null;
+      const provisioned =
+        input.request.managedTunnelsEnabled && requiresLoopback
+          ? yield* managedEndpointProvider.provision({
+              userId: input.userId,
+              environmentId: verified.environmentId,
+              origin: verified.origin,
+            })
+          : null;
       const endpoint = provisioned?.endpoint ?? verified.endpoint;
       if (!isSecureManagedEndpoint(endpoint)) {
         return yield* new EnvironmentLinkProofInvalid({

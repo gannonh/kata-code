@@ -105,6 +105,50 @@ const makeRequest = Effect.gen(function* () {
   };
 });
 
+const makeManualPublicRequest = Effect.gen(function* () {
+  const now = yield* DateTime.now;
+  const expiresAt = DateTime.add(now, { minutes: 5 });
+  const relayTokens = yield* RelayTokens.RelayTokens;
+  const challenge = yield* relayTokens.issueLinkChallenge({
+    userId: "user_123",
+    request: {
+      notificationsEnabled: true,
+      liveActivitiesEnabled: true,
+      managedTunnelsEnabled: true,
+    },
+    jti: "public-challenge-jti",
+    issuedAtEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
+    expiresAtEpochSeconds: Math.floor(expiresAt.epochMilliseconds / 1_000),
+  });
+  const payload = {
+    iss: wireEnvironmentIssuer("env-vercel-test"),
+    aud: "https://relay.example.test",
+    sub: "env-vercel-test",
+    jti: "public-link-proof-jti",
+    iat: Math.floor(now.epochMilliseconds / 1_000),
+    exp: Math.floor(expiresAt.epochMilliseconds / 1_000),
+    challenge,
+    environmentId: "env-vercel-test" as RelayEnvironmentLinkProofPayload["environmentId"],
+    descriptor: {
+      environmentId: "env-vercel-test" as RelayEnvironmentLinkProofPayload["environmentId"],
+      label: "Vercel Sandbox",
+      platform: { os: "linux", arch: "x64" },
+      serverVersion: "0.0.0-test",
+      capabilities: { repositoryIdentity: true },
+    },
+    environmentPublicKey: environmentKeyPair.publicKey.trim(),
+    endpoint: {
+      httpBaseUrl: "https://sb-example.vercel.run/",
+      wsBaseUrl: "wss://sb-example.vercel.run/",
+      providerKind: "manual",
+    },
+    origin: { localHttpHost: "sb-example.vercel.run", localHttpPort: 443 },
+    scopes: ["agent_activity_notifications", "managed_tunnels"],
+  } satisfies RelayEnvironmentLinkProofPayload;
+  const proof = signTestJwt(payload, RELAY_LINK_PROOF_TYP, environmentKeyPair.privateKey);
+  return { payload, proof };
+});
+
 function testLayer(input?: {
   readonly upsert?: EnvironmentLinks.EnvironmentLinksShape["upsert"];
   readonly consume?: DpopProofs.DpopProofReplayShape["consume"];
@@ -203,5 +247,24 @@ describe("EnvironmentLinker", () => {
       const result = yield* Effect.result(linker.link({ userId: "user_123", request }));
       expect(Result.isFailure(result)).toBe(true);
     }).pipe(Effect.provide(testLayer({ consume: () => Effect.succeed(false) }))),
+  );
+
+  it.effect("allows manual provider kind with non-loopback origin (Vercel sandbox)", () =>
+    Effect.gen(function* () {
+      const { payload, proof } = yield* makeManualPublicRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const result = yield* linker.link({
+        userId: "user_123",
+        request: {
+          proof,
+          notificationsEnabled: true,
+          liveActivitiesEnabled: true,
+          managedTunnelsEnabled: true,
+        },
+      });
+      expect(result.environmentId).toBe(payload.environmentId);
+      expect(result.endpoint.httpBaseUrl).toBe("https://sb-example.vercel.run/");
+      expect(result.endpointRuntime).toBeNull();
+    }).pipe(Effect.provide(testLayer())),
   );
 });
