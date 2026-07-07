@@ -13,11 +13,8 @@
 /** In-sandbox home for the katacode user (created and chowned at bootstrap). */
 export const SANDBOX_HOME = "/home/katacode";
 
-/** The katacode CLI npm package (bin `katacode`). Uses the `nightly` dist-tag
- *  because `latest` (0.0.30, published before Phase 1) lacks
- *  `KATACODE_DESKTOP_BOOTSTRAP_TOKEN` support, causing the `/oauth/token`
- *  exchange to fail with `invalid_credential` during Connect registration. */
-export const KATA_CLI_PACKAGE = "@kata-sh/code-cli@nightly";
+/** The katacode CLI npm package (bin `katacode`). */
+export const KATA_CLI_PACKAGE = "@kata-sh/code-cli";
 
 /**
  * Provider CLIs installed at bootstrap. Mirrors the Dockerfile install list so
