@@ -1685,41 +1685,37 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("rejects cloud link proofs for non-loopback managed endpoint origins", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
+  it.effect(
+    "allows cloud link proofs for non-loopback managed endpoint origins (public/manual sandbox)",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
 
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const linkProofResponse = yield* fetchEffect(linkProofUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          challenge: "relay-link-challenge",
-          relayIssuer: "https://relay.example.test",
-          endpoint: {
-            httpBaseUrl: "https://environment.example.test/",
-            wsBaseUrl: "wss://environment.example.test/ws",
-            providerKind: "manual",
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
+        const linkProofResponse = yield* fetchEffect(linkProofUrl, {
+          method: "POST",
+          headers: {
+            cookie: ownerCookie,
+            "content-type": "application/json",
           },
-          origin: {
-            localHttpHost: "192.168.1.42",
-            localHttpPort: 3773,
-          },
-        }),
-      });
-      const body = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(linkProofResponse);
+          body: jsonRequestBody({
+            challenge: "relay-link-challenge",
+            relayIssuer: "https://relay.example.test",
+            endpoint: {
+              httpBaseUrl: "https://environment.example.test/",
+              wsBaseUrl: "wss://environment.example.test/ws",
+              providerKind: "manual",
+            },
+            origin: {
+              localHttpHost: "192.168.1.42",
+              localHttpPort: 3773,
+            },
+          }),
+        });
 
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        assert.equal(linkProofResponse.status, 200);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect(
