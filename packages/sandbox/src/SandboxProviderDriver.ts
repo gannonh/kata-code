@@ -159,7 +159,7 @@ export interface SandboxProvider {
   exec(
     handle: SandboxHandle,
     command: string,
-    opts?: { readonly cwd?: string },
+    opts?: { readonly cwd?: string; readonly user?: string },
   ): Effect.Effect<SandboxExecResult, SandboxProviderError>;
   /** Resolve how the client reaches a port, per `describe().reachabilityKind`. */
   reachability(

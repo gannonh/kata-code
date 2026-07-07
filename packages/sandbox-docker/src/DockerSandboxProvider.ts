@@ -247,7 +247,9 @@ export const DockerSandboxProvider: SandboxProvider = {
         // Ensure all extracted files and intermediate directories are
         // katacode-owned — Docker creates parent dirs as root when directory
         // entries are absent from the tar (see ustarWriter).
-        const chown = yield* DockerSandboxProvider.exec(handle, `chown -R 100:101 '${destPath}'`);
+        const chown = yield* DockerSandboxProvider.exec(handle, `chown -R 100:101 '${destPath}'`, {
+          user: "root",
+        });
         if (chown.exitCode !== 0) {
           return yield* new SandboxProviderError({
             reason: "provision-failed",
@@ -435,6 +437,7 @@ export const DockerSandboxProvider: SandboxProvider = {
             // Phase 2: honor `opts.cwd` so `install` runs in `/workspace`. The
             // spike verified the Engine API honors `WorkingDir` for exec.
             ...(opts?.cwd !== undefined ? { WorkingDir: opts.cwd } : {}),
+            ...(opts?.user !== undefined ? { User: opts.user } : {}),
             AttachStdout: true,
             AttachStderr: true,
           }),
