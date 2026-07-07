@@ -180,12 +180,21 @@ export function SandboxDeploymentSettings() {
 
   const resolveSelectedProject = useCallback(
     (instanceId: string): Project | undefined => {
+      // Check transient UI state first
       const selectedKey = selectedRepositoryKeyByInstance[instanceId];
       if (selectedKey) {
         const selectedProject = repositoryProjects.find(
           (project) => project.repositoryIdentity?.canonicalKey === selectedKey,
         );
         if (selectedProject) return selectedProject;
+      }
+      // Fall back to persisted repositoryKey from instance config
+      const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
+      if (instance?.repositoryKey) {
+        const persistedProject = repositoryProjects.find(
+          (project) => project.repositoryIdentity?.canonicalKey === instance.repositoryKey,
+        );
+        if (persistedProject) return persistedProject;
       }
       return repositoryProjects[0];
     },
@@ -239,7 +248,9 @@ export function SandboxDeploymentSettings() {
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
-        const explicitRepositoryKey = selectedRepositoryKeyByInstance[instanceId];
+        const explicitRepositoryKey =
+          selectedRepositoryKeyByInstance[instanceId] ??
+          (instance?.repositoryKey as string | undefined);
         const project = explicitRepositoryKey ? resolveSelectedProject(instanceId) : undefined;
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
@@ -303,6 +314,11 @@ export function SandboxDeploymentSettings() {
           }
           refreshManagedRelayEnvironments();
           await refreshList();
+
+          // Persist the repository key so the expanded card shows the right repo on reload
+          if (explicitRepositoryKey && instance) {
+            updateInstance(instanceId, { ...instance, repositoryKey: explicitRepositoryKey });
+          }
 
           if (savedForProjectPicker) {
             toastManager.add({
@@ -572,8 +588,10 @@ export function SandboxDeploymentSettings() {
             const displayName = config.displayName ?? id;
             const enabled = config.enabled ?? true;
             const selectedProject = resolveSelectedProject(id);
+            // Prefer transient UI state, then persisted instance config, then first repo
             const selectedRepositoryKey =
               selectedRepositoryKeyByInstance[id] ??
+              (config.repositoryKey as string | undefined) ??
               (selectedProject?.repositoryIdentity?.canonicalKey as string | undefined);
             return (
               <DeploymentTargetCard
@@ -597,9 +615,10 @@ export function SandboxDeploymentSettings() {
                 onSavedEnvironmentChange={(next) =>
                   updateSettings({ savedSandboxEnvironments: next })
                 }
-                onSelectedRepositoryKeyChange={(repositoryKey) =>
-                  setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }))
-                }
+                onSelectedRepositoryKeyChange={(repositoryKey) => {
+                  setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }));
+                  updateInstance(id, { ...config, repositoryKey });
+                }}
                 onDelete={() => handleRemove(id)}
                 onTest={() => void handleTest(id)}
                 onStart={() => void handleStart(id)}
