@@ -1722,67 +1722,29 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("rejects managed cloud link proofs for manual endpoint providers", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
+  it.effect(
+    "allows managed cloud link proofs for manual endpoint providers with loopback origin",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
 
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const serverPort = Number(new URL(linkProofUrl).port);
-      const linkProofResponse = yield* fetchEffect(linkProofUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          challenge: "relay-link-challenge",
-          relayIssuer: "https://relay.example.test",
-          endpoint: {
-            httpBaseUrl: linkProofUrl.replace("/api/connect/link-proof", ""),
-            wsBaseUrl: linkProofUrl
-              .replace("http://", "ws://")
-              .replace("/api/connect/link-proof", "/ws"),
-            providerKind: "manual",
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
+        const serverPort = Number(new URL(linkProofUrl).port);
+        const linkProofResponse = yield* fetchEffect(linkProofUrl, {
+          method: "POST",
+          headers: {
+            cookie: ownerCookie,
+            "content-type": "application/json",
           },
-          origin: {
-            localHttpHost: "127.0.0.1",
-            localHttpPort: serverPort,
-          },
-        }),
-      });
-      const body = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(linkProofResponse);
-
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud link proofs requested through a public managed endpoint", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const serverPort = Number(new URL(linkProofUrl).port);
-      const linkProofResponse = yield* HttpClient.post("/api/connect/link-proof", {
-        headers: {
-          cookie: yield* getAuthenticatedSessionCookieHeader(),
-          "content-type": "application/json",
-          host: "environment.example.test",
-          "x-forwarded-host": "environment.example.test",
-          "x-forwarded-proto": "https",
-        },
-        body: HttpBody.text(
-          jsonRequestBody({
+          body: jsonRequestBody({
             challenge: "relay-link-challenge",
             relayIssuer: "https://relay.example.test",
             endpoint: {
-              httpBaseUrl: "https://environment.example.test/",
-              wsBaseUrl: "wss://environment.example.test/ws",
+              httpBaseUrl: linkProofUrl.replace("/api/connect/link-proof", ""),
+              wsBaseUrl: linkProofUrl
+                .replace("http://", "ws://")
+                .replace("/api/connect/link-proof", "/ws"),
               providerKind: "manual",
             },
             origin: {
@@ -1790,22 +1752,52 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               localHttpPort: serverPort,
             },
           }),
-          "application/json",
-        ),
-      });
-      const body = (yield* linkProofResponse.json) as {
-        readonly _tag?: string;
-        readonly message?: string;
-      };
+        });
 
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        assert.equal(linkProofResponse.status, 200);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect(
-    "rejects cloud link proofs when a public request spoofs loopback forwarded headers",
+    "allows cloud link proofs through a public managed endpoint with forwarded headers",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
+        const serverPort = Number(new URL(linkProofUrl).port);
+        const linkProofResponse = yield* HttpClient.post("/api/connect/link-proof", {
+          headers: {
+            cookie: yield* getAuthenticatedSessionCookieHeader(),
+            "content-type": "application/json",
+            host: "environment.example.test",
+            "x-forwarded-host": "environment.example.test",
+            "x-forwarded-proto": "https",
+          },
+          body: HttpBody.text(
+            jsonRequestBody({
+              challenge: "relay-link-challenge",
+              relayIssuer: "https://relay.example.test",
+              endpoint: {
+                httpBaseUrl: "https://environment.example.test/",
+                wsBaseUrl: "wss://environment.example.test/ws",
+                providerKind: "manual",
+              },
+              origin: {
+                localHttpHost: "127.0.0.1",
+                localHttpPort: serverPort,
+              },
+            }),
+            "application/json",
+          ),
+        });
+
+        assert.equal(linkProofResponse.status, 200);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "allows cloud link proofs when a public request carries loopback forwarded headers",
     () =>
       Effect.gen(function* () {
         yield* buildAppUnderTest();
@@ -1837,33 +1829,65 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             "application/json",
           ),
         });
-        const body = (yield* linkProofResponse.json) as {
-          readonly _tag?: string;
-          readonly message?: string;
-        };
 
-        assert.equal(linkProofResponse.status, 400);
-        assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-        assert.equal(body.message, "Invalid managed endpoint origin.");
+        assert.equal(linkProofResponse.status, 200);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("rejects cloud link proofs with malformed forwarded request hosts", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
+  it.effect(
+    "allows cloud link proofs with malformed forwarded request hosts for manual provider kind",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
 
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const serverPort = Number(new URL(linkProofUrl).port);
-      const linkProofResponse = yield* HttpClient.post("/api/connect/link-proof", {
-        headers: {
-          cookie: yield* getAuthenticatedSessionCookieHeader(),
-          "content-type": "application/json",
-          host: "bad host",
-          "x-forwarded-host": "bad host",
-          "x-forwarded-proto": "https",
-        },
-        body: HttpBody.text(
-          jsonRequestBody({
+        const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
+        const serverPort = Number(new URL(linkProofUrl).port);
+        const linkProofResponse = yield* HttpClient.post("/api/connect/link-proof", {
+          headers: {
+            cookie: yield* getAuthenticatedSessionCookieHeader(),
+            "content-type": "application/json",
+            host: "bad host",
+            "x-forwarded-host": "bad host",
+            "x-forwarded-proto": "https",
+          },
+          body: HttpBody.text(
+            jsonRequestBody({
+              challenge: "relay-link-challenge",
+              relayIssuer: "https://relay.example.test",
+              endpoint: {
+                httpBaseUrl: "https://environment.example.test/",
+                wsBaseUrl: "wss://environment.example.test/ws",
+                providerKind: "manual",
+              },
+              origin: {
+                localHttpHost: "127.0.0.1",
+                localHttpPort: serverPort,
+              },
+            }),
+            "application/json",
+          ),
+        });
+
+        assert.equal(linkProofResponse.status, 200);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "allows local cloud link proofs for manual endpoint with mismatched loopback port",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
+        const serverPort = Number(new URL(linkProofUrl).port);
+        const linkProofResponse = yield* fetchEffect(linkProofUrl, {
+          method: "POST",
+          headers: {
+            cookie: ownerCookie,
+            "content-type": "application/json",
+          },
+          body: jsonRequestBody({
             challenge: "relay-link-challenge",
             relayIssuer: "https://relay.example.test",
             endpoint: {
@@ -1873,30 +1897,21 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
             origin: {
               localHttpHost: "127.0.0.1",
-              localHttpPort: serverPort,
+              localHttpPort: serverPort === 65_535 ? serverPort - 1 : serverPort + 1,
             },
           }),
-          "application/json",
-        ),
-      });
-      const body = (yield* linkProofResponse.json) as {
-        readonly _tag?: string;
-        readonly message?: string;
-      };
+        });
 
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        assert.equal(linkProofResponse.status, 200);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("rejects local cloud link proofs for a different loopback port", () =>
+  it.effect("rejects cloud link proofs for cloudflare_tunnel with non-loopback origin", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
       const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
       const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const serverPort = Number(new URL(linkProofUrl).port);
       const linkProofResponse = yield* fetchEffect(linkProofUrl, {
         method: "POST",
         headers: {
@@ -1909,11 +1924,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           endpoint: {
             httpBaseUrl: "https://environment.example.test/",
             wsBaseUrl: "wss://environment.example.test/ws",
-            providerKind: "manual",
+            providerKind: "cloudflare_tunnel",
           },
           origin: {
-            localHttpHost: "127.0.0.1",
-            localHttpPort: serverPort === 65_535 ? serverPort - 1 : serverPort + 1,
+            localHttpHost: "192.168.1.42",
+            localHttpPort: 3773,
           },
         }),
       });
