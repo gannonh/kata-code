@@ -180,7 +180,6 @@ export function SandboxDeploymentSettings() {
 
   const resolveSelectedProject = useCallback(
     (instanceId: string): Project | undefined => {
-      // Check transient UI state first
       const selectedKey = selectedRepositoryKeyByInstance[instanceId];
       if (selectedKey) {
         const selectedProject = repositoryProjects.find(
@@ -188,7 +187,6 @@ export function SandboxDeploymentSettings() {
         );
         if (selectedProject) return selectedProject;
       }
-      // Fall back to persisted repositoryKey from instance config
       const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
       if (instance?.repositoryKey) {
         const persistedProject = repositoryProjects.find(
@@ -198,7 +196,7 @@ export function SandboxDeploymentSettings() {
       }
       return repositoryProjects[0];
     },
-    [repositoryProjects, selectedRepositoryKeyByInstance],
+    [repositoryProjects, selectedRepositoryKeyByInstance, instanceMap],
   );
 
   const handleTest = useCallback(
@@ -248,10 +246,10 @@ export function SandboxDeploymentSettings() {
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
-        const explicitRepositoryKey =
-          selectedRepositoryKeyByInstance[instanceId] ??
-          (instance?.repositoryKey as string | undefined);
-        const project = explicitRepositoryKey ? resolveSelectedProject(instanceId) : undefined;
+        const project = resolveSelectedProject(instanceId);
+        const startedRepositoryKey = project?.repositoryIdentity?.canonicalKey as
+          | string
+          | undefined;
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
           return;
@@ -315,9 +313,8 @@ export function SandboxDeploymentSettings() {
           refreshManagedRelayEnvironments();
           await refreshList();
 
-          // Persist the repository key so the expanded card shows the right repo on reload
-          if (explicitRepositoryKey && instance) {
-            updateInstance(instanceId, { ...instance, repositoryKey: explicitRepositoryKey });
+          if (startedRepositoryKey && instance) {
+            updateInstance(instanceId, { ...instance, repositoryKey: startedRepositoryKey });
           }
 
           if (savedForProjectPicker) {
@@ -588,7 +585,6 @@ export function SandboxDeploymentSettings() {
             const displayName = config.displayName ?? id;
             const enabled = config.enabled ?? true;
             const selectedProject = resolveSelectedProject(id);
-            // Prefer transient UI state, then persisted instance config, then first repo
             const selectedRepositoryKey =
               selectedRepositoryKeyByInstance[id] ??
               (config.repositoryKey as string | undefined) ??
