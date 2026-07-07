@@ -14,6 +14,10 @@
  * @module SandboxService
  */
 import * as NodeCrypto from "node:crypto";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+// @effect-diagnostics nodeBuiltinImport:on
 import * as os from "node:os";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -32,6 +36,7 @@ import {
   ExecutionEnvironmentDescriptor as ExecutionEnvironmentDescriptorSchema,
   type ServerSettings,
 } from "@kata-sh/code-contracts";
+import { resolveDefaultKatacodeHome } from "@kata-sh/code-shared/branding";
 import { createAdvertisedEndpoint } from "@kata-sh/code-shared/advertisedEndpoint";
 import { encodeOAuthScope } from "@kata-sh/code-shared/oauthScope";
 import {
@@ -614,24 +619,77 @@ function resolveConnectAuthToken(
   connectAuthToken: SandboxStartSessionInput["connectAuthToken"],
 ): Effect.Effect<string, SandboxRpcError, CliTokenManager.CloudCliTokenManager> {
   // Prefer the CLI token manager (auto-refreshable OAuth token, persists
-  // across sessions). The CLI token has a refresh mechanism and survives
-  // provisioning delays (Vercel sandboxes take 2-3 min, easily exceeding
-  // a Clerk session JWT's 60 s TTL). Fall back to the UI-provided
-  // short-lived Clerk JWT when no CLI credential exists.
+  // across sessions) which reads from the runtime's secrets directory.
+  // In dev mode (VITE_DEV_SERVER_URL set) that's ~/.katacode/dev/secrets/;
+  // the `npx @kata-sh/code-cli connect login` command (run without --dev-url)
+  // stores to ~/.katacode/userdata/secrets/.  If the managed path misses, fall
+  // back to reading the production path directly before falling through to the
+  // short-lived Clerk JWT (60 s TTL, too short for Vercel's 2-3 min provision).
   return Effect.flatMap(CliTokenManager.CloudCliTokenManager, (tokens) => tokens.getExisting).pipe(
     Effect.catch(() => Effect.succeed(Option.none<never>())),
-    Effect.flatMap((cliToken): Effect.Effect<string, SandboxRpcError> => {
+    Effect.flatMap((cliToken) => {
       if (Option.isSome(cliToken)) return Effect.succeed(cliToken.value.accessToken);
-      if (connectAuthToken) return Effect.succeed(connectAuthToken);
-      return Effect.fail(
-        new SandboxRpcError({
-          reason: "connect-failed",
-          message:
-            "No Kata Code Connect credential found. Run `npx @kata-sh/code-cli connect login` to authorize, or sign in to Kata Code Connect from the desktop app.",
+      return readProductionCliToken().pipe(
+        Effect.catch(() => Effect.succeed(Option.none<{ readonly accessToken: string }>())),
+        Effect.flatMap((fallbackToken) => {
+          if (Option.isSome(fallbackToken)) return Effect.succeed(fallbackToken.value.accessToken);
+          if (connectAuthToken) return Effect.succeed(connectAuthToken);
+          return Effect.fail(
+            new SandboxRpcError({
+              reason: "connect-failed",
+              message:
+                "No Kata Code Connect credential found. Run `npx @kata-sh/code-cli connect login` to authorize, or sign in to Kata Code Connect from the desktop app.",
+            }),
+          );
         }),
       );
     }),
   );
+}
+
+/**
+ * Fallback: read the CLI OAuth token from the production secrets directory
+ * (~/.katacode/userdata/secrets/cloud-cli-oauth-token.bin).  The
+ * CliTokenManager's ServerSecretStore points at ~/.katacode/dev/secrets/
+ * when the server runs in dev mode (VITE_DEV_SERVER_URL set).
+ * `npx @kata-sh/code-cli connect login` (run without --dev-url) stores
+ * to userdata/secrets/, so the managed path sees no token and silently
+ * falls through to the short-lived Clerk JWT (60 s TTL), which expires
+ * during Vercel sandbox provisioning (2-3 min).  This fallback bridges
+ * the directory mismatch.
+ */
+// @effect-diagnostics-next-line effect(nodeBuiltinImport):off - Direct filesystem read for production token fallback.
+function readProductionCliToken(): Effect.Effect<
+  Option.Option<{ readonly accessToken: string }>,
+  never
+> {
+  return Effect.gen(function* () {
+    const katacodeHome = resolveDefaultKatacodeHome(os.homedir());
+    const tokenPath = NodePath.join(
+      katacodeHome,
+      "userdata",
+      "secrets",
+      "cloud-cli-oauth-token.bin",
+    );
+    const raw = yield* Effect.sync(() => {
+      try {
+        return NodeFS.readFileSync(tokenPath, "utf8");
+      } catch {
+        return null as string | null;
+      }
+    });
+    if (raw === null) return Option.none();
+    const decoded = yield* Schema.decodeUnknownEffect(
+      Schema.fromJsonString(
+        Schema.Struct({
+          accessToken: Schema.String,
+        }),
+      ),
+    )(raw).pipe(
+      Effect.catch(() => Effect.succeed(null as { readonly accessToken: string } | null)),
+    );
+    return decoded !== null ? Option.some({ accessToken: decoded.accessToken }) : Option.none();
+  }).pipe(Effect.catch(() => Effect.succeed(Option.none<{ readonly accessToken: string }>())));
 }
 
 function registerSandboxWithConnect(input: {
