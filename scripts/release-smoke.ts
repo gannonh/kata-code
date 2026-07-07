@@ -36,6 +36,7 @@ const workspaceFiles = [
   "packages/sandbox/package.json",
   "packages/sandbox-contracts/package.json",
   "packages/sandbox-docker/package.json",
+  "packages/sandbox-vercel/package.json",
   "packages/shared/package.json",
   "packages/ssh/package.json",
   "packages/tailscale/package.json",
