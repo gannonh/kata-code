@@ -16,7 +16,7 @@ describe("VercelSandboxConfig", () => {
     const decoded = decodeConfig(DEFAULT_VERCEL_CONFIG);
     expect(decoded.runtime).toBe("node24");
     expect(decoded.sourceType).toBe("runtime");
-    expect(decoded.timeoutMs).toBe(2_700_000);
+    expect(decoded.timeoutMs).toBe(86_400_000);
     expect(decoded.port).toBe(13773);
   });
 

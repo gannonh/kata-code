@@ -52,8 +52,9 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
     timeoutMs: Schema.Number.pipe(
       Schema.annotateKey({
         title: "Session timeout (ms)",
-        description: "Sandbox auto-termination timeout. Hobby max is 2_700_000 (45m).",
-        providerSettingsForm: { placeholder: "2700000" },
+        description:
+          "Sandbox auto-termination timeout. Hobby max is 2_700_000 (45m); Pro/Enterprise max is 86_400_000 (24h).",
+        providerSettingsForm: { placeholder: "86400000" },
       }),
     ),
     port: PortSchema.pipe(
@@ -88,7 +89,7 @@ export type VercelSandboxConfig = typeof VercelSandboxConfig.Type;
 export const DEFAULT_VERCEL_CONFIG: VercelSandboxConfig = {
   runtime: "node24",
   sourceType: "runtime",
-  timeoutMs: 2_700_000,
+  timeoutMs: 86_400_000,
   port: 13773,
 };
 

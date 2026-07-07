@@ -1200,12 +1200,13 @@ function VercelConfigFields({ config, idPrefix, onChange }: VercelConfigFieldsPr
               base.timeoutMs = Math.round(minutes * 60_000);
               onChange(base);
             }}
-            placeholder="45"
+            placeholder="1440"
             spellCheck={false}
             inputMode="numeric"
           />
           <span className="mt-1 block text-xs text-muted-foreground">
-            Sandbox auto-termination timeout. Hobby max is 45 minutes.
+            Sandbox auto-termination timeout. Hobby max is 45 minutes; Pro/Enterprise max is 24
+            hours.
           </span>
         </label>
       </div>
@@ -1290,7 +1291,7 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
           driver: VERCEL_KIND,
           enabled: true,
           ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
-          config: { runtime: "node24", sourceType: "runtime", timeoutMs: 2_700_000, port: 13773 },
+          config: { runtime: "node24", sourceType: "runtime", timeoutMs: 86_400_000, port: 13773 },
         };
         onAdd(brandedId as string, instance);
         setLabel("");
