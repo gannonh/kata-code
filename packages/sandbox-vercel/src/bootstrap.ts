@@ -40,7 +40,17 @@ export const PROVIDER_CLI_PACKAGES: ReadonlyArray<string> = [
  * Skipped when booting from a snapshot (the snapshot already has the CLIs).
  */
 export function buildBootstrapScript(): string {
-  const packages = PROVIDER_CLI_PACKAGES.join(" ");
+  // Allow pinning the kata CLI to a specific npm dist-tag via
+  // KATACODE_SANDBOX_CLI_TAG env var set on the sandbox runtime env.
+  // During local dev, set this to "nightly" to use the development build
+  // published from your branch.  Falls back to npm latest when unset.
+  // The shell expression ${KATACODE_SANDBOX_CLI_TAG:+@}${KATACODE_SANDBOX_CLI_TAG}
+  // expands to @nightly when the var is set, empty otherwise.
+  const tagSuffix = "${KATACODE_SANDBOX_CLI_TAG:+@}${KATACODE_SANDBOX_CLI_TAG}";
+  const kataSpec = `${KATA_CLI_PACKAGE}${tagSuffix}`;
+  const packagesSpec = PROVIDER_CLI_PACKAGES.map((p) =>
+    p === KATA_CLI_PACKAGE ? kataSpec : p,
+  ).join(" ");
   return [
     "set -e",
     `echo "[kata:bootstrap] creating ${SANDBOX_HOME}"`,
@@ -50,7 +60,7 @@ export function buildBootstrapScript(): string {
     // python3 + make + gcc-c++ for node-gyp to compile its native addon.
     `sudo dnf install -y python3 make gcc-c++ || true`,
     `echo "[kata:bootstrap] installing CLIs"`,
-    `npm install -g ${packages}`,
+    `npm install -g ${packagesSpec}`,
     `echo "[kata:bootstrap] done"`,
   ].join(" && ");
 }
