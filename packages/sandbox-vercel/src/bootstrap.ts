@@ -32,8 +32,10 @@ export const PROVIDER_CLI_PACKAGES: ReadonlyArray<string> = [
 /**
  * Build the bootstrap script run after a runtime provision. Creates
  * `SANDBOX_HOME` owned by the current user (with a no-sudo fallback for
- * runtimes where sudo is unavailable) and installs the katacode CLI plus
- * provider CLIs. Echoes stage markers so failures are attributable in stderr.
+ * runtimes where sudo is unavailable), installs native-addon build tools
+ * (python3, make, gcc-c++ — needed by node-pty's node-gyp build), then installs
+ * the katacode CLI plus provider CLIs. Echoes stage markers so failures are
+ * attributable in stderr.
  *
  * Skipped when booting from a snapshot (the snapshot already has the CLIs).
  */
@@ -43,6 +45,10 @@ export function buildBootstrapScript(): string {
     "set -e",
     `echo "[kata:bootstrap] creating ${SANDBOX_HOME}"`,
     `(sudo mkdir -p ${SANDBOX_HOME} && sudo chown "$(id -u):$(id -g)" ${SANDBOX_HOME}) || mkdir -p ${SANDBOX_HOME}`,
+    `echo "[kata:bootstrap] installing native build tools"`,
+    // Amazon Linux 2023 (Vercel sandbox runtime) uses dnf. node-pty needs
+    // python3 + make + gcc-c++ for node-gyp to compile its native addon.
+    `sudo dnf install -y python3 make gcc-c++ || true`,
     `echo "[kata:bootstrap] installing CLIs"`,
     `npm install -g ${packages}`,
     `echo "[kata:bootstrap] done"`,
