@@ -24,14 +24,12 @@ export const SandboxRunningSession = Schema.Struct({
   /** The in-sandbox Kata server's environment id. */
   environmentId: TrimmedNonEmptyString,
   endpoint: AdvertisedEndpoint,
-  /** Session lifecycle status (Phase 3b). `lapsed` indicates the sandbox VM stopped or snapshotted; Resume reattaches. */
-  status: Schema.optional(Schema.Literals(["running", "lapsed"])),
+  /** Lifecycle status: `running` or `stopped` (a Vercel timeout in persistent mode reconciles to `stopped`). */
+  status: Schema.optional(Schema.Literals(["running", "stopped"])),
   /** Host-side deadline (epoch ms) the keepalive scheduler maintains. */
   deadlineEpochMs: Schema.optional(Schema.Number),
-  /** Snapshot id captured for this session (Phase 3b). */
-  snapshotId: Schema.optional(TrimmedNonEmptyString),
-  /** Why a session lapsed (e.g. `timeout-cap`, `snapshotted`). */
-  lapsedReason: Schema.optional(Schema.String),
+  /** Reconcile warning (e.g. Vercel auth missing on boot); the UI flags the record as unverified. */
+  statusDetail: Schema.optional(Schema.String),
 });
 export type SandboxRunningSession = typeof SandboxRunningSession.Type;
 
@@ -146,33 +144,17 @@ export const SandboxRenewSessionResult = Schema.Struct({
 });
 export type SandboxRenewSessionResult = typeof SandboxRenewSessionResult.Type;
 
-/** Resume a lapsed sandbox session (Phase 3b). Same input shape as start (minus repository). */
-export const SandboxResumeSessionInput = Schema.Struct({
+/** Stop a running sandbox session (durable lifecycle). The sandbox filesystem
+ *  persists (Vercel persistent / Docker container); start resumes it. */
+export const SandboxStopSessionInput = Schema.Struct({
   instanceId: SandboxProviderInstanceId,
-  /** Relay Clerk JWT from the desktop/web session; falls back to the CLI token when omitted. */
-  connectAuthToken: Schema.optional(TrimmedNonEmptyString),
 });
-export type SandboxResumeSessionInput = typeof SandboxResumeSessionInput.Type;
-/** Resume returns the same shape as start (the deploying client re-binds the environment). */
-export const SandboxResumeSessionResult = Schema.Struct({
+export type SandboxStopSessionInput = typeof SandboxStopSessionInput.Type;
+export const SandboxStopSessionResult = Schema.Struct({
   instanceId: SandboxProviderInstanceId,
-  environmentId: TrimmedNonEmptyString,
-  pairingToken: TrimmedNonEmptyString,
-  endpoint: AdvertisedEndpoint,
+  stopped: Schema.Boolean,
 });
-export type SandboxResumeSessionResult = typeof SandboxResumeSessionResult.Type;
-
-/** Create a snapshot from a running sandbox session (Phase 3b). */
-export const SandboxCreateSnapshotInput = Schema.Struct({
-  instanceId: SandboxProviderInstanceId,
-  name: Schema.optional(TrimmedNonEmptyString),
-});
-export type SandboxCreateSnapshotInput = typeof SandboxCreateSnapshotInput.Type;
-export const SandboxCreateSnapshotResult = Schema.Struct({
-  instanceId: SandboxProviderInstanceId,
-  snapshotId: TrimmedNonEmptyString,
-});
-export type SandboxCreateSnapshotResult = typeof SandboxCreateSnapshotResult.Type;
+export type SandboxStopSessionResult = typeof SandboxStopSessionResult.Type;
 
 /** Start an interactive provider sign-in flow inside a sandbox (Phase 3b). Streaming. */
 export const SandboxProviderLoginStartInput = Schema.Struct({

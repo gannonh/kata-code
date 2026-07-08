@@ -190,8 +190,7 @@ export interface WsRpcClient {
     readonly startSession: RpcUnaryMethod<typeof WS_METHODS.sandboxStartSession>;
     readonly disposeSession: RpcUnaryMethod<typeof WS_METHODS.sandboxDisposeSession>;
     readonly renewSession: RpcUnaryMethod<typeof WS_METHODS.sandboxRenewSession>;
-    readonly resumeSession: RpcUnaryMethod<typeof WS_METHODS.sandboxResumeSession>;
-    readonly createSnapshot: RpcUnaryMethod<typeof WS_METHODS.sandboxCreateSnapshot>;
+    readonly stopSession: RpcUnaryMethod<typeof WS_METHODS.sandboxStopSession>;
     readonly providerLoginStart: (
       input: RpcInput<typeof WS_METHODS.sandboxProviderLoginStart>,
       onEvent: (event: SandboxProviderLoginEvent) => void,
@@ -448,10 +447,8 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.sandboxDisposeSession](input)),
       renewSession: (input) =>
         transport.request((client) => client[WS_METHODS.sandboxRenewSession](input)),
-      resumeSession: (input) =>
-        transport.request((client) => client[WS_METHODS.sandboxResumeSession](input)),
-      createSnapshot: (input) =>
-        transport.request((client) => client[WS_METHODS.sandboxCreateSnapshot](input)),
+      stopSession: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxStopSession](input)),
       providerLoginStart: async (input, onEvent) => {
         await transport.requestStream(
           (client) => client[WS_METHODS.sandboxProviderLoginStart](input),

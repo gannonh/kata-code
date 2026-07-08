@@ -79,8 +79,6 @@ import {
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
-  SandboxCreateSnapshotInput,
-  SandboxCreateSnapshotResult,
   SandboxDisposeSessionInput,
   SandboxDisposeSessionResult,
   SandboxListInstancesInput,
@@ -91,11 +89,11 @@ import {
   SandboxProviderLoginSubmitCodeResult,
   SandboxRenewSessionInput,
   SandboxRenewSessionResult,
-  SandboxResumeSessionInput,
-  SandboxResumeSessionResult,
   SandboxRpcError,
   SandboxStartSessionInput,
   SandboxStartSessionResult,
+  SandboxStopSessionInput,
+  SandboxStopSessionResult,
   SandboxTestConnectionInput,
   SandboxTestConnectionProgressEvent,
 } from "./sandboxRpc.ts";
@@ -258,8 +256,7 @@ export const WS_METHODS = {
   sandboxStartSession: "sandbox.startSession",
   sandboxDisposeSession: "sandbox.disposeSession",
   sandboxRenewSession: "sandbox.renewSession",
-  sandboxResumeSession: "sandbox.resumeSession",
-  sandboxCreateSnapshot: "sandbox.createSnapshot",
+  sandboxStopSession: "sandbox.stopSession",
   sandboxProviderLoginStart: "sandbox.providerLoginStart",
   sandboxProviderLoginSubmitCode: "sandbox.providerLoginSubmitCode",
 } as const;
@@ -345,16 +342,10 @@ export const WsSandboxRenewSessionRpc = Rpc.make(WS_METHODS.sandboxRenewSession,
   error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
 });
 
-export const WsSandboxResumeSessionRpc = Rpc.make(WS_METHODS.sandboxResumeSession, {
-  payload: SandboxResumeSessionInput,
-  success: SandboxResumeSessionResult,
+export const WsSandboxStopSessionRpc = Rpc.make(WS_METHODS.sandboxStopSession, {
+  payload: SandboxStopSessionInput,
+  success: SandboxStopSessionResult,
   error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
-});
-
-export const WsSandboxCreateSnapshotRpc = Rpc.make(WS_METHODS.sandboxCreateSnapshot, {
-  payload: SandboxCreateSnapshotInput,
-  success: SandboxCreateSnapshotResult,
-  error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
 });
 
 export const WsSandboxProviderLoginStartRpc = Rpc.make(WS_METHODS.sandboxProviderLoginStart, {
@@ -782,8 +773,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxStartSessionRpc,
   WsSandboxDisposeSessionRpc,
   WsSandboxRenewSessionRpc,
-  WsSandboxResumeSessionRpc,
-  WsSandboxCreateSnapshotRpc,
+  WsSandboxStopSessionRpc,
   WsSandboxProviderLoginStartRpc,
   WsSandboxProviderLoginSubmitCodeRpc,
   WsServerDiscoverSourceControlRpc,
