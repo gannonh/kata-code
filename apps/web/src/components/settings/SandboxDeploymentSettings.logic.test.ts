@@ -9,6 +9,7 @@ import {
   parseSandboxPort,
   resolveSandboxLifecycleState,
   sandboxInstanceIdForLabel,
+  shouldSeedRepositoryForStart,
   slugifySandboxLabel,
 } from "./SandboxDeploymentSettings.logic";
 
@@ -68,6 +69,25 @@ describe("sandbox deployment settings logic", () => {
       displayName: "Cloud",
       config: { runtime: "node24", persistent: true, timeoutMs: 86_400_000, port: 13773 },
     });
+  });
+
+  it("only seeds a repository for the create path, not lifecycle Start", () => {
+    expect(shouldSeedRepositoryForStart(undefined)).toBe(true);
+    expect(
+      shouldSeedRepositoryForStart({ kind: "available", runningSession: undefined } as never),
+    ).toBe(true);
+    expect(
+      shouldSeedRepositoryForStart({
+        kind: "available",
+        runningSession: { status: "stopped" },
+      } as never),
+    ).toBe(false);
+    expect(
+      shouldSeedRepositoryForStart({
+        kind: "available",
+        runningSession: { status: "running" },
+      } as never),
+    ).toBe(false);
   });
 });
 

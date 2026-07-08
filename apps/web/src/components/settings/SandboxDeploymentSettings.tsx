@@ -37,6 +37,7 @@ import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt"
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
 import { ProviderSignInDialog } from "./ProviderSignInDialog";
 import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
+import { shouldSeedRepositoryForStart } from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
 
 const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
@@ -230,10 +231,11 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
-        const project = resolveSelectedProject(instanceId);
-        const startedRepositoryKey = project?.repositoryIdentity?.canonicalKey as
-          | string
-          | undefined;
+        const shouldSeedRepository = shouldSeedRepositoryForStart(summaryById[instanceId]);
+        const project = shouldSeedRepository ? resolveSelectedProject(instanceId) : undefined;
+        const startedRepositoryKey = shouldSeedRepository
+          ? (project?.repositoryIdentity?.canonicalKey as string | undefined)
+          : undefined;
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
           return;
@@ -329,6 +331,7 @@ export function SandboxDeploymentSettings({
       refreshList,
       resolveSelectedProject,
       selectedRepositoryKeyByInstance,
+      summaryById,
       withBusy,
     ],
   );

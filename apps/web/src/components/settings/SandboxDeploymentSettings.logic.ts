@@ -64,6 +64,14 @@ export function buildVercelSandboxProviderInstance(input: {
   } satisfies SandboxProviderInstanceConfig;
 }
 
+/** `sandbox.startSession` is both create-and-run and lifecycle-start. Attach a
+ * repository only for the create path; an existing running/stopped sandbox
+ * already has a seeded workspace, so Start must only start the sandbox. */
+export function shouldSeedRepositoryForStart(summary: SandboxInstanceSummary | undefined): boolean {
+  if (summary?.kind !== "available") return true;
+  return summary.runningSession === undefined;
+}
+
 export function makeSandboxProviderInstanceId(input: {
   readonly driver: typeof DOCKER_SANDBOX_KIND | typeof VERCEL_SANDBOX_KIND;
   readonly label: string;
