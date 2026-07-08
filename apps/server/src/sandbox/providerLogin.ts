@@ -111,6 +111,24 @@ export function startProviderLogin(input: {
 
   return Stream.fromEffect(
     Effect.gen(function* () {
+      // Fail loud when the sandbox image is missing `script(1)`. Without it
+      // the launch pipeline below silently produces no output.log and the UI
+      // hangs on "Starting sign-in…". Alpine ships `script` in the
+      // `util-linux-misc` package; the katacode image installs it.
+      const scriptCheck = yield* input.driver
+        .exec(input.handle, "command -v script >/dev/null 2>&1 && echo ok")
+        .pipe(
+          Effect.mapError(
+            (e) => new SandboxRpcError({ reason: "provision-failed", message: e.message }),
+          ),
+        );
+      if (scriptCheck.stdout.trim() !== "ok") {
+        return yield* new SandboxRpcError({
+          reason: "provision-failed",
+          message:
+            "Provider sign-in needs `script(1)` inside the sandbox, but the image does not ship it. Rebuild the katacode image (adds `util-linux-misc`), or install `util-linux-misc` in your custom image.",
+        });
+      }
       yield* input.driver
         .exec(input.handle, `mkdir -p ${dir} && mkfifo ${dir}/stdin.fifo`)
         .pipe(
