@@ -835,7 +835,7 @@ const RelayConfigResponse = Schema.Struct({ ok: Schema.Boolean });
  *  durable store is the source of truth; this in-memory cache is populated by
  *  startSession/reconcile and read by providerLogin (which needs the live
  *  driver + handle for exec). */
-interface LiveSession {
+export interface LiveSession {
   handle: SandboxHandle;
   readonly driver: SandboxProvider;
   readonly instanceConfig: SandboxProviderInstanceConfig;
@@ -874,10 +874,6 @@ const busyInstances = new Set<string>();
  *  `listInstances` if it hasn't run yet. */
 let reconcileDone = false;
 
-/** Reconcile stored records against the providers. For each stored record:
- *  re-resolve config from settings, find the driver, call `lifecycle.status`;
- *  update the stored status, evict `gone` records, keep `stopped`/`running`.
- *  Reconcile failures keep the last-known status and set `statusDetail`. */
 /** Reconcile stored records against the providers. For each stored record:
  *  re-resolve config from settings, find the driver, call `lifecycle.status`;
  *  update the stored status, evict `gone` records, keep `stopped`/`running`.
@@ -929,24 +925,15 @@ export function reconcileStoredRecords(input: {
         record.handle.handle,
         resolved.config,
       );
-      // Cache the live session so providerLogin can use the driver.
-      input.liveSessions.set(record.instanceId, {
-        handle: {
-          driverKind: inst.driver.kind,
-          instanceId: record.instanceId,
-          handle: rehydratedHandleState,
-        },
-        driver: inst.driver,
-        instanceConfig: resolved,
-        environmentId: record.sandboxEnvironmentId,
-      });
-      // If the driver supports lifecycle, reconcile the status.
+      const handle: SandboxHandle = {
+        driverKind: inst.driver.kind,
+        instanceId: record.instanceId,
+        handle: rehydratedHandleState,
+      };
+      // If the driver supports lifecycle, reconcile the status before caching.
+      // `gone` records are evicted and never cached so providerLogin cannot
+      // operate on a sandbox the provider reports as gone.
       if (inst.driver.lifecycle) {
-        const handle: SandboxHandle = {
-          driverKind: inst.driver.kind,
-          instanceId: record.instanceId,
-          handle: rehydratedHandleState,
-        };
         const statusResult = yield* inst.driver.lifecycle.status(handle).pipe(
           Effect.matchEffect({
             onFailure: (left) =>
@@ -963,29 +950,57 @@ export function reconcileStoredRecords(input: {
         );
         if (statusResult._tag === "Right") {
           if (statusResult.right === "gone") {
+            input.liveSessions.delete(record.instanceId);
             yield* Effect.logWarning("Sandbox session store: provider reports gone; evicting", {
               instanceId: record.instanceId,
             });
             continue; // evict
           }
+          // Drop any prior statusDetail (exactOptionalPropertyTypes: omit the
+          // key rather than assigning undefined).
+          const { statusDetail: _dropDetail, ...restRecord } = record;
           updated.push({
-            ...record,
+            ...restRecord,
             status: statusResult.right,
-            statusDetail: undefined,
+          });
+          input.liveSessions.set(record.instanceId, {
+            handle,
+            driver: inst.driver,
+            instanceConfig: resolved,
+            environmentId: record.sandboxEnvironmentId,
           });
         } else {
-          // Reconcile failure — keep last-known status, set statusDetail.
+          // Reconcile failure — keep last-known status, set statusDetail. Still
+          // cache the live session so stop/dispose can reach the driver.
           updated.push({
             ...record,
             statusDetail: `Reconcile failed: ${statusResult.left.message}`,
           });
+          input.liveSessions.set(record.instanceId, {
+            handle,
+            driver: inst.driver,
+            instanceConfig: resolved,
+            environmentId: record.sandboxEnvironmentId,
+          });
         }
       } else {
-        // No lifecycle capability — keep as-is.
+        // No lifecycle capability — keep as-is and cache the live session.
         updated.push(record);
+        input.liveSessions.set(record.instanceId, {
+          handle,
+          driver: inst.driver,
+          instanceConfig: resolved,
+          environmentId: record.sandboxEnvironmentId,
+        });
       }
     }
-    yield* input.store.save(updated).pipe(Effect.catch(() => Effect.void));
+    yield* input.store.save(updated).pipe(
+      Effect.catch((error: unknown) =>
+        Effect.logError("Sandbox session store save failed during reconcile", {
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    );
     return updated;
   });
 }
@@ -1003,7 +1018,6 @@ function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never>
   });
 }
 
-/** Store a session record from a completed provision/start. */
 /** Sanitize a driver handle for persistence: strip the Vercel auth trio
  *  (token/teamId/projectId) so no secrets are written to the store file.
  *  The auth re-resolves from instance config env on load/reconcile. */
@@ -1063,6 +1077,36 @@ function storeSessionRecord(input: {
     relay: input.relay ? { relayUrl: input.relay.relayUrl } : undefined,
   };
   return sessionStore.upsert(record);
+}
+
+/** Persist a session record, logging (not swallowing) store write failures.
+ *  A store write failure after a successful provision cannot unwind the
+ *  provision (the sandbox is live on the provider), so the error is surfaced
+ *  via a warning log — fail-loud for operators — rather than failing the RPC
+ *  and tearing down a working sandbox. The same applies to stop/renew updates. */
+function persistSessionRecord(
+  input: Parameters<typeof storeSessionRecord>[0],
+): Effect.Effect<void, never> {
+  return storeSessionRecord(input).pipe(
+    Effect.catch((error: unknown) =>
+      Effect.logError("Sandbox session store write failed; sandbox may be orphaned on restart", {
+        instanceId: input.instanceId as string,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    ),
+  );
+}
+
+/** Remove a session record from the store, logging (not swallowing) failures. */
+function removeSessionRecord(instanceId: SandboxProviderInstanceId): Effect.Effect<void, never> {
+  return sessionStore.remove(instanceId).pipe(
+    Effect.catch((error: unknown) =>
+      Effect.logError("Sandbox session store remove failed", {
+        instanceId: instanceId as string,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    ),
+  );
 }
 
 /**
@@ -1198,23 +1242,25 @@ export const SandboxServiceLive = {
     Effect.gen(function* () {
       const sessionKey = instanceId as string;
       // Operation lock: prevents concurrent start/stop/delete on the same instance.
+      // Add to the lock BEFORE any yield (reconcile) so a concurrent startSession
+      // for the same instance cannot pass the guard and orphan a second container.
       if (busyInstances.has(sessionKey)) {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
           message: "An operation is already in progress for this sandbox environment.",
         });
       }
-      // Ensure reconcile has run so the store is populated.
-      yield* reconcileSessions(settings);
-      const existing = sessionStore.records.find((r) => r.instanceId === sessionKey);
-      if (existing !== undefined && existing.status === "running") {
-        return yield* new SandboxRpcError({
-          reason: "provision-failed",
-          message: "A session is already running for this sandbox environment.",
-        });
-      }
       busyInstances.add(sessionKey);
       return yield* Effect.gen(function* () {
+        // Ensure reconcile has run so the store is populated.
+        yield* reconcileSessions(settings);
+        const existing = sessionStore.records.find((r) => r.instanceId === sessionKey);
+        if (existing !== undefined && existing.status === "running") {
+          return yield* new SandboxRpcError({
+            reason: "provision-failed",
+            message: "A session is already running for this sandbox environment.",
+          });
+        }
         const registry = buildRegistry();
         const config = (settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap)[
           instanceId as SandboxProviderInstanceId
@@ -1277,8 +1323,8 @@ export const SandboxServiceLive = {
             bootstrapToken,
             connectAuthToken: options?.connectAuthToken,
           });
-          // Update the store record.
-          yield* storeSessionRecord({
+          // Update the store record (logs on failure rather than swallowing).
+          yield* persistSessionRecord({
             instanceId,
             driver: inst.driver,
             handle: started,
@@ -1287,7 +1333,7 @@ export const SandboxServiceLive = {
             endpoint: finalized.endpoint,
             relay: finalized.relay,
             status: "running",
-          }).pipe(Effect.catch(() => Effect.void));
+          });
           // Cache the live session.
           liveSessions.set(sessionKey, {
             handle: started,
@@ -1404,8 +1450,8 @@ export const SandboxServiceLive = {
           connectAuthToken: options?.connectAuthToken,
         });
 
-        // Persist the session record.
-        yield* storeSessionRecord({
+        // Persist the session record (logs on failure rather than swallowing).
+        yield* persistSessionRecord({
           instanceId,
           driver: inst.driver,
           handle,
@@ -1414,7 +1460,7 @@ export const SandboxServiceLive = {
           endpoint: finalized.endpoint,
           relay: finalized.relay,
           status: "running",
-        }).pipe(Effect.catch(() => Effect.void));
+        });
 
         // Cache the live session.
         liveSessions.set(sessionKey, {
@@ -1464,10 +1510,16 @@ export const SandboxServiceLive = {
       const lifecycle = live.driver.lifecycle;
       return yield* Effect.gen(function* () {
         yield* lifecycle.stop(live.handle).pipe(Effect.mapError(mapDriverError));
-        // Update the store record to stopped; keep the relay link.
-        yield* sessionStore
-          .upsert({ ...record, status: "stopped", statusDetail: undefined })
-          .pipe(Effect.catch(() => Effect.void));
+        // Update the store record to stopped; keep the relay link (log on failure).
+        const { statusDetail: _dropDetail, ...restRecord } = record;
+        yield* sessionStore.upsert({ ...restRecord, status: "stopped" }).pipe(
+          Effect.catch((error: unknown) =>
+            Effect.logError("Sandbox session store write failed during stop", {
+              instanceId: sessionKey,
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          ),
+        );
         return { instanceId, stopped: true };
       }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
     }),
@@ -1533,11 +1585,30 @@ export const SandboxServiceLive = {
                 ),
               };
               yield* inst.driver.dispose(handle).pipe(Effect.mapError(mapDriverError));
+            } else {
+              // Driver unavailable (removed from settings or invalid config) —
+              // the sandbox VM may remain running on the provider with no handle
+              // to delete it. Surface this so an operator can clean it up; the
+              // store record is still removed below (we can no longer manage it).
+              yield* Effect.logWarning(
+                "Sandbox dispose: driver unavailable; sandbox may be orphaned on the provider",
+                {
+                  instanceId: sessionKey,
+                  reason: inst.kind === "unavailable" ? inst.reason : "unknown",
+                },
+              );
             }
+          } else {
+            // Instance removed from settings and no live driver reference —
+            // cannot reach the provider to delete the sandbox. Surface it.
+            yield* Effect.logWarning(
+              "Sandbox dispose: instance no longer in settings; sandbox may be orphaned on the provider",
+              { instanceId: sessionKey },
+            );
           }
         }
         // Remove the store record.
-        yield* sessionStore.remove(instanceId).pipe(Effect.catch(() => Effect.void));
+        yield* removeSessionRecord(instanceId);
         liveSessions.delete(sessionKey);
         return true;
       }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
@@ -1566,9 +1637,14 @@ export const SandboxServiceLive = {
         .pipe(Effect.mapError(mapDriverError));
       // @effect-diagnostics-next-line globalDateInEffect:off - host-side deadline arithmetic.
       const deadline = Date.now() + extendMs;
-      yield* sessionStore
-        .upsert({ ...record, deadlineEpochMs: deadline })
-        .pipe(Effect.catch(() => Effect.void));
+      yield* sessionStore.upsert({ ...record, deadlineEpochMs: deadline }).pipe(
+        Effect.catch((error: unknown) =>
+          Effect.logError("Sandbox session store write failed during renew", {
+            instanceId: sessionKey,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+      );
       return { instanceId, deadlineEpochMs: deadline };
     }),
 

@@ -23,6 +23,7 @@ import {
   reconcileStoredRecords,
   sanitizeHandleForStore,
   reinjectVercelAuth,
+  type LiveSession,
 } from "./SandboxService.ts";
 
 /** Create a unique tmp dir for a store. */
@@ -110,14 +111,14 @@ describe("reconcileStoredRecords (AC-L7)", () => {
     const { driver, statusCalls } = makeFakeDriver(() => "running");
     const registry = new SandboxProviderRegistry();
     registry.register(driver, () => ({}));
-    const liveSessions = new Map<string, never>();
+    const liveSessions = new Map<string, LiveSession>();
 
     const updated = await Effect.runPromise(
       reconcileStoredRecords({
         store,
         registry,
         settings: settingsWithInstance("fake_01"),
-        liveSessions: liveSessions as never,
+        liveSessions,
       }),
     );
 
@@ -125,6 +126,9 @@ describe("reconcileStoredRecords (AC-L7)", () => {
     expect(updated[0]?.status).toBe("running");
     expect(updated[0]?.statusDetail).toBeUndefined();
     expect(statusCalls).toEqual(["fake_01"]);
+    // The live session cache is populated for a kept record so providerLogin
+    // can reach the driver (AC-L7 / review issue #9).
+    expect(liveSessions.get("fake_01")?.driver).toBe(driver);
     // A fresh store instance (simulating a server restart) loads the reconciled record.
     const reloaded = await Effect.runPromise(makeSandboxSessionStore(home).load());
     expect(reloaded[0]?.status).toBe("running");
@@ -145,7 +149,7 @@ describe("reconcileStoredRecords (AC-L7)", () => {
         store,
         registry,
         settings: settingsWithInstance("fake_01"),
-        liveSessions: new Map<string, never>(),
+        liveSessions: new Map<string, LiveSession>(),
       }),
     );
 
@@ -162,12 +166,14 @@ describe("reconcileStoredRecords (AC-L7)", () => {
     const registry = new SandboxProviderRegistry();
     registry.register(driver, () => ({}));
 
+    const liveSessions = new Map<string, LiveSession>();
+
     const updated = await Effect.runPromise(
       reconcileStoredRecords({
         store,
         registry,
         settings: settingsWithInstance("gone_01"),
-        liveSessions: new Map<string, never>(),
+        liveSessions,
       }),
     );
 
@@ -175,6 +181,9 @@ describe("reconcileStoredRecords (AC-L7)", () => {
     // The store no longer holds the evicted record.
     const reloaded = await Effect.runPromise(makeSandboxSessionStore(home).load());
     expect(reloaded).toHaveLength(0);
+    // A gone record is not cached (review issue #2): providerLogin cannot
+    // operate on a sandbox the provider reports as gone.
+    expect(liveSessions.get("gone_01")).toBeUndefined();
   });
 
   it("keeps the last-known status and sets statusDetail when reconcile fails", async () => {
@@ -201,7 +210,7 @@ describe("reconcileStoredRecords (AC-L7)", () => {
         store,
         registry,
         settings: settingsWithInstance("fake_01"),
-        liveSessions: new Map<string, never>(),
+        liveSessions: new Map<string, LiveSession>(),
       }),
     );
 
@@ -228,7 +237,7 @@ describe("reconcileStoredRecords (AC-L7)", () => {
         store,
         registry,
         settings: emptySettings,
-        liveSessions: new Map<string, never>(),
+        liveSessions: new Map<string, LiveSession>(),
       }),
     );
 
