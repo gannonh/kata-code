@@ -19,6 +19,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 // @effect-diagnostics nodeBuiltinImport:on
 import * as os from "node:os";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -84,7 +85,7 @@ import {
 } from "@kata-sh/code-contracts/relay";
 import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
-import { relayUrlConfig } from "../cloud/publicConfig.ts";
+import { cloudCliOAuthConfig, relayUrlConfig } from "../cloud/publicConfig.ts";
 import { EnvironmentConfigLoadError, loadEnvironmentConfig } from "./environmentConfigLoader.ts";
 import { buildCredentialSeedArchives } from "./credentialSeed.ts";
 import { SetupFailed, runSandboxSetup } from "./sandboxSetupRunner.ts";
@@ -614,6 +615,24 @@ function exchangeBootstrapToken(input: {
 
 type ConnectAuthTokenPreference = "provided-first" | "stored-first";
 
+const CONNECT_TOKEN_REFRESH_EARLY_MS = 5 * 60 * 1_000;
+
+const ProductionCliToken = Schema.Struct({
+  accessToken: Schema.String,
+  refreshToken: Schema.String,
+  expiresAtEpochMs: Schema.Number,
+});
+type ProductionCliToken = typeof ProductionCliToken.Type;
+
+const ProductionCliTokenJson = Schema.fromJsonString(ProductionCliToken);
+
+const ConnectOAuthTokenResponse = Schema.Struct({
+  access_token: Schema.String,
+  refresh_token: Schema.optional(Schema.String),
+  expires_in: Schema.Number,
+  token_type: Schema.String,
+});
+
 export function connectAuthTokenPreferenceForEndpoint(
   endpointProviderKind: RelayManagedEndpointProviderKind,
 ): ConnectAuthTokenPreference {
@@ -622,7 +641,7 @@ export function connectAuthTokenPreferenceForEndpoint(
 
 function readStoredConnectAuthToken(): Effect.Effect<
   Option.Option<{ readonly accessToken: string }>,
-  never,
+  SandboxRpcError,
   CliTokenManager.CloudCliTokenManager
 > {
   // The CLI token manager is auto-refreshable and reads from the runtime's
@@ -634,9 +653,7 @@ function readStoredConnectAuthToken(): Effect.Effect<
     Effect.catch(() => Effect.succeed(Option.none<{ readonly accessToken: string }>())),
     Effect.flatMap((cliToken) => {
       if (Option.isSome(cliToken)) return Effect.succeed(Option.some(cliToken.value));
-      return readProductionCliToken().pipe(
-        Effect.catch(() => Effect.succeed(Option.none<{ readonly accessToken: string }>())),
-      );
+      return readProductionCliToken();
     }),
   );
 }
@@ -669,28 +686,63 @@ function resolveConnectAuthToken(
 
 /**
  * Fallback: read the CLI OAuth token from the production secrets directory
- * (~/.katacode/userdata/secrets/cloud-cli-oauth-token.bin).  The
+ * (~/.katacode/userdata/secrets/cloud-cli-oauth-token.bin). The
  * CliTokenManager's ServerSecretStore points at ~/.katacode/dev/secrets/
  * when the server runs in dev mode (VITE_DEV_SERVER_URL set).
  * `npx @kata-sh/code-cli connect login` (run without --dev-url) stores
  * to userdata/secrets/, so the managed path sees no token and silently
  * falls through to the short-lived Clerk JWT (60 s TTL), which expires
- * during Vercel sandbox provisioning (2-3 min).  This fallback bridges
- * the directory mismatch.
+ * during Vercel sandbox provisioning (2-3 min). This fallback bridges
+ * the directory mismatch and refreshes the production token before use.
  */
+function productionCliTokenPath(): string {
+  return NodePath.join(
+    resolveDefaultKatacodeHome(os.homedir()),
+    "userdata",
+    "secrets",
+    "cloud-cli-oauth-token.bin",
+  );
+}
+
+function refreshProductionCliToken(
+  token: ProductionCliToken,
+): Effect.Effect<ProductionCliToken, SandboxRpcError> {
+  return Effect.gen(function* () {
+    const metadata = yield* cloudCliOAuthConfig.pipe(
+      Effect.mapError(
+        (cause) =>
+          new SandboxRpcError({
+            reason: "connect-failed",
+            message: `Kata Code Connect OAuth config is unavailable: ${String(cause)}`,
+          }),
+      ),
+    );
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: token.refreshToken,
+      client_id: metadata.clientId,
+    });
+    const response = yield* fetchJson(ConnectOAuthTokenResponse, metadata.tokenEndpoint, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const now = yield* Clock.currentTimeMillis;
+    return {
+      accessToken: response.access_token,
+      refreshToken: response.refresh_token ?? token.refreshToken,
+      expiresAtEpochMs: now + response.expires_in * 1_000,
+    } satisfies ProductionCliToken;
+  });
+}
+
 // @effect-diagnostics-next-line effect(nodeBuiltinImport):off - Direct filesystem read for production token fallback.
 function readProductionCliToken(): Effect.Effect<
   Option.Option<{ readonly accessToken: string }>,
-  never
+  SandboxRpcError
 > {
   return Effect.gen(function* () {
-    const katacodeHome = resolveDefaultKatacodeHome(os.homedir());
-    const tokenPath = NodePath.join(
-      katacodeHome,
-      "userdata",
-      "secrets",
-      "cloud-cli-oauth-token.bin",
-    );
+    const tokenPath = productionCliTokenPath();
     const raw = yield* Effect.sync(() => {
       try {
         return NodeFS.readFileSync(tokenPath, "utf8");
@@ -699,17 +751,50 @@ function readProductionCliToken(): Effect.Effect<
       }
     });
     if (raw === null) return Option.none();
-    const decoded = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(
-        Schema.Struct({
-          accessToken: Schema.String,
-        }),
+    const decoded = yield* Schema.decodeUnknownEffect(ProductionCliTokenJson)(raw).pipe(
+      Effect.mapError(
+        (cause) =>
+          new SandboxRpcError({
+            reason: "connect-failed",
+            message: `Stored Kata Code Connect CLI credential is unreadable. Run \`npx @kata-sh/code-cli connect login\`, then retry. ${errorToMessage(cause)}`,
+          }),
       ),
-    )(raw).pipe(
-      Effect.catch(() => Effect.succeed(null as { readonly accessToken: string } | null)),
     );
-    return decoded !== null ? Option.some({ accessToken: decoded.accessToken }) : Option.none();
-  }).pipe(Effect.catch(() => Effect.succeed(Option.none<{ readonly accessToken: string }>())));
+    const now = yield* Clock.currentTimeMillis;
+    if (decoded.expiresAtEpochMs - CONNECT_TOKEN_REFRESH_EARLY_MS > now) {
+      return Option.some({ accessToken: decoded.accessToken });
+    }
+    const refreshed = yield* refreshProductionCliToken(decoded).pipe(
+      Effect.mapError(
+        (cause) =>
+          new SandboxRpcError({
+            reason: "connect-failed",
+            message: `Stored Kata Code Connect CLI credential is expired and refresh failed. Run \`npx @kata-sh/code-cli connect login\`, then retry. ${errorToMessage(cause)}`,
+          }),
+      ),
+    );
+    const encoded = yield* Schema.encodeEffect(ProductionCliTokenJson)(refreshed).pipe(
+      Effect.mapError(
+        (cause) =>
+          new SandboxRpcError({
+            reason: "connect-failed",
+            message: `Could not encode refreshed Kata Code Connect CLI credential. ${errorToMessage(cause)}`,
+          }),
+      ),
+    );
+    yield* Effect.try({
+      try: () => {
+        NodeFS.writeFileSync(tokenPath, encoded);
+        NodeFS.chmodSync(tokenPath, 0o600);
+      },
+      catch: (cause) =>
+        new SandboxRpcError({
+          reason: "connect-failed",
+          message: `Could not persist refreshed Kata Code Connect CLI credential. ${errorToMessage(cause)}`,
+        }),
+    });
+    return Option.some({ accessToken: refreshed.accessToken });
+  });
 }
 
 function registerSandboxWithConnect(input: {
