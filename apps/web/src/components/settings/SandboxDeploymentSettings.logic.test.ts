@@ -46,7 +46,7 @@ describe("sandbox deployment settings logic", () => {
     ).toThrow("Container port");
   });
 
-  it("creates Docker and Vercel sandbox configs for the unified add dialog", () => {
+  it("creates Docker and Vercel sandbox configs for the add environment dialog", () => {
     expect(
       buildDockerSandboxProviderInstance({
         label: "Local",

@@ -603,6 +603,9 @@ describe("GeneralSettingsPanel observability", () => {
     await expect
       .element(page.getByRole("heading", { name: "Environments", exact: true }))
       .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("heading", { name: "Available Runtimes", exact: true }))
+      .toBeInTheDocument();
   });
 
   it("hides advertised endpoint rows when desktop network access is disabled", async () => {

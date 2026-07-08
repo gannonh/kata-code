@@ -1,8 +1,8 @@
 # Specs log
 
-## 2026-07-07 (Environments / Deployments — Unified Environments UX)
+## 2026-07-07 (Environments / Deployments — Settings environments and runtimes split)
 
-Converged the Settings UI from separate Sandbox environments and Remote environments sections into one **Environments** section. The unified Add Environment dialog now exposes Remote link, SSH, Docker container, and Cloud Provider top-level choices, with Vercel Sandbox selected via a provider dropdown in the cloud form. Sandbox saved runtime records are filtered out of the remote rows to remove duplicate display while retaining the current storage model. Updated the specs roadmap note for Phase 3b follow-up UX validation.
+Adjusted the Settings follow-up UX around Environments/Deployments. **Environments** now owns saved definitions and the Add Environment flow for Remote link, SSH, Docker container, and Cloud Provider. **Available Runtimes** now represents connectable runtime endpoints and exposes only Connect/Disconnect, while Remote link and SSH label edit/delete controls live with the saved definitions. Updated the specs roadmap note for the Phase 3b follow-up UX.
 
 ## 2026-07-06 (Environments / Deployments Phase 3a — OKF finalize update)
 

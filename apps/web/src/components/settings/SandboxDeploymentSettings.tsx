@@ -1,10 +1,11 @@
 "use client";
 
 import { useAuth } from "@clerk/react";
-import { ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronDownIcon, Trash2Icon } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   EnvironmentId,
+  SandboxProviderDriverKind,
   type ProviderInstanceEnvironmentVariable,
   type SavedSandboxEnvironmentMap,
   type SandboxInstanceSummary,
@@ -26,21 +27,9 @@ import { cn } from "../../lib/utils";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import type { Project } from "../../types";
 import { Button } from "../ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPopup,
-  DialogTitle,
-  DialogTrigger,
-} from "../ui/dialog";
 import { Badge } from "../ui/badge";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -48,16 +37,9 @@ import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt"
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
 import { ProviderSignInDialog } from "./ProviderSignInDialog";
 import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
-import {
-  DOCKER_SANDBOX_KIND,
-  VERCEL_SANDBOX_KIND,
-  buildDockerSandboxProviderInstance,
-  buildVercelSandboxProviderInstance,
-  makeSandboxProviderInstanceId,
-  parseSandboxPort,
-  sandboxInstanceIdForLabel,
-} from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
+
+const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
 /** Per-instance busy state for the long-running RPCs. */
 type BusyOp = "test" | "start" | "dispose" | "renew" | "snapshot";
@@ -76,20 +58,24 @@ function failureMessage(error: unknown): string {
 }
 
 /**
- * Settings panel for sandbox environments (Phase 1: local Docker
- * containers). Lists configured targets with their materialized status, and
- * provides Add / Test connection (streaming) / Start session / Dispose /
- * Remove. Writes go through `useUpdateSettings` against the
- * `sandboxProviderInstances` settings map (no plaintext secrets in settings);
+ * Settings panel for environment definitions. Lists configured targets with
+ * their materialized status, and provides Test connection (streaming) / Start
+ * session / Dispose / Delete for sandbox-backed environments. Writes go
+ * through `useUpdateSettings` against the `sandboxProviderInstances` settings
+ * map (no plaintext secrets in settings);
  * the live RPCs (list/test/start/dispose) go through the paired WS client.
  */
+interface SandboxDeploymentSettingsProps {
+  readonly headerAction?: ReactNode;
+  readonly savedEnvironmentRows?: ReactNode;
+  readonly hasSavedEnvironmentRows?: boolean;
+}
+
 export function SandboxDeploymentSettings({
-  presentation = "section",
-  showEmptyState = true,
-}: {
-  readonly presentation?: "section" | "rows";
-  readonly showEmptyState?: boolean;
-} = {}) {
+  headerAction,
+  savedEnvironmentRows,
+  hasSavedEnvironmentRows = false,
+}: SandboxDeploymentSettingsProps) {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { getToken, isSignedIn } = useAuth();
@@ -101,7 +87,6 @@ export function SandboxDeploymentSettings({
     | undefined;
 
   const [summaries, setSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>([]);
-  const [addOpen, setAddOpen] = useState(false);
   const [testProgress, setTestProgress] = useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [selectedRepositoryKeyByInstance, setSelectedRepositoryKeyByInstance] = useState<
@@ -496,10 +481,7 @@ export function SandboxDeploymentSettings({
           const previousSnapshotId =
             typeof config.snapshotId === "string" ? config.snapshotId : undefined;
           const isSameSnapshot = previousSnapshotId === result.snapshotId;
-          if (
-            instance !== undefined &&
-            (instance.driver as string) === (VERCEL_SANDBOX_KIND as string)
-          ) {
+          if (instance !== undefined && (instance.driver as string) === (VERCEL_KIND as string)) {
             updateSettings({
               sandboxProviderInstances: {
                 ...instanceMap,
@@ -570,115 +552,71 @@ export function SandboxDeploymentSettings({
   );
 
   const instanceEntries = Object.entries(instanceMap);
-  const sandboxRows =
-    instanceEntries.length === 0 ? (
-      showEmptyState ? (
-        <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
-          <p className="text-xs text-muted-foreground">
-            No sandbox environments configured. Add one to provision a container.
-          </p>
-        </div>
-      ) : null
-    ) : (
-      instanceEntries.map(([id, config]) => {
-        const summary = summaryById[id];
-        const available = summary?.kind === "available";
-        const reason = summary?.kind === "unavailable" ? summary.reason : undefined;
-        const session = activeSession[id];
-        const progress = testProgress[id] ?? [];
-        const instanceBusy = busy[id];
-        const isOpen = expanded[id] ?? false;
-        const displayName = config.displayName ?? id;
-        const enabled = config.enabled ?? true;
-        const selectedProject = resolveSelectedProject(id);
-        const selectedRepositoryKey =
-          selectedRepositoryKeyByInstance[id] ??
-          (config.repositoryKey as string | undefined) ??
-          (selectedProject?.repositoryIdentity?.canonicalKey as string | undefined);
-        return (
-          <DeploymentTargetCard
-            key={id}
-            instanceId={id}
-            instance={config}
-            displayName={displayName}
-            enabled={enabled}
-            available={available}
-            reason={reason}
-            session={session}
-            summary={summary}
-            progress={progress}
-            instanceBusy={instanceBusy}
-            isExpanded={isOpen}
-            projects={projects}
-            savedSandboxEnvironments={savedSandboxEnvironments}
-            selectedRepositoryKey={selectedRepositoryKey}
-            onExpandedChange={(open) => setExpanded((prev) => ({ ...prev, [id]: open }))}
-            onUpdate={(next) => updateInstance(id, next)}
-            onSavedEnvironmentChange={(next) => updateSettings({ savedSandboxEnvironments: next })}
-            onSelectedRepositoryKeyChange={(repositoryKey) => {
-              setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }));
-              updateInstance(id, { ...config, repositoryKey });
-            }}
-            onDelete={() => handleRemove(id)}
-            onTest={() => void handleTest(id)}
-            onStart={() => void handleStart(id)}
-            onDispose={() => void handleDispose(id)}
-            onResume={() => void handleResume(id)}
-            onRenew={() => void handleRenew(id)}
-            onSnapshot={() => void handleSnapshot(id)}
-          />
-        );
-      })
-    );
-
-  if (presentation === "rows") {
-    return (
-      <>
-        {sandboxRows}
-        {authPrompt}
-      </>
-    );
-  }
 
   return (
     <>
-      <SettingsSection
-        title="Sandbox environments"
-        headerAction={
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <DialogTrigger
-                    render={
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
-                        aria-label="Add sandbox environment"
-                      >
-                        <PlusIcon className="size-3" />
-                        <span>Add sandbox environment</span>
-                      </Button>
-                    }
-                  />
+      <SettingsSection title="Environments" headerAction={headerAction}>
+        {hasSavedEnvironmentRows ? savedEnvironmentRows : null}
+        {instanceEntries.length === 0 && !hasSavedEnvironmentRows ? (
+          <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
+            <p className="text-xs text-muted-foreground">
+              No environments configured. Add one to define a remote link, SSH host, Docker
+              container, or cloud provider.
+            </p>
+          </div>
+        ) : (
+          instanceEntries.map(([id, config]) => {
+            const summary = summaryById[id];
+            const available = summary?.kind === "available";
+            const reason = summary?.kind === "unavailable" ? summary.reason : undefined;
+            const session = activeSession[id];
+            const progress = testProgress[id] ?? [];
+            const instanceBusy = busy[id];
+            const isOpen = expanded[id] ?? false;
+            const displayName = config.displayName ?? id;
+            const enabled = config.enabled ?? true;
+            const selectedProject = resolveSelectedProject(id);
+            const selectedRepositoryKey =
+              selectedRepositoryKeyByInstance[id] ??
+              (config.repositoryKey as string | undefined) ??
+              (selectedProject?.repositoryIdentity?.canonicalKey as string | undefined);
+            return (
+              <DeploymentTargetCard
+                key={id}
+                instanceId={id}
+                instance={config}
+                displayName={displayName}
+                enabled={enabled}
+                available={available}
+                reason={reason}
+                session={session}
+                summary={summary}
+                progress={progress}
+                instanceBusy={instanceBusy}
+                isExpanded={isOpen}
+                projects={projects}
+                savedSandboxEnvironments={savedSandboxEnvironments}
+                selectedRepositoryKey={selectedRepositoryKey}
+                onExpandedChange={(open) => setExpanded((prev) => ({ ...prev, [id]: open }))}
+                onUpdate={(next) => updateInstance(id, next)}
+                onSavedEnvironmentChange={(next) =>
+                  updateSettings({ savedSandboxEnvironments: next })
                 }
+                onSelectedRepositoryKeyChange={(repositoryKey) => {
+                  setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }));
+                  updateInstance(id, { ...config, repositoryKey });
+                }}
+                onDelete={() => handleRemove(id)}
+                onTest={() => void handleTest(id)}
+                onStart={() => void handleStart(id)}
+                onDispose={() => void handleDispose(id)}
+                onResume={() => void handleResume(id)}
+                onRenew={() => void handleRenew(id)}
+                onSnapshot={() => void handleSnapshot(id)}
               />
-              <TooltipPopup side="top">Add sandbox environment</TooltipPopup>
-            </Tooltip>
-            <AddDeploymentTargetDialogBody
-              existingIds={new Set(instanceEntries.map(([id]) => id))}
-              onAdd={(id, instance) => {
-                updateSettings({
-                  sandboxProviderInstances: { ...instanceMap, [id]: instance },
-                });
-                setAddOpen(false);
-              }}
-            />
-          </Dialog>
-        }
-      >
-        {sandboxRows}
+            );
+          })
+        )}
       </SettingsSection>
       {authPrompt}
     </>
@@ -746,7 +684,7 @@ function DeploymentTargetCard({
   onRenew,
   onSnapshot,
 }: DeploymentTargetCardProps) {
-  const isVercel = (instance.driver as string) === (VERCEL_SANDBOX_KIND as string);
+  const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
   const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
   const supportsResume = summary?.kind === "available" ? summary.supportsResume : undefined;
   const supportsSnapshot = summary?.kind === "available" ? summary.supportsSnapshot : undefined;
@@ -1078,6 +1016,14 @@ function formatRemaining(deadlineEpochMs: number): string {
   return `${minutes}m`;
 }
 
+/** Parse a container port string into a validated integer in 1..65535, or null. */
+function parseContainerPort(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+$/u.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535 ? parsed : null;
+}
+
 /** Set a numeric container port field, rejecting non-integer/out-of-range values.
  * An empty input clears the field. */
 function setContainerPort(
@@ -1090,7 +1036,7 @@ function setContainerPort(
   if (value.trim().length === 0) {
     delete base[key];
   } else {
-    const parsed = parseSandboxPort(value);
+    const parsed = parseContainerPort(value);
     if (parsed === null) return base;
     base[key] = parsed;
   }
@@ -1304,120 +1250,5 @@ function VercelConfigFields({ config, idPrefix, onChange }: VercelConfigFieldsPr
         </label>
       </div>
     </>
-  );
-}
-
-interface AddDeploymentTargetDialogBodyProps {
-  existingIds: Set<string>;
-  onAdd: (id: string, instance: SandboxProviderInstanceConfig) => void;
-}
-
-function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTargetDialogBodyProps) {
-  const [driver, setDriver] = useState<"docker" | "vercel">("docker");
-  // Defaults match the driver's DEFAULT_*_CONFIG. Docker: the `katacode:local`
-  // image built by `pnpm run build:docker-image`, started with
-  // `katacode serve --port 13773`. Vercel: the `node24` runtime with a 45m
-  // timeout. Add -> Test connection provisions the real server.
-  const [label, setLabel] = useState("");
-  const [image, setImage] = useState("katacode:local");
-  const [command, setCommand] = useState("katacode serve --port 13773");
-  const [port, setPort] = useState("13773");
-  const [error, setError] = useState<string | null>(null);
-
-  const driverKind = driver === "vercel" ? VERCEL_SANDBOX_KIND : DOCKER_SANDBOX_KIND;
-  const instanceId = useMemo(
-    () => sandboxInstanceIdForLabel({ driver: driverKind, label }),
-    [driverKind, label],
-  );
-
-  const handleSubmit = useCallback(() => {
-    try {
-      const brandedId = makeSandboxProviderInstanceId({ driver: driverKind, label, existingIds });
-      const instance =
-        driver === "vercel"
-          ? buildVercelSandboxProviderInstance({ label })
-          : buildDockerSandboxProviderInstance({ label, image, command, port });
-      onAdd(brandedId, instance);
-      setLabel("");
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Invalid instance id.");
-    }
-  }, [driver, driverKind, existingIds, label, image, command, port, onAdd]);
-
-  return (
-    <DialogPopup className="max-w-xl overflow-hidden">
-      <DialogHeader>
-        <DialogTitle>Add sandbox environment</DialogTitle>
-        <DialogDescription>
-          Provisions an isolated sandbox running a Kata server. Choose a local container or a Vercel
-          Sandbox cloud microVM.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="flex flex-col gap-3 p-4">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-driver">Driver</Label>
-          <select
-            id="sandbox-driver"
-            className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
-            value={driver}
-            onChange={(e) => setDriver(e.target.value as "docker" | "vercel")}
-          >
-            <option value="docker">Local container (Docker)</option>
-            <option value="vercel">Vercel Sandbox</option>
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-label">Label</Label>
-          <Input
-            id="sandbox-label"
-            value={label}
-            placeholder="e.g. Work"
-            onChange={(e) => setLabel(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">Instance id: {instanceId}</p>
-        </div>
-        {driver === "docker" ? (
-          <>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="sandbox-image">Image</Label>
-              <Input id="sandbox-image" value={image} onChange={(e) => setImage(e.target.value)} />
-              <p className="text-xs text-muted-foreground">
-                Must contain your start command's runtime. Use a <code>katacode</code> image once
-                published.
-              </p>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="sandbox-command">Start command</Label>
-              <Input
-                id="sandbox-command"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Launches the Kata server inside the container. Defaults to
-                <code>katacode serve --port 13773</code> against the
-                <code>katacode:local</code> image (built by
-                <code>pnpm run build:docker-image</code>).
-              </p>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="sandbox-port">Container port</Label>
-              <Input id="sandbox-port" value={port} onChange={(e) => setPort(e.target.value)} />
-            </div>
-          </>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            After creating, add <code>VERCEL_TOKEN</code>, <code>VERCEL_TEAM_ID</code>, and
-            <code>VERCEL_PROJECT_ID</code> as sensitive environment variables on the target.
-          </p>
-        )}
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      </div>
-      <DialogFooter>
-        <DialogClose render={<Button variant="ghost">Cancel</Button>} />
-        <Button onClick={handleSubmit}>Add sandbox environment</Button>
-      </DialogFooter>
-    </DialogPopup>
   );
 }

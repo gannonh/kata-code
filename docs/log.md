@@ -1,8 +1,8 @@
 # OKF bundle log
 
-## 2026-07-07 (Unified Environments UX)
+## 2026-07-07 (Settings environments and runtimes split)
 
-Merged the Settings environments surface so sandbox targets and remote/SSH saved environments render under one **Environments** section. The Add Environment dialog now offers **Remote link**, **SSH**, **Docker container**, and **Cloud Provider**, with **Vercel Sandbox** selected inside the cloud-provider form. Sandbox runtime records are hidden from the remote saved-environment rows to avoid duplicate entries while preserving the existing `sandboxProviderInstances` and saved-environment registry models. Added shared sandbox instance creation helpers and unit coverage; updated the browser settings heading assertion. Validation: `vp test apps/web/src/components/settings/SandboxDeploymentSettings.logic.test.ts`, `vp run --filter @kata-sh/code-web test:browser -- SettingsPanels.browser.tsx`, `vp run typecheck`, `vp check`.
+Updated the Settings connections UX to separate saved environment definitions from connectable runtime state. The former **Sandbox environments** section is now **Environments** and owns the Add Environment flow for Remote link, SSH, Docker container, and Cloud Provider definitions. The former **Remote environments** section is now **Available Runtimes** and keeps only Connect/Disconnect runtime actions; local Delete/Edit controls for saved Remote link and SSH definitions moved into **Environments**. Updated browser settings coverage and sandbox creation helper test naming. Validation: `vp test apps/web/src/components/settings/SandboxDeploymentSettings.logic.test.ts`, `vp run --filter @kata-sh/code-web test:browser -- SettingsPanels.browser.tsx`, `vp run typecheck`, `vp check`, `vp run check:okf`.
 
 ## 2026-07-06 (Environments / Deployments Phase 3a — OKF finalize update)
 
