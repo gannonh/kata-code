@@ -612,32 +612,55 @@ function exchangeBootstrapToken(input: {
   });
 }
 
-function resolveConnectAuthToken(
-  connectAuthToken: SandboxStartSessionInput["connectAuthToken"],
-): Effect.Effect<string, SandboxRpcError, CliTokenManager.CloudCliTokenManager> {
-  // Prefer the CLI token manager (auto-refreshable OAuth token, persists
-  // across sessions) which reads from the runtime's secrets directory.
-  // In dev mode (VITE_DEV_SERVER_URL set) that's ~/.katacode/dev/secrets/;
-  // the `npx @kata-sh/code-cli connect login` command (run without --dev-url)
-  // stores to ~/.katacode/userdata/secrets/.  If the managed path misses, fall
-  // back to reading the production path directly before falling through to the
-  // short-lived Clerk JWT (60 s TTL, too short for Vercel's 2-3 min provision).
+type ConnectAuthTokenPreference = "provided-first" | "stored-first";
+
+export function connectAuthTokenPreferenceForEndpoint(
+  endpointProviderKind: RelayManagedEndpointProviderKind,
+): ConnectAuthTokenPreference {
+  return endpointProviderKind === "cloudflare_tunnel" ? "provided-first" : "stored-first";
+}
+
+function readStoredConnectAuthToken(): Effect.Effect<
+  Option.Option<{ readonly accessToken: string }>,
+  never,
+  CliTokenManager.CloudCliTokenManager
+> {
+  // The CLI token manager is auto-refreshable and reads from the runtime's
+  // secrets directory. In dev mode (VITE_DEV_SERVER_URL set) that's
+  // ~/.katacode/dev/secrets/; `npx @kata-sh/code-cli connect login` (run
+  // without --dev-url) stores to ~/.katacode/userdata/secrets/, so also check
+  // the production path before falling through to the desktop session token.
   return Effect.flatMap(CliTokenManager.CloudCliTokenManager, (tokens) => tokens.getExisting).pipe(
-    Effect.catch(() => Effect.succeed(Option.none<never>())),
+    Effect.catch(() => Effect.succeed(Option.none<{ readonly accessToken: string }>())),
     Effect.flatMap((cliToken) => {
-      if (Option.isSome(cliToken)) return Effect.succeed(cliToken.value.accessToken);
+      if (Option.isSome(cliToken)) return Effect.succeed(Option.some(cliToken.value));
       return readProductionCliToken().pipe(
         Effect.catch(() => Effect.succeed(Option.none<{ readonly accessToken: string }>())),
-        Effect.flatMap((fallbackToken) => {
-          if (Option.isSome(fallbackToken)) return Effect.succeed(fallbackToken.value.accessToken);
-          if (connectAuthToken) return Effect.succeed(connectAuthToken);
-          return Effect.fail(
-            new SandboxRpcError({
-              reason: "connect-failed",
-              message:
-                "No Kata Code Connect credential found. Run `npx @kata-sh/code-cli connect login` to authorize, or sign in to Kata Code Connect from the desktop app.",
-            }),
-          );
+      );
+    }),
+  );
+}
+
+function resolveConnectAuthToken(
+  connectAuthToken: SandboxStartSessionInput["connectAuthToken"],
+  preference: ConnectAuthTokenPreference,
+): Effect.Effect<string, SandboxRpcError, CliTokenManager.CloudCliTokenManager> {
+  // Loopback/Docker registration happens immediately after local container
+  // start, so prefer the freshly supplied desktop token when available. Public
+  // Vercel registration can happen minutes after the UI request starts, so keep
+  // using the refreshable stored CLI OAuth token first there.
+  if (preference === "provided-first" && connectAuthToken) {
+    return Effect.succeed(connectAuthToken);
+  }
+  return readStoredConnectAuthToken().pipe(
+    Effect.flatMap((storedToken) => {
+      if (Option.isSome(storedToken)) return Effect.succeed(storedToken.value.accessToken);
+      if (connectAuthToken) return Effect.succeed(connectAuthToken);
+      return Effect.fail(
+        new SandboxRpcError({
+          reason: "connect-failed",
+          message:
+            "No Kata Code Connect credential found. Run `npx @kata-sh/code-cli connect login` to authorize, or sign in to Kata Code Connect from the desktop app.",
         }),
       );
     }),
@@ -716,7 +739,10 @@ function registerSandboxWithConnect(input: {
           }),
       ),
     );
-    const bearerToken = yield* resolveConnectAuthToken(input.connectAuthToken);
+    const bearerToken = yield* resolveConnectAuthToken(
+      input.connectAuthToken,
+      connectAuthTokenPreferenceForEndpoint(input.endpointProviderKind),
+    );
     const session = yield* exchangeBootstrapToken(input);
     const descriptor = yield* fetchJson(
       ExecutionEnvironmentDescriptorSchema,
@@ -1646,7 +1672,7 @@ export const SandboxServiceLive = {
         // link lapses when the sandbox becomes unreachable. The bearer token
         // is not stored; re-resolve it via resolveConnectAuthToken.
         if (record.relay) {
-          const bearerToken = yield* resolveConnectAuthToken(undefined).pipe(
+          const bearerToken = yield* resolveConnectAuthToken(undefined, "stored-first").pipe(
             Effect.catch(() => Effect.succeed(null)),
           );
           if (bearerToken !== null) {

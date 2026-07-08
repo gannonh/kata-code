@@ -25,6 +25,7 @@ import {
   discoverUntrackedSessions,
   sanitizeHandleForStore,
   reinjectVercelAuth,
+  connectAuthTokenPreferenceForEndpoint,
   type LiveSession,
 } from "./SandboxService.ts";
 
@@ -126,6 +127,18 @@ function makeRecord(instanceId: string, status: "running" | "stopped"): SandboxS
     status,
   };
 }
+
+describe("Connect token selection for sandbox registration", () => {
+  it("prefers the freshly supplied desktop token for loopback/Docker registration", () => {
+    expect(connectAuthTokenPreferenceForEndpoint("cloudflare_tunnel" as never)).toBe(
+      "provided-first",
+    );
+  });
+
+  it("keeps the refreshable stored CLI token first for public/Vercel registration", () => {
+    expect(connectAuthTokenPreferenceForEndpoint("manual" as never)).toBe("stored-first");
+  });
+});
 
 describe("reconcileStoredRecords (AC-L7)", () => {
   it("reports running when the provider lifecycle.status returns running", async () => {
