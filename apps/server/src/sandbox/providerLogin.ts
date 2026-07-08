@@ -75,11 +75,31 @@ interface ActiveLogin {
 
 const activeLogins = new Map<string, ActiveLogin>();
 
+const OSC8_HYPERLINK_PATTERN = /\x1b\]8;[^\x07\x1b;]*;(https?:\/\/[^\x07\x1b]+)(?:\x07|\x1b\\)/gu;
+
 /** Strip ANSI escape sequences and OSC hyperlinks from terminal output. */
 function stripAnsi(input: string): string {
   return input
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/gu, "")
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/gu, "");
+}
+
+/** Extract the provider OAuth URL from PTY output.
+ *
+ * Claude renders the full sign-in URL as an OSC-8 terminal hyperlink and then
+ * prints a visually wrapped copy. The visible copy can be line-truncated by
+ * `script(1)`, so prefer the OSC-8 URI before falling back to stripped text.
+ */
+export function extractProviderLoginUrl(input: string, urlPattern: RegExp): string | null {
+  for (const match of input.matchAll(OSC8_HYPERLINK_PATTERN)) {
+    const uri = match[1];
+    if (!uri) continue;
+    const urlMatch = uri.match(urlPattern);
+    if (urlMatch !== null) return urlMatch[0];
+  }
+  const text = stripAnsi(input);
+  const urlMatch = text.match(urlPattern);
+  return urlMatch?.[0] ?? null;
 }
 
 /** Injection guard for OAuth codes written into the FIFO. */
@@ -166,12 +186,11 @@ export function startProviderLogin(input: {
                   (e) => new SandboxRpcError({ reason: "provision-failed", message: e.message }),
                 ),
               );
-            const text = stripAnsi(result.stdout);
-            const urlMatch = text.match(spec.urlPattern);
-            if (urlMatch !== null) {
+            const url = extractProviderLoginUrl(result.stdout, spec.urlPattern);
+            if (url !== null) {
               return [
                 { stage: "started", loginSessionId: id },
-                { stage: "url", loginSessionId: id, url: urlMatch[0] },
+                { stage: "url", loginSessionId: id, url },
                 { stage: "awaiting-code", loginSessionId: id },
               ] as ReadonlyArray<SandboxProviderLoginEvent>;
             }
