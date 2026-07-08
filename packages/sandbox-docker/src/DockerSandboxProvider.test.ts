@@ -8,6 +8,8 @@ import * as Schema from "effect/Schema";
 
 import {
   DockerSandboxProvider,
+  makeDockerSandboxProvider,
+  dockerContainerName,
   dockerConfigDecoder,
   DOCKER_KIND,
   type DockerSandboxHandleState,
@@ -19,6 +21,14 @@ import type { SandboxHandle } from "@kata-sh/code-sandbox/driver";
 const decodeConfig = Schema.decodeUnknownSync(DockerSandboxConfig);
 
 describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
+  it("dockerContainerName derives a deterministic slug-safe name from an instance id", () => {
+    expect(dockerContainerName("docker_docker_test_01")).toBe("kata-sandbox-docker_docker_test_01");
+    // Same input -> same name (stable across restarts, no timestamp).
+    expect(dockerContainerName("docker_docker_test_01")).toBe(
+      dockerContainerName("docker_docker_test_01"),
+    );
+  });
+
   it("kind is the branded 'docker' slug", () => {
     expect(DOCKER_KIND as string).toBe("docker");
   });
@@ -39,7 +49,7 @@ describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
   });
 
   vitIt.effect(
-    "describe() advertises loopback reachability and no snapshot support (Phase 1)",
+    "describe() advertises loopback reachability, lifecycle, and no snapshot support",
     () =>
       Effect.gen(function* () {
         const d = yield* DockerSandboxProvider.describe();
@@ -48,8 +58,20 @@ describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
         expect(d.supportsSnapshot).toBe(false);
         expect(d.supportsRenewTimeout).toBe(false);
         expect(d.supportsCopyInto).toBe(true);
+        expect(d.supportsLifecycle).toBe(true);
         expect(d.baseImages?.[0]).toBe(DEFAULT_DOCKER_CONFIG.image);
       }),
+  );
+
+  vitIt.effect("lifecycle capability is present and matches describe().supportsLifecycle", () =>
+    Effect.gen(function* () {
+      const d = yield* DockerSandboxProvider.describe();
+      expect(DockerSandboxProvider.lifecycle).toBeDefined();
+      expect(DockerSandboxProvider.lifecycle !== undefined).toBe(d.supportsLifecycle);
+      expect(DockerSandboxProvider.lifecycle?.stop).toBeDefined();
+      expect(DockerSandboxProvider.lifecycle?.start).toBeDefined();
+      expect(DockerSandboxProvider.lifecycle?.status).toBeDefined();
+    }),
   );
 
   vitIt.effect(
@@ -67,7 +89,12 @@ describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
       const handle = {
         driverKind: DOCKER_KIND,
         instanceId: "x",
-        handle: { containerId: "c", hostPort: 32789, containerPort: 13773 },
+        handle: {
+          containerId: "c",
+          containerName: "kata-sandbox-x",
+          hostPort: 32789,
+          containerPort: 13773,
+        },
       };
       const r = yield* DockerSandboxProvider.reachability(handle, 13773);
       expect(r.reachabilityKind).toBe("loopback");
@@ -118,7 +145,7 @@ function startAlpineContainer(label: string): Effect.Effect<SandboxHandle, Error
   return Effect.gen(function* () {
     yield* assertDockerDaemonReachable();
     const name = `kata-sandbox-test-${label}-${Date.now()}`;
-    const create = yield* dockerRequest("/containers/create", {
+    const create = yield* dockerRequest(`/containers/create?name=${name}`, {
       method: "POST",
       body: JSON.stringify({
         Image: INTEGRATION_IMAGE,
@@ -143,6 +170,7 @@ function startAlpineContainer(label: string): Effect.Effect<SandboxHandle, Error
     }
     const state: DockerSandboxHandleState = {
       containerId,
+      containerName: name,
       hostPort: 0,
       containerPort: 13773,
     };
@@ -280,6 +308,116 @@ describe("DockerSandboxProvider exec/copyInto integration (Docker-guarded, AC-2.
         expect(cat.exitCode).toBe(0);
         expect(cat.stdout).toBe("hello-from-host");
       }).pipe(Effect.ensuring(removeContainer(handle)));
+    }),
+  );
+});
+
+/** A Docker provider with a healthz probe that always succeeds, so lifecycle
+ *  start/stop/status integration tests work against a plain `alpine` container
+ *  that does not serve HTTP (AC-L5/L6). */
+const providerWithFakeProbe = makeDockerSandboxProvider({
+  healthzProbe: () => Effect.succeed(true),
+});
+
+/** Start an alpine container with a published port (no listener) so lifecycle
+ *  start can read a host port binding from inspect. The caller MUST remove it. */
+function startAlpineContainerWithPort(label: string): Effect.Effect<SandboxHandle, Error> {
+  return Effect.gen(function* () {
+    yield* assertDockerDaemonReachable();
+    const name = `kata-sandbox-test-${label}-${Date.now()}`;
+    const create = yield* dockerRequest(`/containers/create?name=${name}`, {
+      method: "POST",
+      body: JSON.stringify({
+        Image: INTEGRATION_IMAGE,
+        Cmd: ["sh", "-c", "sleep 300"],
+        ExposedPorts: { "8080/tcp": {} },
+        HostConfig: { PortBindings: { "8080/tcp": [{ HostPort: "0" }] } },
+        Labels: { "kata.sandbox.test": "true" },
+      }),
+    }).pipe(Effect.mapError((err) => new Error(`container create failed: ${err.message}`)));
+    if (create.status >= 300) {
+      return yield* Effect.fail(
+        new Error(`container create failed: ${create.status} ${create.body.slice(0, 200)}`),
+      );
+    }
+    const containerId = (parseJson(create.body) as { Id: string }).Id;
+    const start = yield* dockerRequest(`/containers/${containerId}/start`, {
+      method: "POST",
+    }).pipe(Effect.mapError((err) => new Error(`container start failed: ${err.message}`)));
+    if (start.status >= 300 && start.status !== 304) {
+      yield* dockerRequest(`/containers/${containerId}?force=true`, { method: "DELETE" }).pipe(
+        Effect.ignore,
+      );
+      return yield* Effect.fail(new Error(`container start failed: ${start.status}`));
+    }
+    const inspect = yield* dockerRequest(`/containers/${containerId}/json`).pipe(
+      Effect.mapError((err) => new Error(`container inspect failed: ${err.message}`)),
+    );
+    const info = parseJson(inspect.body) as {
+      NetworkSettings: {
+        Ports: Record<string, ReadonlyArray<{ HostPort: string }> | undefined>;
+      };
+    };
+    const hostPort = Number(info.NetworkSettings.Ports["8080/tcp"]?.[0]?.HostPort);
+    const state: DockerSandboxHandleState = {
+      containerId,
+      containerName: name,
+      hostPort,
+      containerPort: 8080,
+    };
+    return { driverKind: DOCKER_KIND, instanceId: label, handle: state } satisfies SandboxHandle;
+  });
+}
+
+describe("DockerSandboxProvider lifecycle (Docker-guarded, AC-L5/L6)", () => {
+  vitIt.effect("status reports running for a running container", () =>
+    Effect.gen(function* () {
+      const handle = yield* startAlpineContainerWithPort("status-running");
+      yield* Effect.gen(function* () {
+        const status = yield* providerWithFakeProbe.lifecycle!.status(handle);
+        expect(status).toBe("running");
+      }).pipe(Effect.ensuring(removeContainer(handle)));
+    }),
+  );
+
+  vitIt.effect("stop stops the container and status reports stopped", () =>
+    Effect.gen(function* () {
+      const handle = yield* startAlpineContainerWithPort("stop");
+      yield* Effect.gen(function* () {
+        yield* providerWithFakeProbe.lifecycle!.stop(handle);
+        const status = yield* providerWithFakeProbe.lifecycle!.status(handle);
+        expect(status).toBe("stopped");
+      }).pipe(Effect.ensuring(removeContainer(handle)));
+    }),
+  );
+
+  vitIt.effect("stop then start preserves the container filesystem (AC-L5)", () =>
+    Effect.gen(function* () {
+      const handle = yield* startAlpineContainerWithPort("fs-persist");
+      yield* Effect.gen(function* () {
+        // Write a marker file while running.
+        const write = yield* DockerSandboxProvider.exec(handle, "echo persisted > /tmp/marker.txt");
+        expect(write.exitCode).toBe(0);
+        // Stop, then start; the filesystem must survive.
+        yield* providerWithFakeProbe.lifecycle!.stop(handle);
+        const stopped = yield* providerWithFakeProbe.lifecycle!.status(handle);
+        expect(stopped).toBe("stopped");
+        yield* providerWithFakeProbe.lifecycle!.start(handle, { config: {} });
+        const running = yield* providerWithFakeProbe.lifecycle!.status(handle);
+        expect(running).toBe("running");
+        const read = yield* DockerSandboxProvider.exec(handle, "cat /tmp/marker.txt");
+        expect(read.exitCode).toBe(0);
+        expect(read.stdout.trim()).toBe("persisted");
+      }).pipe(Effect.ensuring(removeContainer(handle)));
+    }),
+  );
+
+  vitIt.effect("status reports gone after the container is removed (AC-L6)", () =>
+    Effect.gen(function* () {
+      const handle = yield* startAlpineContainerWithPort("gone");
+      yield* removeContainer(handle);
+      const status = yield* providerWithFakeProbe.lifecycle!.status(handle);
+      expect(status).toBe("gone");
     }),
   );
 });
