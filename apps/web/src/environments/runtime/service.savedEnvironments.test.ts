@@ -156,6 +156,14 @@ const savedRecord = {
   wsBaseUrl: "wss://remote.example.test/",
 };
 
+const localSandboxRecord = {
+  environmentId: EnvironmentId.make("env-local-sandbox"),
+  label: "Local sandbox",
+  httpBaseUrl: "http://localhost:32798/",
+  wsBaseUrl: "ws://localhost:32798/",
+  sandbox: { providerKind: "docker" },
+};
+
 const configSnapshot = {
   environment: {
     environmentId: savedRecord.environmentId,
@@ -325,6 +333,28 @@ describe("saved environment startup", () => {
     );
     expect(savedConnectionCalls).toHaveLength(1);
     expect(mockFetchRemoteSessionState).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not auto-connect local sandbox records on startup", async () => {
+    mockListSavedEnvironmentRecords.mockReturnValue([localSandboxRecord]);
+    mockGetSavedEnvironmentRecord.mockImplementation((environmentId: EnvironmentId) =>
+      environmentId === localSandboxRecord.environmentId ? localSandboxRecord : null,
+    );
+
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    await vi.runAllTimersAsync();
+
+    expect(mockReadSavedEnvironmentCredential).not.toHaveBeenCalled();
+    expect(mockCreateEnvironmentConnection).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "saved" }),
+    );
+    expect(mockFetchRemoteSessionState).not.toHaveBeenCalled();
 
     stop();
     await resetEnvironmentServiceForTests();
