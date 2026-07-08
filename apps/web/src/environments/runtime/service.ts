@@ -1690,15 +1690,8 @@ async function syncSavedEnvironmentConnections(
     staleEnvironmentIds.map((environmentId) => disconnectSavedEnvironment(environmentId)),
   );
   await Promise.all(
-    records
-      .filter(shouldAutoConnectSavedEnvironment)
-      .map((record) => ensureSavedEnvironmentConnection(record).catch(() => undefined)),
+    records.map((record) => ensureSavedEnvironmentConnection(record).catch(() => undefined)),
   );
-}
-
-function shouldAutoConnectSavedEnvironment(record: SavedEnvironmentRecord): boolean {
-  if (!record.sandbox) return true;
-  return record.relayManaged !== undefined || record.desktopSsh !== undefined;
 }
 
 function stopActiveService() {

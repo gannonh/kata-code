@@ -802,7 +802,7 @@ export function DeploymentTargetCard({
                     disabled={instanceBusy !== undefined}
                     onClick={() => setSignInFor("claude")}
                   >
-                    Sign in Claude
+                    Sign in to Claude
                   </Button>
                 </div>
               ) : null}

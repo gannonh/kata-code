@@ -338,7 +338,7 @@ describe("saved environment startup", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("does not auto-connect local sandbox records on startup", async () => {
+  it("auto-connects local sandbox records on startup", async () => {
     mockListSavedEnvironmentRecords.mockReturnValue([localSandboxRecord]);
     mockGetSavedEnvironmentRecord.mockImplementation((environmentId: EnvironmentId) =>
       environmentId === localSandboxRecord.environmentId ? localSandboxRecord : null,
@@ -350,11 +350,7 @@ describe("saved environment startup", () => {
     const stop = startEnvironmentConnectionService(new QueryClient());
     await vi.runAllTimersAsync();
 
-    expect(mockReadSavedEnvironmentCredential).not.toHaveBeenCalled();
-    expect(mockCreateEnvironmentConnection).not.toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "saved" }),
-    );
-    expect(mockFetchRemoteSessionState).not.toHaveBeenCalled();
+    expect(mockReadSavedEnvironmentCredential).toHaveBeenCalled();
 
     stop();
     await resetEnvironmentServiceForTests();

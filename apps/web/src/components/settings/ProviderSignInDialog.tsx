@@ -12,7 +12,16 @@
 import { useEffect, useState } from "react";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime/service";
-import { Dialog, DialogClose, DialogFooter, DialogPopup, DialogTitle } from "../ui/dialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -26,11 +35,16 @@ interface ProviderSignInDialogProps {
 
 type Stage = "starting" | "awaiting-url" | "awaiting-code" | "submitting" | "done";
 
+function providerDisplayName(providerId: string): string {
+  return providerId === "claude" ? "Claude" : providerId;
+}
+
 export function ProviderSignInDialog({
   instanceId,
   providerId,
   onClose,
 }: ProviderSignInDialogProps) {
+  const providerLabel = providerDisplayName(providerId);
   const [stage, setStage] = useState<Stage>("starting");
   const [url, setUrl] = useState<string | null>(null);
   const [loginSessionId, setLoginSessionId] = useState<string | null>(null);
@@ -110,24 +124,28 @@ export function ProviderSignInDialog({
         if (!open) onClose();
       }}
     >
-      <DialogPopup className="max-w-lg overflow-hidden">
-        <DialogTitle>Sign in {providerId}</DialogTitle>
-        <div className="flex flex-col gap-3 p-4">
+      <DialogPopup className="max-w-xl overflow-hidden">
+        <DialogHeader className="pr-12 pb-3">
+          <DialogTitle>Sign in to {providerLabel}</DialogTitle>
+          <DialogDescription>
+            Open the sign-in page, complete authentication, then paste the code below.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel className="flex flex-col gap-4 pt-0">
           {stage === "starting" ? (
-            <p className="text-xs text-muted-foreground">Starting sign-in…</p>
+            <p className="text-sm text-muted-foreground">Starting sign-in…</p>
           ) : null}
           {url ? (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-2">
               <Label>OAuth URL</Label>
-              <div className="flex items-center gap-2">
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-blue-600 underline"
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  render={<a href={url} target="_blank" rel="noreferrer" />}
                 >
                   Open sign-in page
-                </a>
+                </Button>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -136,24 +154,22 @@ export function ProviderSignInDialog({
                   Copy URL
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Complete sign-in, then paste the code below.
-              </p>
             </div>
           ) : null}
           {stage === "awaiting-code" || stage === "submitting" ? (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="sandbox-signin-code">Code</Label>
               <Input
                 id="sandbox-signin-code"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 spellCheck={false}
+                className="font-mono text-sm"
               />
             </div>
           ) : null}
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
-        </div>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        </DialogPanel>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost">Cancel</Button>} />
           {stage === "awaiting-code" || stage === "submitting" ? (
