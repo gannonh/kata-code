@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - tmp dir creation via node:fs/promises + node:path in tests; no Effect FileSystem service.
+/* eslint-disable kata-code/no-manual-effect-runtime-in-tests -- store integration tests use Effect.runPromise for simple async assertions (vitIt.effect suite resolver is unavailable in this test runner config). */
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as NodeFs from "node:fs/promises";

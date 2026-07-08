@@ -17,6 +17,10 @@
  * @module sandboxSessionStore
  */
 // @effect-diagnostics nodeBuiltinImport:off - atomic file write via node:fs/promises + node:path; no Effect FileSystem service.
+// @effect-diagnostics globalDateInEffect:off - temp file naming uses Date.now for uniqueness; no Effect Clock in this utility.
+// @effect-diagnostics globalErrorInEffectCatch:off - the store returns a plain Error for file I/O failures (simple utility, not a tagged-error boundary).
+// @effect-diagnostics globalErrorInEffectFailure:off - same: plain Error for file I/O failures.
+// @effect-diagnostics preferSchemaOverJson:off - the store file is an opaque JSON blob validated by Schema on load; JSON.parse/stringify are the raw file I/O layer.
 import * as NodeFs from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";

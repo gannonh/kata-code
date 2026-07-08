@@ -375,68 +375,6 @@ export function SandboxDeploymentSettings({
     [activeSession, refreshList, withBusy],
   );
 
-  const resolveConnectAuthToken = useCallback(async (): Promise<string | null> => {
-    if (hasCloudPublicConfig() && !isSignedIn) {
-      openAuthPrompt();
-      return null;
-    }
-    if (!hasCloudPublicConfig()) return null;
-    const token = await getToken(resolveRelayClerkTokenOptions());
-    if (!token) {
-      throw new Error("Sign in to Kata Code Connect before resuming a deployment session.");
-    }
-    return token;
-  }, [getToken, isSignedIn, openAuthPrompt]);
-
-  const handleResume = useCallback(
-    (instanceId: string) =>
-      withBusy(instanceId, "start", async () => {
-        try {
-          const connectAuthToken = await resolveConnectAuthToken();
-          if (connectAuthToken === null) return;
-          const result = await getPrimaryEnvironmentConnection().client.sandbox.resumeSession({
-            instanceId: instanceId as never,
-            connectAuthToken: connectAuthToken as never,
-          });
-          setActiveSession((prev) => ({
-            ...prev,
-            [instanceId]: {
-              environmentId: result.environmentId,
-              httpBaseUrl: result.endpoint.httpBaseUrl,
-            },
-          }));
-          try {
-            await addSavedEnvironment({
-              label: result.endpoint.label,
-              host: result.endpoint.httpBaseUrl,
-              pairingCode: result.pairingToken,
-              sandbox: {
-                providerKind:
-                  ((instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId]
-                    ?.driver as string) ?? "vercel",
-              },
-            });
-          } catch (error) {
-            toastManager.add({
-              type: "error",
-              title: "Resumed but was not re-added",
-              description: error instanceof Error ? error.message : "Unknown error.",
-            });
-          }
-          refreshManagedRelayEnvironments();
-          await refreshList();
-          toastManager.add({ type: "success", title: "Sandbox resumed" });
-        } catch (error) {
-          toastManager.add({
-            type: "error",
-            title: "Resume failed",
-            description: error instanceof Error ? error.message : "Unknown error.",
-          });
-        }
-      }),
-    [instanceMap, refreshList, resolveConnectAuthToken, withBusy],
-  );
-
   const handleRenew = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "renew", async () => {
@@ -454,70 +392,6 @@ export function SandboxDeploymentSettings({
         }
       }),
     [refreshList, withBusy],
-  );
-
-  const handleSnapshot = useCallback(
-    (instanceId: string) =>
-      withBusy(instanceId, "snapshot", async () => {
-        const appendProgress = (line: string) => {
-          setTestProgress((prev) => ({
-            ...prev,
-            [instanceId]: [...(prev[instanceId] ?? []), line],
-          }));
-        };
-        try {
-          appendProgress("snapshot: creating Vercel snapshot…");
-          const result = await getPrimaryEnvironmentConnection().client.sandbox.createSnapshot({
-            instanceId: instanceId as never,
-          });
-          const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[
-            instanceId
-          ];
-          const rawConfig = instance?.config;
-          const config =
-            rawConfig !== null && typeof rawConfig === "object"
-              ? { ...(rawConfig as Record<string, unknown>) }
-              : {};
-          const previousSnapshotId =
-            typeof config.snapshotId === "string" ? config.snapshotId : undefined;
-          const isSameSnapshot = previousSnapshotId === result.snapshotId;
-          if (instance !== undefined && (instance.driver as string) === (VERCEL_KIND as string)) {
-            updateSettings({
-              sandboxProviderInstances: {
-                ...instanceMap,
-                [instanceId]: {
-                  ...instance,
-                  config: {
-                    ...config,
-                    sourceType: "snapshot",
-                    snapshotId: result.snapshotId,
-                  },
-                },
-              },
-            });
-          }
-          appendProgress(
-            `snapshot: ok — ${result.snapshotId}${isSameSnapshot ? " (same id returned)" : ""}`,
-          );
-          toastManager.add({
-            type: "success",
-            title: "Snapshot created",
-            description: isSameSnapshot
-              ? `Vercel returned the same snapshot id: ${result.snapshotId}. The session is lapsed; Resume to continue.`
-              : `Snapshot id: ${result.snapshotId}. The session is lapsed; Resume to continue.`,
-          });
-          await refreshList();
-        } catch (error) {
-          const message = failureMessage(error);
-          appendProgress(`snapshot: failed — ${message}`);
-          toastManager.add({
-            type: "error",
-            title: "Snapshot failed",
-            description: message,
-          });
-        }
-      }),
-    [instanceMap, refreshList, updateSettings, withBusy],
   );
 
   const handleRemove = useCallback(
@@ -610,9 +484,7 @@ export function SandboxDeploymentSettings({
                 onTest={() => void handleTest(id)}
                 onStart={() => void handleStart(id)}
                 onDispose={() => void handleDispose(id)}
-                onResume={() => void handleResume(id)}
                 onRenew={() => void handleRenew(id)}
-                onSnapshot={() => void handleSnapshot(id)}
               />
             );
           })
@@ -646,9 +518,7 @@ interface DeploymentTargetCardProps {
   readonly onTest: () => void;
   readonly onStart: () => void;
   readonly onDispose: () => void;
-  readonly onResume: () => void;
   readonly onRenew: () => void;
-  readonly onSnapshot: () => void;
 }
 
 /**
@@ -680,20 +550,15 @@ function DeploymentTargetCard({
   onTest,
   onStart,
   onDispose,
-  onResume,
   onRenew,
-  onSnapshot,
 }: DeploymentTargetCardProps) {
   const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
   const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
-  const supportsLifecycle = summary?.kind === "available" ? summary.supportsLifecycle : undefined;
-  const supportsSnapshot = summary?.kind === "available" ? summary.supportsSnapshot : undefined;
   const supportsRenewTimeout =
     summary?.kind === "available" ? summary.supportsRenewTimeout : undefined;
   const sessionStatus = runningSession?.status;
   const deadlineEpochMs = runningSession?.deadlineEpochMs;
-  const lapsedReason = runningSession?.lapsedReason;
-  const snapshotId = runningSession?.snapshotId;
+  const statusDetail = runningSession?.statusDetail;
   const [signInFor, setSignInFor] = useState<string | null>(null);
   const updateDisplayName = (value: string) => {
     const trimmed = value.trim();
@@ -851,32 +716,12 @@ function DeploymentTargetCard({
             </div>
 
             <div className="space-y-3 border-t border-border/60 px-4 py-3 sm:px-5">
-              {sessionStatus === "lapsed" ? (
+              {statusDetail ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary" className="text-amber-600">
-                    Lapsed
-                  </Badge>
-                  {lapsedReason ? (
-                    <span className="text-xs text-muted-foreground">{lapsedReason}</span>
-                  ) : null}
-                  {snapshotId ? (
-                    <span className="text-xs text-muted-foreground">
-                      Snapshot: <code>{snapshotId}</code>
-                    </span>
-                  ) : null}
-                  {supportsLifecycle ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={instanceBusy !== undefined}
-                      onClick={onResume}
-                    >
-                      {instanceBusy === "start" ? "Resuming…" : "Resume"}
-                    </Button>
-                  ) : null}
+                  <span className="text-xs text-amber-600">{statusDetail}</span>
                 </div>
               ) : null}
-              {session && sessionStatus !== "lapsed" ? (
+              {session && sessionStatus !== "stopped" ? (
                 <div className="flex flex-wrap items-center gap-2">
                   {deadlineEpochMs !== undefined ? (
                     <span className="text-xs text-muted-foreground">
@@ -892,21 +737,6 @@ function DeploymentTargetCard({
                     >
                       {instanceBusy === "renew" ? "Extending…" : "Extend"}
                     </Button>
-                  ) : null}
-                  {supportsSnapshot ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={instanceBusy !== undefined}
-                      onClick={onSnapshot}
-                    >
-                      {instanceBusy === "snapshot" ? "Snapshotting…" : "Snapshot"}
-                    </Button>
-                  ) : null}
-                  {snapshotId ? (
-                    <span className="text-xs text-muted-foreground">
-                      Snapshot: <code>{snapshotId}</code>
-                    </span>
                   ) : null}
                   {isVercel ? (
                     <Button
@@ -1119,10 +949,13 @@ interface VercelConfigFieldsProps {
   readonly onChange: (nextConfig: Record<string, unknown> | undefined) => void;
 }
 
-/** Inline editor for the Vercel Sandbox driver config (runtime, boot source,
- *  snapshot id, timeout, port, vCPUs). Mirrors DockerConfigFields' layout. */
+/** Inline editor for the Vercel Sandbox driver config (runtime, persistent,
+ *  timeout, port, vCPUs). Mirrors DockerConfigFields' layout. */
 function VercelConfigFields({ config, idPrefix, onChange }: VercelConfigFieldsProps) {
-  const sourceType = readConfigString(config, "sourceType") || "runtime";
+  const persistent =
+    config !== null &&
+    typeof config === "object" &&
+    (config as Record<string, unknown>).persistent !== false;
   const timeoutMs = readConfigNumber(config, "timeoutMs");
   const timeoutMinutes = timeoutMs ? String(Math.round(Number(timeoutMs) / 60_000)) : "";
   return (
@@ -1144,37 +977,27 @@ function VercelConfigFields({ config, idPrefix, onChange }: VercelConfigFieldsPr
         </label>
       </div>
       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-        <label htmlFor={`${idPrefix}-sourceType`} className="block">
-          <span className="text-xs font-medium text-foreground">Boot source</span>
-          <select
-            id={`${idPrefix}-sourceType`}
-            className="mt-1.5 w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
-            value={sourceType}
-            onChange={(e) => onChange(setConfigField(config, "sourceType", e.target.value))}
-          >
-            <option value="runtime">Runtime</option>
-            <option value="snapshot">Snapshot</option>
-          </select>
-          <span className="mt-1 block text-xs text-muted-foreground">
-            Boot from a Vercel runtime or a prepared snapshot.
-          </span>
+        <label htmlFor={`${idPrefix}-persistent`} className="block">
+          <span className="text-xs font-medium text-foreground">Persistent filesystem</span>
+          <div className="mt-1.5 flex items-center gap-2">
+            <Switch
+              id={`${idPrefix}-persistent`}
+              checked={persistent}
+              onCheckedChange={(checked) => {
+                const base =
+                  config !== null && typeof config === "object"
+                    ? { ...(config as Record<string, unknown>) }
+                    : {};
+                base.persistent = Boolean(checked);
+                onChange(base);
+              }}
+            />
+            <span className="text-xs text-muted-foreground">
+              Stop auto-saves the sandbox; start resumes it (bounded snapshot storage).
+            </span>
+          </div>
         </label>
       </div>
-      {sourceType === "snapshot" ? (
-        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-          <label htmlFor={`${idPrefix}-snapshotId`} className="block">
-            <span className="text-xs font-medium text-foreground">Snapshot id</span>
-            <DraftInput
-              id={`${idPrefix}-snapshotId`}
-              className="mt-1.5"
-              value={readConfigString(config, "snapshotId")}
-              onCommit={(next) => onChange(setConfigField(config, "snapshotId", next))}
-              placeholder="snap_xxx"
-              spellCheck={false}
-            />
-          </label>
-        </div>
-      ) : null}
       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
         <label htmlFor={`${idPrefix}-timeoutMs`} className="block">
           <span className="text-xs font-medium text-foreground">Timeout (minutes)</span>

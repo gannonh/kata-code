@@ -333,7 +333,7 @@ export const WsSandboxStartSessionRpc = Rpc.make(WS_METHODS.sandboxStartSession,
 export const WsSandboxDisposeSessionRpc = Rpc.make(WS_METHODS.sandboxDisposeSession, {
   payload: SandboxDisposeSessionInput,
   success: SandboxDisposeSessionResult,
-  error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+  error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
 });
 
 export const WsSandboxRenewSessionRpc = Rpc.make(WS_METHODS.sandboxRenewSession, {
