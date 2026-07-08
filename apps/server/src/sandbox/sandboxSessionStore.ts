@@ -73,6 +73,9 @@ const SandboxSessionStoreFile = Schema.Struct({
 });
 type SandboxSessionStoreFile = typeof SandboxSessionStoreFile.Type;
 
+// Hoist compiled schema function to module scope (kata-code/no-inline-schema-compile).
+const decodeSandboxSessionRecord = Schema.decodeUnknownSync(SandboxSessionRecord);
+
 /** Resolve the store file path under the katacode home `userdata/` dir. */
 function storeFilePath(katacodeHome: string): string {
   return NodePath.join(katacodeHome, "userdata", "sandbox-sessions.json");
@@ -115,7 +118,7 @@ function decodeStore(raw: unknown): ReadonlyArray<SandboxSessionRecord> {
   const valid: SandboxSessionRecord[] = [];
   for (const entry of recordsRaw) {
     try {
-      valid.push(Schema.decodeUnknownSync(SandboxSessionRecord)(entry));
+      valid.push(decodeSandboxSessionRecord(entry));
     } catch (error) {
       // Per-entry eviction: log the evicted record so operators can see data loss.
       const id =

@@ -94,11 +94,7 @@ import {
 } from "./sandboxSessionStore.ts";
 import { loadStoredSandboxCredentials } from "./storedSandboxCredentials.ts";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
-import {
-  startProviderLogin,
-  submitProviderLoginCode,
-  PROVIDER_LOGIN_SPECS,
-} from "./providerLogin.ts";
+import { startProviderLogin, submitProviderLoginCode } from "./providerLogin.ts";
 
 /** A sandbox `AdvertisedEndpointProvider` (manual kind; container-sourced). */
 const SANDBOX_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
@@ -882,18 +878,24 @@ let reconcileDone = false;
  *  re-resolve config from settings, find the driver, call `lifecycle.status`;
  *  update the stored status, evict `gone` records, keep `stopped`/`running`.
  *  Reconcile failures keep the last-known status and set `statusDetail`. */
-function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never> {
+/** Reconcile stored records against the providers. For each stored record:
+ *  re-resolve config from settings, find the driver, call `lifecycle.status`;
+ *  update the stored status, evict `gone` records, keep `stopped`/`running`.
+ *  Reconcile failures keep the last-known status and set `statusDetail`.
+ *  Pure/testable: takes the store, registry, settings, and the liveSessions
+ *  cache to populate; returns the updated records (also persisted). */
+export function reconcileStoredRecords(input: {
+  readonly store: SandboxSessionStore;
+  readonly registry: SandboxProviderRegistry;
+  readonly settings: ServerSettings;
+  readonly liveSessions: Map<string, LiveSession>;
+}): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, never> {
   return Effect.gen(function* () {
-    if (reconcileDone) return;
-    const records = yield* sessionStore
+    const records = yield* input.store
       .load()
       .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<SandboxSessionRecord>)));
-    if (records.length === 0) {
-      reconcileDone = true;
-      return;
-    }
-    const registry = buildRegistry();
-    const rawMap = settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
+    if (records.length === 0) return [];
+    const rawMap = input.settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
     const updated: SandboxSessionRecord[] = [];
     for (const record of records) {
       const config = rawMap[record.instanceId as SandboxProviderInstanceId];
@@ -908,7 +910,7 @@ function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never>
         continue;
       }
       const resolved = resolveInstanceEnvelope(config);
-      const inst = registry.materializeOne(
+      const inst = input.registry.materializeOne(
         record.instanceId as SandboxProviderInstanceId,
         resolved,
       );
@@ -920,12 +922,19 @@ function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never>
         });
         continue;
       }
+      // Re-inject the Vercel auth trio into the stored (sanitized) handle
+      // from the resolved config before passing it to the driver.
+      const rehydratedHandleState = reinjectVercelAuth(
+        inst.driver.kind as string,
+        record.handle.handle,
+        resolved.config,
+      );
       // Cache the live session so providerLogin can use the driver.
-      liveSessions.set(record.instanceId, {
+      input.liveSessions.set(record.instanceId, {
         handle: {
           driverKind: inst.driver.kind,
           instanceId: record.instanceId,
-          handle: record.handle.handle,
+          handle: rehydratedHandleState,
         },
         driver: inst.driver,
         instanceConfig: resolved,
@@ -936,7 +945,7 @@ function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never>
         const handle: SandboxHandle = {
           driverKind: inst.driver.kind,
           instanceId: record.instanceId,
-          handle: record.handle.handle,
+          handle: rehydratedHandleState,
         };
         const statusResult = yield* inst.driver.lifecycle.status(handle).pipe(
           Effect.matchEffect({
@@ -976,12 +985,57 @@ function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never>
         updated.push(record);
       }
     }
-    yield* sessionStore.save(updated).pipe(Effect.catch(() => Effect.void));
+    yield* input.store.save(updated).pipe(Effect.catch(() => Effect.void));
+    return updated;
+  });
+}
+
+function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never> {
+  return Effect.gen(function* () {
+    if (reconcileDone) return;
+    yield* reconcileStoredRecords({
+      store: sessionStore,
+      registry: buildRegistry(),
+      settings,
+      liveSessions,
+    });
     reconcileDone = true;
   });
 }
 
 /** Store a session record from a completed provision/start. */
+/** Sanitize a driver handle for persistence: strip the Vercel auth trio
+ *  (token/teamId/projectId) so no secrets are written to the store file.
+ *  The auth re-resolves from instance config env on load/reconcile. */
+export function sanitizeHandleForStore(driverKind: string, handleState: unknown): unknown {
+  if (
+    driverKind === (VERCEL_KIND as string) &&
+    handleState !== null &&
+    typeof handleState === "object"
+  ) {
+    const { auth: _auth, ...rest } = handleState as Record<string, unknown>;
+    return rest;
+  }
+  return handleState;
+}
+
+/** Re-inject the Vercel auth trio into a stored (sanitized) handle from the
+ *  resolved config. The config carries `auth` after `mergeVercelAuthIntoConfig`;
+ *  the driver's lifecycle methods read `state.auth` from the handle. */
+export function reinjectVercelAuth(
+  driverKind: string,
+  storedHandle: unknown,
+  config: unknown,
+): unknown {
+  if (driverKind !== (VERCEL_KIND as string)) return storedHandle;
+  const auth =
+    config !== null && typeof config === "object" && "auth" in config
+      ? (config as { auth?: unknown }).auth
+      : undefined;
+  if (auth === undefined) return storedHandle;
+  return { ...(storedHandle as Record<string, unknown>), auth };
+}
+
 function storeSessionRecord(input: {
   readonly instanceId: SandboxProviderInstanceId;
   readonly driver: SandboxProvider;
@@ -992,18 +1046,21 @@ function storeSessionRecord(input: {
   readonly relay: { readonly relayUrl: string; readonly bearerToken: string } | null;
   readonly status: "running" | "stopped";
 }): Effect.Effect<void, Error> {
+  const driverKindStr = input.driver.kind as string;
   const record: SandboxSessionRecord = {
     instanceId: input.instanceId as string,
-    driverKind: input.driver.kind as string,
+    driverKind: driverKindStr,
     environmentId: input.instanceId as string,
     sandboxEnvironmentId: input.environmentId,
     handle: {
-      driverKind: input.driver.kind as string,
-      handle: input.handle.handle,
+      driverKind: driverKindStr,
+      // Strip secrets (Vercel auth trio) before persisting.
+      handle: sanitizeHandleForStore(driverKindStr, input.handle.handle),
     },
     endpoint: input.endpoint,
     status: input.status,
-    relay: input.relay ?? undefined,
+    // Store only the relay URL; the bearer token is re-resolved at dispose time.
+    relay: input.relay ? { relayUrl: input.relay.relayUrl } : undefined,
   };
   return sessionStore.upsert(record);
 }
@@ -1193,7 +1250,12 @@ export const SandboxServiceLive = {
           const handle: SandboxHandle = {
             driverKind: inst.driver.kind,
             instanceId: sessionKey,
-            handle: existing.handle.handle,
+            // Re-inject Vercel auth into the stored (sanitized) handle.
+            handle: reinjectVercelAuth(
+              inst.driver.kind as string,
+              existing.handle.handle,
+              resolvedConfig.config,
+            ),
           };
           // Fresh bootstrap token for the started server.
           // @effect-diagnostics-next-line effect(globalDateInEffect):off - random token, not a clock read.
@@ -1424,20 +1486,26 @@ export const SandboxServiceLive = {
       return yield* Effect.gen(function* () {
         // Unlink the environment from the relay so it disappears from the
         // Connect pool immediately. Non-fatal: if the unlink fails, the relay
-        // link lapses when the sandbox becomes unreachable.
+        // link lapses when the sandbox becomes unreachable. The bearer token
+        // is not stored; re-resolve it via resolveConnectAuthToken.
         if (record.relay) {
-          yield* deleteJson(
-            RelayOkResponse,
-            `${record.relay.relayUrl}/v1/client/environment-links/${record.sandboxEnvironmentId}`,
-            record.relay.bearerToken,
-          ).pipe(
-            Effect.catch((error: SandboxRpcError) =>
-              Effect.logWarning("Could not unlink sandbox from relay", {
-                environmentId: record.sandboxEnvironmentId,
-                message: error.message,
-              }).pipe(Effect.asVoid),
-            ),
+          const bearerToken = yield* resolveConnectAuthToken(undefined).pipe(
+            Effect.catch(() => Effect.succeed(null)),
           );
+          if (bearerToken !== null) {
+            yield* deleteJson(
+              RelayOkResponse,
+              `${record.relay.relayUrl}/v1/client/environment-links/${record.sandboxEnvironmentId}`,
+              bearerToken,
+            ).pipe(
+              Effect.catch((error: SandboxRpcError) =>
+                Effect.logWarning("Could not unlink sandbox from relay", {
+                  environmentId: record.sandboxEnvironmentId,
+                  message: error.message,
+                }).pipe(Effect.asVoid),
+              ),
+            );
+          }
         }
         // Delete the provider sandbox via the driver.
         const live = liveSessions.get(sessionKey);
@@ -1453,10 +1521,16 @@ export const SandboxServiceLive = {
             const registry = buildRegistry();
             const inst = registry.materializeOne(instanceId, resolveInstanceEnvelope(config));
             if (inst.kind === "available") {
+              const resolvedConfig = resolveInstanceEnvelope(config);
               const handle: SandboxHandle = {
                 driverKind: inst.driver.kind,
                 instanceId: sessionKey,
-                handle: record.handle.handle,
+                // Re-inject Vercel auth into the stored (sanitized) handle.
+                handle: reinjectVercelAuth(
+                  inst.driver.kind as string,
+                  record.handle.handle,
+                  resolvedConfig.config,
+                ),
               };
               yield* inst.driver.dispose(handle).pipe(Effect.mapError(mapDriverError));
             }
