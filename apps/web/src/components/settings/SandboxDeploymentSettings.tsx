@@ -42,7 +42,7 @@ import { SettingsSection } from "./settingsLayout";
 const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
 /** Per-instance busy state for the long-running RPCs. */
-type BusyOp = "test" | "start" | "dispose" | "renew" | "snapshot";
+type BusyOp = "test" | "start" | "dispose" | "renew" | "stop";
 
 /** Render a non-empty failure message for the progress log and toasts.
  * Effect fiber failures can surface as objects whose `message` is empty. */
@@ -375,6 +375,31 @@ export function SandboxDeploymentSettings({
     [activeSession, refreshList, withBusy],
   );
 
+  const handleStop = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "stop", async () => {
+        try {
+          await getPrimaryEnvironmentConnection().client.sandbox.stopSession({
+            instanceId: instanceId as never,
+          });
+          refreshManagedRelayEnvironments();
+          await refreshList();
+          toastManager.add({
+            type: "success",
+            title: "Sandbox stopped",
+            description: `Sandbox '${instanceId}' stopped. Start it again to resume.`,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Stop failed",
+            description: error instanceof Error ? error.message : "Unknown error.",
+          });
+        }
+      }),
+    [refreshList, withBusy],
+  );
+
   const handleRenew = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "renew", async () => {
@@ -448,7 +473,6 @@ export function SandboxDeploymentSettings({
             const instanceBusy = busy[id];
             const isOpen = expanded[id] ?? false;
             const displayName = config.displayName ?? id;
-            const enabled = config.enabled ?? true;
             const selectedProject = resolveSelectedProject(id);
             const selectedRepositoryKey =
               selectedRepositoryKeyByInstance[id] ??
@@ -460,7 +484,6 @@ export function SandboxDeploymentSettings({
                 instanceId={id}
                 instance={config}
                 displayName={displayName}
-                enabled={enabled}
                 available={available}
                 reason={reason}
                 session={session}
@@ -483,6 +506,7 @@ export function SandboxDeploymentSettings({
                 onDelete={() => handleRemove(id)}
                 onTest={() => void handleTest(id)}
                 onStart={() => void handleStart(id)}
+                onStop={() => void handleStop(id)}
                 onDispose={() => void handleDispose(id)}
                 onRenew={() => void handleRenew(id)}
               />
@@ -499,7 +523,6 @@ interface DeploymentTargetCardProps {
   readonly instanceId: string;
   readonly instance: SandboxProviderInstanceConfig;
   readonly displayName: string;
-  readonly enabled: boolean;
   readonly available: boolean;
   readonly reason: string | undefined;
   readonly session: { environmentId: string; httpBaseUrl: string } | undefined;
@@ -517,21 +540,21 @@ interface DeploymentTargetCardProps {
   readonly onDelete: () => void;
   readonly onTest: () => void;
   readonly onStart: () => void;
+  readonly onStop: () => void;
   readonly onDispose: () => void;
   readonly onRenew: () => void;
 }
 
 /**
- * A single deployment-target row, mirroring `ProviderInstanceCard.tsx`:
- * title + driver/status badges + delete + chevron + enabled switch in the row,
- * and a `Collapsible` with display name, docker config fields, env vars, and
- * the Part B controls (Test connection / Start session / Dispose) + progress.
+ * A single deployment-target row: title + driver/status badges + delete +
+ * status badge + secondary Stop/Start button + chevron in the header, and a
+ * `Collapsible` with display name, config fields, env vars, and state-driven
+ * actions (Create & run sandbox / Stop / Start / Delete sandbox) + progress.
  */
-function DeploymentTargetCard({
+export function DeploymentTargetCard({
   instanceId,
   instance,
   displayName,
-  enabled,
   available,
   reason,
   session,
@@ -549,6 +572,7 @@ function DeploymentTargetCard({
   onDelete,
   onTest,
   onStart,
+  onStop,
   onDispose,
   onRenew,
 }: DeploymentTargetCardProps) {
@@ -568,10 +592,6 @@ function DeploymentTargetCard({
         ? ({ ...rest, displayName: trimmed } as SandboxProviderInstanceConfig)
         : (rest as SandboxProviderInstanceConfig),
     );
-  };
-
-  const updateEnabled = (value: boolean) => {
-    onUpdate({ ...instance, enabled: value });
   };
 
   const updateConfig = (nextConfig: Record<string, unknown> | undefined) => {
@@ -611,6 +631,15 @@ function DeploymentTargetCard({
               ) : reason ? (
                 <Badge variant="destructive">{reason}</Badge>
               ) : null}
+              {sessionStatus === "running" ? (
+                <Badge variant="default" className="bg-green-600 text-green-50">
+                  running
+                </Badge>
+              ) : sessionStatus === "stopped" ? (
+                <Badge variant="secondary" className="bg-muted text-muted-foreground">
+                  stopped
+                </Badge>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -637,12 +666,25 @@ function DeploymentTargetCard({
             </p>
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-            <span className="text-xs text-muted-foreground">Enabled</span>
-            <Switch
-              checked={enabled}
-              onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
-              aria-label={`Enable ${displayName}`}
-            />
+            {sessionStatus === "running" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={instanceBusy !== undefined}
+                onClick={onStop}
+              >
+                {instanceBusy === "stop" ? "Stopping…" : "Stop"}
+              </Button>
+            ) : sessionStatus === "stopped" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={instanceBusy !== undefined}
+                onClick={onStart}
+              >
+                {instanceBusy === "start" ? "Starting…" : "Start"}
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="ghost"
@@ -721,13 +763,26 @@ function DeploymentTargetCard({
                   <span className="text-xs text-amber-600">{statusDetail}</span>
                 </div>
               ) : null}
-              {session && sessionStatus !== "stopped" ? (
+              {sessionStatus === "running" ? (
                 <div className="flex flex-wrap items-center gap-2">
+                  {session ? (
+                    <span className="text-xs text-muted-foreground">
+                      {session.httpBaseUrl} (env {session.environmentId})
+                    </span>
+                  ) : null}
                   {deadlineEpochMs !== undefined ? (
                     <span className="text-xs text-muted-foreground">
                       Expires in {formatRemaining(deadlineEpochMs)}
                     </span>
                   ) : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={instanceBusy !== undefined}
+                    onClick={onStop}
+                  >
+                    {instanceBusy === "stop" ? "Stopping…" : "Stop"}
+                  </Button>
                   {supportsRenewTimeout ? (
                     <Button
                       size="sm"
@@ -751,32 +806,40 @@ function DeploymentTargetCard({
                 </div>
               ) : null}
               <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={instanceBusy !== undefined || !available}
-                  onClick={onTest}
-                >
-                  {instanceBusy === "test" ? "Testing…" : "Test connection"}
-                </Button>
-                {session ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={instanceBusy !== undefined}
-                    onClick={onDispose}
-                  >
-                    {instanceBusy === "dispose" ? "Disposing…" : "Dispose"}
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    disabled={instanceBusy !== undefined || !available}
-                    onClick={onStart}
-                  >
-                    {instanceBusy === "start" ? "Starting…" : "Start session"}
-                  </Button>
-                )}
+                {sessionStatus === undefined ? (
+                  <>
+                    <Button
+                      size="sm"
+                      disabled={instanceBusy !== undefined || !available}
+                      onClick={onStart}
+                    >
+                      {instanceBusy === "start" ? "Starting…" : "Create & run sandbox"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={instanceBusy !== undefined || !available}
+                      onClick={onTest}
+                    >
+                      {instanceBusy === "test" ? "Testing…" : "Test connection"}
+                    </Button>
+                  </>
+                ) : sessionStatus === "stopped" ? (
+                  <>
+                    <Button size="sm" disabled={instanceBusy !== undefined} onClick={onStart}>
+                      {instanceBusy === "start" ? "Starting…" : "Start"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                      disabled={instanceBusy !== undefined}
+                      onClick={onDispose}
+                    >
+                      {instanceBusy === "dispose" ? "Deleting…" : "Delete sandbox"}
+                    </Button>
+                  </>
+                ) : null}
               </div>
               {progress.length > 0 || instanceBusy === "test" ? (
                 <pre className="text-xs whitespace-pre-wrap text-muted-foreground">
