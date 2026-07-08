@@ -9,6 +9,7 @@ import * as NodeOs from "node:os";
 import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/instance";
 import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachability";
 import {
+  type SandboxHandle,
   type SandboxLifecycleStatus,
   type SandboxProvider,
   SandboxProviderError,
@@ -21,6 +22,7 @@ import type { ServerSettings } from "@kata-sh/code-contracts";
 import { makeSandboxSessionStore, type SandboxSessionRecord } from "./sandboxSessionStore.ts";
 import {
   reconcileStoredRecords,
+  discoverUntrackedSessions,
   sanitizeHandleForStore,
   reinjectVercelAuth,
   type LiveSession,
@@ -35,11 +37,16 @@ const FAKE_KIND = SandboxProviderDriverKind.make("fake-lifecycle");
 
 /** A fake driver with a controllable `lifecycle.status`. Records each status
  *  call so the test can assert reconcile queried the provider. */
-function makeFakeDriver(statusFor: (instanceId: string) => SandboxLifecycleStatus): {
+function makeFakeDriver(
+  statusFor: (instanceId: string) => SandboxLifecycleStatus,
+  discoverFor?: (instanceId: string) => SandboxLifecycleStatus | null,
+): {
   driver: SandboxProvider;
   statusCalls: string[];
+  discoverCalls: string[];
 } {
   const statusCalls: string[] = [];
+  const discoverCalls: string[] = [];
   const descriptor: SandboxProviderDescriptor = {
     kind: FAKE_KIND,
     reachabilityKind: SandboxReachabilityKind.make("loopback"),
@@ -73,9 +80,26 @@ function makeFakeDriver(statusFor: (instanceId: string) => SandboxLifecycleStatu
         statusCalls.push(handle.instanceId);
         return Effect.succeed(statusFor(handle.instanceId));
       },
+      ...(discoverFor !== undefined
+        ? {
+            discover: (req) => {
+              discoverCalls.push(req.instanceId);
+              const status = discoverFor(req.instanceId);
+              if (status === null) return Effect.succeed(null);
+              return Effect.succeed({
+                handle: {
+                  driverKind: FAKE_KIND,
+                  instanceId: req.instanceId,
+                  handle: { fake: true, discovered: true },
+                } satisfies SandboxHandle,
+                status,
+              });
+            },
+          }
+        : {}),
     },
   };
-  return { driver, statusCalls };
+  return { driver, statusCalls, discoverCalls };
 }
 
 /** Minimal ServerSettings with one fake instance. */
@@ -242,6 +266,88 @@ describe("reconcileStoredRecords (AC-L7)", () => {
     );
 
     expect(updated).toHaveLength(0);
+  });
+});
+
+describe("discoverUntrackedSessions (reconcile discovery)", () => {
+  it("discovers a stopped sandbox for an instance with no store record and persists it", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    // No store record for fake_01, but the provider reports a stopped sandbox.
+    const { driver, discoverCalls } = makeFakeDriver(
+      () => "running",
+      () => "stopped",
+    );
+    const registry = new SandboxProviderRegistry();
+    registry.register(driver, () => ({}));
+    const liveSessions = new Map<string, LiveSession>();
+
+    await Effect.runPromise(
+      discoverUntrackedSessions({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions,
+      }),
+    );
+
+    expect(discoverCalls).toEqual(["fake_01"]);
+    const reloaded = await Effect.runPromise(makeSandboxSessionStore(home).load());
+    expect(reloaded).toHaveLength(1);
+    expect(reloaded[0]?.instanceId).toBe("fake_01");
+    expect(reloaded[0]?.status).toBe("stopped");
+    // The live session is cached so stop/start/dispose can reach the driver.
+    expect(liveSessions.get("fake_01")?.driver).toBe(driver);
+  });
+
+  it("does not persist when the provider reports no sandbox (discover returns null)", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    const { driver } = makeFakeDriver(
+      () => "running",
+      () => null,
+    );
+    const registry = new SandboxProviderRegistry();
+    registry.register(driver, () => ({}));
+
+    await Effect.runPromise(
+      discoverUntrackedSessions({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions: new Map<string, LiveSession>(),
+      }),
+    );
+
+    const reloaded = await Effect.runPromise(makeSandboxSessionStore(home).load());
+    expect(reloaded).toHaveLength(0);
+  });
+
+  it("skips instances that already have a store record", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    await Effect.runPromise(store.upsert(makeRecord("fake_01", "running")));
+    const { driver, discoverCalls } = makeFakeDriver(
+      () => "running",
+      () => "stopped",
+    );
+    const registry = new SandboxProviderRegistry();
+    registry.register(driver, () => ({}));
+
+    await Effect.runPromise(
+      discoverUntrackedSessions({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions: new Map<string, LiveSession>(),
+      }),
+    );
+
+    // Existing record is not re-discovered.
+    expect(discoverCalls).toEqual([]);
+    const reloaded = await Effect.runPromise(makeSandboxSessionStore(home).load());
+    expect(reloaded).toHaveLength(1);
+    expect(reloaded[0]?.status).toBe("running");
   });
 });
 

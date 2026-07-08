@@ -148,6 +148,19 @@ export interface SandboxLifecycleCapability {
     req: { readonly config: unknown; readonly env?: ReadonlyArray<readonly [string, string]> },
   ): Effect.Effect<SandboxHandle, SandboxProviderError>;
   status(handle: SandboxHandle): Effect.Effect<SandboxLifecycleStatus, SandboxProviderError>;
+  /** Discover an existing sandbox for an instance that has no store record
+   *  (e.g. created before the durable store existed, or after a store reset).
+   *  Returns a handle + status when a sandbox exists on the provider, `null`
+   *  when none. Absent ⇒ the server cannot discover un-tracked sandboxes.
+   *  Never mutates provider state. */
+  discover?(req: {
+    readonly instanceId: string;
+    readonly config: unknown;
+    readonly env?: ReadonlyArray<readonly [string, string]>;
+  }): Effect.Effect<
+    { readonly handle: SandboxHandle; readonly status: SandboxLifecycleStatus } | null,
+    SandboxProviderError
+  >;
 }
 
 /**

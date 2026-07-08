@@ -420,4 +420,53 @@ describe("DockerSandboxProvider lifecycle (Docker-guarded, AC-L5/L6)", () => {
       expect(status).toBe("gone");
     }),
   );
+
+  vitIt.effect(
+    "discover finds an existing container by instance label and reports its status",
+    () =>
+      Effect.gen(function* () {
+        const instanceId = "docker_discover_01";
+        yield* assertDockerDaemonReachable();
+        // Create a container with the kata.sandbox.instance label (the real
+        // provision path sets it); discover must find it by label, not by the
+        // deterministic name, so legacy timestamped containers are reclaimed.
+        const name = `kata-sandbox-${instanceId}-${Date.now()}`;
+        const create = yield* dockerRequest(`/containers/create?name=${name}`, {
+          method: "POST",
+          body: JSON.stringify({
+            Image: INTEGRATION_IMAGE,
+            Cmd: ["sh", "-c", "sleep 300"],
+            Labels: { "kata.sandbox": "true", "kata.sandbox.instance": instanceId },
+          }),
+        }).pipe(Effect.mapError((err) => new Error(`container create failed: ${err.message}`)));
+        if (create.status >= 300) {
+          return yield* Effect.fail(
+            new Error(`create failed: ${create.status} ${create.body.slice(0, 200)}`),
+          );
+        }
+        const containerId = (parseJson(create.body) as { Id: string }).Id;
+        yield* dockerRequest(`/containers/${containerId}/start`, { method: "POST" }).pipe(
+          Effect.mapError((err) => new Error(`start failed: ${err.message}`)),
+        );
+        yield* Effect.gen(function* () {
+          const found = yield* DockerSandboxProvider.lifecycle!.discover!({
+            instanceId,
+            config: { ...DEFAULT_DOCKER_CONFIG, port: 13773 },
+          });
+          expect(found).not.toBeNull();
+          if (found !== null) {
+            expect(found.status).toBe("running");
+            const state = found.handle.handle as DockerSandboxHandleState;
+            expect(state.containerId).toBe(containerId);
+          }
+        }).pipe(
+          Effect.ensuring(
+            dockerRequest(`/containers/${containerId}?force=true`, { method: "DELETE" }).pipe(
+              Effect.ignore,
+              Effect.asVoid,
+            ),
+          ),
+        );
+      }),
+  );
 });

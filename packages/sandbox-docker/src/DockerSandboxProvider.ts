@@ -440,6 +440,61 @@ export function makeDockerSandboxProvider(
           if (info === null) return "gone";
           return info.State.Running ? "running" : "stopped";
         }),
+
+      discover: (
+        req,
+      ): Effect.Effect<
+        { readonly handle: SandboxHandle; readonly status: SandboxLifecycleStatus } | null,
+        SandboxProviderError
+      > =>
+        Effect.gen(function* () {
+          // List containers by the instance label so both the new deterministic
+          // name and any legacy timestamped containers are discovered.
+          const filters = encodeURIComponent(
+            JSON.stringify({ label: [`kata.sandbox.instance=${req.instanceId}`] }),
+          );
+          const res = yield* dockerRequest(`/containers/json?all=true&filters=${filters}`).pipe(
+            Effect.mapError(
+              (e: DockerEngineError) =>
+                new SandboxProviderError({
+                  reason: "unreachable",
+                  message: `discover: ${e.message}`,
+                }),
+            ),
+          );
+          if (res.status >= 400) {
+            return yield* new SandboxProviderError({
+              reason: "unreachable",
+              message: `discover: list ${res.status}: ${res.body.slice(0, 200)}`,
+            });
+          }
+          const list = parseJson(res.body) as ReadonlyArray<{
+            readonly Id: string;
+            readonly Names: ReadonlyArray<string>;
+            readonly State: string;
+            readonly Created: number;
+            readonly Ports?: ReadonlyArray<{
+              readonly PrivatePort: number;
+              readonly PublicPort?: number;
+            }>;
+          }>;
+          if (list.length === 0) return null;
+          // Most recent first.
+          const found = [...list].sort((a, b) => (b.Created ?? 0) - (a.Created ?? 0))[0];
+          if (found === undefined) return null;
+          const containerName = found.Names[0]?.startsWith("/")
+            ? found.Names[0].slice(1)
+            : (found.Names[0] ?? dockerContainerName(req.instanceId));
+          // Inspect to read the authoritative state + port binding.
+          const info = yield* inspectContainer(containerName, "unreachable", "discover");
+          if (info === null) return null;
+          const resolved = resolveConfig(req.config);
+          const status: SandboxLifecycleStatus = info.State.Running ? "running" : "stopped";
+          return {
+            handle: handleFromInspect(info, req.instanceId, resolved.port),
+            status,
+          };
+        }),
     } satisfies SandboxLifecycleCapability,
 
     validate: (config) =>

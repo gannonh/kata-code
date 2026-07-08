@@ -60,6 +60,7 @@ import { SandboxProviderRegistry } from "@kata-sh/code-sandbox/registry";
 import {
   SandboxProviderError,
   type SandboxHandle,
+  type SandboxReachability,
   type SandboxProvider,
 } from "@kata-sh/code-sandbox/driver";
 import {
@@ -1014,7 +1015,111 @@ function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never>
       settings,
       liveSessions,
     });
+    // Discovery: for configured instances with supportsLifecycle and no store
+    // record, probe the provider for an existing sandbox (e.g. created before
+    // the durable store existed, or after a store reset). Found sandboxes are
+    // persisted so the UI reports them as running/stopped with the right actions.
+    yield* discoverUntrackedSessions({
+      store: sessionStore,
+      registry: buildRegistry(),
+      settings,
+      liveSessions,
+    });
     reconcileDone = true;
+  });
+}
+
+/** Discover provider-side sandboxes for configured instances that have no store
+ *  record. For each such instance whose driver supports `lifecycle.discover`,
+ *  probe the provider; when a sandbox exists, persist a record + cache the live
+ *  session so the UI shows the correct state-driven actions. */
+export function discoverUntrackedSessions(input: {
+  readonly store: SandboxSessionStore;
+  readonly registry: SandboxProviderRegistry;
+  readonly settings: ServerSettings;
+  readonly liveSessions: Map<string, LiveSession>;
+}): Effect.Effect<void, never> {
+  return Effect.gen(function* () {
+    const existing = new Set(
+      (yield* input.store.load().pipe(
+        Effect.catch((error: unknown) =>
+          Effect.logWarning("Sandbox session store load failed during discover", {
+            message: error instanceof Error ? error.message : String(error),
+          }).pipe(Effect.as([] as ReadonlyArray<SandboxSessionRecord>)),
+        ),
+      )).map((r) => r.instanceId),
+    );
+    const rawMap = input.settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
+    for (const [id, cfg] of Object.entries(rawMap)) {
+      const instanceId = id as SandboxProviderInstanceId;
+      if (existing.has(instanceId as string)) continue;
+      const resolved = resolveInstanceEnvelope(cfg as SandboxProviderInstanceConfig);
+      const inst = input.registry.materializeOne(instanceId, resolved);
+      if (inst.kind !== "available") continue;
+      const lifecycle = inst.driver.lifecycle;
+      if (lifecycle === undefined || lifecycle.discover === undefined) continue;
+      const found = yield* lifecycle
+        .discover({
+          instanceId: instanceId as string,
+          config: resolved.config,
+        })
+        .pipe(
+          Effect.catch((error: SandboxProviderError) =>
+            Effect.logWarning("Sandbox discover failed", {
+              instanceId: instanceId as string,
+              message: error.message,
+            }).pipe(Effect.as(null)),
+          ),
+        );
+      if (found === null) continue;
+      // Derive a display endpoint from the handle (reachability). The real
+      // Connect environmentId re-registers on start; use the instance id as a
+      // placeholder so the store record is valid + the UI can render status.
+      const port = resolveSandboxPort(resolved.config);
+      const reach = yield* inst.driver
+        .reachability(found.handle, port)
+        .pipe(Effect.catch(() => Effect.succeed(null as SandboxReachability | null)));
+      const isVercel = (inst.driver.kind as string) === (VERCEL_KIND as string);
+      const endpoint: AdvertisedEndpoint | null = reach
+        ? createAdvertisedEndpoint({
+            id: `sandbox-${instanceId as string}`,
+            label:
+              cfg.displayName ??
+              (isVercel ? `Vercel ${instanceId as string}` : `Container ${instanceId as string}`),
+            provider: isVercel ? VERCEL_ENDPOINT_PROVIDER : SANDBOX_ENDPOINT_PROVIDER,
+            httpBaseUrl: reach.httpBaseUrl,
+            reachability: reach.reachabilityKind,
+            source: "server",
+          })
+        : null;
+      if (endpoint === null) continue;
+      const record: SandboxSessionRecord = {
+        instanceId: instanceId as string,
+        driverKind: inst.driver.kind as string,
+        environmentId: instanceId as string,
+        sandboxEnvironmentId: instanceId as string,
+        handle: {
+          driverKind: inst.driver.kind as string,
+          handle: sanitizeHandleForStore(inst.driver.kind as string, found.handle.handle),
+        },
+        endpoint,
+        status: found.status === "running" ? "running" : "stopped",
+      };
+      yield* input.store.upsert(record).pipe(
+        Effect.catch((error: unknown) =>
+          Effect.logError("Sandbox discover store write failed", {
+            instanceId: instanceId as string,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+      );
+      input.liveSessions.set(instanceId as string, {
+        handle: found.handle,
+        driver: inst.driver,
+        instanceConfig: resolved,
+        environmentId: instanceId as string,
+      });
+    }
   });
 }
 

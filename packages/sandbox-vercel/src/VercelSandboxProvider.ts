@@ -358,6 +358,64 @@ export function makeVercelSandboxProvider(
         );
         return result;
       }),
+
+    discover: (
+      req,
+    ): Effect.Effect<
+      { readonly handle: SandboxHandle; readonly status: SandboxLifecycleStatus } | null,
+      SandboxProviderError
+    > =>
+      Effect.gen(function* () {
+        const decoded = yield* Effect.try({
+          try: () => decodeVercelSandboxConfig(req.config),
+          catch: (e) =>
+            new SandboxProviderError({
+              reason: "invalid-config",
+              message: e instanceof Error ? e.message : String(e),
+            }),
+        });
+        const auth = resolveAuth(decoded);
+        if (auth === undefined) {
+          // No credentials to probe with — nothing to discover.
+          return null;
+        }
+        const name = vercelSandboxName(req.instanceId);
+        const result = yield* trySdk(
+          "lifecycle.discover",
+          () => sdk.get({ sandboxId: name, resume: false, ...auth }),
+          "provision-failed",
+        ).pipe(
+          Effect.matchEffect({
+            onFailure: (error: SandboxProviderError) =>
+              isNotFound(error.cause ?? error)
+                ? Effect.succeed<{
+                    readonly handle: SandboxHandle;
+                    readonly status: SandboxLifecycleStatus;
+                  } | null>(null)
+                : Effect.fail(error),
+            onSuccess: (sb) =>
+              Effect.succeed<{
+                readonly handle: SandboxHandle;
+                readonly status: SandboxLifecycleStatus;
+              } | null>({
+                handle: {
+                  driverKind: VERCEL_KIND,
+                  instanceId: req.instanceId,
+                  handle: {
+                    sandboxId: name,
+                    port: decoded.port,
+                    domainBase: sb.domain(decoded.port),
+                    timeoutMs: decoded.timeoutMs,
+                    auth,
+                    persistent: decoded.persistent,
+                  } satisfies VercelSandboxHandleState,
+                } satisfies SandboxHandle,
+                status: mapVercelStatus(sb.status),
+              }),
+          }),
+        );
+        return result;
+      }),
   };
 
   const renewTimeout: SandboxRenewTimeoutCapability = {
