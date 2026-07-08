@@ -162,7 +162,7 @@ function toSummary(inst: Materialized): Effect.Effect<SandboxInstanceSummary, ne
       reachabilityKind: descriptor.reachabilityKind,
       supportsSnapshot: descriptor.supportsSnapshot,
       supportsRenewTimeout: descriptor.supportsRenewTimeout,
-      supportsResume: descriptor.supportsResume,
+      supportsLifecycle: descriptor.supportsLifecycle,
       ...(runningSession
         ? {
             runningSession: {
@@ -1368,10 +1368,10 @@ export const SandboxServiceLive = {
           message: "No lapsed sandbox session to resume.",
         });
       }
-      if (record.driver.resume === undefined) {
+      if (record.driver.lifecycle === undefined) {
         return yield* new SandboxRpcError({
           reason: "not-running",
-          message: "This sandbox driver does not support resume.",
+          message: "This sandbox driver does not support lifecycle start.",
         });
       }
       // Fresh bootstrap token for the resumed server; rebuild the serve env
@@ -1383,28 +1383,9 @@ export const SandboxServiceLive = {
         instanceEnvironment: record.instanceConfig.environment,
       });
       let handle = record.handle;
-      const resumed = yield* record.driver.resume
-        .resume(record.handle, { config: record.instanceConfig.config, env })
-        .pipe(
-          Effect.catchTag("SandboxProviderError", (resumeError: SandboxProviderError) => {
-            // Fall back to provisioning from the captured snapshot when resume fails.
-            if (record.snapshotId !== undefined && record.driver.kind === VERCEL_KIND) {
-              const overrideConfig = {
-                ...(record.instanceConfig.config as object),
-                sourceType: "snapshot" as const,
-                snapshotId: record.snapshotId,
-              };
-              return record.driver.provision({
-                instanceId: sessionKey,
-                config: overrideConfig,
-                image: "",
-                env,
-              });
-            }
-            return Effect.fail(resumeError);
-          }),
-          Effect.mapError(mapDriverError),
-        );
+      const resumed = yield* record.driver.lifecycle
+        .start(record.handle, { config: record.instanceConfig.config, env })
+        .pipe(Effect.mapError(mapDriverError));
       handle = resumed;
       record.handle = handle;
       record.status = "running";

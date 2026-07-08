@@ -527,7 +527,7 @@ export const DockerSandboxProvider: SandboxProvider = {
       supportsSnapshot: false,
       supportsRenewTimeout: false,
       supportsCopyInto: true,
-      supportsResume: false,
+      supportsLifecycle: false,
       baseImages: [DEFAULT_DOCKER_CONFIG.image],
     } satisfies SandboxProviderDescriptor),
 };

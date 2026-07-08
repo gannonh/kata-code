@@ -686,7 +686,7 @@ function DeploymentTargetCard({
 }: DeploymentTargetCardProps) {
   const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
   const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
-  const supportsResume = summary?.kind === "available" ? summary.supportsResume : undefined;
+  const supportsLifecycle = summary?.kind === "available" ? summary.supportsLifecycle : undefined;
   const supportsSnapshot = summary?.kind === "available" ? summary.supportsSnapshot : undefined;
   const supportsRenewTimeout =
     summary?.kind === "available" ? summary.supportsRenewTimeout : undefined;
@@ -864,7 +864,7 @@ function DeploymentTargetCard({
                       Snapshot: <code>{snapshotId}</code>
                     </span>
                   ) : null}
-                  {supportsResume ? (
+                  {supportsLifecycle ? (
                     <Button
                       size="sm"
                       variant="outline"

@@ -165,7 +165,7 @@ describe("VercelSandboxProvider", () => {
     expect(provider.snapshot).toBeDefined();
     expect(provider.renewTimeout).toBeDefined();
     expect(provider.copyInto).toBeDefined();
-    expect(provider.resume).toBeDefined();
+    expect(provider.lifecycle).toBeUndefined();
   });
 
   vitIt.effect("validate fails invalid-config without auth", () =>
@@ -364,7 +364,7 @@ describe("VercelSandboxProvider", () => {
     }),
   );
 
-  vitIt.effect("resume calls get with resume:true and restarts serve", () =>
+  vitIt.effect("resume is removed from the SPI (replaced by lifecycle.start in Phase 3)", () =>
     Effect.gen(function* () {
       const { sdk, state } = fakeSdk();
       const provider = makeProvider(sdk);
@@ -374,15 +374,11 @@ describe("VercelSandboxProvider", () => {
         image: "",
         env: [["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", "bt2"]],
       });
-      const resumed = yield* provider.resume!.resume(handle, {
-        config: configWithAuth(),
-        env: [["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", "bt2"]],
-      });
-      const resumeGet = state.getCalls.find((c) => c.resume === true);
-      expect(resumeGet).toBeDefined();
-      const serveRun = [...state.runCommands].toReversed().find((r) => r.detached === true);
-      expect(serveRun?.args?.join(" ")).toContain("katacode serve");
-      expect((resumed.handle as { sandboxId: string }).sandboxId).toBe("sandbox-1");
+      // lifecycle is not present until Phase 3 wires it.
+      expect(provider.lifecycle).toBeUndefined();
+      // No resume get call is made.
+      expect(state.getCalls.find((c) => c.resume === true)).toBeUndefined();
+      expect((handle.handle as { sandboxId: string }).sandboxId).toBe("sandbox-1");
     }),
   );
 
@@ -396,7 +392,7 @@ describe("VercelSandboxProvider", () => {
       expect(d.supportsSnapshot).toBe(true);
       expect(d.supportsRenewTimeout).toBe(true);
       expect(d.supportsCopyInto).toBe(true);
-      expect(d.supportsResume).toBe(true);
+      expect(d.supportsLifecycle).toBe(false);
       expect(d.maxLifetimeMs).toBe(86_400_000);
     }),
   );

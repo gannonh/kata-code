@@ -125,6 +125,25 @@ describe("describe() capability flags match method presence (AC-1.5)", () => {
       expect(withoutRenew.renewTimeout === undefined).toBe(true);
     }),
   );
+
+  vitIt.effect("supportsLifecycle is true only when lifecycle (stop/start/status) is present", () =>
+    Effect.gen(function* () {
+      const withLifecycle = createStubSandboxProvider({ withLifecycle: true });
+      const withoutLifecycle = createStubSandboxProvider({ withLifecycle: false });
+      const dWith = yield* withLifecycle.describe();
+      const dWithout = yield* withoutLifecycle.describe();
+      expect(dWith.supportsLifecycle).toBe(true);
+      expect(dWithout.supportsLifecycle).toBe(false);
+      expect(withLifecycle.lifecycle !== undefined).toBe(dWith.supportsLifecycle);
+      expect(
+        withLifecycle.lifecycle !== undefined &&
+          withLifecycle.lifecycle.stop !== undefined &&
+          withLifecycle.lifecycle.start !== undefined &&
+          withLifecycle.lifecycle.status !== undefined,
+      ).toBe(dWith.supportsLifecycle);
+      expect(withoutLifecycle.lifecycle === undefined).toBe(true);
+    }),
+  );
 });
 
 describe("SPI freeze drift guard (AC-1.6)", () => {

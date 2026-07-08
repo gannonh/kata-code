@@ -45,8 +45,8 @@ export const SandboxInstanceSummary = Schema.Union([
     reachabilityKind: Schema.Literals(["loopback", "public", "private-network"]),
     supportsSnapshot: Schema.Boolean,
     supportsRenewTimeout: Schema.Boolean,
-    /** Phase 3b: driver can resume a lapsed sandbox (`resume`). */
-    supportsResume: Schema.optional(Schema.Boolean),
+    /** Driver supports durable stop/start lifecycle (`lifecycle`). */
+    supportsLifecycle: Schema.optional(Schema.Boolean),
     runningSession: Schema.optional(SandboxRunningSession),
   }),
   Schema.Struct({

@@ -122,20 +122,32 @@ export interface SandboxCopyIntoCapability {
 }
 
 /**
- * Optional capability: reattach/restart a lapsed sandbox (Phase 3b).
+ * Optional capability: durable stop/start lifecycle.
  *
- * Cloud sandbox VMs can lapse when their lifetime expires or a snapshot is
- * taken (which stops the VM). Resume reattaches to the named sandbox (or
- * recreates it from a snapshot at the server layer's discretion) and restarts
- * any in-sandbox processes the driver owns. Absent ⇒
- * `describe().supportsResume === false`; the server layer fails loud with
- * `not-running` rather than silently recreating.
+ * Both Vercel Sandbox (v2 persistent sandboxes) and Docker (named containers)
+ * can stop a sandbox without destroying it and start it again later, with the
+ * filesystem preserved. `stop`/`start`/`status` are the durable lifecycle
+ * primitives; `start` subsumes the former `resume` capability. Absent ⇒
+ * `describe().supportsLifecycle === false`; the server layer fails loud rather
+ * than silently recreating.
+ *
+ * Contract semantics:
+ * - `stop` on an already-stopped sandbox is idempotent success.
+ * - `start` on a running sandbox is idempotent success (re-verifies serve +
+ *   healthz) and returns a refreshed handle.
+ * - `start` on a `gone` sandbox fails `provision-failed` with a message telling
+ *   the user to create a new sandbox.
+ * - `status` never mutates.
  */
-export interface SandboxResumeCapability {
-  resume(
+export type SandboxLifecycleStatus = "running" | "stopped" | "gone";
+
+export interface SandboxLifecycleCapability {
+  stop(handle: SandboxHandle): Effect.Effect<void, SandboxProviderError>;
+  start(
     handle: SandboxHandle,
     req: { readonly config: unknown; readonly env?: ReadonlyArray<readonly [string, string]> },
   ): Effect.Effect<SandboxHandle, SandboxProviderError>;
+  status(handle: SandboxHandle): Effect.Effect<SandboxLifecycleStatus, SandboxProviderError>;
 }
 
 /**
@@ -147,7 +159,7 @@ export interface SandboxResumeCapability {
  * Optional (driver may omit; registry exposes presence via `describe()` and
  * callers guard with capability checks): `snapshot` (snapshot lifecycle),
  * `renewTimeout` (extend session), `copyInto` (seed a repo archive into the
- * sandbox — Phase 2).
+ * sandbox — Phase 2), `lifecycle` (durable stop/start — replaces `resume`).
  */
 export interface SandboxProvider {
   readonly kind: SandboxProviderDriverKind;
@@ -176,8 +188,8 @@ export interface SandboxProvider {
   readonly renewTimeout?: SandboxRenewTimeoutCapability;
   /** Optional copy-into capability (Phase 2 seeding). Absent ⇒ `describe().supportsCopyInto === false`. */
   readonly copyInto?: SandboxCopyIntoCapability;
-  /** Optional resume capability (Phase 3b). Absent ⇒ `describe().supportsResume === false`. */
-  readonly resume?: SandboxResumeCapability;
+  /** Optional durable lifecycle capability (stop/start/status). Absent ⇒ `describe().supportsLifecycle === false`. */
+  readonly lifecycle?: SandboxLifecycleCapability;
 }
 
 /**

@@ -11,9 +11,11 @@
  * `katacode serve` detached, and polls the public `/healthz` until ready.
  * Reachability returns the public `https://<sandbox.domain(port)>` URL.
  * Lifecycle: `renewTimeout` forwards to `sb.extendTimeout`, `snapshot` stops
- * the VM (caller treats the session as lapsed), `resume` reattaches via
- * `Sandbox.get({ resume: true })` and restarts serve, `copyInto` writes a tar
- * and extracts it, `dispose` deletes the sandbox.
+ * the VM (caller treats the session as lapsed), `copyInto` writes a tar
+ * and extracts it, `dispose` deletes the sandbox. The durable `lifecycle`
+ * capability (stop/start/status via v2 persistent sandboxes) is wired in
+ * Phase 3; the former `resume` capability was removed from the SPI in favor
+ * of `lifecycle.start`.
  *
  * Handle state is plain serializable data (no live SDK object); every method
  * re-fetches the instance with `sdk.get` when it needs one.
@@ -39,7 +41,6 @@ import {
   type SandboxHandle,
   type SandboxProvisionRequest,
   type SandboxReachability,
-  type SandboxResumeCapability,
   type SandboxRenewTimeoutCapability,
   type SandboxSnapshotCapability,
   type SandboxProvider,
@@ -307,37 +308,6 @@ export function makeVercelSandboxProvider(
       }),
   };
 
-  const resume: SandboxResumeCapability = {
-    resume: (handle, req) =>
-      Effect.gen(function* () {
-        const state = handle.handle as VercelSandboxHandleState;
-        const sb = yield* trySdk(
-          "resume",
-          () => sdk.get({ sandboxId: state.sandboxId, resume: true, ...state.auth }),
-          "provision-failed",
-        ).pipe(
-          Effect.mapError((error: SandboxProviderError) =>
-            isNotFound(error.cause ?? error)
-              ? new SandboxProviderError({
-                  reason: "provision-failed",
-                  message: "Sandbox is gone; recreate from its snapshot or start a new session.",
-                  cause: error,
-                })
-              : error,
-          ),
-        );
-        // Relaunch serve detached with the new env.
-        const serveCmd = buildServeCommand({ port: state.port, env: buildServeEnv(req) });
-        yield* trySdk(
-          "resume.serve",
-          () => sb.runCommand({ cmd: "sh", args: ["-c", serveCmd], detached: true }),
-          "exec-failed",
-        );
-        yield* waitForReadyFor(`https://${new URL(sb.domain(state.port)).host}`);
-        return handle;
-      }),
-  };
-
   const provider: SandboxProvider = {
     kind: VERCEL_KIND,
 
@@ -547,13 +517,12 @@ export function makeVercelSandboxProvider(
         supportsSnapshot: true,
         supportsRenewTimeout: true,
         supportsCopyInto: true,
-        supportsResume: true,
+        supportsLifecycle: false,
       } satisfies SandboxProviderDescriptor),
 
     snapshot,
     renewTimeout,
     copyInto,
-    resume,
   };
 
   return provider;
