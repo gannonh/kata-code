@@ -30,6 +30,14 @@ interface FakeSdkState {
   extendTimeouts: Array<{ sandboxId: string; deltaMs: number }>;
   snapshotCalls: Array<{ sandboxId: string; expiration?: number }>;
   snapshots: Map<string, { status: string }>;
+  /** Names stopped via `lifecycle.stop`. */
+  stoppedNames: Set<string>;
+  /** Per-name status override (default "running"). */
+  statusByName: Map<string, string>;
+  /** Per-name persistent flag (default true). */
+  persistentByName: Map<string, boolean>;
+  /** `update` calls recorded for assertions. */
+  updateCalls: Array<{ sandboxId: string; persistent?: boolean }>;
   /** Fail the next `get` with a not-found error. */
   failGetNotFound: boolean;
 }
@@ -53,12 +61,22 @@ function fakeSdk(
     extendTimeouts: [],
     snapshotCalls: [],
     snapshots: new Map(),
+    stoppedNames: new Set(),
+    statusByName: new Map(),
+    persistentByName: new Map(),
+    updateCalls: [],
     failGetNotFound: false,
   };
 
   const makeInstance = (sandboxId: string): VercelSandboxInstance => ({
     sandboxId,
     domain: () => domain,
+    get status() {
+      return state.statusByName.get(sandboxId) ?? "running";
+    },
+    get persistent() {
+      return state.persistentByName.get(sandboxId) ?? true;
+    },
     runCommand: async (opts) => {
       state.runCommands.push({
         cmd: opts.cmd,
@@ -86,9 +104,22 @@ function fakeSdk(
       state.snapshots.set(id, { status: overrides.snapshotStatus ?? "created" });
       return { snapshotId: id };
     },
-    stop: async () => undefined,
+    stop: async () => {
+      state.stoppedNames.add(sandboxId);
+      state.statusByName.set(sandboxId, "stopped");
+    },
     delete: async () => {
       state.deleted = [...state.deleted, sandboxId];
+    },
+    update: async (params) => {
+      state.updateCalls = [
+        ...state.updateCalls,
+        {
+          sandboxId,
+          ...(params.persistent !== undefined ? { persistent: params.persistent } : {}),
+        },
+      ];
+      if (params.persistent !== undefined) state.persistentByName.set(sandboxId, params.persistent);
     },
   });
 
@@ -132,14 +163,12 @@ function fakeSdk(
 
 const configWithAuth = (
   overrides: Partial<{
-    sourceType: "runtime" | "snapshot";
-    snapshotId: string;
+    persistent: boolean;
   }> = {},
 ) => ({
   ...DEFAULT_VERCEL_CONFIG,
   auth: AUTH,
-  ...(overrides.sourceType !== undefined ? { sourceType: overrides.sourceType } : {}),
-  ...(overrides.snapshotId !== undefined ? { snapshotId: overrides.snapshotId } : {}),
+  ...(overrides.persistent !== undefined ? { persistent: overrides.persistent } : {}),
 });
 
 /** Collapse an effect's error channel into a `{ _tag: "Left"|"Right" }` value (Effect v4 has no `Effect.either`). */
@@ -162,10 +191,10 @@ describe("VercelSandboxProvider", () => {
     expect(typeof provider.reachability).toBe("function");
     expect(typeof provider.dispose).toBe("function");
     expect(typeof provider.describe).toBe("function");
-    expect(provider.snapshot).toBeDefined();
+    expect(provider.snapshot).toBeUndefined();
     expect(provider.renewTimeout).toBeDefined();
     expect(provider.copyInto).toBeDefined();
-    expect(provider.lifecycle).toBeUndefined();
+    expect(provider.lifecycle).toBeDefined();
   });
 
   vitIt.effect("validate fails invalid-config without auth", () =>
@@ -178,28 +207,13 @@ describe("VercelSandboxProvider", () => {
     }),
   );
 
-  vitIt.effect("validate fails invalid-config when the configured snapshot is missing", () =>
+  vitIt.effect("validate succeeds with auth (no snapshot validation)", () =>
     Effect.gen(function* () {
-      const { sdk } = fakeSdk();
+      const { sdk, state } = fakeSdk();
       const provider = makeProvider(sdk);
-      const result = yield* either(
-        provider.validate(configWithAuth({ sourceType: "snapshot", snapshotId: "snap_gone" })),
-      );
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") expect(result.left.reason).toBe("invalid-config");
-    }),
-  );
-
-  vitIt.effect("validate fails invalid-config when the snapshot status is not created", () =>
-    Effect.gen(function* () {
-      const { sdk, state } = fakeSdk({ snapshotStatus: "failed" });
-      state.snapshots.set("snap_1", { status: "failed" });
-      const provider = makeProvider(sdk);
-      const result = yield* either(
-        provider.validate(configWithAuth({ sourceType: "snapshot", snapshotId: "snap_1" })),
-      );
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") expect(result.left.reason).toBe("invalid-config");
+      const result = yield* either(provider.validate(configWithAuth()));
+      expect(result._tag).toBe("Right");
+      expect(state.probeCalls).toBe(1);
     }),
   );
 
@@ -225,31 +239,63 @@ describe("VercelSandboxProvider", () => {
       const serveRun = state.runCommands.find((r) => r.detached === true);
       expect(serveRun).toBeDefined();
       expect(serveRun?.args?.join(" ")).toContain("katacode serve");
-      const hstate = handle.handle as { sandboxId: string; port: number; domainBase: string };
-      expect(hstate.sandboxId).toBe("sandbox-1");
+      const hstate = handle.handle as {
+        sandboxId: string;
+        port: number;
+        domainBase: string;
+        persistent: boolean;
+      };
+      // Deterministic name derived from the instance id (AC-L2).
+      expect(hstate.sandboxId).toBe("kata-inst-1");
       expect(hstate.port).toBe(13773);
       expect(hstate.domainBase).toMatch(/^https:\/\//);
+      expect(hstate.persistent).toBe(true);
     }),
   );
 
-  vitIt.effect("provision creates from snapshot source and skips the bootstrap script", () =>
+  vitIt.effect(
+    "provision passes a deterministic name + persistence + keepLastSnapshots (AC-L2/L4)",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        yield* provider.provision({
+          instanceId: "inst_1",
+          config: configWithAuth(),
+          image: "",
+          env: [],
+        });
+        const createCall = state.createCalls[0] as {
+          name?: string;
+          persistent?: boolean;
+          keepLastSnapshots?: { count: number };
+          runtime?: string;
+        };
+        expect(createCall.name).toBe("kata-inst-1");
+        expect(createCall.persistent).toBe(true);
+        expect(createCall.keepLastSnapshots).toEqual({ count: 1 });
+        expect(createCall.runtime).toBe("node24");
+      }),
+  );
+
+  vitIt.effect("two provisions for the same instance reuse the same sandbox name (AC-L2)", () =>
     Effect.gen(function* () {
       const { sdk, state } = fakeSdk();
-      state.snapshots.set("snap_base", { status: "created" });
       const provider = makeProvider(sdk);
       yield* provider.provision({
         instanceId: "inst_1",
-        config: configWithAuth({ sourceType: "snapshot", snapshotId: "snap_base" }),
+        config: configWithAuth(),
         image: "",
         env: [],
       });
-      const createCall = state.createCalls[0] as { source?: unknown; runtime?: string };
-      expect(createCall.source).toEqual({ type: "snapshot", snapshotId: "snap_base" });
-      expect(createCall.runtime).toBeUndefined();
-      const bootstrapRun = state.runCommands.find((r) =>
-        r.args?.join(" ")?.includes("npm install -g"),
-      );
-      expect(bootstrapRun).toBeUndefined();
+      yield* provider.provision({
+        instanceId: "inst_1",
+        config: configWithAuth(),
+        image: "",
+        env: [],
+      });
+      const names = (state.createCalls as Array<{ name?: string }>).map((c) => c.name);
+      expect(names).toEqual(["kata-inst-1", "kata-inst-1"]);
     }),
   );
 
@@ -305,7 +351,7 @@ describe("VercelSandboxProvider", () => {
         env: [],
       });
       yield* provider.renewTimeout!.renewTimeout(handle, 60_000);
-      expect(state.extendTimeouts).toEqual([{ sandboxId: "sandbox-1", deltaMs: 60_000 }]);
+      expect(state.extendTimeouts).toEqual([{ sandboxId: "kata-inst-1", deltaMs: 60_000 }]);
     }),
   );
 
@@ -320,7 +366,7 @@ describe("VercelSandboxProvider", () => {
         env: [],
       });
       yield* provider.dispose(handle);
-      expect(state.deleted).toEqual(["sandbox-1"]);
+      expect(state.deleted).toEqual(["kata-inst-1"]);
       state.failGetNotFound = true;
       // Already-deleted (404 on get) is tolerated as success.
       yield* provider.dispose(handle);
@@ -349,22 +395,7 @@ describe("VercelSandboxProvider", () => {
     }),
   );
 
-  vitIt.effect("createSnapshot returns the snapshot id", () =>
-    Effect.gen(function* () {
-      const { sdk } = fakeSdk();
-      const provider = makeProvider(sdk);
-      const handle = yield* provider.provision({
-        instanceId: "inst_1",
-        config: configWithAuth(),
-        image: "",
-        env: [],
-      });
-      const result = yield* provider.snapshot!.createSnapshot(handle);
-      expect(result.snapshotId).toMatch(/^snap_/);
-    }),
-  );
-
-  vitIt.effect("resume is removed from the SPI (replaced by lifecycle.start in Phase 3)", () =>
+  vitIt.effect("lifecycle.stop stops the VM and status reports stopped (AC-L3/L6)", () =>
     Effect.gen(function* () {
       const { sdk, state } = fakeSdk();
       const provider = makeProvider(sdk);
@@ -372,14 +403,110 @@ describe("VercelSandboxProvider", () => {
         instanceId: "inst_1",
         config: configWithAuth(),
         image: "",
-        env: [["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", "bt2"]],
+        env: [],
       });
-      // lifecycle is not present until Phase 3 wires it.
-      expect(provider.lifecycle).toBeUndefined();
-      // No resume get call is made.
-      expect(state.getCalls.find((c) => c.resume === true)).toBeUndefined();
-      expect((handle.handle as { sandboxId: string }).sandboxId).toBe("sandbox-1");
+      yield* provider.lifecycle!.stop(handle);
+      expect([...state.stoppedNames]).toEqual(["kata-inst-1"]);
+      const status = yield* provider.lifecycle!.status(handle);
+      expect(status).toBe("stopped");
     }),
+  );
+
+  vitIt.effect(
+    "lifecycle.start resumes via get(resume:true), relaunches serve, and re-applies persistence (AC-L3)",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        const handle = yield* provider.provision({
+          instanceId: "inst_1",
+          config: configWithAuth(),
+          image: "",
+          env: [["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", "bt2"]],
+        });
+        yield* provider.lifecycle!.stop(handle);
+        const started = yield* provider.lifecycle!.start(handle, {
+          config: configWithAuth(),
+          env: [["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", "bt2"]],
+        });
+        // start resumes via get(resume: true).
+        const resumeGet = state.getCalls.find((c) => c.resume === true);
+        expect(resumeGet).toBeDefined();
+        // serve is relaunched detached.
+        const serveRun = [...state.runCommands].toReversed().find((r) => r.detached === true);
+        expect(serveRun?.args?.join(" ")).toContain("katacode serve");
+        expect((started.handle as { sandboxId: string }).sandboxId).toBe("kata-inst-1");
+        // persistence unchanged -> no update call.
+        expect(state.updateCalls).toHaveLength(0);
+      }),
+  );
+
+  vitIt.effect(
+    "lifecycle.start fails loud for a non-persistent stopped sandbox (no silent recreate)",
+    () =>
+      Effect.gen(function* () {
+        const { sdk } = fakeSdk();
+        const provider = makeProvider(sdk);
+        const handle = yield* provider.provision({
+          instanceId: "inst_1",
+          config: configWithAuth({ persistent: false }),
+          image: "",
+          env: [],
+        });
+        yield* provider.lifecycle!.stop(handle);
+        const result = yield* either(
+          provider.lifecycle!.start(handle, {
+            config: configWithAuth({ persistent: false }),
+            env: [],
+          }),
+        );
+        expect(result._tag).toBe("Left");
+        if (result._tag === "Left") expect(result.left.reason).toBe("provision-failed");
+      }),
+  );
+
+  vitIt.effect("lifecycle.start re-applies a persistence toggle via sandbox.update (AC-L4)", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk();
+      const provider = makeProvider(sdk);
+      const handle = yield* provider.provision({
+        instanceId: "inst_1",
+        config: configWithAuth({ persistent: true }),
+        image: "",
+        env: [],
+      });
+      yield* provider.lifecycle!.stop(handle);
+      // Toggle persistent off for the next start.
+      yield* provider.lifecycle!.start(handle, {
+        config: configWithAuth({ persistent: false }),
+        env: [],
+      });
+      expect(state.updateCalls).toEqual([{ sandboxId: "kata-inst-1", persistent: false }]);
+    }),
+  );
+
+  vitIt.effect(
+    "lifecycle.status maps SDK statuses to running/stopped and gone on not-found (AC-L6)",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        const handle = yield* provider.provision({
+          instanceId: "inst_1",
+          config: configWithAuth(),
+          image: "",
+          env: [],
+        });
+        expect(yield* provider.lifecycle!.status(handle)).toBe("running");
+        state.statusByName.set("kata-inst-1", "stopped");
+        expect(yield* provider.lifecycle!.status(handle)).toBe("stopped");
+        state.statusByName.set("kata-inst-1", "snapshotting");
+        expect(yield* provider.lifecycle!.status(handle)).toBe("stopped");
+        state.failGetNotFound = true;
+        const result = yield* either(provider.lifecycle!.status(handle));
+        expect(result._tag).toBe("Left");
+        if (result._tag === "Left") expect(result.left.reason).toBe("provision-failed");
+      }),
   );
 
   vitIt.effect("describe advertises public/snapshot/renewTimeout/copyInto/resume (AC-3b.1)", () =>
@@ -389,10 +516,10 @@ describe("VercelSandboxProvider", () => {
       const d = yield* provider.describe();
       expect(d.kind as string).toBe("vercel");
       expect(d.reachabilityKind).toBe("public");
-      expect(d.supportsSnapshot).toBe(true);
+      expect(d.supportsSnapshot).toBe(false);
       expect(d.supportsRenewTimeout).toBe(true);
       expect(d.supportsCopyInto).toBe(true);
-      expect(d.supportsLifecycle).toBe(false);
+      expect(d.supportsLifecycle).toBe(true);
       expect(d.maxLifetimeMs).toBe(86_400_000);
     }),
   );

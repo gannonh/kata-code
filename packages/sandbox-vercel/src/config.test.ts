@@ -7,6 +7,7 @@ import {
   DEFAULT_VERCEL_CONFIG,
   VERCEL_AUTH_ENV_VARS,
   mergeVercelAuthIntoConfig,
+  decodeVercelSandboxConfig,
 } from "./config.ts";
 
 const decodeConfig = Schema.decodeUnknownSync(VercelSandboxConfig);
@@ -15,14 +16,25 @@ describe("VercelSandboxConfig", () => {
   it("decodes a minimal config and round-trips the default", () => {
     const decoded = decodeConfig(DEFAULT_VERCEL_CONFIG);
     expect(decoded.runtime).toBe("node24");
-    expect(decoded.sourceType).toBe("runtime");
+    expect(decoded.persistent).toBe(true);
     expect(decoded.timeoutMs).toBe(86_400_000);
     expect(decoded.port).toBe(13773);
   });
 
-  it("rejects malformed config (bad port, unknown sourceType)", () => {
+  it("rejects malformed config (bad port, non-boolean persistent)", () => {
     expect(() => decodeConfig({ ...DEFAULT_VERCEL_CONFIG, port: 0 })).toThrow();
-    expect(() => decodeConfig({ ...DEFAULT_VERCEL_CONFIG, sourceType: "vcr" })).toThrow();
+    expect(() => decodeConfig({ ...DEFAULT_VERCEL_CONFIG, persistent: "yes" })).toThrow();
+  });
+
+  it("decodeVercelSandboxConfig strips legacy sourceType/snapshotId keys (decode-time migration)", () => {
+    const decoded = decodeVercelSandboxConfig({
+      ...DEFAULT_VERCEL_CONFIG,
+      sourceType: "snapshot",
+      snapshotId: "snap_legacy",
+    });
+    expect(decoded.persistent).toBe(true);
+    expect((decoded as unknown as Record<string, unknown>).sourceType).toBeUndefined();
+    expect((decoded as unknown as Record<string, unknown>).snapshotId).toBeUndefined();
   });
 
   it("VERCEL_AUTH_ENV_VARS lists the trio the server materializes", () => {

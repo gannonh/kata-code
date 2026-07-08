@@ -31,7 +31,6 @@
 import * as NodeCrypto from "node:crypto";
 
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 
 import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/instance";
 import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachability";
@@ -39,17 +38,23 @@ import {
   type SandboxCopyIntoCapability,
   type SandboxExecResult,
   type SandboxHandle,
+  type SandboxLifecycleCapability,
+  type SandboxLifecycleStatus,
   type SandboxProvisionRequest,
   type SandboxReachability,
   type SandboxRenewTimeoutCapability,
-  type SandboxSnapshotCapability,
   type SandboxProvider,
   type SandboxProviderConfigDecoder,
   SandboxProviderError,
 } from "@kata-sh/code-sandbox/driver";
 import type { SandboxProviderDescriptor } from "@kata-sh/code-sandbox/descriptor";
 
-import { DEFAULT_VERCEL_CONFIG, VercelSandboxConfig, VERCEL_AUTH_ENV_VARS } from "./config.ts";
+import {
+  DEFAULT_VERCEL_CONFIG,
+  VercelSandboxConfig,
+  VERCEL_AUTH_ENV_VARS,
+  decodeVercelSandboxConfig,
+} from "./config.ts";
 import type { VercelAuthParams, VercelSdk } from "./sdk.ts";
 import { isAuthError, isNotFound, liveVercelSdk } from "./sdk.ts";
 import { buildBootstrapScript, buildServeCommand, SANDBOX_HOME } from "./bootstrap.ts";
@@ -57,7 +62,9 @@ import { buildBootstrapScript, buildServeCommand, SANDBOX_HOME } from "./bootstr
 export const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
 // Hoist compiled schema function to module scope (kata-code/no-inline-schema-compile).
-const decodeVercelSandboxConfig = Schema.decodeUnknownSync(VercelSandboxConfig);
+// `decodeVercelSandboxConfig` (from config.ts) performs the legacy-key strip;
+// the raw `Schema.decodeUnknownSync(VercelSandboxConfig)` is kept for tests
+// that assert the underlying schema rejects malformed payloads.
 
 /** Decoded config the registry feeds the driver. */
 export const vercelConfigDecoder: SandboxProviderConfigDecoder<VercelSandboxConfig> = (input) =>
@@ -78,14 +85,31 @@ const KATA_SERVER_ENV: ReadonlyArray<readonly [string, string]> = [
 ];
 
 export interface VercelSandboxHandleState {
+  /** The SDK sandbox `name` (deterministic; the durable address for stop/start/status). */
   readonly sandboxId: string;
   readonly port: number;
   /** `sandbox.domain(port)` captured at provision for reachability without a re-fetch. */
   readonly domainBase: string;
   readonly timeoutMs: number;
   readonly auth: VercelAuthParams;
-  /** Snapshot id the sandbox was booted from, when `sourceType === "snapshot"`. */
-  readonly bootedFromSnapshotId?: string;
+  /** Whether the sandbox persists its filesystem between sessions. */
+  readonly persistent: boolean;
+}
+
+/** Vercel sandbox name prefix + rules. Names are lowercase alphanumeric +
+ *  dashes, project-unique. The instance-derived slug is clamped to keep the
+ *  whole name within the SDK's name rules. */
+const SANDBOX_NAME_PREFIX = "kata-";
+
+/** Derive a deterministic Vercel sandbox name from an instance id. Instance
+ *  ids are slug-safe and unique within a Kata server; the Vercel sandbox
+ *  name is project-unique (scoped to the configured projectId), so the
+ *  instance id alone is a stable, collision-free address. The result is
+ *  lowercased and any underscores replaced with dashes to match Vercel's
+ *  `[a-z0-9-]+` name rule. */
+export function vercelSandboxName(instanceId: string): string {
+  const slug = instanceId.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+  return `${SANDBOX_NAME_PREFIX}${slug}`;
 }
 
 // ── Error mapping ─────────────────────────────────────────────────────
@@ -109,6 +133,31 @@ function mapSdkError(
     });
   }
   return new SandboxProviderError({ reason: fallback, message: `${context}: ${message}` });
+}
+
+/** Map a Vercel SDK session/sandbox status to the SPI lifecycle status.
+ *
+ * Spike result (recorded 2026-07-08, `@vercel/sandbox@2.4.0`):
+ * `Sandbox.get({ name, resume: false })` returns a `SandboxAndSessionResponse`
+ * whose `session` field is **required** (not nullable) and carries the last
+ * session metadata, so `sandbox.status` is readable for a stopped sandbox
+ * without resuming and does **not** throw. Not-found throws a 404, mapped to
+ * `gone`. SDK statuses map as: running <- running, pending; stopped <-
+ * stopped, stopping, snapshotting, aborted, failed. */
+function mapVercelStatus(status: string): SandboxLifecycleStatus {
+  switch (status) {
+    case "running":
+    case "pending":
+      return "running";
+    case "stopped":
+    case "stopping":
+    case "snapshotting":
+    case "aborted":
+    case "failed":
+      return "stopped";
+    default:
+      return "stopped";
+  }
 }
 
 /** Wrap a promise from the SDK so its error channel is `SandboxProviderError`. */
@@ -197,10 +246,8 @@ function waitForReady(
 // ── Provider factory ──────────────────────────────────────────────────
 
 /**
- * Build a Vercel sandbox provider bound to an SDK. The provider captures the
- * auth from the most recent successful `validate`/`provision` so the
- * handle-less `snapshot.deleteSnapshot`/`snapshotExists` methods can reach the
- * Vercel API. See the module header for the documented limitation.
+ * Build a Vercel sandbox provider bound to an SDK. Unit tests inject a fake
+ * SDK with no network; the live provider is bound to `liveVercelSdk`.
  */
 export function makeVercelSandboxProvider(
   sdk: VercelSdk,
@@ -208,61 +255,109 @@ export function makeVercelSandboxProvider(
 ): SandboxProvider {
   const healthzProbe = options.healthzProbe ?? defaultHealthzProbe;
   const waitForReadyFor = (httpBaseUrl: string) => waitForReady(httpBaseUrl, healthzProbe);
-  // Last-used auth captured at validate/provision time. Mutated by those
-  // methods only; read by handle-less snapshot methods.
-  let lastAuth: VercelAuthParams | undefined;
 
-  const requireLastAuth = (): Effect.Effect<VercelAuthParams, SandboxProviderError> =>
-    lastAuth !== undefined
-      ? Effect.succeed(lastAuth)
-      : Effect.fail(
-          new SandboxProviderError({
-            reason: "invalid-config",
-            message: "Validate the Vercel deployment target before managing snapshots.",
-          }),
-        );
-
-  const snapshot: SandboxSnapshotCapability = {
-    /**
-     * Capture a snapshot. **This stops the sandbox VM** (Vercel snapshots stop
-     * the source session); the caller treats the session as lapsed and uses
-     * `resume` to continue, or boots a new sandbox from the snapshot id.
-     */
-    createSnapshot: (handle, options) =>
+  const lifecycle: SandboxLifecycleCapability = {
+    stop: (handle) =>
       Effect.gen(function* () {
         const state = handle.handle as VercelSandboxHandleState;
         const sb = yield* trySdk(
-          "snapshot.createSnapshot",
-          () => sdk.get({ sandboxId: state.sandboxId, ...state.auth }),
-          "unknown",
+          "lifecycle.stop",
+          () => sdk.get({ sandboxId: state.sandboxId, resume: false, ...state.auth }),
+          "provision-failed",
         );
-        const snap = yield* trySdk(
-          "snapshot.createSnapshot",
-          () => sb.snapshot({ expiration: 0 }),
-          "unknown",
-        );
-        return { snapshotId: snap.snapshotId };
+        yield* trySdk("lifecycle.stop", () => sb.stop(), "provision-failed");
+        // stop on an already-stopped sandbox is idempotent success; the SDK
+        // stop call is safe to re-issue.
       }),
-    deleteSnapshot: (snapshotId) =>
+
+    start: (handle, req) =>
       Effect.gen(function* () {
-        const auth = yield* requireLastAuth();
-        const snap = yield* trySdk(
-          "snapshot.deleteSnapshot",
-          () => sdk.getSnapshot({ snapshotId, ...auth }),
-          "unknown",
+        const state = handle.handle as VercelSandboxHandleState;
+        // A non-persistent stopped sandbox cannot be resumed (its filesystem was
+        // discarded); fail loud rather than silently recreating.
+        if (!state.persistent) {
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message:
+              "This sandbox was not persistent and cannot be started after stop. Delete it and create a new sandbox.",
+          });
+        }
+        // Re-apply the current config's persistence setting so a toggle takes
+        // effect at runtime (the next stop honors the new value).
+        const decoded = yield* Effect.try({
+          try: () => decodeVercelSandboxConfig(req.config),
+          catch: (e) =>
+            new SandboxProviderError({
+              reason: "invalid-config",
+              message: e instanceof Error ? e.message : String(e),
+            }),
+        });
+        const persistent = decoded.persistent;
+        const sb = yield* trySdk(
+          "lifecycle.start",
+          () => sdk.get({ sandboxId: state.sandboxId, resume: true, ...state.auth }),
+          "provision-failed",
+        ).pipe(
+          Effect.mapError((error: SandboxProviderError) =>
+            isNotFound(error.cause ?? error)
+              ? new SandboxProviderError({
+                  reason: "provision-failed",
+                  message: "Sandbox is gone; create a new sandbox to re-seed the workspace.",
+                  cause: error,
+                })
+              : error,
+          ),
         );
-        if (snap === null) return; // already gone — succeed
-        yield* trySdk("snapshot.deleteSnapshot", () => snap.delete(), "unknown");
+        if (persistent !== state.persistent) {
+          yield* trySdk(
+            "lifecycle.start.update",
+            () => sb.update({ persistent }),
+            "provision-failed",
+          );
+        }
+        // Relaunch serve detached with the new env.
+        const serveCmd = buildServeCommand({ port: state.port, env: buildServeEnv(req) });
+        yield* trySdk(
+          "lifecycle.start.serve",
+          () => sb.runCommand({ cmd: "sh", args: ["-c", serveCmd], detached: true }),
+          "exec-failed",
+        );
+        yield* waitForReadyFor(`https://${new URL(sb.domain(state.port)).host}`);
+        const domainBase = sb.domain(state.port);
+        return {
+          driverKind: VERCEL_KIND,
+          instanceId: handle.instanceId,
+          handle: {
+            sandboxId: state.sandboxId,
+            port: state.port,
+            domainBase,
+            timeoutMs: state.timeoutMs,
+            auth: state.auth,
+            persistent,
+          } satisfies VercelSandboxHandleState,
+        } satisfies SandboxHandle;
       }),
-    snapshotExists: (snapshotId) =>
+
+    status: (handle): Effect.Effect<SandboxLifecycleStatus, SandboxProviderError> =>
       Effect.gen(function* () {
-        const auth = yield* requireLastAuth();
-        const snap = yield* trySdk(
-          "snapshotExists",
-          () => sdk.getSnapshot({ snapshotId, ...auth }),
-          "unknown",
+        const state = handle.handle as VercelSandboxHandleState;
+        const sb = yield* trySdk(
+          "lifecycle.status",
+          () => sdk.get({ sandboxId: state.sandboxId, resume: false, ...state.auth }),
+          "provision-failed",
+        ).pipe(
+          // not-found -> gone; other errors surface as provision-failed.
+          Effect.mapError((error: SandboxProviderError) =>
+            isNotFound(error.cause ?? error)
+              ? new SandboxProviderError({
+                  reason: "provision-failed",
+                  message: "Sandbox not found.",
+                  cause: error,
+                })
+              : error,
+          ),
         );
-        return snap !== null && snap.status === "created";
+        return mapVercelStatus(sb.status);
       }),
   };
 
@@ -331,27 +426,6 @@ export function makeVercelSandboxProvider(
         }
         // Probe credentials with the cheapest authenticated call.
         yield* trySdk("validate", () => sdk.listProjectsProbe(auth), "invalid-config");
-        // Snapshot source: require a usable snapshot.
-        if (decoded.sourceType === "snapshot") {
-          if (decoded.snapshotId === undefined) {
-            return yield* new SandboxProviderError({
-              reason: "invalid-config",
-              message: "Boot source is snapshot but no snapshot id is configured.",
-            });
-          }
-          const snap = yield* trySdk(
-            "validate.snapshot",
-            () => sdk.getSnapshot({ snapshotId: decoded.snapshotId as string, ...auth }),
-            "invalid-config",
-          );
-          if (snap === null || snap.status !== "created") {
-            return yield* new SandboxProviderError({
-              reason: "invalid-config",
-              message: `Snapshot ${decoded.snapshotId as string} is missing or not usable (status=${snap?.status ?? "gone"}).`,
-            });
-          }
-        }
-        lastAuth = auth;
       }),
 
     provision: (req) =>
@@ -373,45 +447,48 @@ export function makeVercelSandboxProvider(
           });
         }
         const createEnv = buildCreateEnv(req);
+        const name = vercelSandboxName(req.instanceId);
+        const persistent = decoded.persistent;
         // NEVER retry create — it is billable and non-idempotent.
         const sb = yield* trySdk(
           "provision.create",
           () =>
             sdk.create({
               ...auth,
-              ...(decoded.sourceType === "snapshot" && decoded.snapshotId !== undefined
-                ? { source: { type: "snapshot", snapshotId: decoded.snapshotId as string } }
-                : { runtime: decoded.runtime }),
+              name,
+              runtime: decoded.runtime,
               ...(decoded.vcpus !== undefined ? { resources: { vcpus: decoded.vcpus } } : {}),
               ports: [decoded.port],
               timeout: decoded.timeoutMs,
               env: createEnv,
+              persistent,
+              // Bound snapshot storage for persistent sandboxes so stop/start
+              // keeps only the latest auto-snapshot.
+              ...(persistent ? { keepLastSnapshots: { count: 1 } } : {}),
             }),
           "provision-failed",
         );
         // Capture the domain now so reachability does not require a re-fetch.
         const domainBase = sb.domain(decoded.port);
 
-        // Runtime boot: install CLIs. Snapshot boot: skip (snapshot has them).
-        if (decoded.sourceType === "runtime") {
-          const bootstrap = yield* trySdk(
-            "provision.bootstrap",
-            () => sb.runCommand({ cmd: "sh", args: ["-c", buildBootstrapScript()] }),
-            "provision-failed",
+        // Cold boot: install CLIs (the only boot path now; snapshot boot removed).
+        const bootstrap = yield* trySdk(
+          "provision.bootstrap",
+          () => sb.runCommand({ cmd: "sh", args: ["-c", buildBootstrapScript()] }),
+          "provision-failed",
+        );
+        if (bootstrap.exitCode !== 0) {
+          const stderr = yield* Effect.promise(() => bootstrap.stderr()).pipe(
+            Effect.orElseSucceed(() => ""),
           );
-          if (bootstrap.exitCode !== 0) {
-            const stderr = yield* Effect.promise(() => bootstrap.stderr()).pipe(
-              Effect.orElseSucceed(() => ""),
-            );
-            // Best-effort cleanup after a bootstrap failure.
-            yield* trySdk("provision.bootstrap.cleanup", () => sb.delete(), "dispose-failed").pipe(
-              Effect.ignore,
-            );
-            return yield* new SandboxProviderError({
-              reason: "provision-failed",
-              message: `bootstrap failed (exit ${bootstrap.exitCode}): ${stderr.slice(-512)}`,
-            });
-          }
+          // Best-effort cleanup after a bootstrap failure.
+          yield* trySdk("provision.bootstrap.cleanup", () => sb.delete(), "dispose-failed").pipe(
+            Effect.ignore,
+          );
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `bootstrap failed (exit ${bootstrap.exitCode}): ${stderr.slice(-512)}`,
+          });
         }
 
         // Launch serve detached with the filtered env.
@@ -432,16 +509,13 @@ export function makeVercelSandboxProvider(
           ),
         );
 
-        lastAuth = auth;
         const state: VercelSandboxHandleState = {
-          sandboxId: sb.sandboxId,
+          sandboxId: name,
           port: decoded.port,
           domainBase,
           timeoutMs: decoded.timeoutMs,
           auth,
-          ...(decoded.sourceType === "snapshot" && decoded.snapshotId !== undefined
-            ? { bootedFromSnapshotId: decoded.snapshotId as string }
-            : {}),
+          persistent,
         };
         return {
           driverKind: VERCEL_KIND,
@@ -496,9 +570,12 @@ export function makeVercelSandboxProvider(
     dispose: (handle) =>
       Effect.gen(function* () {
         const state = handle.handle as VercelSandboxHandleState;
+        // v2 delete removes the sandbox and all of its snapshots/sessions, so
+        // no separate snapshot cleanup is needed. Resolve without resuming so
+        // dispose works on a stopped sandbox.
         yield* trySdk(
           "dispose",
-          () => sdk.get({ sandboxId: state.sandboxId, ...state.auth }),
+          () => sdk.get({ sandboxId: state.sandboxId, resume: false, ...state.auth }),
           "dispose-failed",
         ).pipe(
           Effect.flatMap((sb) => trySdk("dispose", () => sb.delete(), "dispose-failed")),
@@ -514,13 +591,13 @@ export function makeVercelSandboxProvider(
         kind: VERCEL_KIND,
         reachabilityKind: SandboxReachabilityKind.make("public"),
         maxLifetimeMs: VERCEL_MAX_LIFETIME_MS,
-        supportsSnapshot: true,
+        supportsSnapshot: false,
         supportsRenewTimeout: true,
         supportsCopyInto: true,
-        supportsLifecycle: false,
+        supportsLifecycle: true,
       } satisfies SandboxProviderDescriptor),
 
-    snapshot,
+    lifecycle,
     renewTimeout,
     copyInto,
   };

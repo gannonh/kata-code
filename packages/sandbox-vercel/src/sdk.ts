@@ -39,6 +39,10 @@ export interface VercelSandboxInstance {
   /** The SDK sandbox `name` used to re-fetch the instance. */
   readonly sandboxId: string;
   domain(port: number): string;
+  /** Session-level status (readable without resuming; see `Sandbox.get({ resume: false })`). */
+  readonly status: string;
+  /** Whether the sandbox persists its filesystem between sessions. */
+  readonly persistent: boolean;
   runCommand(opts: {
     readonly cmd: string;
     readonly args?: ReadonlyArray<string>;
@@ -58,12 +62,18 @@ export interface VercelSandboxInstance {
   snapshot(opts?: { readonly expiration?: number }): Promise<{ readonly snapshotId: string }>;
   stop(): Promise<void>;
   delete(): Promise<void>;
+  /** Update sandbox config (persistence, keepLastSnapshots, …). */
+  update(params: {
+    readonly persistent?: boolean;
+    readonly keepLastSnapshots?: { readonly count: number; readonly expiration?: number } | null;
+  }): Promise<void>;
 }
 
 /** Injectable SDK surface the driver uses. */
 export interface VercelSdk {
   create(
     params: VercelAuthParams & {
+      readonly name?: string;
       readonly runtime?: string;
       readonly image?: string;
       readonly source?: { readonly type: "snapshot"; readonly snapshotId: string };
@@ -71,6 +81,8 @@ export interface VercelSdk {
       readonly ports: ReadonlyArray<number>;
       readonly timeout: number;
       readonly env: Record<string, string>;
+      readonly persistent?: boolean;
+      readonly keepLastSnapshots?: { readonly count: number; readonly expiration?: number };
     },
   ): Promise<VercelSandboxInstance>;
   get(
@@ -91,6 +103,12 @@ function adaptSandbox(sb: Sandbox): VercelSandboxInstance {
   return {
     sandboxId: sb.name,
     domain: (port) => sb.domain(port),
+    get status() {
+      return sb.status;
+    },
+    get persistent() {
+      return sb.persistent;
+    },
     runCommand: async (opts) => {
       const result = await sb.runCommand({
         cmd: opts.cmd,
@@ -123,6 +141,13 @@ function adaptSandbox(sb: Sandbox): VercelSandboxInstance {
     },
     stop: () => sb.stop().then(() => undefined),
     delete: () => sb.delete(),
+    update: (params) =>
+      sb.update({
+        ...(params.persistent !== undefined ? { persistent: params.persistent } : {}),
+        ...(params.keepLastSnapshots !== undefined
+          ? { keepLastSnapshots: params.keepLastSnapshots }
+          : {}),
+      }),
   };
 }
 
@@ -173,6 +198,11 @@ export const liveVercelSdk: VercelSdk = {
       timeout: params.timeout,
       env: params.env,
       ...(params.resources !== undefined ? { resources: params.resources } : {}),
+      ...(params.name !== undefined ? { name: params.name } : {}),
+      ...(params.persistent !== undefined ? { persistent: params.persistent } : {}),
+      ...(params.keepLastSnapshots !== undefined
+        ? { keepLastSnapshots: params.keepLastSnapshots }
+        : {}),
     };
     const sb =
       params.source !== undefined

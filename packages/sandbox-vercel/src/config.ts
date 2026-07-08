@@ -12,6 +12,7 @@
  *
  * @module config
  */
+// @effect-diagnostics globalConsole:off - the legacy-config migration log runs in a non-Effect decode context (registry materialization), where console is the available surface.
 import * as Schema from "effect/Schema";
 
 import { makeProviderSettingsSchema } from "@kata-sh/code-contracts/settings";
@@ -24,6 +25,12 @@ import type { SandboxProviderInstanceConfig } from "@kata-sh/code-contracts/sand
  * instance environment variables, not user-entered. The remaining fields are
  * rendered by `ProviderSettingsForm` using the `providerSettingsForm`
  * annotations, mirroring `packages/sandbox-docker/src/config.ts`.
+ *
+ * `persistent` (default true) maps to SDK v2 persistent sandboxes: stop
+ * auto-saves the filesystem, start resumes it by name. The legacy
+ * `sourceType`/`snapshotId` fields are removed from the schema; the decoder
+ * tolerates and strips them via `decodeVercelSandboxConfig` so existing
+ * targets keep decoding (decode-time migration, logged once per process).
  */
 export const VercelSandboxConfig = makeProviderSettingsSchema(
   {
@@ -34,20 +41,12 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
         providerSettingsForm: { placeholder: "node24", clearWhenEmpty: "omit" },
       }),
     ),
-    sourceType: Schema.Literals(["runtime", "snapshot"]).pipe(
+    persistent: Schema.Boolean.pipe(
       Schema.annotateKey({
-        title: "Boot source",
-        description: "Boot from a Vercel runtime or a prepared snapshot.",
+        title: "Persistent filesystem",
+        description:
+          "When on, stop auto-saves the sandbox filesystem and start resumes it (bounded snapshot storage). Turn off only for throwaway sandboxes.",
       }),
-    ),
-    snapshotId: Schema.optionalKey(
-      TrimmedNonEmptyString.pipe(
-        Schema.annotateKey({
-          title: "Snapshot id",
-          description: "Vercel snapshot id to boot from (required when boot source is snapshot).",
-          providerSettingsForm: { placeholder: "snap_xxx", clearWhenEmpty: "omit" },
-        }),
-      ),
     ),
     timeoutMs: Schema.Number.pipe(
       Schema.annotateKey({
@@ -81,17 +80,50 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
       }).pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
   },
-  { order: ["runtime", "sourceType", "snapshotId", "timeoutMs", "port", "vcpus", "auth"] },
+  { order: ["runtime", "persistent", "timeoutMs", "port", "vcpus", "auth"] },
 );
 
 export type VercelSandboxConfig = typeof VercelSandboxConfig.Type;
 
 export const DEFAULT_VERCEL_CONFIG: VercelSandboxConfig = {
   runtime: "node24",
-  sourceType: "runtime",
+  persistent: true,
   timeoutMs: 86_400_000,
   port: 13773,
 };
+
+/** Legacy config keys removed in the lifecycle rework. Stripped at decode time
+ *  so existing targets keep decoding; the strip is logged once per process. */
+const LEGACY_VERCEL_CONFIG_KEYS = ["sourceType", "snapshotId"] as const;
+let loggedLegacyStrip = false;
+
+/** Decode a Vercel config, stripping legacy `sourceType`/`snapshotId` keys
+ *  (decode-time migration). The strip is logged once per process so operators
+ *  see the migration on first load after upgrade. */
+export function decodeVercelSandboxConfig(input: unknown): VercelSandboxConfig {
+  if (input !== null && typeof input === "object") {
+    const record = input as Record<string, unknown>;
+    const stripped: string[] = [];
+    const next: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if ((LEGACY_VERCEL_CONFIG_KEYS as readonly string[]).includes(key)) {
+        stripped.push(key);
+        continue;
+      }
+      next[key] = value;
+    }
+    if (stripped.length > 0 && !loggedLegacyStrip) {
+      loggedLegacyStrip = true;
+      // Decode-time migration log (one line per process); see the file-level
+      // globalConsole disable for why console is used here.
+      console.warn(
+        `[kata:sandbox-vercel] stripped legacy config keys ${stripped.join(", ")}; snapshot boot is no longer supported. Delete the sandbox and re-create it if you relied on snapshot boot.`,
+      );
+    }
+    return Schema.decodeUnknownSync(VercelSandboxConfig)(next);
+  }
+  return Schema.decodeUnknownSync(VercelSandboxConfig)(input);
+}
 
 /**
  * Sensitive instance environment variable names that carry the Vercel auth
