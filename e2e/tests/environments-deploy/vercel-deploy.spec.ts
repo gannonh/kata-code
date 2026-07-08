@@ -80,9 +80,10 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     await expect(progress).toContainText("done: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
 
     // Start session (AC-3b.8): provisions the sandbox, Connect-auto-registers
-    // the public endpoint, and surfaces the public URL.
+    // the public endpoint, and surfaces the public URL. State-driven primary
+    // action: no sandbox -> "Create & run sandbox" (AC-L11).
     await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Start session" }).click();
+    await card.getByRole("button", { name: "Create & run sandbox" }).click();
     const sessionLine = card.getByText(/Session ready:/);
     await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
     await sessionLine.scrollIntoViewIfNeeded();
@@ -96,8 +97,11 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
       /https:\/\/[a-z0-9-]+\.vercel\.run/i,
     );
 
-    // Dispose (AC-3b.12): the sandbox is deleted and the session line disappears.
-    await card.getByRole("button", { name: "Dispose" }).click();
+    // Stop then delete the sandbox (durable lifecycle: AC-L8/L9). The session
+    // line disappears once the sandbox is deleted.
+    await dismissBlockingToasts(page);
+    await card.getByRole("button", { name: "Stop" }).click();
+    await card.getByRole("button", { name: "Delete sandbox" }).click();
     await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
     await dismissBlockingToasts(page);

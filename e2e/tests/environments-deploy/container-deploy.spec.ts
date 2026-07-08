@@ -189,6 +189,23 @@ async function findSandboxContainerId(instanceId: string): Promise<string | unde
     .sort((left, right) => (right.Created ?? 0) - (left.Created ?? 0))[0]?.Id;
 }
 
+/** Resolve the Docker container state for a sandbox instance (running/exited/…),
+ *  state-insensitive so the stop/start lifecycle test can assert stopped vs
+ *  running. Returns undefined when no container matches the instance label. */
+async function findSandboxContainerState(
+  instanceId: string,
+): Promise<{ readonly Id: string; readonly State: string } | undefined> {
+  const filters = encodeURIComponent(
+    JSON.stringify({ label: [`kata.sandbox.instance=${instanceId}`] }),
+  );
+  const response = await dockerEngineRequest(`/containers/json?all=true&filters=${filters}`);
+  const containers = parseDockerJson<ReadonlyArray<DockerContainerSummary>>(
+    response,
+    "container state lookup",
+  );
+  return [...containers].sort((left, right) => (right.Created ?? 0) - (left.Created ?? 0))[0];
+}
+
 async function execInContainer(containerId: string, command: string): Promise<DockerExecResult> {
   const create = parseDockerJson<DockerExecCreateResponse>(
     await dockerEngineRequest(`/containers/${containerId}/exec`, {
@@ -257,9 +274,10 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
 
     // Start session (AC-1.10): provision the real katacode image, auto-register
     // with Connect using the signed-in app user's Clerk relay token, and surface
-    // the loopback endpoint + environmentId.
+    // the loopback endpoint + environmentId. The primary action is state-driven:
+    // no sandbox -> "Create & run sandbox" (AC-L11).
     await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Start session" }).click();
+    await card.getByRole("button", { name: "Create & run sandbox" }).click();
     const sessionLine = card.getByText(/Session ready:/);
     await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
     await sessionLine.scrollIntoViewIfNeeded();
@@ -277,9 +295,12 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     const healthStatus = await probeContainerHealth(hostPort);
     expect(healthStatus).toBe(200);
 
-    // Dispose the session — the container is released and the session line
-    // disappears (AC-1.12 single-client slice).
-    await card.getByRole("button", { name: "Dispose" }).click();
+    // Stop the running sandbox, then delete it. The durable lifecycle exposes
+    // Stop (running) then Delete sandbox (stopped) instead of the old Dispose
+    // (AC-L8/L9). The session line disappears once the sandbox is deleted.
+    await dismissBlockingToasts(page);
+    await card.getByRole("button", { name: "Stop" }).click();
+    await card.getByRole("button", { name: "Delete sandbox" }).click();
     await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
     // Clean up the target via the trash button on the card row.
@@ -348,7 +369,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await expect(editor.getByLabel("Environment variable value 1")).toHaveValue(secret);
 
     await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Start session" }).click();
+    await card.getByRole("button", { name: "Create & run sandbox" }).click();
     const sessionLine = card.getByText(/Session ready:/);
     await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
@@ -395,7 +416,9 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     );
     expect(workspaceSecretSearch.exitCode).not.toBe(0);
 
-    await card.getByRole("button", { name: "Dispose" }).click();
+    await dismissBlockingToasts(page);
+    await card.getByRole("button", { name: "Stop" }).click();
+    await card.getByRole("button", { name: "Delete sandbox" }).click();
     await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
     await dismissBlockingToasts(page);
@@ -418,7 +441,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
       await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: "Start session" }).click();
+      await card.getByRole("button", { name: "Create & run sandbox" }).click();
       const sessionLine = card.getByText(/Session ready:/);
       await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
       await page.screenshot({
@@ -459,7 +482,91 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
         );
       }
 
-      await card.getByRole("button", { name: "Dispose" }).click();
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Stop" }).click();
+      await card.getByRole("button", { name: "Delete sandbox" }).click();
+      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
+      await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+    },
+  );
+
+  test(
+    "stop/start lifecycle preserves the container and its filesystem (AC-L5/L8)",
+    { tag: [E2E_TAGS.sandbox] },
+    async ({ appWindow }, testInfo) => {
+      await assertDockerDaemonReachable();
+      await assertKatacodeImageBuilt();
+
+      const page = appWindow;
+      await openConnectionsSettings(page);
+      await dismissBlockingToasts(page);
+
+      const card = await addContainerDeploymentTarget(page, "E2E Lifecycle");
+      await card.getByRole("button", { name: /Toggle .* details/ }).click();
+
+      // Create & run the sandbox.
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Create & run sandbox" }).click();
+      const sessionLine = card.getByText(/Session ready:/);
+      await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+
+      const instanceId = "docker_e2e_lifecycle";
+      let containerId = "";
+      await expect
+        .poll(
+          async () => {
+            containerId = (await findSandboxContainerId(instanceId)) ?? "";
+            return containerId;
+          },
+          { timeout: E2E_TIMEOUTS.agentReplyMs },
+        )
+        .not.toBe("");
+
+      // Write a marker file while running.
+      const writeMarker = await execInContainer(
+        containerId,
+        "echo persisted > /tmp/lifecycle-marker.txt",
+      );
+      expect(writeMarker.exitCode).toBe(0);
+
+      // Stop the sandbox: the container transitions to exited (not removed),
+      // the card shows the stopped state with a Start button (AC-L8).
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Stop" }).click();
+      await expect(card.getByRole("button", { name: "Start" })).toBeVisible({
+        timeout: E2E_TIMEOUTS.assertionMs,
+      });
+      await expect
+        .poll(async () => (await findSandboxContainerState(instanceId))?.State, {
+          timeout: E2E_TIMEOUTS.assertionMs,
+        })
+        .not.toBe("running");
+      await page.screenshot({ path: testInfo.outputPath("lifecycle-stopped.png"), fullPage: true });
+
+      // Start the sandbox again: the same container resumes and the marker
+      // file survives (AC-L5 filesystem persistence across stop/start).
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Start" }).click();
+      await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      await expect
+        .poll(async () => (await findSandboxContainerState(instanceId))?.State, {
+          timeout: E2E_TIMEOUTS.agentReplyMs,
+        })
+        .toBe("running");
+
+      const resumedContainerId = (await findSandboxContainerId(instanceId)) ?? "";
+      expect(resumedContainerId, "start should resume the same container").toBe(containerId);
+      const readMarker = await execInContainer(resumedContainerId, "cat /tmp/lifecycle-marker.txt");
+      expect(readMarker.exitCode).toBe(0);
+      expect(readMarker.stdout.trim()).toBe("persisted");
+
+      // Stop then delete the sandbox and remove the target.
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Stop" }).click();
+      await card.getByRole("button", { name: "Delete sandbox" }).click();
       await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
       await dismissBlockingToasts(page);
