@@ -503,9 +503,9 @@ describe("VercelSandboxProvider", () => {
         state.statusByName.set("kata-inst-1", "snapshotting");
         expect(yield* provider.lifecycle!.status(handle)).toBe("stopped");
         state.failGetNotFound = true;
-        const result = yield* either(provider.lifecycle!.status(handle));
-        expect(result._tag).toBe("Left");
-        if (result._tag === "Left") expect(result.left.reason).toBe("provision-failed");
+        // not-found maps to the `gone` status value (not an error) so reconcile
+        // evicts the record (AC-L6).
+        expect(yield* provider.lifecycle!.status(handle)).toBe("gone");
       }),
   );
 

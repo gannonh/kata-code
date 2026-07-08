@@ -60,7 +60,7 @@ export function buildVercelSandboxProviderInstance(input: {
     driver: VERCEL_SANDBOX_KIND,
     enabled: true,
     ...(input.label.trim().length > 0 ? { displayName: input.label.trim() } : {}),
-    config: { runtime: "node24", sourceType: "runtime", timeoutMs: 86_400_000, port: 13773 },
+    config: { runtime: "node24", persistent: true, timeoutMs: 86_400_000, port: 13773 },
   } satisfies SandboxProviderInstanceConfig;
 }
 

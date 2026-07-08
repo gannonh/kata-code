@@ -341,23 +341,22 @@ export function makeVercelSandboxProvider(
     status: (handle): Effect.Effect<SandboxLifecycleStatus, SandboxProviderError> =>
       Effect.gen(function* () {
         const state = handle.handle as VercelSandboxHandleState;
-        const sb = yield* trySdk(
+        // not-found -> `gone` (a status value, not an error) so the reconcile
+        // pass evicts the record; other errors surface as provision-failed.
+        const result = yield* trySdk(
           "lifecycle.status",
           () => sdk.get({ sandboxId: state.sandboxId, resume: false, ...state.auth }),
           "provision-failed",
         ).pipe(
-          // not-found -> gone; other errors surface as provision-failed.
-          Effect.mapError((error: SandboxProviderError) =>
-            isNotFound(error.cause ?? error)
-              ? new SandboxProviderError({
-                  reason: "provision-failed",
-                  message: "Sandbox not found.",
-                  cause: error,
-                })
-              : error,
-          ),
+          Effect.matchEffect({
+            onFailure: (error: SandboxProviderError) =>
+              isNotFound(error.cause ?? error)
+                ? Effect.succeed<SandboxLifecycleStatus>("gone")
+                : Effect.fail(error),
+            onSuccess: (sb) => Effect.succeed<SandboxLifecycleStatus>(mapVercelStatus(sb.status)),
+          }),
         );
-        return mapVercelStatus(sb.status);
+        return result;
       }),
   };
 

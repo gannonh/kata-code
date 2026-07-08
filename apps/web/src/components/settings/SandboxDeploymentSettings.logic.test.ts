@@ -66,7 +66,7 @@ describe("sandbox deployment settings logic", () => {
       driver: VERCEL_SANDBOX_KIND,
       enabled: true,
       displayName: "Cloud",
-      config: { runtime: "node24", sourceType: "runtime", timeoutMs: 86_400_000, port: 13773 },
+      config: { runtime: "node24", persistent: true, timeoutMs: 86_400_000, port: 13773 },
     });
   });
 });
