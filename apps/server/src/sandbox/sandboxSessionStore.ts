@@ -21,6 +21,7 @@
 // @effect-diagnostics globalErrorInEffectCatch:off - the store returns a plain Error for file I/O failures (simple utility, not a tagged-error boundary).
 // @effect-diagnostics globalErrorInEffectFailure:off - same: plain Error for file I/O failures.
 // @effect-diagnostics preferSchemaOverJson:off - the store file is an opaque JSON blob validated by Schema on load; JSON.parse/stringify are the raw file I/O layer.
+// @effect-diagnostics globalConsole:off - per-entry eviction and corrupt-file warnings use console in a non-Effect decode utility.
 import * as NodeFs from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
@@ -38,10 +39,11 @@ export const SandboxStoredHandle = Schema.Struct({
 });
 export type SandboxStoredHandle = typeof SandboxStoredHandle.Type;
 
-/** Relay link info for unlinking on dispose. */
+/** Relay link info for unlinking on dispose. Only the relay URL is stored;
+ *  the bearer token is a secret and is re-resolved at dispose time via
+ *  `resolveConnectAuthToken`. */
 export const SandboxStoredRelay = Schema.Struct({
   relayUrl: Schema.String,
-  bearerToken: Schema.String,
 });
 export type SandboxStoredRelay = typeof SandboxStoredRelay.Type;
 
@@ -104,13 +106,31 @@ export interface SandboxSessionStore {
   readonly records: ReadonlyArray<SandboxSessionRecord>;
 }
 
-/** Decode + validate a store file payload, evicting invalid records. */
-function decodeStore(raw: unknown): SandboxSessionStoreFile {
-  const empty: SandboxSessionStoreFile = { records: [] };
-  if (raw === null || typeof raw !== "object") return empty;
-  const parsed = Schema.decodeUnknownSync(SandboxSessionStoreFile)(raw);
-  if (parsed.records.length === 0) return empty;
-  return parsed;
+/** Decode + validate a store file payload, evicting invalid records
+ *  individually with a warning log (per-entry eviction, not all-or-nothing). */
+function decodeStore(raw: unknown): ReadonlyArray<SandboxSessionRecord> {
+  if (raw === null || typeof raw !== "object") return [];
+  const recordsRaw = (raw as { records?: unknown }).records;
+  if (!Array.isArray(recordsRaw)) return [];
+  const valid: SandboxSessionRecord[] = [];
+  for (const entry of recordsRaw) {
+    try {
+      valid.push(Schema.decodeUnknownSync(SandboxSessionRecord)(entry));
+    } catch (error) {
+      // Per-entry eviction: log the evicted record so operators can see data loss.
+      const id =
+        entry !== null && typeof entry === "object" && "instanceId" in entry
+          ? String((entry as { instanceId: unknown }).instanceId)
+          : "<unknown>";
+      // console.warn is appropriate here (non-Effect context, same as the
+      // corrupt-JSON case above which uses Effect.logWarning).
+      // @effect-diagnostics-next-line effect(globalConsole):off - per-entry eviction log in a non-Effect decode utility.
+      console.warn(
+        `[kata:sandbox-store] evicted invalid session record for instance "${id}": ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return valid;
 }
 
 /**
@@ -152,7 +172,7 @@ export function makeSandboxSessionStore(katacodeHome: string): SandboxSessionSto
       return cached;
     }
     const decoded = decodeStore(parsed);
-    cached = decoded.records;
+    cached = decoded;
     return cached;
   });
 

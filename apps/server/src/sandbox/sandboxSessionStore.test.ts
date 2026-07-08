@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - tmp dir creation via node:fs/promises + node:path in tests; no Effect FileSystem service.
+// @effect-diagnostics globalConsole:off - per-entry eviction tests expect console.warn output from the store.
 /* eslint-disable kata-code/no-manual-effect-runtime-in-tests -- store integration tests use Effect.runPromise for simple async assertions (vitIt.effect suite resolver is unavailable in this test runner config). */
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
@@ -123,6 +124,76 @@ describe("SandboxSessionStore", () => {
       expect(parsed.records).toHaveLength(1);
       expect(parsed.records[0]?.status).toBe("stopped");
       expect(parsed.records[0]?.statusDetail).toBe("auth missing");
+    } finally {
+      await NodeFs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("persisted file contains no secrets (no auth/token/bearerToken) when a Vercel-style handle + relay is stored", async () => {
+    const home = await tmpKatacodeHome();
+    try {
+      const store = makeSandboxSessionStore(home);
+      // A Vercel-style handle that includes an auth trio — the store schema
+      // accepts it (handle is Schema.Unknown), but the caller (storeSessionRecord)
+      // is responsible for stripping auth. Here we verify the store itself does
+      // not add secret fields to the relay schema (no bearerToken).
+      await Effect.runPromise(
+        store.upsert(
+          makeRecord({
+            driverKind: "vercel",
+            handle: {
+              driverKind: "vercel",
+              // Simulate a sanitized handle (no auth) — what storeSessionRecord
+              // should produce after the fix.
+              handle: {
+                sandboxId: "kata-vercel-test-01",
+                port: 13773,
+                domainBase: "https://sandbox.vercel.run",
+                timeoutMs: 86_400_000,
+                persistent: true,
+              },
+            },
+            relay: { relayUrl: "https://relay.example.com" },
+          }),
+        ),
+      );
+      const storePath = NodePath.join(home, "userdata", "sandbox-sessions.json");
+      const raw = await NodeFs.readFile(storePath, "utf8");
+      // The serialized file must not contain any secret field names.
+      expect(raw).not.toContain("bearerToken");
+      expect(raw).not.toContain('"token"');
+      expect(raw).not.toContain('"auth"');
+      expect(raw).not.toContain('"teamId"');
+      expect(raw).not.toContain('"projectId"');
+      // The relay must have relayUrl but no bearerToken.
+      const parsed = JSON.parse(raw) as {
+        records: Array<{ relay?: { relayUrl: string; bearerToken?: string } }>;
+      };
+      expect(parsed.records[0]?.relay?.relayUrl).toBe("https://relay.example.com");
+      expect(parsed.records[0]?.relay?.bearerToken).toBeUndefined();
+    } finally {
+      await NodeFs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("evicts invalid records individually while keeping valid ones (per-entry eviction)", async () => {
+    const home = await tmpKatacodeHome();
+    try {
+      const storePath = NodePath.join(home, "userdata", "sandbox-sessions.json");
+      await NodeFs.mkdir(NodePath.dirname(storePath), { recursive: true });
+      // Write a file with one valid record and one invalid (missing required fields).
+      const fileContents = JSON.stringify({
+        records: [
+          makeRecord({ instanceId: "valid_01" }),
+          { instanceId: "broken_01", driverKind: "docker" /* missing required fields */ },
+        ],
+      });
+      await NodeFs.writeFile(storePath, fileContents, "utf8");
+      const store = makeSandboxSessionStore(home);
+      const records = await Effect.runPromise(store.load());
+      // The valid record survives; the invalid one is evicted.
+      expect(records).toHaveLength(1);
+      expect(records[0]?.instanceId).toBe("valid_01");
     } finally {
       await NodeFs.rm(home, { recursive: true, force: true });
     }
