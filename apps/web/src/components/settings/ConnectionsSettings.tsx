@@ -28,6 +28,7 @@ import {
   type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type EnvironmentId,
+  type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
   type SandboxProviderInstanceConfigMap,
 } from "@kata-sh/code-contracts";
@@ -47,6 +48,7 @@ import {
   buildDockerSandboxProviderInstance,
   buildVercelSandboxProviderInstance,
   makeSandboxProviderInstanceId,
+  resolveSandboxLifecycleState,
   sandboxInstanceIdForLabel,
 } from "./SandboxDeploymentSettings.logic";
 import { resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
@@ -1507,14 +1509,17 @@ type SavedBackendListRowProps = {
   environmentId: EnvironmentId;
   reconnectingEnvironmentId: EnvironmentId | null;
   disconnectingEnvironmentId: EnvironmentId | null;
+  /** Sandbox lifecycle state from `listInstances` join (undefined = not a sandbox). */
+  sandboxLifecycleState: "running" | "stopped" | "gone" | undefined;
   onConnect: (environmentId: EnvironmentId) => void;
   onDisconnect: (environmentId: EnvironmentId) => void;
 };
 
-function SavedBackendListRow({
+export function SavedBackendListRow({
   environmentId,
   reconnectingEnvironmentId,
   disconnectingEnvironmentId,
+  sandboxLifecycleState,
   onConnect,
   onDisconnect,
 }: SavedBackendListRowProps) {
@@ -1531,8 +1536,10 @@ function SavedBackendListRow({
   const isConnecting =
     connectionState === "connecting" || reconnectingEnvironmentId === environmentId;
   const isDisconnecting = disconnectingEnvironmentId === environmentId;
-  const stateDotClassName =
-    connectionState === "connected"
+  const isStoppedSandbox = sandboxLifecycleState === "stopped";
+  const stateDotClassName = isStoppedSandbox
+    ? "bg-muted-foreground/40"
+    : connectionState === "connected"
       ? "bg-success"
       : connectionState === "connecting"
         ? "bg-warning"
@@ -1587,22 +1594,28 @@ function SavedBackendListRow({
           ) : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={isConnected ? isDisconnecting : isConnecting}
-            onClick={() =>
-              void (isConnected ? onDisconnect(environmentId) : onConnect(environmentId))
-            }
-          >
-            {isConnected
-              ? isDisconnecting
-                ? "Disconnecting…"
-                : "Disconnect"
-              : isConnecting
-                ? "Connecting…"
-                : "Connect"}
-          </Button>
+          {isStoppedSandbox && !isConnected ? (
+            <span className="text-xs text-muted-foreground">
+              Sandbox is stopped — start it under Environments.
+            </span>
+          ) : (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={isConnected ? isDisconnecting : isConnecting}
+              onClick={() =>
+                void (isConnected ? onDisconnect(environmentId) : onConnect(environmentId))
+              }
+            >
+              {isConnected
+                ? isDisconnecting
+                  ? "Disconnecting…"
+                  : "Disconnect"
+                : isConnecting
+                  ? "Connecting…"
+                  : "Connect"}
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -2087,6 +2100,42 @@ export function ConnectionsSettings() {
         .map((record) => record.environmentId),
     [savedEnvironmentsById],
   );
+  // Sandbox lifecycle summaries from `listInstances` — used to join saved
+  // sandbox runtime records to their instance's lifecycle state (AC-L13) and
+  // reconcile orphaned records whose sandbox was deleted (AC-L14).
+  const [sandboxSummaries, setSandboxSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>(
+    [],
+  );
+  const refreshSandboxSummaries = useCallback(async () => {
+    try {
+      const result = await getPrimaryEnvironmentConnection().client.sandbox.listInstances();
+      setSandboxSummaries(result.instances);
+    } catch {
+      // Non-fatal: the Available Runtimes list still renders; lifecycle join
+      // falls back to treating sandbox records as gone (conservative).
+    }
+  }, []);
+  useEffect(() => {
+    void refreshSandboxSummaries();
+  }, [refreshSandboxSummaries]);
+  // Reconcile orphan sandbox records: a saved sandbox record whose instance is
+  // gone (deleted, or never existed) is removed so it can no longer produce a
+  // dead Connect attempt. Runs after summaries load and when the saved
+  // environment registry changes.
+  useEffect(() => {
+    if (sandboxSummaries.length === 0) return;
+    const orphanIds: EnvironmentId[] = [];
+    for (const record of Object.values(savedEnvironmentsById)) {
+      if (record.sandbox === undefined) continue;
+      const state = resolveSandboxLifecycleState(record, sandboxSummaries);
+      if (state === "gone") orphanIds.push(record.environmentId);
+    }
+    if (orphanIds.length === 0) return;
+    // Best-effort: remove each orphan; a failure doesn't crash the list.
+    for (const environmentId of orphanIds) {
+      void removeSavedEnvironment(environmentId).catch(() => {});
+    }
+  }, [sandboxSummaries, savedEnvironmentsById]);
   const sandboxInstanceLabels = useMemo(() => {
     const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
     const labels = new Set<string>();
@@ -2554,45 +2603,53 @@ export function ConnectionsSettings() {
     updateSettings,
   ]);
 
-  const handleConnectSavedBackend = useCallback(async (environmentId: EnvironmentId) => {
-    setReconnectingSavedEnvironmentId(environmentId);
-    setSavedBackendError(null);
-    try {
-      await reconnectSavedEnvironment(environmentId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to connect backend.";
-      setSavedBackendError(message);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not connect backend",
-          description: message,
-        }),
-      );
-    } finally {
-      setReconnectingSavedEnvironmentId(null);
-    }
-  }, []);
+  const handleConnectSavedBackend = useCallback(
+    async (environmentId: EnvironmentId) => {
+      setReconnectingSavedEnvironmentId(environmentId);
+      setSavedBackendError(null);
+      try {
+        await reconnectSavedEnvironment(environmentId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to connect backend.";
+        setSavedBackendError(message);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not connect backend",
+            description: message,
+          }),
+        );
+      } finally {
+        setReconnectingSavedEnvironmentId(null);
+        void refreshSandboxSummaries();
+      }
+    },
+    [refreshSandboxSummaries],
+  );
 
-  const handleDisconnectSavedBackend = useCallback(async (environmentId: EnvironmentId) => {
-    setDisconnectingSavedEnvironmentId(environmentId);
-    setSavedBackendError(null);
-    try {
-      await disconnectSavedEnvironment(environmentId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to disconnect backend.";
-      setSavedBackendError(message);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not disconnect backend",
-          description: message,
-        }),
-      );
-    } finally {
-      setDisconnectingSavedEnvironmentId(null);
-    }
-  }, []);
+  const handleDisconnectSavedBackend = useCallback(
+    async (environmentId: EnvironmentId) => {
+      setDisconnectingSavedEnvironmentId(environmentId);
+      setSavedBackendError(null);
+      try {
+        await disconnectSavedEnvironment(environmentId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to disconnect backend.";
+        setSavedBackendError(message);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not disconnect backend",
+            description: message,
+          }),
+        );
+      } finally {
+        setDisconnectingSavedEnvironmentId(null);
+        void refreshSandboxSummaries();
+      }
+    },
+    [refreshSandboxSummaries],
+  );
 
   const handleRemoveSavedBackend = useCallback(async (environmentId: EnvironmentId) => {
     setRemovingSavedEnvironmentId(environmentId);
@@ -3604,16 +3661,23 @@ export function ConnectionsSettings() {
       />
 
       <SettingsSection title="Available Runtimes">
-        {savedEnvironmentIds.map((environmentId) => (
-          <SavedBackendListRow
-            key={environmentId}
-            environmentId={environmentId}
-            reconnectingEnvironmentId={reconnectingSavedEnvironmentId}
-            disconnectingEnvironmentId={disconnectingSavedEnvironmentId}
-            onConnect={handleConnectSavedBackend}
-            onDisconnect={handleDisconnectSavedBackend}
-          />
-        ))}
+        {savedEnvironmentIds.map((environmentId) => {
+          const record = savedEnvironmentsById[environmentId];
+          const sandboxLifecycleState = record
+            ? resolveSandboxLifecycleState(record, sandboxSummaries)
+            : undefined;
+          return (
+            <SavedBackendListRow
+              key={environmentId}
+              environmentId={environmentId}
+              reconnectingEnvironmentId={reconnectingSavedEnvironmentId}
+              disconnectingEnvironmentId={disconnectingSavedEnvironmentId}
+              sandboxLifecycleState={sandboxLifecycleState}
+              onConnect={handleConnectSavedBackend}
+              onDisconnect={handleDisconnectSavedBackend}
+            />
+          );
+        })}
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironmentIds={savedEnvironmentIds}

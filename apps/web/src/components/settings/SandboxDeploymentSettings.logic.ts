@@ -1,6 +1,7 @@
 import {
   SandboxProviderDriverKind,
   SandboxProviderInstanceId,
+  type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
 } from "@kata-sh/code-contracts";
 
@@ -73,4 +74,44 @@ export function makeSandboxProviderInstanceId(input: {
     throw new Error(`Instance id '${instanceId}' already exists. Choose a different label.`);
   }
   return SandboxProviderInstanceId.make(instanceId) as string;
+}
+
+/** The lifecycle state of a saved sandbox runtime record, joined to its
+ *  instance's `SandboxInstanceSummary` from `sandbox.listInstances`. */
+export type SandboxLifecycleState = "running" | "stopped" | "gone";
+
+/** Map a saved record's `sandbox.providerKind` to the driver kind used in
+ *  `sandboxInstanceIdForLabel`. Legacy Docker records use "local"; current
+ *  records use the driver kind string ("docker" / "vercel"). */
+function providerKindToDriver(providerKind: string): string {
+  if (providerKind === "local") return DOCKER_SANDBOX_KIND as string;
+  return providerKind;
+}
+
+/** Resolve the lifecycle state of a saved sandbox runtime record by joining it
+ *  to the matching `SandboxInstanceSummary` from `listInstances`. Returns
+ *  `undefined` when the record is not a sandbox record (no `sandbox` marker).
+ *  Returns `"gone"` when no matching summary exists or the instance is
+ *  unavailable (the sandbox was deleted or its config is invalid). */
+export function resolveSandboxLifecycleState(
+  record: {
+    readonly label: string;
+    readonly sandbox?: { readonly providerKind: string } | undefined;
+  },
+  summaries: ReadonlyArray<SandboxInstanceSummary>,
+): SandboxLifecycleState | undefined {
+  if (record.sandbox === undefined) return undefined;
+  const driver = providerKindToDriver(record.sandbox.providerKind);
+  const instanceId = sandboxInstanceIdForLabel({
+    driver: driver as typeof DOCKER_SANDBOX_KIND | typeof VERCEL_SANDBOX_KIND,
+    label: record.label,
+  });
+  const match = summaries.find((s) => (s.instanceId as string) === instanceId);
+  if (match === undefined || match.kind !== "available") return "gone";
+  const status = match.runningSession?.status;
+  if (status === "running") return "running";
+  if (status === "stopped") return "stopped";
+  // A sandbox instance exists with no running session (not yet provisioned).
+  // Treat as gone from the runtime perspective — there's no sandbox to connect to.
+  return "gone";
 }

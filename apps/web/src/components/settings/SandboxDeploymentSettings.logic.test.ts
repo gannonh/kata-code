@@ -7,6 +7,7 @@ import {
   buildVercelSandboxProviderInstance,
   makeSandboxProviderInstanceId,
   parseSandboxPort,
+  resolveSandboxLifecycleState,
   sandboxInstanceIdForLabel,
   slugifySandboxLabel,
 } from "./SandboxDeploymentSettings.logic";
@@ -67,5 +68,100 @@ describe("sandbox deployment settings logic", () => {
       displayName: "Cloud",
       config: { runtime: "node24", sourceType: "runtime", timeoutMs: 86_400_000, port: 13773 },
     });
+  });
+});
+
+describe("resolveSandboxLifecycleState (AC-L13)", () => {
+  /** A minimal saved-record shape with the `sandbox` marker. */
+  function savedSandbox(providerKind: string, label: string) {
+    return {
+      environmentId: "env_1",
+      label,
+      wsBaseUrl: "ws://localhost:1",
+      httpBaseUrl: "http://localhost:1",
+      createdAt: "",
+      lastConnectedAt: null,
+      sandbox: { providerKind },
+    } as never;
+  }
+
+  /** A minimal available summary shape. */
+  function summary(instanceId: string, status: "running" | "stopped") {
+    return {
+      kind: "available",
+      instanceId,
+      driver: "docker",
+      reachabilityKind: "loopback",
+      supportsSnapshot: false,
+      supportsRenewTimeout: false,
+      supportsLifecycle: true,
+      runningSession: {
+        environmentId: "env_1",
+        endpoint: { id: "e", label: "L", httpBaseUrl: "http://localhost:1" },
+        status,
+      },
+    } as never;
+  }
+
+  it("returns undefined for a non-sandbox saved record", () => {
+    const record = { label: "My Remote", sandbox: undefined } as never;
+    expect(resolveSandboxLifecycleState(record, [])).toBeUndefined();
+  });
+
+  it("returns 'running' when the matching summary has runningSession.status running", () => {
+    const record = savedSandbox("docker", "My Container");
+    const summaries = [summary("docker_my_container", "running")];
+    expect(resolveSandboxLifecycleState(record, summaries)).toBe("running");
+  });
+
+  it("returns 'stopped' when the matching summary has runningSession.status stopped", () => {
+    const record = savedSandbox("docker", "My Container");
+    const summaries = [summary("docker_my_container", "stopped")];
+    expect(resolveSandboxLifecycleState(record, summaries)).toBe("stopped");
+  });
+
+  it("returns 'gone' when no matching summary exists (sandbox deleted)", () => {
+    const record = savedSandbox("vercel", "Cloud Test");
+    expect(resolveSandboxLifecycleState(record, [])).toBe("gone");
+  });
+
+  it("returns 'gone' when the matching instance is unavailable", () => {
+    const record = savedSandbox("docker", "My Container");
+    const summaries = [
+      {
+        kind: "unavailable",
+        instanceId: "docker_my_container",
+        reason: "invalid-config",
+        message: "bad",
+      } as never,
+    ];
+    expect(resolveSandboxLifecycleState(record, summaries)).toBe("gone");
+  });
+
+  it("maps 'local' providerKind to the docker driver (legacy records)", () => {
+    const record = savedSandbox("local", "My Container");
+    const summaries = [summary("docker_my_container", "running")];
+    expect(resolveSandboxLifecycleState(record, summaries)).toBe("running");
+  });
+
+  it("maps 'vercel' providerKind to the vercel driver", () => {
+    const record = savedSandbox("vercel", "Cloud Test");
+    const summaries = [
+      {
+        kind: "available",
+        instanceId: "vercel_cloud_test",
+        driver: "vercel",
+        reachabilityKind: "public",
+        supportsSnapshot: false,
+        supportsRenewTimeout: false,
+        supportsLifecycle: true,
+        runningSession: {
+          environmentId: "env_1",
+          endpoint: { id: "e", label: "L", httpBaseUrl: "http://localhost:1" },
+          status: "running",
+        },
+      } as never,
+    ];
+    expect(resolveSandboxLifecycleState(record, summaries)).toBe("running");
   });
 });
