@@ -2,14 +2,14 @@
 type: Spec
 title: Sandbox lifecycle — durable stop/start for Vercel and Docker
 description: Replace the provision-once/dispose lifecycle with a durable create/stop/start/delete model across the sandbox SPI, both drivers, the server session store, and the Environments/Available Runtimes UI.
-status: Draft
+status: Approved
 ---
 
 # Sandbox lifecycle — durable stop/start for Vercel and Docker
 
 ## Status
 
-Draft
+Approved
 
 ## Goal
 
