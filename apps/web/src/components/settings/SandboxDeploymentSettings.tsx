@@ -796,16 +796,14 @@ export function DeploymentTargetCard({
                       {instanceBusy === "renew" ? "Extending…" : "Extend"}
                     </Button>
                   ) : null}
-                  {isVercel ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={instanceBusy !== undefined}
-                      onClick={() => setSignInFor("claude")}
-                    >
-                      Sign in Claude
-                    </Button>
-                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={instanceBusy !== undefined}
+                    onClick={() => setSignInFor("claude")}
+                  >
+                    Sign in Claude
+                  </Button>
                 </div>
               ) : null}
               <div className="flex flex-wrap items-center gap-2">
