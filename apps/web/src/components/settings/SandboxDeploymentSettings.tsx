@@ -5,8 +5,6 @@ import { ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   EnvironmentId,
-  SandboxProviderDriverKind,
-  SandboxProviderInstanceId,
   type ProviderInstanceEnvironmentVariable,
   type SavedSandboxEnvironmentMap,
   type SandboxInstanceSummary,
@@ -50,21 +48,16 @@ import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt"
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
 import { ProviderSignInDialog } from "./ProviderSignInDialog";
 import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
+import {
+  DOCKER_SANDBOX_KIND,
+  VERCEL_SANDBOX_KIND,
+  buildDockerSandboxProviderInstance,
+  buildVercelSandboxProviderInstance,
+  makeSandboxProviderInstanceId,
+  parseSandboxPort,
+  sandboxInstanceIdForLabel,
+} from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
-
-const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
-const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
-
-/** Slugify a label into a sandbox instance id suffix (mirrors provider dialog). */
-function slugifyLabel(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "")
-    .slice(0, 48);
-}
 
 /** Per-instance busy state for the long-running RPCs. */
 type BusyOp = "test" | "start" | "dispose" | "renew" | "snapshot";
@@ -90,7 +83,13 @@ function failureMessage(error: unknown): string {
  * `sandboxProviderInstances` settings map (no plaintext secrets in settings);
  * the live RPCs (list/test/start/dispose) go through the paired WS client.
  */
-export function SandboxDeploymentSettings() {
+export function SandboxDeploymentSettings({
+  presentation = "section",
+  showEmptyState = true,
+}: {
+  readonly presentation?: "section" | "rows";
+  readonly showEmptyState?: boolean;
+} = {}) {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { getToken, isSignedIn } = useAuth();
@@ -497,7 +496,10 @@ export function SandboxDeploymentSettings() {
           const previousSnapshotId =
             typeof config.snapshotId === "string" ? config.snapshotId : undefined;
           const isSameSnapshot = previousSnapshotId === result.snapshotId;
-          if (instance !== undefined && (instance.driver as string) === (VERCEL_KIND as string)) {
+          if (
+            instance !== undefined &&
+            (instance.driver as string) === (VERCEL_SANDBOX_KIND as string)
+          ) {
             updateSettings({
               sandboxProviderInstances: {
                 ...instanceMap,
@@ -568,6 +570,75 @@ export function SandboxDeploymentSettings() {
   );
 
   const instanceEntries = Object.entries(instanceMap);
+  const sandboxRows =
+    instanceEntries.length === 0 ? (
+      showEmptyState ? (
+        <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
+          <p className="text-xs text-muted-foreground">
+            No sandbox environments configured. Add one to provision a container.
+          </p>
+        </div>
+      ) : null
+    ) : (
+      instanceEntries.map(([id, config]) => {
+        const summary = summaryById[id];
+        const available = summary?.kind === "available";
+        const reason = summary?.kind === "unavailable" ? summary.reason : undefined;
+        const session = activeSession[id];
+        const progress = testProgress[id] ?? [];
+        const instanceBusy = busy[id];
+        const isOpen = expanded[id] ?? false;
+        const displayName = config.displayName ?? id;
+        const enabled = config.enabled ?? true;
+        const selectedProject = resolveSelectedProject(id);
+        const selectedRepositoryKey =
+          selectedRepositoryKeyByInstance[id] ??
+          (config.repositoryKey as string | undefined) ??
+          (selectedProject?.repositoryIdentity?.canonicalKey as string | undefined);
+        return (
+          <DeploymentTargetCard
+            key={id}
+            instanceId={id}
+            instance={config}
+            displayName={displayName}
+            enabled={enabled}
+            available={available}
+            reason={reason}
+            session={session}
+            summary={summary}
+            progress={progress}
+            instanceBusy={instanceBusy}
+            isExpanded={isOpen}
+            projects={projects}
+            savedSandboxEnvironments={savedSandboxEnvironments}
+            selectedRepositoryKey={selectedRepositoryKey}
+            onExpandedChange={(open) => setExpanded((prev) => ({ ...prev, [id]: open }))}
+            onUpdate={(next) => updateInstance(id, next)}
+            onSavedEnvironmentChange={(next) => updateSettings({ savedSandboxEnvironments: next })}
+            onSelectedRepositoryKeyChange={(repositoryKey) => {
+              setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }));
+              updateInstance(id, { ...config, repositoryKey });
+            }}
+            onDelete={() => handleRemove(id)}
+            onTest={() => void handleTest(id)}
+            onStart={() => void handleStart(id)}
+            onDispose={() => void handleDispose(id)}
+            onResume={() => void handleResume(id)}
+            onRenew={() => void handleRenew(id)}
+            onSnapshot={() => void handleSnapshot(id)}
+          />
+        );
+      })
+    );
+
+  if (presentation === "rows") {
+    return (
+      <>
+        {sandboxRows}
+        {authPrompt}
+      </>
+    );
+  }
 
   return (
     <>
@@ -607,65 +678,7 @@ export function SandboxDeploymentSettings() {
           </Dialog>
         }
       >
-        {instanceEntries.length === 0 ? (
-          <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
-            <p className="text-xs text-muted-foreground">
-              No sandbox environments configured. Add one to provision a container.
-            </p>
-          </div>
-        ) : (
-          instanceEntries.map(([id, config]) => {
-            const summary = summaryById[id];
-            const available = summary?.kind === "available";
-            const reason = summary?.kind === "unavailable" ? summary.reason : undefined;
-            const session = activeSession[id];
-            const progress = testProgress[id] ?? [];
-            const instanceBusy = busy[id];
-            const isOpen = expanded[id] ?? false;
-            const displayName = config.displayName ?? id;
-            const enabled = config.enabled ?? true;
-            const selectedProject = resolveSelectedProject(id);
-            const selectedRepositoryKey =
-              selectedRepositoryKeyByInstance[id] ??
-              (config.repositoryKey as string | undefined) ??
-              (selectedProject?.repositoryIdentity?.canonicalKey as string | undefined);
-            return (
-              <DeploymentTargetCard
-                key={id}
-                instanceId={id}
-                instance={config}
-                displayName={displayName}
-                enabled={enabled}
-                available={available}
-                reason={reason}
-                session={session}
-                summary={summary}
-                progress={progress}
-                instanceBusy={instanceBusy}
-                isExpanded={isOpen}
-                projects={projects}
-                savedSandboxEnvironments={savedSandboxEnvironments}
-                selectedRepositoryKey={selectedRepositoryKey}
-                onExpandedChange={(open) => setExpanded((prev) => ({ ...prev, [id]: open }))}
-                onUpdate={(next) => updateInstance(id, next)}
-                onSavedEnvironmentChange={(next) =>
-                  updateSettings({ savedSandboxEnvironments: next })
-                }
-                onSelectedRepositoryKeyChange={(repositoryKey) => {
-                  setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }));
-                  updateInstance(id, { ...config, repositoryKey });
-                }}
-                onDelete={() => handleRemove(id)}
-                onTest={() => void handleTest(id)}
-                onStart={() => void handleStart(id)}
-                onDispose={() => void handleDispose(id)}
-                onResume={() => void handleResume(id)}
-                onRenew={() => void handleRenew(id)}
-                onSnapshot={() => void handleSnapshot(id)}
-              />
-            );
-          })
-        )}
+        {sandboxRows}
       </SettingsSection>
       {authPrompt}
     </>
@@ -733,7 +746,7 @@ function DeploymentTargetCard({
   onRenew,
   onSnapshot,
 }: DeploymentTargetCardProps) {
-  const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
+  const isVercel = (instance.driver as string) === (VERCEL_SANDBOX_KIND as string);
   const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
   const supportsResume = summary?.kind === "available" ? summary.supportsResume : undefined;
   const supportsSnapshot = summary?.kind === "available" ? summary.supportsSnapshot : undefined;
@@ -821,6 +834,12 @@ function DeploymentTargetCard({
             </p>
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+            <span className="text-xs text-muted-foreground">Enabled</span>
+            <Switch
+              checked={enabled}
+              onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
+              aria-label={`Enable ${displayName}`}
+            />
             <Button
               size="sm"
               variant="ghost"
@@ -832,11 +851,6 @@ function DeploymentTargetCard({
                 className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")}
               />
             </Button>
-            <Switch
-              checked={enabled}
-              onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
-              aria-label={`Enable ${displayName}`}
-            />
           </div>
         </div>
       </div>
@@ -1064,14 +1078,6 @@ function formatRemaining(deadlineEpochMs: number): string {
   return `${minutes}m`;
 }
 
-/** Parse a container port string into a validated integer in 1..65535, or null. */
-function parseContainerPort(value: string): number | null {
-  const trimmed = value.trim();
-  if (!/^\d+$/u.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535 ? parsed : null;
-}
-
 /** Set a numeric container port field, rejecting non-integer/out-of-range values.
  * An empty input clears the field. */
 function setContainerPort(
@@ -1084,7 +1090,7 @@ function setContainerPort(
   if (value.trim().length === 0) {
     delete base[key];
   } else {
-    const parsed = parseContainerPort(value);
+    const parsed = parseSandboxPort(value);
     if (parsed === null) return base;
     base[key] = parsed;
   }
@@ -1318,49 +1324,26 @@ function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTarg
   const [port, setPort] = useState("13773");
   const [error, setError] = useState<string | null>(null);
 
-  const driverKind = driver === "vercel" ? VERCEL_KIND : DOCKER_KIND;
-  const instanceId = useMemo(() => {
-    const suffix = slugifyLabel(label) || "default";
-    return `${driverKind as string}_${suffix}`;
-  }, [driverKind, label]);
+  const driverKind = driver === "vercel" ? VERCEL_SANDBOX_KIND : DOCKER_SANDBOX_KIND;
+  const instanceId = useMemo(
+    () => sandboxInstanceIdForLabel({ driver: driverKind, label }),
+    [driverKind, label],
+  );
 
   const handleSubmit = useCallback(() => {
-    if (existingIds.has(instanceId)) {
-      setError(`Instance id '${instanceId}' already exists. Choose a different label.`);
-      return;
-    }
     try {
-      const brandedId = SandboxProviderInstanceId.make(instanceId);
-      if (driver === "vercel") {
-        const instance: SandboxProviderInstanceConfig = {
-          driver: VERCEL_KIND,
-          enabled: true,
-          ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
-          config: { runtime: "node24", sourceType: "runtime", timeoutMs: 86_400_000, port: 13773 },
-        };
-        onAdd(brandedId as string, instance);
-        setLabel("");
-        setError(null);
-        return;
-      }
-      const portNumber = parseContainerPort(port);
-      if (portNumber === null) {
-        setError("Container port must be an integer from 1 to 65535.");
-        return;
-      }
-      const instance: SandboxProviderInstanceConfig = {
-        driver: DOCKER_KIND,
-        enabled: true,
-        ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
-        config: { image, command, port: portNumber },
-      };
-      onAdd(brandedId as string, instance);
+      const brandedId = makeSandboxProviderInstanceId({ driver: driverKind, label, existingIds });
+      const instance =
+        driver === "vercel"
+          ? buildVercelSandboxProviderInstance({ label })
+          : buildDockerSandboxProviderInstance({ label, image, command, port });
+      onAdd(brandedId, instance);
       setLabel("");
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid instance id.");
     }
-  }, [driver, existingIds, instanceId, label, image, command, port, onAdd]);
+  }, [driver, driverKind, existingIds, label, image, command, port, onAdd]);
 
   return (
     <DialogPopup className="max-w-xl overflow-hidden">

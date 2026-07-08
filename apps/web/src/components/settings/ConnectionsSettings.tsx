@@ -28,16 +28,26 @@ import {
   type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type EnvironmentId,
+  type SandboxProviderInstanceConfigMap,
 } from "@kata-sh/code-contracts";
 import { WsRpcClient } from "@kata-sh/code-client-runtime";
 import type { RelayClientEnvironmentRecord } from "@kata-sh/code-contracts/relay";
 import * as DateTime from "effect/DateTime";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
 import { SandboxDeploymentSettings } from "./SandboxDeploymentSettings";
+import {
+  DOCKER_SANDBOX_KIND,
+  VERCEL_SANDBOX_KIND,
+  buildDockerSandboxProviderInstance,
+  buildVercelSandboxProviderInstance,
+  makeSandboxProviderInstanceId,
+  sandboxInstanceIdForLabel,
+} from "./SandboxDeploymentSettings.logic";
 import { resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
 import {
   SettingsPageContainer,
@@ -1884,9 +1894,11 @@ function RemoteEnvironmentRowsSkeleton() {
 function ConfiguredCloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironmentIds,
+  showEmptyState,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  readonly showEmptyState: boolean;
 }) {
   const { getToken, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useHostedConnectAuthPrompt();
@@ -1967,16 +1979,16 @@ function ConfiguredCloudRemoteEnvironmentRows({
   );
 
   if (savedEnvironmentIds.length === 0 && environmentsState.data === null) {
-    return <RemoteEnvironmentRowsSkeleton />;
+    return showEmptyState ? <RemoteEnvironmentRowsSkeleton /> : null;
   }
 
   if (savedEnvironmentIds.length === 0 && connectableEnvironments.length === 0) {
-    return (
+    return showEmptyState ? (
       <>
         <EmptyRemoteEnvironments {...(!isSignedIn ? { onConnectFromCloud: openAuthPrompt } : {})} />
         {authPrompt}
       </>
-    );
+    ) : null;
   }
 
   return connectableEnvironments.map((environment) => (
@@ -2017,22 +2029,27 @@ function ConfiguredCloudRemoteEnvironmentRows({
 function CloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironmentIds,
+  showEmptyState,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  readonly showEmptyState: boolean;
 }) {
   return hasCloudPublicConfig() ? (
     <ConfiguredCloudRemoteEnvironmentRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironmentIds={savedEnvironmentIds}
+      showEmptyState={showEmptyState}
     />
-  ) : savedEnvironmentIds.length === 0 ? (
+  ) : showEmptyState && savedEnvironmentIds.length === 0 ? (
     <EmptyRemoteEnvironments cloudEnabled={false} />
   ) : null;
 }
 
 export function ConnectionsSettings() {
   const desktopBridge = window.desktopBridge;
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primarySessionState = usePrimarySessionState();
   const currentSessionScopes = desktopBridge
@@ -2045,6 +2062,7 @@ export function ConnectionsSettings() {
   const savedEnvironmentIds = useMemo(
     () =>
       Object.values(savedEnvironmentsById)
+        .filter((record) => !record.sandbox)
         .toSorted((left, right) => left.label.localeCompare(right.label))
         .map((record) => record.environmentId),
     [savedEnvironmentsById],
@@ -2104,14 +2122,27 @@ export function ConnectionsSettings() {
   >(null);
   const [isRevokingOtherDesktopClients, setIsRevokingOtherDesktopClients] = useState(false);
   const [addBackendDialogOpen, setAddBackendDialogOpen] = useState(false);
-  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
+  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh" | "docker" | "cloud">(
+    "remote",
+  );
   const [savedBackendHost, setSavedBackendHost] = useState("");
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
   const [savedBackendSshUsername, setSavedBackendSshUsername] = useState("");
   const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
+  const [sandboxLabel, setSandboxLabel] = useState("");
+  const [sandboxDockerImage, setSandboxDockerImage] = useState("katacode:local");
+  const [sandboxDockerCommand, setSandboxDockerCommand] = useState("katacode serve --port 13773");
+  const [sandboxDockerPort, setSandboxDockerPort] = useState("13773");
+  const [cloudSandboxProvider, setCloudSandboxProvider] = useState<"vercel">("vercel");
   const [savedBackendError, setSavedBackendError] = useState<string | null>(null);
   const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
+  const sandboxInstanceMap = (settings.sandboxProviderInstances ??
+    {}) as SandboxProviderInstanceConfigMap;
+  const sandboxExistingIds = useMemo(
+    () => new Set(Object.keys(sandboxInstanceMap)),
+    [sandboxInstanceMap],
+  );
   const unsavedDiscoveredSshHosts = useMemo(
     () =>
       discoveredSshHosts.filter((target) => {
@@ -2351,6 +2382,50 @@ export function ConnectionsSettings() {
   }, []);
 
   const handleAddSavedBackend = useCallback(async () => {
+    if (savedBackendMode === "docker" || savedBackendMode === "cloud") {
+      setIsAddingSavedBackend(true);
+      setSavedBackendError(null);
+      try {
+        if (savedBackendMode === "cloud" && cloudSandboxProvider !== "vercel") {
+          throw new Error("Unsupported cloud provider.");
+        }
+        const driver = savedBackendMode === "cloud" ? VERCEL_SANDBOX_KIND : DOCKER_SANDBOX_KIND;
+        const id = makeSandboxProviderInstanceId({
+          driver,
+          label: sandboxLabel,
+          existingIds: sandboxExistingIds,
+        });
+        const instance =
+          savedBackendMode === "cloud"
+            ? buildVercelSandboxProviderInstance({ label: sandboxLabel })
+            : buildDockerSandboxProviderInstance({
+                label: sandboxLabel,
+                image: sandboxDockerImage,
+                command: sandboxDockerCommand,
+                port: sandboxDockerPort,
+              });
+        updateSettings({
+          sandboxProviderInstances: { ...sandboxInstanceMap, [id]: instance },
+        });
+        setSandboxLabel("");
+        setAddBackendDialogOpen(false);
+        toastManager.add({
+          type: "success",
+          title: "Environment added",
+          description:
+            savedBackendMode === "cloud"
+              ? "Vercel Sandbox is ready to configure."
+              : "Docker container is ready to configure.",
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to add environment.";
+        setSavedBackendError(message);
+      } finally {
+        setIsAddingSavedBackend(false);
+      }
+      return;
+    }
+
     if (savedBackendMode === "ssh") {
       setIsAddingSavedBackend(true);
       setSavedBackendError(null);
@@ -2424,6 +2499,14 @@ export function ConnectionsSettings() {
     savedBackendSshHost,
     savedBackendSshPort,
     savedBackendSshUsername,
+    cloudSandboxProvider,
+    sandboxDockerCommand,
+    sandboxDockerImage,
+    sandboxDockerPort,
+    sandboxExistingIds,
+    sandboxInstanceMap,
+    sandboxLabel,
+    updateSettings,
   ]);
 
   const handleConnectSavedBackend = useCallback(async (environmentId: EnvironmentId) => {
@@ -2731,7 +2814,7 @@ export function ConnectionsSettings() {
   }, []);
 
   const renderConnectionModeCard = (input: {
-    readonly mode: "remote" | "ssh";
+    readonly mode: "remote" | "ssh" | "docker" | "cloud";
     readonly title: string;
     readonly description: string;
     readonly icon?: ReactNode;
@@ -2913,6 +2996,112 @@ export function ConnectionsSettings() {
       </div>
     </div>
   );
+  const renderSandboxLabelField = () => {
+    const driver = savedBackendMode === "cloud" ? VERCEL_SANDBOX_KIND : DOCKER_SANDBOX_KIND;
+    return (
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Label</span>
+        <Input
+          value={sandboxLabel}
+          onChange={(event) => setSandboxLabel(event.target.value)}
+          placeholder="Work"
+          disabled={isAddingSavedBackend}
+          spellCheck={false}
+        />
+        <span className="mt-1 block text-[11px] text-muted-foreground">
+          Instance id: {sandboxInstanceIdForLabel({ driver, label: sandboxLabel })}
+        </span>
+      </label>
+    );
+  };
+  const renderDockerFields = () => (
+    <div className="space-y-4">
+      {renderSandboxLabelField()}
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Image</span>
+        <Input
+          value={sandboxDockerImage}
+          onChange={(event) => setSandboxDockerImage(event.target.value)}
+          placeholder="katacode:local"
+          disabled={isAddingSavedBackend}
+          spellCheck={false}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Start command</span>
+        <Input
+          value={sandboxDockerCommand}
+          onChange={(event) => setSandboxDockerCommand(event.target.value)}
+          placeholder="katacode serve --port 13773"
+          disabled={isAddingSavedBackend}
+          spellCheck={false}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Container port</span>
+        <Input
+          value={sandboxDockerPort}
+          onChange={(event) => setSandboxDockerPort(event.target.value)}
+          placeholder="13773"
+          inputMode="numeric"
+          disabled={isAddingSavedBackend}
+          spellCheck={false}
+        />
+      </label>
+      {savedBackendError ? <p className="text-xs text-destructive">{savedBackendError}</p> : null}
+      <Button
+        variant="outline"
+        className="w-full"
+        disabled={isAddingSavedBackend}
+        onClick={() => void handleAddSavedBackend()}
+      >
+        <PlusIcon className="size-3.5" />
+        {isAddingSavedBackend ? "Adding…" : "Add environment"}
+      </Button>
+    </div>
+  );
+  const renderCloudProviderFields = () => (
+    <div className="space-y-4">
+      {renderSandboxLabelField()}
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Provider</span>
+        <select
+          className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+          value={cloudSandboxProvider}
+          onChange={(event) => setCloudSandboxProvider(event.target.value as "vercel")}
+          disabled={isAddingSavedBackend}
+        >
+          <option value="vercel">Vercel Sandbox</option>
+        </select>
+        <span className="mt-1 block text-[11px] text-muted-foreground">
+          After creating, add VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID as sensitive
+          environment variables on the environment row.
+        </span>
+      </label>
+      {savedBackendError ? <p className="text-xs text-destructive">{savedBackendError}</p> : null}
+      <Button
+        variant="outline"
+        className="w-full"
+        disabled={isAddingSavedBackend}
+        onClick={() => void handleAddSavedBackend()}
+      >
+        <PlusIcon className="size-3.5" />
+        {isAddingSavedBackend ? "Adding…" : "Add environment"}
+      </Button>
+    </div>
+  );
+  const renderAddEnvironmentModeBody = () => {
+    switch (savedBackendMode) {
+      case "ssh":
+        return renderSshFields();
+      case "docker":
+        return renderDockerFields();
+      case "cloud":
+        return renderCloudProviderFields();
+      case "remote":
+        return renderRemoteModeBody();
+    }
+  };
   const renderNetworkAccessToggle = () => (
     <Switch
       checked={desktopServerExposureState?.mode === "network-accessible"}
@@ -3284,10 +3473,8 @@ export function ConnectionsSettings() {
         </SettingsSection>
       )}
 
-      <SandboxDeploymentSettings />
-
       <SettingsSection
-        title="Remote environments"
+        title="Environments"
         headerAction={
           <Dialog
             open={addBackendDialogOpen}
@@ -3340,16 +3527,27 @@ export function ConnectionsSettings() {
                           icon: <TerminalIcon aria-hidden className="size-4" />,
                         })
                       : null}
+                    {renderConnectionModeCard({
+                      mode: "docker",
+                      title: "Docker container",
+                      description: "Provision a local container that runs a Kata server.",
+                      icon: <TerminalIcon aria-hidden className="size-4" />,
+                    })}
+                    {renderConnectionModeCard({
+                      mode: "cloud",
+                      title: "Cloud Provider",
+                      description: "Provision a provider-backed sandbox environment.",
+                      icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
+                    })}
                   </div>
-                  <AnimatedHeight>
-                    {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
-                  </AnimatedHeight>
+                  <AnimatedHeight>{renderAddEnvironmentModeBody()}</AnimatedHeight>
                 </div>
               </DialogPanel>
             </DialogPopup>
           </Dialog>
         }
       >
+        <SandboxDeploymentSettings presentation="rows" showEmptyState={false} />
         {savedEnvironmentIds.map((environmentId) => (
           <SavedBackendListRow
             key={environmentId}
@@ -3365,6 +3563,7 @@ export function ConnectionsSettings() {
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironmentIds={savedEnvironmentIds}
+          showEmptyState={sandboxExistingIds.size === 0}
         />
       </SettingsSection>
     </SettingsPageContainer>

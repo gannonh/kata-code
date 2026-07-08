@@ -601,7 +601,7 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByText("Authorized clients")).not.toBeInTheDocument();
     await expect.element(page.getByText("Chrome on Mac")).not.toBeInTheDocument();
     await expect
-      .element(page.getByRole("heading", { name: "Remote environments", exact: true }))
+      .element(page.getByRole("heading", { name: "Environments", exact: true }))
       .toBeInTheDocument();
   });
 
