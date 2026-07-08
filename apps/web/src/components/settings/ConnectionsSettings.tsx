@@ -28,6 +28,7 @@ import {
   type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type EnvironmentId,
+  type SandboxProviderInstanceConfig,
   type SandboxProviderInstanceConfigMap,
 } from "@kata-sh/code-contracts";
 import { WsRpcClient } from "@kata-sh/code-client-runtime";
@@ -2086,13 +2087,30 @@ export function ConnectionsSettings() {
         .map((record) => record.environmentId),
     [savedEnvironmentsById],
   );
+  const sandboxInstanceLabels = useMemo(() => {
+    const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
+    const labels = new Set<string>();
+    for (const [instanceId, instance] of Object.entries(map)) {
+      const displayName = (instance as SandboxProviderInstanceConfig).displayName ?? instanceId;
+      labels.add(displayName);
+    }
+    return labels;
+  }, [settings.sandboxProviderInstances]);
   const savedEnvironmentDefinitionIds = useMemo(
     () =>
       Object.values(savedEnvironmentsById)
-        .filter((record) => !record.relayManaged)
+        .filter((record) => {
+          if (record.relayManaged) return false;
+          // Sandbox saved records are the runtime side of a sandbox instance
+          // defined in `sandboxProviderInstances`. Skip the saved-record row
+          // when a matching instance already renders its own definition row;
+          // keep orphan sandbox records visible so they can be cleaned up.
+          if (record.sandbox && sandboxInstanceLabels.has(record.label)) return false;
+          return true;
+        })
         .toSorted((left, right) => left.label.localeCompare(right.label))
         .map((record) => record.environmentId),
-    [savedEnvironmentsById],
+    [sandboxInstanceLabels, savedEnvironmentsById],
   );
   const savedDesktopSshEnvironmentsByAlias = useMemo(
     () =>
