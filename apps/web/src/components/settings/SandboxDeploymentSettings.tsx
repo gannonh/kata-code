@@ -67,7 +67,7 @@ function slugifyLabel(value: string): string {
 }
 
 /** Per-instance busy state for the long-running RPCs. */
-type BusyOp = "test" | "start" | "dispose";
+type BusyOp = "test" | "start" | "dispose" | "renew" | "snapshot";
 
 /** Render a non-empty failure message for the progress log and toasts.
  * Effect fiber failures can surface as objects whose `message` is empty. */
@@ -455,7 +455,7 @@ export function SandboxDeploymentSettings() {
 
   const handleRenew = useCallback(
     (instanceId: string) =>
-      withBusy(instanceId, "start", async () => {
+      withBusy(instanceId, "renew", async () => {
         try {
           await getPrimaryEnvironmentConnection().client.sandbox.renewSession({
             instanceId: instanceId as never,
@@ -474,19 +474,30 @@ export function SandboxDeploymentSettings() {
 
   const handleSnapshot = useCallback(
     (instanceId: string) =>
-      withBusy(instanceId, "start", async () => {
+      withBusy(instanceId, "snapshot", async () => {
+        const appendProgress = (line: string) => {
+          setTestProgress((prev) => ({
+            ...prev,
+            [instanceId]: [...(prev[instanceId] ?? []), line],
+          }));
+        };
         try {
+          appendProgress("snapshot: creating Vercel snapshot…");
           const result = await getPrimaryEnvironmentConnection().client.sandbox.createSnapshot({
             instanceId: instanceId as never,
           });
           const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[
             instanceId
           ];
+          const rawConfig = instance?.config;
+          const config =
+            rawConfig !== null && typeof rawConfig === "object"
+              ? { ...(rawConfig as Record<string, unknown>) }
+              : {};
+          const previousSnapshotId =
+            typeof config.snapshotId === "string" ? config.snapshotId : undefined;
+          const isSameSnapshot = previousSnapshotId === result.snapshotId;
           if (instance !== undefined && (instance.driver as string) === (VERCEL_KIND as string)) {
-            const config =
-              instance.config !== null && typeof instance.config === "object"
-                ? { ...(instance.config as Record<string, unknown>) }
-                : {};
             updateSettings({
               sandboxProviderInstances: {
                 ...instanceMap,
@@ -501,17 +512,24 @@ export function SandboxDeploymentSettings() {
               },
             });
           }
+          appendProgress(
+            `snapshot: ok — ${result.snapshotId}${isSameSnapshot ? " (same id returned)" : ""}`,
+          );
           toastManager.add({
             type: "success",
             title: "Snapshot created",
-            description: `Snapshot id: ${result.snapshotId}. The session is lapsed; Resume to continue.`,
+            description: isSameSnapshot
+              ? `Vercel returned the same snapshot id: ${result.snapshotId}. The session is lapsed; Resume to continue.`
+              : `Snapshot id: ${result.snapshotId}. The session is lapsed; Resume to continue.`,
           });
           await refreshList();
         } catch (error) {
+          const message = failureMessage(error);
+          appendProgress(`snapshot: failed — ${message}`);
           toastManager.add({
             type: "error",
             title: "Snapshot failed",
-            description: error instanceof Error ? error.message : "Unknown error.",
+            description: message,
           });
         }
       }),
@@ -664,7 +682,7 @@ interface DeploymentTargetCardProps {
   readonly session: { environmentId: string; httpBaseUrl: string } | undefined;
   readonly summary: SandboxInstanceSummary | undefined;
   readonly progress: string[];
-  readonly instanceBusy: "test" | "start" | "dispose" | undefined;
+  readonly instanceBusy: BusyOp | undefined;
   readonly isExpanded: boolean;
   readonly projects: ReadonlyArray<Project>;
   readonly savedSandboxEnvironments: SavedSandboxEnvironmentMap | undefined;
@@ -889,6 +907,11 @@ function DeploymentTargetCard({
                   {lapsedReason ? (
                     <span className="text-xs text-muted-foreground">{lapsedReason}</span>
                   ) : null}
+                  {snapshotId ? (
+                    <span className="text-xs text-muted-foreground">
+                      Snapshot: <code>{snapshotId}</code>
+                    </span>
+                  ) : null}
                   {supportsResume ? (
                     <Button
                       size="sm"
@@ -915,7 +938,7 @@ function DeploymentTargetCard({
                       disabled={instanceBusy !== undefined}
                       onClick={onRenew}
                     >
-                      Extend
+                      {instanceBusy === "renew" ? "Extending…" : "Extend"}
                     </Button>
                   ) : null}
                   {supportsSnapshot ? (
@@ -925,7 +948,7 @@ function DeploymentTargetCard({
                       disabled={instanceBusy !== undefined}
                       onClick={onSnapshot}
                     >
-                      Snapshot
+                      {instanceBusy === "snapshot" ? "Snapshotting…" : "Snapshot"}
                     </Button>
                   ) : null}
                   {snapshotId ? (
