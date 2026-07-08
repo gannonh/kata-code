@@ -2089,7 +2089,7 @@ export function ConnectionsSettings() {
   const savedEnvironmentDefinitionIds = useMemo(
     () =>
       Object.values(savedEnvironmentsById)
-        .filter((record) => !record.sandbox && !record.relayManaged)
+        .filter((record) => !record.relayManaged)
         .toSorted((left, right) => left.label.localeCompare(right.label))
         .map((record) => record.environmentId),
     [savedEnvironmentsById],

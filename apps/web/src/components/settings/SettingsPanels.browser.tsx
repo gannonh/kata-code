@@ -150,6 +150,86 @@ const authAccessHarness = vi.hoisted(() => {
 const mockConnectDesktopSshEnvironment = vi.hoisted(() => vi.fn());
 const mockGetClerkToken = vi.hoisted(() => vi.fn(async () => null));
 const mockOpenClerkWaitlist = vi.hoisted(() => vi.fn());
+const savedEnvironmentHarness = vi.hoisted(() => {
+  type RegistryRecord = {
+    readonly environmentId: string;
+    readonly label: string;
+    readonly wsBaseUrl: string;
+    readonly httpBaseUrl: string;
+    readonly createdAt: string;
+    readonly lastConnectedAt: string | null;
+    readonly desktopSsh?: unknown;
+    readonly relayManaged?: unknown;
+    readonly sandbox?: { readonly providerKind: string };
+  };
+  type RuntimeState = {
+    readonly connectionState: "connecting" | "connected" | "disconnected" | "error";
+    readonly authState: "authenticated" | "requires-auth" | "unknown";
+    readonly lastError: string | null;
+    readonly lastErrorAt: string | null;
+    readonly scopes: ReadonlyArray<string> | null;
+    readonly descriptor: { readonly label?: string } | null;
+    readonly serverConfig: unknown | null;
+    readonly connectedAt: string | null;
+    readonly disconnectedAt: string | null;
+  };
+
+  let registryById: Record<string, RegistryRecord> = {};
+  let runtimeById: Record<string, RuntimeState> = {};
+
+  const rename = vi.fn((environmentId: string, label: string) => {
+    const existing = registryById[environmentId];
+    if (!existing) return;
+    registryById = {
+      ...registryById,
+      [environmentId]: { ...existing, label },
+    };
+  });
+
+  const remove = vi.fn((environmentId: string) => {
+    const { [environmentId]: _removedRecord, ...remainingRegistry } = registryById;
+    const { [environmentId]: _removedRuntime, ...remainingRuntime } = runtimeById;
+    registryById = remainingRegistry;
+    runtimeById = remainingRuntime;
+  });
+
+  return {
+    reset() {
+      registryById = {};
+      runtimeById = {};
+      rename.mockClear();
+      remove.mockClear();
+    },
+    setRegistry(next: Record<string, RegistryRecord>) {
+      registryById = next;
+    },
+    setRuntime(next: Record<string, RuntimeState>) {
+      runtimeById = next;
+    },
+    getRegistryState() {
+      return {
+        byId: registryById,
+        rename,
+        remove,
+      };
+    },
+    getRuntimeState() {
+      return {
+        byId: runtimeById,
+      };
+    },
+    listRecords() {
+      return Object.values(registryById);
+    },
+    getRecord(environmentId: string) {
+      return registryById[environmentId] ?? null;
+    },
+    getRuntime(environmentId: string) {
+      return runtimeById[environmentId] ?? null;
+    },
+    remove,
+  };
+});
 
 vi.mock("@clerk/react", () => ({
   useAuth: () => ({
@@ -188,10 +268,12 @@ vi.mock("../../environments/runtime", () => {
 
   return {
     getEnvironmentHttpBaseUrl: () => "http://localhost:3000",
-    getSavedEnvironmentRecord: () => null,
-    getSavedEnvironmentRuntimeState: () => null,
+    getSavedEnvironmentRecord: (environmentId: string) =>
+      savedEnvironmentHarness.getRecord(environmentId),
+    getSavedEnvironmentRuntimeState: (environmentId: string) =>
+      savedEnvironmentHarness.getRuntime(environmentId),
     hasSavedEnvironmentRegistryHydrated: () => true,
-    listSavedEnvironmentRecords: () => [],
+    listSavedEnvironmentRecords: () => savedEnvironmentHarness.listRecords(),
     resetSavedEnvironmentRegistryStoreForTests: () => undefined,
     resetSavedEnvironmentRuntimeStoreForTests: () => undefined,
     resolveEnvironmentHttpUrl: (_environmentId: unknown, path: string) =>
@@ -212,17 +294,19 @@ vi.mock("../../environments/runtime", () => {
     getPrimaryEnvironmentConnection: () => primaryConnection,
     readEnvironmentConnection: () => primaryConnection,
     reconnectSavedEnvironment: vi.fn(),
-    removeSavedEnvironment: vi.fn(),
+    removeSavedEnvironment: vi.fn(async (environmentId: string) => {
+      savedEnvironmentHarness.remove(environmentId);
+    }),
     requireEnvironmentConnection: () => primaryConnection,
     resetEnvironmentServiceForTests: () => undefined,
     startEnvironmentConnectionService: () => undefined,
     subscribeEnvironmentConnections: () => () => {},
     useSavedEnvironmentRegistryStore: (
-      selector: (state: { byId: Record<string, never> }) => unknown,
-    ) => selector({ byId: {} }),
+      selector: (state: ReturnType<typeof savedEnvironmentHarness.getRegistryState>) => unknown,
+    ) => selector(savedEnvironmentHarness.getRegistryState()),
     useSavedEnvironmentRuntimeStore: (
-      selector: (state: { byId: Record<string, never> }) => unknown,
-    ) => selector({ byId: {} }),
+      selector: (state: ReturnType<typeof savedEnvironmentHarness.getRuntimeState>) => unknown,
+    ) => selector(savedEnvironmentHarness.getRuntimeState()),
   };
 });
 
@@ -517,6 +601,7 @@ describe("GeneralSettingsPanel observability", () => {
     localStorage.clear();
     useUiStateStore.setState({ defaultAdvertisedEndpointKey: null });
     authAccessHarness.reset();
+    savedEnvironmentHarness.reset();
     mockConnectDesktopSshEnvironment.mockReset();
   });
 
@@ -606,6 +691,66 @@ describe("GeneralSettingsPanel observability", () => {
     await expect
       .element(page.getByRole("heading", { name: "Available Runtimes", exact: true }))
       .toBeInTheDocument();
+  });
+
+  it("lists saved sandbox runtimes under Environments with management actions", async () => {
+    const sandboxEnvironmentId = "environment-sandbox-docker-test";
+    window.desktopBridge = createDesktopBridgeStub();
+    authAccessHarness.setSnapshot({
+      pairingLinks: [],
+      clientSessions: [],
+    });
+    setServerConfigSnapshot(createBaseServerConfig());
+    savedEnvironmentHarness.setRegistry({
+      [sandboxEnvironmentId]: {
+        environmentId: sandboxEnvironmentId,
+        label: "docker test 01",
+        httpBaseUrl: "https://docker-test.example",
+        wsBaseUrl: "wss://docker-test.example",
+        createdAt: "2036-04-07T00:00:00.000Z",
+        lastConnectedAt: "2036-04-07T09:21:00.000Z",
+        sandbox: { providerKind: "docker" },
+      },
+    });
+    savedEnvironmentHarness.setRuntime({
+      [sandboxEnvironmentId]: {
+        connectionState: "connected",
+        authState: "authenticated",
+        lastError: null,
+        lastErrorAt: null,
+        scopes: ["orchestration:read"],
+        descriptor: { label: "container hostname" },
+        serverConfig: null,
+        connectedAt: "2036-04-07T09:21:00.000Z",
+        disconnectedAt: null,
+      },
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ConnectionsSettings />
+      </AppAtomRegistryProvider>,
+    );
+
+    const findSettingsSection = (title: string): HTMLElement | undefined =>
+      Array.from(document.querySelectorAll("section")).find((section) =>
+        section.querySelector("h2")?.textContent?.includes(title),
+      );
+
+    await vi.waitFor(() => {
+      const environmentsSection = findSettingsSection("Environments");
+      const availableRuntimesSection = findSettingsSection("Available Runtimes");
+      expect(environmentsSection).toBeDefined();
+      expect(availableRuntimesSection).toBeDefined();
+
+      expect(environmentsSection?.textContent).toContain("docker test 01");
+      expect(environmentsSection?.textContent).toContain("Sandbox (docker)");
+      expect(environmentsSection?.textContent).toContain("Edit");
+      expect(environmentsSection?.textContent).toContain("Delete");
+      expect(availableRuntimesSection?.textContent).toContain("docker test 01");
+      expect(availableRuntimesSection?.textContent).toContain("Disconnect");
+      expect(availableRuntimesSection?.textContent).not.toContain("Delete");
+    });
   });
 
   it("hides advertised endpoint rows when desktop network access is disabled", async () => {
