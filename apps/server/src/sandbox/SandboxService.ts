@@ -338,6 +338,11 @@ function registerAndFinalizeSession(input: {
   readonly config: SandboxProviderInstanceConfig;
   readonly bootstrapToken: string;
   readonly connectAuthToken: SandboxStartSessionInput["connectAuthToken"];
+  /** Failure cleanup policy. `dispose` (default) deletes the sandbox — only
+   *  correct for the fresh-provision path. The start-from-stopped path MUST
+   *  pass `keep`: the sandbox holds a durable user filesystem and a transient
+   *  Connect failure must never destroy it. */
+  readonly failureCleanup?: "dispose" | "keep";
 }): Effect.Effect<
   {
     readonly environmentId: string;
@@ -351,14 +356,19 @@ function registerAndFinalizeSession(input: {
 > {
   return Effect.gen(function* () {
     const driverConfig = input.config.config;
+    // "keep" (start-from-stopped): a Connect failure must never destroy the
+    // sandbox — it holds a durable user filesystem. The record stays and the
+    // user retries Start (lifecycle.start is idempotent).
+    const cleanupOnFailure =
+      input.failureCleanup === "keep"
+        ? Effect.void
+        : disposeAfterFailure(input.sessionKey, input.driver, input.handle);
     const reach = yield* input.driver
       .reachability(input.handle, resolveSandboxPort(driverConfig))
       .pipe(
         Effect.mapError(mapDriverError),
         Effect.catch((error: SandboxRpcError) =>
-          disposeAfterFailure(input.sessionKey, input.driver, input.handle).pipe(
-            Effect.andThen(Effect.fail(error)),
-          ),
+          cleanupOnFailure.pipe(Effect.andThen(Effect.fail(error))),
         ),
       );
     const isVercel = (input.driver.kind as string) === (VERCEL_KIND as string);
@@ -394,7 +404,7 @@ function registerAndFinalizeSession(input: {
       origin: connectOrigin,
     }).pipe(
       Effect.catch((error: SandboxRpcError) =>
-        disposeAfterFailure(input.sessionKey, input.driver, input.handle).pipe(
+        cleanupOnFailure.pipe(
           Effect.andThen(
             Effect.fail(
               new SandboxRpcError({
@@ -411,7 +421,7 @@ function registerAndFinalizeSession(input: {
       adminAccessToken,
     }).pipe(
       Effect.catch((error: SandboxRpcError) =>
-        disposeAfterFailure(input.sessionKey, input.driver, input.handle).pipe(
+        cleanupOnFailure.pipe(
           Effect.andThen(
             Effect.fail(
               new SandboxRpcError({
@@ -1577,15 +1587,39 @@ export const SandboxServiceLive = {
           const started = yield* inst.driver.lifecycle
             .start(handle, { config: resolvedConfig.config, env })
             .pipe(Effect.mapError(mapDriverError));
-          // Re-run Connect registration + mint a fresh pairing token.
+          // Docker env is fixed at container create: the restarted in-container
+          // server re-seeds its ORIGINAL create-time bootstrap grant, not the
+          // fresh token minted above. Recover the effective token from the
+          // container env so the exchange matches what the server booted with.
+          // (Vercel relaunches `serve` with the fresh env, so it keeps the
+          // fresh token.)
+          let effectiveBootstrapToken = bootstrapToken;
+          if ((inst.driver.kind as string) === (DockerSandboxProvider.kind as string)) {
+            const recovered = yield* inst.driver
+              .exec(started, "printenv KATACODE_DESKTOP_BOOTSTRAP_TOKEN")
+              .pipe(Effect.mapError(mapDriverError));
+            const token = recovered.stdout.trim();
+            if (token.length === 0) {
+              return yield* new SandboxRpcError({
+                reason: "connect-failed",
+                message:
+                  "Started container has no KATACODE_DESKTOP_BOOTSTRAP_TOKEN in its environment; delete the sandbox and create it again.",
+              });
+            }
+            effectiveBootstrapToken = token;
+          }
+          // Re-run Connect registration + mint a fresh pairing token. `keep`:
+          // a transient Connect failure must never destroy a stopped-started
+          // sandbox's durable filesystem — the user retries Start.
           const finalized = yield* registerAndFinalizeSession({
             sessionKey,
             instanceId,
             driver: inst.driver,
             handle: started,
             config: resolvedConfig,
-            bootstrapToken,
+            bootstrapToken: effectiveBootstrapToken,
             connectAuthToken: options?.connectAuthToken,
+            failureCleanup: "keep",
           });
           // Update the store record (logs on failure rather than swallowing).
           yield* persistSessionRecord({
