@@ -8,7 +8,7 @@
  */
 import * as Effect from "effect/Effect";
 
-import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
+import { SecretStoreError, ServerSecretStore } from "../auth/ServerSecretStore.ts";
 
 export interface SandboxCredentialSecret {
   readonly providerId: string;
@@ -45,8 +45,9 @@ export const SANDBOX_CREDENTIAL_SECRETS: ReadonlyArray<SandboxCredentialSecret> 
 
 /**
  * Load all stored sandbox credentials present in `ServerSecretStore`. Absent
- * secrets are skipped (the provider starts unauthenticated). Contents are
- * never logged.
+ * secrets (`null`) are skipped (the provider starts unauthenticated). Real
+ * secret-store failures propagate as `SecretStoreError`. Contents are never
+ * logged.
  */
 export function loadStoredSandboxCredentials(): Effect.Effect<
   ReadonlyArray<{
@@ -54,7 +55,7 @@ export function loadStoredSandboxCredentials(): Effect.Effect<
     readonly content: Uint8Array;
     readonly mode: number;
   }>,
-  never,
+  SecretStoreError,
   ServerSecretStore
 > {
   return Effect.gen(function* () {
@@ -65,7 +66,7 @@ export function loadStoredSandboxCredentials(): Effect.Effect<
       readonly mode: number;
     }> = [];
     for (const spec of SANDBOX_CREDENTIAL_SECRETS) {
-      const bytes = yield* store.get(spec.secretName).pipe(Effect.orElseSucceed(() => null));
+      const bytes = yield* store.get(spec.secretName);
       if (bytes === null) continue;
       loaded.push({ relativePath: spec.relativePath, content: bytes, mode: spec.mode });
     }

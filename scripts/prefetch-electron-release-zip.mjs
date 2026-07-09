@@ -15,8 +15,9 @@
  *   ELECTRON_ZIP_NAME (optional for --download; derived when omitted)
  */
 import { createRequire } from "node:module";
-import { mkdir, access } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, access, readFile } from "node:fs/promises";
+import { join, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const require = createRequire(import.meta.url);
@@ -47,6 +48,40 @@ function requireEnv(name) {
   return value;
 }
 
+function expectedSha256(shasumsText, zipName) {
+  for (const line of shasumsText.split("\n")) {
+    const match = line.trim().match(/^([0-9a-fA-F]{64})\s+(\S+)$/);
+    if (match && match[2] === zipName) return match[1].toLowerCase();
+  }
+  return null;
+}
+
+async function verifyElectronZip(zipPath, version) {
+  const zipName = basename(zipPath);
+  const shasumsUrl = `https://github.com/electron/electron/releases/download/v${version}/SHASUMS256.txt`;
+  const shasumsPath = join(zipPath, "..", "SHASUMS256.txt");
+  const curl = spawnSync("curl", ["-fsSL", "-o", shasumsPath, shasumsUrl], {
+    encoding: "utf8",
+  });
+  if (curl.status !== 0) {
+    throw new Error(`Failed to download Electron SHASUMS256.txt from ${shasumsUrl}`);
+  }
+  const shasumsText = await readFile(shasumsPath, "utf8");
+  const expected = expectedSha256(shasumsText, zipName);
+  if (expected === null) {
+    throw new Error(`No SHA256 entry for ${zipName} in Electron SHASUMS256.txt`);
+  }
+  const actual = createHash("sha256")
+    .update(await readFile(zipPath))
+    .digest("hex");
+  if (actual !== expected) {
+    throw new Error(
+      `Electron zip checksum mismatch for ${zipName}: expected ${expected}, got ${actual}`,
+    );
+  }
+  console.log(`Verified Electron zip checksum: ${zipName}`);
+}
+
 async function main() {
   const { printName, download } = readArgs(process.argv.slice(2));
   if (!printName && !download) {
@@ -72,37 +107,43 @@ async function main() {
   await mkdir(cacheDir, { recursive: true });
   const zipPath = join(cacheDir, process.env.ELECTRON_ZIP_NAME?.trim() || zipName);
 
+  let reused = false;
   try {
     await access(zipPath);
     console.log(`Reusing cached Electron zip: ${zipPath}`);
-    return;
+    reused = true;
   } catch {
     // Not cached — download below.
   }
 
-  const url = electronReleaseZipUrl({ version, platform, arch });
-  console.log(`Downloading ${url}`);
-  const result = spawnSync(
-    "curl",
-    [
-      "-fsSL",
-      "--retry",
-      "8",
-      "--retry-all-errors",
-      "--retry-delay",
-      "2",
-      "--connect-timeout",
-      "30",
-      "-o",
-      zipPath,
-      url,
-    ],
-    { stdio: "inherit" },
-  );
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+  if (!reused) {
+    const url = electronReleaseZipUrl({ version, platform, arch });
+    console.log(`Downloading ${url}`);
+    const result = spawnSync(
+      "curl",
+      [
+        "-fsSL",
+        "--retry",
+        "8",
+        "--retry-all-errors",
+        "--retry-delay",
+        "2",
+        "--connect-timeout",
+        "30",
+        "-o",
+        zipPath,
+        url,
+      ],
+      { stdio: "inherit" },
+    );
+    if (result.status !== 0) {
+      process.exit(result.status ?? 1);
+    }
+    spawnSync("ls", ["-lh", zipPath], { stdio: "inherit" });
   }
-  spawnSync("ls", ["-lh", zipPath], { stdio: "inherit" });
+
+  // Verify integrity for both cache hits and fresh downloads (cache poisoning).
+  await verifyElectronZip(zipPath, version);
 }
 
 main().catch((error) => {

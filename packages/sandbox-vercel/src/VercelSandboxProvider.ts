@@ -141,15 +141,21 @@ function mapSdkError(
     return new SandboxProviderError({
       reason: "invalid-config",
       message: `${context}: Vercel rejected the token/team/project (${message}).`,
+      cause: error,
     });
   }
   if (isNotFound(error)) {
     return new SandboxProviderError({
       reason: "invalid-config",
       message: `${context}: not found (${message}).`,
+      cause: error,
     });
   }
-  return new SandboxProviderError({ reason: fallback, message: `${context}: ${message}` });
+  return new SandboxProviderError({
+    reason: fallback,
+    message: `${context}: ${message}`,
+    cause: error,
+  });
 }
 
 /** Map a Vercel SDK session/sandbox status to the SPI lifecycle status.

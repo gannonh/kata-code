@@ -6,6 +6,7 @@ import * as Stream from "effect/Stream";
 import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/instance";
 import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachability";
 import type { SandboxHandle, SandboxProvider } from "@kata-sh/code-sandbox/driver";
+import { SandboxProviderError } from "@kata-sh/code-sandbox/driver";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 
 import {
@@ -175,6 +176,58 @@ describe("providerLogin lifecycle cleanup", () => {
     expect(hasActiveProviderLogin(loginSessionId)).toBe(true);
     cancelProviderLogin({ loginSessionId, instanceId: handle.instanceId });
     expect(hasActiveProviderLogin(loginSessionId)).toBe(false);
+  });
+
+  it("cleans up the active login when submit exec fails after validation", async () => {
+    let execCount = 0;
+    const { driver, handle } = makeFakeDriver({
+      outputLog:
+        "Open https://claude.com/cai/oauth/authorize?code=true&client_id=c&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=a&code_challenge_method=S256&state=z",
+    });
+    const failingDriver: SandboxProvider = {
+      ...driver,
+      exec: (h, command) => {
+        execCount += 1;
+        // After URL discovery, fail the FIFO write on submit.
+        if (command.includes("stdin.fifo") && command.includes("printf")) {
+          return Effect.fail(
+            new SandboxProviderError({
+              reason: "exec-failed",
+              message: "fifo write failed",
+            }),
+          );
+        }
+        return driver.exec(h, command);
+      },
+    };
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        startProviderLogin({
+          driver: failingDriver,
+          handle,
+          providerId: "claude",
+          urlPollAttempts: 2,
+        }),
+      ).pipe(Effect.map((chunk) => [...chunk])),
+    );
+    const started = events.find((e) => e.stage === "started");
+    expect(started?.stage === "started" ? started.loginSessionId : undefined).toBeTruthy();
+    if (started?.stage !== "started") return;
+    const loginSessionId = started.loginSessionId;
+    expect(hasActiveProviderLogin(loginSessionId)).toBe(true);
+
+    const result = await Effect.runPromise(
+      either(
+        submitProviderLoginCode({
+          loginSessionId,
+          instanceId: handle.instanceId,
+          code: "abcd",
+        }).pipe(Effect.provideService(ServerSecretStore, stubSecretStore)),
+      ),
+    );
+    expect(result._tag).toBe("Left");
+    expect(hasActiveProviderLogin(loginSessionId)).toBe(false);
+    expect(execCount).toBeGreaterThan(0);
   });
 
   it("cancelProviderLogin is a no-op for a mismatched instanceId", async () => {

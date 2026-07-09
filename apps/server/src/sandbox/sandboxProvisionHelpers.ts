@@ -87,7 +87,16 @@ export function runCredentialSeed(
   return Effect.gen(function* () {
     const copyIntoCap = driver.copyInto;
     if (!copyIntoCap) return;
-    const storedCredentials = yield* loadStoredSandboxCredentials();
+    const storedCredentials = yield* loadStoredSandboxCredentials().pipe(
+      Effect.mapError(
+        (e) =>
+          new SetupFailed({
+            stage: "seed",
+            message: `credential secret load failed: ${e.message}`,
+            cause: e,
+          }),
+      ),
+    );
     const archives = yield* buildCredentialSeedArchives({
       hostHome: os.homedir(),
       ...(storedCredentials.length > 0 ? { storedCredentials } : {}),

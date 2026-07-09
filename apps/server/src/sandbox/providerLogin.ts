@@ -24,6 +24,7 @@
 import * as NodeCrypto from "node:crypto";
 
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Stream from "effect/Stream";
 
 import type { SandboxHandle, SandboxProvider } from "@kata-sh/code-sandbox/driver";
@@ -131,6 +132,11 @@ export function startProviderLogin(input: {
   const loginSessionId = NodeCrypto.randomBytes(8).toString("hex");
   const dir = `/tmp/kata-login/${loginSessionId}`;
 
+  // Tracks whether URL polling completed with a live login awaiting a code.
+  // Stream interruption / failure before that point must clean up; success
+  // leaves the session active for submit/cancel.
+  let awaitingCode = false;
+
   return Stream.fromEffect(
     Effect.gen(function* () {
       // Fail loud when the sandbox image is missing `script(1)`. Without it
@@ -191,6 +197,7 @@ export function startProviderLogin(input: {
               );
             const url = extractProviderLoginUrl(result.stdout, spec.urlPattern);
             if (url !== null) {
+              awaitingCode = true;
               return [
                 { stage: "started", loginSessionId: id },
                 { stage: "url", loginSessionId: id, url },
@@ -211,6 +218,11 @@ export function startProviderLogin(input: {
           ] as ReadonlyArray<SandboxProviderLoginEvent>;
         }),
       ).pipe(Stream.flatMap(Stream.fromIterable)),
+    ),
+    Stream.ensuring(
+      Effect.sync(() => {
+        if (!awaitingCode) cleanupLogin(loginSessionId);
+      }),
     ),
   );
 }
@@ -249,62 +261,72 @@ export function submitProviderLoginCode(input: {
         message: "Invalid code format.",
       });
     }
-    // Write the code into the FIFO.
-    const escapedCode = input.code.replace(/'/g, "'\\''");
-    yield* active.driver
-      .exec(active.handle, `printf '%s\\n' '${escapedCode}' > ${active.dir}/stdin.fifo`)
-      .pipe(
-        Effect.mapError(
-          (e) => new SandboxRpcError({ reason: "provision-failed", message: e.message }),
-        ),
-      );
-
-    const store = yield* ServerSecretStore;
-    // Poll for success (credential file appears) or invalid code (90s budget).
-    for (let i = 0; i < 90; i++) {
-      const existsResult = yield* active.driver
-        .exec(active.handle, `test -f ${active.spec.credentialPath}`)
+    // After validation, exec/store failures must not leave FIFO/processes behind.
+    // Invalid-code returns Success(accepted:false) and must keep the session.
+    return yield* Effect.gen(function* () {
+      // Write the code into the FIFO.
+      const escapedCode = input.code.replace(/'/g, "'\\''");
+      yield* active.driver
+        .exec(active.handle, `printf '%s\\n' '${escapedCode}' > ${active.dir}/stdin.fifo`)
         .pipe(
           Effect.mapError(
             (e) => new SandboxRpcError({ reason: "provision-failed", message: e.message }),
           ),
         );
-      if (existsResult.exitCode === 0) {
-        const catResult = yield* active.driver
-          .exec(active.handle, `cat ${active.spec.credentialPath}`)
+
+      const store = yield* ServerSecretStore;
+      // Poll for success (credential file appears) or invalid code (90s budget).
+      for (let i = 0; i < 90; i++) {
+        const existsResult = yield* active.driver
+          .exec(active.handle, `test -f ${active.spec.credentialPath}`)
           .pipe(
             Effect.mapError(
               (e) => new SandboxRpcError({ reason: "provision-failed", message: e.message }),
             ),
           );
-        yield* store
-          .set(active.spec.secretName, Buffer.from(catResult.stdout, "utf8"))
+        if (existsResult.exitCode === 0) {
+          const catResult = yield* active.driver
+            .exec(active.handle, `cat ${active.spec.credentialPath}`)
+            .pipe(
+              Effect.mapError(
+                (e) => new SandboxRpcError({ reason: "provision-failed", message: e.message }),
+              ),
+            );
+          yield* store
+            .set(active.spec.secretName, Buffer.from(catResult.stdout, "utf8"))
+            .pipe(
+              Effect.mapError(
+                (e) => new SandboxRpcError({ reason: "internal", message: e.message }),
+              ),
+            );
+          cleanupLogin(input.loginSessionId);
+          return { loginSessionId: input.loginSessionId, accepted: true };
+        }
+        const logResult = yield* active.driver
+          .exec(active.handle, `cat ${active.dir}/output.log 2>/dev/null || true`)
           .pipe(
-            Effect.mapError((e) => new SandboxRpcError({ reason: "internal", message: e.message })),
+            Effect.mapError(
+              (e) => new SandboxRpcError({ reason: "provision-failed", message: e.message }),
+            ),
           );
-        cleanupLogin(input.loginSessionId);
-        return { loginSessionId: input.loginSessionId, accepted: true };
+        const text = stripAnsi(logResult.stdout);
+        if (active.spec.invalidCodePattern.test(text)) {
+          // Keep the session alive so the user can retry with a new code; the
+          // dialog close / cancel path calls cancelProviderLogin.
+          return { loginSessionId: input.loginSessionId, accepted: false };
+        }
+        yield* Effect.sleep("1 seconds");
       }
-      const logResult = yield* active.driver
-        .exec(active.handle, `cat ${active.dir}/output.log 2>/dev/null || true`)
-        .pipe(
-          Effect.mapError(
-            (e) => new SandboxRpcError({ reason: "provision-failed", message: e.message }),
-          ),
-        );
-      const text = stripAnsi(logResult.stdout);
-      if (active.spec.invalidCodePattern.test(text)) {
-        // Keep the session alive so the user can retry with a new code; the
-        // dialog close / cancel path calls cancelProviderLogin.
-        return { loginSessionId: input.loginSessionId, accepted: false };
-      }
-      yield* Effect.sleep("1 seconds");
-    }
-    cleanupLogin(input.loginSessionId);
-    return yield* new SandboxRpcError({
-      reason: "unreachable",
-      message: "Sign-in timed out waiting for the credential file.",
-    });
+      cleanupLogin(input.loginSessionId);
+      return yield* new SandboxRpcError({
+        reason: "unreachable",
+        message: "Sign-in timed out waiting for the credential file.",
+      });
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? Effect.sync(() => cleanupLogin(input.loginSessionId)) : Effect.void,
+      ),
+    );
   });
 }
 

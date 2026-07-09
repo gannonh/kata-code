@@ -848,6 +848,12 @@ export const SandboxServiceLive = {
   renewSession: (instanceId: SandboxProviderInstanceId, input?: { readonly extendMs?: number }) =>
     Effect.gen(function* () {
       const sessionKey = instanceId as string;
+      if (busyInstances.has(sessionKey) || reconcileInProgress) {
+        return yield* new SandboxRpcError({
+          reason: "provision-failed",
+          message: "An operation is already in progress for this sandbox environment.",
+        });
+      }
       const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
       if (record === undefined || record.status !== "running") {
         return yield* new SandboxRpcError({
@@ -856,29 +862,42 @@ export const SandboxServiceLive = {
         });
       }
       const live = liveSessions.get(sessionKey);
-      if (live === undefined || live.driver.renewTimeout === undefined) {
+      const renewTimeout = live?.driver.renewTimeout;
+      if (live === undefined || renewTimeout === undefined) {
         return yield* new SandboxRpcError({
           reason: "not-running",
           message: "This sandbox driver does not support timeout renewal.",
         });
       }
-      const extendMs = input?.extendMs ?? resolveSandboxTimeoutMs(live.instanceConfig.config);
-      yield* live.driver.renewTimeout
-        .renewTimeout(live.handle, extendMs)
-        .pipe(Effect.mapError(mapDriverError));
-      // @effect-diagnostics-next-line globalDateInEffect:off - host-side deadline arithmetic.
-      const deadline = Date.now() + extendMs;
-      yield* getSessionStore()
-        .upsert({ ...record, deadlineEpochMs: deadline })
-        .pipe(
-          Effect.catch((error: unknown) =>
-            Effect.logError("Sandbox session store write failed during renew", {
-              instanceId: sessionKey,
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          ),
-        );
-      return { instanceId, deadlineEpochMs: deadline };
+      busyInstances.add(sessionKey);
+      return yield* Effect.gen(function* () {
+        const extendMs = input?.extendMs ?? resolveSandboxTimeoutMs(live.instanceConfig.config);
+        yield* renewTimeout
+          .renewTimeout(live.handle, extendMs)
+          .pipe(Effect.mapError(mapDriverError));
+        // Re-check after the provider call so a concurrent dispose cannot be
+        // resurrected by writing the stale running record back.
+        const current = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+        if (current === undefined || current.status !== "running") {
+          return yield* new SandboxRpcError({
+            reason: "not-running",
+            message: "Sandbox session was stopped or deleted during renew.",
+          });
+        }
+        // @effect-diagnostics-next-line globalDateInEffect:off - host-side deadline arithmetic.
+        const deadline = Date.now() + extendMs;
+        yield* getSessionStore()
+          .upsert({ ...current, deadlineEpochMs: deadline })
+          .pipe(
+            Effect.catch((error: unknown) =>
+              Effect.logError("Sandbox session store write failed during renew", {
+                instanceId: sessionKey,
+                message: error instanceof Error ? error.message : String(error),
+              }),
+            ),
+          );
+        return { instanceId, deadlineEpochMs: deadline };
+      }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
     }),
 
   /** Re-issue a pairing token for a running sandbox (identity recovery R2).
