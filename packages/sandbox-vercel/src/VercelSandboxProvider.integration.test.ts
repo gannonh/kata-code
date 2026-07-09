@@ -107,41 +107,35 @@ describe.skipIf(!creds)("vercel driver (credentialed)", () => {
     }),
   );
 
-  vitIt.effect("createSnapshot then provision-from-snapshot skips bootstrap (AC-3b.7)", () =>
+  vitIt.effect("lifecycle.stop/start preserves filesystem across stop (AC-L3)", () =>
     Effect.gen(function* () {
       const provider = VercelSandboxProvider;
-      // Seed the snapshot capability's auth via a prior validate.
-      yield* runOrNull(provider.validate({ ...DEFAULT_VERCEL_CONFIG, auth }));
       yield* Effect.acquireUseRelease(
         provider.provision({
-          instanceId: `kata-test-snap-${Date.now().toString(36)}`,
-          config: { ...DEFAULT_VERCEL_CONFIG, auth },
+          instanceId: `kata-test-life-${Date.now().toString(36)}`,
+          config: { ...DEFAULT_VERCEL_CONFIG, auth, persistent: true },
           image: "",
           env: [],
         }),
         (handle) =>
           Effect.gen(function* () {
-            const snap = yield* provider.snapshot!.createSnapshot(handle as SandboxHandle);
-            expect(snap.snapshotId).toMatch(/^snap_/);
-            const start = Date.now();
-            yield* Effect.acquireUseRelease(
-              provider.provision({
-                instanceId: `kata-test-snapboot-${Date.now().toString(36)}`,
-                config: {
-                  ...DEFAULT_VERCEL_CONFIG,
-                  auth,
-                  sourceType: "snapshot",
-                  snapshotId: snap.snapshotId,
-                },
-                image: "",
-                env: [],
-              }),
-              (_fromSnap) => Effect.void,
-              (fromSnap) => provider.dispose(fromSnap as SandboxHandle),
-            );
-            const readyMs = Date.now() - start;
-            // Visible in the test runner's effect log output.
-            yield* Effect.logInfo(`[vercel] snapshot-boot time-to-ready: ${readyMs}ms`);
+            yield* provider.lifecycle!.stop(handle as SandboxHandle);
+            const status = yield* provider.lifecycle!.status(handle as SandboxHandle);
+            expect(status).toBe("stopped");
+            const started = yield* provider.lifecycle!.start(handle as SandboxHandle, {
+              config: { ...DEFAULT_VERCEL_CONFIG, auth, persistent: true },
+              env: [],
+            });
+            const reach = yield* provider.reachability(
+              started,
+              13773,
+            ) as Effect.Effect<SandboxReachability>;
+            const res = yield* Effect.tryPromise({
+              try: () =>
+                fetch(`${reach.httpBaseUrl}/healthz`, { signal: AbortSignal.timeout(10_000) }),
+              catch: (e) => new Error(String(e)),
+            });
+            expect(res.status).toBe(200);
           }),
         (handle) => provider.dispose(handle as SandboxHandle),
       );

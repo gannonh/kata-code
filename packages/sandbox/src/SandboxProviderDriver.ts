@@ -44,6 +44,13 @@ export interface SandboxProvisionRequest {
   readonly image: string;
   /** Optional in-container env vars (already materialized with secrets). */
   readonly env?: ReadonlyArray<readonly [string, string]>;
+  /**
+   * Optional stable namespace for cloud sandbox names that must be unique across
+   * Kata server installations sharing one cloud project (e.g. Vercel). Typically
+   * the server environment id. Absent ⇒ driver derives the name from
+   * `instanceId` alone (fine for local Docker).
+   */
+  readonly nameNamespace?: string;
 }
 
 /** Result of `exec(handle, cmd)`. */
@@ -157,6 +164,8 @@ export interface SandboxLifecycleCapability {
     readonly instanceId: string;
     readonly config: unknown;
     readonly env?: ReadonlyArray<readonly [string, string]>;
+    /** Same namespace as `SandboxProvisionRequest.nameNamespace` when present. */
+    readonly nameNamespace?: string;
   }): Effect.Effect<
     { readonly handle: SandboxHandle; readonly status: SandboxLifecycleStatus } | null,
     SandboxProviderError

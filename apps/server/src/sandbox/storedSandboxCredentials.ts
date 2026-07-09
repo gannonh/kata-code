@@ -65,9 +65,7 @@ export function loadStoredSandboxCredentials(): Effect.Effect<
       readonly mode: number;
     }> = [];
     for (const spec of SANDBOX_CREDENTIAL_SECRETS) {
-      const bytes = yield* store
-        .get(spec.secretName)
-        .pipe(Effect.catch(() => Effect.succeed(null)));
+      const bytes = yield* store.get(spec.secretName).pipe(Effect.orElseSucceed(() => null));
       if (bytes === null) continue;
       loaded.push({ relativePath: spec.relativePath, content: bytes, mode: spec.mode });
     }

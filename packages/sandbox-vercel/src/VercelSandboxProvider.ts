@@ -96,15 +96,28 @@ export interface VercelSandboxHandleState {
  *  whole name within the SDK's name rules. */
 const SANDBOX_NAME_PREFIX = "kata-";
 
-/** Derive a deterministic Vercel sandbox name from an instance id. Instance
- *  ids are slug-safe and unique within a Kata server; the Vercel sandbox
- *  name is project-unique (scoped to the configured projectId), so the
- *  instance id alone is a stable, collision-free address. The result is
- *  lowercased and any underscores replaced with dashes to match Vercel's
- *  `[a-z0-9-]+` name rule. */
-export function vercelSandboxName(instanceId: string): string {
-  const slug = instanceId.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
-  return `${SANDBOX_NAME_PREFIX}${slug}`;
+/** Slugify a fragment for Vercel sandbox names (`[a-z0-9-]+`). */
+function vercelNameSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Derive a deterministic Vercel sandbox name. Vercel names are project-unique,
+ * so two Kata servers sharing one Vercel project must not collide on the same
+ * instance id. Pass `nameNamespace` (typically the server environment id) to
+ * scope the name; when omitted the name is `kata-<instanceId>` (local/single-
+ * server). The result is clamped to 63 characters (Vercel name limit).
+ */
+export function vercelSandboxName(instanceId: string, nameNamespace?: string): string {
+  const slug = vercelNameSlug(instanceId);
+  const ns = nameNamespace !== undefined ? vercelNameSlug(nameNamespace).slice(0, 24) : "";
+  const raw =
+    ns.length > 0 ? `${SANDBOX_NAME_PREFIX}${ns}-${slug}` : `${SANDBOX_NAME_PREFIX}${slug}`;
+  return raw.slice(0, 63).replace(/-+$/g, "");
 }
 
 // ── Error mapping ─────────────────────────────────────────────────────
@@ -374,7 +387,7 @@ export function makeVercelSandboxProvider(
           // No credentials to probe with — nothing to discover.
           return null;
         }
-        const name = vercelSandboxName(req.instanceId);
+        const name = vercelSandboxName(req.instanceId, req.nameNamespace);
         const result = yield* trySdk(
           "lifecycle.discover",
           () => sdk.get({ sandboxId: name, resume: false, ...auth }),
@@ -499,7 +512,7 @@ export function makeVercelSandboxProvider(
           });
         }
         const createEnv = buildCreateEnv(req);
-        const name = vercelSandboxName(req.instanceId);
+        const name = vercelSandboxName(req.instanceId, req.nameNamespace);
         const persistent = decoded.persistent;
         // NEVER retry create — it is billable and non-idempotent.
         const sb = yield* trySdk(

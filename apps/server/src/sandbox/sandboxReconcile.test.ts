@@ -439,7 +439,7 @@ describe("sanitizeHandleForStore / reinjectVercelAuth (no plaintext secrets)", (
         status: "running",
       }),
     );
-    const file = NodePath.join(home, "userdata", "sandbox-sessions.json");
+    const file = NodePath.join(home, "sandbox-sessions.json");
     const raw = await NodeFs.readFile(file, "utf8");
     expect(raw).not.toContain("secret-token");
     expect(raw).not.toContain('"auth"');

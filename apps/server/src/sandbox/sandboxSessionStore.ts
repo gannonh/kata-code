@@ -25,6 +25,7 @@
 import * as NodeFs from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import type { AdvertisedEndpoint } from "@kata-sh/code-contracts";
@@ -76,9 +77,10 @@ type SandboxSessionStoreFile = typeof SandboxSessionStoreFile.Type;
 // Hoist compiled schema function to module scope (kata-code/no-inline-schema-compile).
 const decodeSandboxSessionRecord = Schema.decodeUnknownSync(SandboxSessionRecord);
 
-/** Resolve the store file path under the katacode home `userdata/` dir. */
-function storeFilePath(katacodeHome: string): string {
-  return NodePath.join(katacodeHome, "userdata", "sandbox-sessions.json");
+/** Resolve the store file path under the server state directory
+ *  (`ServerConfig.stateDir` — already `…/userdata` or `…/dev`). */
+function storeFilePath(stateDir: string): string {
+  return NodePath.join(stateDir, "sandbox-sessions.json");
 }
 
 let atomicWriteSeq = 0;
@@ -148,12 +150,14 @@ function decodeStore(raw: unknown): ReadonlyArray<SandboxSessionRecord> {
 }
 
 /**
- * Create a sandbox session store backed by `<katacodeHome>/userdata/sandbox-sessions.json`.
- * The store loads lazily on first access and caches records in memory; `save`
- * persists atomically and updates the cache.
+ * Create a sandbox session store backed by `<stateDir>/sandbox-sessions.json`.
+ * Pass `ServerConfig.stateDir` (respects `KATACODE_HOME` / `--base-dir`) so the
+ * store lives with the rest of server state. The store loads lazily on first
+ * access and caches records in memory; `save` persists atomically and updates
+ * the cache.
  */
-export function makeSandboxSessionStore(katacodeHome: string): SandboxSessionStore {
-  const filePath = storeFilePath(katacodeHome);
+export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
+  const filePath = storeFilePath(stateDir);
   let cached: ReadonlyArray<SandboxSessionRecord> | null = null;
   /** Serialize mutations so concurrent upsert/save/remove cannot interleave
    *  read-modify-write against the in-memory cache. */
@@ -190,10 +194,11 @@ export function makeSandboxSessionStore(katacodeHome: string): SandboxSessionSto
       cached = [];
       return cached;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw) as unknown;
-    } catch {
+    const parsed = yield* Effect.try({
+      try: () => JSON.parse(raw) as unknown,
+      catch: () => new Error("corrupt sandbox session store JSON"),
+    }).pipe(Effect.option);
+    if (Option.isNone(parsed)) {
       // Corrupt JSON: start empty rather than crashing the server.
       yield* Effect.logWarning("Sandbox session store JSON is corrupt; starting empty", {
         path: filePath,
@@ -201,7 +206,7 @@ export function makeSandboxSessionStore(katacodeHome: string): SandboxSessionSto
       cached = [];
       return cached;
     }
-    const decoded = decodeStore(parsed);
+    const decoded = decodeStore(parsed.value);
     cached = decoded;
     return cached;
   });

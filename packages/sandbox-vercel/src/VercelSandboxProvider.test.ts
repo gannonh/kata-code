@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 
 import type { SandboxProvider } from "@kata-sh/code-sandbox/driver";
 
-import { makeVercelSandboxProvider } from "./VercelSandboxProvider.ts";
+import { makeVercelSandboxProvider, vercelSandboxName } from "./VercelSandboxProvider.ts";
 import type { VercelAuthParams, VercelSandboxInstance, VercelSdk } from "./sdk.ts";
 import { DEFAULT_VERCEL_CONFIG } from "./config.ts";
 
@@ -296,6 +296,26 @@ describe("VercelSandboxProvider", () => {
       });
       const names = (state.createCalls as Array<{ name?: string }>).map((c) => c.name);
       expect(names).toEqual(["kata-inst-1", "kata-inst-1"]);
+    }),
+  );
+
+  vitIt.effect("provision scopes the sandbox name with nameNamespace (server identity)", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk();
+      const provider = makeProvider(sdk);
+      const handle = yield* provider.provision({
+        instanceId: "inst_1",
+        nameNamespace: "env_server_abc",
+        config: configWithAuth(),
+        image: "",
+        env: [],
+      });
+      const expected = vercelSandboxName("inst_1", "env_server_abc");
+      expect(expected).toBe("kata-env-server-abc-inst-1");
+      expect((state.createCalls[0] as { name?: string }).name).toBe(expected);
+      expect((handle.handle as { sandboxId: string }).sandboxId).toBe(expected);
+      // Distinct namespaces must not collide for the same instance id.
+      expect(vercelSandboxName("inst_1", "env_other")).not.toBe(expected);
     }),
   );
 

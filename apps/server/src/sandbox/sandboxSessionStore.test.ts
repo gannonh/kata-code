@@ -100,8 +100,8 @@ describe("SandboxSessionStore", () => {
   it("survives a corrupt JSON file by starting empty", async () => {
     const home = await tmpKatacodeHome();
     try {
-      const storePath = NodePath.join(home, "userdata", "sandbox-sessions.json");
-      await NodeFs.mkdir(NodePath.dirname(storePath), { recursive: true });
+      const storePath = NodePath.join(home, "sandbox-sessions.json");
+      await NodeFs.mkdir(home, { recursive: true });
       await NodeFs.writeFile(storePath, "{not valid json", "utf8");
       const store = makeSandboxSessionStore(home);
       const records = await Effect.runPromise(store.load());
@@ -118,7 +118,7 @@ describe("SandboxSessionStore", () => {
       await Effect.runPromise(
         store.upsert(makeRecord({ status: "stopped", statusDetail: "auth missing" })),
       );
-      const storePath = NodePath.join(home, "userdata", "sandbox-sessions.json");
+      const storePath = NodePath.join(home, "sandbox-sessions.json");
       const raw = await NodeFs.readFile(storePath, "utf8");
       const parsed = JSON.parse(raw) as { records: SandboxSessionRecord[] };
       expect(parsed.records).toHaveLength(1);
@@ -157,7 +157,7 @@ describe("SandboxSessionStore", () => {
           }),
         ),
       );
-      const storePath = NodePath.join(home, "userdata", "sandbox-sessions.json");
+      const storePath = NodePath.join(home, "sandbox-sessions.json");
       const raw = await NodeFs.readFile(storePath, "utf8");
       // The serialized file must not contain any secret field names.
       expect(raw).not.toContain("bearerToken");
@@ -179,8 +179,8 @@ describe("SandboxSessionStore", () => {
   it("evicts invalid records individually while keeping valid ones (per-entry eviction)", async () => {
     const home = await tmpKatacodeHome();
     try {
-      const storePath = NodePath.join(home, "userdata", "sandbox-sessions.json");
-      await NodeFs.mkdir(NodePath.dirname(storePath), { recursive: true });
+      const storePath = NodePath.join(home, "sandbox-sessions.json");
+      await NodeFs.mkdir(home, { recursive: true });
       // Write a file with one valid record and one invalid (missing required fields).
       const fileContents = JSON.stringify({
         records: [
@@ -216,7 +216,7 @@ describe("SandboxSessionStore", () => {
       );
       const loaded = await Effect.runPromise(store.load());
       expect(loaded.map((r) => r.instanceId).toSorted()).toEqual(["a", "b", "c", "d"]);
-      const storePath = NodePath.join(home, "userdata", "sandbox-sessions.json");
+      const storePath = NodePath.join(home, "sandbox-sessions.json");
       const raw = await NodeFs.readFile(storePath, "utf8");
       expect(JSON.parse(raw).records).toHaveLength(4);
     } finally {

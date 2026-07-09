@@ -73,7 +73,7 @@ import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
-import { SandboxServiceLive } from "./sandbox/SandboxService.ts";
+import { configureSandboxRuntime, SandboxServiceLive } from "./sandbox/SandboxService.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -216,6 +216,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.sandboxIssuePairingToken, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxProviderLoginStart, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxProviderLoginSubmitCode, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxProviderLoginCancel, AuthOrchestrationOperateScope],
 ]);
 
 function toAuthAccessStreamEvent(
@@ -287,6 +288,11 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
+      const sandboxEnvironmentId = yield* serverEnvironment.getEnvironmentId;
+      configureSandboxRuntime({
+        stateDir: config.stateDir,
+        nameNamespace: sandboxEnvironmentId as string,
+      });
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
       const sourceControlDiscovery = yield* SourceControlDiscoveryLayer.SourceControlDiscovery;
       const automaticGitFetchInterval = serverSettings.getSettings.pipe(
@@ -1151,6 +1157,12 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(
             WS_METHODS.sandboxProviderLoginSubmitCode,
             SandboxServiceLive.providerLoginSubmitCode({ instanceId, loginSessionId, code }),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxProviderLoginCancel]: ({ instanceId, loginSessionId }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxProviderLoginCancel,
+            SandboxServiceLive.providerLoginCancel({ instanceId, loginSessionId }),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>

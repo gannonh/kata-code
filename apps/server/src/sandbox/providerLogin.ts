@@ -115,6 +115,8 @@ export function startProviderLogin(input: {
   readonly driver: SandboxProvider;
   readonly handle: SandboxHandle;
   readonly providerId: string;
+  /** Override the URL-poll budget (default 180 × 1s). Tests pass 1–2. */
+  readonly urlPollAttempts?: number;
 }): Stream.Stream<SandboxProviderLoginEvent, SandboxRpcError> {
   const spec = PROVIDER_LOGIN_SPECS.find((s) => s.providerId === input.providerId);
   if (spec === undefined) {
@@ -177,8 +179,9 @@ export function startProviderLogin(input: {
     Stream.flatMap((id) =>
       Stream.fromEffect(
         Effect.gen(function* () {
-          // Poll the output log for the OAuth URL (180s budget).
-          for (let i = 0; i < 180; i++) {
+          // Poll the output log for the OAuth URL (default 180s budget).
+          const attempts = input.urlPollAttempts ?? 180;
+          for (let i = 0; i < attempts; i++) {
             const result = yield* input.driver
               .exec(input.handle, `cat ${dir}/output.log 2>/dev/null || true`)
               .pipe(
@@ -196,6 +199,9 @@ export function startProviderLogin(input: {
             }
             yield* Effect.sleep("1 seconds");
           }
+          // URL timeout: tear down the FIFO/process and drop the active entry
+          // so a cancelled/abandoned dialog cannot leak sandbox resources.
+          cleanupLogin(id);
           return [
             {
               stage: "error",
@@ -215,6 +221,7 @@ export function startProviderLogin(input: {
  * On success, captures the credential into `ServerSecretStore`.
  */
 export function submitProviderLoginCode(input: {
+  readonly instanceId?: string;
   readonly loginSessionId: string;
   readonly code: string;
 }): Effect.Effect<
@@ -228,6 +235,12 @@ export function submitProviderLoginCode(input: {
       return yield* new SandboxRpcError({
         reason: "not-running",
         message: "No active sign-in session for that id.",
+      });
+    }
+    if (input.instanceId !== undefined && active.instanceId !== input.instanceId) {
+      return yield* new SandboxRpcError({
+        reason: "invalid-config",
+        message: "Sign-in session does not belong to this sandbox instance.",
       });
     }
     if (!CODE_PATTERN.test(input.code)) {
@@ -281,6 +294,8 @@ export function submitProviderLoginCode(input: {
         );
       const text = stripAnsi(logResult.stdout);
       if (active.spec.invalidCodePattern.test(text)) {
+        // Keep the session alive so the user can retry with a new code; the
+        // dialog close / cancel path calls cancelProviderLogin.
         return { loginSessionId: input.loginSessionId, accepted: false };
       }
       yield* Effect.sleep("1 seconds");
@@ -293,6 +308,19 @@ export function submitProviderLoginCode(input: {
   });
 }
 
+/** Cancel an in-flight sign-in (dialog close / stream abort). Idempotent.
+ *  When `instanceId` is provided, only cancels if the active session belongs
+ *  to that instance (cross-instance cancel is a no-op). */
+export function cancelProviderLogin(input: {
+  readonly loginSessionId: string;
+  readonly instanceId?: string;
+}): void {
+  const active = activeLogins.get(input.loginSessionId);
+  if (active === undefined) return;
+  if (input.instanceId !== undefined && active.instanceId !== input.instanceId) return;
+  cleanupLogin(input.loginSessionId);
+}
+
 /** Best-effort cleanup of a login session's FIFO/log + active-login entry. */
 function cleanupLogin(loginSessionId: string): void {
   const active = activeLogins.get(loginSessionId);
@@ -301,4 +329,9 @@ function cleanupLogin(loginSessionId: string): void {
     .exec(active.handle, `pkill -f '${active.dir}' ; rm -rf ${active.dir}`)
     .pipe(Effect.ignore, Effect.runFork);
   activeLogins.delete(loginSessionId);
+}
+
+/** Test-only: whether a login session is still tracked (leak detection). */
+export function hasActiveProviderLogin(loginSessionId: string): boolean {
+  return activeLogins.has(loginSessionId);
 }

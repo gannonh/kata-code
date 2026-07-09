@@ -199,6 +199,7 @@ export interface WsRpcClient {
     readonly providerLoginSubmitCode: RpcUnaryMethod<
       typeof WS_METHODS.sandboxProviderLoginSubmitCode
     >;
+    readonly providerLoginCancel: RpcUnaryMethod<typeof WS_METHODS.sandboxProviderLoginCancel>;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -460,6 +461,8 @@ export function createWsRpcClient(
       },
       providerLoginSubmitCode: (input) =>
         transport.request((client) => client[WS_METHODS.sandboxProviderLoginSubmitCode](input)),
+      providerLoginCancel: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxProviderLoginCancel](input)),
     },
     orchestration: {
       dispatchCommand: (input) =>

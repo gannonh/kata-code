@@ -87,6 +87,8 @@ import {
   SandboxProviderLoginStartInput,
   SandboxProviderLoginSubmitCodeInput,
   SandboxProviderLoginSubmitCodeResult,
+  SandboxProviderLoginCancelInput,
+  SandboxProviderLoginCancelResult,
   SandboxRenewSessionInput,
   SandboxRenewSessionResult,
   SandboxRpcError,
@@ -262,6 +264,7 @@ export const WS_METHODS = {
   sandboxIssuePairingToken: "sandbox.issuePairingToken",
   sandboxProviderLoginStart: "sandbox.providerLoginStart",
   sandboxProviderLoginSubmitCode: "sandbox.providerLoginSubmitCode",
+  sandboxProviderLoginCancel: "sandbox.providerLoginCancel",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -372,6 +375,12 @@ export const WsSandboxProviderLoginSubmitCodeRpc = Rpc.make(
     error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
   },
 );
+
+export const WsSandboxProviderLoginCancelRpc = Rpc.make(WS_METHODS.sandboxProviderLoginCancel, {
+  payload: SandboxProviderLoginCancelInput,
+  success: SandboxProviderLoginCancelResult,
+  error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+});
 
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
   payload: Schema.Struct({}),
@@ -786,6 +795,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxIssuePairingTokenRpc,
   WsSandboxProviderLoginStartRpc,
   WsSandboxProviderLoginSubmitCodeRpc,
+  WsSandboxProviderLoginCancelRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,

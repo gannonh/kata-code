@@ -29,6 +29,12 @@ describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
     );
   });
 
+  it("testConnection probe ids do not collide with durable container names", () => {
+    const durable = "docker_docker_test_01";
+    const probe = `${durable}__probe_abcd1234`;
+    expect(dockerContainerName(probe)).not.toBe(dockerContainerName(durable));
+  });
+
   it("kind is the branded 'docker' slug", () => {
     expect(DOCKER_KIND as string).toBe("docker");
   });

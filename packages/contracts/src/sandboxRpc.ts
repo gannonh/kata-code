@@ -227,6 +227,18 @@ export const SandboxProviderLoginSubmitCodeResult = Schema.Struct({
 });
 export type SandboxProviderLoginSubmitCodeResult = typeof SandboxProviderLoginSubmitCodeResult.Type;
 
+/** Cancel an in-flight provider sign-in (dialog close / stream abort). */
+export const SandboxProviderLoginCancelInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  loginSessionId: TrimmedNonEmptyString,
+});
+export type SandboxProviderLoginCancelInput = typeof SandboxProviderLoginCancelInput.Type;
+export const SandboxProviderLoginCancelResult = Schema.Struct({
+  loginSessionId: TrimmedNonEmptyString,
+  cancelled: Schema.Boolean,
+});
+export type SandboxProviderLoginCancelResult = typeof SandboxProviderLoginCancelResult.Type;
+
 export class SandboxRpcError extends Schema.TaggedErrorClass<SandboxRpcError>()("SandboxRpcError", {
   reason: Schema.Literals([
     "unknown-driver",
