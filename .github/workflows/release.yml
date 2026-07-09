@@ -54,7 +54,7 @@ jobs:
         name: Compare HEAD to last nightly tag
         run: |
           set -euo pipefail
-          last_nightly_tag=$(git tag --list 'v*-nightly.*' 'nightly-v*' --sort=-creatordate | head -n 1)
+          last_nightly_tag="$(git for-each-ref --sort=-creatordate --format='%(refname:short)' --count=1 'refs/tags/v*-nightly.*' 'refs/tags/nightly-v*')"
           if [[ -z "$last_nightly_tag" ]]; then
             echo "No previous nightly tag found. Proceeding with release."
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
@@ -149,7 +149,7 @@ jobs:
                 # No version input: derive from the most recent nightly tag's
                 # stable core (vX.Y.Z-nightly.* -> X.Y.Z). A stable release always
                 # ships the version last validated on nightly.
-                latest_nightly="$(git tag --list 'v*-nightly.*' --sort=-creatordate | head -n 1)"
+                latest_nightly="$(git for-each-ref --sort=-creatordate --format='%(refname:short)' --count=1 'refs/tags/v*-nightly.*')"
                 if [[ -n "$latest_nightly" ]]; then
                   raw="${latest_nightly#v}"
                   raw="${raw%%-nightly.*}"
