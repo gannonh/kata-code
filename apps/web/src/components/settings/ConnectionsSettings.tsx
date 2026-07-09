@@ -1541,6 +1541,10 @@ export function SavedBackendListRow({
   const isDisconnecting = disconnectingEnvironmentId === environmentId;
   const isStoppedSandbox = sandboxLifecycleState === "stopped";
   const isGoneSandbox = sandboxLifecycleState === "gone";
+  // Legacy sandbox record that could not be joined by id: offer Connect (in
+  // case it is reachable) plus an explicit Remove so a dead orphan is never a
+  // dead end. Never auto-removed.
+  const isUnknownSandbox = sandboxLifecycleState === "unknown";
   const stateDotClassName = isStoppedSandbox
     ? "bg-muted-foreground/40"
     : connectionState === "connected"
@@ -1614,22 +1618,33 @@ export function SavedBackendListRow({
               Sandbox is stopped — start it under Environments.
             </span>
           ) : (
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={isConnected ? isDisconnecting : isConnecting}
-              onClick={() =>
-                void (isConnected ? onDisconnect(environmentId) : onConnect(environmentId))
-              }
-            >
-              {isConnected
-                ? isDisconnecting
-                  ? "Disconnecting…"
-                  : "Disconnect"
-                : isConnecting
-                  ? "Connecting…"
-                  : "Connect"}
-            </Button>
+            <>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isConnected ? isDisconnecting : isConnecting}
+                onClick={() =>
+                  void (isConnected ? onDisconnect(environmentId) : onConnect(environmentId))
+                }
+              >
+                {isConnected
+                  ? isDisconnecting
+                    ? "Disconnecting…"
+                    : "Disconnect"
+                  : isConnecting
+                    ? "Connecting…"
+                    : "Connect"}
+              </Button>
+              {isUnknownSandbox && !isConnected ? (
+                <Button
+                  size="xs"
+                  variant="destructive-outline"
+                  onClick={() => void onRemove(environmentId)}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </>
           )}
         </div>
       </div>

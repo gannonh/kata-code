@@ -75,9 +75,9 @@ describe("SavedBackendListRow sandbox lifecycle rendering (AC-L13)", () => {
     expect(html).not.toContain(">Connect<");
   });
 
-  it("unknown (legacy record): shows Connect and is never auto-removed", () => {
+  it("unknown (legacy record): shows Connect plus an explicit Remove", () => {
     const html = renderRow("unknown");
     expect(html).toContain(">Connect<");
-    expect(html).not.toContain(">Remove<");
+    expect(html).toContain(">Remove<");
   });
 });
