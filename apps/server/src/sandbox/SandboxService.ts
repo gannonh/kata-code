@@ -996,12 +996,15 @@ let reconcileDone = false;
  *  Reconcile failures keep the last-known status and set `statusDetail`.
  *  Pure/testable: takes the store, registry, settings, and the liveSessions
  *  cache to populate; returns the updated records (also persisted). */
-export function reconcileStoredRecords(input: {
+export function reconcileStoredRecords<R = never>(input: {
   readonly store: SandboxSessionStore;
   readonly registry: SandboxProviderRegistry;
   readonly settings: ServerSettings;
   readonly liveSessions: Map<string, LiveSession>;
-}): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, never> {
+  /** Best-effort relay unlink for records evicted as `gone` (identity
+   *  recovery R3). Log-only failure; absent in unit tests. */
+  readonly unlinkRelay?: (record: SandboxSessionRecord) => Effect.Effect<void, never, R>;
+}): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, never, R> {
   return Effect.gen(function* () {
     const records = yield* input.store
       .load()
@@ -1070,6 +1073,11 @@ export function reconcileStoredRecords(input: {
             yield* Effect.logWarning("Sandbox session store: provider reports gone; evicting", {
               instanceId: record.instanceId,
             });
+            // R3: best-effort relay unlink so the evicted sandbox does not
+            // linger in the Connect pool as a dead relay row.
+            if (input.unlinkRelay !== undefined && record.relay !== undefined) {
+              yield* input.unlinkRelay(record);
+            }
             continue; // evict
           }
           // Drop any prior statusDetail (exactOptionalPropertyTypes: omit the
@@ -1121,7 +1129,9 @@ export function reconcileStoredRecords(input: {
   });
 }
 
-function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never> {
+function reconcileSessions(
+  settings: ServerSettings,
+): Effect.Effect<void, never, CliTokenManager.CloudCliTokenManager> {
   return Effect.gen(function* () {
     if (reconcileDone) return;
     yield* reconcileStoredRecords({
@@ -1129,6 +1139,7 @@ function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never>
       registry: buildRegistry(),
       settings,
       liveSessions,
+      unlinkRelay: (record) => unlinkSandboxFromRelay(record),
     });
     // Discovery: for configured instances with supportsLifecycle and no store
     // record, probe the provider for an existing sandbox (e.g. created before
@@ -1141,6 +1152,39 @@ function reconcileSessions(settings: ServerSettings): Effect.Effect<void, never>
       liveSessions,
     });
     reconcileDone = true;
+  });
+}
+
+/** Best-effort relay unlink for a session record (dispose + gone-eviction
+ *  share this). The bearer token is never stored; re-resolve it. All failures
+ *  log and succeed — a dead relay link lapses on its own eventually. */
+function unlinkSandboxFromRelay(
+  record: SandboxSessionRecord,
+): Effect.Effect<void, never, CliTokenManager.CloudCliTokenManager> {
+  return Effect.gen(function* () {
+    if (record.relay === undefined) return;
+    const bearerToken = yield* resolveConnectAuthToken(undefined, "stored-first").pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    if (bearerToken === null) {
+      yield* Effect.logWarning("Sandbox relay unlink skipped: no Connect credential", {
+        environmentId: record.sandboxEnvironmentId,
+      });
+      return;
+    }
+    yield* deleteJson(
+      RelayOkResponse,
+      `${record.relay.relayUrl}/v1/client/environment-links/${record.sandboxEnvironmentId}`,
+      bearerToken,
+    ).pipe(
+      Effect.asVoid,
+      Effect.catch((error: SandboxRpcError) =>
+        Effect.logWarning("Could not unlink sandbox from relay", {
+          environmentId: record.sandboxEnvironmentId,
+          message: error.message,
+        }).pipe(Effect.asVoid),
+      ),
+    );
   });
 }
 

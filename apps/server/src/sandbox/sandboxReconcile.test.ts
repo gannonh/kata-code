@@ -198,12 +198,15 @@ describe("reconcileStoredRecords (AC-L7)", () => {
   it("evicts a record when the provider lifecycle.status returns gone", async () => {
     const home = await tmpKatacodeHome();
     const store = makeSandboxSessionStore(home);
-    await Effect.runPromise(store.upsert(makeRecord("gone_01", "running")));
+    await Effect.runPromise(
+      store.upsert({ ...makeRecord("gone_01", "running"), relay: { relayUrl: "https://r.test" } }),
+    );
     const { driver } = makeFakeDriver(() => "gone");
     const registry = new SandboxProviderRegistry();
     registry.register(driver, () => ({}));
 
     const liveSessions = new Map<string, LiveSession>();
+    const unlinked: string[] = [];
 
     const updated = await Effect.runPromise(
       reconcileStoredRecords({
@@ -211,6 +214,10 @@ describe("reconcileStoredRecords (AC-L7)", () => {
         registry,
         settings: settingsWithInstance("gone_01"),
         liveSessions,
+        unlinkRelay: (record) =>
+          Effect.sync(() => {
+            unlinked.push(record.sandboxEnvironmentId);
+          }),
       }),
     );
 
@@ -221,6 +228,8 @@ describe("reconcileStoredRecords (AC-L7)", () => {
     // A gone record is not cached (review issue #2): providerLogin cannot
     // operate on a sandbox the provider reports as gone.
     expect(liveSessions.get("gone_01")).toBeUndefined();
+    // R3: gone eviction attempted the relay unlink.
+    expect(unlinked).toEqual(["env_gone_01"]);
   });
 
   it("keeps the last-known status and sets statusDetail when reconcile fails", async () => {
