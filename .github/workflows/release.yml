@@ -394,17 +394,17 @@ jobs:
       - name: Resolve Electron version for cache
         id: electron
         shell: bash
+        env:
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./apps/desktop/package.json').dependencies.electron")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          case "${{ matrix.platform }}" in
-            mac) electron_platform=darwin ;;
-            win) electron_platform=win32 ;;
-            linux) electron_platform=linux ;;
-            *) echo "Unsupported matrix platform: ${{ matrix.platform }}" >&2; exit 1 ;;
-          esac
-          zip_name="electron-v${version}-${electron_platform}-${{ matrix.arch }}.zip"
+          zip_name="$(
+            ELECTRON_VERSION="$version" MATRIX_PLATFORM="$MATRIX_PLATFORM" MATRIX_ARCH="$MATRIX_ARCH" \
+              node scripts/prefetch-electron-release-zip.mjs --print-name
+          )"
           echo "zip_name=$zip_name" >> "$GITHUB_OUTPUT"
           echo "cache_dir=$RUNNER_TEMP/electron-cache" >> "$GITHUB_OUTPUT"
 
@@ -420,24 +420,9 @@ jobs:
           ELECTRON_CACHE_DIR: ${{ steps.electron.outputs.cache_dir }}
           ELECTRON_ZIP_NAME: ${{ steps.electron.outputs.zip_name }}
           ELECTRON_VERSION: ${{ steps.electron.outputs.version }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$ELECTRON_CACHE_DIR"
-          zip_path="$ELECTRON_CACHE_DIR/$ELECTRON_ZIP_NAME"
-          if [[ -f "$zip_path" ]]; then
-            echo "Reusing cached Electron zip: $zip_path"
-            exit 0
-          fi
-          case "${{ matrix.platform }}" in
-            mac) electron_platform=darwin ;;
-            win) electron_platform=win32 ;;
-            linux) electron_platform=linux ;;
-          esac
-          url="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-${electron_platform}-${{ matrix.arch }}.zip"
-          echo "Downloading $url"
-          curl -fsSL --retry 8 --retry-all-errors --retry-delay 2 --connect-timeout 30 \
-            -o "$zip_path" "$url"
-          ls -lh "$zip_path"
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: node scripts/prefetch-electron-release-zip.mjs --download
 
       - name: Install Spectre-mitigated MSVC libs
         if: matrix.platform == 'win'
