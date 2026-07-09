@@ -234,8 +234,9 @@ export const liveVercelSdk: VercelSdk = {
       projectId: params.projectId,
       limit: 1,
     });
-    // Drain the first page so the API call actually executes.
-    await result.toArray().catch(() => undefined);
+    // Drain the first page so the API call actually executes. Propagate
+    // auth/network failures so `validate` can map them to `invalid-config`.
+    await result.toArray();
   },
   getSnapshot: async (params) => {
     try {

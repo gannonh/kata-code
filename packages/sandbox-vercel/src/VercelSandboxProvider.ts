@@ -109,15 +109,24 @@ function vercelNameSlug(value: string): string {
  * Derive a deterministic Vercel sandbox name. Vercel names are project-unique,
  * so two Kata servers sharing one Vercel project must not collide on the same
  * instance id. Pass `nameNamespace` (typically the server environment id) to
- * scope the name; when omitted the name is `kata-<instanceId>` (local/single-
- * server). The result is clamped to 63 characters (Vercel name limit).
+ * scope the name.
+ *
+ * Slugification collapses `_` and `-` (and other non `[a-z0-9-]`) to `-`, so
+ * distinct instance ids like `vercel_foo_bar` and `vercel_foo-bar` would
+ * otherwise share a name. A short hash of the raw identity is appended so
+ * those configs stay distinct. The result is clamped to 63 characters
+ * (Vercel name limit), preserving the hash suffix.
  */
 export function vercelSandboxName(instanceId: string, nameNamespace?: string): string {
   const slug = vercelNameSlug(instanceId);
   const ns = nameNamespace !== undefined ? vercelNameSlug(nameNamespace).slice(0, 24) : "";
-  const raw =
+  const identity = nameNamespace !== undefined ? `${nameNamespace}\0${instanceId}` : instanceId;
+  const suffix = NodeCrypto.createHash("sha256").update(identity).digest("hex").slice(0, 8);
+  const bodyRaw =
     ns.length > 0 ? `${SANDBOX_NAME_PREFIX}${ns}-${slug}` : `${SANDBOX_NAME_PREFIX}${slug}`;
-  return raw.slice(0, 63).replace(/-+$/g, "");
+  // Reserve `-` + 8-char hash within the 63-char Vercel limit.
+  const body = bodyRaw.slice(0, 63 - 1 - suffix.length).replace(/-+$/g, "");
+  return `${body}-${suffix}`;
 }
 
 // ── Error mapping ─────────────────────────────────────────────────────

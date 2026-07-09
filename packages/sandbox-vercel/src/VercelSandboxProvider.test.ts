@@ -9,6 +9,8 @@ import type { VercelAuthParams, VercelSandboxInstance, VercelSdk } from "./sdk.t
 import { DEFAULT_VERCEL_CONFIG } from "./config.ts";
 
 const AUTH: VercelAuthParams = { token: "tok", teamId: "team_1", projectId: "prj_1" };
+/** Deterministic Vercel name for the common `inst_1` fixture (includes hash suffix). */
+const INST_1_NAME = vercelSandboxName("inst_1");
 
 /** Provider factory with a healthz probe that always succeeds (no network). */
 function makeProvider(sdk: VercelSdk): SandboxProvider {
@@ -40,6 +42,8 @@ interface FakeSdkState {
   updateCalls: Array<{ sandboxId: string; persistent?: boolean }>;
   /** Fail the next `get` with a not-found error. */
   failGetNotFound: boolean;
+  /** Fail `listProjectsProbe` (auth/network) so validate can surface it. */
+  failProbe: Error | null;
 }
 
 function fakeSdk(
@@ -66,6 +70,7 @@ function fakeSdk(
     persistentByName: new Map(),
     updateCalls: [],
     failGetNotFound: false,
+    failProbe: null,
   };
 
   const makeInstance = (sandboxId: string): VercelSandboxInstance => ({
@@ -145,6 +150,7 @@ function fakeSdk(
     },
     listProjectsProbe: async () => {
       state.probeCalls += 1;
+      if (state.failProbe !== null) throw state.failProbe;
     },
     getSnapshot: async (params) => {
       const snap = state.snapshots.get(params.snapshotId);
@@ -217,6 +223,20 @@ describe("VercelSandboxProvider", () => {
     }),
   );
 
+  vitIt.effect("validate fails invalid-config when list probe rejects", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk();
+      state.failProbe = Object.assign(new Error("Unauthorized"), {
+        response: { status: 401 },
+      });
+      const provider = makeProvider(sdk);
+      const result = yield* either(provider.validate(configWithAuth()));
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") expect(result.left.reason).toBe("invalid-config");
+      expect(state.probeCalls).toBe(1);
+    }),
+  );
+
   vitIt.effect("provision creates from runtime and runs the bootstrap script", () =>
     Effect.gen(function* () {
       const { sdk, state } = fakeSdk();
@@ -246,7 +266,7 @@ describe("VercelSandboxProvider", () => {
         persistent: boolean;
       };
       // Deterministic name derived from the instance id (AC-L2).
-      expect(hstate.sandboxId).toBe("kata-inst-1");
+      expect(hstate.sandboxId).toBe(INST_1_NAME);
       expect(hstate.port).toBe(13773);
       expect(hstate.domainBase).toMatch(/^https:\/\//);
       expect(hstate.persistent).toBe(true);
@@ -271,7 +291,7 @@ describe("VercelSandboxProvider", () => {
           keepLastSnapshots?: { count: number };
           runtime?: string;
         };
-        expect(createCall.name).toBe("kata-inst-1");
+        expect(createCall.name).toBe(INST_1_NAME);
         expect(createCall.persistent).toBe(true);
         expect(createCall.keepLastSnapshots).toEqual({ count: 1 });
         expect(createCall.runtime).toBe("node24");
@@ -295,7 +315,7 @@ describe("VercelSandboxProvider", () => {
         env: [],
       });
       const names = (state.createCalls as Array<{ name?: string }>).map((c) => c.name);
-      expect(names).toEqual(["kata-inst-1", "kata-inst-1"]);
+      expect(names).toEqual([INST_1_NAME, INST_1_NAME]);
     }),
   );
 
@@ -311,13 +331,21 @@ describe("VercelSandboxProvider", () => {
         env: [],
       });
       const expected = vercelSandboxName("inst_1", "env_server_abc");
-      expect(expected).toBe("kata-env-server-abc-inst-1");
+      expect(expected).toMatch(/^kata-env-server-abc-inst-1-[0-9a-f]{8}$/);
       expect((state.createCalls[0] as { name?: string }).name).toBe(expected);
       expect((handle.handle as { sandboxId: string }).sandboxId).toBe(expected);
       // Distinct namespaces must not collide for the same instance id.
       expect(vercelSandboxName("inst_1", "env_other")).not.toBe(expected);
     }),
   );
+
+  it("vercelSandboxName keeps underscore/dash instance ids distinct after slugification", () => {
+    const underscored = vercelSandboxName("vercel_foo_bar");
+    const dashed = vercelSandboxName("vercel_foo-bar");
+    expect(underscored).not.toBe(dashed);
+    expect(underscored).toMatch(/^kata-vercel-foo-bar-[0-9a-f]{8}$/);
+    expect(dashed).toMatch(/^kata-vercel-foo-bar-[0-9a-f]{8}$/);
+  });
 
   vitIt.effect("provision excludes VERCEL_TOKEN/TEAM_ID/PROJECT_ID from sandbox env", () =>
     Effect.gen(function* () {
@@ -371,7 +399,7 @@ describe("VercelSandboxProvider", () => {
         env: [],
       });
       yield* provider.renewTimeout!.renewTimeout(handle, 60_000);
-      expect(state.extendTimeouts).toEqual([{ sandboxId: "kata-inst-1", deltaMs: 60_000 }]);
+      expect(state.extendTimeouts).toEqual([{ sandboxId: INST_1_NAME, deltaMs: 60_000 }]);
     }),
   );
 
@@ -386,7 +414,7 @@ describe("VercelSandboxProvider", () => {
         env: [],
       });
       yield* provider.dispose(handle);
-      expect(state.deleted).toEqual(["kata-inst-1"]);
+      expect(state.deleted).toEqual([INST_1_NAME]);
       state.failGetNotFound = true;
       // Already-deleted (404 on get) is tolerated as success.
       yield* provider.dispose(handle);
@@ -426,7 +454,7 @@ describe("VercelSandboxProvider", () => {
         env: [],
       });
       yield* provider.lifecycle!.stop(handle);
-      expect([...state.stoppedNames]).toEqual(["kata-inst-1"]);
+      expect([...state.stoppedNames]).toEqual([INST_1_NAME]);
       const status = yield* provider.lifecycle!.status(handle);
       expect(status).toBe("stopped");
     }),
@@ -455,7 +483,7 @@ describe("VercelSandboxProvider", () => {
         // serve is relaunched detached.
         const serveRun = [...state.runCommands].toReversed().find((r) => r.detached === true);
         expect(serveRun?.args?.join(" ")).toContain("katacode serve");
-        expect((started.handle as { sandboxId: string }).sandboxId).toBe("kata-inst-1");
+        expect((started.handle as { sandboxId: string }).sandboxId).toBe(INST_1_NAME);
         // persistence unchanged -> no update call.
         expect(state.updateCalls).toHaveLength(0);
       }),
@@ -501,7 +529,7 @@ describe("VercelSandboxProvider", () => {
         config: configWithAuth({ persistent: false }),
         env: [],
       });
-      expect(state.updateCalls).toEqual([{ sandboxId: "kata-inst-1", persistent: false }]);
+      expect(state.updateCalls).toEqual([{ sandboxId: INST_1_NAME, persistent: false }]);
     }),
   );
 
@@ -518,9 +546,9 @@ describe("VercelSandboxProvider", () => {
           env: [],
         });
         expect(yield* provider.lifecycle!.status(handle)).toBe("running");
-        state.statusByName.set("kata-inst-1", "stopped");
+        state.statusByName.set(INST_1_NAME, "stopped");
         expect(yield* provider.lifecycle!.status(handle)).toBe("stopped");
-        state.statusByName.set("kata-inst-1", "snapshotting");
+        state.statusByName.set(INST_1_NAME, "snapshotting");
         expect(yield* provider.lifecycle!.status(handle)).toBe("stopped");
         state.failGetNotFound = true;
         // not-found maps to the `gone` status value (not an error) so reconcile

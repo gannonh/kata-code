@@ -177,6 +177,16 @@ export function clearSandboxInstanceBusyForTests(instanceId: string): void {
   busyInstances.delete(instanceId);
 }
 
+/** Test-only: seed the in-memory live-session cache (e.g. stopped-store + live
+ *  handle races for providerLoginStart). Cleared via `clearLiveSessionForTests`. */
+export function setLiveSessionForTests(instanceId: string, live: LiveSession): void {
+  liveSessions.set(instanceId, live);
+}
+
+export function clearLiveSessionForTests(instanceId: string): void {
+  liveSessions.delete(instanceId);
+}
+
 /** Whether a boot reconcile is currently running. Lifecycle ops wait/fail
  *  rather than racing a full-store rewrite. */
 let reconcileInProgress = false;
@@ -912,7 +922,17 @@ export const SandboxServiceLive = {
     readonly instanceId: SandboxProviderInstanceId;
     readonly providerId: string;
   }): Stream.Stream<SandboxProviderLoginEvent, SandboxRpcError> => {
-    const live = liveSessions.get(input.instanceId as string);
+    const sessionKey = input.instanceId as string;
+    const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+    if (record === undefined || record.status !== "running") {
+      return Stream.fail(
+        new SandboxRpcError({
+          reason: "not-running",
+          message: "No running sandbox session to sign in to.",
+        }),
+      );
+    }
+    const live = liveSessions.get(sessionKey);
     if (live === undefined) {
       return Stream.fail(
         new SandboxRpcError({
