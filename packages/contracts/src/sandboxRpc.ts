@@ -24,6 +24,12 @@ export const SandboxRunningSession = Schema.Struct({
   /** The in-sandbox Kata server's environment id. */
   environmentId: TrimmedNonEmptyString,
   endpoint: AdvertisedEndpoint,
+  /** Lifecycle status: `running` or `stopped` (a Vercel timeout in persistent mode reconciles to `stopped`). */
+  status: Schema.optional(Schema.Literals(["running", "stopped"])),
+  /** Host-side deadline (epoch ms) the keepalive scheduler maintains. */
+  deadlineEpochMs: Schema.optional(Schema.Number),
+  /** Reconcile warning (e.g. Vercel auth missing on boot); the UI flags the record as unverified. */
+  statusDetail: Schema.optional(Schema.String),
 });
 export type SandboxRunningSession = typeof SandboxRunningSession.Type;
 
@@ -37,6 +43,8 @@ export const SandboxInstanceSummary = Schema.Union([
     reachabilityKind: Schema.Literals(["loopback", "public", "private-network"]),
     supportsSnapshot: Schema.Boolean,
     supportsRenewTimeout: Schema.Boolean,
+    /** Driver supports durable stop/start lifecycle (`lifecycle`). */
+    supportsLifecycle: Schema.optional(Schema.Boolean),
     runningSession: Schema.optional(SandboxRunningSession),
   }),
   Schema.Struct({
@@ -122,6 +130,114 @@ export const SandboxDisposeSessionResult = Schema.Struct({
   disposed: Schema.Boolean,
 });
 export type SandboxDisposeSessionResult = typeof SandboxDisposeSessionResult.Type;
+
+/** Renew a running sandbox session's lifetime (Phase 3b). */
+export const SandboxRenewSessionInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  /** Extension in ms; defaults to the target's configured `timeoutMs`. */
+  extendMs: Schema.optional(Schema.Number),
+});
+export type SandboxRenewSessionInput = typeof SandboxRenewSessionInput.Type;
+export const SandboxRenewSessionResult = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  deadlineEpochMs: Schema.Number,
+});
+export type SandboxRenewSessionResult = typeof SandboxRenewSessionResult.Type;
+
+/** Stop a running sandbox session (durable lifecycle). The sandbox filesystem
+ *  persists (Vercel persistent / Docker container); start resumes it. */
+export const SandboxStopSessionInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+});
+export type SandboxStopSessionInput = typeof SandboxStopSessionInput.Type;
+export const SandboxStopSessionResult = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  stopped: Schema.Boolean,
+});
+export type SandboxStopSessionResult = typeof SandboxStopSessionResult.Type;
+
+/** Re-issue a pairing token for a running sandbox (identity recovery R2).
+ *  Recovery path when the client-side pairing (`addSavedEnvironment`) failed
+ *  after a successful start — the sandbox runs but no saved environment
+ *  exists. Mints a fresh admin + pairing token chain against the live
+ *  container without restarting anything. */
+export const SandboxIssuePairingTokenInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+});
+export type SandboxIssuePairingTokenInput = typeof SandboxIssuePairingTokenInput.Type;
+export const SandboxIssuePairingTokenResult = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  /** The in-sandbox Kata server's environment id. */
+  environmentId: TrimmedNonEmptyString,
+  pairingToken: TrimmedNonEmptyString,
+  endpoint: AdvertisedEndpoint,
+});
+export type SandboxIssuePairingTokenResult = typeof SandboxIssuePairingTokenResult.Type;
+
+/** Start an interactive provider sign-in flow inside a sandbox (Phase 3b). Streaming. */
+export const SandboxProviderLoginStartInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  providerId: TrimmedNonEmptyString,
+});
+export type SandboxProviderLoginStartInput = typeof SandboxProviderLoginStartInput.Type;
+
+/** A sign-in flow event, tagged by `stage`. */
+export const SandboxProviderLoginEvent = Schema.Union([
+  Schema.Struct({
+    stage: Schema.Literal("started"),
+    loginSessionId: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("url"),
+    loginSessionId: TrimmedNonEmptyString,
+    url: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("awaiting-code"),
+    loginSessionId: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("invalid-code"),
+    loginSessionId: TrimmedNonEmptyString,
+    detail: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("success"),
+    loginSessionId: TrimmedNonEmptyString,
+    credentialStored: Schema.Boolean,
+  }),
+  Schema.Struct({
+    stage: Schema.Literal("error"),
+    loginSessionId: TrimmedNonEmptyString,
+    message: Schema.String,
+  }),
+]);
+export type SandboxProviderLoginEvent = typeof SandboxProviderLoginEvent.Type;
+
+/** Submit an OAuth code into a running sign-in flow (Phase 3b). */
+export const SandboxProviderLoginSubmitCodeInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  loginSessionId: TrimmedNonEmptyString,
+  code: TrimmedNonEmptyString,
+});
+export type SandboxProviderLoginSubmitCodeInput = typeof SandboxProviderLoginSubmitCodeInput.Type;
+export const SandboxProviderLoginSubmitCodeResult = Schema.Struct({
+  loginSessionId: TrimmedNonEmptyString,
+  accepted: Schema.Boolean,
+});
+export type SandboxProviderLoginSubmitCodeResult = typeof SandboxProviderLoginSubmitCodeResult.Type;
+
+/** Cancel an in-flight provider sign-in (dialog close / stream abort). */
+export const SandboxProviderLoginCancelInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  loginSessionId: TrimmedNonEmptyString,
+});
+export type SandboxProviderLoginCancelInput = typeof SandboxProviderLoginCancelInput.Type;
+export const SandboxProviderLoginCancelResult = Schema.Struct({
+  loginSessionId: TrimmedNonEmptyString,
+  cancelled: Schema.Boolean,
+});
+export type SandboxProviderLoginCancelResult = typeof SandboxProviderLoginCancelResult.Type;
 
 export class SandboxRpcError extends Schema.TaggedErrorClass<SandboxRpcError>()("SandboxRpcError", {
   reason: Schema.Literals([

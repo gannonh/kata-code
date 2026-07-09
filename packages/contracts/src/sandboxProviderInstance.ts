@@ -100,6 +100,7 @@ export type SandboxProviderInstanceId = typeof SandboxProviderInstanceId.Type;
 export const SandboxProviderInstanceConfig = Schema.Struct({
   driver: SandboxProviderDriverKind,
   displayName: Schema.optional(TrimmedNonEmptyString),
+  repositoryKey: Schema.optionalKey(TrimmedNonEmptyString),
   environment: Schema.optionalKey(ProviderInstanceEnvironment),
   enabled: Schema.optionalKey(Schema.Boolean),
   config: Schema.optionalKey(Schema.Unknown),

@@ -1,0 +1,692 @@
+// @effect-diagnostics nodeBuiltinImport:off - the driver uses node:crypto for random temp paths and node:buffer for tar seeding; no node:http.
+// @effect-diagnostics globalFetchInEffect:off - raw public-healthz readiness probes against the sandbox domain; the driver is not an Effect HttpClient consumer.
+// @effect-diagnostics globalDateInEffect:off - deadline arithmetic is host-side (keepalive owns it); the driver only reads Date for temp-path uniqueness.
+/**
+ * `VercelSandboxProvider` — the first cloud sandbox driver, implementing the
+ * frozen `SandboxProvider` SPI against Vercel Sandbox (Firecracker microVMs)
+ * via `@vercel/sandbox`.
+ *
+ * Provision creates a sandbox from a configured runtime or snapshot, runs the
+ * bootstrap script (runtime only; snapshots already have the CLIs), launches
+ * `katacode serve` detached, and polls the public `/healthz` until ready.
+ * Reachability returns the public `https://<sandbox.domain(port)>` URL.
+ * Lifecycle: `renewTimeout` forwards to `sb.extendTimeout`, `snapshot` stops
+ * the VM (caller treats the session as lapsed), `copyInto` writes a tar
+ * and extracts it, `dispose` deletes the sandbox. The durable `lifecycle`
+ * capability (stop/start/status via v2 persistent sandboxes) is wired in
+ * Phase 3; the former `resume` capability was removed from the SPI in favor
+ * of `lifecycle.start`.
+ *
+ * Handle state is plain serializable data (no live SDK object); every method
+ * re-fetches the instance with `sdk.get` when it needs one.
+ *
+ * Limitation: `snapshot.deleteSnapshot`/`snapshotExists` take no handle, so
+ * per-instance auth is unavailable. V1 captures the auth from the most recent
+ * successful `validate`/`provision` in the provider closure and fails with
+ * `invalid-config` ("validate the target first") when absent. Documented in
+ * the plan; a future auth-resolver SPI removes this limitation.
+ *
+ * @module VercelSandboxProvider
+ */
+import * as NodeCrypto from "node:crypto";
+
+import * as Effect from "effect/Effect";
+
+import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/instance";
+import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachability";
+import {
+  type SandboxCopyIntoCapability,
+  type SandboxExecResult,
+  type SandboxHandle,
+  type SandboxLifecycleCapability,
+  type SandboxLifecycleStatus,
+  type SandboxProvisionRequest,
+  type SandboxReachability,
+  type SandboxRenewTimeoutCapability,
+  type SandboxProvider,
+  type SandboxProviderConfigDecoder,
+  SandboxProviderError,
+} from "@kata-sh/code-sandbox/driver";
+import type { SandboxProviderDescriptor } from "@kata-sh/code-sandbox/descriptor";
+
+import { VercelSandboxConfig, VERCEL_AUTH_ENV_VARS, decodeVercelSandboxConfig } from "./config.ts";
+import type { VercelAuthParams, VercelSdk } from "./sdk.ts";
+import { isAuthError, isNotFound, liveVercelSdk } from "./sdk.ts";
+import { buildBootstrapScript, buildServeCommand, SANDBOX_HOME } from "./bootstrap.ts";
+
+export const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
+
+// Hoist compiled schema function to module scope (kata-code/no-inline-schema-compile).
+// `decodeVercelSandboxConfig` (from config.ts) performs the legacy-key strip;
+// the raw `Schema.decodeUnknownSync(VercelSandboxConfig)` is kept for tests
+// that assert the underlying schema rejects malformed payloads.
+
+/** Decoded config the registry feeds the driver. */
+export const vercelConfigDecoder: SandboxProviderConfigDecoder<VercelSandboxConfig> = (input) =>
+  decodeVercelSandboxConfig(input);
+
+/** Vercel max session lifetime on Pro/Enterprise (Hobby is 45m). */
+const VERCEL_MAX_LIFETIME_MS = 86_400_000;
+/** Healthz probe interval and budget. */
+const HEALTHZ_INTERVAL_MS = 500;
+const HEALTHZ_MAX_ATTEMPTS = 240; // 120s
+const HEALTHZ_PROBE_TIMEOUT_MS = 3000;
+
+/** The env vars the Kata server always needs, mirrored from the Docker driver. */
+const KATA_SERVER_ENV: ReadonlyArray<readonly [string, string]> = [
+  ["KATACODE_HOST", "0.0.0.0"],
+  ["KATACODE_MODE", "desktop"],
+  ["KATACODE_NO_BROWSER", "true"],
+];
+
+export interface VercelSandboxHandleState {
+  /** The SDK sandbox `name` (deterministic; the durable address for stop/start/status). */
+  readonly sandboxId: string;
+  readonly port: number;
+  /** `sandbox.domain(port)` captured at provision for reachability without a re-fetch. */
+  readonly domainBase: string;
+  readonly timeoutMs: number;
+  readonly auth: VercelAuthParams;
+  /** Whether the sandbox persists its filesystem between sessions. */
+  readonly persistent: boolean;
+}
+
+/** Vercel sandbox name prefix + rules. Names are lowercase alphanumeric +
+ *  dashes, project-unique. The instance-derived slug is clamped to keep the
+ *  whole name within the SDK's name rules. */
+const SANDBOX_NAME_PREFIX = "kata-";
+
+/** Slugify a fragment for Vercel sandbox names (`[a-z0-9-]+`). */
+function vercelNameSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Derive a deterministic Vercel sandbox name. Vercel names are project-unique,
+ * so two Kata servers sharing one Vercel project must not collide on the same
+ * instance id. Pass `nameNamespace` (typically the server environment id) to
+ * scope the name.
+ *
+ * Slugification collapses `_` and `-` (and other non `[a-z0-9-]`) to `-`, so
+ * distinct instance ids like `vercel_foo_bar` and `vercel_foo-bar` would
+ * otherwise share a name. A short hash of the raw identity is appended so
+ * those configs stay distinct. The result is clamped to 63 characters
+ * (Vercel name limit), preserving the hash suffix.
+ */
+export function vercelSandboxName(instanceId: string, nameNamespace?: string): string {
+  const slug = vercelNameSlug(instanceId);
+  const ns = nameNamespace !== undefined ? vercelNameSlug(nameNamespace).slice(0, 24) : "";
+  const identity = nameNamespace !== undefined ? `${nameNamespace}\0${instanceId}` : instanceId;
+  const suffix = NodeCrypto.createHash("sha256").update(identity).digest("hex").slice(0, 8);
+  const bodyRaw =
+    ns.length > 0 ? `${SANDBOX_NAME_PREFIX}${ns}-${slug}` : `${SANDBOX_NAME_PREFIX}${slug}`;
+  // Reserve `-` + 8-char hash within the 63-char Vercel limit.
+  const body = bodyRaw.slice(0, 63 - 1 - suffix.length).replace(/-+$/g, "");
+  return `${body}-${suffix}`;
+}
+
+// ── Error mapping ─────────────────────────────────────────────────────
+
+function mapSdkError(
+  context: string,
+  error: unknown,
+  fallback: SandboxProviderError["reason"] = "unknown",
+): SandboxProviderError {
+  const message = error instanceof Error ? error.message : String(error);
+  if (isAuthError(error)) {
+    return new SandboxProviderError({
+      reason: "invalid-config",
+      message: `${context}: Vercel rejected the token/team/project (${message}).`,
+      cause: error,
+    });
+  }
+  if (isNotFound(error)) {
+    return new SandboxProviderError({
+      reason: "invalid-config",
+      message: `${context}: not found (${message}).`,
+      cause: error,
+    });
+  }
+  return new SandboxProviderError({
+    reason: fallback,
+    message: `${context}: ${message}`,
+    cause: error,
+  });
+}
+
+/** Map a Vercel SDK session/sandbox status to the SPI lifecycle status.
+ *
+ * Spike result (recorded 2026-07-08, `@vercel/sandbox@2.4.0`):
+ * `Sandbox.get({ name, resume: false })` returns a `SandboxAndSessionResponse`
+ * whose `session` field is **required** (not nullable) and carries the last
+ * session metadata, so `sandbox.status` is readable for a stopped sandbox
+ * without resuming and does **not** throw. Not-found throws a 404, mapped to
+ * `gone`. SDK statuses map as: running <- running, pending; stopped <-
+ * stopped, stopping, snapshotting, aborted, failed. */
+function mapVercelStatus(status: string): SandboxLifecycleStatus {
+  switch (status) {
+    case "running":
+    case "pending":
+      return "running";
+    case "stopped":
+    case "stopping":
+    case "snapshotting":
+    case "aborted":
+    case "failed":
+      return "stopped";
+    default:
+      return "stopped";
+  }
+}
+
+/** Wrap a promise from the SDK so its error channel is `SandboxProviderError`. */
+function trySdk<A>(
+  context: string,
+  run: () => Promise<A>,
+  fallback: SandboxProviderError["reason"] = "unknown",
+): Effect.Effect<A, SandboxProviderError> {
+  return Effect.tryPromise({
+    try: run,
+    catch: (cause) => mapSdkError(context, cause, fallback),
+  });
+}
+
+// ── Config resolution ─────────────────────────────────────────────────
+
+function resolveAuth(config: VercelSandboxConfig): VercelAuthParams | undefined {
+  return config.auth;
+}
+
+/** Env passed into `Sandbox.create` — excludes the auth trio and adds KATA_* server env. */
+function buildCreateEnv(req: SandboxProvisionRequest): Record<string, string> {
+  const env: Record<string, string> = {};
+  const excluded = new Set<string>(VERCEL_AUTH_ENV_VARS);
+  for (const [k, v] of req.env ?? []) {
+    if (excluded.has(k)) continue;
+    env[k] = v;
+  }
+  for (const [k, v] of KATA_SERVER_ENV) env[k] = v;
+  return env;
+}
+
+/** Env inlined at `katacode serve` launch — excludes the auth trio, adds KATA_* server env. */
+function buildServeEnv(req: {
+  readonly env?: ReadonlyArray<readonly [string, string]>;
+}): ReadonlyArray<readonly [string, string]> {
+  const excluded = new Set<string>(VERCEL_AUTH_ENV_VARS);
+  const env: Array<readonly [string, string]> = [];
+  for (const [k, v] of req.env ?? []) {
+    if (excluded.has(k)) continue;
+    env.push([k, v]);
+  }
+  for (const [k, v] of KATA_SERVER_ENV) env.push([k, v]);
+  return env;
+}
+
+// ── Healthz polling ───────────────────────────────────────────────────
+
+/** Optional override for the public-healthz probe (tests inject a synchronous 200). */
+export interface VercelSandboxProviderOptions {
+  readonly healthzProbe?: (httpBaseUrl: string) => Effect.Effect<boolean, SandboxProviderError>;
+}
+
+/** Default public-healthz probe against `sandbox.domain(port)`. */
+function defaultHealthzProbe(httpBaseUrl: string): Effect.Effect<boolean, SandboxProviderError> {
+  const healthUrl = `${httpBaseUrl}/healthz`;
+  return Effect.tryPromise({
+    try: () => fetch(healthUrl, { signal: AbortSignal.timeout(HEALTHZ_PROBE_TIMEOUT_MS) }),
+    catch: () =>
+      new SandboxProviderError({ reason: "unreachable", message: "healthz fetch failed" }),
+  }).pipe(
+    Effect.matchEffect({
+      onFailure: () => Effect.succeed(false),
+      onSuccess: (res) => Effect.succeed(res.status === 200),
+    }),
+  );
+}
+
+function waitForReady(
+  httpBaseUrl: string,
+  probe: (url: string) => Effect.Effect<boolean, SandboxProviderError>,
+): Effect.Effect<void, SandboxProviderError> {
+  return Effect.gen(function* () {
+    for (let i = 0; i < HEALTHZ_MAX_ATTEMPTS; i++) {
+      const ok = yield* probe(httpBaseUrl);
+      if (ok) return;
+      yield* Effect.sleep(`${HEALTHZ_INTERVAL_MS} millis`);
+    }
+    return yield* new SandboxProviderError({
+      reason: "timeout",
+      message: `sandbox never became ready on ${httpBaseUrl}`,
+    });
+  });
+}
+
+// ── Provider factory ──────────────────────────────────────────────────
+
+/**
+ * Build a Vercel sandbox provider bound to an SDK. Unit tests inject a fake
+ * SDK with no network; the live provider is bound to `liveVercelSdk`.
+ */
+export function makeVercelSandboxProvider(
+  sdk: VercelSdk,
+  options: VercelSandboxProviderOptions = {},
+): SandboxProvider {
+  const healthzProbe = options.healthzProbe ?? defaultHealthzProbe;
+  const waitForReadyFor = (httpBaseUrl: string) => waitForReady(httpBaseUrl, healthzProbe);
+
+  const lifecycle: SandboxLifecycleCapability = {
+    stop: (handle) =>
+      Effect.gen(function* () {
+        const state = handle.handle as VercelSandboxHandleState;
+        const sb = yield* trySdk(
+          "lifecycle.stop",
+          () => sdk.get({ sandboxId: state.sandboxId, resume: false, ...state.auth }),
+          "provision-failed",
+        );
+        yield* trySdk("lifecycle.stop", () => sb.stop(), "provision-failed");
+        // stop on an already-stopped sandbox is idempotent success; the SDK
+        // stop call is safe to re-issue.
+      }),
+
+    start: (handle, req) =>
+      Effect.gen(function* () {
+        const state = handle.handle as VercelSandboxHandleState;
+        // A non-persistent stopped sandbox cannot be resumed (its filesystem was
+        // discarded); fail loud rather than silently recreating.
+        if (!state.persistent) {
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message:
+              "This sandbox was not persistent and cannot be started after stop. Delete it and create a new sandbox.",
+          });
+        }
+        // Re-apply the current config's persistence setting so a toggle takes
+        // effect at runtime (the next stop honors the new value).
+        const decoded = yield* Effect.try({
+          try: () => decodeVercelSandboxConfig(req.config),
+          catch: (e) =>
+            new SandboxProviderError({
+              reason: "invalid-config",
+              message: e instanceof Error ? e.message : String(e),
+            }),
+        });
+        const persistent = decoded.persistent;
+        const sb = yield* trySdk(
+          "lifecycle.start",
+          () => sdk.get({ sandboxId: state.sandboxId, resume: true, ...state.auth }),
+          "provision-failed",
+        ).pipe(
+          Effect.mapError((error: SandboxProviderError) =>
+            isNotFound(error.cause ?? error)
+              ? new SandboxProviderError({
+                  reason: "provision-failed",
+                  message: "Sandbox is gone; create a new sandbox to re-seed the workspace.",
+                  cause: error,
+                })
+              : error,
+          ),
+        );
+        if (persistent !== state.persistent) {
+          yield* trySdk(
+            "lifecycle.start.update",
+            () => sb.update({ persistent }),
+            "provision-failed",
+          );
+        }
+        // Relaunch serve detached with the new env.
+        const serveCmd = buildServeCommand({ port: state.port, env: buildServeEnv(req) });
+        yield* trySdk(
+          "lifecycle.start.serve",
+          () => sb.runCommand({ cmd: "sh", args: ["-c", serveCmd], detached: true }),
+          "exec-failed",
+        );
+        yield* waitForReadyFor(`https://${new URL(sb.domain(state.port)).host}`);
+        const domainBase = sb.domain(state.port);
+        return {
+          driverKind: VERCEL_KIND,
+          instanceId: handle.instanceId,
+          handle: {
+            sandboxId: state.sandboxId,
+            port: state.port,
+            domainBase,
+            timeoutMs: state.timeoutMs,
+            auth: state.auth,
+            persistent,
+          } satisfies VercelSandboxHandleState,
+        } satisfies SandboxHandle;
+      }),
+
+    status: (handle): Effect.Effect<SandboxLifecycleStatus, SandboxProviderError> =>
+      Effect.gen(function* () {
+        const state = handle.handle as VercelSandboxHandleState;
+        // not-found -> `gone` (a status value, not an error) so the reconcile
+        // pass evicts the record; other errors surface as provision-failed.
+        const result = yield* trySdk(
+          "lifecycle.status",
+          () => sdk.get({ sandboxId: state.sandboxId, resume: false, ...state.auth }),
+          "provision-failed",
+        ).pipe(
+          Effect.matchEffect({
+            onFailure: (error: SandboxProviderError) =>
+              isNotFound(error.cause ?? error)
+                ? Effect.succeed<SandboxLifecycleStatus>("gone")
+                : Effect.fail(error),
+            onSuccess: (sb) => Effect.succeed<SandboxLifecycleStatus>(mapVercelStatus(sb.status)),
+          }),
+        );
+        return result;
+      }),
+
+    discover: (
+      req,
+    ): Effect.Effect<
+      { readonly handle: SandboxHandle; readonly status: SandboxLifecycleStatus } | null,
+      SandboxProviderError
+    > =>
+      Effect.gen(function* () {
+        const decoded = yield* Effect.try({
+          try: () => decodeVercelSandboxConfig(req.config),
+          catch: (e) =>
+            new SandboxProviderError({
+              reason: "invalid-config",
+              message: e instanceof Error ? e.message : String(e),
+            }),
+        });
+        const auth = resolveAuth(decoded);
+        if (auth === undefined) {
+          // No credentials to probe with — nothing to discover.
+          return null;
+        }
+        const name = vercelSandboxName(req.instanceId, req.nameNamespace);
+        const result = yield* trySdk(
+          "lifecycle.discover",
+          () => sdk.get({ sandboxId: name, resume: false, ...auth }),
+          "provision-failed",
+        ).pipe(
+          Effect.matchEffect({
+            onFailure: (error: SandboxProviderError) =>
+              isNotFound(error.cause ?? error)
+                ? Effect.succeed<{
+                    readonly handle: SandboxHandle;
+                    readonly status: SandboxLifecycleStatus;
+                  } | null>(null)
+                : Effect.fail(error),
+            onSuccess: (sb) =>
+              Effect.succeed<{
+                readonly handle: SandboxHandle;
+                readonly status: SandboxLifecycleStatus;
+              } | null>({
+                handle: {
+                  driverKind: VERCEL_KIND,
+                  instanceId: req.instanceId,
+                  handle: {
+                    sandboxId: name,
+                    port: decoded.port,
+                    domainBase: sb.domain(decoded.port),
+                    timeoutMs: decoded.timeoutMs,
+                    auth,
+                    persistent: decoded.persistent,
+                  } satisfies VercelSandboxHandleState,
+                } satisfies SandboxHandle,
+                status: mapVercelStatus(sb.status),
+              }),
+          }),
+        );
+        return result;
+      }),
+  };
+
+  const renewTimeout: SandboxRenewTimeoutCapability = {
+    renewTimeout: (handle, extendMs) =>
+      Effect.gen(function* () {
+        const state = handle.handle as VercelSandboxHandleState;
+        const sb = yield* trySdk(
+          "renewTimeout",
+          () => sdk.get({ sandboxId: state.sandboxId, ...state.auth }),
+          "unknown",
+        );
+        yield* trySdk("renewTimeout", () => sb.extendTimeout(extendMs), "unknown");
+      }),
+  };
+
+  const copyInto: SandboxCopyIntoCapability = {
+    copyInto: (handle, archive, destPath) =>
+      Effect.gen(function* () {
+        const state = handle.handle as VercelSandboxHandleState;
+        const sb = yield* trySdk(
+          "copyInto",
+          () => sdk.get({ sandboxId: state.sandboxId, ...state.auth }),
+          "unknown",
+        );
+        // @effect-diagnostics-next-line effect(globalDateInEffect):off - random temp path; no Effect Clock in the driver.
+        const tmpPath = `/tmp/kata-seed-${Date.now().toString(36)}-${NodeCrypto.randomBytes(4).toString("hex")}.tar`;
+        yield* trySdk(
+          "copyInto.writeFiles",
+          () => sb.writeFiles([{ path: tmpPath, content: Buffer.from(archive) }]),
+          "provision-failed",
+        );
+        const extract = yield* provider.exec(
+          handle,
+          `mkdir -p '${destPath}' && tar -xf '${tmpPath}' -C '${destPath}' && rm -f '${tmpPath}'`,
+        );
+        if (extract.exitCode !== 0) {
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `copyInto: extract failed (exit ${extract.exitCode}): ${extract.stderr}`,
+          });
+        }
+      }),
+  };
+
+  const provider: SandboxProvider = {
+    kind: VERCEL_KIND,
+
+    validate: (config) =>
+      Effect.gen(function* () {
+        const decoded = yield* Effect.try({
+          try: () => decodeVercelSandboxConfig(config),
+          catch: (e) =>
+            new SandboxProviderError({
+              reason: "invalid-config",
+              message: e instanceof Error ? e.message : String(e),
+            }),
+        });
+        const auth = resolveAuth(decoded);
+        if (auth === undefined) {
+          return yield* new SandboxProviderError({
+            reason: "invalid-config",
+            message:
+              "Set VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID as sensitive environment variables on this deployment target.",
+          });
+        }
+        // Probe credentials with the cheapest authenticated call.
+        yield* trySdk("validate", () => sdk.listProjectsProbe(auth), "invalid-config");
+      }),
+
+    provision: (req) =>
+      Effect.gen(function* () {
+        const decoded = yield* Effect.try({
+          try: () => decodeVercelSandboxConfig(req.config),
+          catch: (e) =>
+            new SandboxProviderError({
+              reason: "invalid-config",
+              message: e instanceof Error ? e.message : String(e),
+            }),
+        });
+        const auth = resolveAuth(decoded);
+        if (auth === undefined) {
+          return yield* new SandboxProviderError({
+            reason: "invalid-config",
+            message:
+              "Set VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID as sensitive environment variables on this deployment target.",
+          });
+        }
+        const createEnv = buildCreateEnv(req);
+        const name = vercelSandboxName(req.instanceId, req.nameNamespace);
+        const persistent = decoded.persistent;
+        // NEVER retry create — it is billable and non-idempotent.
+        const sb = yield* trySdk(
+          "provision.create",
+          () =>
+            sdk.create({
+              ...auth,
+              name,
+              runtime: decoded.runtime,
+              ...(decoded.vcpus !== undefined ? { resources: { vcpus: decoded.vcpus } } : {}),
+              ports: [decoded.port],
+              timeout: decoded.timeoutMs,
+              env: createEnv,
+              persistent,
+              // Bound snapshot storage for persistent sandboxes so stop/start
+              // keeps only the latest auto-snapshot.
+              ...(persistent ? { keepLastSnapshots: { count: 1 } } : {}),
+            }),
+          "provision-failed",
+        );
+        // Capture the domain now so reachability does not require a re-fetch.
+        const domainBase = sb.domain(decoded.port);
+
+        // Cold boot: install CLIs (the only boot path now; snapshot boot removed).
+        const bootstrap = yield* trySdk(
+          "provision.bootstrap",
+          () => sb.runCommand({ cmd: "sh", args: ["-c", buildBootstrapScript()] }),
+          "provision-failed",
+        );
+        if (bootstrap.exitCode !== 0) {
+          const stderr = yield* Effect.promise(() => bootstrap.stderr()).pipe(
+            Effect.orElseSucceed(() => ""),
+          );
+          // Best-effort cleanup after a bootstrap failure.
+          yield* trySdk("provision.bootstrap.cleanup", () => sb.delete(), "dispose-failed").pipe(
+            Effect.ignore,
+          );
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `bootstrap failed (exit ${bootstrap.exitCode}): ${stderr.slice(-512)}`,
+          });
+        }
+
+        // Launch serve detached with the filtered env.
+        const serveCmd = buildServeCommand({ port: decoded.port, env: buildServeEnv(req) });
+        yield* trySdk(
+          "provision.serve",
+          () => sb.runCommand({ cmd: "sh", args: ["-c", serveCmd], detached: true }),
+          "exec-failed",
+        );
+
+        // Poll the public healthz endpoint.
+        yield* waitForReadyFor(`https://${new URL(domainBase).host}`).pipe(
+          Effect.catch((error: SandboxProviderError) =>
+            trySdk("provision.healthz.cleanup", () => sb.delete(), "dispose-failed").pipe(
+              Effect.ignore,
+              Effect.andThen(Effect.fail(error)),
+            ),
+          ),
+        );
+
+        const state: VercelSandboxHandleState = {
+          sandboxId: name,
+          port: decoded.port,
+          domainBase,
+          timeoutMs: decoded.timeoutMs,
+          auth,
+          persistent,
+        };
+        return {
+          driverKind: VERCEL_KIND,
+          instanceId: req.instanceId,
+          handle: state,
+        } satisfies SandboxHandle;
+      }),
+
+    exec: (handle, command, opts) =>
+      Effect.gen(function* () {
+        const state = handle.handle as VercelSandboxHandleState;
+        const sb = yield* trySdk(
+          "exec",
+          () => sdk.get({ sandboxId: state.sandboxId, ...state.auth }),
+          "exec-failed",
+        );
+        const wrapped = `export HOME=${SANDBOX_HOME}; ${opts?.cwd !== undefined ? `cd '${opts.cwd}'; ` : ""}${command}`;
+        const result = yield* trySdk(
+          "exec",
+          () => sb.runCommand({ cmd: "sh", args: ["-c", wrapped] }),
+          "exec-failed",
+        );
+        const stdout = yield* Effect.promise(() => result.stdout()).pipe(
+          Effect.orElseSucceed(() => ""),
+        );
+        const stderr = yield* Effect.promise(() => result.stderr()).pipe(
+          Effect.orElseSucceed(() => ""),
+        );
+        return { exitCode: result.exitCode, stdout, stderr } satisfies SandboxExecResult;
+      }),
+
+    reachability: (handle, port) =>
+      Effect.gen(function* () {
+        const state = handle.handle as VercelSandboxHandleState;
+        // Use the stored domain when the port matches; re-fetch otherwise.
+        const domainBase =
+          port === state.port
+            ? state.domainBase
+            : yield* trySdk(
+                "reachability",
+                () => sdk.get({ sandboxId: state.sandboxId, ...state.auth }),
+                "unreachable",
+              ).pipe(Effect.map((sb) => sb.domain(port)));
+        const host = new URL(domainBase).host;
+        return {
+          reachabilityKind: SandboxReachabilityKind.make("public"),
+          httpBaseUrl: `https://${host}`,
+          wsBaseUrl: `wss://${host}`,
+        } satisfies SandboxReachability;
+      }),
+
+    dispose: (handle) =>
+      Effect.gen(function* () {
+        const state = handle.handle as VercelSandboxHandleState;
+        // v2 delete removes the sandbox and all of its snapshots/sessions, so
+        // no separate snapshot cleanup is needed. Resolve without resuming so
+        // dispose works on a stopped sandbox.
+        yield* trySdk(
+          "dispose",
+          () => sdk.get({ sandboxId: state.sandboxId, resume: false, ...state.auth }),
+          "dispose-failed",
+        ).pipe(
+          Effect.flatMap((sb) => trySdk("dispose", () => sb.delete(), "dispose-failed")),
+          Effect.catch((error: SandboxProviderError) =>
+            // Tolerate already-deleted (404) as success; surface other errors.
+            isNotFound(error.cause ?? error) ? Effect.void : Effect.fail(error),
+          ),
+        );
+      }),
+
+    describe: () =>
+      Effect.succeed({
+        kind: VERCEL_KIND,
+        reachabilityKind: SandboxReachabilityKind.make("public"),
+        maxLifetimeMs: VERCEL_MAX_LIFETIME_MS,
+        supportsSnapshot: false,
+        supportsRenewTimeout: true,
+        supportsCopyInto: true,
+        supportsLifecycle: true,
+      } satisfies SandboxProviderDescriptor),
+
+    lifecycle,
+    renewTimeout,
+    copyInto,
+  };
+
+  return provider;
+}
+
+/**
+ * The live Vercel sandbox provider, bound to `liveVercelSdk`. Registered with
+ * the `SandboxProviderRegistry` by the server layer.
+ */
+export const VercelSandboxProvider: SandboxProvider = makeVercelSandboxProvider(liveVercelSdk);

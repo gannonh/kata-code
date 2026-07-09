@@ -57,6 +57,7 @@ const PersistedSavedEnvironmentStorageRecordSchema = Schema.Struct({
   sandbox: Schema.optionalKey(
     Schema.Struct({
       providerKind: Schema.String,
+      instanceId: Schema.optionalKey(Schema.String),
     }),
   ),
   encryptedBearerToken: Schema.optionalKey(Schema.String),

@@ -30,6 +30,19 @@ const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
   },
 };
 
+const sandboxRegistryRecord: PersistedSavedEnvironmentRecord = {
+  environmentId: EnvironmentId.make("sandbox-environment-1"),
+  label: "vercel test 11",
+  httpBaseUrl: "https://sb.vercel.run/",
+  wsBaseUrl: "wss://sb.vercel.run/",
+  createdAt: "2026-04-09T00:00:00.000Z",
+  lastConnectedAt: "2026-04-09T01:00:00.000Z",
+  sandbox: {
+    providerKind: "vercel",
+    instanceId: "vercel_vercel_test_11",
+  },
+};
+
 const SavedEnvironmentRegistryDocumentProbe = Schema.Struct({
   version: Schema.Number,
   records: Schema.Array(Schema.Unknown),
@@ -154,6 +167,19 @@ describe("DesktopSavedEnvironments", () => {
         );
         assert.equal(persisted.version, 1);
         assert.lengthOf(persisted.records, 1);
+      }),
+    ),
+  );
+
+  it.effect("round-trips the sandbox instanceId join key", () =>
+    withSavedEnvironments(
+      Effect.gen(function* () {
+        const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+        yield* savedEnvironments.setRegistry([sandboxRegistryRecord]);
+
+        // instanceId must survive the desktop storage round-trip; dropping it
+        // breaks id-based Available Runtimes dedupe and surfaces orphan rows.
+        assert.deepEqual(yield* savedEnvironments.getRegistry, [sandboxRegistryRecord]);
       }),
     ),
   );

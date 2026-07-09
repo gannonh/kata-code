@@ -305,10 +305,20 @@ function endpointRequestPort(url: URL): number {
   return Number(url.port || (url.protocol === "https:" ? 443 : 80));
 }
 
+const LOOPBACK_ONLY_KINDS = new Set(["cloudflare_tunnel"]);
+
 function isAllowedEndpointOrigin(input: {
   readonly origin: RelayManagedEndpointOrigin;
   readonly requestUrl: string;
+  readonly providerKind: string;
 }): boolean {
+  // Public sandboxes (providerKind === "manual") have a public hostname and
+  // the sandbox server receives the link-proof request through the provider's
+  // proxy infrastructure.  Skip strict loopback validation for these and
+  // rely on the bootstrap-token-session authentication instead.
+  if (!LOOPBACK_ONLY_KINDS.has(input.providerKind)) {
+    return true;
+  }
   if (!isLoopbackHostname(input.origin.localHttpHost)) {
     return false;
   }
@@ -322,7 +332,12 @@ function isAllowedEndpointOrigin(input: {
 }
 
 function providerKindMatchesRequestedLinkScopes(request: RelayLinkProofRequest): boolean {
-  return request.endpoint.providerKind === "cloudflare_tunnel";
+  // Loopback sandboxes (Docker) use cloudflare_tunnel managed endpoints.
+  // Public sandboxes (Vercel) use manual endpoints.  Both are valid.
+  return (
+    request.endpoint.providerKind === "cloudflare_tunnel" ||
+    request.endpoint.providerKind === "manual"
+  );
 }
 
 function hasExactScope(input: {
@@ -378,6 +393,7 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
     !isAllowedEndpointOrigin({
       origin: request.origin,
       requestUrl,
+      providerKind: request.endpoint.providerKind,
     })
   ) {
     return yield* new EnvironmentHttpBadRequestError({
@@ -423,7 +439,18 @@ const cloudLinkProofHandler = Effect.fn("environment.cloud.linkProof")(
     yield* requireEnvironmentScope(AuthRelayWriteScope);
     const httpRequest = yield* HttpServerRequest.HttpServerRequest;
     const requestUrl = requestAbsoluteUrl(httpRequest);
-    if (requestUrl === null || hasForwardedAuthorityHeaders(httpRequest)) {
+    if (requestUrl === null) {
+      return yield* new EnvironmentHttpBadRequestError({
+        message: "Invalid managed endpoint origin.",
+      });
+    }
+    // Public sandboxes (Vercel) receive the link-proof request through their
+    // proxy infrastructure which sets forwarding headers — skip the strict
+    // forwarded-headers rejection for non-loopback provider kinds.
+    if (
+      LOOPBACK_ONLY_KINDS.has(request.endpoint.providerKind) &&
+      hasForwardedAuthorityHeaders(httpRequest)
+    ) {
       return yield* new EnvironmentHttpBadRequestError({
         message: "Invalid managed endpoint origin.",
       });

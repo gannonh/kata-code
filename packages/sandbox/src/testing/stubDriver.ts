@@ -19,6 +19,7 @@ import {
   type SandboxCopyIntoCapability,
   type SandboxExecResult,
   type SandboxHandle,
+  type SandboxLifecycleCapability,
   type SandboxProvisionRequest,
   type SandboxReachability,
   type SandboxProvider,
@@ -42,6 +43,7 @@ export interface StubDriverOptions {
   readonly withSnapshot?: boolean;
   readonly withRenewTimeout?: boolean;
   readonly withCopyInto?: boolean;
+  readonly withLifecycle?: boolean;
 }
 
 /**
@@ -68,12 +70,21 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
     ? { copyInto: () => Effect.void }
     : undefined;
 
+  const lifecycle: SandboxLifecycleCapability | undefined = options.withLifecycle
+    ? {
+        stop: () => Effect.void,
+        start: (handle) => Effect.succeed(handle),
+        status: () => Effect.succeed("running" as const),
+      }
+    : undefined;
+
   const descriptor: SandboxProviderDescriptor = {
     kind,
     reachabilityKind: SandboxReachabilityKind.make("loopback"),
     supportsSnapshot: options.withSnapshot === true,
     supportsRenewTimeout: options.withRenewTimeout === true,
     supportsCopyInto: options.withCopyInto === true,
+    supportsLifecycle: options.withLifecycle === true,
   };
 
   return {
@@ -117,5 +128,6 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
     ...(snapshot !== undefined ? { snapshot } : {}),
     ...(renewTimeout !== undefined ? { renewTimeout } : {}),
     ...(copyInto !== undefined ? { copyInto } : {}),
+    ...(lifecycle !== undefined ? { lifecycle } : {}),
   };
 }

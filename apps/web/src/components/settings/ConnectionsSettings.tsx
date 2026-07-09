@@ -28,16 +28,28 @@ import {
   type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type EnvironmentId,
+  type SandboxInstanceSummary,
+  type SandboxProviderInstanceConfigMap,
 } from "@kata-sh/code-contracts";
 import { WsRpcClient } from "@kata-sh/code-client-runtime";
 import type { RelayClientEnvironmentRecord } from "@kata-sh/code-contracts/relay";
 import * as DateTime from "effect/DateTime";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
 import { SandboxDeploymentSettings } from "./SandboxDeploymentSettings";
+import {
+  DOCKER_SANDBOX_KIND,
+  VERCEL_SANDBOX_KIND,
+  buildDockerSandboxProviderInstance,
+  buildVercelSandboxProviderInstance,
+  makeSandboxProviderInstanceId,
+  resolveSandboxLifecycleState,
+  sandboxInstanceIdForLabel,
+} from "./SandboxDeploymentSettings.logic";
 import { resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
 import {
   SettingsPageContainer,
@@ -90,6 +102,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Textarea } from "../ui/textarea";
+import { DraftInput } from "../ui/draft-input";
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "../../pairingUrl";
 import { readHostedPairingRequest } from "../../hostedPairing";
 import {
@@ -124,7 +137,6 @@ import {
   connectManagedCloudEnvironment,
   isCloudSessionRejectedError,
   linkPrimaryEnvironmentToCloud,
-  unlinkManagedRelayEnvironment,
   unlinkPrimaryEnvironmentFromCloud,
   updatePrimaryCloudPreferences,
 } from "~/cloud/linkEnvironment";
@@ -1496,17 +1508,19 @@ type SavedBackendListRowProps = {
   environmentId: EnvironmentId;
   reconnectingEnvironmentId: EnvironmentId | null;
   disconnectingEnvironmentId: EnvironmentId | null;
-  removingEnvironmentId: EnvironmentId | null;
+  /** Sandbox lifecycle state from `listInstances` join (undefined = not a sandbox). */
+  sandboxLifecycleState: "running" | "stopped" | "gone" | "unknown" | undefined;
   onConnect: (environmentId: EnvironmentId) => void;
   onDisconnect: (environmentId: EnvironmentId) => void;
+  /** Explicit removal of an orphaned sandbox record (lifecycle state "gone"). */
   onRemove: (environmentId: EnvironmentId) => void;
 };
 
-function SavedBackendListRow({
+export function SavedBackendListRow({
   environmentId,
   reconnectingEnvironmentId,
   disconnectingEnvironmentId,
-  removingEnvironmentId,
+  sandboxLifecycleState,
   onConnect,
   onDisconnect,
   onRemove,
@@ -1524,8 +1538,15 @@ function SavedBackendListRow({
   const isConnecting =
     connectionState === "connecting" || reconnectingEnvironmentId === environmentId;
   const isDisconnecting = disconnectingEnvironmentId === environmentId;
-  const stateDotClassName =
-    connectionState === "connected"
+  const isStoppedSandbox = sandboxLifecycleState === "stopped";
+  const isGoneSandbox = sandboxLifecycleState === "gone";
+  // Legacy sandbox record that could not be joined by id: offer Connect (in
+  // case it is reachable) plus an explicit Remove so a dead orphan is never a
+  // dead end. Never auto-removed.
+  const isUnknownSandbox = sandboxLifecycleState === "unknown";
+  const stateDotClassName = isStoppedSandbox
+    ? "bg-muted-foreground/40"
+    : connectionState === "connected"
       ? "bg-success"
       : connectionState === "connecting"
         ? "bg-warning"
@@ -1580,32 +1601,138 @@ function SavedBackendListRow({
           ) : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={isConnected ? isDisconnecting : isConnecting}
-            onClick={() =>
-              void (isConnected ? onDisconnect(environmentId) : onConnect(environmentId))
-            }
-          >
-            {isConnected
-              ? isDisconnecting
-                ? "Disconnecting…"
-                : "Disconnect"
-              : isConnecting
-                ? "Connecting…"
-                : "Connect"}
-          </Button>
-          <Button
-            size="xs"
-            variant="destructive-outline"
-            disabled={removingEnvironmentId === environmentId}
-            onClick={() => void onRemove(environmentId)}
-          >
-            {removingEnvironmentId === environmentId ? "Removing…" : "Remove"}
-          </Button>
+          {isGoneSandbox && !isConnected ? (
+            <>
+              <span className="text-xs text-muted-foreground">Sandbox no longer exists.</span>
+              <Button
+                size="xs"
+                variant="destructive-outline"
+                onClick={() => void onRemove(environmentId)}
+              >
+                Remove
+              </Button>
+            </>
+          ) : isStoppedSandbox && !isConnected ? (
+            <span className="text-xs text-muted-foreground">
+              Sandbox is stopped — start it under Environments.
+            </span>
+          ) : (
+            <>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isConnected ? isDisconnecting : isConnecting}
+                onClick={() =>
+                  void (isConnected ? onDisconnect(environmentId) : onConnect(environmentId))
+                }
+              >
+                {isConnected
+                  ? isDisconnecting
+                    ? "Disconnecting…"
+                    : "Disconnect"
+                  : isConnecting
+                    ? "Connecting…"
+                    : "Connect"}
+              </Button>
+              {isUnknownSandbox && !isConnected ? (
+                <Button
+                  size="xs"
+                  variant="destructive-outline"
+                  onClick={() => void onRemove(environmentId)}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+type SavedEnvironmentDefinitionRowProps = {
+  environmentId: EnvironmentId;
+  removingEnvironmentId: EnvironmentId | null;
+  onRemove: (environmentId: EnvironmentId) => void;
+};
+
+function SavedEnvironmentDefinitionRow({
+  environmentId,
+  removingEnvironmentId,
+  onRemove,
+}: SavedEnvironmentDefinitionRowProps) {
+  const record = useSavedEnvironmentRegistryStore((state) => state.byId[environmentId] ?? null);
+  const rename = useSavedEnvironmentRegistryStore((state) => state.rename);
+  const [isEditing, setIsEditing] = useState(false);
+
+  if (!record) {
+    return null;
+  }
+
+  const environmentTypeLabel = resolveEnvironmentTypeLabel(record);
+  const targetLabel = record.desktopSsh
+    ? formatDesktopSshTarget(record.desktopSsh)
+    : record.httpBaseUrl;
+  const isRemoving = removingEnvironmentId === environmentId;
+  const isOrphanSandbox = record.sandbox !== undefined;
+
+  return (
+    <div className="border-t border-border/60 first:border-t-0">
+      <div className="px-4 py-3.5 sm:px-5">
+        <div className={ITEM_ROW_INNER_CLASSNAME}>
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex min-h-5 items-center gap-2">
+              <h3 className="truncate text-sm font-medium text-foreground">{record.label}</h3>
+              <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {environmentTypeLabel}
+              </span>
+            </div>
+            <p className="truncate text-xs text-muted-foreground">
+              {isOrphanSandbox
+                ? "Orphaned sandbox runtime — no matching deployment target. Delete this row, then re-add the sandbox under Environments."
+                : targetLabel}
+            </p>
+          </div>
+          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+            {isOrphanSandbox ? null : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isRemoving}
+                onClick={() => setIsEditing((editing) => !editing)}
+              >
+                {isEditing ? "Done" : "Edit"}
+              </Button>
+            )}
+            <Button
+              size="xs"
+              variant="destructive-outline"
+              disabled={isRemoving}
+              onClick={() => void onRemove(environmentId)}
+            >
+              {isRemoving ? "Deleting…" : "Delete"}
+            </Button>
+          </div>
+        </div>
+      </div>
+      {isEditing && !isOrphanSandbox ? (
+        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+          <label className="block">
+            <span className="text-xs font-medium text-foreground">Display name</span>
+            <DraftInput
+              className="mt-1.5"
+              value={record.label}
+              onCommit={(nextLabel) => {
+                rename(environmentId, nextLabel);
+                setIsEditing(false);
+              }}
+              placeholder="Environment label"
+              spellCheck={false}
+            />
+          </label>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1828,7 +1955,7 @@ function CloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) 
   return hasCloudPublicConfig() ? <ConfiguredCloudLinkRow canManageRelay={canManageRelay} /> : null;
 }
 
-function EmptyRemoteEnvironments({
+function EmptyAvailableRuntimes({
   cloudEnabled = true,
   onConnectFromCloud,
 }: {
@@ -1841,9 +1968,9 @@ function EmptyRemoteEnvironments({
         <ChevronsLeftRightEllipsisIcon />
       </EmptyMedia>
       <EmptyHeader>
-        <EmptyTitle>No saved remote environments</EmptyTitle>
+        <EmptyTitle>No available runtimes</EmptyTitle>
         <EmptyDescription>
-          Click “Add environment” to pair another environment
+          Add an environment above to create a runtime target
           {cloudEnabled ? (
             <>
               , or connect one from{" "}
@@ -1884,9 +2011,13 @@ function RemoteEnvironmentRowsSkeleton() {
 function ConfiguredCloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironmentIds,
+  sandboxEnvironmentIds,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  /** Environment ids of sandbox sessions — relay rows for these are hidden
+   *  (sandboxes connect via the pairing path, never the relay path). */
+  readonly sandboxEnvironmentIds: ReadonlySet<string>;
 }) {
   const { getToken, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useHostedConnectAuthPrompt();
@@ -1894,7 +2025,6 @@ function ConfiguredCloudRemoteEnvironmentRows({
   const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
-  const [removingEnvironmentId, setRemovingEnvironmentId] = useState<EnvironmentId | null>(null);
   const savedIds = useMemo(() => new Set(savedEnvironmentIds), [savedEnvironmentIds]);
 
   const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
@@ -1927,43 +2057,11 @@ function ConfiguredCloudRemoteEnvironmentRows({
     }
   };
 
-  const removeEnvironment = async (environment: RelayClientEnvironmentRecord) => {
-    setRemovingEnvironmentId(environment.environmentId);
-    try {
-      const clerkToken = await getToken(resolveRelayClerkTokenOptions());
-      if (!clerkToken) {
-        throw new Error("Sign in to Kata Code Connect before removing this environment.");
-      }
-      await webRuntime.runPromise(
-        unlinkManagedRelayEnvironment({
-          clerkToken,
-          environmentId: environment.environmentId,
-        }),
-      );
-      refreshManagedRelayEnvironments();
-      toastManager.add({
-        type: "success",
-        title: "Environment removed",
-        description: `${environment.label} was unlinked from Kata Code Connect.`,
-      });
-    } catch (cause) {
-      toastManager.add({
-        type: "error",
-        title: "Could not remove environment",
-        description:
-          cause instanceof Error
-            ? cause.message
-            : "Could not unlink the Kata Code Connect environment.",
-      });
-    } finally {
-      setRemovingEnvironmentId(null);
-    }
-  };
-
   const connectableEnvironments = (environmentsState.data ?? []).filter(
     (environment) =>
       environment.environmentId !== primaryEnvironmentId &&
-      !savedIds.has(environment.environmentId),
+      !savedIds.has(environment.environmentId) &&
+      !sandboxEnvironmentIds.has(environment.environmentId as string),
   );
 
   if (savedEnvironmentIds.length === 0 && environmentsState.data === null) {
@@ -1973,7 +2071,7 @@ function ConfiguredCloudRemoteEnvironmentRows({
   if (savedEnvironmentIds.length === 0 && connectableEnvironments.length === 0) {
     return (
       <>
-        <EmptyRemoteEnvironments {...(!isSignedIn ? { onConnectFromCloud: openAuthPrompt } : {})} />
+        <EmptyAvailableRuntimes {...(!isSignedIn ? { onConnectFromCloud: openAuthPrompt } : {})} />
         {authPrompt}
       </>
     );
@@ -2000,14 +2098,6 @@ function ConfiguredCloudRemoteEnvironmentRows({
           >
             {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
           </Button>
-          <Button
-            size="sm"
-            variant="destructive-outline"
-            disabled={removingEnvironmentId !== null}
-            onClick={() => void removeEnvironment(environment)}
-          >
-            {removingEnvironmentId === environment.environmentId ? "Removing…" : "Remove"}
-          </Button>
         </div>
       </div>
     </div>
@@ -2017,22 +2107,27 @@ function ConfiguredCloudRemoteEnvironmentRows({
 function CloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironmentIds,
+  sandboxEnvironmentIds,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  readonly sandboxEnvironmentIds: ReadonlySet<string>;
 }) {
   return hasCloudPublicConfig() ? (
     <ConfiguredCloudRemoteEnvironmentRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironmentIds={savedEnvironmentIds}
+      sandboxEnvironmentIds={sandboxEnvironmentIds}
     />
   ) : savedEnvironmentIds.length === 0 ? (
-    <EmptyRemoteEnvironments cloudEnabled={false} />
+    <EmptyAvailableRuntimes cloudEnabled={false} />
   ) : null;
 }
 
 export function ConnectionsSettings() {
   const desktopBridge = window.desktopBridge;
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primarySessionState = usePrimarySessionState();
   const currentSessionScopes = desktopBridge
@@ -2048,6 +2143,75 @@ export function ConnectionsSettings() {
         .toSorted((left, right) => left.label.localeCompare(right.label))
         .map((record) => record.environmentId),
     [savedEnvironmentsById],
+  );
+  // Sandbox lifecycle summaries from `listInstances` — used to join saved
+  // sandbox runtime records to their instance's lifecycle state (AC-L13) and
+  // reconcile orphaned records whose sandbox was deleted (AC-L14).
+  const [sandboxSummaries, setSandboxSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>(
+    [],
+  );
+  /** False until the first successful `listInstances`; also cleared on fetch
+   *  failure so a network error cannot invent `"gone"` for live sandboxes. */
+  const [sandboxSummariesLoaded, setSandboxSummariesLoaded] = useState(false);
+  const refreshSandboxSummaries = useCallback(async () => {
+    try {
+      const result = await getPrimaryEnvironmentConnection().client.sandbox.listInstances();
+      setSandboxSummaries(result.instances);
+      setSandboxSummariesLoaded(true);
+    } catch {
+      // Non-fatal: keep prior summaries when present, but mark unloaded so the
+      // join returns `"unknown"` instead of inventing `"gone"`.
+      setSandboxSummariesLoaded(false);
+    }
+  }, []);
+  useEffect(() => {
+    void refreshSandboxSummaries();
+  }, [refreshSandboxSummaries]);
+  // Orphan sandbox records (lifecycle state "gone"/"unknown") are NOT
+  // auto-deleted. Destructive cleanup happens only on server-confirmed
+  // disposeSession or via the explicit per-row Remove action (identity
+  // recovery plan R1: the client never destructively infers).
+  //
+  // Environment ids of every sandbox session known to the server — used to
+  // filter relay-managed rows so stale relay links for local sandboxes never
+  // render a dead relay Connect button (identity recovery plan R4: one
+  // connect path per record kind).
+  const sandboxSessionEnvironmentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const summary of sandboxSummaries) {
+      if (summary.kind !== "available") continue;
+      const session = summary.runningSession;
+      if (session !== undefined) ids.add(session.environmentId as string);
+    }
+    return ids;
+  }, [sandboxSummaries]);
+  // Join sandbox saved-records to configured instances by instanceId only
+  // (identity recovery R1). Labels are never join keys — endpoint.label can
+  // diverge from displayName and must not resurrect a title-only Edit/Delete
+  // row beside (or instead of) the expandable DeploymentTargetCard.
+  const sandboxInstanceIds = useMemo(() => {
+    const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
+    return new Set(Object.keys(map));
+  }, [settings.sandboxProviderInstances]);
+  const savedEnvironmentDefinitionIds = useMemo(
+    () =>
+      Object.values(savedEnvironmentsById)
+        .filter((record) => {
+          if (record.relayManaged) return false;
+          // Sandbox saved records are the runtime side of a sandbox instance
+          // defined in `sandboxProviderInstances`. Skip when that instance
+          // already renders its own expandable definition row; keep orphans
+          // (no matching instanceId, or legacy records without instanceId)
+          // visible so they can be cleaned up.
+          const sandboxInstanceId = record.sandbox?.instanceId;
+          if (sandboxInstanceId !== undefined && sandboxInstanceIds.has(sandboxInstanceId)) {
+            return false;
+          }
+          return true;
+        })
+        .toSorted((left, right) => left.label.localeCompare(right.label))
+        .map((record) => record.environmentId),
+    [sandboxInstanceIds, savedEnvironmentsById],
   );
   const savedDesktopSshEnvironmentsByAlias = useMemo(
     () =>
@@ -2104,14 +2268,27 @@ export function ConnectionsSettings() {
   >(null);
   const [isRevokingOtherDesktopClients, setIsRevokingOtherDesktopClients] = useState(false);
   const [addBackendDialogOpen, setAddBackendDialogOpen] = useState(false);
-  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
+  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh" | "docker" | "cloud">(
+    "remote",
+  );
   const [savedBackendHost, setSavedBackendHost] = useState("");
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
   const [savedBackendSshUsername, setSavedBackendSshUsername] = useState("");
   const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
+  const [sandboxLabel, setSandboxLabel] = useState("");
+  const [sandboxDockerImage, setSandboxDockerImage] = useState("katacode:local");
+  const [sandboxDockerCommand, setSandboxDockerCommand] = useState("katacode serve --port 13773");
+  const [sandboxDockerPort, setSandboxDockerPort] = useState("13773");
+  const [cloudSandboxProvider, setCloudSandboxProvider] = useState<"vercel">("vercel");
   const [savedBackendError, setSavedBackendError] = useState<string | null>(null);
   const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
+  const sandboxInstanceMap = (settings.sandboxProviderInstances ??
+    {}) as SandboxProviderInstanceConfigMap;
+  const sandboxExistingIds = useMemo(
+    () => new Set(Object.keys(sandboxInstanceMap)),
+    [sandboxInstanceMap],
+  );
   const unsavedDiscoveredSshHosts = useMemo(
     () =>
       discoveredSshHosts.filter((target) => {
@@ -2351,6 +2528,50 @@ export function ConnectionsSettings() {
   }, []);
 
   const handleAddSavedBackend = useCallback(async () => {
+    if (savedBackendMode === "docker" || savedBackendMode === "cloud") {
+      setIsAddingSavedBackend(true);
+      setSavedBackendError(null);
+      try {
+        if (savedBackendMode === "cloud" && cloudSandboxProvider !== "vercel") {
+          throw new Error("Unsupported cloud provider.");
+        }
+        const driver = savedBackendMode === "cloud" ? VERCEL_SANDBOX_KIND : DOCKER_SANDBOX_KIND;
+        const id = makeSandboxProviderInstanceId({
+          driver,
+          label: sandboxLabel,
+          existingIds: sandboxExistingIds,
+        });
+        const instance =
+          savedBackendMode === "cloud"
+            ? buildVercelSandboxProviderInstance({ label: sandboxLabel })
+            : buildDockerSandboxProviderInstance({
+                label: sandboxLabel,
+                image: sandboxDockerImage,
+                command: sandboxDockerCommand,
+                port: sandboxDockerPort,
+              });
+        updateSettings({
+          sandboxProviderInstances: { ...sandboxInstanceMap, [id]: instance },
+        });
+        setSandboxLabel("");
+        setAddBackendDialogOpen(false);
+        toastManager.add({
+          type: "success",
+          title: "Environment added",
+          description:
+            savedBackendMode === "cloud"
+              ? "Vercel Sandbox is ready to configure."
+              : "Docker container is ready to configure.",
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to add environment.";
+        setSavedBackendError(message);
+      } finally {
+        setIsAddingSavedBackend(false);
+      }
+      return;
+    }
+
     if (savedBackendMode === "ssh") {
       setIsAddingSavedBackend(true);
       setSavedBackendError(null);
@@ -2424,47 +2645,63 @@ export function ConnectionsSettings() {
     savedBackendSshHost,
     savedBackendSshPort,
     savedBackendSshUsername,
+    cloudSandboxProvider,
+    sandboxDockerCommand,
+    sandboxDockerImage,
+    sandboxDockerPort,
+    sandboxExistingIds,
+    sandboxInstanceMap,
+    sandboxLabel,
+    updateSettings,
   ]);
 
-  const handleConnectSavedBackend = useCallback(async (environmentId: EnvironmentId) => {
-    setReconnectingSavedEnvironmentId(environmentId);
-    setSavedBackendError(null);
-    try {
-      await reconnectSavedEnvironment(environmentId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to connect backend.";
-      setSavedBackendError(message);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not connect backend",
-          description: message,
-        }),
-      );
-    } finally {
-      setReconnectingSavedEnvironmentId(null);
-    }
-  }, []);
+  const handleConnectSavedBackend = useCallback(
+    async (environmentId: EnvironmentId) => {
+      setReconnectingSavedEnvironmentId(environmentId);
+      setSavedBackendError(null);
+      try {
+        await reconnectSavedEnvironment(environmentId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to connect backend.";
+        setSavedBackendError(message);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not connect backend",
+            description: message,
+          }),
+        );
+      } finally {
+        setReconnectingSavedEnvironmentId(null);
+        void refreshSandboxSummaries();
+      }
+    },
+    [refreshSandboxSummaries],
+  );
 
-  const handleDisconnectSavedBackend = useCallback(async (environmentId: EnvironmentId) => {
-    setDisconnectingSavedEnvironmentId(environmentId);
-    setSavedBackendError(null);
-    try {
-      await disconnectSavedEnvironment(environmentId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to disconnect backend.";
-      setSavedBackendError(message);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not disconnect backend",
-          description: message,
-        }),
-      );
-    } finally {
-      setDisconnectingSavedEnvironmentId(null);
-    }
-  }, []);
+  const handleDisconnectSavedBackend = useCallback(
+    async (environmentId: EnvironmentId) => {
+      setDisconnectingSavedEnvironmentId(environmentId);
+      setSavedBackendError(null);
+      try {
+        await disconnectSavedEnvironment(environmentId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to disconnect backend.";
+        setSavedBackendError(message);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not disconnect backend",
+            description: message,
+          }),
+        );
+      } finally {
+        setDisconnectingSavedEnvironmentId(null);
+        void refreshSandboxSummaries();
+      }
+    },
+    [refreshSandboxSummaries],
+  );
 
   const handleRemoveSavedBackend = useCallback(async (environmentId: EnvironmentId) => {
     setRemovingSavedEnvironmentId(environmentId);
@@ -2731,7 +2968,7 @@ export function ConnectionsSettings() {
   }, []);
 
   const renderConnectionModeCard = (input: {
-    readonly mode: "remote" | "ssh";
+    readonly mode: "remote" | "ssh" | "docker" | "cloud";
     readonly title: string;
     readonly description: string;
     readonly icon?: ReactNode;
@@ -2913,6 +3150,112 @@ export function ConnectionsSettings() {
       </div>
     </div>
   );
+  const renderSandboxLabelField = () => {
+    const driver = savedBackendMode === "cloud" ? VERCEL_SANDBOX_KIND : DOCKER_SANDBOX_KIND;
+    return (
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Label</span>
+        <Input
+          value={sandboxLabel}
+          onChange={(event) => setSandboxLabel(event.target.value)}
+          placeholder="Work"
+          disabled={isAddingSavedBackend}
+          spellCheck={false}
+        />
+        <span className="mt-1 block text-[11px] text-muted-foreground">
+          Instance id: {sandboxInstanceIdForLabel({ driver, label: sandboxLabel })}
+        </span>
+      </label>
+    );
+  };
+  const renderDockerFields = () => (
+    <div className="space-y-4">
+      {renderSandboxLabelField()}
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Image</span>
+        <Input
+          value={sandboxDockerImage}
+          onChange={(event) => setSandboxDockerImage(event.target.value)}
+          placeholder="katacode:local"
+          disabled={isAddingSavedBackend}
+          spellCheck={false}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Start command</span>
+        <Input
+          value={sandboxDockerCommand}
+          onChange={(event) => setSandboxDockerCommand(event.target.value)}
+          placeholder="katacode serve --port 13773"
+          disabled={isAddingSavedBackend}
+          spellCheck={false}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Container port</span>
+        <Input
+          value={sandboxDockerPort}
+          onChange={(event) => setSandboxDockerPort(event.target.value)}
+          placeholder="13773"
+          inputMode="numeric"
+          disabled={isAddingSavedBackend}
+          spellCheck={false}
+        />
+      </label>
+      {savedBackendError ? <p className="text-xs text-destructive">{savedBackendError}</p> : null}
+      <Button
+        variant="outline"
+        className="w-full"
+        disabled={isAddingSavedBackend}
+        onClick={() => void handleAddSavedBackend()}
+      >
+        <PlusIcon className="size-3.5" />
+        {isAddingSavedBackend ? "Adding…" : "Add environment"}
+      </Button>
+    </div>
+  );
+  const renderCloudProviderFields = () => (
+    <div className="space-y-4">
+      {renderSandboxLabelField()}
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-medium text-foreground">Provider</span>
+        <select
+          className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+          value={cloudSandboxProvider}
+          onChange={(event) => setCloudSandboxProvider(event.target.value as "vercel")}
+          disabled={isAddingSavedBackend}
+        >
+          <option value="vercel">Vercel Sandbox</option>
+        </select>
+        <span className="mt-1 block text-[11px] text-muted-foreground">
+          After creating, add VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID as sensitive
+          environment variables on the environment row.
+        </span>
+      </label>
+      {savedBackendError ? <p className="text-xs text-destructive">{savedBackendError}</p> : null}
+      <Button
+        variant="outline"
+        className="w-full"
+        disabled={isAddingSavedBackend}
+        onClick={() => void handleAddSavedBackend()}
+      >
+        <PlusIcon className="size-3.5" />
+        {isAddingSavedBackend ? "Adding…" : "Add environment"}
+      </Button>
+    </div>
+  );
+  const renderAddEnvironmentModeBody = () => {
+    switch (savedBackendMode) {
+      case "ssh":
+        return renderSshFields();
+      case "docker":
+        return renderDockerFields();
+      case "cloud":
+        return renderCloudProviderFields();
+      case "remote":
+        return renderRemoteModeBody();
+    }
+  };
   const renderNetworkAccessToggle = () => (
     <Switch
       checked={desktopServerExposureState?.mode === "network-accessible"}
@@ -3052,6 +3395,78 @@ export function ConnectionsSettings() {
         </Tooltip>
       }
     />
+  );
+
+  const renderAddEnvironmentDialog = () => (
+    <Dialog
+      open={addBackendDialogOpen}
+      onOpenChange={(open) => {
+        setAddBackendDialogOpen(open);
+        if (!open) {
+          setSavedBackendError(null);
+        }
+      }}
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DialogTrigger
+              render={
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
+                  aria-label="Add environment"
+                >
+                  <PlusIcon className="size-3" />
+                  <span>Add environment</span>
+                </Button>
+              }
+            />
+          }
+        />
+        <TooltipPopup side="top">Add environment</TooltipPopup>
+      </Tooltip>
+      <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Add Environment</DialogTitle>
+          <DialogDescription>Define an environment for this client.</DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {renderConnectionModeCard({
+                mode: "remote",
+                title: "Remote link",
+                description: "Enter a backend host and pairing code.",
+                icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
+              })}
+              {desktopBridge
+                ? renderConnectionModeCard({
+                    mode: "ssh",
+                    title: "SSH",
+                    description: "Use local SSH config, agent, and tunnels for the backend.",
+                    icon: <TerminalIcon aria-hidden className="size-4" />,
+                  })
+                : null}
+              {renderConnectionModeCard({
+                mode: "docker",
+                title: "Docker container",
+                description: "Provision a local container that runs a Kata server.",
+                icon: <TerminalIcon aria-hidden className="size-4" />,
+              })}
+              {renderConnectionModeCard({
+                mode: "cloud",
+                title: "Cloud Provider",
+                description: "Provision a provider-backed sandbox environment.",
+                icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
+              })}
+            </div>
+            <AnimatedHeight>{renderAddEnvironmentModeBody()}</AnimatedHeight>
+          </div>
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
   );
 
   return (
@@ -3284,87 +3699,44 @@ export function ConnectionsSettings() {
         </SettingsSection>
       )}
 
-      <SandboxDeploymentSettings />
-
-      <SettingsSection
-        title="Remote environments"
-        headerAction={
-          <Dialog
-            open={addBackendDialogOpen}
-            onOpenChange={(open) => {
-              setAddBackendDialogOpen(open);
-              if (!open) {
-                setSavedBackendError(null);
-              }
-            }}
-          >
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <DialogTrigger
-                    render={
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
-                        aria-label="Add environment"
-                      >
-                        <PlusIcon className="size-3" />
-                        <span>Add environment</span>
-                      </Button>
-                    }
-                  />
-                }
-              />
-              <TooltipPopup side="top">Add environment</TooltipPopup>
-            </Tooltip>
-            <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
-              <DialogHeader>
-                <DialogTitle>Add Environment</DialogTitle>
-                <DialogDescription>Pair another environment to this client.</DialogDescription>
-              </DialogHeader>
-              <DialogPanel>
-                <div className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {renderConnectionModeCard({
-                      mode: "remote",
-                      title: "Remote link",
-                      description: "Enter a backend host and pairing code.",
-                      icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
-                    })}
-                    {desktopBridge
-                      ? renderConnectionModeCard({
-                          mode: "ssh",
-                          title: "SSH",
-                          description: "Use local SSH config, agent, and tunnels for the backend.",
-                          icon: <TerminalIcon aria-hidden className="size-4" />,
-                        })
-                      : null}
-                  </div>
-                  <AnimatedHeight>
-                    {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
-                  </AnimatedHeight>
-                </div>
-              </DialogPanel>
-            </DialogPopup>
-          </Dialog>
-        }
-      >
-        {savedEnvironmentIds.map((environmentId) => (
-          <SavedBackendListRow
+      <SandboxDeploymentSettings
+        headerAction={renderAddEnvironmentDialog()}
+        hasSavedEnvironmentRows={savedEnvironmentDefinitionIds.length > 0}
+        savedEnvironmentRows={savedEnvironmentDefinitionIds.map((environmentId) => (
+          <SavedEnvironmentDefinitionRow
             key={environmentId}
             environmentId={environmentId}
-            reconnectingEnvironmentId={reconnectingSavedEnvironmentId}
-            disconnectingEnvironmentId={disconnectingSavedEnvironmentId}
             removingEnvironmentId={removingSavedEnvironmentId}
-            onConnect={handleConnectSavedBackend}
-            onDisconnect={handleDisconnectSavedBackend}
             onRemove={handleRemoveSavedBackend}
           />
         ))}
+      />
+
+      <SettingsSection title="Available Runtimes">
+        {savedEnvironmentIds.map((environmentId) => {
+          const record = savedEnvironmentsById[environmentId];
+          const sandboxLifecycleState = record
+            ? resolveSandboxLifecycleState(record, sandboxSummaries, {
+                summariesLoaded: sandboxSummariesLoaded,
+              })
+            : undefined;
+          return (
+            <SavedBackendListRow
+              key={environmentId}
+              environmentId={environmentId}
+              reconnectingEnvironmentId={reconnectingSavedEnvironmentId}
+              disconnectingEnvironmentId={disconnectingSavedEnvironmentId}
+              sandboxLifecycleState={sandboxLifecycleState}
+              onConnect={handleConnectSavedBackend}
+              onDisconnect={handleDisconnectSavedBackend}
+              onRemove={handleRemoveSavedBackend}
+            />
+          );
+        })}
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironmentIds={savedEnvironmentIds}
+          sandboxEnvironmentIds={sandboxSessionEnvironmentIds}
         />
       </SettingsSection>
     </SettingsPageContainer>

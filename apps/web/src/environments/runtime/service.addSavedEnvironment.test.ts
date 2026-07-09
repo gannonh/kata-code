@@ -194,6 +194,9 @@ describe("addSavedEnvironment", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mockSavedRecords = [];
+    mockGetSavedEnvironmentRecord.mockImplementation((environmentId: EnvironmentId) => {
+      return mockSavedRecords.find((record) => record.environmentId === environmentId) ?? null;
+    });
     mockRelayClientTracer = Option.none();
     mockWsTransportConnectors.length = 0;
     vi.stubGlobal("window", {
@@ -389,6 +392,34 @@ describe("addSavedEnvironment", () => {
         label: "Julius's Mac mini",
       }),
     ]);
+
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("uses the freshly created record when registry lookup races initial connection", async () => {
+    mockWriteSavedEnvironmentBearerToken.mockResolvedValue(true);
+    mockGetSavedEnvironmentRecord.mockReturnValue(null);
+
+    const { addSavedEnvironment, resetEnvironmentServiceForTests } = await import("./service");
+
+    await expect(
+      addSavedEnvironment({
+        label: "Docker sandbox",
+        host: "http://localhost:32859",
+        pairingCode: "123456",
+        sandbox: { providerKind: "docker" },
+      }),
+    ).resolves.toMatchObject({
+      environmentId: EnvironmentId.make("environment-1"),
+    });
+    await expect(mockWsTransportConnectors[0]?.()).resolves.toBe(
+      "wss://remote.example.com/?wsTicket=remote-token",
+    );
+
+    expect(mockFetchRemoteSessionState).toHaveBeenCalledWith({
+      httpBaseUrl: "http://localhost:32859/",
+      bearerToken: "bearer-token",
+    });
 
     await resetEnvironmentServiceForTests();
   });

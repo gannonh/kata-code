@@ -1,16 +1,16 @@
 ---
 type: ADR
 title: "Vercel Sandbox as the first cloud sandbox driver"
-description: "Supersede the Railway Service Phase 3b decision and select Vercel Sandbox as the first BYOC cloud sandbox provider because its ephemeral microVM, snapshot, resume, timeout-extension, and public port model better matches Kata's task-environment shape."
+description: "Select Vercel Sandbox as the first BYOC cloud sandbox provider for its Firecracker microVM, persistent filesystem, public port model, and task-environment fit."
 tags: [adr, environments, deployments, sandbox, vercel, railway, byoc]
-timestamp: 2026-07-05T00:00:00Z
+timestamp: 2026-07-09T00:00:00Z
 ---
 
 # ADR 0007: Vercel Sandbox as the first cloud sandbox driver
 
 ## Status
 
-Accepted. Supersedes [ADR 0006 — Sandbox provider auth model and Railway as the first cloud driver](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) for the Phase 3b cloud provider choice. Keeps ADR 0006's provider-auth model.
+Accepted. Supersedes [ADR 0006 — Sandbox provider auth model and Railway as the first cloud driver](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) for the Phase 3b cloud provider choice. Keeps ADR 0006's provider-auth model. The lifecycle details were amended by the [durable sandbox lifecycle design](/specs/2026-07-07-kata-sandbox-lifecycle-design.md).
 
 ## Context
 
@@ -37,12 +37,12 @@ Railway Sandbox is also directionally strong: it has ephemeral VMs, exec, files,
 2. **Railway Service is removed from Phase 3b.** It becomes a future service-deploy target, not the first cloud sandbox implementation.
 3. **Railway Sandbox moves to the future cloud sandbox list.** Revisit when its SDK/API stabilizes or when Railway-native workflows become a near-term priority.
 4. **Keep ADR 0006's provider-auth model.** Local Docker still bind-mounts host credentials. Cloud drivers seed credential files from a host-side encrypted store and keep env-var API keys as an alternative.
-5. **Use Vercel's sandbox lifecycle directly.** The driver implements optional `snapshot`, `renewTimeout`, and `copyInto` capabilities. It provisions from a runtime, VCR image, or prepared snapshot; exposes `sandbox.domain(port)`; extends timeout while active; surfaces lapsed/resume states; and deletes sandboxes on dispose.
+5. **Use Vercel's persistent named-sandbox lifecycle directly.** The driver exposes the optional lifecycle capability for stop/start/status, uses a server-namespaced deterministic name, resumes persistent filesystem state by name, exposes `sandbox.domain(port)`, extends timeout while active, and deletes the sandbox on explicit deletion. User-facing explicit snapshots, lapse, and resume controls are removed.
 6. **Measure provider performance by time-to-usable sandbox.** Phase 3b validation records `create -> seed -> setup -> healthz -> Connect registered` time. This is the user-facing performance metric.
 
 ## Consequences
 
-- [Phase 3b](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) is rewritten for Vercel Sandbox: `packages/sandbox-vercel`, Vercel token trio, runtime/image/snapshot source, `sandbox.domain(port)`, `extendTimeout`, snapshot/resume, and Vercel credentialed UAT.
+- [Phase 3b](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) delivers `packages/sandbox-vercel`, the Vercel token trio, public `sandbox.domain(port)` reachability, credential seeding, timeout extension, and credentialed Vercel UAT. The [lifecycle design](/specs/2026-07-07-kata-sandbox-lifecycle-design.md) defines durable stop/start/delete behavior and the [identity recovery plan](/specs/2026-07-08-sandbox-identity-recovery-plan.md) defines saved-runtime identity.
 - The [Environments/Deployments roadmap](/specs/2026-06-27-kata-environments-deployments-design.md) is updated so Phase 3b is Vercel Sandbox and future providers include Railway Sandbox, Railway Service, E2B, Daytona, and Hetzner.
 - ADR 0006 is marked superseded by this ADR for provider choice, but remains the accepted source for the credential model unless a later ADR replaces it.
 - The official GHCR image publish requirement from the Railway Service plan is no longer a Phase 3b prerequisite. A VCR image pipeline may still be added if measurements justify it.

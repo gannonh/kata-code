@@ -492,6 +492,16 @@ function OpenCommandPaletteDialog() {
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
   const getAddProjectInitialQueryForEnvironment = useCallback(
     (environmentId: EnvironmentId | null): string => {
+      // Sandboxes seed the repo at a fixed /workspace root. Default the Add
+      // Project browse query there so the user does not have to type it each
+      // time. The host `addProjectBaseDirectory` setting still governs local
+      // (non-sandbox) environments and is kept separate.
+      if (environmentId !== null) {
+        const record = savedEnvironmentRegistry[environmentId];
+        if (record?.sandbox) {
+          return "/workspace/";
+        }
+      }
       const environmentSettings =
         environmentId && primaryEnvironmentId && environmentId === primaryEnvironmentId
           ? settings
@@ -504,7 +514,7 @@ function OpenCommandPaletteDialog() {
       }
       return ensureBrowseDirectoryPath(baseDirectory);
     },
-    [primaryEnvironmentId, savedEnvironmentRuntimeById, settings],
+    [primaryEnvironmentId, savedEnvironmentRegistry, savedEnvironmentRuntimeById, settings],
   );
 
   const projectCwdById = useMemo(

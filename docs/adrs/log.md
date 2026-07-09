@@ -1,5 +1,9 @@
 # ADR log
 
+## 2026-07-09 (ADR 0007 lifecycle amendment)
+
+Updated [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md) to record the implemented persistent named-sandbox lifecycle: stop/start/status through the optional lifecycle capability, deterministic server-namespaced names, public `sandbox.domain(port)` endpoints, and explicit delete. The later [lifecycle design](/specs/2026-07-07-kata-sandbox-lifecycle-design.md) replaces the initial user-facing snapshot, lapse, and resume model; [identity recovery](/specs/2026-07-08-sandbox-identity-recovery-plan.md) defines the saved-runtime join model.
+
 ## 2026-07-06 (ADR 0006 — credential model implementation note)
 
 Updated [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) consequences to record that Phase 3a implementation pivoted the local-Docker credential model from bind-mounts to copy+sanitize (`credentialSeed.ts` + `ustarWriter.ts`) after bind-mounts leaked host-absolute paths into the container. The ADR's auth model (local credential access + cloud credential-file seeding + env-var alternative) is unchanged; only the local implementation detail evolved. See the [Phase 3a spec — Credential model deviation](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md#credential-model-deviation).

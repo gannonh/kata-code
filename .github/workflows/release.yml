@@ -391,6 +391,39 @@ jobs:
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
+      - name: Resolve Electron version for cache
+        id: electron
+        shell: bash
+        env:
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/desktop/package.json').dependencies.electron")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          zip_name="$(
+            ELECTRON_VERSION="$version" MATRIX_PLATFORM="$MATRIX_PLATFORM" MATRIX_ARCH="$MATRIX_ARCH" \
+              node scripts/prefetch-electron-release-zip.mjs --print-name
+          )"
+          echo "zip_name=$zip_name" >> "$GITHUB_OUTPUT"
+          echo "cache_dir=$RUNNER_TEMP/electron-cache" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Electron release zip
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.electron.outputs.cache_dir }}
+          key: electron-zip-${{ steps.electron.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
+
+      - name: Prefetch Electron release zip
+        shell: bash
+        env:
+          ELECTRON_CACHE_DIR: ${{ steps.electron.outputs.cache_dir }}
+          ELECTRON_ZIP_NAME: ${{ steps.electron.outputs.zip_name }}
+          ELECTRON_VERSION: ${{ steps.electron.outputs.version }}
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: node scripts/prefetch-electron-release-zip.mjs --download
+
       - name: Install Spectre-mitigated MSVC libs
         if: matrix.platform == 'win'
         shell: pwsh
@@ -488,6 +521,7 @@ jobs:
       - name: Build desktop artifact
         shell: bash
         env:
+          KATACODE_ELECTRON_CACHE_DIR: ${{ steps.electron.outputs.cache_dir }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}

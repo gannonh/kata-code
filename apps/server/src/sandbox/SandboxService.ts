@@ -14,588 +14,315 @@
  * @module SandboxService
  */
 import * as NodeCrypto from "node:crypto";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodePath from "node:path";
+// @effect-diagnostics nodeBuiltinImport:on
 import * as os from "node:os";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import {
-  AuthAccessTokenResult,
-  AuthAccessTokenType,
-  AuthAdministrativeScopes,
-  AuthEnvironmentBootstrapTokenType,
-  AuthTokenExchangeGrantType,
-  type AdvertisedEndpoint,
-  type AdvertisedEndpointProvider,
-  type ExecutionEnvironmentDescriptor,
-  ExecutionEnvironmentDescriptor as ExecutionEnvironmentDescriptorSchema,
-  type ServerSettings,
-} from "@kata-sh/code-contracts";
-import { createAdvertisedEndpoint } from "@kata-sh/code-shared/advertisedEndpoint";
-import { encodeOAuthScope } from "@kata-sh/code-shared/oauthScope";
+import { type AdvertisedEndpoint, type ServerSettings } from "@kata-sh/code-contracts";
+import { resolveDefaultKatacodeHome } from "@kata-sh/code-shared/branding";
 import {
   type SandboxProviderInstanceConfigMap,
   SandboxProviderInstanceId,
 } from "@kata-sh/code-contracts/sandboxProviderInstance";
-import type {
-  ProviderInstanceEnvironment,
-  ProviderInstanceEnvironmentVariable,
-} from "@kata-sh/code-contracts";
+import type { SandboxProviderInstanceConfig } from "@kata-sh/code-contracts/sandboxProviderInstance";
 import { RepositoryCanonicalKey } from "@kata-sh/code-contracts";
 import {
-  type SandboxInstanceSummary,
+  type SandboxProviderLoginEvent,
   type SandboxStartSessionInput,
   type SandboxTestConnectionProgressEvent,
   SandboxRpcError,
 } from "@kata-sh/code-contracts/sandboxRpc";
-import { SandboxProviderRegistry } from "@kata-sh/code-sandbox/registry";
 import {
   SandboxProviderError,
   type SandboxHandle,
   type SandboxProvider,
 } from "@kata-sh/code-sandbox/driver";
-import {
-  DEFAULT_DOCKER_CONFIG,
-  DockerSandboxProvider,
-  dockerConfigDecoder,
-} from "@kata-sh/code-sandbox-docker";
-import {
-  type RelayEnvironmentConfigRequest,
-  RelayEnvironmentLinkChallengeResponse,
-  RelayEnvironmentLinkResponse,
-  type RelayLinkProofRequest,
-  RelayOkResponse,
-} from "@kata-sh/code-contracts/relay";
-import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
+import { DockerSandboxProvider } from "@kata-sh/code-sandbox-docker";
+import { RelayOkResponse } from "@kata-sh/code-contracts/relay";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
-import { relayUrlConfig } from "../cloud/publicConfig.ts";
-import { EnvironmentConfigLoadError, loadEnvironmentConfig } from "./environmentConfigLoader.ts";
-import { buildCredentialSeedArchives } from "./credentialSeed.ts";
-import { type SetupProcessRecord, SetupFailed, runSandboxSetup } from "./sandboxSetupRunner.ts";
+import { loadEnvironmentConfig } from "./environmentConfigLoader.ts";
+import { SetupFailed, runSandboxSetup } from "./sandboxSetupRunner.ts";
+import {
+  makeSandboxSessionStore,
+  type SandboxSessionRecord,
+  type SandboxSessionStore,
+} from "./sandboxSessionStore.ts";
+import {
+  buildRegistry,
+  toSummary,
+  resolveInstanceEnvelope,
+  reinjectVercelAuth,
+  sanitizeHandleForStore,
+} from "./sandboxSessionHelpers.ts";
+import { reconcileStoredRecords, discoverUntrackedSessions } from "./sandboxReconcile.ts";
+import type { LiveSession } from "./sandboxSessionTypes.ts";
+import {
+  cancelProviderLogin,
+  startProviderLogin,
+  submitProviderLoginCode,
+} from "./providerLogin.ts";
+import {
+  resolveConnectAuthToken,
+  issueSandboxPairingCredential,
+  deleteJson,
+} from "./sandboxConnect.ts";
+import {
+  either,
+  mapLoadError,
+  mapSetupFailed,
+  mapDriverError,
+  registryError,
+  runCredentialSeed,
+  buildProvisionEnvironment,
+  resolveProvisionImage,
+  resolveSandboxTimeoutMs,
+} from "./sandboxProvisionHelpers.ts";
+import {
+  disposeAfterFailure as disposeAfterFailureImpl,
+  registerAndFinalizeSession as registerAndFinalizeSessionImpl,
+} from "./sandboxSessionFinalize.ts";
 
-/** A sandbox `AdvertisedEndpointProvider` (manual kind; container-sourced). */
-const SANDBOX_ENDPOINT_PROVIDER: AdvertisedEndpointProvider = {
-  id: "sandbox-container",
-  label: "Container",
-  kind: "manual",
-  isAddon: false,
-};
+export type { LiveSession } from "./sandboxSessionTypes.ts";
+export { sanitizeHandleForStore, reinjectVercelAuth } from "./sandboxSessionHelpers.ts";
+export { reconcileStoredRecords, discoverUntrackedSessions } from "./sandboxReconcile.ts";
+/** Re-export for existing tests that import from SandboxService. */
+export { connectAuthTokenPreferenceForEndpoint } from "./sandboxConnect.ts";
 
-/** Deadline for Connect/container HTTP fetches (bootstrap token exchange,
- * well-known descriptor, relay link/config calls). A hung network call aborts
- * and surfaces as a `connect-failed` SandboxRpcError instead of pending. */
-const SANDBOX_FETCH_TIMEOUT_MS = 30_000;
-
-function buildRegistry(): SandboxProviderRegistry {
-  const registry = new SandboxProviderRegistry();
-  registry.register(DockerSandboxProvider, dockerConfigDecoder);
-  return registry;
+function removeStoreRecordOnFailure(sessionKey: string): Effect.Effect<void, never> {
+  return Effect.ignore(getSessionStore().remove(sessionKey as never)).pipe(Effect.asVoid);
 }
 
-type Materialized = ReturnType<SandboxProviderRegistry["materializeOne"]>;
-
-function toSummary(inst: Materialized): Effect.Effect<SandboxInstanceSummary, never> {
-  if (inst.kind === "unavailable") {
-    return Effect.succeed({
-      kind: "unavailable",
-      instanceId: inst.instanceId,
-      reason: inst.reason,
-      message: inst.message,
-    });
-  }
-  return Effect.gen(function* () {
-    const descriptor = yield* inst.driver.describe();
-    const runningSession = runningSessions.get(inst.instanceId as string);
-    return {
-      kind: "available",
-      instanceId: inst.instanceId,
-      driver: descriptor.kind as string,
-      reachabilityKind: descriptor.reachabilityKind,
-      supportsSnapshot: descriptor.supportsSnapshot,
-      supportsRenewTimeout: descriptor.supportsRenewTimeout,
-      ...(runningSession
-        ? {
-            runningSession: {
-              environmentId: runningSession.environmentId,
-              endpoint: runningSession.endpoint,
-            },
-          }
-        : {}),
-    };
+/** Wrap finalize so dispose-after-failure can remove the store record. */
+function registerAndFinalizeSession(
+  input: Omit<Parameters<typeof registerAndFinalizeSessionImpl>[0], "removeStoreRecord">,
+): ReturnType<typeof registerAndFinalizeSessionImpl> {
+  return registerAndFinalizeSessionImpl({
+    ...input,
+    removeStoreRecord: removeStoreRecordOnFailure,
   });
 }
 
-/**
- * Turn an effect into an Either-shaped `{ _tag: "Left"|"Right" }` value.
- * `Effect.either` is not exported in the installed Effect (4.0.0-beta.78);
- * `Effect.matchEffect` is the canonical primitive for collapsing the error
- * channel into a value. The explicit `_tag` union is what the `testConnection`
- * stream pipeline narrows on per step.
- */
-function either<A, E>(
-  eff: Effect.Effect<A, E>,
-): Effect.Effect<{ _tag: "Left"; left: E } | { _tag: "Right"; right: A }, never> {
-  return Effect.matchEffect(eff, {
-    onFailure: (left) => Effect.succeed<{ _tag: "Left"; left: E }>({ _tag: "Left", left }),
-    onSuccess: (right) => Effect.succeed<{ _tag: "Right"; right: A }>({ _tag: "Right", right }),
-  });
-}
-
-/** Map a loader failure to the RPC error channel. */
-function mapLoadError(e: EnvironmentConfigLoadError): SandboxRpcError {
-  return new SandboxRpcError({ reason: "invalid-config", message: e.message });
-}
-
-/** Map a setup-runner failure to the RPC error channel. */
-function mapSetupFailed(e: SetupFailed): SandboxRpcError {
-  return new SandboxRpcError({
-    reason: "provision-failed",
-    message: `Setup failed (${e.stage}): ${e.message}`,
-  });
-}
-
-/** Seed provider credentials (static config + auth) into the container home.
- *  Runs unconditionally after provision, before the repo seed. Returns void on
- *  success; failures map to SetupFailed/SandboxProviderError via the caller. */
-function runCredentialSeed(
-  driver: SandboxProvider,
-  handle: SandboxHandle,
-): Effect.Effect<void, SetupFailed | SandboxProviderError> {
-  return Effect.gen(function* () {
-    const copyIntoCap = driver.copyInto;
-    if (!copyIntoCap) return; // driver without copyInto — cloud drivers seed via their own mechanism
-    const archives = yield* buildCredentialSeedArchives({ hostHome: os.homedir() }).pipe(
-      Effect.mapError(
-        (e) =>
-          new SetupFailed({
-            stage: "seed",
-            message: `credential seed build failed: ${e.message}`,
-            cause: e,
-          }),
-      ),
-    );
-    if (archives.static) {
-      yield* copyIntoCap.copyInto(handle, archives.static, "/home/katacode").pipe(
-        Effect.mapError(
-          (e) =>
-            new SetupFailed({
-              stage: "seed",
-              message: `credential static copyInto failed: ${e.message}`,
-              cause: e,
-            }),
-        ),
-      );
-    }
-    if (archives.credentials) {
-      yield* copyIntoCap.copyInto(handle, archives.credentials, "/home/katacode").pipe(
-        Effect.mapError(
-          (e) =>
-            new SetupFailed({
-              stage: "seed",
-              message: `credential auth copyInto failed: ${e.message}`,
-              cause: e,
-            }),
-        ),
-      );
-    }
-  });
-}
-
-/** Collect provision env tuples and secret values for setup-output redaction. */
-function buildProvisionEnvironment(input: {
-  readonly bootstrapToken: string;
-  readonly instanceEnvironment?: ProviderInstanceEnvironment | undefined;
-  readonly savedEnvironment?: ProviderInstanceEnvironment | undefined;
-}): {
-  readonly env: ReadonlyArray<readonly [string, string]>;
-  readonly secretValues: ReadonlyArray<string>;
-} {
-  const byName = new Map<string, ProviderInstanceEnvironmentVariable>();
-  for (const variable of input.instanceEnvironment ?? []) {
-    byName.set(variable.name, variable);
-  }
-  for (const variable of input.savedEnvironment ?? []) {
-    byName.set(variable.name, variable);
-  }
-  const env: Array<readonly [string, string]> = [
-    ["KATACODE_DESKTOP_BOOTSTRAP_TOKEN", input.bootstrapToken],
-  ];
-  const secretValues: string[] = [input.bootstrapToken];
-  for (const variable of byName.values()) {
-    env.push([variable.name, variable.value]);
-    if (variable.sensitive && variable.value.length > 0) {
-      secretValues.push(variable.value);
-    }
-  }
-  return { env, secretValues };
-}
-
-/** Dispose a provisioned sandbox after a post-provision failure. */
 function disposeAfterFailure(
   sessionKey: string,
   driver: SandboxProvider,
   handle: SandboxHandle,
 ): Effect.Effect<void, never> {
-  return Effect.sync(() => runningSessions.delete(sessionKey)).pipe(
-    Effect.andThen(
-      driver.dispose(handle).pipe(
-        Effect.catch((disposeError) =>
-          Effect.logWarning("Could not dispose sandbox after startSession failure", {
-            cause: disposeError,
-          }),
-        ),
+  return disposeAfterFailureImpl(sessionKey, driver, handle, removeStoreRecordOnFailure);
+}
+
+/** Ephemeral instance id for `testConnection` so deterministic Docker/Vercel
+ *  names cannot adopt (and then dispose) an existing durable sandbox. */
+export function makeTestConnectionProbeInstanceId(instanceId: string): string {
+  return `${instanceId}__probe_${NodeCrypto.randomBytes(4).toString("hex")}`;
+}
+
+/** Durable session store — the source of truth for sandbox session state.
+ *  Configured via `configureSandboxRuntime` from the WS layer with
+ *  `ServerConfig.stateDir` (respects `KATACODE_HOME` / `--base-dir`). */
+let sessionStore: SandboxSessionStore | null = null;
+let configuredStateDir: string | null = null;
+/** Server environment id used to namespace Vercel sandbox names so two Kata
+ *  servers sharing one Vercel project do not collide on the same instance id. */
+let sandboxNameNamespace: string | undefined;
+
+/**
+ * Bind the durable session store (and optional Vercel name namespace) to the
+ * running server's state directory. Idempotent when `stateDir` is unchanged.
+ * Call from the WS layer before any sandbox RPC.
+ */
+export function configureSandboxRuntime(input: {
+  readonly stateDir: string;
+  readonly nameNamespace?: string;
+}): void {
+  sandboxNameNamespace = input.nameNamespace;
+  if (sessionStore !== null && configuredStateDir === input.stateDir) return;
+  configuredStateDir = input.stateDir;
+  sessionStore = makeSandboxSessionStore(input.stateDir);
+  // A new store must re-reconcile against providers.
+  reconcileDone = false;
+  liveSessions.clear();
+}
+
+/** Resolve the session store, lazily falling back to `<katacodeHome>/userdata`
+ *  only when tests or early callers have not configured the runtime. */
+function getSessionStore(): SandboxSessionStore {
+  if (sessionStore === null) {
+    const fallback = NodePath.join(resolveDefaultKatacodeHome(os.homedir()), "userdata");
+    configuredStateDir = fallback;
+    sessionStore = makeSandboxSessionStore(fallback);
+  }
+  return sessionStore;
+}
+
+/** In-memory cache of live sessions (instanceId → driver + handle). Populated
+ *  by startSession and reconcile; read by providerLogin (needs the driver for
+ *  exec). The store holds the durable state; this holds the ephemeral driver
+ *  reference. */
+const liveSessions = new Map<string, LiveSession>();
+
+/** In-flight operation reservations (instanceId). Prevents concurrent
+ *  start/stop/delete operations from racing. Cleared in an ensuring block. */
+const busyInstances = new Set<string>();
+
+/** Test-only: mark an instance busy so dispose/start/stop refuse with a
+ *  provision-failed race error. Cleared via `clearSandboxInstanceBusyForTests`. */
+export function markSandboxInstanceBusyForTests(instanceId: string): void {
+  busyInstances.add(instanceId);
+}
+
+export function clearSandboxInstanceBusyForTests(instanceId: string): void {
+  busyInstances.delete(instanceId);
+}
+
+/** Test-only: seed the in-memory live-session cache (e.g. stopped-store + live
+ *  handle races for providerLoginStart). Cleared via `clearLiveSessionForTests`. */
+export function setLiveSessionForTests(instanceId: string, live: LiveSession): void {
+  liveSessions.set(instanceId, live);
+}
+
+export function clearLiveSessionForTests(instanceId: string): void {
+  liveSessions.delete(instanceId);
+}
+
+/** Whether a boot reconcile is currently running. Lifecycle ops wait/fail
+ *  rather than racing a full-store rewrite. */
+let reconcileInProgress = false;
+
+/** Whether boot reconcile has run. Reconcile runs lazily on first
+ *  `listInstances` if it hasn't run yet. */
+let reconcileDone = false;
+
+/** Best-effort relay unlink for a session record (dispose + gone-eviction
+ *  share this). The bearer token is never stored; re-resolve it. All failures
+ *  log and succeed — a dead relay link lapses on its own eventually. */
+function unlinkSandboxFromRelay(
+  record: SandboxSessionRecord,
+): Effect.Effect<void, never, CliTokenManager.CloudCliTokenManager> {
+  return Effect.gen(function* () {
+    if (record.relay === undefined) return;
+    const bearerToken = yield* resolveConnectAuthToken(undefined, "stored-first").pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (bearerToken === null) {
+      yield* Effect.logWarning("Sandbox relay unlink skipped: no Connect credential", {
+        environmentId: record.sandboxEnvironmentId,
+      });
+      return;
+    }
+    yield* deleteJson(
+      RelayOkResponse,
+      `${record.relay.relayUrl}/v1/client/environment-links/${record.sandboxEnvironmentId}`,
+      bearerToken,
+    ).pipe(
+      Effect.asVoid,
+      Effect.catch((error: SandboxRpcError) =>
+        Effect.logWarning("Could not unlink sandbox from relay", {
+          environmentId: record.sandboxEnvironmentId,
+          message: error.message,
+        }).pipe(Effect.asVoid),
       ),
+    );
+  });
+}
+
+function reconcileSessions(
+  settings: ServerSettings,
+): Effect.Effect<void, never, CliTokenManager.CloudCliTokenManager> {
+  return Effect.gen(function* () {
+    if (reconcileDone) return;
+    // Do not rewrite the store while a lifecycle op holds an instance lock.
+    if (busyInstances.size > 0) return;
+    reconcileInProgress = true;
+    try {
+      const store = getSessionStore();
+      yield* reconcileStoredRecords({
+        store,
+        registry: buildRegistry(),
+        settings,
+        liveSessions,
+        unlinkRelay: (record) => unlinkSandboxFromRelay(record),
+      });
+      // Discovery: for configured instances with supportsLifecycle and no store
+      // record, probe the provider for an existing sandbox (e.g. created before
+      // the durable store existed, or after a store reset). Found sandboxes are
+      // persisted so the UI reports them as running/stopped with the right actions.
+      yield* discoverUntrackedSessions({
+        store,
+        registry: buildRegistry(),
+        settings,
+        liveSessions,
+        ...(sandboxNameNamespace !== undefined ? { nameNamespace: sandboxNameNamespace } : {}),
+      });
+      reconcileDone = true;
+    } finally {
+      reconcileInProgress = false;
+    }
+  });
+}
+
+function storeSessionRecord(input: {
+  readonly instanceId: SandboxProviderInstanceId;
+  readonly driver: SandboxProvider;
+  readonly handle: SandboxHandle;
+  readonly config: SandboxProviderInstanceConfig;
+  readonly environmentId: string;
+  readonly endpoint: AdvertisedEndpoint;
+  readonly relay: { readonly relayUrl: string; readonly bearerToken: string } | null;
+  readonly status: "running" | "stopped";
+}): Effect.Effect<void, Error> {
+  const driverKindStr = input.driver.kind as string;
+  const record: SandboxSessionRecord = {
+    instanceId: input.instanceId as string,
+    driverKind: driverKindStr,
+    environmentId: input.instanceId as string,
+    sandboxEnvironmentId: input.environmentId,
+    handle: {
+      driverKind: driverKindStr,
+      // Strip secrets (Vercel auth trio) before persisting.
+      handle: sanitizeHandleForStore(driverKindStr, input.handle.handle),
+    },
+    endpoint: input.endpoint,
+    status: input.status,
+    // Store only the relay URL; the bearer token is re-resolved at dispose time.
+    relay: input.relay ? { relayUrl: input.relay.relayUrl } : undefined,
+  };
+  return getSessionStore().upsert(record);
+}
+
+/** Persist a session record, logging (not swallowing) store write failures.
+ *  A store write failure after a successful provision cannot unwind the
+ *  provision (the sandbox is live on the provider), so the error is surfaced
+ *  via a warning log — fail-loud for operators — rather than failing the RPC
+ *  and tearing down a working sandbox. The same applies to stop/renew updates. */
+function persistSessionRecord(
+  input: Parameters<typeof storeSessionRecord>[0],
+): Effect.Effect<void, never> {
+  return storeSessionRecord(input).pipe(
+    Effect.catch((error: unknown) =>
+      Effect.logError("Sandbox session store write failed; sandbox may be orphaned on restart", {
+        instanceId: input.instanceId as string,
+        message: error instanceof Error ? error.message : String(error),
+      }),
     ),
   );
 }
 
-/** Map a driver `SandboxProviderError` to the RPC `SandboxRpcError`. */
-function mapDriverError(e: SandboxProviderError): SandboxRpcError {
-  let reason: SandboxRpcError["reason"];
-  switch (e.reason) {
-    case "invalid-config":
-      reason = "invalid-config";
-      break;
-    case "unreachable":
-      reason = "unreachable";
-      break;
-    case "provision-failed":
-    case "dispose-failed":
-    case "exec-failed":
-      reason = "provision-failed";
-      break;
-    default:
-      reason = "internal";
-  }
-  return new SandboxRpcError({ reason, message: e.message });
-}
-
-/** Map a registry unavailable reason to an RPC error. `SandboxRpcError`
- * already lists every registry reason, so the reason is passed through verbatim
- * (a deliberately-disabled instance must surface as `disabled`, not
- * `invalid-config`). */
-function registryError(
-  reason: "unknown-driver" | "disabled" | "invalid-config",
-  message: string,
-): SandboxRpcError {
-  return new SandboxRpcError({ reason, message });
-}
-
-/** Best-effort message from any error value (Connect/relay errors are a union). */
-function errorToMessage(e: unknown): string {
-  if (typeof e === "object" && e !== null && "message" in e) {
-    return String((e as { message: unknown }).message);
-  }
-  return String(e);
-}
-
-/** Resolve the base image for a provision request from the decoded driver
- * config, falling back to the Docker default when the config omits one.
- * The driver treats `req.image` as authoritative, so passing the configured
- * image (rather than always the default) honors user-configured targets. */
-function resolveProvisionImage(config: unknown): string {
-  if (
-    config !== null &&
-    typeof config === "object" &&
-    typeof (config as { image?: unknown }).image === "string"
-  ) {
-    return (config as { image: string }).image;
-  }
-  return DEFAULT_DOCKER_CONFIG.image;
-}
-
-async function readResponseBody(response: Response): Promise<string> {
-  const text = await response.text();
-  if (!text) return `${response.status} ${response.statusText}`;
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (typeof parsed === "object" && parsed !== null && "message" in parsed) {
-      return String((parsed as { message: unknown }).message);
-    }
-    if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
-      const error = String((parsed as { error: unknown }).error);
-      const description =
-        "error_description" in parsed
-          ? String((parsed as { error_description: unknown }).error_description)
-          : "";
-      return description ? `${error}: ${description}` : error;
-    }
-  } catch {
-    // The raw response text is more useful than a JSON parse failure here.
-  }
-  return text;
-}
-
-async function fetchAndDecodeJson<S extends Schema.Decoder<unknown>>(
-  schema: S,
-  url: string,
-  init?: RequestInit,
-): Promise<S["Type"]> {
-  // Bound every Connect/container fetch so a hung network call fails loudly
-  // instead of leaving startSession/testConnection pending indefinitely.
-  // @effect-diagnostics-next-line globalFetch:off - probes another Kata server endpoint from the sandbox orchestrator.
-  const response = await fetch(url, {
-    ...init,
-    signal: AbortSignal.timeout(SANDBOX_FETCH_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(`${url} failed: ${await readResponseBody(response)}`);
-  }
-  return Schema.decodeUnknownSync(schema)(await response.json());
-}
-
-function fetchJson<S extends Schema.Decoder<unknown>>(
-  schema: S,
-  url: string,
-  init?: RequestInit,
-): Effect.Effect<S["Type"], SandboxRpcError> {
-  return Effect.tryPromise({
-    try: () => fetchAndDecodeJson(schema, url, init),
-    catch: (cause) =>
-      new SandboxRpcError({
-        reason: "connect-failed",
-        message: errorToMessage(cause),
-      }),
-  });
-}
-
-function postJson<S extends Schema.Decoder<unknown>>(
-  schema: S,
-  url: string,
-  payload: unknown,
-  bearerToken?: string,
-): Effect.Effect<S["Type"], SandboxRpcError> {
-  return fetchJson(schema, url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-}
-
-function deleteJson<S extends Schema.Decoder<unknown>>(
-  schema: S,
-  url: string,
-  bearerToken?: string,
-): Effect.Effect<S["Type"], SandboxRpcError> {
-  return fetchJson(schema, url, {
-    method: "DELETE",
-    headers: bearerToken ? { authorization: `Bearer ${bearerToken}` } : {},
-  });
-}
-
-function exchangeBootstrapToken(input: {
-  readonly httpBaseUrl: string;
-  readonly bootstrapToken: string;
-}): Effect.Effect<AuthAccessTokenResult, SandboxRpcError> {
-  const body = new URLSearchParams({
-    grant_type: AuthTokenExchangeGrantType,
-    subject_token: input.bootstrapToken,
-    subject_token_type: AuthEnvironmentBootstrapTokenType,
-    requested_token_type: AuthAccessTokenType,
-    scope: encodeOAuthScope(AuthAdministrativeScopes),
-    client_label: "Kata Code sandbox environment",
-    client_device_type: "desktop",
-  });
-  return fetchJson(AuthAccessTokenResult, `${input.httpBaseUrl}/oauth/token`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body,
-  });
-}
-
-function resolveConnectAuthToken(
-  connectAuthToken: SandboxStartSessionInput["connectAuthToken"],
-): Effect.Effect<string, SandboxRpcError, CliTokenManager.CloudCliTokenManager> {
-  if (connectAuthToken) return Effect.succeed(connectAuthToken);
-  return Effect.gen(function* () {
-    const tokens = yield* CliTokenManager.CloudCliTokenManager;
-    const token = yield* tokens.getExisting.pipe(
-      Effect.mapError(
-        (cause) =>
-          new SandboxRpcError({
-            reason: "connect-failed",
-            message: `Could not read Kata Code Connect authorization: ${cause.message}`,
-          }),
+/** Remove a session record from the store, logging (not swallowing) failures. */
+function removeSessionRecord(instanceId: SandboxProviderInstanceId): Effect.Effect<void, never> {
+  return getSessionStore()
+    .remove(instanceId)
+    .pipe(
+      Effect.catch((error: unknown) =>
+        Effect.logError("Sandbox session store remove failed", {
+          instanceId: instanceId as string,
+          message: error instanceof Error ? error.message : String(error),
+        }),
       ),
     );
-    return yield* Option.match(token, {
-      onNone: () =>
-        Effect.fail(
-          new SandboxRpcError({
-            reason: "connect-failed",
-            message: "Sign in to Kata Code Connect before starting a deployment session.",
-          }),
-        ),
-      onSome: (value) => Effect.succeed(value.accessToken),
-    });
-  });
 }
-
-function registerSandboxWithConnect(input: {
-  readonly httpBaseUrl: string;
-  readonly bootstrapToken: string;
-  readonly connectAuthToken: SandboxStartSessionInput["connectAuthToken"];
-}): Effect.Effect<
-  {
-    readonly descriptor: ExecutionEnvironmentDescriptor;
-    readonly adminAccessToken: string;
-    readonly relay?: { readonly relayUrl: string; readonly bearerToken: string } | null;
-  },
-  SandboxRpcError,
-  CliTokenManager.CloudCliTokenManager
-> {
-  return Effect.gen(function* () {
-    const relayUrl = yield* relayUrlConfig.pipe(
-      Effect.mapError(
-        (cause) =>
-          new SandboxRpcError({
-            reason: "connect-failed",
-            message: `KATACODE_RELAY_URL is not configured for sandbox Connect registration: ${String(cause)}`,
-          }),
-      ),
-    );
-    const bearerToken = yield* resolveConnectAuthToken(input.connectAuthToken);
-    const session = yield* exchangeBootstrapToken(input);
-    const descriptor = yield* fetchJson(
-      ExecutionEnvironmentDescriptorSchema,
-      `${input.httpBaseUrl}${WIRE_ENVIRONMENT_WELL_KNOWN_PATH}`,
-    );
-    const endpoint = {
-      httpBaseUrl: input.httpBaseUrl,
-      wsBaseUrl: input.httpBaseUrl.replace(/^http/u, "ws"),
-      providerKind: "cloudflare_tunnel" as const,
-    };
-    const url = new URL(input.httpBaseUrl);
-    const challenge = yield* postJson(
-      RelayEnvironmentLinkChallengeResponse,
-      `${relayUrl}/v1/client/environment-link-challenges`,
-      {
-        notificationsEnabled: true,
-        liveActivitiesEnabled: true,
-        managedTunnelsEnabled: true,
-      },
-      bearerToken,
-    );
-    const proofRequest: RelayLinkProofRequest = {
-      challenge: challenge.challenge,
-      relayIssuer: relayUrl,
-      endpoint,
-      origin: {
-        localHttpHost: "127.0.0.1",
-        localHttpPort: Number(url.port || (url.protocol === "https:" ? 443 : 80)),
-      },
-    };
-    const proof = yield* postJson(
-      Schema.String,
-      `${input.httpBaseUrl}/api/connect/link-proof`,
-      proofRequest,
-      session.access_token,
-    );
-    const link = yield* postJson(
-      RelayEnvironmentLinkResponse,
-      `${relayUrl}/v1/client/environment-links`,
-      {
-        proof,
-        notificationsEnabled: true,
-        liveActivitiesEnabled: true,
-        managedTunnelsEnabled: true,
-      },
-      bearerToken,
-    );
-    if (link.environmentId !== descriptor.environmentId) {
-      return yield* new SandboxRpcError({
-        reason: "connect-failed",
-        message: "Relay returned credentials for a different sandbox environment.",
-      });
-    }
-    const relayConfig: RelayEnvironmentConfigRequest = {
-      relayUrl,
-      relayIssuer: link.relayIssuer,
-      cloudUserId: link.cloudUserId,
-      environmentCredential: link.environmentCredential,
-      cloudMintPublicKey: link.cloudMintPublicKey,
-      endpointRuntime: link.endpointRuntime,
-    };
-    yield* postJson(
-      RelayConfigResponse,
-      `${input.httpBaseUrl}/api/connect/relay-config`,
-      relayConfig,
-      session.access_token,
-    );
-    return {
-      descriptor,
-      adminAccessToken: session.access_token,
-      relay: { relayUrl, bearerToken },
-    };
-  });
-}
-
-/** Wire shape of the pairing-token response. Decoded from raw JSON, so
- * `expiresAt` stays a string here (the full `AuthPairingCredentialResult`
- * schema expects a decoded DateTime). Only `credential` is used. */
-const SandboxPairingCredentialWire = Schema.Struct({
-  credential: Schema.String,
-});
-
-/** Mint a fresh pairing credential from the in-container server. The desktop
- * bootstrap token is single-use and is consumed by Connect registration, so
- * the deploying client needs its own credential to save the sandbox as an
- * environment. */
-function issueSandboxPairingCredential(input: {
-  readonly httpBaseUrl: string;
-  readonly adminAccessToken: string;
-}): Effect.Effect<string, SandboxRpcError> {
-  return postJson(
-    SandboxPairingCredentialWire,
-    `${input.httpBaseUrl}/api/auth/pairing-token`,
-    { label: "Deploying desktop" },
-    input.adminAccessToken,
-  ).pipe(Effect.map((credential) => credential.credential));
-}
-
-/** Re-probe all providers on the sandbox server via the `/api/providers/refresh`
- *  HTTP endpoint. Called after credentials are seeded via copyInto so the
- *  sandbox server re-probes with auth in place. The initial boot probe may
- *  have fired before credentials were in the container home. */
-function refreshSandboxProviders(input: {
-  readonly httpBaseUrl: string;
-  readonly adminAccessToken: string;
-}): Effect.Effect<void, SandboxRpcError> {
-  // Best-effort: a 200 with any body is a successful refresh. The refreshed
-  // provider statuses flow to clients via the WS serverConfig stream.
-  return fetchJson(Schema.Unknown, `${input.httpBaseUrl}/api/providers/refresh`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${input.adminAccessToken}` },
-  }).pipe(Effect.asVoid);
-}
-
-const RelayConfigResponse = Schema.Struct({ ok: Schema.Boolean });
-
-/** A running sandbox session: the provisioned handle plus the driver that
- * created it, so `disposeSession` routes to the correct driver rather than a
- * hardcoded one. Phase 1; not durable (server restart cannot reclaim these —
- * see deferred-work for a startup container sweep). */
-interface RunningSession {
-  readonly handle: SandboxHandle;
-  readonly driver: SandboxProvider;
-  readonly setupProcesses: ReadonlyArray<SetupProcessRecord>;
-  readonly environmentId: string;
-  readonly endpoint: AdvertisedEndpoint;
-  /** Relay link info for unlinking on dispose. */
-  readonly relay?: { readonly relayUrl: string; readonly bearerToken: string } | null;
-}
-
-/** In-memory map of running sessions (instanceId → handle + driver + endpoint). Phase 1; not durable. */
-const runningSessions = new Map<string, RunningSession>();
-
-/** In-flight provisioning reservations (instanceId). Prevents concurrent startSession
- * calls from racing past the runningSessions check and booting duplicate containers.
- * Cleared in an ensuring block after provision completes (success or failure). */
-const startingSessions = new Set<string>();
 
 /**
  * The live sandbox service. `startSession` requires the Kata Code Connect
@@ -606,11 +333,25 @@ const startingSessions = new Set<string>();
 export const SandboxServiceLive = {
   listInstances: (settings: ServerSettings) =>
     Effect.gen(function* () {
+      // Lazy boot reconcile: on first listInstances, reconcile stored records
+      // against provider lifecycle.status.
+      yield* reconcileSessions(settings);
       const registry = buildRegistry();
-      const materialized = registry.materialize(
-        settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap,
+      const rawMap = settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
+      const resolvedMap: SandboxProviderInstanceConfigMap = Object.fromEntries(
+        Object.entries(rawMap).map(([id, cfg]) => [
+          id,
+          resolveInstanceEnvelope(cfg as SandboxProviderInstanceConfig),
+        ]),
+      ) as SandboxProviderInstanceConfigMap;
+      const materialized = registry.materialize(resolvedMap);
+      const records = getSessionStore().records;
+      const recordByInstance = new Map(records.map((r) => [r.instanceId, r] as const));
+      return yield* Effect.forEach(
+        materialized,
+        (inst) => toSummary(inst, recordByInstance.get(inst.instanceId as string)),
+        { concurrency: "unbounded" },
       );
-      return yield* Effect.forEach(materialized, toSummary, { concurrency: "unbounded" });
     }),
 
   testConnection: (instanceId: SandboxProviderInstanceId, settings: ServerSettings) =>
@@ -626,7 +367,7 @@ export const SandboxServiceLive = {
             message: "instance not found",
           });
         }
-        const inst = registry.materializeOne(instanceId, config);
+        const inst = registry.materializeOne(instanceId, resolveInstanceEnvelope(config));
         if (inst.kind !== "available") {
           return yield* registryError(inst.reason, inst.message);
         }
@@ -651,13 +392,16 @@ export const SandboxServiceLive = {
         );
         // Stream level 2 — if validate failed, emit just the validate event;
         // otherwise run provision and carry both the result and its event.
+        // Use a unique probe instance id so Docker/Vercel deterministic naming
+        // cannot adopt (and then dispose) an existing durable sandbox.
         return validate.pipe(
           Stream.flatMap((validateEvent) => {
             if (!validateEvent.ok) return Stream.make(validateEvent);
+            const probeInstanceId = makeTestConnectionProbeInstanceId(instanceId as string);
             const provision = Stream.fromEffect(
               either(
                 inst.driver.provision({
-                  instanceId: instanceId as string,
+                  instanceId: probeInstanceId,
                   config: inst.config,
                   image: resolveProvisionImage(inst.config),
                   env: [],
@@ -714,19 +458,27 @@ export const SandboxServiceLive = {
     },
   ) =>
     Effect.gen(function* () {
-      // Idempotency guard: a concurrent `startSession` for the same instance
-      // (e.g. a double-click during the up-to-60s provision window) would
-      // boot a second container and orphan the first one with no handle to
-      // dispose. Fail fast instead.
       const sessionKey = instanceId as string;
-      if (runningSessions.has(sessionKey) || startingSessions.has(sessionKey)) {
+      // Operation lock: prevents concurrent start/stop/delete on the same instance.
+      // Add to the lock BEFORE any yield (reconcile) so a concurrent startSession
+      // for the same instance cannot pass the guard and orphan a second container.
+      if (busyInstances.has(sessionKey) || reconcileInProgress) {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
-          message: "A session is already running for this sandbox environment.",
+          message: "An operation is already in progress for this sandbox environment.",
         });
       }
-      startingSessions.add(sessionKey);
+      busyInstances.add(sessionKey);
       return yield* Effect.gen(function* () {
+        // Ensure reconcile has run so the store is populated.
+        yield* reconcileSessions(settings);
+        const existing = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+        if (existing !== undefined && existing.status === "running") {
+          return yield* new SandboxRpcError({
+            reason: "provision-failed",
+            message: "A session is already running for this sandbox environment.",
+          });
+        }
         const registry = buildRegistry();
         const config = (settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap)[
           instanceId as SandboxProviderInstanceId
@@ -737,11 +489,110 @@ export const SandboxServiceLive = {
             message: "instance not found",
           });
         }
-        const inst = registry.materializeOne(instanceId, config);
+        const resolvedConfig = resolveInstanceEnvelope(config);
+        const inst = registry.materializeOne(instanceId, resolvedConfig);
         if (inst.kind !== "available") {
           return yield* registryError(inst.reason, inst.message);
         }
-        // Per-session Kata WebSocket auth token (required for non-loopback clients).
+
+        // ── Start-from-stopped path ──
+        if (existing !== undefined && existing.status === "stopped") {
+          if (inst.driver.lifecycle === undefined) {
+            return yield* new SandboxRpcError({
+              reason: "not-running",
+              message: "This sandbox driver does not support lifecycle start.",
+            });
+          }
+          // A stopped sandbox already has a seeded workspace; re-seeding is
+          // not supported. Fail loud rather than silently dropping the input.
+          if (options?.repository !== undefined) {
+            return yield* new SandboxRpcError({
+              reason: "invalid-config",
+              message: "The sandbox already has a seeded workspace; delete it to re-seed.",
+            });
+          }
+          const handle: SandboxHandle = {
+            driverKind: inst.driver.kind,
+            instanceId: sessionKey,
+            // Re-inject Vercel auth into the stored (sanitized) handle.
+            handle: reinjectVercelAuth(
+              inst.driver.kind as string,
+              existing.handle.handle,
+              resolvedConfig.config,
+            ),
+          };
+          // Fresh bootstrap token for the started server.
+          // @effect-diagnostics-next-line effect(globalDateInEffect):off - random token, not a clock read.
+          const bootstrapToken = NodeCrypto.randomBytes(24).toString("hex");
+          const { env } = buildProvisionEnvironment({
+            bootstrapToken,
+            instanceEnvironment: resolvedConfig.environment,
+          });
+          const started = yield* inst.driver.lifecycle
+            .start(handle, { config: resolvedConfig.config, env })
+            .pipe(Effect.mapError(mapDriverError));
+          // Docker env is fixed at container create: the restarted in-container
+          // server re-seeds its ORIGINAL create-time bootstrap grant, not the
+          // fresh token minted above. Recover the effective token from the
+          // container env so the exchange matches what the server booted with.
+          // (Vercel relaunches `serve` with the fresh env, so it keeps the
+          // fresh token.)
+          let effectiveBootstrapToken = bootstrapToken;
+          if ((inst.driver.kind as string) === (DockerSandboxProvider.kind as string)) {
+            const recovered = yield* inst.driver
+              .exec(started, "printenv KATACODE_DESKTOP_BOOTSTRAP_TOKEN")
+              .pipe(Effect.mapError(mapDriverError));
+            const token = recovered.stdout.trim();
+            if (token.length === 0) {
+              return yield* new SandboxRpcError({
+                reason: "connect-failed",
+                message:
+                  "Started container has no KATACODE_DESKTOP_BOOTSTRAP_TOKEN in its environment; delete the sandbox and create it again.",
+              });
+            }
+            effectiveBootstrapToken = token;
+          }
+          // Re-run Connect registration + mint a fresh pairing token. `keep`:
+          // a transient Connect failure must never destroy a stopped-started
+          // sandbox's durable filesystem — the user retries Start.
+          const finalized = yield* registerAndFinalizeSession({
+            sessionKey,
+            instanceId,
+            driver: inst.driver,
+            handle: started,
+            config: resolvedConfig,
+            bootstrapToken: effectiveBootstrapToken,
+            connectAuthToken: options?.connectAuthToken,
+            failureCleanup: "keep",
+          });
+          // Update the store record (logs on failure rather than swallowing).
+          yield* persistSessionRecord({
+            instanceId,
+            driver: inst.driver,
+            handle: started,
+            config: resolvedConfig,
+            environmentId: finalized.environmentId,
+            endpoint: finalized.endpoint,
+            relay: finalized.relay,
+            status: "running",
+          });
+          // Cache the live session.
+          liveSessions.set(sessionKey, {
+            handle: started,
+            driver: inst.driver,
+            instanceConfig: resolvedConfig,
+            environmentId: finalized.environmentId,
+            adminAccessToken: finalized.adminAccessToken,
+          });
+          return {
+            instanceId,
+            environmentId: finalized.environmentId,
+            pairingToken: finalized.pairingToken,
+            endpoint: finalized.endpoint,
+          };
+        }
+
+        // ── Provision path (no existing record) ──
         // @effect-diagnostics-next-line effect(globalDateInEffect):off - random token, not a clock read.
         const bootstrapToken = NodeCrypto.randomBytes(24).toString("hex");
 
@@ -758,9 +609,6 @@ export const SandboxServiceLive = {
           savedEnvironment: savedEnv?.environment,
         });
 
-        // Pass the display name into the container so the sandbox server can
-        // use it as its environment descriptor label (instead of the container
-        // hostname, which is a meaningless Docker ID).
         const envWithLabel = config.displayName
           ? [...env, ["KATACODE_ENVIRONMENT_LABEL", config.displayName] as const]
           : env;
@@ -771,13 +619,10 @@ export const SandboxServiceLive = {
             config: inst.config,
             image: resolveProvisionImage(inst.config),
             env: envWithLabel,
+            ...(sandboxNameNamespace !== undefined ? { nameNamespace: sandboxNameNamespace } : {}),
           })
           .pipe(Effect.mapError(mapDriverError));
 
-        // Seed provider credentials (static config + auth) into the container
-        // home before any provider probe re-checks. This runs unconditionally —
-        // credentials are independent of the repo. The repo seed + install below
-        // is conditional on a repository being specified.
         yield* runCredentialSeed(inst.driver, handle).pipe(
           Effect.catch((error: SetupFailed | SandboxProviderError) =>
             disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
@@ -790,13 +635,7 @@ export const SandboxServiceLive = {
           ),
         );
 
-        let setupProcesses: ReadonlyArray<SetupProcessRecord> = [];
         if (options?.repository !== undefined) {
-          // The container is already provisioned and running at this point, so a
-          // loader failure (a malformed .kata/environment.json) must dispose it
-          // the same way every other post-provision failure in this function
-          // does; otherwise a bad repo-local config file orphans a running
-          // container with no handle retained anywhere to dispose it later.
           const loaded = yield* loadEnvironmentConfig({
             repoRoot: options.repository.repoRoot,
             repositoryIdentity: options.repository.repositoryIdentity,
@@ -810,7 +649,23 @@ export const SandboxServiceLive = {
             ),
           );
 
-          const setup = yield* runSandboxSetup({
+          if (
+            loaded.resolved.build?.dockerfile !== undefined &&
+            (inst.driver.kind as string) !== "docker"
+          ) {
+            return yield* disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new SandboxRpcError({
+                    reason: "invalid-config",
+                    message: `.kata/environment.json requests a Dockerfile build, which the "${inst.driver.kind as string}" sandbox driver does not support. Use a local Docker deployment target for this repository.`,
+                  }),
+                ),
+              ),
+            );
+          }
+
+          yield* runSandboxSetup({
             driver: inst.driver,
             handle,
             resolved: loaded.resolved,
@@ -818,9 +673,6 @@ export const SandboxServiceLive = {
             seed: { repoRoot: options.repository.repoRoot },
           }).pipe(
             Effect.catch((error: SetupFailed | SandboxProviderError) =>
-              // Reuse the canonical post-provision dispose helper. The
-              // session is not in `runningSessions` yet at this point, so the
-              // helper's `runningSessions.delete` is a harmless no-op here.
               disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
                 Effect.andThen(
                   Effect.fail(
@@ -830,131 +682,307 @@ export const SandboxServiceLive = {
               ),
             ),
           );
-          setupProcesses = setup.processes;
         }
 
-        const reach = yield* inst.driver.reachability(handle, 13773).pipe(
-          Effect.mapError(mapDriverError),
-          Effect.catch((error: SandboxRpcError) =>
-            disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
-              Effect.andThen(Effect.fail(error)),
-            ),
-          ),
-        );
-        const endpoint: AdvertisedEndpoint = createAdvertisedEndpoint({
-          id: `sandbox-${instanceId as string}`,
-          label: config.displayName ?? `Container ${instanceId as string}`,
-          provider: SANDBOX_ENDPOINT_PROVIDER,
-          httpBaseUrl: reach.httpBaseUrl,
-          reachability: "loopback",
-          source: "server",
-        });
-        // Connect auto-registration (AC-1.11): authenticate to the freshly booted
-        // container with its desktop bootstrap token, ask that container to sign
-        // the link proof for its own descriptor/keypair, then apply the returned
-        // relay config back to the container. This keeps the linked environment id
-        // and endpoint bound to the deployed container rather than the parent
-        // desktop server. A missing user/CLI Connect token or relay failure fails
-        // the RPC and tears down the just-created container.
-        const loopbackHttpBaseUrl = reach.httpBaseUrl.replace("localhost", "127.0.0.1");
-        const { descriptor, adminAccessToken, relay } = yield* registerSandboxWithConnect({
-          httpBaseUrl: loopbackHttpBaseUrl,
+        const finalized = yield* registerAndFinalizeSession({
+          sessionKey,
+          instanceId,
+          driver: inst.driver,
+          handle,
+          config: resolvedConfig,
           bootstrapToken,
           connectAuthToken: options?.connectAuthToken,
-        }).pipe(
-          Effect.catch((error: SandboxRpcError) =>
-            disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new SandboxRpcError({
-                    reason: "connect-failed",
-                    message: `Connect auto-registration failed: ${error.message}`,
-                  }),
-                ),
-              ),
-            ),
-          ),
-        );
-        // The desktop bootstrap token was consumed by registration above, so
-        // issue a dedicated pairing credential for the deploying client.
-        const pairingToken = yield* issueSandboxPairingCredential({
-          httpBaseUrl: loopbackHttpBaseUrl,
-          adminAccessToken,
-        }).pipe(
-          Effect.catch((error: SandboxRpcError) =>
-            disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new SandboxRpcError({
-                    reason: "connect-failed",
-                    message: `Could not issue a sandbox pairing credential: ${error.message}`,
-                  }),
-                ),
-              ),
-            ),
-          ),
-        );
-        // Re-probe providers on the sandbox server now that credentials have
-        // been seeded via copyInto during setup. The initial probe at container
-        // boot may have fired before credentials were in place; this refresh
-        // corrects the provider status (e.g. Codex flips from error to ready).
-        yield* refreshSandboxProviders({
-          httpBaseUrl: loopbackHttpBaseUrl,
-          adminAccessToken,
-        }).pipe(
-          Effect.catchTag("SandboxRpcError", (error: SandboxRpcError) =>
-            // Non-fatal: a refresh failure leaves the sandbox running with the
-            // initial probe result. The client re-fetches provider status on
-            // its own interval, so a transient refresh error self-heals.
-            Effect.logWarning("Could not refresh sandbox providers after credential seed", {
-              message: error.message,
-            }).pipe(Effect.asVoid),
-          ),
-        );
-        runningSessions.set(sessionKey, {
+        });
+
+        // Persist the session record (logs on failure rather than swallowing).
+        yield* persistSessionRecord({
+          instanceId,
+          driver: inst.driver,
+          handle,
+          config: resolvedConfig,
+          environmentId: finalized.environmentId,
+          endpoint: finalized.endpoint,
+          relay: finalized.relay,
+          status: "running",
+        });
+
+        // Cache the live session.
+        liveSessions.set(sessionKey, {
           handle,
           driver: inst.driver,
-          setupProcesses,
-          environmentId: descriptor.environmentId,
-          endpoint,
-          relay: relay ?? null,
+          instanceConfig: resolvedConfig,
+          environmentId: finalized.environmentId,
+          adminAccessToken: finalized.adminAccessToken,
         });
+
         return {
           instanceId,
-          environmentId: descriptor.environmentId,
-          pairingToken,
-          endpoint,
+          environmentId: finalized.environmentId,
+          pairingToken: finalized.pairingToken,
+          endpoint: finalized.endpoint,
         };
-      }).pipe(Effect.ensuring(Effect.sync(() => startingSessions.delete(sessionKey))));
+      }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
     }),
 
-  disposeSession: (instanceId: SandboxProviderInstanceId) =>
+  stopSession: (instanceId: SandboxProviderInstanceId) =>
     Effect.gen(function* () {
-      const entry = runningSessions.get(instanceId as string);
-      if (entry === undefined) return false;
-      // Unlink the environment from the relay so it disappears from the
-      // Connect pool immediately. Non-fatal: if the unlink fails, the relay
-      // link lapses when the container becomes unreachable.
-      if (entry.relay) {
-        yield* deleteJson(
-          RelayOkResponse,
-          `${entry.relay.relayUrl}/v1/client/environment-links/${entry.environmentId}`,
-          entry.relay.bearerToken,
-        ).pipe(
-          Effect.catch((error: SandboxRpcError) =>
-            Effect.logWarning("Could not unlink sandbox from relay", {
-              environmentId: entry.environmentId,
-              message: error.message,
-            }).pipe(Effect.asVoid),
-          ),
-        );
+      const sessionKey = instanceId as string;
+      if (busyInstances.has(sessionKey) || reconcileInProgress) {
+        return yield* new SandboxRpcError({
+          reason: "provision-failed",
+          message: "An operation is already in progress for this sandbox environment.",
+        });
       }
-      // Route through the driver that created the handle rather than a
-      // hardcoded one, so a future non-Docker driver disposes its own
-      // sandboxes correctly (the handle's `driverKind` is the routing key).
-      yield* entry.driver.dispose(entry.handle).pipe(Effect.mapError(mapDriverError));
-      runningSessions.delete(instanceId as string);
-      return true;
+      const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+      if (record === undefined) {
+        return yield* new SandboxRpcError({
+          reason: "not-running",
+          message: "No sandbox session to stop.",
+        });
+      }
+      if (record.status === "stopped") {
+        return { instanceId, stopped: true };
+      }
+      // Resolve the driver to call lifecycle.stop.
+      const live = liveSessions.get(sessionKey);
+      if (live === undefined || live.driver.lifecycle === undefined) {
+        return yield* new SandboxRpcError({
+          reason: "not-running",
+          message: "This sandbox driver does not support lifecycle stop.",
+        });
+      }
+      busyInstances.add(sessionKey);
+      const lifecycle = live.driver.lifecycle;
+      return yield* Effect.gen(function* () {
+        yield* lifecycle.stop(live.handle).pipe(Effect.mapError(mapDriverError));
+        // Update the store record to stopped; keep the relay link (log on failure).
+        const { statusDetail: _dropDetail, ...restRecord } = record;
+        yield* getSessionStore()
+          .upsert({ ...restRecord, status: "stopped" })
+          .pipe(
+            Effect.catch((error: unknown) =>
+              Effect.logError("Sandbox session store write failed during stop", {
+                instanceId: sessionKey,
+                message: error instanceof Error ? error.message : String(error),
+              }),
+            ),
+          );
+        return { instanceId, stopped: true };
+      }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
+    }),
+
+  disposeSession: (instanceId: SandboxProviderInstanceId, settings: ServerSettings) =>
+    Effect.gen(function* () {
+      const sessionKey = instanceId as string;
+      if (busyInstances.has(sessionKey) || reconcileInProgress) {
+        return yield* new SandboxRpcError({
+          reason: "provision-failed",
+          message: "An operation is already in progress for this sandbox environment.",
+        });
+      }
+      // Read from the store — works even when the client that started the
+      // session is gone (AC-L9).
+      const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+      if (record === undefined) return false;
+      busyInstances.add(sessionKey);
+      return yield* Effect.gen(function* () {
+        // Unlink the environment from the relay so it disappears from the
+        // Connect pool immediately. Non-fatal: if the unlink fails, the relay
+        // link lapses when the sandbox becomes unreachable.
+        yield* unlinkSandboxFromRelay(record);
+        // Delete the provider sandbox via the driver.
+        const live = liveSessions.get(sessionKey);
+        if (live !== undefined) {
+          yield* live.driver.dispose(live.handle).pipe(Effect.mapError(mapDriverError));
+        } else {
+          // No live session — reconstruct the driver from the registry using
+          // the instance config from settings.
+          const config = (settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap)[
+            instanceId as SandboxProviderInstanceId
+          ];
+          if (config !== undefined) {
+            const registry = buildRegistry();
+            const inst = registry.materializeOne(instanceId, resolveInstanceEnvelope(config));
+            if (inst.kind === "available") {
+              const resolvedConfig = resolveInstanceEnvelope(config);
+              const handle: SandboxHandle = {
+                driverKind: inst.driver.kind,
+                instanceId: sessionKey,
+                // Re-inject Vercel auth into the stored (sanitized) handle.
+                handle: reinjectVercelAuth(
+                  inst.driver.kind as string,
+                  record.handle.handle,
+                  resolvedConfig.config,
+                ),
+              };
+              yield* inst.driver.dispose(handle).pipe(Effect.mapError(mapDriverError));
+            } else {
+              // Driver unavailable (removed from settings or invalid config) —
+              // the sandbox VM may remain running on the provider with no handle
+              // to delete it. Surface this so an operator can clean it up; the
+              // store record is still removed below (we can no longer manage it).
+              yield* Effect.logWarning(
+                "Sandbox dispose: driver unavailable; sandbox may be orphaned on the provider",
+                {
+                  instanceId: sessionKey,
+                  reason: inst.kind === "unavailable" ? inst.reason : "unknown",
+                },
+              );
+            }
+          } else {
+            // Instance removed from settings and no live driver reference —
+            // cannot reach the provider to delete the sandbox. Surface it.
+            yield* Effect.logWarning(
+              "Sandbox dispose: instance no longer in settings; sandbox may be orphaned on the provider",
+              { instanceId: sessionKey },
+            );
+          }
+        }
+        // Remove the store record.
+        yield* removeSessionRecord(instanceId);
+        liveSessions.delete(sessionKey);
+        return true;
+      }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
+    }),
+
+  renewSession: (instanceId: SandboxProviderInstanceId, input?: { readonly extendMs?: number }) =>
+    Effect.gen(function* () {
+      const sessionKey = instanceId as string;
+      if (busyInstances.has(sessionKey) || reconcileInProgress) {
+        return yield* new SandboxRpcError({
+          reason: "provision-failed",
+          message: "An operation is already in progress for this sandbox environment.",
+        });
+      }
+      const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+      if (record === undefined || record.status !== "running") {
+        return yield* new SandboxRpcError({
+          reason: "not-running",
+          message: "No running sandbox session to renew.",
+        });
+      }
+      const live = liveSessions.get(sessionKey);
+      const renewTimeout = live?.driver.renewTimeout;
+      if (live === undefined || renewTimeout === undefined) {
+        return yield* new SandboxRpcError({
+          reason: "not-running",
+          message: "This sandbox driver does not support timeout renewal.",
+        });
+      }
+      busyInstances.add(sessionKey);
+      return yield* Effect.gen(function* () {
+        const extendMs = input?.extendMs ?? resolveSandboxTimeoutMs(live.instanceConfig.config);
+        yield* renewTimeout
+          .renewTimeout(live.handle, extendMs)
+          .pipe(Effect.mapError(mapDriverError));
+        // Re-check after the provider call so a concurrent dispose cannot be
+        // resurrected by writing the stale running record back.
+        const current = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+        if (current === undefined || current.status !== "running") {
+          return yield* new SandboxRpcError({
+            reason: "not-running",
+            message: "Sandbox session was stopped or deleted during renew.",
+          });
+        }
+        // @effect-diagnostics-next-line globalDateInEffect:off - host-side deadline arithmetic.
+        const deadline = Date.now() + extendMs;
+        yield* getSessionStore()
+          .upsert({ ...current, deadlineEpochMs: deadline })
+          .pipe(
+            Effect.catch((error: unknown) =>
+              Effect.logError("Sandbox session store write failed during renew", {
+                instanceId: sessionKey,
+                message: error instanceof Error ? error.message : String(error),
+              }),
+            ),
+          );
+        return { instanceId, deadlineEpochMs: deadline };
+      }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
+    }),
+
+  /** Re-issue a pairing token for a running sandbox (identity recovery R2).
+   *  Used when client-side pairing failed after a successful start. Requires
+   *  the in-memory admin token from this server's start of the sandbox; after
+   *  a server restart the token is gone — fail loud with the Stop/Start
+   *  recovery path (which re-mints everything). */
+  issuePairingToken: (instanceId: SandboxProviderInstanceId) =>
+    Effect.gen(function* () {
+      const sessionKey = instanceId as string;
+      const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+      if (record === undefined || record.status !== "running") {
+        return yield* new SandboxRpcError({
+          reason: "not-running",
+          message: "No running sandbox session to pair with.",
+        });
+      }
+      const live = liveSessions.get(sessionKey);
+      if (live === undefined || live.adminAccessToken === undefined) {
+        return yield* new SandboxRpcError({
+          reason: "not-running",
+          message:
+            "Pairing requires a fresh admin credential, which this server no longer holds (it restarts on Stop/Start). Stop and start the sandbox to re-pair.",
+        });
+      }
+      const endpoint = record.endpoint as AdvertisedEndpoint;
+      const connectBaseUrl = endpoint.httpBaseUrl.replace("localhost", "127.0.0.1");
+      const pairingToken = yield* issueSandboxPairingCredential({
+        httpBaseUrl: connectBaseUrl,
+        adminAccessToken: live.adminAccessToken,
+      });
+      return {
+        instanceId,
+        environmentId: record.sandboxEnvironmentId,
+        pairingToken,
+        endpoint,
+      };
+    }),
+
+  providerLoginStart: (input: {
+    readonly instanceId: SandboxProviderInstanceId;
+    readonly providerId: string;
+  }): Stream.Stream<SandboxProviderLoginEvent, SandboxRpcError> => {
+    const sessionKey = input.instanceId as string;
+    const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+    if (record === undefined || record.status !== "running") {
+      return Stream.fail(
+        new SandboxRpcError({
+          reason: "not-running",
+          message: "No running sandbox session to sign in to.",
+        }),
+      );
+    }
+    const live = liveSessions.get(sessionKey);
+    if (live === undefined) {
+      return Stream.fail(
+        new SandboxRpcError({
+          reason: "not-running",
+          message: "No sandbox session to sign in to.",
+        }),
+      );
+    }
+    return startProviderLogin({
+      driver: live.driver,
+      handle: live.handle,
+      providerId: input.providerId,
+    });
+  },
+
+  providerLoginSubmitCode: (input: {
+    readonly instanceId: SandboxProviderInstanceId;
+    readonly loginSessionId: string;
+    readonly code: string;
+  }) => submitProviderLoginCode(input),
+
+  providerLoginCancel: (input: {
+    readonly instanceId: SandboxProviderInstanceId;
+    readonly loginSessionId: string;
+  }) =>
+    Effect.sync(() => {
+      cancelProviderLogin({
+        loginSessionId: input.loginSessionId,
+        instanceId: input.instanceId as string,
+      });
+      return { loginSessionId: input.loginSessionId, cancelled: true };
     }),
 };
 

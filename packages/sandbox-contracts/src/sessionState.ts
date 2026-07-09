@@ -12,6 +12,7 @@ export const SandboxSessionState = Schema.Literals([
   "ready",
   "error",
   "disposed",
+  "lapsed",
   "unknown",
 ]);
 export type SandboxSessionState = typeof SandboxSessionState.Type;

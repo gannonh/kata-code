@@ -44,6 +44,13 @@ export interface SandboxProvisionRequest {
   readonly image: string;
   /** Optional in-container env vars (already materialized with secrets). */
   readonly env?: ReadonlyArray<readonly [string, string]>;
+  /**
+   * Optional stable namespace for cloud sandbox names that must be unique across
+   * Kata server installations sharing one cloud project (e.g. Vercel). Typically
+   * the server environment id. Absent ⇒ driver derives the name from
+   * `instanceId` alone (fine for local Docker).
+   */
+  readonly nameNamespace?: string;
 }
 
 /** Result of `exec(handle, cmd)`. */
@@ -122,6 +129,50 @@ export interface SandboxCopyIntoCapability {
 }
 
 /**
+ * Optional capability: durable stop/start lifecycle.
+ *
+ * Both Vercel Sandbox (v2 persistent sandboxes) and Docker (named containers)
+ * can stop a sandbox without destroying it and start it again later, with the
+ * filesystem preserved. `stop`/`start`/`status` are the durable lifecycle
+ * primitives; `start` subsumes the former `resume` capability. Absent ⇒
+ * `describe().supportsLifecycle === false`; the server layer fails loud rather
+ * than silently recreating.
+ *
+ * Contract semantics:
+ * - `stop` on an already-stopped sandbox is idempotent success.
+ * - `start` on a running sandbox is idempotent success (re-verifies serve +
+ *   healthz) and returns a refreshed handle.
+ * - `start` on a `gone` sandbox fails `provision-failed` with a message telling
+ *   the user to create a new sandbox.
+ * - `status` never mutates.
+ */
+export type SandboxLifecycleStatus = "running" | "stopped" | "gone";
+
+export interface SandboxLifecycleCapability {
+  stop(handle: SandboxHandle): Effect.Effect<void, SandboxProviderError>;
+  start(
+    handle: SandboxHandle,
+    req: { readonly config: unknown; readonly env?: ReadonlyArray<readonly [string, string]> },
+  ): Effect.Effect<SandboxHandle, SandboxProviderError>;
+  status(handle: SandboxHandle): Effect.Effect<SandboxLifecycleStatus, SandboxProviderError>;
+  /** Discover an existing sandbox for an instance that has no store record
+   *  (e.g. created before the durable store existed, or after a store reset).
+   *  Returns a handle + status when a sandbox exists on the provider, `null`
+   *  when none. Absent ⇒ the server cannot discover un-tracked sandboxes.
+   *  Never mutates provider state. */
+  discover?(req: {
+    readonly instanceId: string;
+    readonly config: unknown;
+    readonly env?: ReadonlyArray<readonly [string, string]>;
+    /** Same namespace as `SandboxProvisionRequest.nameNamespace` when present. */
+    readonly nameNamespace?: string;
+  }): Effect.Effect<
+    { readonly handle: SandboxHandle; readonly status: SandboxLifecycleStatus } | null,
+    SandboxProviderError
+  >;
+}
+
+/**
  * `SandboxProvider` — the frozen driver SPI.
  *
  * Required (every driver implements): `kind`, `validate`, `provision`, `exec`,
@@ -130,7 +181,7 @@ export interface SandboxCopyIntoCapability {
  * Optional (driver may omit; registry exposes presence via `describe()` and
  * callers guard with capability checks): `snapshot` (snapshot lifecycle),
  * `renewTimeout` (extend session), `copyInto` (seed a repo archive into the
- * sandbox — Phase 2).
+ * sandbox — Phase 2), `lifecycle` (durable stop/start — replaces `resume`).
  */
 export interface SandboxProvider {
   readonly kind: SandboxProviderDriverKind;
@@ -142,7 +193,7 @@ export interface SandboxProvider {
   exec(
     handle: SandboxHandle,
     command: string,
-    opts?: { readonly cwd?: string },
+    opts?: { readonly cwd?: string; readonly user?: string },
   ): Effect.Effect<SandboxExecResult, SandboxProviderError>;
   /** Resolve how the client reaches a port, per `describe().reachabilityKind`. */
   reachability(
@@ -159,6 +210,8 @@ export interface SandboxProvider {
   readonly renewTimeout?: SandboxRenewTimeoutCapability;
   /** Optional copy-into capability (Phase 2 seeding). Absent ⇒ `describe().supportsCopyInto === false`. */
   readonly copyInto?: SandboxCopyIntoCapability;
+  /** Optional durable lifecycle capability (stop/start/status). Absent ⇒ `describe().supportsLifecycle === false`. */
+  readonly lifecycle?: SandboxLifecycleCapability;
 }
 
 /**

@@ -91,6 +91,7 @@ function startAlpineContainer(label: string): Effect.Effect<SandboxHandle, Error
     }
     const state: DockerSandboxHandleState = {
       containerId,
+      containerName: "kata-sandbox-setup-test",
       hostPort: 0,
       containerPort: 13773,
     };

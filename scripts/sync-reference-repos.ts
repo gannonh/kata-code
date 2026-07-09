@@ -161,13 +161,17 @@ export const planReferenceRepoSync = Effect.fn("planReferenceRepoSync")(function
   } satisfies ReferenceRepoSyncPlan;
 });
 
-const runGit = Effect.fn("runGit")(function* (rootDir: string, plan: ReferenceRepoSyncPlan) {
+const runGitCommand = Effect.fn("runGitCommand")(function* (
+  rootDir: string,
+  args: ReadonlyArray<string>,
+  failureMessage: string,
+) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const child = yield* spawner.spawn(ChildProcess.make("git", plan.args, { cwd: rootDir })).pipe(
+  const child = yield* spawner.spawn(ChildProcess.make("git", args, { cwd: rootDir })).pipe(
     Effect.mapError(
       (cause) =>
         new ReferenceRepoSyncError({
-          message: `Unable to start git subtree ${plan.action} for '${plan.repo.id}'.`,
+          message: `Unable to start ${failureMessage}.`,
           cause,
         }),
     ),
@@ -183,7 +187,7 @@ const runGit = Effect.fn("runGit")(function* (rootDir: string, plan: ReferenceRe
     Effect.mapError(
       (cause) =>
         new ReferenceRepoSyncError({
-          message: `Unable to run git subtree ${plan.action} for '${plan.repo.id}'.`,
+          message: `Unable to run ${failureMessage}.`,
           cause,
         }),
     ),
@@ -191,13 +195,75 @@ const runGit = Effect.fn("runGit")(function* (rootDir: string, plan: ReferenceRe
 
   if (exitCode !== 0) {
     return yield* new ReferenceRepoSyncError({
-      message: `git subtree ${plan.action} failed for '${plan.repo.id}' with exit code ${exitCode}.\n${stderr.trim()}`,
+      message: `${failureMessage} failed with exit code ${exitCode}.\n${stderr.trim()}`,
     });
   }
+
+  return stdout;
+});
+
+const runGitSubtree = Effect.fn("runGitSubtree")(function* (
+  rootDir: string,
+  plan: ReferenceRepoSyncPlan,
+) {
+  const stdout = yield* runGitCommand(
+    rootDir,
+    plan.args,
+    `git subtree ${plan.action} for '${plan.repo.id}'`,
+  );
 
   if (stdout.trim().length > 0) {
     yield* Console.log(stdout.trim());
   }
+});
+
+/** Nested submodule gitlinks (mode 160000) break the parent repo when vendored via subtree. */
+export const listNestedGitlinks = Effect.fn("listNestedGitlinks")(function* (
+  rootDir: string,
+  prefix: string,
+) {
+  const stdout = yield* runGitCommand(
+    rootDir,
+    ["ls-files", "-s", "--", prefix],
+    `git ls-files for nested gitlinks under '${prefix}'`,
+  );
+
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .flatMap((line) => {
+      const match = /^(?<mode>\d{6})\s+\S+\s+\S+\t(?<path>.+)$/.exec(line);
+      if (match?.groups?.mode !== "160000" || match.groups.path === undefined) {
+        return [];
+      }
+      return [match.groups.path];
+    });
+});
+
+export const stripNestedGitlinks = Effect.fn("stripNestedGitlinks")(function* (
+  rootDir: string,
+  prefix: string,
+) {
+  const gitlinks = yield* listNestedGitlinks(rootDir, prefix);
+  for (const gitlinkPath of gitlinks) {
+    yield* runGitCommand(
+      rootDir,
+      ["rm", "-f", "--", gitlinkPath],
+      `git rm for nested gitlink '${gitlinkPath}'`,
+    );
+    yield* Console.log(`Removed nested gitlink ${gitlinkPath}.`);
+  }
+
+  if (gitlinks.length > 0) {
+    yield* runGitCommand(
+      rootDir,
+      ["commit", "-m", `chore(repos): drop nested gitlinks under ${prefix}`],
+      `git commit for nested gitlink cleanup under '${prefix}'`,
+    );
+  }
+
+  return gitlinks;
 });
 
 export const syncReferenceRepos = Effect.fn("syncReferenceRepos")(function* (
@@ -213,7 +279,8 @@ export const syncReferenceRepos = Effect.fn("syncReferenceRepos")(function* (
     plans.push(plan);
     yield* Console.log(`Syncing ${repo.id} from ${plan.ref} with git subtree ${plan.action}.`);
     if (!(options.dryRun ?? false)) {
-      yield* runGit(rootDir, plan).pipe(Effect.scoped);
+      yield* runGitSubtree(rootDir, plan).pipe(Effect.scoped);
+      yield* stripNestedGitlinks(rootDir, repo.prefix).pipe(Effect.scoped);
     }
   }
 

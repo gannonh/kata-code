@@ -1174,19 +1174,17 @@ function createPrimaryEnvironmentClient(
 }
 
 function createSavedEnvironmentClient(
-  environmentId: EnvironmentId,
+  initialRecord: SavedEnvironmentRecord,
   credentialRef: { current: SavedEnvironmentCredential },
   relayTraceHeadersRef: { current: Headers.Headers | null },
 ): WsRpcClient {
+  const environmentId = initialRecord.environmentId;
   useSavedEnvironmentRuntimeStore.getState().ensure(environmentId);
 
   return createWsRpcClient(
     new WsTransport(
       async () => {
-        const record = getSavedEnvironmentRecord(environmentId);
-        if (!record) {
-          throw new Error(`Saved environment ${environmentId} not found.`);
-        }
+        const record = getSavedEnvironmentRecord(environmentId) ?? initialRecord;
         const credential = credentialRef.current;
         if (record.desktopSsh) {
           if (credential.method !== "bearer") {
@@ -1233,7 +1231,8 @@ function createSavedEnvironmentClient(
         );
       },
       {
-        getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
+        getConnectionLabel: () =>
+          getSavedEnvironmentRecord(environmentId)?.label ?? initialRecord.label ?? null,
         getVersionMismatchHint: () =>
           resolveServerConfigVersionMismatch(
             useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
@@ -1276,8 +1275,9 @@ async function refreshSavedEnvironmentMetadata(
   client: WsRpcClient,
   scopeHint?: ReadonlyArray<AuthEnvironmentScope> | null,
   configHint?: ServerConfig | null,
+  fallbackRecord?: SavedEnvironmentRecord,
 ): Promise<void> {
-  const record = getSavedEnvironmentRecord(environmentId);
+  const record = getSavedEnvironmentRecord(environmentId) ?? fallbackRecord;
   if (!record) {
     throw new Error(`Saved environment ${environmentId} not found.`);
   }
@@ -1539,11 +1539,7 @@ async function ensureSavedEnvironmentConnection(
       const relayTraceHeaders = { current: options?.relayTraceHeaders ?? null };
       const client =
         options?.client ??
-        createSavedEnvironmentClient(
-          activeRecord.environmentId,
-          activeCredential,
-          relayTraceHeaders,
-        );
+        createSavedEnvironmentClient(activeRecord, activeCredential, relayTraceHeaders);
       const initialConfigSnapshot = createDeferredPromise<ServerConfig>();
       const knownEnvironment = createKnownEnvironment({
         id: activeRecord.environmentId,
@@ -1597,6 +1593,7 @@ async function ensureSavedEnvironmentConnection(
             client,
             scopeHint,
             initialServerConfig,
+            activeRecord,
           );
         } catch (error) {
           const isAuthError = activeRecord.desktopSsh
@@ -1877,8 +1874,10 @@ export async function addSavedEnvironment(input: {
   readonly host?: string;
   readonly pairingCode?: string;
   readonly desktopSsh?: DesktopSshEnvironmentTarget;
-  /** Optional sandbox marker (local Docker or cloud provider). */
-  readonly sandbox?: { readonly providerKind: string };
+  /** Optional sandbox marker (local Docker or cloud provider). `instanceId`
+   *  is the configured sandbox instance id — the id-based join key for
+   *  Available Runtimes lifecycle state (identity recovery plan R1). */
+  readonly sandbox?: { readonly providerKind: string; readonly instanceId?: string };
 }): Promise<SavedEnvironmentRecord> {
   const resolvedTarget = resolveRemotePairingTarget({
     ...(input.pairingUrl !== undefined ? { pairingUrl: input.pairingUrl } : {}),

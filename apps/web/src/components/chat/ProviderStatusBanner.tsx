@@ -20,7 +20,7 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
     ? `${providerName} is unauthenticated`
     : `${providerName} provider status`;
   const message = isUnauthenticated
-    ? "Sign in via the CLI to authenticate again."
+    ? "Sign in via the CLI, or from the deployment target card in Settings → Environments for sandbox sessions."
     : (status.message ??
       (status.status === "error"
         ? `${providerName} provider is unavailable.`

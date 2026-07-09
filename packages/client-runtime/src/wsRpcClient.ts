@@ -6,6 +6,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type RelayClientInstallProgressEvent,
   type RelayClientStatus,
+  type SandboxProviderLoginEvent,
   type SandboxTestConnectionProgressEvent,
   type ServerSettingsPatch,
   type VcsStatusResult,
@@ -188,6 +189,17 @@ export interface WsRpcClient {
     ) => Promise<void>;
     readonly startSession: RpcUnaryMethod<typeof WS_METHODS.sandboxStartSession>;
     readonly disposeSession: RpcUnaryMethod<typeof WS_METHODS.sandboxDisposeSession>;
+    readonly renewSession: RpcUnaryMethod<typeof WS_METHODS.sandboxRenewSession>;
+    readonly stopSession: RpcUnaryMethod<typeof WS_METHODS.sandboxStopSession>;
+    readonly issuePairingToken: RpcUnaryMethod<typeof WS_METHODS.sandboxIssuePairingToken>;
+    readonly providerLoginStart: (
+      input: RpcInput<typeof WS_METHODS.sandboxProviderLoginStart>,
+      onEvent: (event: SandboxProviderLoginEvent) => void,
+    ) => Promise<void>;
+    readonly providerLoginSubmitCode: RpcUnaryMethod<
+      typeof WS_METHODS.sandboxProviderLoginSubmitCode
+    >;
+    readonly providerLoginCancel: RpcUnaryMethod<typeof WS_METHODS.sandboxProviderLoginCancel>;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -435,6 +447,22 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.sandboxStartSession](input)),
       disposeSession: (input) =>
         transport.request((client) => client[WS_METHODS.sandboxDisposeSession](input)),
+      renewSession: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxRenewSession](input)),
+      stopSession: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxStopSession](input)),
+      issuePairingToken: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxIssuePairingToken](input)),
+      providerLoginStart: async (input, onEvent) => {
+        await transport.requestStream(
+          (client) => client[WS_METHODS.sandboxProviderLoginStart](input),
+          (event) => onEvent(event),
+        );
+      },
+      providerLoginSubmitCode: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxProviderLoginSubmitCode](input)),
+      providerLoginCancel: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxProviderLoginCancel](input)),
     },
     orchestration: {
       dispatchCommand: (input) =>

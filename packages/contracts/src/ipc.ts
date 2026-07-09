@@ -387,6 +387,9 @@ export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
     Schema.Struct({
       /** Provider kind: "local" (Docker) or a cloud provider id (e.g. "cloudflare"). */
       providerKind: Schema.String,
+      /** The sandbox provider instance id this record belongs to (id-based
+       *  join to `sandboxProviderInstances`; optional on legacy records). */
+      instanceId: Schema.optionalKey(Schema.String),
     }),
   ),
 });

@@ -73,7 +73,7 @@ import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
-import { SandboxServiceLive } from "./sandbox/SandboxService.ts";
+import { configureSandboxRuntime, SandboxServiceLive } from "./sandbox/SandboxService.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -211,6 +211,12 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.sandboxTestConnection, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxStartSession, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxDisposeSession, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxRenewSession, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxStopSession, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxIssuePairingToken, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxProviderLoginStart, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxProviderLoginSubmitCode, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxProviderLoginCancel, AuthOrchestrationOperateScope],
 ]);
 
 function toAuthAccessStreamEvent(
@@ -282,6 +288,11 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
+      const sandboxEnvironmentId = yield* serverEnvironment.getEnvironmentId;
+      configureSandboxRuntime({
+        stateDir: config.stateDir,
+        nameNamespace: sandboxEnvironmentId as string,
+      });
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
       const sourceControlDiscovery = yield* SourceControlDiscoveryLayer.SourceControlDiscovery;
       const automaticGitFetchInterval = serverSettings.getSettings.pipe(
@@ -1106,9 +1117,52 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         [WS_METHODS.sandboxDisposeSession]: ({ instanceId }) =>
           observeRpcEffect(
             WS_METHODS.sandboxDisposeSession,
-            SandboxServiceLive.disposeSession(instanceId).pipe(
-              Effect.map((disposed) => ({ instanceId, disposed })),
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) =>
+                SandboxServiceLive.disposeSession(instanceId, settings).pipe(
+                  Effect.map((disposed) => ({ instanceId, disposed })),
+                ),
+              ),
             ),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxRenewSession]: ({ instanceId, extendMs }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxRenewSession,
+            SandboxServiceLive.renewSession(
+              instanceId,
+              extendMs !== undefined ? { extendMs } : {},
+            ).pipe(Effect.map((result) => result)),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxStopSession]: ({ instanceId }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxStopSession,
+            SandboxServiceLive.stopSession(instanceId).pipe(Effect.map((result) => result)),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxIssuePairingToken]: ({ instanceId }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxIssuePairingToken,
+            SandboxServiceLive.issuePairingToken(instanceId).pipe(Effect.map((result) => result)),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxProviderLoginStart]: ({ instanceId, providerId }) =>
+          observeRpcStream(
+            WS_METHODS.sandboxProviderLoginStart,
+            SandboxServiceLive.providerLoginStart({ instanceId, providerId }),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxProviderLoginSubmitCode]: ({ instanceId, loginSessionId, code }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxProviderLoginSubmitCode,
+            SandboxServiceLive.providerLoginSubmitCode({ instanceId, loginSessionId, code }),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxProviderLoginCancel]: ({ instanceId, loginSessionId }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxProviderLoginCancel,
+            SandboxServiceLive.providerLoginCancel({ instanceId, loginSessionId }),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>

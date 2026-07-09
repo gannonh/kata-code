@@ -56,13 +56,35 @@ const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 let environmentVariableDraftId = 0;
 const nextEnvironmentVariableDraftId = () => `provider-env-${environmentVariableDraftId++}`;
 
-type EnvironmentDraftRow = {
+export type EnvironmentDraftRow = {
   readonly id: string;
   readonly name: string;
   readonly value: string;
   readonly sensitive: boolean;
   readonly valueRedacted?: boolean;
+  /** Seeded by `prefillNames` with no value; not persisted until filled. */
+  readonly prefill?: boolean;
 };
+
+/**
+ * Convert draft rows into publishable environment variables. Drops rows with
+ * invalid names and empty prefilled placeholder rows. User-added rows are
+ * always published, even with no value, so an entered name survives blur and
+ * navigation.
+ */
+export function publishEnvironmentDraftRows(
+  rows: ReadonlyArray<EnvironmentDraftRow>,
+): ReadonlyArray<ProviderInstanceEnvironmentVariable> {
+  const published: ProviderInstanceEnvironmentVariable[] = [];
+  for (const row of rows) {
+    const name = row.name.trim();
+    if (!ENVIRONMENT_VARIABLE_NAME_PATTERN.test(name)) continue;
+    if (row.prefill && row.value.trim().length === 0 && row.valueRedacted !== true) continue;
+    const { id: _id, prefill: _prefill, ...rest } = row;
+    published.push({ ...rest, name });
+  }
+  return published;
+}
 
 function makeEnvironmentDraftRow(
   variable: ProviderInstanceEnvironmentVariable,
@@ -75,6 +97,26 @@ function makeEnvironmentDraftRow(
     sensitive: variable.sensitive,
     ...(variable.valueRedacted !== undefined ? { valueRedacted: variable.valueRedacted } : {}),
   };
+}
+
+/**
+ * Build the initial draft rows from the saved environment, then append a
+ * blank sensitive row for each `prefillNames` entry not already present.
+ * Prefilled names guide the user toward required variables (e.g. Vercel
+ * credentials) without inventing values.
+ */
+export function buildEnvironmentDraftRows(
+  environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>,
+  prefillNames: ReadonlyArray<string>,
+): ReadonlyArray<EnvironmentDraftRow> {
+  const rows = environment.map(makeEnvironmentDraftRow);
+  const presentNames = new Set(rows.map((row) => row.name));
+  for (const name of prefillNames) {
+    if (presentNames.has(name)) continue;
+    presentNames.add(name);
+    rows.push({ id: `prefill:${name}`, name, value: "", sensitive: true, prefill: true });
+  }
+  return rows;
 }
 
 /**
@@ -156,21 +198,34 @@ function ProviderAuthEmail(props: {
 export function ProviderEnvironmentSection(props: {
   readonly environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>;
   readonly onChange: (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => void;
+  /** Heading label; defaults to "Environment variables". */
+  readonly title?: string;
+  /** Explanatory copy rendered under the heading. */
+  readonly description?: string;
+  /**
+   * Variable names to seed as blank rows when absent, guiding the user toward
+   * required credentials (e.g. Vercel). Prefilled rows carry no value.
+   */
+  readonly prefillNames?: ReadonlyArray<string>;
 }) {
   const focusedWithinRef = useRef(false);
   const latestEnvironmentRef = useRef(props.environment);
+  const prefillNames = props.prefillNames ?? [];
   const [rows, setRows] = useState<ReadonlyArray<EnvironmentDraftRow>>(() =>
-    props.environment.map(makeEnvironmentDraftRow),
+    buildEnvironmentDraftRows(props.environment, prefillNames),
   );
   const rowsRef = useRef(rows);
 
   useEffect(() => {
     latestEnvironmentRef.current = props.environment;
     if (!focusedWithinRef.current) {
-      const nextRows = props.environment.map(makeEnvironmentDraftRow);
+      const nextRows = buildEnvironmentDraftRows(props.environment, prefillNames);
       rowsRef.current = nextRows;
       setRows(nextRows);
     }
+    // prefillNames is a stable literal from the caller; excluded to avoid
+    // resetting rows on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.environment]);
 
   const setDraftRows = (nextRows: ReadonlyArray<EnvironmentDraftRow>) => {
@@ -179,18 +234,7 @@ export function ProviderEnvironmentSection(props: {
   };
 
   const publishRows = (nextRows: ReadonlyArray<EnvironmentDraftRow>) => {
-    const published: ProviderInstanceEnvironmentVariable[] = [];
-    for (const row of nextRows) {
-      const name = row.name.trim();
-      if (!ENVIRONMENT_VARIABLE_NAME_PATTERN.test(name)) {
-        // Skip invalid rows individually rather than aborting the entire
-        // batch, so unrelated valid edits are still published.
-        continue;
-      }
-      const { id: _id, ...rest } = row;
-      published.push({ ...rest, name });
-    }
-    props.onChange(published);
+    props.onChange(publishEnvironmentDraftRows(nextRows));
   };
 
   const updateVariable = (id: string, patch: Partial<Omit<EnvironmentDraftRow, "id">>) => {
@@ -199,7 +243,7 @@ export function ProviderEnvironmentSection(props: {
         ? {
             ...row,
             ...patch,
-            ...(patch.value !== undefined ? { valueRedacted: false } : {}),
+            ...(patch.value !== undefined ? { valueRedacted: false, prefill: false } : {}),
           }
         : row,
     );
@@ -230,7 +274,14 @@ export function ProviderEnvironmentSection(props: {
       }}
     >
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium text-foreground">Environment variables</span>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-medium text-foreground">
+            {props.title ?? "Environment variables"}
+          </span>
+          {props.description ? (
+            <span className="text-[11px] text-muted-foreground">{props.description}</span>
+          ) : null}
+        </div>
         <Button
           type="button"
           size="sm"

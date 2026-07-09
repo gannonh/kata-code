@@ -82,8 +82,12 @@ ARG TARGETARCH
 # cloudflared on PATH so Connect relay config can start the managed tunnel
 # inside the deployed container. `git` is required for in-container worktree
 # and source-control operations (Phase 3a AC-3a.1).
+# `util-linux-misc` provides `script(1)`, which providerLogin uses to allocate
+# a PTY around interactive provider CLI logins (`claude setup-token`,
+# `codex login`, etc.). Without it the sign-in flow hangs at "Starting
+# sign-in…" forever.
 RUN set -eux; \
-    apk add --no-cache libstdc++ ca-certificates curl git bash; \
+    apk add --no-cache libstdc++ ca-certificates curl git bash util-linux-misc; \
     case "${TARGETARCH}" in \
       amd64) \
         cloudflared_url="https://github.com/cloudflare/cloudflared/releases/download/2026.5.2/cloudflared-linux-amd64"; \

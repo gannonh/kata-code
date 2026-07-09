@@ -205,12 +205,12 @@ Each entry should include:
 
 ### Sandbox: interactive "Sign in <provider>" affordance on the sandbox card
 
-- **Status:** deferred
+- **Status:** closed
 - **Area:** sandbox, web, auth, cloud
 - **Source:** [Phase 3a deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) — [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) (provider-auth model), [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md) (Phase 3b provider choice)
-- **Rationale:** Phase 3a ships the local Docker copy+sanitize + env-var auth paths only. The interactive in-sandbox login flow (PTY-driven OAuth URL + code relay, the AgentBox `_claude-login-worker` pattern) that captures a credential file back to a host-side encrypted store is part of the cloud credential-seeding work in Phase 3b. Without it, a cloud sandbox user with no stored credential and no env-var API key must run the provider login manually in the terminal and complete OAuth via the provider CLI's device-code flow.
-- **Revisit trigger:** Phase 3b spec implementation (the affordance is an AC-3b.11 acceptance criterion).
-- **Notes:** Pattern reference: `apps/cli/src/commands/_claude-login-worker.ts` and `packages/sandbox-docker/src/claude-credentials.ts` in the AgentBox checkout. Phase 3a's `credentialSeed.ts` infrastructure is the local analogue and shares the same copy+sanitize pattern.
+- **Rationale:** Phase 3b implemented a bounded provider-login session with OAuth URL/code relay, credential capture in `ServerSecretStore`, cancellation, and cleanup.
+- **Revisit trigger:** None. Credentialed Vercel UAT remains a release-evidence task.
+- **Notes:** Completed 2026-07-09. `ProviderSignInDialog` starts, submits to, and cancels the instance-bound provider-login RPC; stored credentials seed future deployments.
 
 ### Sandbox: volume-retained resume for Railway Service cloud sandboxes
 
@@ -238,3 +238,12 @@ Each entry should include:
 - **Rationale:** The Vercel Sandbox driver provisions from a runtime, VCR image, or prepared snapshot — not from a published Docker image ref. The official GHCR image publish requirement from the Railway Service plan is no longer a Phase 3b prerequisite. A VCR image pipeline may still be added if measured cold-start or setup time justifies it. The image remains useful for local Docker sandboxes and future Railway Service/E2B/Hetzner drivers.
 - **Revisit trigger:** When a VCR production image pipeline is needed for Vercel cold-start optimization, or when a future driver requires a published image ref.
 - **Notes:** Closer to the future managed Kata Cloud product than to BYOC; the official image is the first step toward a managed registry. The `Dockerfile` with provider CLIs baked in during Phase 3a remains the local Docker provision unit.
+
+### Sandbox: durable RunningSession reclamation across server restarts
+
+- **Status:** closed
+- **Area:** sandbox, lifecycle, reliability
+- **Source:** [Phase 3b plan](/specs/2026-07-04-kata-environments-deployments-phase-3b-plan.md) — Build completion report, risk #6; [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md)
+- **Rationale:** The lifecycle implementation persists non-secret session records in `SandboxSessionStore`, reconciles them on startup, and recovers configured provider sandboxes by instance id.
+- **Revisit trigger:** None.
+- **Notes:** Completed 2026-07-09. The store is bound to the resolved server state directory, reconciles through provider lifecycle status, and unlinks relay state for confirmed-gone records.

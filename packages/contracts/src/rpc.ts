@@ -83,9 +83,21 @@ import {
   SandboxDisposeSessionResult,
   SandboxListInstancesInput,
   SandboxListInstancesResult,
+  SandboxProviderLoginEvent,
+  SandboxProviderLoginStartInput,
+  SandboxProviderLoginSubmitCodeInput,
+  SandboxProviderLoginSubmitCodeResult,
+  SandboxProviderLoginCancelInput,
+  SandboxProviderLoginCancelResult,
+  SandboxRenewSessionInput,
+  SandboxRenewSessionResult,
   SandboxRpcError,
   SandboxStartSessionInput,
   SandboxStartSessionResult,
+  SandboxStopSessionInput,
+  SandboxStopSessionResult,
+  SandboxIssuePairingTokenInput,
+  SandboxIssuePairingTokenResult,
   SandboxTestConnectionInput,
   SandboxTestConnectionProgressEvent,
 } from "./sandboxRpc.ts";
@@ -247,6 +259,12 @@ export const WS_METHODS = {
   sandboxTestConnection: "sandbox.testConnection",
   sandboxStartSession: "sandbox.startSession",
   sandboxDisposeSession: "sandbox.disposeSession",
+  sandboxRenewSession: "sandbox.renewSession",
+  sandboxStopSession: "sandbox.stopSession",
+  sandboxIssuePairingToken: "sandbox.issuePairingToken",
+  sandboxProviderLoginStart: "sandbox.providerLoginStart",
+  sandboxProviderLoginSubmitCode: "sandbox.providerLoginSubmitCode",
+  sandboxProviderLoginCancel: "sandbox.providerLoginCancel",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -321,6 +339,46 @@ export const WsSandboxStartSessionRpc = Rpc.make(WS_METHODS.sandboxStartSession,
 export const WsSandboxDisposeSessionRpc = Rpc.make(WS_METHODS.sandboxDisposeSession, {
   payload: SandboxDisposeSessionInput,
   success: SandboxDisposeSessionResult,
+  error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+export const WsSandboxRenewSessionRpc = Rpc.make(WS_METHODS.sandboxRenewSession, {
+  payload: SandboxRenewSessionInput,
+  success: SandboxRenewSessionResult,
+  error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+export const WsSandboxStopSessionRpc = Rpc.make(WS_METHODS.sandboxStopSession, {
+  payload: SandboxStopSessionInput,
+  success: SandboxStopSessionResult,
+  error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+export const WsSandboxIssuePairingTokenRpc = Rpc.make(WS_METHODS.sandboxIssuePairingToken, {
+  payload: SandboxIssuePairingTokenInput,
+  success: SandboxIssuePairingTokenResult,
+  error: Schema.Union([SandboxRpcError, ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+export const WsSandboxProviderLoginStartRpc = Rpc.make(WS_METHODS.sandboxProviderLoginStart, {
+  payload: SandboxProviderLoginStartInput,
+  success: SandboxProviderLoginEvent,
+  error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+export const WsSandboxProviderLoginSubmitCodeRpc = Rpc.make(
+  WS_METHODS.sandboxProviderLoginSubmitCode,
+  {
+    payload: SandboxProviderLoginSubmitCodeInput,
+    success: SandboxProviderLoginSubmitCodeResult,
+    error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsSandboxProviderLoginCancelRpc = Rpc.make(WS_METHODS.sandboxProviderLoginCancel, {
+  payload: SandboxProviderLoginCancelInput,
+  success: SandboxProviderLoginCancelResult,
   error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
 });
 
@@ -732,6 +790,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxTestConnectionRpc,
   WsSandboxStartSessionRpc,
   WsSandboxDisposeSessionRpc,
+  WsSandboxRenewSessionRpc,
+  WsSandboxStopSessionRpc,
+  WsSandboxIssuePairingTokenRpc,
+  WsSandboxProviderLoginStartRpc,
+  WsSandboxProviderLoginSubmitCodeRpc,
+  WsSandboxProviderLoginCancelRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,

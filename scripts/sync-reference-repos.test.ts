@@ -10,8 +10,10 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { referenceRepos } from "./lib/reference-repos.ts";
 import {
+  listNestedGitlinks,
   planReferenceRepoSync,
   resolveReferenceRepoRef,
+  stripNestedGitlinks,
   syncReferenceRepos,
 } from "./sync-reference-repos.ts";
 
@@ -19,7 +21,7 @@ const encoder = new TextEncoder();
 const effectSmol = referenceRepos[0]!;
 const alchemyEffect = referenceRepos[1]!;
 
-function mockHandle() {
+function mockHandle(stdout = "done\n") {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
     exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
@@ -27,7 +29,7 @@ function mockHandle() {
     kill: () => Effect.void,
     unref: Effect.succeed(Effect.void),
     stdin: Sink.drain,
-    stdout: Stream.make(encoder.encode("done\n")),
+    stdout: Stream.make(encoder.encode(stdout)),
     stderr: Stream.empty,
     all: Stream.empty,
     getInputFd: () => Sink.drain,
@@ -37,6 +39,7 @@ function mockHandle() {
 
 function mockSpawnerLayer(
   commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>,
+  stdoutForArgs: (args: ReadonlyArray<string>) => string = () => "done\n",
 ) {
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
@@ -49,7 +52,7 @@ function mockSpawnerLayer(
         command: childProcess.command,
         args: childProcess.args,
       });
-      return Effect.succeed(mockHandle());
+      return Effect.succeed(mockHandle(stdoutForArgs(childProcess.args)));
     }),
   );
 }
@@ -159,6 +162,107 @@ it.layer(NodeServices.layer)("sync-reference-repos", (it) => {
             "effect@4.0.0-beta.73",
             "--squash",
           ],
+        },
+        {
+          command: "git",
+          args: ["ls-files", "-s", "--", ".repos/effect-smol"],
+        },
+      ]);
+    });
+  });
+
+  it.effect("lists and removes nested gitlinks under a vendored prefix", () => {
+    const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> = [];
+    const gitlinkPath = ".repos/alchemy-effect/.vendor/alchemy";
+
+    return Effect.gen(function* () {
+      const listed = yield* listNestedGitlinks("/tmp/repo", ".repos/alchemy-effect").pipe(
+        Effect.provide(
+          mockSpawnerLayer(commands, (args) =>
+            args[0] === "ls-files"
+              ? [
+                  `100644 abcdef1 0\t.repos/alchemy-effect/.gitmodules`,
+                  `160000 c9f5e549cf023632c3df948c207a58336192b3c7 0\t${gitlinkPath}`,
+                  "",
+                ].join("\n")
+              : "done\n",
+          ),
+        ),
+      );
+      assert.deepStrictEqual(listed, [gitlinkPath]);
+
+      const removed = yield* stripNestedGitlinks("/tmp/repo", ".repos/alchemy-effect").pipe(
+        Effect.provide(
+          mockSpawnerLayer(commands, (args) =>
+            args[0] === "ls-files"
+              ? `160000 c9f5e549cf023632c3df948c207a58336192b3c7 0\t${gitlinkPath}\n`
+              : "done\n",
+          ),
+        ),
+      );
+      assert.deepStrictEqual(removed, [gitlinkPath]);
+      assert.deepStrictEqual(commands.slice(-2), [
+        {
+          command: "git",
+          args: ["rm", "-f", "--", gitlinkPath],
+        },
+        {
+          command: "git",
+          args: ["commit", "-m", "chore(repos): drop nested gitlinks under .repos/alchemy-effect"],
+        },
+      ]);
+    });
+  });
+
+  it.effect("strips nested gitlinks after a successful subtree sync", () => {
+    const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> = [];
+    const gitlinkPath = ".repos/alchemy-effect/.vendor/alchemy";
+
+    return Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const rootDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "sync-reference-repos-strip-",
+      });
+      yield* fs.makeDirectory(path.join(rootDir, "infra", "relay"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(rootDir, "infra", "relay", "package.json"),
+        '{"dependencies":{"alchemy":"2.0.0-beta.49"}}',
+      );
+
+      yield* syncReferenceRepos({ rootDir, repoId: "alchemy-effect" }).pipe(
+        Effect.provide(
+          mockSpawnerLayer(commands, (args) =>
+            args[0] === "ls-files"
+              ? `160000 c9f5e549cf023632c3df948c207a58336192b3c7 0\t${gitlinkPath}\n`
+              : "done\n",
+          ),
+        ),
+      );
+
+      assert.deepStrictEqual(commands, [
+        {
+          command: "git",
+          args: [
+            "subtree",
+            "add",
+            "--prefix=.repos/alchemy-effect",
+            "https://github.com/alchemy-run/alchemy-effect.git",
+            "v2.0.0-beta.49",
+            "--squash",
+          ],
+        },
+        {
+          command: "git",
+          args: ["ls-files", "-s", "--", ".repos/alchemy-effect"],
+        },
+        {
+          command: "git",
+          args: ["rm", "-f", "--", gitlinkPath],
+        },
+        {
+          command: "git",
+          args: ["commit", "-m", "chore(repos): drop nested gitlinks under .repos/alchemy-effect"],
         },
       ]);
     });

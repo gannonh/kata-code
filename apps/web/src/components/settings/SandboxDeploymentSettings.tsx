@@ -1,12 +1,11 @@
 "use client";
 
 import { useAuth } from "@clerk/react";
-import { ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronDownIcon, Trash2Icon } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   EnvironmentId,
   SandboxProviderDriverKind,
-  SandboxProviderInstanceId,
   type ProviderInstanceEnvironmentVariable,
   type SavedSandboxEnvironmentMap,
   type SandboxInstanceSummary,
@@ -23,49 +22,32 @@ import {
   addSavedEnvironment,
   getPrimaryEnvironmentConnection,
   removeSavedEnvironment,
+  useSavedEnvironmentRegistryStore,
 } from "../../environments/runtime";
 import { cn } from "../../lib/utils";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import type { Project } from "../../types";
 import { Button } from "../ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPopup,
-  DialogTitle,
-  DialogTrigger,
-} from "../ui/dialog";
 import { Badge } from "../ui/badge";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt";
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
+import { ProviderSignInDialog } from "./ProviderSignInDialog";
+import { DockerConfigFields, VercelConfigFields } from "./SandboxDriverConfigFields";
 import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
+import { shouldSeedRepositoryForStart } from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
 
-const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
+const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
-/** Slugify a label into a sandbox instance id suffix (mirrors provider dialog). */
-function slugifyLabel(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "")
-    .slice(0, 48);
-}
+/** Credentials the Vercel sandbox driver requires at session start. */
+const VERCEL_REQUIRED_ENV_NAMES = ["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID"] as const;
 
 /** Per-instance busy state for the long-running RPCs. */
-type BusyOp = "test" | "start" | "dispose";
+type BusyOp = "test" | "start" | "dispose" | "renew" | "stop";
 
 /** Render a non-empty failure message for the progress log and toasts.
  * Effect fiber failures can surface as objects whose `message` is empty. */
@@ -81,14 +63,24 @@ function failureMessage(error: unknown): string {
 }
 
 /**
- * Settings panel for sandbox environments (Phase 1: local Docker
- * containers). Lists configured targets with their materialized status, and
- * provides Add / Test connection (streaming) / Start session / Dispose /
- * Remove. Writes go through `useUpdateSettings` against the
- * `sandboxProviderInstances` settings map (no plaintext secrets in settings);
+ * Settings panel for environment definitions. Lists configured targets with
+ * their materialized status, and provides Test connection (streaming) / Start
+ * session / Dispose / Delete for sandbox-backed environments. Writes go
+ * through `useUpdateSettings` against the `sandboxProviderInstances` settings
+ * map (no plaintext secrets in settings);
  * the live RPCs (list/test/start/dispose) go through the paired WS client.
  */
-export function SandboxDeploymentSettings() {
+interface SandboxDeploymentSettingsProps {
+  readonly headerAction?: ReactNode;
+  readonly savedEnvironmentRows?: ReactNode;
+  readonly hasSavedEnvironmentRows?: boolean;
+}
+
+export function SandboxDeploymentSettings({
+  headerAction,
+  savedEnvironmentRows,
+  hasSavedEnvironmentRows = false,
+}: SandboxDeploymentSettingsProps) {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { getToken, isSignedIn } = useAuth();
@@ -100,7 +92,6 @@ export function SandboxDeploymentSettings() {
     | undefined;
 
   const [summaries, setSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>([]);
-  const [addOpen, setAddOpen] = useState(false);
   const [testProgress, setTestProgress] = useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [selectedRepositoryKeyByInstance, setSelectedRepositoryKeyByInstance] = useState<
@@ -185,9 +176,16 @@ export function SandboxDeploymentSettings() {
         );
         if (selectedProject) return selectedProject;
       }
+      const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
+      if (instance?.repositoryKey) {
+        const persistedProject = repositoryProjects.find(
+          (project) => project.repositoryIdentity?.canonicalKey === instance.repositoryKey,
+        );
+        if (persistedProject) return persistedProject;
+      }
       return repositoryProjects[0];
     },
-    [repositoryProjects, selectedRepositoryKeyByInstance],
+    [repositoryProjects, selectedRepositoryKeyByInstance, instanceMap],
   );
 
   const handleTest = useCallback(
@@ -236,8 +234,12 @@ export function SandboxDeploymentSettings() {
   const handleStart = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
-        const explicitRepositoryKey = selectedRepositoryKeyByInstance[instanceId];
-        const project = explicitRepositoryKey ? resolveSelectedProject(instanceId) : undefined;
+        const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
+        const shouldSeedRepository = shouldSeedRepositoryForStart(summaryById[instanceId]);
+        const project = shouldSeedRepository ? resolveSelectedProject(instanceId) : undefined;
+        const startedRepositoryKey = shouldSeedRepository
+          ? (project?.repositoryIdentity?.canonicalKey as string | undefined)
+          : undefined;
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
           return;
@@ -276,10 +278,15 @@ export function SandboxDeploymentSettings() {
           let savedForProjectPicker = false;
           try {
             await addSavedEnvironment({
-              label: result.endpoint.label,
+              // Prefer the instance display name so Environments dedupe and
+              // Available Runtimes stay aligned with the deployment-target card.
+              label: instance?.displayName?.trim() || result.endpoint.label,
               host: result.endpoint.httpBaseUrl,
               pairingCode: result.pairingToken,
-              sandbox: { providerKind: "local" },
+              sandbox: {
+                providerKind: (instance?.driver as string) ?? "local",
+                instanceId,
+              },
             });
             savedForProjectPicker = true;
             setTestProgress((prev) => ({
@@ -300,6 +307,10 @@ export function SandboxDeploymentSettings() {
           }
           refreshManagedRelayEnvironments();
           await refreshList();
+
+          if (startedRepositoryKey && instance) {
+            updateInstance(instanceId, { ...instance, repositoryKey: startedRepositoryKey });
+          }
 
           if (savedForProjectPicker) {
             toastManager.add({
@@ -323,11 +334,13 @@ export function SandboxDeploymentSettings() {
       }),
     [
       getToken,
+      instanceMap,
       isSignedIn,
       openAuthPrompt,
       refreshList,
       resolveSelectedProject,
       selectedRepositoryKeyByInstance,
+      summaryById,
       withBusy,
     ],
   );
@@ -337,9 +350,17 @@ export function SandboxDeploymentSettings() {
       withBusy(instanceId, "dispose", async () => {
         try {
           const session = activeSession[instanceId];
-          await getPrimaryEnvironmentConnection().client.sandbox.disposeSession({
+          const result = await getPrimaryEnvironmentConnection().client.sandbox.disposeSession({
             instanceId: instanceId as never,
           });
+          if (!result.disposed) {
+            toastManager.add({
+              type: "error",
+              title: "Delete sandbox failed",
+              description: "No sandbox session to delete, or another operation is in progress.",
+            });
+            return;
+          }
           if (session) {
             await removeSavedEnvironment(EnvironmentId.make(session.environmentId)).catch(
               (error) => {
@@ -360,13 +381,13 @@ export function SandboxDeploymentSettings() {
           });
           toastManager.add({
             type: "success",
-            title: "Sandbox disposed",
+            title: "Sandbox deleted",
             description: `Sandbox '${instanceId}' released.`,
           });
         } catch (error) {
           toastManager.add({
             type: "error",
-            title: "Dispose failed",
+            title: "Delete sandbox failed",
             description: error instanceof Error ? error.message : "Unknown error.",
           });
         }
@@ -374,13 +395,104 @@ export function SandboxDeploymentSettings() {
     [activeSession, refreshList, withBusy],
   );
 
+  const handleStop = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "stop", async () => {
+        try {
+          await getPrimaryEnvironmentConnection().client.sandbox.stopSession({
+            instanceId: instanceId as never,
+          });
+          refreshManagedRelayEnvironments();
+          await refreshList();
+          toastManager.add({
+            type: "success",
+            title: "Sandbox stopped",
+            description: `Sandbox '${instanceId}' stopped. Start it again to resume.`,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Stop failed",
+            description: error instanceof Error ? error.message : "Unknown error.",
+          });
+        }
+      }),
+    [refreshList, withBusy],
+  );
+
+  const handleRenew = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "renew", async () => {
+        try {
+          await getPrimaryEnvironmentConnection().client.sandbox.renewSession({
+            instanceId: instanceId as never,
+          });
+          await refreshList();
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Extend failed",
+            description: error instanceof Error ? error.message : "Unknown error.",
+          });
+        }
+      }),
+    [refreshList, withBusy],
+  );
+
+  /** Recovery path (identity plan R2): the sandbox is running but pairing
+   *  failed or the saved environment is missing. Mint a fresh pairing token
+   *  against the live sandbox and re-run addSavedEnvironment. */
+  const handleRetryPairing = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "start", async () => {
+        const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
+        try {
+          const issued = await getPrimaryEnvironmentConnection().client.sandbox.issuePairingToken({
+            instanceId: instanceId as never,
+          });
+          await addSavedEnvironment({
+            label: instance?.displayName?.trim() || issued.endpoint.label,
+            host: issued.endpoint.httpBaseUrl,
+            pairingCode: issued.pairingToken,
+            sandbox: {
+              providerKind: (instance?.driver as string) ?? "local",
+              instanceId,
+            },
+          });
+          setTestProgress((prev) => ({
+            ...prev,
+            [instanceId]: [...(prev[instanceId] ?? []), "connect: ok (re-paired)"],
+          }));
+          toastManager.add({
+            type: "success",
+            title: "Sandbox paired",
+            description: "Available from Add project.",
+          });
+          await refreshList();
+        } catch (error) {
+          const message = failureMessage(error);
+          setTestProgress((prev) => ({
+            ...prev,
+            [instanceId]: [...(prev[instanceId] ?? []), `connect: failed — ${message}`],
+          }));
+          toastManager.add({
+            type: "error",
+            title: "Pairing failed",
+            description: message,
+          });
+        }
+      }),
+    [instanceMap, refreshList, withBusy],
+  );
+
   const handleRemove = useCallback(
     (instanceId: string) => {
       if (activeSession[instanceId]) {
         toastManager.add({
           type: "error",
-          title: "Cannot remove sandbox environment",
-          description: `Dispose the active session for '${instanceId}' before removing it.`,
+          title: "Delete the sandbox first",
+          description:
+            "Expand this environment and click “Delete sandbox” to remove the running/stopped sandbox, then remove the environment.",
         });
         return;
       }
@@ -409,46 +521,13 @@ export function SandboxDeploymentSettings() {
 
   return (
     <>
-      <SettingsSection
-        title="Sandbox environments"
-        headerAction={
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <DialogTrigger
-                    render={
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
-                        aria-label="Add sandbox environment"
-                      >
-                        <PlusIcon className="size-3" />
-                        <span>Add sandbox environment</span>
-                      </Button>
-                    }
-                  />
-                }
-              />
-              <TooltipPopup side="top">Add sandbox environment</TooltipPopup>
-            </Tooltip>
-            <AddDeploymentTargetDialogBody
-              existingIds={new Set(instanceEntries.map(([id]) => id))}
-              onAdd={(id, instance) => {
-                updateSettings({
-                  sandboxProviderInstances: { ...instanceMap, [id]: instance },
-                });
-                setAddOpen(false);
-              }}
-            />
-          </Dialog>
-        }
-      >
-        {instanceEntries.length === 0 ? (
+      <SettingsSection title="Environments" headerAction={headerAction}>
+        {hasSavedEnvironmentRows ? savedEnvironmentRows : null}
+        {instanceEntries.length === 0 && !hasSavedEnvironmentRows ? (
           <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
             <p className="text-xs text-muted-foreground">
-              No sandbox environments configured. Add one to provision a container.
+              No environments configured. Add one to define a remote link, SSH host, Docker
+              container, or cloud provider.
             </p>
           </div>
         ) : (
@@ -461,10 +540,10 @@ export function SandboxDeploymentSettings() {
             const instanceBusy = busy[id];
             const isOpen = expanded[id] ?? false;
             const displayName = config.displayName ?? id;
-            const enabled = config.enabled ?? true;
             const selectedProject = resolveSelectedProject(id);
             const selectedRepositoryKey =
               selectedRepositoryKeyByInstance[id] ??
+              (config.repositoryKey as string | undefined) ??
               (selectedProject?.repositoryIdentity?.canonicalKey as string | undefined);
             return (
               <DeploymentTargetCard
@@ -472,10 +551,10 @@ export function SandboxDeploymentSettings() {
                 instanceId={id}
                 instance={config}
                 displayName={displayName}
-                enabled={enabled}
                 available={available}
                 reason={reason}
                 session={session}
+                summary={summary}
                 progress={progress}
                 instanceBusy={instanceBusy}
                 isExpanded={isOpen}
@@ -487,13 +566,17 @@ export function SandboxDeploymentSettings() {
                 onSavedEnvironmentChange={(next) =>
                   updateSettings({ savedSandboxEnvironments: next })
                 }
-                onSelectedRepositoryKeyChange={(repositoryKey) =>
-                  setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }))
-                }
+                onSelectedRepositoryKeyChange={(repositoryKey) => {
+                  setSelectedRepositoryKeyByInstance((prev) => ({ ...prev, [id]: repositoryKey }));
+                  updateInstance(id, { ...config, repositoryKey });
+                }}
                 onDelete={() => handleRemove(id)}
                 onTest={() => void handleTest(id)}
                 onStart={() => void handleStart(id)}
+                onStop={() => void handleStop(id)}
                 onDispose={() => void handleDispose(id)}
+                onRenew={() => void handleRenew(id)}
+                onRetryPairing={() => void handleRetryPairing(id)}
               />
             );
           })
@@ -508,12 +591,12 @@ interface DeploymentTargetCardProps {
   readonly instanceId: string;
   readonly instance: SandboxProviderInstanceConfig;
   readonly displayName: string;
-  readonly enabled: boolean;
   readonly available: boolean;
   readonly reason: string | undefined;
   readonly session: { environmentId: string; httpBaseUrl: string } | undefined;
+  readonly summary: SandboxInstanceSummary | undefined;
   readonly progress: string[];
-  readonly instanceBusy: "test" | "start" | "dispose" | undefined;
+  readonly instanceBusy: BusyOp | undefined;
   readonly isExpanded: boolean;
   readonly projects: ReadonlyArray<Project>;
   readonly savedSandboxEnvironments: SavedSandboxEnvironmentMap | undefined;
@@ -525,23 +608,26 @@ interface DeploymentTargetCardProps {
   readonly onDelete: () => void;
   readonly onTest: () => void;
   readonly onStart: () => void;
+  readonly onStop: () => void;
   readonly onDispose: () => void;
+  readonly onRenew: () => void;
+  readonly onRetryPairing: () => void;
 }
 
 /**
- * A single deployment-target row, mirroring `ProviderInstanceCard.tsx`:
- * title + driver/status badges + delete + chevron + enabled switch in the row,
- * and a `Collapsible` with display name, docker config fields, env vars, and
- * the Part B controls (Test connection / Start session / Dispose) + progress.
+ * A single deployment-target row: title + driver/status badges + delete +
+ * status badge + secondary Stop/Start button + chevron in the header, and a
+ * `Collapsible` with display name, config fields, env vars, and state-driven
+ * actions (Create & run sandbox / Stop / Start / Delete sandbox) + progress.
  */
-function DeploymentTargetCard({
+export function DeploymentTargetCard({
   instanceId,
   instance,
   displayName,
-  enabled,
   available,
   reason,
   session,
+  summary,
   progress,
   instanceBusy,
   isExpanded,
@@ -555,8 +641,26 @@ function DeploymentTargetCard({
   onDelete,
   onTest,
   onStart,
+  onStop,
   onDispose,
+  onRenew,
+  onRetryPairing,
 }: DeploymentTargetCardProps) {
+  const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
+  const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
+  const supportsRenewTimeout =
+    summary?.kind === "available" ? summary.supportsRenewTimeout : undefined;
+  const sessionStatus = runningSession?.status;
+  const deadlineEpochMs = runningSession?.deadlineEpochMs;
+  const statusDetail = runningSession?.statusDetail;
+  const [signInFor, setSignInFor] = useState<string | null>(null);
+  // Recovery R2: a running sandbox whose environment id has no saved record
+  // is unreachable from Add Project — offer Retry pairing instead of a dead end.
+  const hasSavedRecordForSession = useSavedEnvironmentRegistryStore((state) =>
+    runningSession !== undefined && sessionStatus === "running"
+      ? state.byId[runningSession.environmentId as never] !== undefined
+      : true,
+  );
   const updateDisplayName = (value: string) => {
     const trimmed = value.trim();
     const { displayName: _omit, ...rest } = instance;
@@ -565,10 +669,6 @@ function DeploymentTargetCard({
         ? ({ ...rest, displayName: trimmed } as SandboxProviderInstanceConfig)
         : (rest as SandboxProviderInstanceConfig),
     );
-  };
-
-  const updateEnabled = (value: boolean) => {
-    onUpdate({ ...instance, enabled: value });
   };
 
   const updateConfig = (nextConfig: Record<string, unknown> | undefined) => {
@@ -608,6 +708,15 @@ function DeploymentTargetCard({
               ) : reason ? (
                 <Badge variant="destructive">{reason}</Badge>
               ) : null}
+              {sessionStatus === "running" ? (
+                <Badge variant="default" className="bg-green-600 text-green-50">
+                  running
+                </Badge>
+              ) : sessionStatus === "stopped" ? (
+                <Badge variant="secondary" className="bg-muted text-muted-foreground">
+                  stopped
+                </Badge>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -628,10 +737,31 @@ function DeploymentTargetCard({
             <p className="text-xs text-muted-foreground/80">
               {session
                 ? `Session ready: ${session.httpBaseUrl} (env ${session.environmentId})`
-                : "Provision an isolated container reached over localhost."}
+                : isVercel
+                  ? "Provisions an ephemeral Vercel Sandbox microVM, reached over a public URL."
+                  : "Provision an isolated container reached over localhost."}
             </p>
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+            {sessionStatus === "running" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={instanceBusy !== undefined}
+                onClick={onStop}
+              >
+                {instanceBusy === "stop" ? "Stopping…" : "Stop"}
+              </Button>
+            ) : sessionStatus === "stopped" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={instanceBusy !== undefined}
+                onClick={onStart}
+              >
+                {instanceBusy === "start" ? "Starting…" : "Start"}
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="ghost"
@@ -643,11 +773,6 @@ function DeploymentTargetCard({
                 className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")}
               />
             </Button>
-            <Switch
-              checked={enabled}
-              onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
-              aria-label={`Enable ${displayName}`}
-            />
           </div>
         </div>
       </div>
@@ -672,16 +797,32 @@ function DeploymentTargetCard({
               </label>
             </div>
 
-            <DockerConfigFields
-              config={instance.config}
-              idPrefix={`sandbox-instance-${instanceId}`}
-              onChange={updateConfig}
-            />
+            {isVercel ? (
+              <VercelConfigFields
+                config={instance.config}
+                idPrefix={`sandbox-instance-${instanceId}`}
+                onChange={updateConfig}
+                machineSizeLocked={sessionStatus !== undefined}
+              />
+            ) : (
+              <DockerConfigFields
+                config={instance.config}
+                idPrefix={`sandbox-instance-${instanceId}`}
+                onChange={updateConfig}
+              />
+            )}
 
             <div className="border-t border-border/60 px-4 py-3 sm:px-5">
               <ProviderEnvironmentSection
                 environment={instance.environment ?? []}
                 onChange={updateEnvironment}
+                title="Runtime environment variables"
+                {...(isVercel ? { prefillNames: VERCEL_REQUIRED_ENV_NAMES } : {})}
+                description={
+                  isVercel
+                    ? "Apply to every session on this target. Add VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID here as sensitive variables."
+                    : "Apply to every session on this target (e.g. API keys the sandbox server needs at boot)."
+                }
               />
             </div>
 
@@ -696,33 +837,95 @@ function DeploymentTargetCard({
             </div>
 
             <div className="space-y-3 border-t border-border/60 px-4 py-3 sm:px-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={instanceBusy !== undefined || !available}
-                  onClick={onTest}
-                >
-                  {instanceBusy === "test" ? "Testing…" : "Test connection"}
-                </Button>
-                {session ? (
+              {statusDetail ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-amber-600">{statusDetail}</span>
+                </div>
+              ) : null}
+              {sessionStatus === "running" ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {session ? (
+                    <span className="text-xs text-muted-foreground">
+                      {session.httpBaseUrl} (env {session.environmentId})
+                    </span>
+                  ) : null}
+                  {deadlineEpochMs !== undefined ? (
+                    <span className="text-xs text-muted-foreground">
+                      Expires in {formatRemaining(deadlineEpochMs)}
+                    </span>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="outline"
                     disabled={instanceBusy !== undefined}
-                    onClick={onDispose}
+                    onClick={onStop}
                   >
-                    {instanceBusy === "dispose" ? "Disposing…" : "Dispose"}
+                    {instanceBusy === "stop" ? "Stopping…" : "Stop"}
                   </Button>
-                ) : (
+                  {supportsRenewTimeout ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={instanceBusy !== undefined}
+                      onClick={onRenew}
+                    >
+                      {instanceBusy === "renew" ? "Extending…" : "Extend"}
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
-                    disabled={instanceBusy !== undefined || !available}
-                    onClick={onStart}
+                    variant="outline"
+                    disabled={instanceBusy !== undefined}
+                    onClick={() => setSignInFor("claude")}
                   >
-                    {instanceBusy === "start" ? "Starting…" : "Start session"}
+                    Sign in to Claude
                   </Button>
-                )}
+                  {!hasSavedRecordForSession ? (
+                    <Button
+                      size="sm"
+                      disabled={instanceBusy !== undefined}
+                      onClick={onRetryPairing}
+                    >
+                      {instanceBusy === "start" ? "Pairing…" : "Retry pairing"}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                {sessionStatus === undefined ? (
+                  <>
+                    <Button
+                      size="sm"
+                      disabled={instanceBusy !== undefined || !available}
+                      onClick={onStart}
+                    >
+                      {instanceBusy === "start" ? "Starting…" : "Create & run sandbox"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={instanceBusy !== undefined || !available}
+                      onClick={onTest}
+                    >
+                      {instanceBusy === "test" ? "Testing…" : "Test connection"}
+                    </Button>
+                  </>
+                ) : sessionStatus === "stopped" ? (
+                  <>
+                    <Button size="sm" disabled={instanceBusy !== undefined} onClick={onStart}>
+                      {instanceBusy === "start" ? "Starting…" : "Start"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                      disabled={instanceBusy !== undefined}
+                      onClick={onDispose}
+                    >
+                      {instanceBusy === "dispose" ? "Deleting…" : "Delete sandbox"}
+                    </Button>
+                  </>
+                ) : null}
               </div>
               {progress.length > 0 || instanceBusy === "test" ? (
                 <pre className="text-xs whitespace-pre-wrap text-muted-foreground">
@@ -733,240 +936,26 @@ function DeploymentTargetCard({
           </div>
         </CollapsibleContent>
       </Collapsible>
+      {signInFor !== null ? (
+        <ProviderSignInDialog
+          instanceId={instanceId}
+          providerId={signInFor}
+          onClose={() => setSignInFor(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-interface DockerConfigFieldsProps {
-  readonly config: unknown;
-  readonly idPrefix: string;
-  readonly onChange: (nextConfig: Record<string, unknown> | undefined) => void;
-}
-
-function readConfigString(config: unknown, key: string): string {
-  if (config === null || typeof config !== "object") return "";
-  const value = (config as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : "";
-}
-
-function readConfigNumber(config: unknown, key: string): string {
-  if (config === null || typeof config !== "object") return "";
-  const value = (config as Record<string, unknown>)[key];
-  return typeof value === "number" ? String(value) : "";
-}
-
-function setConfigField(
-  config: unknown,
-  key: string,
-  value: string,
-  clearWhenEmpty: "omit" | "persist" = "omit",
-): Record<string, unknown> | undefined {
-  const base: Record<string, unknown> =
-    config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
-  const trimmed = value.trim();
-  if (clearWhenEmpty === "omit" && trimmed.length === 0) {
-    delete base[key];
-  } else {
-    base[key] = value;
+/** Format the remaining lifetime from an epoch-ms deadline. */
+function formatRemaining(deadlineEpochMs: number): string {
+  const remaining = deadlineEpochMs - Date.now();
+  if (remaining <= 0) return "soon";
+  const minutes = Math.floor(remaining / 60_000);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m`;
   }
-  return Object.keys(base).length > 0 ? base : undefined;
-}
-
-/** Parse a container port string into a validated integer in 1..65535, or null. */
-function parseContainerPort(value: string): number | null {
-  const trimmed = value.trim();
-  if (!/^\d+$/u.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535 ? parsed : null;
-}
-
-/** Set a numeric container port field, rejecting non-integer/out-of-range values.
- * An empty input clears the field. */
-function setContainerPort(
-  config: unknown,
-  key: string,
-  value: string,
-): Record<string, unknown> | undefined {
-  const base: Record<string, unknown> =
-    config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
-  if (value.trim().length === 0) {
-    delete base[key];
-  } else {
-    const parsed = parseContainerPort(value);
-    if (parsed === null) return base;
-    base[key] = parsed;
-  }
-  return Object.keys(base).length > 0 ? base : undefined;
-}
-
-/**
- * Inline editor for the docker driver config (image, command, port), mirroring
- * `ProviderSettingsForm`'s card variant layout. The web app cannot import the
- * server-only `@kata-sh/code-sandbox-docker` `DockerSandboxConfig` schema, so
- * this renders the known fields directly against the opaque `config` blob.
- */
-function DockerConfigFields({ config, idPrefix, onChange }: DockerConfigFieldsProps) {
-  const fields: ReadonlyArray<{
-    key: string;
-    label: string;
-    description: string;
-    placeholder: string;
-    kind: "text" | "port";
-  }> = [
-    {
-      key: "image",
-      label: "Image",
-      description: "Container image (must contain your start command's runtime).",
-      placeholder: "katacode:local",
-      kind: "text",
-    },
-    {
-      key: "command",
-      label: "Start command",
-      description:
-        "Command to launch the Kata server inside the container, e.g. `katacode serve --port 13773`.",
-      placeholder: "katacode serve --port 13773",
-      kind: "text",
-    },
-    {
-      key: "port",
-      label: "Container port",
-      description: "In-container port the Kata server listens on.",
-      placeholder: "13773",
-      kind: "port",
-    },
-  ];
-  return (
-    <>
-      {fields.map((field) => (
-        <div key={field.key} className="border-t border-border/60 px-4 py-3 sm:px-5">
-          <label htmlFor={`${idPrefix}-${field.key}`} className="block">
-            <span className="text-xs font-medium text-foreground">{field.label}</span>
-            <DraftInput
-              id={`${idPrefix}-${field.key}`}
-              className="mt-1.5"
-              value={
-                field.kind === "port"
-                  ? readConfigNumber(config, field.key)
-                  : readConfigString(config, field.key)
-              }
-              onCommit={(next) =>
-                onChange(
-                  field.kind === "port"
-                    ? setContainerPort(config, field.key, next)
-                    : setConfigField(config, field.key, next),
-                )
-              }
-              placeholder={field.placeholder}
-              spellCheck={false}
-              inputMode={field.kind === "port" ? "numeric" : undefined}
-            />
-            <span className="mt-1 block text-xs text-muted-foreground">{field.description}</span>
-          </label>
-        </div>
-      ))}
-    </>
-  );
-}
-
-interface AddDeploymentTargetDialogBodyProps {
-  existingIds: Set<string>;
-  onAdd: (id: string, instance: SandboxProviderInstanceConfig) => void;
-}
-
-function AddDeploymentTargetDialogBody({ existingIds, onAdd }: AddDeploymentTargetDialogBodyProps) {
-  // Defaults match the driver's DEFAULT_DOCKER_CONFIG: the `katacode:local`
-  // image built by `pnpm run build:docker-image`, started with
-  // `katacode serve --port 13773`. Add -> Test connection provisions the real
-  // server out of the box (requires the image to be built; the e2e asserts it).
-  const [label, setLabel] = useState("");
-  const [image, setImage] = useState("katacode:local");
-  const [command, setCommand] = useState("katacode serve --port 13773");
-  const [port, setPort] = useState("13773");
-  const [error, setError] = useState<string | null>(null);
-
-  const instanceId = useMemo(() => {
-    const suffix = slugifyLabel(label) || "default";
-    return `${DOCKER_KIND}_${suffix}`;
-  }, [label]);
-
-  const handleSubmit = useCallback(() => {
-    if (existingIds.has(instanceId)) {
-      setError(`Instance id '${instanceId}' already exists. Choose a different label.`);
-      return;
-    }
-    const portNumber = parseContainerPort(port);
-    if (portNumber === null) {
-      setError("Container port must be an integer from 1 to 65535.");
-      return;
-    }
-    try {
-      const brandedId = SandboxProviderInstanceId.make(instanceId);
-      const instance: SandboxProviderInstanceConfig = {
-        driver: DOCKER_KIND,
-        enabled: true,
-        ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
-        config: { image, command, port: portNumber },
-      };
-      onAdd(brandedId as string, instance);
-      setLabel("");
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Invalid instance id.");
-    }
-  }, [existingIds, instanceId, label, image, command, port, onAdd]);
-
-  return (
-    <DialogPopup className="max-w-xl overflow-hidden">
-      <DialogHeader>
-        <DialogTitle>Add container sandbox environment</DialogTitle>
-        <DialogDescription>
-          Provisions an isolated Docker container running a Kata server, reached over localhost.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="flex flex-col gap-3 p-4">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-label">Label</Label>
-          <Input
-            id="sandbox-label"
-            value={label}
-            placeholder="e.g. Work"
-            onChange={(e) => setLabel(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">Instance id: {instanceId}</p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-image">Image</Label>
-          <Input id="sandbox-image" value={image} onChange={(e) => setImage(e.target.value)} />
-          <p className="text-xs text-muted-foreground">
-            Must contain your start command's runtime. Use a <code>katacode</code> image once
-            published.
-          </p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-command">Start command</Label>
-          <Input
-            id="sandbox-command"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">
-            Launches the Kata server inside the container. Defaults to
-            <code>katacode serve --port 13773</code> against the
-            <code>katacode:local</code> image (built by
-            <code>pnpm run build:docker-image</code>).
-          </p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="sandbox-port">Container port</Label>
-          <Input id="sandbox-port" value={port} onChange={(e) => setPort(e.target.value)} />
-        </div>
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      </div>
-      <DialogFooter>
-        <DialogClose render={<Button variant="ghost">Cancel</Button>} />
-        <Button onClick={handleSubmit}>Add sandbox environment</Button>
-      </DialogFooter>
-    </DialogPopup>
-  );
+  return `${minutes}m`;
 }

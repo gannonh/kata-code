@@ -58,6 +58,14 @@ export interface CredentialSeedInput {
   readonly hostHome: string;
   /** Predicate to test whether a host path exists. Defaults to `fs.existsSync`. */
   readonly hostPathExists?: (path: string) => boolean;
+  /** Stored credentials (e.g. captured via the Sign-in flow) appended to the
+   *  credentials archive UNLESS a host-collected file already produces the
+   *  same `relativePath` (host wins; the host file is the live copy). */
+  readonly storedCredentials?: ReadonlyArray<{
+    readonly relativePath: string;
+    readonly content: Uint8Array;
+    readonly mode?: number;
+  }>;
 }
 
 // ── Provider declarations ─────────────────────────────────────────────
@@ -165,6 +173,19 @@ const PI_EXCLUDES: ReadonlyArray<ExcludePattern> = [
   { name: "bin" },
   { name: "git" },
   { name: "intercom" },
+  { name: ".DS_Store" },
+];
+
+// OpenCode reads auth from XDG data home (`~/.local/share/opencode/auth.json`),
+// not `~/.config/opencode/auth.json` as the Phase 3b spec states. The seed
+// targets the data-home path; the spec discrepancy is recorded in the build log.
+const OPENCODE_EXCLUDES: ReadonlyArray<ExcludePattern> = [
+  { name: "log" },
+  { name: "cache" },
+  { name: "storage" },
+  { name: "snapshot" },
+  { name: "tui" },
+  { name: "node_modules" },
   { name: ".DS_Store" },
 ];
 
@@ -370,6 +391,13 @@ const PROVIDER_SPECS: ReadonlyArray<ProviderSpec> = [
     configFileName: "settings.json",
     sanitizeConfig: sanitizePiSettings,
   },
+  {
+    name: "opencode",
+    hostDir: ".local/share/opencode",
+    containerRelative: ".local/share/opencode",
+    authFiles: ["auth.json"],
+    excludes: OPENCODE_EXCLUDES,
+  },
 ];
 
 // ── Archive builder ───────────────────────────────────────────────────
@@ -449,6 +477,27 @@ export function buildCredentialSeedArchives(
               }),
           })
         : null;
+
+    // Append stored credentials (e.g. captured via the Sign-in flow) to the
+    // credentials archive UNLESS a host-collected file already produces the
+    // same relative path. Host wins because it is the live copy the user
+    // refreshes; a stored credential is the fallback for providers without a
+    // host credential dir (typical for cloud-only sandboxes).
+    if (input.storedCredentials !== undefined) {
+      const existingPaths = new Set<string>([
+        ...credentialFiles.map((f) => f.relativePath),
+        ...credentialContents.map((c) => c.relativePath),
+      ]);
+      for (const stored of input.storedCredentials) {
+        if (existingPaths.has(stored.relativePath)) continue;
+        credentialContents.push({
+          relativePath: stored.relativePath,
+          content: Buffer.from(stored.content),
+          ...(stored.mode !== undefined ? { mode: stored.mode } : {}),
+        });
+        existingPaths.add(stored.relativePath);
+      }
+    }
 
     const credentialsArchive =
       credentialFiles.length > 0 || credentialContents.length > 0

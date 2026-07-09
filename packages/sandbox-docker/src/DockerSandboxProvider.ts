@@ -27,6 +27,8 @@ import {
   type SandboxCopyIntoCapability,
   type SandboxExecResult,
   type SandboxHandle,
+  type SandboxLifecycleCapability,
+  type SandboxLifecycleStatus,
   SandboxProviderError,
   type SandboxProvisionRequest,
   type SandboxReachability,
@@ -55,8 +57,31 @@ export const dockerConfigDecoder: SandboxProviderConfigDecoder<DockerSandboxConf
 
 export interface DockerSandboxHandleState {
   readonly containerId: string;
+  readonly containerName: string;
   readonly hostPort: number;
   readonly containerPort: number;
+}
+
+/** Deterministic container name for an instance (slug-safe; stable across restarts). */
+export function dockerContainerName(instanceId: string): string {
+  return `kata-sandbox-${instanceId}`;
+}
+
+/** Shape of the Docker Engine `GET /containers/{id}/json` response fields the
+ *  driver reads (State + port bindings + labels). */
+interface DockerContainerInspect {
+  readonly Id: string;
+  readonly Name: string;
+  readonly State: {
+    readonly Status: string;
+    readonly ExitCode: number;
+    readonly Error: string;
+    readonly Running: boolean;
+  };
+  readonly Config: { readonly Labels: Record<string, string> | null };
+  readonly NetworkSettings: {
+    readonly Ports: Record<string, ReadonlyArray<{ readonly HostPort: string }> | undefined>;
+  };
 }
 
 const parseJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
@@ -170,28 +195,106 @@ function buildContainerEnv(
   return env;
 }
 
-function waitForReady(hostPort: number): Effect.Effect<void, SandboxProviderError> {
-  // Use 127.0.0.1 (not localhost) so the probe bypasses any localhost
-  // proxy/IPv6 resolution quirks in the host process, and cap each probe at
-  // 3s so a hung fetch cannot stall the whole readiness window.
-  const healthUrl = `http://127.0.0.1:${hostPort}${HEALTHZ_PATH}`;
-  const probe = Effect.tryPromise({
-    try: () =>
-      fetch(healthUrl, {
-        signal: AbortSignal.timeout(3000),
+/** Inspect a container by name. Returns `null` on 404 (gone); surfaces other
+ *  errors as `SandboxProviderError`. The response is the full Engine inspect
+ *  JSON (`DockerContainerInspect`-shaped). */
+function inspectContainer(
+  name: string,
+  reason: SandboxProviderError["reason"],
+  msg: string,
+): Effect.Effect<DockerContainerInspect | null, SandboxProviderError> {
+  return Effect.gen(function* () {
+    const res = yield* dockerRequest(`/containers/${encodeURIComponent(name)}/json`).pipe(
+      Effect.mapError(
+        (e: DockerEngineError) =>
+          new SandboxProviderError({ reason, message: `${msg}: ${e.message}` }),
+      ),
+    );
+    if (res.status === 404) return null;
+    if (res.status >= 400) {
+      return yield* new SandboxProviderError({
+        reason,
+        message: `${msg}: inspect ${res.status}: ${res.body.slice(0, 200)}`,
+      });
+    }
+    return parseJson(res.body) as DockerContainerInspect;
+  });
+}
+
+/** Read the published host port for a container port from an inspect response. */
+function readHostPort(info: DockerContainerInspect, containerPort: number): number {
+  const binding = info.NetworkSettings.Ports[`${containerPort}/tcp`]?.[0];
+  const hostPort = Number(binding?.HostPort);
+  return Number.isFinite(hostPort) ? hostPort : 0;
+}
+
+/** Build a handle from an inspect response (re-reads the host port so a
+ *  re-adopted or started container reports its current binding). */
+function handleFromInspect(
+  info: DockerContainerInspect,
+  instanceId: string,
+  containerPort: number,
+): SandboxHandle {
+  return {
+    driverKind: DOCKER_KIND,
+    instanceId,
+    handle: {
+      containerId: info.Id,
+      containerName: info.Name.startsWith("/") ? info.Name.slice(1) : info.Name,
+      hostPort: readHostPort(info, containerPort),
+      containerPort,
+    } satisfies DockerSandboxHandleState,
+  };
+}
+
+/** Verify an inspected container is one we own (carries our instance label).
+ *  Fails loud on a name collision with a foreign container lacking the label. */
+function assertOwnedContainer(
+  info: DockerContainerInspect,
+  instanceId: string,
+): Effect.Effect<void, SandboxProviderError> {
+  const label = info.Config.Labels?.["kata.sandbox.instance"];
+  if (label !== instanceId) {
+    return Effect.fail(
+      new SandboxProviderError({
+        reason: "provision-failed",
+        message: `Container name is already in use by a container not owned by this sandbox instance (label mismatch: expected ${instanceId}, found ${label ?? "absent"}).`,
       }),
+    );
+  }
+  return Effect.void;
+}
+
+export interface DockerSandboxProviderOptions {
+  /** Optional override for the loopback healthz probe (tests inject a synchronous 200). */
+  readonly healthzProbe?: (hostPort: number) => Effect.Effect<boolean, SandboxProviderError>;
+}
+
+/** Default loopback healthz probe against `http://127.0.0.1:<port>/healthz`. */
+function defaultHealthzProbe(hostPort: number): Effect.Effect<boolean, SandboxProviderError> {
+  const healthUrl = `http://127.0.0.1:${hostPort}${HEALTHZ_PATH}`;
+  return Effect.tryPromise({
+    try: () => fetch(healthUrl, { signal: AbortSignal.timeout(3000) }),
     catch: () =>
       new SandboxProviderError({ reason: "unreachable", message: "healthz fetch failed" }),
-  });
+  }).pipe(
+    Effect.matchEffect({
+      onFailure: () => Effect.succeed(false),
+      onSuccess: (res) => Effect.succeed(res.status === 200),
+    }),
+  );
+}
+
+function waitForReady(
+  hostPort: number,
+  probe: (port: number) => Effect.Effect<boolean, SandboxProviderError>,
+): Effect.Effect<void, SandboxProviderError> {
   return Effect.gen(function* () {
     // The real `katacode serve` image runs migrations + startup before
     // answering, so allow up to 60s (240 × 250ms) rather than the 15s that
     // sufficed for the lightweight node http stub.
     for (let i = 0; i < 240; i++) {
-      const ok = yield* Effect.matchEffect(probe, {
-        onFailure: () => Effect.succeed(false),
-        onSuccess: (res) => Effect.succeed(res.status === 200),
-      });
+      const ok = yield* probe(hostPort);
       if (ok) return;
       yield* Effect.sleep("250 millis");
     }
@@ -202,328 +305,511 @@ function waitForReady(hostPort: number): Effect.Effect<void, SandboxProviderErro
   });
 }
 
-export const DockerSandboxProvider: SandboxProvider = {
-  kind: DOCKER_KIND,
+export function makeDockerSandboxProvider(
+  options: DockerSandboxProviderOptions = {},
+): SandboxProvider {
+  const healthzProbe = options.healthzProbe ?? defaultHealthzProbe;
+  const waitForReadyFor = (hostPort: number) => waitForReady(hostPort, healthzProbe);
+  const provider: SandboxProvider = {
+    kind: DOCKER_KIND,
 
-  /**
-   * Phase 2 seeding capability: upload a host-built tar archive into a running
-   * container at `destPath`. The destination is created first (`mkdir -p` via
-   * exec) because `PUT /containers/{id}/archive` fails on a missing path.
-   * Implemented via the Docker Engine `PUT /containers/{id}/archive` endpoint
-   * with a binary tar body (`Content-Type: application/x-tar`).
-   */
-  copyInto: {
-    copyInto: (handle, archive, destPath) =>
+    /**
+     * Phase 2 seeding capability: upload a host-built tar archive into a running
+     * container at `destPath`. The destination is created first (`mkdir -p` via
+     * exec) because `PUT /containers/{id}/archive` fails on a missing path.
+     * Implemented via the Docker Engine `PUT /containers/{id}/archive` endpoint
+     * with a binary tar body (`Content-Type: application/x-tar`).
+     */
+    copyInto: {
+      copyInto: (handle, archive, destPath) =>
+        Effect.gen(function* () {
+          const state = handle.handle as DockerSandboxHandleState;
+          // Ensure the destination directory exists before uploading; the
+          // `archive` PUT does not create intermediate directories.
+          const mkdir = yield* provider.exec(handle, `mkdir -p ${destPath}`);
+          if (mkdir.exitCode !== 0) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: `copyInto: mkdir -p ${destPath} failed (exit ${mkdir.exitCode}): ${mkdir.stderr}`,
+            });
+          }
+          const put = yield* dockerRequest(
+            `/containers/${state.containerId}/archive?path=${encodeURIComponent(destPath)}`,
+            { method: "PUT", bodyBytes: archive, contentType: "application/x-tar" },
+          ).pipe(
+            Effect.mapError(
+              (e: DockerEngineError) =>
+                new SandboxProviderError({
+                  reason: "provision-failed",
+                  message: `copyInto: ${e.message}`,
+                }),
+            ),
+          );
+          // Docker returns 204 (No Content) on a successful archive upload.
+          if (put.status >= 300) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: `copyInto: archive upload ${put.status}: ${put.body.slice(0, 200)}`,
+            });
+          }
+          // Ensure all extracted files and intermediate directories are
+          // katacode-owned — Docker creates parent dirs as root when directory
+          // entries are absent from the tar (see ustarWriter).
+          const chown = yield* provider.exec(handle, `chown -R 100:101 '${destPath}'`, {
+            user: "root",
+          });
+          if (chown.exitCode !== 0) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: `copyInto: chown ${destPath} failed (exit ${chown.exitCode}): ${chown.stderr}`,
+            });
+          }
+        }),
+    } satisfies SandboxCopyIntoCapability,
+
+    /**
+     * Durable lifecycle capability: stop/start/status a named container without
+     * destroying it. The container filesystem persists across stop/start by
+     * Docker semantics. `stop` uses a 10s grace period; `start` re-runs the
+     * healthz wait against the published loopback port. The published host port
+     * can change only on create, not on stop/start, so the endpoint stays stable
+     * for a container's lifetime; `start` re-reads it from inspect anyway.
+     */
+    lifecycle: {
+      stop: (handle) =>
+        Effect.gen(function* () {
+          const state = handle.handle as DockerSandboxHandleState;
+          const res = yield* engine(
+            `/containers/${state.containerId}/stop?t=10`,
+            { method: "POST" },
+            "provision-failed",
+            "stop failed",
+          );
+          // 304 = already stopped; 404 = gone (treat as idempotent success per
+          // the SPI contract: stop on a gone sandbox is a no-op).
+          if (res.status >= 300 && res.status !== 304 && res.status !== 404) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: `stop failed: ${res.status} ${res.body.slice(0, 200)}`,
+            });
+          }
+        }),
+
+      start: (handle) =>
+        Effect.gen(function* () {
+          const state = handle.handle as DockerSandboxHandleState;
+          const res = yield* engine(
+            `/containers/${state.containerId}/start`,
+            { method: "POST" },
+            "provision-failed",
+            "start failed",
+          );
+          // 304 = already running (idempotent success); re-verify healthz.
+          if (res.status >= 300 && res.status !== 304) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: `start failed: ${res.status} ${res.body.slice(0, 200)}`,
+            });
+          }
+          const info = yield* inspectContainer(
+            state.containerName,
+            "provision-failed",
+            "start re-inspect",
+          );
+          if (info === null) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: "Sandbox container is gone; create a new sandbox to re-seed the workspace.",
+            });
+          }
+          const hostPort = readHostPort(info, state.containerPort);
+          if (hostPort === 0) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: "no published host port after start",
+            });
+          }
+          yield* waitForReadyFor(hostPort);
+          return handleFromInspect(info, handle.instanceId, state.containerPort);
+        }),
+
+      status: (handle): Effect.Effect<SandboxLifecycleStatus, SandboxProviderError> =>
+        Effect.gen(function* () {
+          const state = handle.handle as DockerSandboxHandleState;
+          const info = yield* inspectContainer(state.containerName, "unreachable", "status");
+          if (info === null) return "gone";
+          return info.State.Running ? "running" : "stopped";
+        }),
+
+      discover: (
+        req,
+      ): Effect.Effect<
+        { readonly handle: SandboxHandle; readonly status: SandboxLifecycleStatus } | null,
+        SandboxProviderError
+      > =>
+        Effect.gen(function* () {
+          // List containers by the instance label so both the new deterministic
+          // name and any legacy timestamped containers are discovered.
+          const filters = encodeURIComponent(
+            JSON.stringify({ label: [`kata.sandbox.instance=${req.instanceId}`] }),
+          );
+          const res = yield* dockerRequest(`/containers/json?all=true&filters=${filters}`).pipe(
+            Effect.mapError(
+              (e: DockerEngineError) =>
+                new SandboxProviderError({
+                  reason: "unreachable",
+                  message: `discover: ${e.message}`,
+                }),
+            ),
+          );
+          if (res.status >= 400) {
+            return yield* new SandboxProviderError({
+              reason: "unreachable",
+              message: `discover: list ${res.status}: ${res.body.slice(0, 200)}`,
+            });
+          }
+          const list = parseJson(res.body) as ReadonlyArray<{
+            readonly Id: string;
+            readonly Names: ReadonlyArray<string>;
+            readonly State: string;
+            readonly Created: number;
+            readonly Ports?: ReadonlyArray<{
+              readonly PrivatePort: number;
+              readonly PublicPort?: number;
+            }>;
+          }>;
+          if (list.length === 0) return null;
+          // Most recent first.
+          const found = [...list].sort((a, b) => (b.Created ?? 0) - (a.Created ?? 0))[0];
+          if (found === undefined) return null;
+          const containerName = found.Names[0]?.startsWith("/")
+            ? found.Names[0].slice(1)
+            : (found.Names[0] ?? dockerContainerName(req.instanceId));
+          // Inspect to read the authoritative state + port binding.
+          const info = yield* inspectContainer(containerName, "unreachable", "discover");
+          if (info === null) return null;
+          const resolved = resolveConfig(req.config);
+          const status: SandboxLifecycleStatus = info.State.Running ? "running" : "stopped";
+          return {
+            handle: handleFromInspect(info, req.instanceId, resolved.port),
+            status,
+          };
+        }),
+    } satisfies SandboxLifecycleCapability,
+
+    validate: (config) =>
       Effect.gen(function* () {
-        const state = handle.handle as DockerSandboxHandleState;
-        // Ensure the destination directory exists before uploading; the
-        // `archive` PUT does not create intermediate directories.
-        const mkdir = yield* DockerSandboxProvider.exec(handle, `mkdir -p ${destPath}`);
-        if (mkdir.exitCode !== 0) {
+        const resolved = resolveConfig(config);
+        // `validate` has no provisioning `req.image` to draw from; the registry
+        // guarantees `config` is already decoded, so `resolved.image` is the
+        // configured image (or the default when the envelope omits one).
+        const image = resolved.image;
+        const ping = yield* engine("/_ping", {}, "unreachable", "Docker daemon unreachable");
+        if (ping.status !== 200) {
           return yield* new SandboxProviderError({
-            reason: "provision-failed",
-            message: `copyInto: mkdir -p ${destPath} failed (exit ${mkdir.exitCode}): ${mkdir.stderr}`,
+            reason: "unreachable",
+            message: `Docker _ping returned ${ping.status}`,
           });
         }
-        const put = yield* dockerRequest(
-          `/containers/${state.containerId}/archive?path=${encodeURIComponent(destPath)}`,
-          { method: "PUT", bodyBytes: archive, contentType: "application/x-tar" },
-        ).pipe(
-          Effect.mapError(
-            (e: DockerEngineError) =>
-              new SandboxProviderError({
-                reason: "provision-failed",
-                message: `copyInto: ${e.message}`,
-              }),
-          ),
+        const img = yield* engine(
+          `/images/${encodeURIComponent(image)}/json`,
+          {},
+          "unreachable",
+          "image inspect",
         );
-        // Docker returns 204 (No Content) on a successful archive upload.
-        if (put.status >= 300) {
+        if (img.status === 404) {
+          const pull = yield* engine(
+            `/images/create?fromImage=${encodeURIComponent(image)}`,
+            { method: "POST" },
+            "unreachable",
+            "image pull",
+          );
+          if (pull.status >= 300) {
+            return yield* new SandboxProviderError({
+              reason: "unreachable",
+              message: `image pull ${pull.status}: ${pull.body.slice(0, 200)}`,
+            });
+          }
+        } else if (img.status >= 300) {
           return yield* new SandboxProviderError({
-            reason: "provision-failed",
-            message: `copyInto: archive upload ${put.status}: ${put.body.slice(0, 200)}`,
-          });
-        }
-        // Ensure all extracted files and intermediate directories are
-        // katacode-owned — Docker creates parent dirs as root when directory
-        // entries are absent from the tar (see ustarWriter).
-        const chown = yield* DockerSandboxProvider.exec(handle, `chown -R 100:101 '${destPath}'`);
-        if (chown.exitCode !== 0) {
-          return yield* new SandboxProviderError({
-            reason: "provision-failed",
-            message: `copyInto: chown ${destPath} failed (exit ${chown.exitCode}): ${chown.stderr}`,
+            reason: "unreachable",
+            message: `image inspect ${img.status}: ${img.body.slice(0, 200)}`,
           });
         }
       }),
-  } satisfies SandboxCopyIntoCapability,
 
-  validate: (config) =>
-    Effect.gen(function* () {
-      const resolved = resolveConfig(config);
-      // `validate` has no provisioning `req.image` to draw from; the registry
-      // guarantees `config` is already decoded, so `resolved.image` is the
-      // configured image (or the default when the envelope omits one).
-      const image = resolved.image;
-      const ping = yield* engine("/_ping", {}, "unreachable", "Docker daemon unreachable");
-      if (ping.status !== 200) {
-        return yield* new SandboxProviderError({
-          reason: "unreachable",
-          message: `Docker _ping returned ${ping.status}`,
+    provision: (req) =>
+      Effect.gen(function* () {
+        const resolved = resolveConfig(req.config);
+        // The service layer supplies the authoritative base image (the SPI
+        // contract for `SandboxProvisionRequest.image`); fall back to the
+        // configured/default image only when the caller omits it (e.g. the
+        // registry's own validate path does not pass one).
+        const image = req.image ?? resolved.image;
+        const containerPort = resolved.port;
+        const name = dockerContainerName(req.instanceId);
+
+        // Idempotent adopt: a container with this name may already exist from a
+        // previous provision or a server restart. Running -> reuse it; stopped ->
+        // start it; missing -> create+start below. This makes provision safe to
+        // retry and lets the session store reclaim a container after a restart.
+        const existing = yield* inspectContainer(name, "provision-failed", "provision adopt");
+        if (existing !== null) {
+          yield* assertOwnedContainer(existing, req.instanceId);
+          if (existing.State.Running) {
+            // Already running: return its current handle (re-reading the port
+            // binding in case the daemon restarted with a new mapping).
+            return handleFromInspect(existing, req.instanceId, containerPort);
+          }
+          // Stopped: start it and re-read the port binding (the published host
+          // port is stable for a container's lifetime but re-read defensively).
+          const startRes = yield* engine(
+            `/containers/${existing.Id}/start`,
+            { method: "POST" },
+            "provision-failed",
+            "start failed",
+          );
+          if (startRes.status >= 300 && startRes.status !== 304) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: `start failed: ${startRes.status}`,
+            });
+          }
+          const restarted = yield* inspectContainer(
+            name,
+            "provision-failed",
+            "provision re-inspect",
+          );
+          if (restarted === null) {
+            return yield* new SandboxProviderError({
+              reason: "provision-failed",
+              message: "container vanished after start",
+            });
+          }
+          const hostPort = readHostPort(restarted, containerPort);
+          yield* waitForReadyFor(hostPort);
+          return handleFromInspect(restarted, req.instanceId, containerPort);
+        }
+
+        // Missing: create + start a new named container.
+        const containerPortSpec = `${containerPort}/tcp`;
+        const env = buildContainerEnv(resolved, req);
+        // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - ad-hoc Docker Engine create body, not a typed codec.
+        const createBody = JSON.stringify({
+          Image: image,
+          // Override any image ENTRYPOINT so `Cmd: ["sh", "-c", command]` runs the
+          // shell command directly (the katacode image's entrypoint is
+          // `node bin.mjs`; without this, `sh -c ...` would be appended to it).
+          Entrypoint: [],
+          Cmd: ["sh", "-c", resolved.command],
+          Env: env.map((e) => `${e.name}=${e.value}`),
+          // No AutoRemove: the durable lifecycle stops the container without
+          // destroying it, so it must persist across stop/start. Dispose uses a
+          // force delete. A fast-failing command exits and is detected below.
+          HostConfig: {
+            PortBindings: { [containerPortSpec]: [{ HostPort: "0" }] },
+          },
+          ExposedPorts: { [containerPortSpec]: {} },
+          Labels: { "kata.sandbox": "true", "kata.sandbox.instance": req.instanceId },
         });
-      }
-      const img = yield* engine(
-        `/images/${encodeURIComponent(image)}/json`,
-        {},
-        "unreachable",
-        "image inspect",
-      );
-      if (img.status === 404) {
-        const pull = yield* engine(
-          `/images/create?fromImage=${encodeURIComponent(image)}`,
-          { method: "POST" },
-          "unreachable",
-          "image pull",
+        const created = yield* engine(
+          `/containers/create?name=${name}`,
+          {
+            method: "POST",
+            body: createBody,
+          },
+          "provision-failed",
+          "create failed",
         );
-        if (pull.status >= 300) {
+        if (created.status >= 300) {
           return yield* new SandboxProviderError({
-            reason: "unreachable",
-            message: `image pull ${pull.status}: ${pull.body.slice(0, 200)}`,
+            reason: "provision-failed",
+            message: `create failed: ${created.status} ${created.body.slice(0, 200)}`,
           });
         }
-      } else if (img.status >= 300) {
-        return yield* new SandboxProviderError({
-          reason: "unreachable",
-          message: `image inspect ${img.status}: ${img.body.slice(0, 200)}`,
-        });
-      }
-    }),
-
-  provision: (req) =>
-    Effect.gen(function* () {
-      const resolved = resolveConfig(req.config);
-      // The service layer supplies the authoritative base image (the SPI
-      // contract for `SandboxProvisionRequest.image`); fall back to the
-      // configured/default image only when the caller omits it (e.g. the
-      // registry's own validate path does not pass one).
-      const image = req.image ?? resolved.image;
-      const containerPort = `${resolved.port}/tcp`;
-      // @effect-diagnostics-next-line effect(globalDateInEffect):off - unique container name; no Effect Clock in the driver.
-      const name = `kata-sandbox-${req.instanceId}-${Date.now()}`;
-      const env = buildContainerEnv(resolved, req);
-      // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - ad-hoc Docker Engine create body, not a typed codec.
-      const createBody = JSON.stringify({
-        Image: image,
-        // Override any image ENTRYPOINT so `Cmd: ["sh", "-c", command]` runs the
-        // shell command directly (the katacode image's entrypoint is
-        // `node bin.mjs`; without this, `sh -c ...` would be appended to it).
-        Entrypoint: [],
-        Cmd: ["sh", "-c", resolved.command],
-        Env: env.map((e) => `${e.name}=${e.value}`),
-        HostConfig: {
-          PortBindings: { [containerPort]: [{ HostPort: "0" }] },
-          AutoRemove: true,
-        },
-        ExposedPorts: { [containerPort]: {} },
-        Labels: { "kata.sandbox": "true", "kata.sandbox.instance": req.instanceId },
-      });
-      const created = yield* engine(
-        `/containers/create?name=${name}`,
-        {
-          method: "POST",
-          body: createBody,
-        },
-        "provision-failed",
-        "create failed",
-      );
-      if (created.status >= 300) {
-        return yield* new SandboxProviderError({
-          reason: "provision-failed",
-          message: `create failed: ${created.status} ${created.body.slice(0, 200)}`,
-        });
-      }
-      const containerId = (parseJson(created.body) as { Id: string }).Id;
-      const startRes = yield* engine(
-        `/containers/${containerId}/start`,
-        { method: "POST" },
-        "provision-failed",
-        "start failed",
-      );
-      if (startRes.status >= 300) {
-        yield* bestEffortDispose(containerId);
-        return yield* new SandboxProviderError({
-          reason: "provision-failed",
-          message: `start failed: ${startRes.status}`,
-        });
-      }
-      const inspect = yield* engine(
-        `/containers/${containerId}/json`,
-        {},
-        "provision-failed",
-        "inspect",
-      );
-      if (inspect.status >= 400) {
-        yield* bestEffortDispose(containerId);
-        return yield* new SandboxProviderError({
-          reason: "provision-failed",
-          message: `container inspect ${inspect.status}: ${inspect.body.slice(0, 200)}`,
-        });
-      }
-      const info = parseJson(inspect.body) as {
-        State: {
-          Status: string;
-          ExitCode: number;
-          Error: string;
-        };
-        NetworkSettings: {
-          Ports: Record<string, ReadonlyArray<{ HostPort: string }> | undefined>;
-        };
-      };
-      // A fast-failing command (e.g. missing binary) exits before we read the
-      // port binding; surface the real exit code + logs instead of the
-      // misleading "no published host port". AutoRemove may have already reaped
-      // the container, in which case inspect returned 404 above.
-      if (info.State.Status === "exited") {
-        const logs = yield* engine(
-          `/containers/${containerId}/logs?stdout=true&stderr=true`,
+        const containerId = (parseJson(created.body) as { Id: string }).Id;
+        const startRes = yield* engine(
+          `/containers/${containerId}/start`,
+          { method: "POST" },
+          "provision-failed",
+          "start failed",
+        );
+        if (startRes.status >= 300 && startRes.status !== 304) {
+          yield* bestEffortDispose(containerId);
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `start failed: ${startRes.status}`,
+          });
+        }
+        const inspect = yield* engine(
+          `/containers/${containerId}/json`,
           {},
           "provision-failed",
-          "logs",
+          "inspect",
         );
-        yield* bestEffortDispose(containerId);
-        const tail = logs.body.slice(-512).trim();
-        return yield* new SandboxProviderError({
-          reason: "provision-failed",
-          message: `container exited (code ${info.State.ExitCode})${tail ? `: ${tail}` : ""}`,
-        });
-      }
-      const binding = info.NetworkSettings.Ports[containerPort]?.[0];
-      const hostPort = Number(binding?.HostPort);
-      if (!Number.isFinite(hostPort) || hostPort === 0) {
-        yield* bestEffortDispose(containerId);
-        return yield* new SandboxProviderError({
-          reason: "provision-failed",
-          message: "no published host port",
-        });
-      }
-      yield* waitForReady(hostPort).pipe(
-        Effect.catch((error: SandboxProviderError) =>
-          bestEffortDispose(containerId).pipe(Effect.andThen(Effect.fail(error))),
-        ),
-      );
-      const state: DockerSandboxHandleState = {
-        containerId,
-        hostPort,
-        containerPort: resolved.port,
-      };
-      return {
-        driverKind: DOCKER_KIND,
-        instanceId: req.instanceId,
-        handle: state,
-      } satisfies SandboxHandle;
-    }),
+        if (inspect.status >= 400) {
+          yield* bestEffortDispose(containerId);
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `container inspect ${inspect.status}: ${inspect.body.slice(0, 200)}`,
+          });
+        }
+        const info = parseJson(inspect.body) as DockerContainerInspect;
+        // A fast-failing command (e.g. missing binary) exits before we read the
+        // port binding; surface the real exit code + logs instead of the
+        // misleading "no published host port".
+        if (info.State.Status === "exited") {
+          const logs = yield* engine(
+            `/containers/${containerId}/logs?stdout=true&stderr=true`,
+            {},
+            "provision-failed",
+            "logs",
+          );
+          yield* bestEffortDispose(containerId);
+          const tail = logs.body.slice(-512).trim();
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: `container exited (code ${info.State.ExitCode})${tail ? `: ${tail}` : ""}`,
+          });
+        }
+        const hostPort = readHostPort(info, containerPort);
+        if (hostPort === 0) {
+          yield* bestEffortDispose(containerId);
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message: "no published host port",
+          });
+        }
+        yield* waitForReadyFor(hostPort).pipe(
+          Effect.catch((error: SandboxProviderError) =>
+            bestEffortDispose(containerId).pipe(Effect.andThen(Effect.fail(error))),
+          ),
+        );
+        const state: DockerSandboxHandleState = {
+          containerId,
+          containerName: name,
+          hostPort,
+          containerPort,
+        };
+        return {
+          driverKind: DOCKER_KIND,
+          instanceId: req.instanceId,
+          handle: state,
+        } satisfies SandboxHandle;
+      }),
 
-  exec: (handle, command, opts) =>
-    Effect.gen(function* () {
+    exec: (handle, command, opts) =>
+      Effect.gen(function* () {
+        const state = handle.handle as DockerSandboxHandleState;
+        // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - Docker Engine exec body, not a typed codec.
+        const createExec = yield* engine(
+          `/containers/${state.containerId}/exec`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              Cmd: ["sh", "-c", command],
+              // Phase 2: honor `opts.cwd` so `install` runs in `/workspace`. The
+              // spike verified the Engine API honors `WorkingDir` for exec.
+              ...(opts?.cwd !== undefined ? { WorkingDir: opts.cwd } : {}),
+              ...(opts?.user !== undefined ? { User: opts.user } : {}),
+              AttachStdout: true,
+              AttachStderr: true,
+            }),
+          },
+          "exec-failed",
+          "exec create",
+        );
+        if (createExec.status >= 300) {
+          return yield* new SandboxProviderError({
+            reason: "exec-failed",
+            message: `exec create: ${createExec.status}`,
+          });
+        }
+        const execId = (parseJson(createExec.body) as { Id: string }).Id;
+        // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - Docker Engine exec start body.
+        // Read the start response as a raw buffer so the multiplexed stream can
+        // be demultiplexed into clean stdout/stderr (Phase 2 demux fix). The
+        // previous implementation returned the raw framed bytes as `stdout` and
+        // always-empty `stderr`.
+        const startRes = yield* engineBuffer(
+          `/exec/${execId}/start`,
+          {
+            method: "POST",
+            body: JSON.stringify({ Detach: false, Tty: false }),
+            hijacked: true,
+          },
+          "exec-failed",
+          "exec start",
+        );
+        if (startRes.status >= 300) {
+          return yield* new SandboxProviderError({
+            reason: "exec-failed",
+            message: `exec start: ${startRes.status}`,
+          });
+        }
+        const { stdout, stderr } = demultiplexExecStream(startRes.body);
+        const exitRes = yield* engine(`/exec/${execId}/json`, {}, "exec-failed", "exec inspect");
+        if (exitRes.status >= 300) {
+          return yield* new SandboxProviderError({
+            reason: "exec-failed",
+            message: `exec inspect: ${exitRes.status} ${exitRes.body.slice(0, 200)}`,
+          });
+        }
+        const exitCode = Number((parseJson(exitRes.body) as { ExitCode?: number }).ExitCode ?? 0);
+        return { exitCode, stdout, stderr } satisfies SandboxExecResult;
+      }),
+
+    reachability: (handle) => {
       const state = handle.handle as DockerSandboxHandleState;
-      // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - Docker Engine exec body, not a typed codec.
-      const createExec = yield* engine(
-        `/containers/${state.containerId}/exec`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            Cmd: ["sh", "-c", command],
-            // Phase 2: honor `opts.cwd` so `install` runs in `/workspace`. The
-            // spike verified the Engine API honors `WorkingDir` for exec.
-            ...(opts?.cwd !== undefined ? { WorkingDir: opts.cwd } : {}),
-            AttachStdout: true,
-            AttachStderr: true,
-          }),
-        },
-        "exec-failed",
-        "exec create",
-      );
-      if (createExec.status >= 300) {
-        return yield* new SandboxProviderError({
-          reason: "exec-failed",
-          message: `exec create: ${createExec.status}`,
-        });
-      }
-      const execId = (parseJson(createExec.body) as { Id: string }).Id;
-      // @effect-diagnostics-next-line effect(preferSchemaOverJson):off - Docker Engine exec start body.
-      // Read the start response as a raw buffer so the multiplexed stream can
-      // be demultiplexed into clean stdout/stderr (Phase 2 demux fix). The
-      // previous implementation returned the raw framed bytes as `stdout` and
-      // always-empty `stderr`.
-      const startRes = yield* engineBuffer(
-        `/exec/${execId}/start`,
-        {
-          method: "POST",
-          body: JSON.stringify({ Detach: false, Tty: false }),
-          hijacked: true,
-        },
-        "exec-failed",
-        "exec start",
-      );
-      if (startRes.status >= 300) {
-        return yield* new SandboxProviderError({
-          reason: "exec-failed",
-          message: `exec start: ${startRes.status}`,
-        });
-      }
-      const { stdout, stderr } = demultiplexExecStream(startRes.body);
-      const exitRes = yield* engine(`/exec/${execId}/json`, {}, "exec-failed", "exec inspect");
-      if (exitRes.status >= 300) {
-        return yield* new SandboxProviderError({
-          reason: "exec-failed",
-          message: `exec inspect: ${exitRes.status} ${exitRes.body.slice(0, 200)}`,
-        });
-      }
-      const exitCode = Number((parseJson(exitRes.body) as { ExitCode?: number }).ExitCode ?? 0);
-      return { exitCode, stdout, stderr } satisfies SandboxExecResult;
-    }),
+      return Effect.succeed({
+        reachabilityKind: SandboxReachabilityKind.make("loopback"),
+        httpBaseUrl: `http://localhost:${state.hostPort}`,
+        wsBaseUrl: `ws://localhost:${state.hostPort}`,
+      } satisfies SandboxReachability);
+    },
 
-  reachability: (handle) => {
-    const state = handle.handle as DockerSandboxHandleState;
-    return Effect.succeed({
-      reachabilityKind: SandboxReachabilityKind.make("loopback"),
-      httpBaseUrl: `http://localhost:${state.hostPort}`,
-      wsBaseUrl: `ws://localhost:${state.hostPort}`,
-    } satisfies SandboxReachability);
-  },
+    dispose: (handle) =>
+      Effect.gen(function* () {
+        const state = handle.handle as DockerSandboxHandleState;
+        const res: DockerResponse | null = yield* Effect.matchEffect(
+          dockerRequest(`/containers/${state.containerId}?force=true`, { method: "DELETE" }),
+          {
+            onFailure: (cause) =>
+              // Log the daemon error so operators can see health issues; the
+              // container is most likely already gone (AutoRemove), so dispose
+              // still succeeds rather than surfacing a stale-not-found.
+              Effect.logWarning("Docker dispose daemon error; container may be orphaned", {
+                containerId: state.containerId,
+                cause,
+              }).pipe(Effect.as<DockerResponse | null>(null)),
+            onSuccess: (r) => Effect.succeed<DockerResponse | null>(r),
+          },
+        );
+        if (res === null) return;
+        if (res.status >= 400 && res.status !== 404) {
+          return yield* new SandboxProviderError({
+            reason: "dispose-failed",
+            message: `dispose ${res.status}: ${res.body.slice(0, 200)}`,
+          });
+        }
+      }),
 
-  dispose: (handle) =>
-    Effect.gen(function* () {
-      const state = handle.handle as DockerSandboxHandleState;
-      const res: DockerResponse | null = yield* Effect.matchEffect(
-        dockerRequest(`/containers/${state.containerId}?force=true`, { method: "DELETE" }),
-        {
-          onFailure: (cause) =>
-            // Log the daemon error so operators can see health issues; the
-            // container is most likely already gone (AutoRemove), so dispose
-            // still succeeds rather than surfacing a stale-not-found.
-            Effect.logWarning("Docker dispose daemon error; container may be orphaned", {
-              containerId: state.containerId,
-              cause,
-            }).pipe(Effect.as<DockerResponse | null>(null)),
-          onSuccess: (r) => Effect.succeed<DockerResponse | null>(r),
-        },
-      );
-      if (res === null) return;
-      if (res.status >= 400 && res.status !== 404) {
-        return yield* new SandboxProviderError({
-          reason: "dispose-failed",
-          message: `dispose ${res.status}: ${res.body.slice(0, 200)}`,
-        });
-      }
-    }),
+    describe: () =>
+      Effect.succeed({
+        kind: DOCKER_KIND,
+        reachabilityKind: SandboxReachabilityKind.make("loopback"),
+        supportsSnapshot: false,
+        supportsRenewTimeout: false,
+        supportsCopyInto: true,
+        supportsLifecycle: true,
+        baseImages: [DEFAULT_DOCKER_CONFIG.image],
+      } satisfies SandboxProviderDescriptor),
+  };
+  return provider;
+}
 
-  describe: () =>
-    Effect.succeed({
-      kind: DOCKER_KIND,
-      reachabilityKind: SandboxReachabilityKind.make("loopback"),
-      supportsSnapshot: false,
-      supportsRenewTimeout: false,
-      supportsCopyInto: true,
-      baseImages: [DEFAULT_DOCKER_CONFIG.image],
-    } satisfies SandboxProviderDescriptor),
-};
+/**
+ * The live Docker sandbox provider. Registered with the
+ * `SandboxProviderRegistry` by the server layer.
+ */
+export const DockerSandboxProvider: SandboxProvider = makeDockerSandboxProvider();
