@@ -32,7 +32,13 @@ export function parseSandboxPort(value: string): number | null {
   const trimmed = value.trim();
   if (!/^\d+$/u.test(trimmed)) return null;
   const parsed = Number(trimmed);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535 ? parsed : null;
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535) return parsed;
+  return null;
+}
+
+function optionalDisplayName(label: string): Pick<SandboxProviderInstanceConfig, "displayName"> {
+  const displayName = label.trim();
+  return displayName === "" ? {} : { displayName };
 }
 
 export function buildDockerSandboxProviderInstance(input: {
@@ -48,7 +54,7 @@ export function buildDockerSandboxProviderInstance(input: {
   return {
     driver: DOCKER_SANDBOX_KIND,
     enabled: true,
-    ...(input.label.trim().length > 0 ? { displayName: input.label.trim() } : {}),
+    ...optionalDisplayName(input.label),
     config: { image: input.image, command: input.command, port: portNumber },
   } satisfies SandboxProviderInstanceConfig;
 }
@@ -65,7 +71,8 @@ export function readVercelVcpus(config: unknown): number {
   if (config === null || typeof config !== "object") return DEFAULT_VERCEL_VCPUS;
   const value = (config as Record<string, unknown>).vcpus;
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_VERCEL_VCPUS;
-  return (VERCEL_VCPU_OPTIONS as readonly number[]).includes(value) ? value : DEFAULT_VERCEL_VCPUS;
+  if ((VERCEL_VCPU_OPTIONS as readonly number[]).includes(value)) return value;
+  return DEFAULT_VERCEL_VCPUS;
 }
 
 /** Label showing both vCPU and derived RAM (2 GB × vCPUs). */
@@ -81,7 +88,7 @@ export function buildVercelSandboxProviderInstance(input: {
   return {
     driver: VERCEL_SANDBOX_KIND,
     enabled: true,
-    ...(input.label.trim().length > 0 ? { displayName: input.label.trim() } : {}),
+    ...optionalDisplayName(input.label),
     config: {
       runtime: "node24",
       persistent: true,

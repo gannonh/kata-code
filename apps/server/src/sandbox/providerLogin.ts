@@ -299,7 +299,6 @@ function cleanupLogin(loginSessionId: string): void {
   if (active === undefined) return;
   active.driver
     .exec(active.handle, `pkill -f '${active.dir}' ; rm -rf ${active.dir}`)
-    .pipe(Effect.ignore)
-    .pipe(Effect.runFork);
+    .pipe(Effect.ignore, Effect.runFork);
   activeLogins.delete(loginSessionId);
 }

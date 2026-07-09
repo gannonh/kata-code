@@ -635,6 +635,8 @@ const ProductionCliToken = Schema.Struct({
 type ProductionCliToken = typeof ProductionCliToken.Type;
 
 const ProductionCliTokenJson = Schema.fromJsonString(ProductionCliToken);
+const decodeProductionCliToken = Schema.decodeUnknownEffect(ProductionCliTokenJson);
+const encodeProductionCliToken = Schema.encodeEffect(ProductionCliTokenJson);
 
 const ConnectOAuthTokenResponse = Schema.Struct({
   access_token: Schema.String,
@@ -761,7 +763,7 @@ function readProductionCliToken(): Effect.Effect<
       }
     });
     if (raw === null) return Option.none();
-    const decoded = yield* Schema.decodeUnknownEffect(ProductionCliTokenJson)(raw).pipe(
+    const decoded = yield* decodeProductionCliToken(raw).pipe(
       Effect.mapError(
         (cause) =>
           new SandboxRpcError({
@@ -783,7 +785,7 @@ function readProductionCliToken(): Effect.Effect<
           }),
       ),
     );
-    const encoded = yield* Schema.encodeEffect(ProductionCliTokenJson)(refreshed).pipe(
+    const encoded = yield* encodeProductionCliToken(refreshed).pipe(
       Effect.mapError(
         (cause) =>
           new SandboxRpcError({

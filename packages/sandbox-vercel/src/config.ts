@@ -86,6 +86,8 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
 
 export type VercelSandboxConfig = typeof VercelSandboxConfig.Type;
 
+const decodeVercelSandboxConfigSchema = Schema.decodeUnknownSync(VercelSandboxConfig);
+
 /** Recommended floor / Vercel platform default when `resources` is unspecified. */
 export const DEFAULT_VERCEL_VCPUS = 2;
 
@@ -125,9 +127,9 @@ export function decodeVercelSandboxConfig(input: unknown): VercelSandboxConfig {
         `[kata:sandbox-vercel] stripped legacy config keys ${stripped.join(", ")}; snapshot boot is no longer supported. Delete the sandbox and re-create it if you relied on snapshot boot.`,
       );
     }
-    return Schema.decodeUnknownSync(VercelSandboxConfig)(next);
+    return decodeVercelSandboxConfigSchema(next);
   }
-  return Schema.decodeUnknownSync(VercelSandboxConfig)(input);
+  return decodeVercelSandboxConfigSchema(input);
 }
 
 /**

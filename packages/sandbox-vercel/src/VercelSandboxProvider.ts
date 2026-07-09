@@ -49,12 +49,7 @@ import {
 } from "@kata-sh/code-sandbox/driver";
 import type { SandboxProviderDescriptor } from "@kata-sh/code-sandbox/descriptor";
 
-import {
-  DEFAULT_VERCEL_CONFIG,
-  VercelSandboxConfig,
-  VERCEL_AUTH_ENV_VARS,
-  decodeVercelSandboxConfig,
-} from "./config.ts";
+import { VercelSandboxConfig, VERCEL_AUTH_ENV_VARS, decodeVercelSandboxConfig } from "./config.ts";
 import type { VercelAuthParams, VercelSdk } from "./sdk.ts";
 import { isAuthError, isNotFound, liveVercelSdk } from "./sdk.ts";
 import { buildBootstrapScript, buildServeCommand, SANDBOX_HOME } from "./bootstrap.ts";
