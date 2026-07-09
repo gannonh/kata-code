@@ -205,12 +205,12 @@ Each entry should include:
 
 ### Sandbox: interactive "Sign in <provider>" affordance on the sandbox card
 
-- **Status:** deferred
+- **Status:** closed
 - **Area:** sandbox, web, auth, cloud
 - **Source:** [Phase 3a deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) — [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md) (provider-auth model), [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md) (Phase 3b provider choice)
-- **Rationale:** Phase 3a ships the local Docker copy+sanitize + env-var auth paths only. The interactive in-sandbox login flow (PTY-driven OAuth URL + code relay, the AgentBox `_claude-login-worker` pattern) that captures a credential file back to a host-side encrypted store is part of the cloud credential-seeding work in Phase 3b. Without it, a cloud sandbox user with no stored credential and no env-var API key must run the provider login manually in the terminal and complete OAuth via the provider CLI's device-code flow.
-- **Revisit trigger:** Phase 3b spec implementation (the affordance is an AC-3b.11 acceptance criterion).
-- **Notes:** Pattern reference: `apps/cli/src/commands/_claude-login-worker.ts` and `packages/sandbox-docker/src/claude-credentials.ts` in the AgentBox checkout. Phase 3a's `credentialSeed.ts` infrastructure is the local analogue and shares the same copy+sanitize pattern.
+- **Rationale:** Phase 3b implemented a bounded provider-login session with OAuth URL/code relay, credential capture in `ServerSecretStore`, cancellation, and cleanup.
+- **Revisit trigger:** None. Credentialed Vercel UAT remains a release-evidence task.
+- **Notes:** Completed 2026-07-09. `ProviderSignInDialog` starts, submits to, and cancels the instance-bound provider-login RPC; stored credentials seed future deployments.
 
 ### Sandbox: volume-retained resume for Railway Service cloud sandboxes
 
@@ -241,9 +241,9 @@ Each entry should include:
 
 ### Sandbox: durable RunningSession reclamation across server restarts
 
-- **Status:** deferred
+- **Status:** closed
 - **Area:** sandbox, lifecycle, reliability
 - **Source:** [Phase 3b plan](/specs/2026-07-04-kata-environments-deployments-phase-3b-plan.md) — Build completion report, risk #6; [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md)
-- **Rationale:** `RunningSession` in `apps/server/src/sandbox/SandboxService.ts` is an in-memory map (Phase 1 design). Phase 3b cloud sandboxes outlive a server restart and keep running (and billing) with no handle retained to dispose or resume them. A startup sweep that reclaims live Vercel sandboxes by listing the team/project's sandboxes and reattaching known instance ids is the durable-session path. Pre-existing Phase 1 limitation, now more visible.
-- **Revisit trigger:** When sandbox billing or reliability concerns make orphaned-after-restart sessions unacceptable, or alongside a broader sandbox-state persistence effort.
-- **Notes:** Vercel `Sandbox.list` recovers sandbox names/statuses; a reclaim pass would re-fetch and either resume or dispose orphans for configured instances. Requires persisting the instance→sandboxId mapping and the serve env across restarts.
+- **Rationale:** The lifecycle implementation persists non-secret session records in `SandboxSessionStore`, reconciles them on startup, and recovers configured provider sandboxes by instance id.
+- **Revisit trigger:** None.
+- **Notes:** Completed 2026-07-09. The store is bound to the resolved server state directory, reconciles through provider lifecycle status, and unlinks relay state for confirmed-gone records.

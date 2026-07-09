@@ -1,4 +1,17 @@
+---
+type: Plan
+title: Phase 3b implementation plan — Vercel Sandbox cloud driver
+description: Historical execution plan for the initial Vercel Sandbox delivery, superseded in lifecycle behavior by the durable stop/start design.
+status: Superseded
+tags: [plan, phase-3b, sandbox, vercel, lifecycle]
+timestamp: 2026-07-09T00:00:00Z
+---
+
 # Phase 3b Implementation Plan: Vercel Sandbox cloud driver
+
+## Status
+
+Superseded for lifecycle behavior by the [durable sandbox lifecycle design](/specs/2026-07-07-kata-sandbox-lifecycle-design.md). This plan remains the historical execution record for the initial Vercel driver, credential seeding, public endpoint, and provider-login delivery. Its explicit snapshot, lapse, and resume steps were replaced with persistent named sandboxes and `Create & run` / `Stop` / `Start` / `Delete sandbox` actions.
 
 ## Context
 

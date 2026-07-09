@@ -1,24 +1,34 @@
 ---
 type: Spec
 title: "Kata Environments / Deployments Phase 3b — Vercel Sandbox cloud driver"
-description: "Deep-dive for Phase 3b: the first BYOC cloud sandbox driver on Vercel Sandbox — provision an ephemeral Firecracker microVM via @vercel/sandbox, restore from a prepared image/snapshot, public wss reachability via sandbox.domain(port), credential-file seeding from a host-side encrypted store, keepalive/lapse/resume lifecycle, and Connect auto-registration."
+description: "Historical Phase 3b deep-dive for the Vercel Sandbox cloud driver; durable lifecycle behavior is defined by the later stop/start design."
 status: Implemented
 approved_at: 2026-07-05T00:00:00Z
 tags: [specs, phase-3b, environments, deployments, sandbox, vercel, cloud-driver, byoc, auth]
-timestamp: 2026-07-04T00:00:00Z
+timestamp: 2026-07-09T00:00:00Z
 ---
 
 # Kata Environments / Deployments Phase 3b — Vercel Sandbox cloud driver
 
 ## Status
 
-Implemented. Implements roadmap Phase 3b per [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md). Supersedes the Railway Service version of this spec from [ADR 0006](/adrs/0006-sandbox-provider-auth-and-railway-first-cloud-driver.md). Builds on [Phase 3a](/specs/2026-07-04-kata-environments-deployments-phase-3a-design.md) (provider-ready image, in-container terminal, host credential bind-mounts, env-var auth). Credentialed/UAT-gated ACs are maintainer-local; see the Build completion report in `docs/specs/2026-07-04-kata-environments-deployments-phase-3b-plan.md`.
+Implemented as the initial Phase 3b delivery per [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md). The current lifecycle contract is the [durable sandbox lifecycle design](/specs/2026-07-07-kata-sandbox-lifecycle-design.md): persistent named sandboxes use stop/start/delete, and explicit snapshot, lapse, and resume controls were removed. Identity recovery is defined by the [sandbox identity recovery plan](/specs/2026-07-08-sandbox-identity-recovery-plan.md). Credentialed Vercel UAT remains maintainer-local.
 
 ## Goal
 
 A user configures a Vercel Sandbox deployment target in Settings -> Environments with their Vercel token, team id, project id, runtime/image settings, and timeout. Starting a session provisions an ephemeral Vercel Sandbox microVM, seeds the repo and provider credentials, runs the resolved environment config, starts `katacode serve`, exposes the server over `sandbox.domain(port)`, and auto-registers the public endpoint with Connect so every paired client can reach it over `wss`.
 
 The driver remains a thin implementation of the frozen `SandboxProvider` SPI. Phase 3b uses Vercel's sandbox lifecycle directly: persistent filesystem snapshots by default, explicit `snapshot()` support, `extendTimeout()` keepalive, and manual resume after lapse.
+
+## Lifecycle revision
+
+The initial driver, credential seeding, public endpoint, and provider-login work from this design remain implemented. The following initial design elements are superseded by the lifecycle design:
+
+- explicit snapshot source/configuration and user-facing snapshot actions;
+- keepalive-driven `lapsed` state and Resume controls;
+- in-memory session ownership and client-side orphan deletion.
+
+The current implementation persists non-secret session state under the server state directory, namespaces Vercel names per server installation, serializes lifecycle operations per instance, and treats unavailable summary data as `unknown` rather than `gone`.
 
 ## Source of truth
 

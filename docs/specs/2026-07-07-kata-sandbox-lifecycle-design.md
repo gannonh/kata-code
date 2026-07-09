@@ -224,3 +224,16 @@ Phases 2 and 3 are parallelizable after Phase 1. Phase 4 depends on 1–3. Phase
 - **Verification:** per-phase tests as listed in acceptance criteria; full gates in Phase 7. Vercel live path is maintainer-local UAT — record evidence (screenshots/terminal capture) in the build report.
 - **Fixtures:** fake Vercel SDK in `packages/sandbox-vercel` tests; Docker integration tests require a local Docker daemon (existing pattern in `DockerSandboxProvider.test.ts`).
 - **Blocking questions:** none for Phases 1–2. Phase 3 opens with the build-blocking SDK spike (status-read mechanism for stopped sandboxes); its result gates the rest of Phase 3 and is recorded in the build report.
+
+## Post-implementation quality remediation (2026-07-09)
+
+The strict-quality review found lifecycle ownership and identity gaps in the initial implementation. The remediation is implemented:
+
+- `testConnection` uses an ephemeral probe instance id, so its required provision/dispose cycle cannot adopt or delete a real Docker sandbox.
+- The session store is configured from the resolved server state directory, so `KATACODE_HOME` and `--base-dir` select the persisted `userdata/sandbox-sessions.json` location.
+- Vercel names include a server namespace plus the instance id, avoiding collisions between Kata installations sharing a Vercel project.
+- Reconcile, start, stop, and delete serialize per instance. A busy delete fails explicitly and the UI retains the environment until disposal confirms `disposed: true`.
+- Provider-login sessions bind to the requested instance, have bounded cleanup, and expose cancellation through the RPC and dialog.
+- Summary-fetch failure maps to `unknown`, preserving saved runtime records. `gone` requires successfully loaded summaries with no matching instance or running environment id.
+
+The resulting code is split across lifecycle, connect, reconcile, finalization, and session-store modules. Focused lifecycle, provider-login, store, reconcile, web-logic, Docker, and Vercel tests passed, along with `vp check`, `vp run typecheck`, `vp run test`, and `vp run release:smoke`.

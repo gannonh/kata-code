@@ -2,17 +2,17 @@
 type: Spec
 title: Sandbox identity recovery — one key, one join, no label matching
 description: Fix the sandbox/saved-environment identity model that broke the lifecycle rollout. Join by ids everywhere, make orphan cleanup non-destructive, and restore the create→pair→connect→project flow.
-status: Approved
+status: Implemented
 ---
 
 # Sandbox identity recovery — one key, one join, no label matching
 
 ## Status
 
-Approved — supersedes the joins introduced by the
+Implemented — supersedes the joins introduced by the
 [lifecycle spec](/specs/2026-07-07-kata-sandbox-lifecycle-design.md) Phase 6
 (Available Runtimes reconciliation). The lifecycle SPI, drivers, and session
-store from that spec are sound and stay.
+store from that spec remain in place.
 
 ## The user-facing contract (what "works as intended" means)
 
@@ -177,3 +177,12 @@ Verification: reconcile unit test asserting unlink call on gone eviction.
   where "running" is true but unreachable.
 - Startup behavior is uniform (R5) — no special-cased connect gating to
   silently regress.
+
+## Implementation outcome (2026-07-09)
+
+- **R1:** saved sandbox records persist `sandbox.instanceId`; lifecycle joins use the running session environment id first and instance id second. The label-derived join and destructive orphan cleanup are removed. Unavailable summaries render the record as `unknown` and offer explicit removal.
+- **R2:** `sandbox.issuePairingToken` reissues a pairing credential for a running stored session. The card exposes Retry pairing when initial registration fails or no saved runtime exists.
+- **R3:** reconcile unlinks a relay link before evicting a confirmed-gone session and logs unlink failure without masking the lifecycle result.
+- **R4:** browser and lifecycle regression coverage exercises the id join, unknown state, pairing retry, reconcile cleanup, and durable stop/start/delete paths. The Docker `@environments-deploy` lifecycle test covers filesystem persistence. Credentialed Vercel and end-to-end paired-client validation remain maintainer-local because this branch has no Vercel credentials.
+
+Verification for the remediation pass: `vp check`, `vp run typecheck`, `vp run test`, and `vp run release:smoke` passed.
