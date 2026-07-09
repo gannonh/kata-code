@@ -693,7 +693,10 @@ describe("GeneralSettingsPanel observability", () => {
       .toBeInTheDocument();
   });
 
-  it("lists saved sandbox runtimes under Environments with management actions", async () => {
+  it("lists orphaned sandbox runtimes under Environments with delete-only cleanup", async () => {
+    // Legacy/orphan sandbox records (no matching sandboxProviderInstances entry)
+    // stay visible for explicit cleanup — Edit is hidden; Delete remains
+    // (identity recovery R3). Linked sandboxes render via DeploymentTargetCard.
     const sandboxEnvironmentId = "environment-sandbox-docker-test";
     window.desktopBridge = createDesktopBridgeStub();
     authAccessHarness.setSnapshot({
@@ -745,8 +748,9 @@ describe("GeneralSettingsPanel observability", () => {
 
       expect(environmentsSection?.textContent).toContain("docker test 01");
       expect(environmentsSection?.textContent).toContain("Sandbox (docker)");
-      expect(environmentsSection?.textContent).toContain("Edit");
+      expect(environmentsSection?.textContent).toContain("Orphaned sandbox runtime");
       expect(environmentsSection?.textContent).toContain("Delete");
+      expect(environmentsSection?.textContent).not.toContain("Edit");
       expect(availableRuntimesSection?.textContent).toContain("docker test 01");
       expect(availableRuntimesSection?.textContent).toContain("Disconnect");
       expect(availableRuntimesSection?.textContent).not.toContain("Delete");
