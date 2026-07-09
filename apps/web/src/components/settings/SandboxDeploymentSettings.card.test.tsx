@@ -48,6 +48,7 @@ function makeProps(overrides: {
     onStop: () => {},
     onDispose: () => {},
     onRenew: () => {},
+    onRetryPairing: () => {},
   };
 }
 

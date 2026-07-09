@@ -22,6 +22,7 @@ import {
   addSavedEnvironment,
   getPrimaryEnvironmentConnection,
   removeSavedEnvironment,
+  useSavedEnvironmentRegistryStore,
 } from "../../environments/runtime";
 import { cn } from "../../lib/utils";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
@@ -425,6 +426,52 @@ export function SandboxDeploymentSettings({
     [refreshList, withBusy],
   );
 
+  /** Recovery path (identity plan R2): the sandbox is running but pairing
+   *  failed or the saved environment is missing. Mint a fresh pairing token
+   *  against the live sandbox and re-run addSavedEnvironment. */
+  const handleRetryPairing = useCallback(
+    (instanceId: string) =>
+      withBusy(instanceId, "start", async () => {
+        const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
+        try {
+          const issued = await getPrimaryEnvironmentConnection().client.sandbox.issuePairingToken({
+            instanceId: instanceId as never,
+          });
+          await addSavedEnvironment({
+            label: issued.endpoint.label,
+            host: issued.endpoint.httpBaseUrl,
+            pairingCode: issued.pairingToken,
+            sandbox: {
+              providerKind: (instance?.driver as string) ?? "local",
+              instanceId,
+            },
+          });
+          setTestProgress((prev) => ({
+            ...prev,
+            [instanceId]: [...(prev[instanceId] ?? []), "connect: ok (re-paired)"],
+          }));
+          toastManager.add({
+            type: "success",
+            title: "Sandbox paired",
+            description: "Available from Add project.",
+          });
+          await refreshList();
+        } catch (error) {
+          const message = failureMessage(error);
+          setTestProgress((prev) => ({
+            ...prev,
+            [instanceId]: [...(prev[instanceId] ?? []), `connect: failed — ${message}`],
+          }));
+          toastManager.add({
+            type: "error",
+            title: "Pairing failed",
+            description: message,
+          });
+        }
+      }),
+    [instanceMap, refreshList, withBusy],
+  );
+
   const handleRemove = useCallback(
     (instanceId: string) => {
       if (activeSession[instanceId]) {
@@ -515,6 +562,7 @@ export function SandboxDeploymentSettings({
                 onStop={() => void handleStop(id)}
                 onDispose={() => void handleDispose(id)}
                 onRenew={() => void handleRenew(id)}
+                onRetryPairing={() => void handleRetryPairing(id)}
               />
             );
           })
@@ -549,6 +597,7 @@ interface DeploymentTargetCardProps {
   readonly onStop: () => void;
   readonly onDispose: () => void;
   readonly onRenew: () => void;
+  readonly onRetryPairing: () => void;
 }
 
 /**
@@ -581,6 +630,7 @@ export function DeploymentTargetCard({
   onStop,
   onDispose,
   onRenew,
+  onRetryPairing,
 }: DeploymentTargetCardProps) {
   const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
   const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
@@ -590,6 +640,13 @@ export function DeploymentTargetCard({
   const deadlineEpochMs = runningSession?.deadlineEpochMs;
   const statusDetail = runningSession?.statusDetail;
   const [signInFor, setSignInFor] = useState<string | null>(null);
+  // Recovery R2: a running sandbox whose environment id has no saved record
+  // is unreachable from Add Project — offer Retry pairing instead of a dead end.
+  const hasSavedRecordForSession = useSavedEnvironmentRegistryStore((state) =>
+    runningSession !== undefined && sessionStatus === "running"
+      ? state.byId[runningSession.environmentId as never] !== undefined
+      : true,
+  );
   const updateDisplayName = (value: string) => {
     const trimmed = value.trim();
     const { displayName: _omit, ...rest } = instance;
@@ -807,6 +864,15 @@ export function DeploymentTargetCard({
                   >
                     Sign in to Claude
                   </Button>
+                  {!hasSavedRecordForSession ? (
+                    <Button
+                      size="sm"
+                      disabled={instanceBusy !== undefined}
+                      onClick={onRetryPairing}
+                    >
+                      {instanceBusy === "start" ? "Pairing…" : "Retry pairing"}
+                    </Button>
+                  ) : null}
                 </div>
               ) : null}
               <div className="flex flex-wrap items-center gap-2">

@@ -213,6 +213,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.sandboxDisposeSession, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxRenewSession, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxStopSession, AuthOrchestrationOperateScope],
+  [WS_METHODS.sandboxIssuePairingToken, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxProviderLoginStart, AuthOrchestrationOperateScope],
   [WS_METHODS.sandboxProviderLoginSubmitCode, AuthOrchestrationOperateScope],
 ]);
@@ -1132,6 +1133,12 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(
             WS_METHODS.sandboxStopSession,
             SandboxServiceLive.stopSession(instanceId).pipe(Effect.map((result) => result)),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxIssuePairingToken]: ({ instanceId }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxIssuePairingToken,
+            SandboxServiceLive.issuePairingToken(instanceId).pipe(Effect.map((result) => result)),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.sandboxProviderLoginStart]: ({ instanceId, providerId }) =>

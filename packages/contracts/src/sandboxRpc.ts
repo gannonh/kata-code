@@ -156,6 +156,24 @@ export const SandboxStopSessionResult = Schema.Struct({
 });
 export type SandboxStopSessionResult = typeof SandboxStopSessionResult.Type;
 
+/** Re-issue a pairing token for a running sandbox (identity recovery R2).
+ *  Recovery path when the client-side pairing (`addSavedEnvironment`) failed
+ *  after a successful start — the sandbox runs but no saved environment
+ *  exists. Mints a fresh admin + pairing token chain against the live
+ *  container without restarting anything. */
+export const SandboxIssuePairingTokenInput = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+});
+export type SandboxIssuePairingTokenInput = typeof SandboxIssuePairingTokenInput.Type;
+export const SandboxIssuePairingTokenResult = Schema.Struct({
+  instanceId: SandboxProviderInstanceId,
+  /** The in-sandbox Kata server's environment id. */
+  environmentId: TrimmedNonEmptyString,
+  pairingToken: TrimmedNonEmptyString,
+  endpoint: AdvertisedEndpoint,
+});
+export type SandboxIssuePairingTokenResult = typeof SandboxIssuePairingTokenResult.Type;
+
 /** Start an interactive provider sign-in flow inside a sandbox (Phase 3b). Streaming. */
 export const SandboxProviderLoginStartInput = Schema.Struct({
   instanceId: SandboxProviderInstanceId,

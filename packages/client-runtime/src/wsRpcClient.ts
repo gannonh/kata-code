@@ -191,6 +191,7 @@ export interface WsRpcClient {
     readonly disposeSession: RpcUnaryMethod<typeof WS_METHODS.sandboxDisposeSession>;
     readonly renewSession: RpcUnaryMethod<typeof WS_METHODS.sandboxRenewSession>;
     readonly stopSession: RpcUnaryMethod<typeof WS_METHODS.sandboxStopSession>;
+    readonly issuePairingToken: RpcUnaryMethod<typeof WS_METHODS.sandboxIssuePairingToken>;
     readonly providerLoginStart: (
       input: RpcInput<typeof WS_METHODS.sandboxProviderLoginStart>,
       onEvent: (event: SandboxProviderLoginEvent) => void,
@@ -449,6 +450,8 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.sandboxRenewSession](input)),
       stopSession: (input) =>
         transport.request((client) => client[WS_METHODS.sandboxStopSession](input)),
+      issuePairingToken: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxIssuePairingToken](input)),
       providerLoginStart: async (input, onEvent) => {
         await transport.requestStream(
           (client) => client[WS_METHODS.sandboxProviderLoginStart](input),

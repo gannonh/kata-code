@@ -952,6 +952,10 @@ export interface LiveSession {
   readonly driver: SandboxProvider;
   readonly instanceConfig: SandboxProviderInstanceConfig;
   environmentId: string;
+  /** Admin access token minted at start (in-memory only, never persisted).
+   *  Enables pairing-token re-issue for a running sandbox (recovery R2).
+   *  Absent after a server restart — stop/start re-mints it. */
+  adminAccessToken?: string;
 }
 
 /** Resolve the configured timeout window (ms) from a decoded driver config. */
@@ -1556,6 +1560,7 @@ export const SandboxServiceLive = {
             driver: inst.driver,
             instanceConfig: resolvedConfig,
             environmentId: finalized.environmentId,
+            adminAccessToken: finalized.adminAccessToken,
           });
           return {
             instanceId,
@@ -1684,6 +1689,7 @@ export const SandboxServiceLive = {
           driver: inst.driver,
           instanceConfig: resolvedConfig,
           environmentId: finalized.environmentId,
+          adminAccessToken: finalized.adminAccessToken,
         });
 
         return {
@@ -1862,6 +1868,43 @@ export const SandboxServiceLive = {
         ),
       );
       return { instanceId, deadlineEpochMs: deadline };
+    }),
+
+  /** Re-issue a pairing token for a running sandbox (identity recovery R2).
+   *  Used when client-side pairing failed after a successful start. Requires
+   *  the in-memory admin token from this server's start of the sandbox; after
+   *  a server restart the token is gone — fail loud with the Stop/Start
+   *  recovery path (which re-mints everything). */
+  issuePairingToken: (instanceId: SandboxProviderInstanceId) =>
+    Effect.gen(function* () {
+      const sessionKey = instanceId as string;
+      const record = sessionStore.records.find((r) => r.instanceId === sessionKey);
+      if (record === undefined || record.status !== "running") {
+        return yield* new SandboxRpcError({
+          reason: "not-running",
+          message: "No running sandbox session to pair with.",
+        });
+      }
+      const live = liveSessions.get(sessionKey);
+      if (live === undefined || live.adminAccessToken === undefined) {
+        return yield* new SandboxRpcError({
+          reason: "not-running",
+          message:
+            "Pairing requires a fresh admin credential, which this server no longer holds (it restarts on Stop/Start). Stop and start the sandbox to re-pair.",
+        });
+      }
+      const endpoint = record.endpoint as AdvertisedEndpoint;
+      const connectBaseUrl = endpoint.httpBaseUrl.replace("localhost", "127.0.0.1");
+      const pairingToken = yield* issueSandboxPairingCredential({
+        httpBaseUrl: connectBaseUrl,
+        adminAccessToken: live.adminAccessToken,
+      });
+      return {
+        instanceId,
+        environmentId: record.sandboxEnvironmentId,
+        pairingToken,
+        endpoint,
+      };
     }),
 
   providerLoginStart: (input: {

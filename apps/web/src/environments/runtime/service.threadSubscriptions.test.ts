@@ -92,6 +92,7 @@ vi.mock("@kata-sh/code-client-runtime", async (importOriginal) => {
       disposeSession: vi.fn(),
       renewSession: vi.fn(),
       stopSession: vi.fn(),
+      issuePairingToken: vi.fn(),
       providerLoginStart: vi.fn(),
       providerLoginSubmitCode: vi.fn(),
     },
