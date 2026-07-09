@@ -12,6 +12,9 @@ import {
   createStagePnpmWorkspaceDocument,
   DESKTOP_NATIVE_ASAR_UNPACK,
   DESKTOP_STAGE_INSTALL_ARGS,
+  electronReleasePlatformName,
+  electronReleaseZipName,
+  electronReleaseZipUrl,
   resolveDesktopRuntimeDependencies,
   resolveDesktopStageNativeDependencies,
   resolveDesktopStageSupplementalDependencies,
@@ -27,6 +30,20 @@ import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it("maps desktop platforms to Electron release zip names and URLs", () => {
+    assert.equal(electronReleasePlatformName("mac"), "darwin");
+    assert.equal(electronReleasePlatformName("win"), "win32");
+    assert.equal(electronReleasePlatformName("linux"), "linux");
+    assert.equal(
+      electronReleaseZipName({ version: "41.5.0", platform: "mac", arch: "arm64" }),
+      "electron-v41.5.0-darwin-arm64.zip",
+    );
+    assert.equal(
+      electronReleaseZipUrl({ version: "41.5.0", platform: "win", arch: "x64" }),
+      "https://github.com/electron/electron/releases/download/v41.5.0/electron-v41.5.0-win32-x64.zip",
+    );
+  });
+
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");

@@ -902,6 +902,111 @@ export function resolveDesktopProductName(version: string): string {
     : (desktopPackageJson.productName ?? APP_BASE_NAME);
 }
 
+/** Map Kata desktop build platform to Electron's GitHub release platform slug. */
+export function electronReleasePlatformName(
+  platform: typeof BuildPlatform.Type,
+): "darwin" | "linux" | "win32" {
+  if (platform === "mac") return "darwin";
+  if (platform === "win") return "win32";
+  return "linux";
+}
+
+/** Filename electron-builder expects for a given Electron release zip. */
+export function electronReleaseZipName(input: {
+  readonly version: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+}): string {
+  return `electron-v${input.version}-${electronReleasePlatformName(input.platform)}-${input.arch}.zip`;
+}
+
+export function electronReleaseZipUrl(input: {
+  readonly version: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+}): string {
+  return `https://github.com/electron/electron/releases/download/v${input.version}/${electronReleaseZipName(input)}`;
+}
+
+/**
+ * Prefetch the Electron distribution zip with curl retries so electron-builder
+ * can unpack from a local path. Avoids mid-build GitHub CDN 504 failures.
+ *
+ * Prefer an existing zip from `KATACODE_ELECTRON_CACHE_DIR` (release workflow
+ * Actions cache) before downloading into the stage cache dir.
+ */
+const prefetchElectronReleaseZip = Effect.fn("prefetchElectronReleaseZip")(function* (input: {
+  readonly version: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly cacheDir: string;
+  readonly verbose: boolean;
+}) {
+  if (input.arch === "universal") {
+    return yield* new BuildScriptError({
+      message:
+        "Prefetching Electron zip for universal arch is unsupported; build arm64/x64 separately.",
+    });
+  }
+
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const zipName = electronReleaseZipName({
+    version: input.version,
+    platform: input.platform,
+    arch: input.arch,
+  });
+
+  const sharedCacheDir = process.env.KATACODE_ELECTRON_CACHE_DIR?.trim();
+  if (sharedCacheDir && sharedCacheDir.length > 0) {
+    const sharedZipPath = path.join(sharedCacheDir, zipName);
+    if (yield* fs.exists(sharedZipPath)) {
+      yield* Effect.log(
+        `[desktop-artifact] Reusing workflow-cached Electron zip at ${sharedZipPath}`,
+      );
+      return sharedZipPath;
+    }
+  }
+
+  yield* fs.makeDirectory(input.cacheDir, { recursive: true });
+  const zipPath = path.join(input.cacheDir, zipName);
+  if (yield* fs.exists(zipPath)) {
+    yield* Effect.log(`[desktop-artifact] Reusing cached Electron zip at ${zipPath}`);
+    return zipPath;
+  }
+
+  const url = electronReleaseZipUrl({
+    version: input.version,
+    platform: input.platform,
+    arch: input.arch,
+  });
+  yield* Effect.log(`[desktop-artifact] Prefetching Electron zip from ${url}`);
+  yield* runCommand(
+    ChildProcess.make(
+      "curl",
+      [
+        "-fsSL",
+        "--retry",
+        "8",
+        "--retry-all-errors",
+        "--retry-delay",
+        "2",
+        "--connect-timeout",
+        "30",
+        "-o",
+        zipPath,
+        url,
+      ],
+      {},
+    ),
+    {
+      label: `curl Electron ${zipName}`,
+      verbose: input.verbose,
+    },
+  );
+  return zipPath;
+});
+
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,
   target: string,
@@ -909,6 +1014,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   signed: boolean,
   mockUpdates: boolean,
   mockUpdateServerPort: number | undefined,
+  electronDistZipPath: string | undefined,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: "com.katacode.app",
@@ -920,6 +1026,11 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       buildResources: "apps/desktop/resources",
     },
   };
+  if (electronDistZipPath) {
+    // Point electron-builder at a prefetched zip so unpack-electron does not
+    // hit GitHub mid-build (transient 504s fail the release otherwise).
+    buildConfig.electronDist = electronDistZipPath;
+  }
   const updateChannel = resolveDesktopUpdateChannel(version);
   const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
   if (publishConfig) {
@@ -1136,6 +1247,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     ...resolveDesktopStageSupplementalDependencies(workspaceCatalog),
     ...resolveDesktopStageNativeDependencies(options.platform, options.arch, fffBinVersion),
   };
+  const electronDistZipPath =
+    options.arch === "universal"
+      ? undefined
+      : yield* prefetchElectronReleaseZip({
+          version: electronVersion,
+          platform: options.platform,
+          arch: options.arch,
+          cacheDir: path.join(stageRoot, "electron-cache"),
+          verbose: options.verbose,
+        });
   const stagePackageJson: StagePackageJson = {
     name: "kata-code",
     version: appVersion,
@@ -1153,6 +1274,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.signed,
       options.mockUpdates,
       options.mockUpdateServerPort,
+      electronDistZipPath,
     ),
     dependencies: stageDependencies,
     devDependencies: {
