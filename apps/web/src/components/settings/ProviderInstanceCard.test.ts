@@ -18,23 +18,32 @@ describe("buildEnvironmentDraftRows", () => {
       "VERCEL_TEAM_ID",
       "VERCEL_PROJECT_ID",
     ]);
-    // Existing value is preserved; prefilled rows are blank.
+    // Existing value is preserved; prefilled rows are blank placeholders.
     expect(rows[0]?.value).toBe("tok");
     expect(rows[1]?.value).toBe("");
+    expect(rows[1]?.prefill).toBe(true);
     expect(rows[2]?.sensitive).toBe(true);
   });
 });
 
 describe("publishEnvironmentDraftRows", () => {
-  it("drops blank prefilled placeholder rows but keeps filled and redacted rows", () => {
+  it("drops blank prefilled placeholders but keeps user-added empty rows and redacted rows", () => {
     const published = publishEnvironmentDraftRows([
       { id: "0", name: "VERCEL_TOKEN", value: "tok", sensitive: true },
-      { id: "prefill:VERCEL_TEAM_ID", name: "VERCEL_TEAM_ID", value: "", sensitive: true },
-      { id: "2", name: "VERCEL_PROJECT_ID", value: "", sensitive: true, valueRedacted: true },
+      {
+        id: "prefill:VERCEL_TEAM_ID",
+        name: "VERCEL_TEAM_ID",
+        value: "",
+        sensitive: true,
+        prefill: true,
+      },
+      { id: "2", name: "MY_API_KEY", value: "", sensitive: true },
+      { id: "3", name: "STORED", value: "", sensitive: true, valueRedacted: true },
     ]);
     expect(published).toEqual([
       { name: "VERCEL_TOKEN", value: "tok", sensitive: true },
-      { name: "VERCEL_PROJECT_ID", value: "", sensitive: true, valueRedacted: true },
+      { name: "MY_API_KEY", value: "", sensitive: true },
+      { name: "STORED", value: "", sensitive: true, valueRedacted: true },
     ]);
   });
 });

@@ -62,12 +62,15 @@ export type EnvironmentDraftRow = {
   readonly value: string;
   readonly sensitive: boolean;
   readonly valueRedacted?: boolean;
+  /** Seeded by `prefillNames` with no value; not persisted until filled. */
+  readonly prefill?: boolean;
 };
 
 /**
  * Convert draft rows into publishable environment variables. Drops rows with
- * invalid names and empty non-redacted values so prefilled placeholder names
- * are not persisted until the user supplies a value.
+ * invalid names and empty prefilled placeholder rows. User-added rows are
+ * always published, even with no value, so an entered name survives blur and
+ * navigation.
  */
 export function publishEnvironmentDraftRows(
   rows: ReadonlyArray<EnvironmentDraftRow>,
@@ -76,8 +79,8 @@ export function publishEnvironmentDraftRows(
   for (const row of rows) {
     const name = row.name.trim();
     if (!ENVIRONMENT_VARIABLE_NAME_PATTERN.test(name)) continue;
-    if (row.value.trim().length === 0 && row.valueRedacted !== true) continue;
-    const { id: _id, ...rest } = row;
+    if (row.prefill && row.value.trim().length === 0 && row.valueRedacted !== true) continue;
+    const { id: _id, prefill: _prefill, ...rest } = row;
     published.push({ ...rest, name });
   }
   return published;
@@ -111,7 +114,7 @@ export function buildEnvironmentDraftRows(
   for (const name of prefillNames) {
     if (presentNames.has(name)) continue;
     presentNames.add(name);
-    rows.push({ id: `prefill:${name}`, name, value: "", sensitive: true });
+    rows.push({ id: `prefill:${name}`, name, value: "", sensitive: true, prefill: true });
   }
   return rows;
 }
@@ -240,7 +243,7 @@ export function ProviderEnvironmentSection(props: {
         ? {
             ...row,
             ...patch,
-            ...(patch.value !== undefined ? { valueRedacted: false } : {}),
+            ...(patch.value !== undefined ? { valueRedacted: false, prefill: false } : {}),
           }
         : row,
     );
