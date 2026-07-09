@@ -91,22 +91,33 @@ describe("sandbox deployment settings logic", () => {
   });
 });
 
-describe("resolveSandboxLifecycleState (AC-L13)", () => {
+describe("resolveSandboxLifecycleState (identity recovery R1: id-based join)", () => {
   /** A minimal saved-record shape with the `sandbox` marker. */
-  function savedSandbox(providerKind: string, label: string) {
+  function savedSandbox(input: {
+    environmentId?: string;
+    label?: string;
+    providerKind?: string;
+    instanceId?: string;
+  }) {
     return {
-      environmentId: "env_1",
-      label,
+      environmentId: input.environmentId ?? "env_1",
+      label: input.label ?? "My Container",
       wsBaseUrl: "ws://localhost:1",
       httpBaseUrl: "http://localhost:1",
       createdAt: "",
       lastConnectedAt: null,
-      sandbox: { providerKind },
+      sandbox: {
+        providerKind: input.providerKind ?? "docker",
+        ...(input.instanceId !== undefined ? { instanceId: input.instanceId } : {}),
+      },
     } as never;
   }
 
   /** A minimal available summary shape. */
-  function summary(instanceId: string, status: "running" | "stopped") {
+  function summary(
+    instanceId: string,
+    session?: { environmentId: string; status: "running" | "stopped" },
+  ) {
     return {
       kind: "available",
       instanceId,
@@ -115,73 +126,54 @@ describe("resolveSandboxLifecycleState (AC-L13)", () => {
       supportsSnapshot: false,
       supportsRenewTimeout: false,
       supportsLifecycle: true,
-      runningSession: {
-        environmentId: "env_1",
-        endpoint: { id: "e", label: "L", httpBaseUrl: "http://localhost:1" },
-        status,
-      },
+      ...(session !== undefined
+        ? {
+            runningSession: {
+              environmentId: session.environmentId,
+              endpoint: { id: "e", label: "L", httpBaseUrl: "http://localhost:1" },
+              status: session.status,
+            },
+          }
+        : {}),
     } as never;
   }
 
   it("returns undefined for a non-sandbox saved record", () => {
-    const record = { label: "My Remote", sandbox: undefined } as never;
+    const record = { environmentId: "env_1", label: "My Remote", sandbox: undefined } as never;
     expect(resolveSandboxLifecycleState(record, [])).toBeUndefined();
   });
 
-  it("returns 'running' when the matching summary has runningSession.status running", () => {
-    const record = savedSandbox("docker", "My Container");
-    const summaries = [summary("docker_my_container", "running")];
+  it("joins by environment id regardless of label (rename survival)", () => {
+    const record = savedSandbox({ environmentId: "env_1", label: "totally renamed" });
+    const summaries = [summary("docker_whatever", { environmentId: "env_1", status: "running" })];
     expect(resolveSandboxLifecycleState(record, summaries)).toBe("running");
   });
 
-  it("returns 'stopped' when the matching summary has runningSession.status stopped", () => {
-    const record = savedSandbox("docker", "My Container");
-    const summaries = [summary("docker_my_container", "stopped")];
+  it("returns 'stopped' via the environment-id join", () => {
+    const record = savedSandbox({ environmentId: "env_1" });
+    const summaries = [summary("docker_x", { environmentId: "env_1", status: "stopped" })];
     expect(resolveSandboxLifecycleState(record, summaries)).toBe("stopped");
   });
 
-  it("returns 'gone' when no matching summary exists (sandbox deleted)", () => {
-    const record = savedSandbox("vercel", "Cloud Test");
-    expect(resolveSandboxLifecycleState(record, [])).toBe("gone");
-  });
-
-  it("returns 'gone' when the matching instance is unavailable", () => {
-    const record = savedSandbox("docker", "My Container");
-    const summaries = [
-      {
-        kind: "unavailable",
-        instanceId: "docker_my_container",
-        reason: "invalid-config",
-        message: "bad",
-      } as never,
-    ];
-    expect(resolveSandboxLifecycleState(record, summaries)).toBe("gone");
-  });
-
-  it("maps 'local' providerKind to the docker driver (legacy records)", () => {
-    const record = savedSandbox("local", "My Container");
-    const summaries = [summary("docker_my_container", "running")];
+  it("falls back to the persisted instance id when no session matches", () => {
+    const record = savedSandbox({ environmentId: "env_other", instanceId: "docker_x" });
+    const summaries = [summary("docker_x", { environmentId: "env_new", status: "running" })];
     expect(resolveSandboxLifecycleState(record, summaries)).toBe("running");
   });
 
-  it("maps 'vercel' providerKind to the vercel driver", () => {
-    const record = savedSandbox("vercel", "Cloud Test");
-    const summaries = [
-      {
-        kind: "available",
-        instanceId: "vercel_cloud_test",
-        driver: "vercel",
-        reachabilityKind: "public",
-        supportsSnapshot: false,
-        supportsRenewTimeout: false,
-        supportsLifecycle: true,
-        runningSession: {
-          environmentId: "env_1",
-          endpoint: { id: "e", label: "L", httpBaseUrl: "http://localhost:1" },
-          status: "running",
-        },
-      } as never,
-    ];
-    expect(resolveSandboxLifecycleState(record, summaries)).toBe("running");
+  it("returns 'gone' when the persisted instance id is absent from summaries", () => {
+    const record = savedSandbox({ instanceId: "docker_deleted" });
+    expect(resolveSandboxLifecycleState(record, [summary("docker_other")])).toBe("gone");
+  });
+
+  it("returns 'gone' when the persisted instance id matches an instance with no session", () => {
+    const record = savedSandbox({ environmentId: "env_dead", instanceId: "docker_x" });
+    expect(resolveSandboxLifecycleState(record, [summary("docker_x")])).toBe("gone");
+  });
+
+  it("returns 'unknown' (never 'gone') for legacy records without an instance id", () => {
+    const record = savedSandbox({ environmentId: "env_legacy" });
+    expect(resolveSandboxLifecycleState(record, [summary("docker_x")])).toBe("unknown");
+    expect(resolveSandboxLifecycleState(record, [])).toBe("unknown");
   });
 });

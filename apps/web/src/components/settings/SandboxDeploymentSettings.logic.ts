@@ -85,41 +85,67 @@ export function makeSandboxProviderInstanceId(input: {
 }
 
 /** The lifecycle state of a saved sandbox runtime record, joined to its
- *  instance's `SandboxInstanceSummary` from `sandbox.listInstances`. */
-export type SandboxLifecycleState = "running" | "stopped" | "gone";
+ *  instance's `SandboxInstanceSummary` from `sandbox.listInstances`.
+ *  `unknown` = the record could not be joined by id (legacy record without
+ *  `sandbox.instanceId` and no session claims its environment id); the row
+ *  renders as a plain Connect row and is never auto-deleted. */
+export type SandboxLifecycleState = "running" | "stopped" | "gone" | "unknown";
 
-/** Map a saved record's `sandbox.providerKind` to the driver kind used in
- *  `sandboxInstanceIdForLabel`. Legacy Docker records use "local"; current
- *  records use the driver kind string ("docker" / "vercel"). */
-function providerKindToDriver(providerKind: string): string {
-  if (providerKind === "local") return DOCKER_SANDBOX_KIND as string;
-  return providerKind;
+function sessionStatusToLifecycleState(
+  status: "running" | "stopped" | undefined,
+): SandboxLifecycleState {
+  return status === "stopped" ? "stopped" : "running";
 }
 
 /** Resolve the lifecycle state of a saved sandbox runtime record by joining it
- *  to the matching `SandboxInstanceSummary` from `listInstances`. Returns
- *  `undefined` when the record is not a sandbox record (no `sandbox` marker).
- *  Returns `"gone"` when no matching summary exists or the instance is
- *  unavailable (the sandbox was deleted or its config is invalid). */
+ *  to `sandbox.listInstances` summaries **by id only** (identity recovery plan
+ *  R1; labels are never join keys).
+ *
+ *  Join order:
+ *  1. `runningSession.environmentId === record.environmentId` — the in-sandbox
+ *     server's environment id, stable across renames.
+ *  2. `record.sandbox.instanceId === summary.instanceId` — the configured
+ *     instance id persisted on the record at pairing time.
+ *
+ *  Returns `undefined` when the record is not a sandbox record. Returns
+ *  `"gone"` only when the record's `instanceId` is known and absent from the
+ *  summaries (the instance was deleted). Legacy records without an
+ *  `instanceId` that match nothing resolve to `"unknown"` — never `"gone"` —
+ *  so a failed join can not trigger destructive cleanup. */
 export function resolveSandboxLifecycleState(
   record: {
+    readonly environmentId: string;
     readonly label: string;
-    readonly sandbox?: { readonly providerKind: string } | undefined;
+    readonly sandbox?:
+      | { readonly providerKind: string; readonly instanceId?: string | undefined }
+      | undefined;
   },
   summaries: ReadonlyArray<SandboxInstanceSummary>,
 ): SandboxLifecycleState | undefined {
   if (record.sandbox === undefined) return undefined;
-  const driver = providerKindToDriver(record.sandbox.providerKind);
-  const instanceId = sandboxInstanceIdForLabel({
-    driver: driver as typeof DOCKER_SANDBOX_KIND | typeof VERCEL_SANDBOX_KIND,
-    label: record.label,
-  });
-  const match = summaries.find((s) => (s.instanceId as string) === instanceId);
-  if (match === undefined || match.kind !== "available") return "gone";
-  const status = match.runningSession?.status;
-  if (status === "running") return "running";
-  if (status === "stopped") return "stopped";
-  // A sandbox instance exists with no running session (not yet provisioned).
-  // Treat as gone from the runtime perspective — there's no sandbox to connect to.
-  return "gone";
+
+  // Join 1: by the in-sandbox environment id.
+  for (const summary of summaries) {
+    if (summary.kind !== "available") continue;
+    const session = summary.runningSession;
+    if (session !== undefined && (session.environmentId as string) === record.environmentId) {
+      return sessionStatusToLifecycleState(session.status);
+    }
+  }
+
+  // Join 2: by the persisted instance id.
+  const instanceId = record.sandbox.instanceId;
+  if (instanceId !== undefined) {
+    const match = summaries.find((s) => (s.instanceId as string) === instanceId);
+    if (match === undefined || match.kind !== "available") return "gone";
+    if (match.runningSession === undefined) {
+      // Instance exists but has no session — the sandbox was deleted while the
+      // configured target remains. The record points at nothing.
+      return "gone";
+    }
+    return sessionStatusToLifecycleState(match.runningSession.status);
+  }
+
+  // Legacy record without an instance id and no session match: unknown.
+  return "unknown";
 }

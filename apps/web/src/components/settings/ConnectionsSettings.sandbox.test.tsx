@@ -34,7 +34,7 @@ vi.mock("../ui/tooltip", () => ({
 
 const { SavedBackendListRow } = await import("./ConnectionsSettings");
 
-function renderRow(lifecycleState: "running" | "stopped" | "gone" | undefined) {
+function renderRow(lifecycleState: "running" | "stopped" | "gone" | "unknown" | undefined) {
   return renderToStaticMarkup(
     <SavedBackendListRow
       environmentId={ENV_ID}
@@ -43,6 +43,7 @@ function renderRow(lifecycleState: "running" | "stopped" | "gone" | undefined) {
       sandboxLifecycleState={lifecycleState}
       onConnect={() => {}}
       onDisconnect={() => {}}
+      onRemove={() => {}}
     />,
   );
 }
@@ -65,5 +66,18 @@ describe("SavedBackendListRow sandbox lifecycle rendering (AC-L13)", () => {
     const html = renderRow(undefined);
     expect(html).toContain(">Connect<");
     expect(html).not.toContain("Sandbox is stopped");
+  });
+
+  it("gone: shows an explicit Remove action instead of Connect", () => {
+    const html = renderRow("gone");
+    expect(html).toContain("Sandbox no longer exists");
+    expect(html).toContain(">Remove<");
+    expect(html).not.toContain(">Connect<");
+  });
+
+  it("unknown (legacy record): shows Connect and is never auto-removed", () => {
+    const html = renderRow("unknown");
+    expect(html).toContain(">Connect<");
+    expect(html).not.toContain(">Remove<");
   });
 });

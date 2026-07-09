@@ -1874,8 +1874,10 @@ export async function addSavedEnvironment(input: {
   readonly host?: string;
   readonly pairingCode?: string;
   readonly desktopSsh?: DesktopSshEnvironmentTarget;
-  /** Optional sandbox marker (local Docker or cloud provider). */
-  readonly sandbox?: { readonly providerKind: string };
+  /** Optional sandbox marker (local Docker or cloud provider). `instanceId`
+   *  is the configured sandbox instance id — the id-based join key for
+   *  Available Runtimes lifecycle state (identity recovery plan R1). */
+  readonly sandbox?: { readonly providerKind: string; readonly instanceId?: string };
 }): Promise<SavedEnvironmentRecord> {
   const resolvedTarget = resolveRemotePairingTarget({
     ...(input.pairingUrl !== undefined ? { pairingUrl: input.pairingUrl } : {}),

@@ -277,7 +277,10 @@ export function SandboxDeploymentSettings({
               label: result.endpoint.label,
               host: result.endpoint.httpBaseUrl,
               pairingCode: result.pairingToken,
-              sandbox: { providerKind: (instance?.driver as string) ?? "local" },
+              sandbox: {
+                providerKind: (instance?.driver as string) ?? "local",
+                instanceId,
+              },
             });
             savedForProjectPicker = true;
             setTestProgress((prev) => ({

@@ -1510,9 +1510,11 @@ type SavedBackendListRowProps = {
   reconnectingEnvironmentId: EnvironmentId | null;
   disconnectingEnvironmentId: EnvironmentId | null;
   /** Sandbox lifecycle state from `listInstances` join (undefined = not a sandbox). */
-  sandboxLifecycleState: "running" | "stopped" | "gone" | undefined;
+  sandboxLifecycleState: "running" | "stopped" | "gone" | "unknown" | undefined;
   onConnect: (environmentId: EnvironmentId) => void;
   onDisconnect: (environmentId: EnvironmentId) => void;
+  /** Explicit removal of an orphaned sandbox record (lifecycle state "gone"). */
+  onRemove: (environmentId: EnvironmentId) => void;
 };
 
 export function SavedBackendListRow({
@@ -1522,6 +1524,7 @@ export function SavedBackendListRow({
   sandboxLifecycleState,
   onConnect,
   onDisconnect,
+  onRemove,
 }: SavedBackendListRowProps) {
   const nowMs = useRelativeTimeTick(1_000);
   const record = useSavedEnvironmentRegistryStore((state) => state.byId[environmentId] ?? null);
@@ -1537,6 +1540,7 @@ export function SavedBackendListRow({
     connectionState === "connecting" || reconnectingEnvironmentId === environmentId;
   const isDisconnecting = disconnectingEnvironmentId === environmentId;
   const isStoppedSandbox = sandboxLifecycleState === "stopped";
+  const isGoneSandbox = sandboxLifecycleState === "gone";
   const stateDotClassName = isStoppedSandbox
     ? "bg-muted-foreground/40"
     : connectionState === "connected"
@@ -1594,7 +1598,18 @@ export function SavedBackendListRow({
           ) : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          {isStoppedSandbox && !isConnected ? (
+          {isGoneSandbox && !isConnected ? (
+            <>
+              <span className="text-xs text-muted-foreground">Sandbox no longer exists.</span>
+              <Button
+                size="xs"
+                variant="destructive-outline"
+                onClick={() => void onRemove(environmentId)}
+              >
+                Remove
+              </Button>
+            </>
+          ) : isStoppedSandbox && !isConnected ? (
             <span className="text-xs text-muted-foreground">
               Sandbox is stopped — start it under Environments.
             </span>
@@ -1975,9 +1990,13 @@ function RemoteEnvironmentRowsSkeleton() {
 function ConfiguredCloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironmentIds,
+  sandboxEnvironmentIds,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  /** Environment ids of sandbox sessions — relay rows for these are hidden
+   *  (sandboxes connect via the pairing path, never the relay path). */
+  readonly sandboxEnvironmentIds: ReadonlySet<string>;
 }) {
   const { getToken, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useHostedConnectAuthPrompt();
@@ -2020,7 +2039,8 @@ function ConfiguredCloudRemoteEnvironmentRows({
   const connectableEnvironments = (environmentsState.data ?? []).filter(
     (environment) =>
       environment.environmentId !== primaryEnvironmentId &&
-      !savedIds.has(environment.environmentId),
+      !savedIds.has(environment.environmentId) &&
+      !sandboxEnvironmentIds.has(environment.environmentId as string),
   );
 
   if (savedEnvironmentIds.length === 0 && environmentsState.data === null) {
@@ -2066,14 +2086,17 @@ function ConfiguredCloudRemoteEnvironmentRows({
 function CloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironmentIds,
+  sandboxEnvironmentIds,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  readonly sandboxEnvironmentIds: ReadonlySet<string>;
 }) {
   return hasCloudPublicConfig() ? (
     <ConfiguredCloudRemoteEnvironmentRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironmentIds={savedEnvironmentIds}
+      sandboxEnvironmentIds={sandboxEnvironmentIds}
     />
   ) : savedEnvironmentIds.length === 0 ? (
     <EmptyAvailableRuntimes cloudEnabled={false} />
@@ -2118,24 +2141,24 @@ export function ConnectionsSettings() {
   useEffect(() => {
     void refreshSandboxSummaries();
   }, [refreshSandboxSummaries]);
-  // Reconcile orphan sandbox records: a saved sandbox record whose instance is
-  // gone (deleted, or never existed) is removed so it can no longer produce a
-  // dead Connect attempt. Runs after summaries load and when the saved
-  // environment registry changes.
-  useEffect(() => {
-    if (sandboxSummaries.length === 0) return;
-    const orphanIds: EnvironmentId[] = [];
-    for (const record of Object.values(savedEnvironmentsById)) {
-      if (record.sandbox === undefined) continue;
-      const state = resolveSandboxLifecycleState(record, sandboxSummaries);
-      if (state === "gone") orphanIds.push(record.environmentId);
+  // Orphan sandbox records (lifecycle state "gone"/"unknown") are NOT
+  // auto-deleted. Destructive cleanup happens only on server-confirmed
+  // disposeSession or via the explicit per-row Remove action (identity
+  // recovery plan R1: the client never destructively infers).
+  //
+  // Environment ids of every sandbox session known to the server — used to
+  // filter relay-managed rows so stale relay links for local sandboxes never
+  // render a dead relay Connect button (identity recovery plan R4: one
+  // connect path per record kind).
+  const sandboxSessionEnvironmentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const summary of sandboxSummaries) {
+      if (summary.kind !== "available") continue;
+      const session = summary.runningSession;
+      if (session !== undefined) ids.add(session.environmentId as string);
     }
-    if (orphanIds.length === 0) return;
-    // Best-effort: remove each orphan; a failure doesn't crash the list.
-    for (const environmentId of orphanIds) {
-      void removeSavedEnvironment(environmentId).catch(() => {});
-    }
-  }, [sandboxSummaries, savedEnvironmentsById]);
+    return ids;
+  }, [sandboxSummaries]);
   const sandboxInstanceLabels = useMemo(() => {
     const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
     const labels = new Set<string>();
@@ -3675,12 +3698,14 @@ export function ConnectionsSettings() {
               sandboxLifecycleState={sandboxLifecycleState}
               onConnect={handleConnectSavedBackend}
               onDisconnect={handleDisconnectSavedBackend}
+              onRemove={handleRemoveSavedBackend}
             />
           );
         })}
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironmentIds={savedEnvironmentIds}
+          sandboxEnvironmentIds={sandboxSessionEnvironmentIds}
         />
       </SettingsSection>
     </SettingsPageContainer>
