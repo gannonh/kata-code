@@ -15,6 +15,7 @@ export {
 export {
   VercelSandboxConfig,
   DEFAULT_VERCEL_CONFIG,
+  DEFAULT_VERCEL_VCPUS,
   VERCEL_AUTH_ENV_VARS,
   mergeVercelAuthIntoConfig,
 } from "./config.ts";

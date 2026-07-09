@@ -31,6 +31,7 @@ import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -38,7 +39,12 @@ import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt"
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
 import { ProviderSignInDialog } from "./ProviderSignInDialog";
 import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
-import { shouldSeedRepositoryForStart } from "./SandboxDeploymentSettings.logic";
+import {
+  formatVercelVcpusLabel,
+  readVercelVcpus,
+  VERCEL_VCPU_OPTIONS,
+  shouldSeedRepositoryForStart,
+} from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
 
 const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
@@ -278,7 +284,9 @@ export function SandboxDeploymentSettings({
           let savedForProjectPicker = false;
           try {
             await addSavedEnvironment({
-              label: result.endpoint.label,
+              // Prefer the instance display name so Environments dedupe and
+              // Available Runtimes stay aligned with the deployment-target card.
+              label: instance?.displayName?.trim() || result.endpoint.label,
               host: result.endpoint.httpBaseUrl,
               pairingCode: result.pairingToken,
               sandbox: {
@@ -441,7 +449,7 @@ export function SandboxDeploymentSettings({
             instanceId: instanceId as never,
           });
           await addSavedEnvironment({
-            label: issued.endpoint.label,
+            label: instance?.displayName?.trim() || issued.endpoint.label,
             host: issued.endpoint.httpBaseUrl,
             pairingCode: issued.pairingToken,
             sandbox: {
@@ -792,6 +800,7 @@ export function DeploymentTargetCard({
                 config={instance.config}
                 idPrefix={`sandbox-instance-${instanceId}`}
                 onChange={updateConfig}
+                machineSizeLocked={sessionStatus !== undefined}
               />
             ) : (
               <DockerConfigFields
@@ -1085,11 +1094,18 @@ interface VercelConfigFieldsProps {
   readonly config: unknown;
   readonly idPrefix: string;
   readonly onChange: (nextConfig: Record<string, unknown> | undefined) => void;
+  /** True once a sandbox VM exists (running or stopped). vCPUs are create-only. */
+  readonly machineSizeLocked: boolean;
 }
 
 /** Inline editor for the Vercel Sandbox driver config (runtime, persistent,
  *  timeout, port, vCPUs). Mirrors DockerConfigFields' layout. */
-function VercelConfigFields({ config, idPrefix, onChange }: VercelConfigFieldsProps) {
+function VercelConfigFields({
+  config,
+  idPrefix,
+  onChange,
+  machineSizeLocked,
+}: VercelConfigFieldsProps) {
   const persistent =
     config !== null &&
     typeof config === "object" &&
@@ -1183,19 +1199,16 @@ function VercelConfigFields({ config, idPrefix, onChange }: VercelConfigFieldsPr
         </label>
       </div>
       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-        <label htmlFor={`${idPrefix}-vcpus`} className="block">
-          <span className="text-xs font-medium text-foreground">vCPUs (optional)</span>
-          <DraftInput
-            id={`${idPrefix}-vcpus`}
-            className="mt-1.5"
-            value={readConfigNumber(config, "vcpus")}
-            onCommit={(next) => {
-              const trimmed = next.trim();
-              if (trimmed.length === 0) {
-                onChange(setConfigField(config, "vcpus", ""));
-                return;
-              }
-              const n = Number(trimmed);
+        <div className="grid gap-1.5">
+          <label className="text-xs font-medium text-foreground" htmlFor={`${idPrefix}-vcpus`}>
+            Machine size (vCPU / RAM)
+          </label>
+          <Select
+            value={String(readVercelVcpus(config))}
+            disabled={machineSizeLocked}
+            onValueChange={(next) => {
+              if (machineSizeLocked || !next) return;
+              const n = Number(next);
               if (!Number.isFinite(n)) return;
               const base =
                 config !== null && typeof config === "object"
@@ -1204,11 +1217,24 @@ function VercelConfigFields({ config, idPrefix, onChange }: VercelConfigFieldsPr
               base.vcpus = n;
               onChange(base);
             }}
-            placeholder="1"
-            spellCheck={false}
-            inputMode="numeric"
-          />
-        </label>
+          >
+            <SelectTrigger id={`${idPrefix}-vcpus`} className="w-full sm:w-72">
+              <SelectValue>{formatVercelVcpusLabel(readVercelVcpus(config))}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup alignItemWithTrigger={false}>
+              {VERCEL_VCPU_OPTIONS.map((vcpus) => (
+                <SelectItem key={vcpus} value={String(vcpus)}>
+                  {formatVercelVcpusLabel(vcpus)}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          <span className="text-xs text-muted-foreground">
+            {machineSizeLocked
+              ? "Set at create time and cannot be changed for this sandbox. Delete and create a new sandbox to pick a different size."
+              : "Applied when you create the sandbox. RAM is fixed at 2 GB per vCPU. Plan caps: Hobby ≤ 4, Pro ≤ 8, Enterprise ≤ 32 vCPUs."}
+          </span>
+        </div>
       </div>
     </>
   );

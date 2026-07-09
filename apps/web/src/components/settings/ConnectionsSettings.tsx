@@ -29,7 +29,6 @@ import {
   type DesktopServerExposureState,
   type EnvironmentId,
   type SandboxInstanceSummary,
-  type SandboxProviderInstanceConfig,
   type SandboxProviderInstanceConfigMap,
 } from "@kata-sh/code-contracts";
 import { WsRpcClient } from "@kata-sh/code-client-runtime";
@@ -1676,6 +1675,7 @@ function SavedEnvironmentDefinitionRow({
     ? formatDesktopSshTarget(record.desktopSsh)
     : record.httpBaseUrl;
   const isRemoving = removingEnvironmentId === environmentId;
+  const isOrphanSandbox = record.sandbox !== undefined;
 
   return (
     <div className="border-t border-border/60 first:border-t-0">
@@ -1688,17 +1688,23 @@ function SavedEnvironmentDefinitionRow({
                 {environmentTypeLabel}
               </span>
             </div>
-            <p className="truncate text-xs text-muted-foreground">{targetLabel}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {isOrphanSandbox
+                ? "Orphaned sandbox runtime — no matching deployment target. Delete this row, then re-add the sandbox under Environments."
+                : targetLabel}
+            </p>
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={isRemoving}
-              onClick={() => setIsEditing((editing) => !editing)}
-            >
-              {isEditing ? "Done" : "Edit"}
-            </Button>
+            {isOrphanSandbox ? null : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isRemoving}
+                onClick={() => setIsEditing((editing) => !editing)}
+              >
+                {isEditing ? "Done" : "Edit"}
+              </Button>
+            )}
             <Button
               size="xs"
               variant="destructive-outline"
@@ -1710,7 +1716,7 @@ function SavedEnvironmentDefinitionRow({
           </div>
         </div>
       </div>
-      {isEditing ? (
+      {isEditing && !isOrphanSandbox ? (
         <div className="border-t border-border/60 px-4 py-3 sm:px-5">
           <label className="block">
             <span className="text-xs font-medium text-foreground">Display name</span>
@@ -2174,14 +2180,13 @@ export function ConnectionsSettings() {
     }
     return ids;
   }, [sandboxSummaries]);
-  const sandboxInstanceLabels = useMemo(() => {
+  // Join sandbox saved-records to configured instances by instanceId only
+  // (identity recovery R1). Labels are never join keys — endpoint.label can
+  // diverge from displayName and must not resurrect a title-only Edit/Delete
+  // row beside (or instead of) the expandable DeploymentTargetCard.
+  const sandboxInstanceIds = useMemo(() => {
     const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
-    const labels = new Set<string>();
-    for (const [instanceId, instance] of Object.entries(map)) {
-      const displayName = (instance as SandboxProviderInstanceConfig).displayName ?? instanceId;
-      labels.add(displayName);
-    }
-    return labels;
+    return new Set(Object.keys(map));
   }, [settings.sandboxProviderInstances]);
   const savedEnvironmentDefinitionIds = useMemo(
     () =>
@@ -2189,15 +2194,19 @@ export function ConnectionsSettings() {
         .filter((record) => {
           if (record.relayManaged) return false;
           // Sandbox saved records are the runtime side of a sandbox instance
-          // defined in `sandboxProviderInstances`. Skip the saved-record row
-          // when a matching instance already renders its own definition row;
-          // keep orphan sandbox records visible so they can be cleaned up.
-          if (record.sandbox && sandboxInstanceLabels.has(record.label)) return false;
+          // defined in `sandboxProviderInstances`. Skip when that instance
+          // already renders its own expandable definition row; keep orphans
+          // (no matching instanceId, or legacy records without instanceId)
+          // visible so they can be cleaned up.
+          const sandboxInstanceId = record.sandbox?.instanceId;
+          if (sandboxInstanceId !== undefined && sandboxInstanceIds.has(sandboxInstanceId)) {
+            return false;
+          }
           return true;
         })
         .toSorted((left, right) => left.label.localeCompare(right.label))
         .map((record) => record.environmentId),
-    [sandboxInstanceLabels, savedEnvironmentsById],
+    [sandboxInstanceIds, savedEnvironmentsById],
   );
   const savedDesktopSshEnvironmentsByAlias = useMemo(
     () =>

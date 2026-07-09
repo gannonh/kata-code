@@ -66,9 +66,10 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
     vcpus: Schema.optionalKey(
       Schema.Number.pipe(
         Schema.annotateKey({
-          title: "vCPUs",
-          description: "Optional vCPU allocation (memory is 2048 MB per vCPU).",
-          providerSettingsForm: { placeholder: "1", clearWhenEmpty: "omit" },
+          title: "Machine size (vCPU / RAM)",
+          description:
+            "vCPU allocation applied at sandbox create only (cannot resize later). RAM is fixed at 2048 MB per vCPU. Default is 2 vCPUs / 4 GB RAM.",
+          providerSettingsForm: { placeholder: "2" },
         }),
       ),
     ),
@@ -85,11 +86,15 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
 
 export type VercelSandboxConfig = typeof VercelSandboxConfig.Type;
 
+/** Recommended floor / Vercel platform default when `resources` is unspecified. */
+export const DEFAULT_VERCEL_VCPUS = 2;
+
 export const DEFAULT_VERCEL_CONFIG: VercelSandboxConfig = {
   runtime: "node24",
   persistent: true,
   timeoutMs: 86_400_000,
   port: 13773,
+  vcpus: DEFAULT_VERCEL_VCPUS,
 };
 
 /** Legacy config keys removed in the lifecycle rework. Stripped at decode time

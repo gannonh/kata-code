@@ -185,4 +185,20 @@ describe("DeploymentTargetCard lifecycle actions (AC-L10/L11/L12)", () => {
     const html = renderCard(makeProps({ summary: stoppedSummary() }));
     expect(html).toContain("stopped");
   });
+
+  it("vercel: renders machine size select and chevron affordance", () => {
+    const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
+    const instance = {
+      driver: VERCEL_KIND,
+      config: { runtime: "node24", persistent: true, timeoutMs: 86_400_000, port: 13773, vcpus: 2 },
+    } as unknown as SandboxProviderInstanceConfig;
+    const html = renderCard({
+      ...makeProps({ summary: noSessionSummary() }),
+      instance,
+      displayName: "Cloud",
+    });
+    expect(html).toContain("Machine size (vCPU / RAM)");
+    expect(html).toContain("2 vCPU / 4 GB RAM");
+    expect(html).toContain("Toggle Cloud details");
+  });
 });

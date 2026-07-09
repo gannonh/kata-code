@@ -53,6 +53,28 @@ export function buildDockerSandboxProviderInstance(input: {
   } satisfies SandboxProviderInstanceConfig;
 }
 
+/** Vercel Sandbox vCPU choices. RAM is fixed at 2 GB per vCPU. */
+export const VERCEL_VCPU_OPTIONS = [1, 2, 4, 8, 16, 32] as const;
+
+/** Recommended floor — matches Vercel’s default when `resources` is omitted. */
+export const DEFAULT_VERCEL_VCPUS = 2;
+
+/** Resolve the selected vCPU count. Missing/invalid values fall back to the
+ * recommended floor so the dropdown never shows a misleading empty/placeholder state. */
+export function readVercelVcpus(config: unknown): number {
+  if (config === null || typeof config !== "object") return DEFAULT_VERCEL_VCPUS;
+  const value = (config as Record<string, unknown>).vcpus;
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_VERCEL_VCPUS;
+  return (VERCEL_VCPU_OPTIONS as readonly number[]).includes(value) ? value : DEFAULT_VERCEL_VCPUS;
+}
+
+/** Label showing both vCPU and derived RAM (2 GB × vCPUs). */
+export function formatVercelVcpusLabel(vcpus: number): string {
+  const memoryGb = vcpus * 2;
+  const recommended = vcpus === DEFAULT_VERCEL_VCPUS ? " — recommended" : "";
+  return `${vcpus} vCPU / ${memoryGb} GB RAM${recommended}`;
+}
+
 export function buildVercelSandboxProviderInstance(input: {
   readonly label: string;
 }): SandboxProviderInstanceConfig {
@@ -60,7 +82,13 @@ export function buildVercelSandboxProviderInstance(input: {
     driver: VERCEL_SANDBOX_KIND,
     enabled: true,
     ...(input.label.trim().length > 0 ? { displayName: input.label.trim() } : {}),
-    config: { runtime: "node24", persistent: true, timeoutMs: 86_400_000, port: 13773 },
+    config: {
+      runtime: "node24",
+      persistent: true,
+      timeoutMs: 86_400_000,
+      port: 13773,
+      vcpus: DEFAULT_VERCEL_VCPUS,
+    },
   } satisfies SandboxProviderInstanceConfig;
 }
 

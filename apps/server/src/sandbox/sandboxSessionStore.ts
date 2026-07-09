@@ -81,15 +81,26 @@ function storeFilePath(katacodeHome: string): string {
   return NodePath.join(katacodeHome, "userdata", "sandbox-sessions.json");
 }
 
-/** Atomic write: serialize to a temp file in the same dir, then rename. */
+let atomicWriteSeq = 0;
+
+/** Atomic write: serialize to a unique temp file in the same dir, then rename.
+ *  Temp names include pid + monotonic seq so concurrent upsert/save cannot
+ *  collide on the same `.tmp` (which produced ENOENT on the losing rename). */
 function atomicWriteFile(filePath: string, contents: string): Effect.Effect<void, Error> {
   return Effect.tryPromise({
     try: async () => {
       const dir = NodePath.dirname(filePath);
       await NodeFs.mkdir(dir, { recursive: true });
-      const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+      atomicWriteSeq += 1;
+      const tmp = `${filePath}.${process.pid}.${atomicWriteSeq}.tmp`;
       await NodeFs.writeFile(tmp, contents, "utf8");
-      await NodeFs.rename(tmp, filePath);
+      try {
+        await NodeFs.rename(tmp, filePath);
+      } catch (error) {
+        // Best-effort cleanup so a failed rename does not leave orphan temps.
+        await NodeFs.unlink(tmp).catch(() => undefined);
+        throw error;
+      }
     },
     catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
   });
@@ -144,6 +155,22 @@ function decodeStore(raw: unknown): ReadonlyArray<SandboxSessionRecord> {
 export function makeSandboxSessionStore(katacodeHome: string): SandboxSessionStore {
   const filePath = storeFilePath(katacodeHome);
   let cached: ReadonlyArray<SandboxSessionRecord> | null = null;
+  /** Serialize mutations so concurrent upsert/save/remove cannot interleave
+   *  read-modify-write against the in-memory cache. */
+  let writeTail: Promise<void> = Promise.resolve();
+
+  const withWriteLock = <A>(effect: Effect.Effect<A, Error>): Effect.Effect<A, Error> =>
+    Effect.tryPromise({
+      try: () => {
+        const result = writeTail.then(() => Effect.runPromise(effect));
+        writeTail = result.then(
+          () => undefined,
+          () => undefined,
+        );
+        return result;
+      },
+      catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+    });
 
   const loadOnce = Effect.gen(function* () {
     if (cached !== null) return cached;
@@ -188,21 +215,25 @@ export function makeSandboxSessionStore(katacodeHome: string): SandboxSessionSto
 
   return {
     load: () => loadOnce,
-    save: (records) => persist(records),
+    save: (records) => withWriteLock(persist(records)),
     upsert: (record) =>
-      Effect.gen(function* () {
-        const current = yield* loadOnce;
-        const next = current.filter((r) => r.instanceId !== record.instanceId);
-        next.push(record);
-        yield* persist(next);
-      }),
+      withWriteLock(
+        Effect.gen(function* () {
+          const current = yield* loadOnce;
+          const next = current.filter((r) => r.instanceId !== record.instanceId);
+          next.push(record);
+          yield* persist(next);
+        }),
+      ),
     remove: (instanceId) =>
-      Effect.gen(function* () {
-        const current = yield* loadOnce;
-        const next = current.filter((r) => r.instanceId !== (instanceId as string));
-        if (next.length === current.length) return; // absent — no write
-        yield* persist(next);
-      }),
+      withWriteLock(
+        Effect.gen(function* () {
+          const current = yield* loadOnce;
+          const next = current.filter((r) => r.instanceId !== (instanceId as string));
+          if (next.length === current.length) return; // absent — no write
+          yield* persist(next);
+        }),
+      ),
     get records() {
       return cached ?? [];
     },

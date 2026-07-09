@@ -19,6 +19,7 @@ describe("VercelSandboxConfig", () => {
     expect(decoded.persistent).toBe(true);
     expect(decoded.timeoutMs).toBe(86_400_000);
     expect(decoded.port).toBe(13773);
+    expect(decoded.vcpus).toBe(2);
   });
 
   it("rejects malformed config (bad port, non-boolean persistent)", () => {

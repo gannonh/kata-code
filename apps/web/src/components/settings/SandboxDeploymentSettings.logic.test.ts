@@ -5,8 +5,10 @@ import {
   VERCEL_SANDBOX_KIND,
   buildDockerSandboxProviderInstance,
   buildVercelSandboxProviderInstance,
+  formatVercelVcpusLabel,
   makeSandboxProviderInstanceId,
   parseSandboxPort,
+  readVercelVcpus,
   resolveSandboxLifecycleState,
   sandboxInstanceIdForLabel,
   shouldSeedRepositoryForStart,
@@ -67,8 +69,23 @@ describe("sandbox deployment settings logic", () => {
       driver: VERCEL_SANDBOX_KIND,
       enabled: true,
       displayName: "Cloud",
-      config: { runtime: "node24", persistent: true, timeoutMs: 86_400_000, port: 13773 },
+      config: {
+        runtime: "node24",
+        persistent: true,
+        timeoutMs: 86_400_000,
+        port: 13773,
+        vcpus: 2,
+      },
     });
+  });
+
+  it("defaults missing/invalid vcpus to the recommended floor and labels RAM", () => {
+    expect(readVercelVcpus(undefined)).toBe(2);
+    expect(readVercelVcpus({})).toBe(2);
+    expect(readVercelVcpus({ vcpus: 3 })).toBe(2);
+    expect(readVercelVcpus({ vcpus: 4 })).toBe(4);
+    expect(formatVercelVcpusLabel(2)).toBe("2 vCPU / 4 GB RAM — recommended");
+    expect(formatVercelVcpusLabel(4)).toBe("4 vCPU / 8 GB RAM");
   });
 
   it("only seeds a repository for the create path, not lifecycle Start", () => {

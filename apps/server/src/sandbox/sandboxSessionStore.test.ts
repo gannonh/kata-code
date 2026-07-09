@@ -198,4 +198,29 @@ describe("SandboxSessionStore", () => {
       await NodeFs.rm(home, { recursive: true, force: true });
     }
   });
+
+  it("serializes concurrent upserts without losing records or throwing ENOENT", async () => {
+    const home = await tmpKatacodeHome();
+    try {
+      const store = makeSandboxSessionStore(home);
+      await Effect.runPromise(
+        Effect.all(
+          [
+            store.upsert(makeRecord({ instanceId: "a" })),
+            store.upsert(makeRecord({ instanceId: "b" })),
+            store.upsert(makeRecord({ instanceId: "c" })),
+            store.upsert(makeRecord({ instanceId: "d" })),
+          ],
+          { concurrency: "unbounded" },
+        ),
+      );
+      const loaded = await Effect.runPromise(store.load());
+      expect(loaded.map((r) => r.instanceId).toSorted()).toEqual(["a", "b", "c", "d"]);
+      const storePath = NodePath.join(home, "userdata", "sandbox-sessions.json");
+      const raw = await NodeFs.readFile(storePath, "utf8");
+      expect(JSON.parse(raw).records).toHaveLength(4);
+    } finally {
+      await NodeFs.rm(home, { recursive: true, force: true });
+    }
+  });
 });
