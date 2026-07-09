@@ -95,6 +95,7 @@ vi.mock("@kata-sh/code-client-runtime", async (importOriginal) => {
       issuePairingToken: vi.fn(),
       providerLoginStart: vi.fn(),
       providerLoginSubmitCode: vi.fn(),
+      providerLoginCancel: vi.fn(),
     },
     orchestration: {
       dispatchCommand: vi.fn(),

@@ -143,10 +143,11 @@ function sessionStatusToLifecycleState(
  *     instance id persisted on the record at pairing time.
  *
  *  Returns `undefined` when the record is not a sandbox record. Returns
- *  `"gone"` only when the record's `instanceId` is known and absent from the
- *  summaries (the instance was deleted). Legacy records without an
- *  `instanceId` that match nothing resolve to `"unknown"` — never `"gone"` —
- *  so a failed join can not trigger destructive cleanup. */
+ *  `"gone"` only when summaries were successfully loaded AND the record's
+ *  `instanceId` is known and absent (or has no session). When
+ *  `summariesLoaded` is false (fetch failed / not yet loaded), returns
+ *  `"unknown"` instead of inventing `"gone"`. Legacy records without an
+ *  `instanceId` that match nothing resolve to `"unknown"` — never `"gone"`. */
 export function resolveSandboxLifecycleState(
   record: {
     readonly environmentId: string;
@@ -156,8 +157,10 @@ export function resolveSandboxLifecycleState(
       | undefined;
   },
   summaries: ReadonlyArray<SandboxInstanceSummary>,
+  options?: { readonly summariesLoaded?: boolean },
 ): SandboxLifecycleState | undefined {
   if (record.sandbox === undefined) return undefined;
+  const summariesLoaded = options?.summariesLoaded !== false;
 
   // Join 1: by the in-sandbox environment id.
   for (const summary of summaries) {
@@ -171,8 +174,11 @@ export function resolveSandboxLifecycleState(
   // Join 2: by the persisted instance id.
   const instanceId = record.sandbox.instanceId;
   if (instanceId !== undefined) {
+    // A failed or pending listInstances must never look like confirmed deletion.
+    if (!summariesLoaded) return "unknown";
     const match = summaries.find((s) => (s.instanceId as string) === instanceId);
-    if (match === undefined || match.kind !== "available") return "gone";
+    if (match === undefined) return "gone";
+    if (match.kind !== "available") return "unknown";
     if (match.runningSession === undefined) {
       // Instance exists but has no session — the sandbox was deleted while the
       // configured target remains. The record points at nothing.

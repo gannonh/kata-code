@@ -9,7 +9,7 @@
  *
  * @module ProviderSignInDialog
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime/service";
 import {
@@ -39,6 +39,16 @@ function providerDisplayName(providerId: string): string {
   return providerId === "claude" ? "Claude" : providerId;
 }
 
+function cancelLoginSession(instanceId: string, loginSessionId: string | null): void {
+  if (loginSessionId === null) return;
+  void getPrimaryEnvironmentConnection()
+    .client.sandbox.providerLoginCancel({
+      instanceId: instanceId as never,
+      loginSessionId: loginSessionId as never,
+    })
+    .catch(() => undefined);
+}
+
 export function ProviderSignInDialog({
   instanceId,
   providerId,
@@ -50,6 +60,8 @@ export function ProviderSignInDialog({
   const [loginSessionId, setLoginSessionId] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const loginSessionIdRef = useRef<string | null>(null);
+  const completedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +72,7 @@ export function ProviderSignInDialog({
           if (cancelled) return;
           switch (event.stage) {
             case "started":
+              loginSessionIdRef.current = event.loginSessionId;
               setLoginSessionId(event.loginSessionId);
               setStage("awaiting-url");
               break;
@@ -84,8 +97,18 @@ export function ProviderSignInDialog({
       });
     return () => {
       cancelled = true;
+      if (!completedRef.current) {
+        cancelLoginSession(instanceId, loginSessionIdRef.current);
+      }
     };
-  }, [instanceId, providerId, onClose]);
+  }, [instanceId, providerId]);
+
+  const handleClose = () => {
+    if (!completedRef.current) {
+      cancelLoginSession(instanceId, loginSessionIdRef.current);
+    }
+    onClose();
+  };
 
   const handleSubmit = async () => {
     if (loginSessionId === null) return;
@@ -100,6 +123,7 @@ export function ProviderSignInDialog({
         },
       );
       if (result.accepted) {
+        completedRef.current = true;
         setStage("done");
         toastManager.add({
           type: "success",
@@ -121,7 +145,7 @@ export function ProviderSignInDialog({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) handleClose();
       }}
     >
       <DialogPopup className="max-w-xl overflow-hidden">

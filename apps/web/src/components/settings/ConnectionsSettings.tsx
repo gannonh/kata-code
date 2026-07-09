@@ -2150,13 +2150,18 @@ export function ConnectionsSettings() {
   const [sandboxSummaries, setSandboxSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>(
     [],
   );
+  /** False until the first successful `listInstances`; also cleared on fetch
+   *  failure so a network error cannot invent `"gone"` for live sandboxes. */
+  const [sandboxSummariesLoaded, setSandboxSummariesLoaded] = useState(false);
   const refreshSandboxSummaries = useCallback(async () => {
     try {
       const result = await getPrimaryEnvironmentConnection().client.sandbox.listInstances();
       setSandboxSummaries(result.instances);
+      setSandboxSummariesLoaded(true);
     } catch {
-      // Non-fatal: the Available Runtimes list still renders; lifecycle join
-      // falls back to treating sandbox records as gone (conservative).
+      // Non-fatal: keep prior summaries when present, but mark unloaded so the
+      // join returns `"unknown"` instead of inventing `"gone"`.
+      setSandboxSummariesLoaded(false);
     }
   }, []);
   useEffect(() => {
@@ -3711,7 +3716,9 @@ export function ConnectionsSettings() {
         {savedEnvironmentIds.map((environmentId) => {
           const record = savedEnvironmentsById[environmentId];
           const sandboxLifecycleState = record
-            ? resolveSandboxLifecycleState(record, sandboxSummaries)
+            ? resolveSandboxLifecycleState(record, sandboxSummaries, {
+                summariesLoaded: sandboxSummariesLoaded,
+              })
             : undefined;
           return (
             <SavedBackendListRow

@@ -188,6 +188,27 @@ describe("resolveSandboxLifecycleState (identity recovery R1: id-based join)", (
     expect(resolveSandboxLifecycleState(record, [summary("docker_x")])).toBe("gone");
   });
 
+  it("returns 'unknown' (never 'gone') when summaries were not loaded successfully", () => {
+    const record = savedSandbox({ instanceId: "docker_x" });
+    expect(resolveSandboxLifecycleState(record, [], { summariesLoaded: false })).toBe("unknown");
+    expect(
+      resolveSandboxLifecycleState(record, [summary("docker_other")], {
+        summariesLoaded: false,
+      }),
+    ).toBe("unknown");
+  });
+
+  it("returns 'unknown' for unavailable summaries instead of inventing 'gone'", () => {
+    const record = savedSandbox({ instanceId: "docker_x" });
+    const unavailable = {
+      kind: "unavailable",
+      instanceId: "docker_x",
+      reason: "invalid-config",
+      message: "bad",
+    } as never;
+    expect(resolveSandboxLifecycleState(record, [unavailable])).toBe("unknown");
+  });
+
   it("returns 'unknown' (never 'gone') for legacy records without an instance id", () => {
     const record = savedSandbox({ environmentId: "env_legacy" });
     expect(resolveSandboxLifecycleState(record, [summary("docker_x")])).toBe("unknown");
