@@ -43,6 +43,9 @@ import { SettingsSection } from "./settingsLayout";
 
 const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
+/** Credentials the Vercel sandbox driver requires at session start. */
+const VERCEL_REQUIRED_ENV_NAMES = ["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID"] as const;
+
 /** Per-instance busy state for the long-running RPCs. */
 type BusyOp = "test" | "start" | "dispose" | "renew" | "stop";
 
@@ -803,6 +806,7 @@ export function DeploymentTargetCard({
                 environment={instance.environment ?? []}
                 onChange={updateEnvironment}
                 title="Runtime environment variables"
+                {...(isVercel ? { prefillNames: VERCEL_REQUIRED_ENV_NAMES } : {})}
                 description={
                   isVercel
                     ? "Apply to every session on this target. Add VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID here as sensitive variables."
