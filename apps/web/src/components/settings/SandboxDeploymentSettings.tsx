@@ -477,8 +477,9 @@ export function SandboxDeploymentSettings({
       if (activeSession[instanceId]) {
         toastManager.add({
           type: "error",
-          title: "Cannot remove sandbox environment",
-          description: `Dispose the active session for '${instanceId}' before removing it.`,
+          title: "Delete the sandbox first",
+          description:
+            "Expand this environment and click “Delete sandbox” to remove the running/stopped sandbox, then remove the environment.",
         });
         return;
       }
