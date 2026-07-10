@@ -66,6 +66,10 @@ export const SandboxSessionRecord = Schema.Struct({
   relay: Schema.optional(SandboxStoredRelay),
   /** Host-side deadline (epoch ms) the keepalive scheduler maintains. */
   deadlineEpochMs: Schema.optional(Schema.Number),
+  /** Non-secret fingerprint of the configured source (Vercel GitHub
+   *  repository/branch). Lifecycle start rejects a changed source. Optional so
+   *  older records and source-less sandboxes decode. */
+  sourceFingerprint: Schema.optional(Schema.String),
 });
 export type SandboxSessionRecord = typeof SandboxSessionRecord.Type;
 

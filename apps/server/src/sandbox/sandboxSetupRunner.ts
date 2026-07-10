@@ -71,18 +71,42 @@ export interface SetupSeedLimits {
   readonly maxFiles?: number;
 }
 
+/** Where setup commands run. Docker seeds `/workspace` from a host repo root;
+ *  Vercel sets up `/vercel/sandbox` after its own native clone (no host seed). */
+export interface SetupWorkspace {
+  /** Absolute workspace path setup commands run in. */
+  readonly path: string;
+  /** When present, seed the repo at `repoRoot` into `path` via copyInto
+   *  (Docker). Absent for drivers that clone their own source (Vercel). */
+  readonly seed?: { readonly repoRoot: string; readonly limits?: SetupSeedLimits };
+}
+
 export interface RunSandboxSetupInput {
   readonly driver: SandboxProvider;
   readonly handle: SandboxHandle;
   readonly resolved: ResolvedEnvironmentConfig;
   /** Secret values to redact from captured install/start output. */
   readonly secretValues: ReadonlyArray<string>;
-  /** When present, seed the repo at `repoRoot` into `/workspace` via copyInto. */
+  /** Workspace path + optional host seed. When omitted, defaults to seeding
+   *  `/workspace` from the legacy top-level `seed` field (back-compat). */
+  readonly workspace?: SetupWorkspace;
+  /** Legacy: seed the repo at `repoRoot` into `/workspace` via copyInto.
+   *  Superseded by `workspace`; retained so existing callers/tests decode. */
   readonly seed?: { readonly repoRoot: string; readonly limits?: SetupSeedLimits };
 }
 
-/** Default install cwd: the seeded repo lives at /workspace in the container. */
-const WORKSPACE = "/workspace";
+/** Default workspace when a caller does not specify one. */
+const DEFAULT_WORKSPACE_PATH = "/workspace";
+
+/** Resolve the effective workspace from the new `workspace` field or the legacy
+ *  top-level `seed`. */
+function resolveWorkspace(input: RunSandboxSetupInput): SetupWorkspace {
+  if (input.workspace !== undefined) return input.workspace;
+  return {
+    path: DEFAULT_WORKSPACE_PATH,
+    ...(input.seed !== undefined ? { seed: input.seed } : {}),
+  };
+}
 
 /**
  * Run the Phase 2 setup for a provisioned sandbox: seed (if requested and the
@@ -97,31 +121,36 @@ export function runSandboxSetup(
 ): Effect.Effect<SetupRunnerResult, SetupFailed | SandboxProviderError> {
   return Effect.gen(function* () {
     const { driver, handle, resolved, secretValues } = input;
+    const workspace = resolveWorkspace(input);
+    // Detached start/terminals need a cwd only when the workspace is
+    // materialized: an explicit workspace (Vercel clone) or a host seed
+    // (Docker). A legacy no-seed default workspace does not exist, so detached
+    // processes run without a cwd (matching the pre-workspace behavior).
+    const detachedCwd =
+      input.workspace !== undefined || workspace.seed !== undefined ? workspace.path : undefined;
 
-    // 1. Seed the repo into /workspace (when requested and setup is needed).
-    if (input.seed) {
-      yield* seedWorkspace(driver, handle, input.seed);
+    // 1. Seed the repo into the workspace (Docker only; Vercel clones natively).
+    if (workspace.seed) {
+      yield* seedWorkspace(driver, handle, workspace.path, workspace.seed);
     }
 
-    // 2. Blocking install in /workspace, with secret redaction.
-    const installOutput = yield* runInstall(driver, handle, resolved, secretValues);
+    // 2. Blocking install in the workspace, with secret redaction.
+    const installOutput = yield* runInstall(driver, handle, resolved, secretValues, workspace.path);
 
     // 3. Detached start + terminals (no waiting; recorded for teardown).
     // Detached-process output is redirected to in-container log files (not
     // captured here), so secret redaction does not apply to this stage.
-    // cwd is /workspace only when the repo was seeded there; without seeding,
-    // /workspace may not exist in the container.
-    const cwd = input.seed ? WORKSPACE : undefined;
-    const processes = yield* runDetachedProcesses(driver, handle, resolved, cwd);
+    const processes = yield* runDetachedProcesses(driver, handle, resolved, detachedCwd);
 
     return { processes, installOutput } satisfies SetupRunnerResult;
   });
 }
 
-/** Seed the repo working tree into /workspace via the driver's copyInto. */
+/** Seed the repo working tree into the workspace via the driver's copyInto. */
 function seedWorkspace(
   driver: SandboxProvider,
   handle: SandboxHandle,
+  workspacePath: string,
   seed: { readonly repoRoot: string; readonly limits?: SetupSeedLimits },
 ): Effect.Effect<void, SetupFailed | SandboxProviderError> {
   const copyIntoCap = driver.copyInto;
@@ -151,7 +180,7 @@ function seedWorkspace(
       Effect.mapError((e) => new SetupFailed({ stage: "seed", message: e.message, cause: e })),
     );
     yield* copyIntoCap
-      .copyInto(handle, archive, WORKSPACE)
+      .copyInto(handle, archive, workspacePath)
       .pipe(
         Effect.mapError(
           (e) =>
@@ -161,17 +190,18 @@ function seedWorkspace(
   });
 }
 
-/** Run the blocking install in /workspace, redacting secrets from the output. */
+/** Run the blocking install in the workspace, redacting secrets from the output. */
 function runInstall(
   driver: SandboxProvider,
   handle: SandboxHandle,
   resolved: ResolvedEnvironmentConfig,
   secretValues: ReadonlyArray<string>,
+  workspacePath: string,
 ): Effect.Effect<SetupRunnerResult["installOutput"], SetupFailed | SandboxProviderError> {
   if (resolved.install === undefined) {
     return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
   }
-  return driver.exec(handle, resolved.install, { cwd: WORKSPACE }).pipe(
+  return driver.exec(handle, resolved.install, { cwd: workspacePath }).pipe(
     Effect.map((r) => {
       const stdout = redactSecrets(r.stdout, secretValues);
       const stderr = redactSecrets(r.stderr, secretValues);

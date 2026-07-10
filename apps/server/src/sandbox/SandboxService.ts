@@ -43,8 +43,20 @@ import {
 import { DockerSandboxProvider } from "@kata-sh/code-sandbox-docker";
 import { RelayOkResponse } from "@kata-sh/code-contracts/relay";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
-import { loadEnvironmentConfig } from "./environmentConfigLoader.ts";
+import {
+  loadEnvironmentConfig,
+  decodeEnvironmentConfigText,
+  resolveLoadedEnvironmentConfig,
+} from "./environmentConfigLoader.ts";
 import { SetupFailed, runSandboxSetup } from "./sandboxSetupRunner.ts";
+import { resolveVercelSource, sourceFingerprint } from "./vercelGitHubSource.ts";
+import {
+  VERCEL_WORKSPACE,
+  readRemoteEnvironmentConfig,
+  seedGitHubAuth,
+  VercelRemoteSetupError,
+} from "./vercelRemoteSetup.ts";
+import { VERCEL_KIND, VERCEL_SOURCE_TOKEN_ENV } from "@kata-sh/code-sandbox-vercel";
 import {
   makeSandboxSessionStore,
   type SandboxSessionRecord,
@@ -272,6 +284,8 @@ function storeSessionRecord(input: {
   readonly endpoint: AdvertisedEndpoint;
   readonly relay: { readonly relayUrl: string; readonly bearerToken: string } | null;
   readonly status: "running" | "stopped";
+  /** Non-secret source fingerprint (Vercel GitHub source); omitted otherwise. */
+  readonly sourceFingerprint?: string | undefined;
 }): Effect.Effect<void, Error> {
   const driverKindStr = input.driver.kind as string;
   const record: SandboxSessionRecord = {
@@ -288,6 +302,9 @@ function storeSessionRecord(input: {
     status: input.status,
     // Store only the relay URL; the bearer token is re-resolved at dispose time.
     relay: input.relay ? { relayUrl: input.relay.relayUrl } : undefined,
+    ...(input.sourceFingerprint !== undefined
+      ? { sourceFingerprint: input.sourceFingerprint }
+      : {}),
   };
   return getSessionStore().upsert(record);
 }
@@ -455,6 +472,10 @@ export const SandboxServiceLive = {
     options?: {
       readonly connectAuthToken?: SandboxStartSessionInput["connectAuthToken"];
       readonly repository?: SandboxStartSessionInput["repository"];
+      /** Resolve the active host GitHub token for the Vercel native clone.
+       *  Injected by the WS layer so `GitHubCli` stays out of this method's
+       *  requirements. Fails with the concrete `gh auth login` message. */
+      readonly resolveGitHubToken?: Effect.Effect<string, SandboxRpcError>;
     },
   ) =>
     Effect.gen(function* () {
@@ -511,6 +532,27 @@ export const SandboxServiceLive = {
               message: "The sandbox already has a seeded workspace; delete it to re-seed.",
             });
           }
+          // Reject a changed source: a record created with a source fingerprint
+          // must start against a resolvable, matching current source. A removed
+          // or edited source (including one cleared from settings) fails loud;
+          // delete and recreate to re-clone.
+          if (existing.sourceFingerprint !== undefined) {
+            const startSource = resolveVercelSource(resolvedConfig.config);
+            const currentFingerprint =
+              startSource !== null
+                ? sourceFingerprint({
+                    repositoryKey: startSource.repositoryKey,
+                    branch: startSource.branch,
+                  })
+                : undefined;
+            if (currentFingerprint !== existing.sourceFingerprint) {
+              return yield* new SandboxRpcError({
+                reason: "invalid-config",
+                message:
+                  "The sandbox source changed since it was created. Delete this sandbox and create it again to clone the new source.",
+              });
+            }
+          }
           const handle: SandboxHandle = {
             driverKind: inst.driver.kind,
             instanceId: sessionKey,
@@ -566,6 +608,7 @@ export const SandboxServiceLive = {
             failureCleanup: "keep",
           });
           // Update the store record (logs on failure rather than swallowing).
+          // Preserve the persisted source fingerprint across stop/start.
           yield* persistSessionRecord({
             instanceId,
             driver: inst.driver,
@@ -575,6 +618,9 @@ export const SandboxServiceLive = {
             endpoint: finalized.endpoint,
             relay: finalized.relay,
             status: "running",
+            ...(existing.sourceFingerprint !== undefined
+              ? { sourceFingerprint: existing.sourceFingerprint }
+              : {}),
           });
           // Cache the live session.
           liveSessions.set(sessionKey, {
@@ -593,13 +639,36 @@ export const SandboxServiceLive = {
         }
 
         // ── Provision path (no existing record) ──
+        const isVercel = (inst.driver.kind as string) === (VERCEL_KIND as string);
+        // Vercel clones a selected GitHub repo/branch natively; Docker seeds the
+        // selected local worktree. Resolve the Vercel source from config.
+        const vercelSource = isVercel ? resolveVercelSource(resolvedConfig.config) : null;
+        if (isVercel && options?.repository !== undefined) {
+          return yield* new SandboxRpcError({
+            reason: "invalid-config",
+            message:
+              "Vercel sandboxes clone their GitHub source; a local repository cannot be provided.",
+          });
+        }
+        if (isVercel && vercelSource === null) {
+          return yield* new SandboxRpcError({
+            reason: "invalid-config",
+            message:
+              "Select a GitHub repository and branch for this Vercel sandbox before creating it.",
+          });
+        }
+
         // @effect-diagnostics-next-line effect(globalDateInEffect):off - random token, not a clock read.
         const bootstrapToken = NodeCrypto.randomBytes(24).toString("hex");
 
+        // Saved per-repo env keys off the local repo (Docker) or the Vercel
+        // source's canonical GitHub key.
         const savedEnvKey =
           options?.repository !== undefined
             ? RepositoryCanonicalKey.make(options.repository.repositoryIdentity.canonicalKey)
-            : undefined;
+            : vercelSource !== null
+              ? RepositoryCanonicalKey.make(vercelSource.repositoryKey)
+              : undefined;
         const savedEnv =
           savedEnvKey !== undefined ? settings.savedSandboxEnvironments[savedEnvKey] : undefined;
 
@@ -609,16 +678,36 @@ export const SandboxServiceLive = {
           savedEnvironment: savedEnv?.environment,
         });
 
+        // Resolve the active host GitHub token for the Vercel native clone +
+        // in-sandbox gh auth seed. Missing/unauthenticated fails before create.
+        const githubToken =
+          vercelSource !== null
+            ? yield* (
+                options?.resolveGitHubToken ??
+                  new SandboxRpcError({
+                    reason: "invalid-config",
+                    message: "GitHub authentication is unavailable. Run `gh auth login` and retry.",
+                  })
+              )
+            : undefined;
+
         const envWithLabel = config.displayName
           ? [...env, ["KATACODE_ENVIRONMENT_LABEL", config.displayName] as const]
           : env;
+        // The transient source token is appended only for the create call; the
+        // Vercel driver extracts it for the native source and excludes it from
+        // the sandbox env. It is never persisted or seeded via env.
+        const provisionEnv =
+          githubToken !== undefined
+            ? [...envWithLabel, [VERCEL_SOURCE_TOKEN_ENV, githubToken] as const]
+            : envWithLabel;
 
         const handle = yield* inst.driver
           .provision({
             instanceId: instanceId as string,
             config: inst.config,
             image: resolveProvisionImage(inst.config),
-            env: envWithLabel,
+            env: provisionEnv,
             ...(sandboxNameNamespace !== undefined ? { nameNamespace: sandboxNameNamespace } : {}),
           })
           .pipe(Effect.mapError(mapDriverError));
@@ -635,7 +724,94 @@ export const SandboxServiceLive = {
           ),
         );
 
-        if (options?.repository !== undefined) {
+        // ── Vercel native-source setup: seed gh auth, read remote config, run
+        //    setup in /vercel/sandbox. ──
+        if (vercelSource !== null) {
+          // Seed authenticated gh/Git into the persistent sandbox filesystem.
+          // @effect-diagnostics-next-line effect(globalDateInEffect):off - random nonce, not a clock read.
+          const authNonce = NodeCrypto.randomBytes(8).toString("hex");
+          yield* seedGitHubAuth({
+            driver: inst.driver,
+            handle,
+            token: githubToken as string,
+            nonce: authNonce,
+          }).pipe(
+            Effect.catch((error: VercelRemoteSetupError | SandboxProviderError) =>
+              disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    error._tag === "VercelRemoteSetupError"
+                      ? new SandboxRpcError({ reason: "provision-failed", message: error.message })
+                      : mapDriverError(error),
+                  ),
+                ),
+              ),
+            ),
+          );
+
+          const remoteRaw = yield* readRemoteEnvironmentConfig(inst.driver, handle).pipe(
+            Effect.catch((error: VercelRemoteSetupError | SandboxProviderError) =>
+              disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    error._tag === "VercelRemoteSetupError"
+                      ? new SandboxRpcError({ reason: "invalid-config", message: error.message })
+                      : mapDriverError(error),
+                  ),
+                ),
+              ),
+            ),
+          );
+          const repoFileConfig =
+            remoteRaw !== null
+              ? yield* decodeEnvironmentConfigText(
+                  remoteRaw,
+                  `${VERCEL_WORKSPACE}/.kata/environment.json`,
+                ).pipe(
+                  Effect.mapError(mapLoadError),
+                  Effect.catch((error: SandboxRpcError) =>
+                    disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+                      Effect.andThen(Effect.fail(error)),
+                    ),
+                  ),
+                )
+              : undefined;
+          const loadedResolved = resolveLoadedEnvironmentConfig({
+            ...(repoFileConfig !== undefined ? { repoFileConfig } : {}),
+            repositoryKey: vercelSource.repositoryKey,
+            savedSandboxEnvironments: settings.savedSandboxEnvironments,
+          }).resolved;
+          if (loadedResolved.build?.dockerfile !== undefined) {
+            return yield* disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new SandboxRpcError({
+                    reason: "invalid-config",
+                    message:
+                      ".kata/environment.json requests a Dockerfile build, which the Vercel sandbox driver does not support. Use a local Docker deployment target for this repository.",
+                  }),
+                ),
+              ),
+            );
+          }
+          yield* runSandboxSetup({
+            driver: inst.driver,
+            handle,
+            resolved: loadedResolved,
+            secretValues,
+            workspace: { path: VERCEL_WORKSPACE },
+          }).pipe(
+            Effect.catch((error: SetupFailed | SandboxProviderError) =>
+              disposeAfterFailure(sessionKey, inst.driver, handle).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    error._tag === "SetupFailed" ? mapSetupFailed(error) : mapDriverError(error),
+                  ),
+                ),
+              ),
+            ),
+          );
+        } else if (options?.repository !== undefined) {
           const loaded = yield* loadEnvironmentConfig({
             repoRoot: options.repository.repoRoot,
             repositoryIdentity: options.repository.repositoryIdentity,
@@ -695,6 +871,15 @@ export const SandboxServiceLive = {
         });
 
         // Persist the session record (logs on failure rather than swallowing).
+        // A Vercel source records its non-secret fingerprint so lifecycle start
+        // can reject a changed source.
+        const provisionFingerprint =
+          vercelSource !== null
+            ? sourceFingerprint({
+                repositoryKey: vercelSource.repositoryKey,
+                branch: vercelSource.branch,
+              })
+            : undefined;
         yield* persistSessionRecord({
           instanceId,
           driver: inst.driver,
@@ -704,6 +889,9 @@ export const SandboxServiceLive = {
           endpoint: finalized.endpoint,
           relay: finalized.relay,
           status: "running",
+          ...(provisionFingerprint !== undefined
+            ? { sourceFingerprint: provisionFingerprint }
+            : {}),
         });
 
         // Cache the live session.

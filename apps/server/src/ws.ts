@@ -100,6 +100,7 @@ import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import { searchGitHubRepositories, listGitHubBranches } from "./sandbox/sandboxGitHubDiscovery.ts";
+import { SandboxRpcError } from "@kata-sh/code-contracts/sandboxRpc";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -1113,6 +1114,16 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 SandboxServiceLive.startSession(instanceId, settings, {
                   connectAuthToken,
                   repository,
+                  // Resolve the active host GitHub token for the Vercel native
+                  // clone. Injected so GitHubCli stays out of startSession's R.
+                  resolveGitHubToken: githubCli
+                    .getAuthToken({ cwd: config.cwd })
+                    .pipe(
+                      Effect.mapError(
+                        (error) =>
+                          new SandboxRpcError({ reason: "invalid-config", message: error.detail }),
+                      ),
+                    ),
                 }),
               ),
             ),

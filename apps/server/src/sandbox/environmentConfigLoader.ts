@@ -97,22 +97,7 @@ function readRepoFileConfig(
           }),
       ),
     );
-    const parsed = yield* Effect.try({
-      try: () => parseJson(raw),
-      catch: (cause) =>
-        new EnvironmentConfigLoadError({
-          message: `${filePath} is not valid JSON: ${String(cause)}`,
-          cause,
-        }),
-    });
-    return yield* Effect.try({
-      try: () => decodeEnvironmentConfig(parsed),
-      catch: (cause) =>
-        new EnvironmentConfigLoadError({
-          message: `${filePath} is not a valid environment config: ${String(cause)}`,
-          cause,
-        }),
-    });
+    return yield* decodeEnvironmentConfigText(raw, filePath);
   });
 }
 
@@ -132,6 +117,54 @@ function savedEnvToConfig(saved: SavedSandboxEnvironment): EnvironmentConfig {
   };
 }
 
+/** Decode a raw `.kata/environment.json` text into an `EnvironmentConfig`,
+ *  failing loud on invalid JSON or schema (shared by the host and remote
+ *  readers). `sourceLabel` names the file for error messages. */
+export function decodeEnvironmentConfigText(
+  raw: string,
+  sourceLabel: string,
+): Effect.Effect<EnvironmentConfig, EnvironmentConfigLoadError> {
+  return Effect.gen(function* () {
+    const parsed = yield* Effect.try({
+      try: () => parseJson(raw),
+      catch: (cause) =>
+        new EnvironmentConfigLoadError({
+          message: `${sourceLabel} is not valid JSON: ${String(cause)}`,
+          cause,
+        }),
+    });
+    return yield* Effect.try({
+      try: () => decodeEnvironmentConfig(parsed),
+      catch: (cause) =>
+        new EnvironmentConfigLoadError({
+          message: `${sourceLabel} is not a valid environment config: ${String(cause)}`,
+          cause,
+        }),
+    });
+  });
+}
+
+/** Merge an optional repo-file config with the saved per-repo env (keyed by
+ *  `repositoryKey`) via the pure resolver. The provider default is an empty
+ *  no-op config. Shared by the host and remote loaders. */
+export function resolveLoadedEnvironmentConfig(input: {
+  readonly repoFileConfig?: EnvironmentConfig | undefined;
+  readonly repositoryKey: string;
+  readonly savedSandboxEnvironments: SavedSandboxEnvironments;
+}): LoadedEnvironmentConfig {
+  const saved = input.savedSandboxEnvironments[input.repositoryKey];
+  const savedEnvConfig = saved !== undefined ? savedEnvToConfig(saved) : undefined;
+  // Locked decision 8: the provider default is an empty no-op config, not
+  // derived from DEFAULT_DOCKER_CONFIG (a different shape with no setup fields).
+  const providerDefault: EnvironmentConfig = {};
+  const resolved = resolveEnvironmentConfig({
+    ...(input.repoFileConfig !== undefined ? { repoFileConfig: input.repoFileConfig } : {}),
+    ...(savedEnvConfig !== undefined ? { savedEnvConfig } : {}),
+    providerDefault,
+  });
+  return { resolved, repoFilePresent: input.repoFileConfig !== undefined };
+}
+
 /**
  * Load and resolve a repo's environment config. Reads the host
  * `.kata/environment.json` (fail loud on a malformed file), looks up the saved
@@ -147,24 +180,14 @@ export function loadEnvironmentConfig(
 > {
   return Effect.gen(function* () {
     const repoFileConfig = yield* readRepoFileConfig(input.repoRoot);
-    const repoFilePresent = repoFileConfig !== undefined;
-
     // `SavedSandboxEnvironments` is keyed by plain string (the
     // `RepositoryCanonicalKey` brand is the settings-layer concern); the
     // repo identity's `canonicalKey` is a `TrimmedNonEmptyString` (a plain
     // `string` at the type level), so it indexes the map directly.
-    const saved = input.savedSandboxEnvironments[input.repositoryIdentity.canonicalKey];
-    const savedEnvConfig = saved !== undefined ? savedEnvToConfig(saved) : undefined;
-
-    // Locked decision 8: the provider default is an empty no-op config, not
-    // derived from DEFAULT_DOCKER_CONFIG (a different shape with no setup fields).
-    const providerDefault: EnvironmentConfig = {};
-
-    const resolved = resolveEnvironmentConfig({
+    return resolveLoadedEnvironmentConfig({
       ...(repoFileConfig !== undefined ? { repoFileConfig } : {}),
-      ...(savedEnvConfig !== undefined ? { savedEnvConfig } : {}),
-      providerDefault,
+      repositoryKey: input.repositoryIdentity.canonicalKey,
+      savedSandboxEnvironments: input.savedSandboxEnvironments,
     });
-    return { resolved, repoFilePresent };
   });
 }
