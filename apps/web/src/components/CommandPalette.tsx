@@ -87,6 +87,7 @@ import {
   buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
+  defaultSandboxProjectBrowsePath,
   type CommandPaletteActionItem,
   type CommandPaletteSubmenuItem,
   type CommandPaletteView,
@@ -492,14 +493,14 @@ function OpenCommandPaletteDialog() {
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
   const getAddProjectInitialQueryForEnvironment = useCallback(
     (environmentId: EnvironmentId | null): string => {
-      // Sandboxes seed the repo at a fixed /workspace root. Default the Add
-      // Project browse query there so the user does not have to type it each
-      // time. The host `addProjectBaseDirectory` setting still governs local
-      // (non-sandbox) environments and is kept separate.
+      // Sandboxes expose their repository at a driver-specific fixed root.
+      // Default Add Project there so its Git identity resolves from the actual
+      // clone instead of an empty generic workspace. The host
+      // `addProjectBaseDirectory` setting remains separate for non-sandboxes.
       if (environmentId !== null) {
         const record = savedEnvironmentRegistry[environmentId];
         if (record?.sandbox) {
-          return "/workspace/";
+          return defaultSandboxProjectBrowsePath(record.sandbox.providerKind);
         }
       }
       const environmentSettings =

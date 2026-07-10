@@ -3,6 +3,7 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@kata-sh
 import type { Thread } from "../types";
 import {
   buildThreadActionItems,
+  defaultSandboxProjectBrowsePath,
   filterCommandPaletteGroups,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
@@ -35,6 +36,16 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     ...overrides,
   };
 }
+
+describe("defaultSandboxProjectBrowsePath", () => {
+  it("opens Vercel projects at the native Git clone root", () => {
+    expect(defaultSandboxProjectBrowsePath("vercel")).toBe("/vercel/sandbox/");
+  });
+
+  it("preserves Docker's workspace root", () => {
+    expect(defaultSandboxProjectBrowsePath("docker")).toBe("/workspace/");
+  });
+});
 
 describe("buildThreadActionItems", () => {
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
