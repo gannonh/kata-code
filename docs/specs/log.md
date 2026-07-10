@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-10 (Vercel GitHub repository and branch seeding approved)
+
+Approved [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) for the Build phase. The Vercel `gh` installation procedure remains the first build gate.
+
 ## 2026-07-10 (Vercel GitHub repository and branch seeding drafted)
 
 Drafted [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) after interactive architecture approval; the written spec remains Draft pending review. The draft replaces Vercel host-repository archive seeding with native Git source from a selected GitHub repository and branch, retains Docker local-worktree seeding, preserves setup precedence, and requires persistent authenticated Git and `gh` in Vercel's snapshot-backed filesystem. Verified the installed `@vercel/sandbox` declarations support authenticated Git source with shallow depth and revision, and verified the active host `gh` session can supply a non-empty token without exposing it. The Vercel `gh` installation procedure remains a build-blocking runtime spike. Filed [#29](https://github.com/gannonh/kata-code/issues/29) and added the deferred-work entry for Docker remote-source seeding. Updated the specs roadmap.

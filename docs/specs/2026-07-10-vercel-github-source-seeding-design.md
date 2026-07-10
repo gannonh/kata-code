@@ -2,14 +2,15 @@
 type: Spec
 title: Vercel GitHub repository and branch seeding
 description: Create Vercel sandboxes from a selected GitHub repository and branch through Vercel native Git source support, while preserving authenticated Git and GitHub CLI access in persistent sandboxes.
-status: Draft
+status: Approved
+approved_at: 2026-07-10T17:07:30Z
 ---
 
 # Vercel GitHub repository and branch seeding
 
 ## Status
 
-Draft
+Approved
 
 ## Goal
 
