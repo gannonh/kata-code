@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
 import { dismissBlockingToasts } from "./navigation.ts";
@@ -41,9 +41,102 @@ export async function openProviderSettings(page: Page): Promise<void> {
 export async function openConnectionsSettings(page: Page): Promise<void> {
   await openSettings(page);
   await page.getByRole("button", { name: "Connections" }).click();
-  await expect(page.getByRole("button", { name: "Add sandbox environment" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Environments", level: 2 })).toBeVisible({
     timeout: E2E_TIMEOUTS.authMs,
   });
+  await expect(page.getByRole("button", { name: "Add environment" })).toBeVisible({
+    timeout: E2E_TIMEOUTS.authMs,
+  });
+}
+
+/** A single Environments deployment-target card, located by its display label. */
+export function deploymentTargetCard(page: Page, label: string): Locator {
+  const section = page
+    .getByRole("heading", { name: "Environments", level: 2 })
+    .locator("xpath=ancestor::section[1]");
+  return section.locator("div.border-t").filter({
+    has: page.getByRole("heading", { name: label, level: 3 }),
+  });
+}
+
+/**
+ * Open the Add Environment dialog and select a sandbox mode card. The dialog
+ * replaced the legacy single "Add sandbox environment" button + driver select
+ * with mode cards (Remote link / SSH / Docker container / Cloud Provider),
+ * each revealing its own fields.
+ */
+async function openAddEnvironmentDialog(
+  page: Page,
+  mode: "Docker container" | "Cloud Provider",
+): Promise<Locator> {
+  await page.getByRole("button", { name: "Add environment" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add Environment" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: mode }).click();
+  return dialog;
+}
+
+/**
+ * Add a Docker container sandbox environment and return its card. Image and
+ * start command are set explicitly so the test does not depend on default
+ * resolution under load.
+ */
+export async function addContainerEnvironment(page: Page, label: string): Promise<Locator> {
+  const dialog = await openAddEnvironmentDialog(page, "Docker container");
+  await dialog.getByLabel("Label").fill(label);
+  await dialog.getByLabel("Image").fill("katacode:local");
+  await dialog.getByLabel("Start command").fill("katacode serve --port 13773");
+  await dialog.getByRole("button", { name: "Add environment", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  const card = deploymentTargetCard(page, label);
+  await expect(card).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
+  await expect(card.getByText("docker", { exact: true })).toBeVisible();
+  return card;
+}
+
+/**
+ * Add a Vercel Sandbox (Cloud Provider) environment and return its card. The
+ * dialog only captures the label; the Vercel auth trio and GitHub source are
+ * configured on the expanded card.
+ */
+export async function addVercelEnvironment(page: Page, label: string): Promise<Locator> {
+  const dialog = await openAddEnvironmentDialog(page, "Cloud Provider");
+  await dialog.getByLabel("Label").fill(label);
+  await dialog.getByRole("button", { name: "Add environment", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  const card = deploymentTargetCard(page, label);
+  await expect(card).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
+  await expect(card.getByText("vercel", { exact: true })).toBeVisible();
+  return card;
+}
+
+/**
+ * Select a GitHub repository and branch in the expanded Vercel card's source
+ * picker. Both are searchable comboboxes backed by the host `gh` session. When
+ * `branch` is omitted the repository's default branch (auto-selected on repo
+ * choice) is kept.
+ */
+export async function selectVercelSource(
+  page: Page,
+  card: Locator,
+  input: { readonly repository: string; readonly branch?: string | undefined },
+): Promise<void> {
+  await card.getByRole("button", { name: "Select a repository" }).click();
+  const repoSearch = page.getByRole("textbox", { name: "Search GitHub repositories" });
+  await repoSearch.fill(input.repository);
+  await page
+    .getByRole("option", { name: new RegExp(input.repository, "i") })
+    .first()
+    .click();
+
+  if (input.branch !== undefined) {
+    await card.getByRole("button", { name: /Select a branch|^Branch$/ }).click();
+    const branchSearch = page.getByRole("textbox", { name: "Search branches" });
+    await branchSearch.fill(input.branch);
+    await page.getByRole("option", { name: input.branch, exact: true }).first().click();
+  }
 }
 
 export async function setTheme(page: Page, theme: ThemePreference): Promise<void> {

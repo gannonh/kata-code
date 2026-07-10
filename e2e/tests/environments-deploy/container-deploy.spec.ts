@@ -1,5 +1,4 @@
 import { request } from "node:http";
-import type { Locator, Page } from "@playwright/test";
 import {
   assertDockerDaemonReachable,
   assertKatacodeImageBuilt,
@@ -7,7 +6,11 @@ import {
 } from "../../src/harness/env.ts";
 import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
-import { openConnectionsSettings } from "../../src/flows/settings.ts";
+import {
+  addContainerEnvironment,
+  deploymentTargetCard,
+  openConnectionsSettings,
+} from "../../src/flows/settings.ts";
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
 import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/workspace.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
@@ -72,34 +75,6 @@ interface DockerExecResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
-}
-
-function deploymentTargetCard(page: Page, label: string): Locator {
-  const section = page
-    .getByRole("heading", { name: "Sandbox environments", level: 2 })
-    .locator("xpath=ancestor::section[1]");
-  return section.locator("div.border-t").filter({
-    has: page.getByRole("heading", { name: label, level: 3 }),
-  });
-}
-
-async function addContainerDeploymentTarget(page: Page, label: string): Promise<Locator> {
-  await page.getByRole("button", { name: "Add sandbox environment" }).click();
-  const dialog = page.getByRole("dialog", { name: "Add container sandbox environment" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel("Label").fill(label);
-  // Fill image + command explicitly (the dialog defaults to these, but set
-  // them so the test does not depend on default resolution under load).
-  await dialog.getByLabel("Image").fill("katacode:local");
-  await dialog.getByLabel("Start command").fill("katacode serve --port 13773");
-  await dialog.getByRole("button", { name: "Add sandbox environment" }).click();
-  await expect(dialog).toBeHidden();
-
-  const card = deploymentTargetCard(page, label);
-  await expect(card).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
-  await expect(card.getByText("docker", { exact: true })).toBeVisible();
-  await expect(card.getByText("available")).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
-  return card;
 }
 
 async function dockerEngineRequest(
@@ -257,7 +232,8 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await openConnectionsSettings(page);
     await dismissBlockingToasts(page);
 
-    const card = await addContainerDeploymentTarget(page, "E2E Smoke");
+    const card = await addContainerEnvironment(page, "E2E Smoke");
+    await expect(card.getByText("available")).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
 
     // Expand the card to reach the config + Test connection controls.
     await card.getByRole("button", { name: /Toggle .* details/ }).click();
@@ -340,7 +316,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await openConnectionsSettings(page);
     await dismissBlockingToasts(page);
 
-    await addContainerDeploymentTarget(page, "E2E Phase2");
+    await addContainerEnvironment(page, "E2E Phase2");
 
     await createOrOpenProject(page, workspacePath);
     await openConnectionsSettings(page);
@@ -437,7 +413,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
 
-      const card = await addContainerDeploymentTarget(page, "E2E Phase3a");
+      const card = await addContainerEnvironment(page, "E2E Phase3a");
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
       await dismissBlockingToasts(page);
@@ -504,7 +480,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
 
-      const card = await addContainerDeploymentTarget(page, "E2E Lifecycle");
+      const card = await addContainerEnvironment(page, "E2E Lifecycle");
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
       // Create & run the sandbox.

@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-10 (environments-deploy E2E rewrite for reworked setup UI)
+
+Rewrote the `@environments-deploy` Electron E2E for the reworked Environments UI. The shared [`settings.ts`](../../e2e/src/flows/settings.ts) flow now targets the `Add environment` mode-card dialog and `Environments` section, with `addContainerEnvironment`, `addVercelEnvironment`, `selectVercelSource`, and a shared `deploymentTargetCard` helper. [`container-deploy.spec.ts`](../../e2e/tests/environments-deploy/container-deploy.spec.ts) consumes the shared helpers; [`vercel-deploy.spec.ts`](../../e2e/tests/environments-deploy/vercel-deploy.spec.ts) adds GitHub source selection, a source-required Create gate, source-lock copy, and a New worktree base-branch assertion proving the detached-HEAD repair. Source-selecting tests are credential-gated on `E2E_VERCEL_SOURCE_REPOSITORY`. Marked deferred-work [#32](https://github.com/gannonh/kata-code/issues/32) accepted (specs authored; execution remains maintainer-local). Playwright lists all 9 specs.
+
 ## 2026-07-10 (Vercel detached source revision repair)
 
 Updated [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) after confirming that Vercel's native Git `revision` checkout can leave `HEAD` detached. The Vercel provider now creates the selected local branch before serving a newly provisioned sandbox and conditionally repairs a detached checkout during Start, enabling New worktree branch selection while preserving an existing branch checkout.
