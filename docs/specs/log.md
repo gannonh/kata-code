@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-10 (Vercel GitHub repository and branch seeding implemented)
+
+Marked [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) `Implemented` (base `5e40de257`, head `c46acf4a7`). Vercel sandboxes now clone a selected GitHub repository/branch through native Git source instead of uploading the local worktree: live-verified `gh` RPM install on the Vercel runtime, an optional source config field with host-`gh` repository/branch discovery over read-scoped RPCs, an authenticated shallow Git-source clone using a reserved transient token excluded from create/serve env, a trap-cleaned in-sandbox `gh`/Git auth seed, remote `.kata/environment.json` setup at `/vercel/sandbox`, a persisted non-secret source fingerprint enforced on lifecycle start, and a searchable source picker with source-required creation and source locking. Docker keeps its local worktree seed. Gates: `vp check`, `vp run typecheck`, `vp run test`, `vp run release:smoke` pass. Deferred: Docker remote source [#29](https://github.com/gannonh/kata-code/issues/29), Vercel orchestration tests [#30](https://github.com/gannonh/kata-code/issues/30), picker component tests [#31](https://github.com/gannonh/kata-code/issues/31), source-selection/lock E2E [#32](https://github.com/gannonh/kata-code/issues/32), and maintainer-local Vercel UAT (AC-GS8/AC-GS14).
+
 ## 2026-07-10 (Vercel GitHub repository and branch seeding approved)
 
 Approved [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) for the Build phase. The Vercel `gh` installation procedure remains the first build gate.

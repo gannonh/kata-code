@@ -30,6 +30,36 @@ Each entry should include:
 
 ## Deferred / review queue
 
+### Vercel source-selection Electron E2E
+
+- **Status:** deferred
+- **Tracking issue:** [#32](https://github.com/gannonh/kata-code/issues/32)
+- **Area:** sandbox, vercel, web, testing
+- **Source:** [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) (AC-GS13)
+- **Rationale:** The E2E harness spawns its own isolated stack and the Vercel path is maintainer-local UAT with no CI secret. A live source-selection E2E cannot run in default CI; static card/logic tests already cover source gating, canonical key, and lock copy.
+- **Revisit trigger:** When a maintainer-local credentialed Vercel E2E lane exists, or before release sign-off for this feature.
+- **Notes:** Drive repository + branch selection, assert Create disabled without a source, and assert locked source controls with the delete-to-change hint once a sandbox exists; record manual UAT evidence.
+
+### Vercel source picker component tests
+
+- **Status:** deferred
+- **Tracking issue:** [#31](https://github.com/gannonh/kata-code/issues/31)
+- **Area:** sandbox, vercel, web, testing
+- **Source:** [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) (AC-GS3, AC-GS13)
+- **Rationale:** `VercelSourcePicker` shipped with logic-level and static-markup coverage. Interactive combobox behavior and discovery RPC wiring need a component-test harness that mocks the sandbox client.
+- **Revisit trigger:** Next settings component-test pass, or when the picker changes.
+- **Notes:** Assert discovery RPCs fire on open, branch initializes from the repo default, loading/empty/error status renders, Load more paginates, and locked disables both triggers.
+
+### Vercel sandbox orchestration tests (GitHub source path)
+
+- **Status:** deferred
+- **Tracking issue:** [#30](https://github.com/gannonh/kata-code/issues/30)
+- **Area:** sandbox, vercel, server, testing
+- **Source:** [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) (AC-GS9, AC-GS11, AC-GS12)
+- **Rationale:** `SandboxService.startSession` Vercel orchestration needs a materialized Vercel driver, Connect finalization context, and a live-ish sandbox. The underlying units are covered; a `startSession` driver-fake harness is separate test infrastructure.
+- **Revisit trigger:** When a Vercel driver-fake `startSession` harness is built.
+- **Notes:** Assert reject-local-repo, source-required, dispose-on-setup-failure, start-from-stopped fingerprint mismatch, and `seedGitHubAuth` token redaction.
+
 ### Docker GitHub remote-source seeding
 
 - **Status:** deferred
