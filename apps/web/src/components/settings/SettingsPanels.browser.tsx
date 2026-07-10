@@ -160,7 +160,7 @@ const savedEnvironmentHarness = vi.hoisted(() => {
     readonly lastConnectedAt: string | null;
     readonly desktopSsh?: unknown;
     readonly relayManaged?: unknown;
-    readonly sandbox?: { readonly providerKind: string };
+    readonly sandbox?: { readonly providerKind: string; readonly instanceId?: string };
   };
   type RuntimeState = {
     readonly connectionState: "connecting" | "connected" | "disconnected" | "error";
@@ -755,6 +755,39 @@ describe("GeneralSettingsPanel observability", () => {
       expect(availableRuntimesSection?.textContent).toContain("Disconnect");
       expect(availableRuntimesSection?.textContent).not.toContain("Delete");
     });
+  });
+
+  it("waits for a settings snapshot before classifying a linked sandbox as orphaned", async () => {
+    const sandboxEnvironmentId = "environment-sandbox-vercel-pending";
+    window.desktopBridge = createDesktopBridgeStub();
+    authAccessHarness.setSnapshot({ pairingLinks: [], clientSessions: [] });
+    savedEnvironmentHarness.setRegistry({
+      [sandboxEnvironmentId]: {
+        environmentId: sandboxEnvironmentId,
+        label: "kata-code-sandbox",
+        httpBaseUrl: "https://vercel-test.example",
+        wsBaseUrl: "wss://vercel-test.example",
+        createdAt: "2036-04-07T00:00:00.000Z",
+        lastConnectedAt: "2036-04-07T09:21:00.000Z",
+        sandbox: {
+          providerKind: "vercel",
+          instanceId: "vercel_kata-code-sandbox",
+        },
+      },
+    });
+
+    // The saved environment registry can hydrate before the server's settings
+    // snapshot. Its target id must not be treated as absent during that window.
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ConnectionsSettings />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect
+      .element(page.getByRole("heading", { name: "Environments", exact: true }))
+      .toBeInTheDocument();
+    await expect.element(page.getByText("Orphaned sandbox runtime")).not.toBeInTheDocument();
   });
 
   it("hides advertised endpoint rows when desktop network access is disabled", async () => {

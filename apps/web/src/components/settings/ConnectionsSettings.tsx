@@ -2130,6 +2130,7 @@ export function ConnectionsSettings() {
   const { updateSettings } = useUpdateSettings();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primarySessionState = usePrimarySessionState();
+  const primaryServerConfig = useServerConfig();
   const currentSessionScopes = desktopBridge
     ? AuthAdministrativeScopes
     : primarySessionState.data?.authenticated
@@ -2198,6 +2199,12 @@ export function ConnectionsSettings() {
       Object.values(savedEnvironmentsById)
         .filter((record) => {
           if (record.relayManaged) return false;
+          // The saved-environment registry can hydrate before the server
+          // settings snapshot. Do not classify a linked sandbox as orphaned
+          // until its deployment-target map is known.
+          if (record.sandbox !== undefined && primaryServerConfig === null) {
+            return false;
+          }
           // Sandbox saved records are the runtime side of a sandbox instance
           // defined in `sandboxProviderInstances`. Skip when that instance
           // already renders its own expandable definition row; keep orphans
@@ -2211,7 +2218,7 @@ export function ConnectionsSettings() {
         })
         .toSorted((left, right) => left.label.localeCompare(right.label))
         .map((record) => record.environmentId),
-    [sandboxInstanceIds, savedEnvironmentsById],
+    [primaryServerConfig, sandboxInstanceIds, savedEnvironmentsById],
   );
   const savedDesktopSshEnvironmentsByAlias = useMemo(
     () =>
@@ -2318,7 +2325,6 @@ export function ConnectionsSettings() {
   const [pendingDesktopServerExposureMode, setPendingDesktopServerExposureMode] = useState<
     DesktopServerExposureState["mode"] | null
   >(null);
-  const primaryServerConfig = useServerConfig();
   const primaryVersionMismatch = resolveServerConfigVersionMismatch(primaryServerConfig);
   const [isAdvertisedEndpointListExpanded, setIsAdvertisedEndpointListExpanded] = useState(false);
   const defaultAdvertisedEndpointKey = useUiStateStore(
