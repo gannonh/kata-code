@@ -29,6 +29,17 @@ export const PROVIDER_CLI_PACKAGES: ReadonlyArray<string> = [
   "@earendil-works/pi-coding-agent",
 ];
 
+/** Install GitHub CLI from its official RPM repository on Amazon Linux 2023.
+ * Live-verified in a Vercel `node24` sandbox on 2026-07-10. */
+export function buildGitHubCliInstallScript(): string {
+  return [
+    "sudo dnf install -y 'dnf-command(config-manager)'",
+    "sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo",
+    "sudo dnf install -y gh",
+    "gh --version",
+  ].join(" && ");
+}
+
 /**
  * Build the bootstrap script run after a runtime provision. Creates
  * `SANDBOX_HOME` owned by the current user (with a no-sudo fallback for
@@ -59,6 +70,8 @@ export function buildBootstrapScript(): string {
     // Amazon Linux 2023 (Vercel sandbox runtime) uses dnf. node-pty needs
     // python3 + make + gcc-c++ for node-gyp to compile its native addon.
     `sudo dnf install -y python3 make gcc-c++ || true`,
+    `echo "[kata:bootstrap] installing GitHub CLI"`,
+    buildGitHubCliInstallScript(),
     `echo "[kata:bootstrap] installing CLIs"`,
     `npm install -g ${packagesSpec}`,
     `echo "[kata:bootstrap] done"`,
