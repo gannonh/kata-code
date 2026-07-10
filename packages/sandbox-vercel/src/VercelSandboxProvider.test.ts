@@ -6,7 +6,7 @@ import type { SandboxProvider } from "@kata-sh/code-sandbox/driver";
 
 import { makeVercelSandboxProvider, vercelSandboxName } from "./VercelSandboxProvider.ts";
 import type { VercelAuthParams, VercelSandboxInstance, VercelSdk } from "./sdk.ts";
-import { DEFAULT_VERCEL_CONFIG } from "./config.ts";
+import { DEFAULT_VERCEL_CONFIG, VERCEL_SOURCE_TOKEN_ENV } from "./config.ts";
 
 const AUTH: VercelAuthParams = { token: "tok", teamId: "team_1", projectId: "prj_1" };
 /** Deterministic Vercel name for the common `inst_1` fixture (includes hash suffix). */
@@ -170,11 +170,13 @@ function fakeSdk(
 const configWithAuth = (
   overrides: Partial<{
     persistent: boolean;
+    source: { repository: string; branch: string };
   }> = {},
 ) => ({
   ...DEFAULT_VERCEL_CONFIG,
   auth: AUTH,
   ...(overrides.persistent !== undefined ? { persistent: overrides.persistent } : {}),
+  ...(overrides.source !== undefined ? { source: overrides.source } : {}),
 });
 
 /** Collapse an effect's error channel into a `{ _tag: "Left"|"Right" }` value (Effect v4 has no `Effect.either`). */
@@ -368,6 +370,68 @@ describe("VercelSandboxProvider", () => {
       expect(createCall.env["VERCEL_PROJECT_ID"]).toBeUndefined();
       expect(createCall.env["KATACODE_DESKTOP_BOOTSTRAP_TOKEN"]).toBe("bt");
       expect(createCall.env["KATACODE_HOST"]).toBe("0.0.0.0");
+    }),
+  );
+
+  vitIt.effect(
+    "provision passes a native Git source with token credentials and shallow depth (AC-GS5)",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        yield* provider.provision({
+          instanceId: "inst_1",
+          config: configWithAuth({
+            source: { repository: "octocat/Hello-World", branch: "main" },
+          }),
+          image: "",
+          env: [[VERCEL_SOURCE_TOKEN_ENV, "gho_secrettoken"]],
+        });
+        const createCall = state.createCalls[0] as {
+          source?: {
+            type: string;
+            url: string;
+            username?: string;
+            password?: string;
+            depth?: number;
+            revision?: string;
+          };
+          env: Record<string, string>;
+        };
+        expect(createCall.source).toEqual({
+          type: "git",
+          url: "https://github.com/octocat/Hello-World.git",
+          username: "x-access-token",
+          password: "gho_secrettoken",
+          depth: 1,
+          revision: "main",
+        });
+        // The transient token must never reach the sandbox env.
+        expect(createCall.env[VERCEL_SOURCE_TOKEN_ENV]).toBeUndefined();
+        expect(
+          Object.values(createCall.env).some((value) => value.includes("gho_secrettoken")),
+        ).toBe(false);
+      }),
+  );
+
+  vitIt.effect("provision omits the source when no source is configured", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk();
+      const provider = makeProvider(sdk);
+      yield* provider.provision({
+        instanceId: "inst_1",
+        config: configWithAuth(),
+        image: "",
+        env: [[VERCEL_SOURCE_TOKEN_ENV, "gho_secrettoken"]],
+      });
+      const createCall = state.createCalls[0] as {
+        source?: unknown;
+        runtime?: string;
+        env: Record<string, string>;
+      };
+      expect(createCall.source).toBeUndefined();
+      expect(createCall.runtime).toBe("node24");
+      expect(createCall.env[VERCEL_SOURCE_TOKEN_ENV]).toBeUndefined();
     }),
   );
 

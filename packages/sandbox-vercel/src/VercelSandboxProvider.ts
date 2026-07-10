@@ -49,7 +49,14 @@ import {
 } from "@kata-sh/code-sandbox/driver";
 import type { SandboxProviderDescriptor } from "@kata-sh/code-sandbox/descriptor";
 
-import { VercelSandboxConfig, VERCEL_AUTH_ENV_VARS, decodeVercelSandboxConfig } from "./config.ts";
+import {
+  VercelSandboxConfig,
+  VERCEL_AUTH_ENV_VARS,
+  VERCEL_SOURCE_TOKEN_ENV,
+  GITHUB_TOKEN_GIT_USERNAME,
+  decodeVercelSandboxConfig,
+} from "./config.ts";
+import type { VercelGitSource } from "./sdk.ts";
 import type { VercelAuthParams, VercelSdk } from "./sdk.ts";
 import { isAuthError, isNotFound, liveVercelSdk } from "./sdk.ts";
 import { buildBootstrapScript, buildServeCommand, SANDBOX_HOME } from "./bootstrap.ts";
@@ -201,26 +208,54 @@ function resolveAuth(config: VercelSandboxConfig): VercelAuthParams | undefined 
   return config.auth;
 }
 
-/** Env passed into `Sandbox.create` — excludes the auth trio and adds KATA_* server env. */
+/** Env names never passed into the sandbox (auth trio + transient source token). */
+const EXCLUDED_SANDBOX_ENV = new Set<string>([...VERCEL_AUTH_ENV_VARS, VERCEL_SOURCE_TOKEN_ENV]);
+
+/** Read the transient GitHub source token from a provision request's env. */
+function readSourceToken(req: {
+  readonly env?: ReadonlyArray<readonly [string, string]>;
+}): string | undefined {
+  for (const [k, v] of req.env ?? []) {
+    if (k === VERCEL_SOURCE_TOKEN_ENV && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+/** Build the native Git source payload from a configured source + token.
+ *  Returns `undefined` when no source is configured. */
+function buildGitSource(
+  config: VercelSandboxConfig,
+  token: string | undefined,
+): VercelGitSource | undefined {
+  const source = config.source;
+  if (source === undefined) return undefined;
+  return {
+    type: "git",
+    url: `https://github.com/${source.repository}.git`,
+    ...(token !== undefined ? { username: GITHUB_TOKEN_GIT_USERNAME, password: token } : {}),
+    depth: 1,
+    revision: source.branch,
+  };
+}
+
+/** Env passed into `Sandbox.create` — excludes the auth trio + source token, adds KATA_* server env. */
 function buildCreateEnv(req: SandboxProvisionRequest): Record<string, string> {
   const env: Record<string, string> = {};
-  const excluded = new Set<string>(VERCEL_AUTH_ENV_VARS);
   for (const [k, v] of req.env ?? []) {
-    if (excluded.has(k)) continue;
+    if (EXCLUDED_SANDBOX_ENV.has(k)) continue;
     env[k] = v;
   }
   for (const [k, v] of KATA_SERVER_ENV) env[k] = v;
   return env;
 }
 
-/** Env inlined at `katacode serve` launch — excludes the auth trio, adds KATA_* server env. */
+/** Env inlined at `katacode serve` launch — excludes the auth trio + source token, adds KATA_* server env. */
 function buildServeEnv(req: {
   readonly env?: ReadonlyArray<readonly [string, string]>;
 }): ReadonlyArray<readonly [string, string]> {
-  const excluded = new Set<string>(VERCEL_AUTH_ENV_VARS);
   const env: Array<readonly [string, string]> = [];
   for (const [k, v] of req.env ?? []) {
-    if (excluded.has(k)) continue;
+    if (EXCLUDED_SANDBOX_ENV.has(k)) continue;
     env.push([k, v]);
   }
   for (const [k, v] of KATA_SERVER_ENV) env.push([k, v]);
@@ -529,6 +564,10 @@ export function makeVercelSandboxProvider(
         const createEnv = buildCreateEnv(req);
         const name = vercelSandboxName(req.instanceId, req.nameNamespace);
         const persistent = decoded.persistent;
+        // Native Git source (when configured): clone the selected repo/branch
+        // into /vercel/sandbox using the transient GitHub token supplied in the
+        // provision env. The token is excluded from the sandbox env above.
+        const source = buildGitSource(decoded, readSourceToken(req));
         // NEVER retry create — it is billable and non-idempotent.
         const sb = yield* trySdk(
           "provision.create",
@@ -537,6 +576,7 @@ export function makeVercelSandboxProvider(
               ...auth,
               name,
               runtime: decoded.runtime,
+              ...(source !== undefined ? { source } : {}),
               ...(decoded.vcpus !== undefined ? { resources: { vcpus: decoded.vcpus } } : {}),
               ports: [decoded.port],
               timeout: decoded.timeoutMs,
