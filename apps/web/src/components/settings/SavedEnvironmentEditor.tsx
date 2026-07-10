@@ -39,6 +39,9 @@ interface SavedEnvironmentEditorProps {
   readonly selectedRepositoryKey: string | undefined;
   readonly onSelectedRepositoryKeyChange: (repositoryKey: string) => void;
   readonly onChange: (next: SavedSandboxEnvironmentMap) => void;
+  /** When set (Vercel), key the editor to this repository and show a static
+   *  label instead of the local-project selector. */
+  readonly fixedRepository?: { readonly repositoryKey: string; readonly label: string };
 }
 
 function projectRepositoryKey(project: RepositoryProject): string {
@@ -80,6 +83,7 @@ export function SavedEnvironmentEditor({
   selectedRepositoryKey,
   onSelectedRepositoryKeyChange,
   onChange,
+  fixedRepository,
 }: SavedEnvironmentEditorProps) {
   const repositoryProjects = useMemo(() => {
     const seen = new Set<string>();
@@ -93,7 +97,11 @@ export function SavedEnvironmentEditor({
     });
   }, [projects]);
   const selectedProject = findSelectedProject(repositoryProjects, selectedRepositoryKey);
-  const repositoryKey = selectedProject ? projectRepositoryKey(selectedProject) : undefined;
+  const repositoryKey = fixedRepository
+    ? fixedRepository.repositoryKey
+    : selectedProject
+      ? projectRepositoryKey(selectedProject)
+      : undefined;
   const savedEnvironment: SavedSandboxEnvironment | undefined = repositoryKey
     ? savedSandboxEnvironments?.[repositoryKey as RepositoryCanonicalKey]
     : undefined;
@@ -106,7 +114,7 @@ export function SavedEnvironmentEditor({
     setTerminalDrafts((savedEnvironment?.terminals ?? []).map(makeTerminalDraftRow));
   }, [savedEnvironment?.terminals]);
 
-  if (repositoryProjects.length === 0) {
+  if (!fixedRepository && repositoryProjects.length === 0) {
     return (
       <div className="grid gap-1.5">
         <span className="text-xs font-medium text-foreground">Saved environment</span>
@@ -159,29 +167,39 @@ export function SavedEnvironmentEditor({
         >
           Saved environment
         </label>
-        <Select
-          value={repositoryKey}
-          onValueChange={(nextKey) => {
-            if (nextKey) onSelectedRepositoryKeyChange(nextKey);
-          }}
-        >
-          <SelectTrigger id={`saved-environment-repo-${repositoryKey}`} className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {repositoryProjects.map((project) => {
-              const key = projectRepositoryKey(project);
-              return (
-                <SelectItem key={key} value={key}>
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate">{projectLabel(project)}</span>
-                    <span className="truncate text-[11px] text-muted-foreground">{key}</span>
-                  </span>
-                </SelectItem>
-              );
-            })}
-          </SelectPopup>
-        </Select>
+        {fixedRepository ? (
+          <div
+            id={`saved-environment-repo-${repositoryKey}`}
+            className="flex min-w-0 flex-col rounded-md border border-border/70 px-3 py-2"
+          >
+            <span className="truncate text-sm">{fixedRepository.label}</span>
+            <span className="truncate text-[11px] text-muted-foreground">{repositoryKey}</span>
+          </div>
+        ) : (
+          <Select
+            value={repositoryKey}
+            onValueChange={(nextKey) => {
+              if (nextKey) onSelectedRepositoryKeyChange(nextKey);
+            }}
+          >
+            <SelectTrigger id={`saved-environment-repo-${repositoryKey}`} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {repositoryProjects.map((project) => {
+                const key = projectRepositoryKey(project);
+                return (
+                  <SelectItem key={key} value={key}>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">{projectLabel(project)}</span>
+                      <span className="truncate text-[11px] text-muted-foreground">{key}</span>
+                    </span>
+                  </SelectItem>
+                );
+              })}
+            </SelectPopup>
+          </Select>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">

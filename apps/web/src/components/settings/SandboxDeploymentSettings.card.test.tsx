@@ -201,4 +201,63 @@ describe("DeploymentTargetCard lifecycle actions (AC-L10/L11/L12)", () => {
     expect(html).toContain("2 vCPU / 4 GB RAM");
     expect(html).toContain("Toggle Cloud details");
   });
+
+  it("vercel: renders the GitHub repository and Branch source pickers (AC-GS3)", () => {
+    const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
+    const instance = {
+      driver: VERCEL_KIND,
+      config: { runtime: "node24", persistent: true, timeoutMs: 86_400_000, port: 13773, vcpus: 2 },
+    } as unknown as SandboxProviderInstanceConfig;
+    const html = renderCard({
+      ...makeProps({ summary: noSessionSummary() }),
+      instance,
+      displayName: "Cloud",
+    });
+    expect(html).toContain(">GitHub repository<");
+    expect(html).toContain(">Branch<");
+    expect(html).toContain("Select a repository");
+  });
+
+  it("vercel: disables Create when no source is selected (AC-GS4)", () => {
+    const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
+    const instance = {
+      driver: VERCEL_KIND,
+      config: { runtime: "node24", persistent: true, timeoutMs: 86_400_000, port: 13773, vcpus: 2 },
+    } as unknown as SandboxProviderInstanceConfig;
+    const html = renderCard({
+      ...makeProps({ summary: noSessionSummary() }),
+      instance,
+      displayName: "Cloud",
+    });
+    // The Create button renders disabled with no configured source.
+    const createIndex = html.indexOf("Create &amp; run sandbox");
+    expect(createIndex).toBeGreaterThan(-1);
+    const buttonStart = html.lastIndexOf("<button", createIndex);
+    expect(html.slice(buttonStart, createIndex)).toContain("disabled");
+  });
+
+  it("vercel: enables Create and locks the source once a source is selected + running (AC-GS4/AC-GS11)", () => {
+    const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
+    const instance = {
+      driver: VERCEL_KIND,
+      config: {
+        runtime: "node24",
+        persistent: true,
+        timeoutMs: 86_400_000,
+        port: 13773,
+        vcpus: 2,
+        source: { repository: "octocat/Hello-World", branch: "main" },
+      },
+    } as unknown as SandboxProviderInstanceConfig;
+    const running = {
+      ...(runningSummary() as Record<string, unknown>),
+      driver: "vercel",
+    } as unknown as SandboxInstanceSummary;
+    const html = renderCard({
+      ...makeProps({ summary: running }),
+      instance,
+      displayName: "Cloud",
+    });
+    expect(html).toContain("Delete this sandbox to change its repository or branch.");
+  });
 });

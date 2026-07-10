@@ -4,6 +4,7 @@ import {
   type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
 } from "@kata-sh/code-contracts";
+import { normalizeGitRemoteUrl } from "@kata-sh/code-shared/git";
 
 export const DOCKER_SANDBOX_KIND = SandboxProviderDriverKind.make("docker");
 export const VERCEL_SANDBOX_KIND = SandboxProviderDriverKind.make("vercel");
@@ -105,6 +106,80 @@ export function buildVercelSandboxProviderInstance(input: {
 export function shouldSeedRepositoryForStart(summary: SandboxInstanceSummary | undefined): boolean {
   if (summary?.kind !== "available") return true;
   return summary.runningSession === undefined;
+}
+
+/** A Vercel GitHub source selection persisted on the instance config. */
+export interface VercelSourceSelection {
+  readonly repository: string;
+  readonly branch: string;
+}
+
+/** Read the `{ repository, branch }` source from an opaque Vercel config, or
+ *  null when either value is missing. */
+export function readVercelSource(config: unknown): VercelSourceSelection | null {
+  if (config === null || typeof config !== "object") return null;
+  const source = (config as Record<string, unknown>).source;
+  if (source === null || typeof source !== "object") return null;
+  const repository = (source as Record<string, unknown>).repository;
+  const branch = (source as Record<string, unknown>).branch;
+  if (
+    typeof repository !== "string" ||
+    repository.trim().length === 0 ||
+    typeof branch !== "string" ||
+    branch.trim().length === 0
+  ) {
+    return null;
+  }
+  return { repository: repository.trim(), branch: branch.trim() };
+}
+
+/** Write a Vercel source onto an opaque config, clearing it when repository is
+ *  empty. Branch resets when the repository changes. */
+export function setVercelSource(
+  config: unknown,
+  next: { readonly repository?: string; readonly branch?: string },
+): Record<string, unknown> | undefined {
+  const base: Record<string, unknown> =
+    config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
+  // Read the raw source (repo-only intermediate states have no branch yet).
+  const rawSource =
+    base.source !== null && typeof base.source === "object"
+      ? (base.source as Record<string, unknown>)
+      : {};
+  const currentRepository =
+    typeof rawSource.repository === "string" ? rawSource.repository.trim() : "";
+  const currentBranch = typeof rawSource.branch === "string" ? rawSource.branch.trim() : "";
+  const repository = (next.repository ?? currentRepository).trim();
+  if (repository.length === 0) {
+    delete base.source;
+    return Object.keys(base).length > 0 ? base : undefined;
+  }
+  // Reset the branch when the repository changes.
+  const branchBase =
+    next.repository !== undefined && next.repository.trim() !== currentRepository
+      ? ""
+      : currentBranch;
+  const branch = (next.branch ?? branchBase).trim();
+  base.source = { repository, ...(branch.length > 0 ? { branch } : {}) };
+  return base;
+}
+
+/** The canonical GitHub repository key for an `owner/name` selection
+ *  (`github.com/<owner>/<name>` lowercased). Reuses the shared
+ *  `normalizeGitRemoteUrl` so it matches the server derivation exactly. */
+export function vercelSourceRepositoryKey(repository: string): string {
+  const owner = repository.trim().replace(/\.git$/i, "");
+  return normalizeGitRemoteUrl(`https://github.com/${owner}.git`);
+}
+
+/** Whether a Vercel target can be created: a complete source is required.
+ *  Non-Vercel drivers are unaffected (always true). */
+export function canCreateVercelSandbox(input: {
+  readonly isVercel: boolean;
+  readonly config: unknown;
+}): boolean {
+  if (!input.isVercel) return true;
+  return readVercelSource(input.config) !== null;
 }
 
 export function makeSandboxProviderInstanceId(input: {

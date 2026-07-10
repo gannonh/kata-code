@@ -38,7 +38,14 @@ import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
 import { ProviderSignInDialog } from "./ProviderSignInDialog";
 import { DockerConfigFields, VercelConfigFields } from "./SandboxDriverConfigFields";
 import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
-import { shouldSeedRepositoryForStart } from "./SandboxDeploymentSettings.logic";
+import { VercelSourcePicker } from "./VercelSourcePicker";
+import {
+  shouldSeedRepositoryForStart,
+  canCreateVercelSandbox,
+  readVercelSource,
+  setVercelSource,
+  vercelSourceRepositoryKey,
+} from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
 
 const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
@@ -235,7 +242,11 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
-        const shouldSeedRepository = shouldSeedRepositoryForStart(summaryById[instanceId]);
+        // Vercel clones its GitHub source server-side from config; never attach
+        // a local project repository for it.
+        const isVercelInstance = (instance?.driver as string) === (VERCEL_KIND as string);
+        const shouldSeedRepository =
+          !isVercelInstance && shouldSeedRepositoryForStart(summaryById[instanceId]);
         const project = shouldSeedRepository ? resolveSelectedProject(instanceId) : undefined;
         const startedRepositoryKey = shouldSeedRepository
           ? (project?.repositoryIdentity?.canonicalKey as string | undefined)
@@ -690,6 +701,40 @@ export function DeploymentTargetCard({
     );
   };
 
+  // Vercel source selection (GitHub repository + branch). The source is locked
+  // once a sandbox exists; creation requires a complete source.
+  const vercelSource = isVercel ? readVercelSource(instance.config) : null;
+  const sourceLocked = isVercel && sessionStatus !== undefined;
+  const vercelSourceKey = vercelSource
+    ? vercelSourceRepositoryKey(vercelSource.repository)
+    : undefined;
+  const createDisabledForSource = !canCreateVercelSandbox({
+    isVercel,
+    config: instance.config,
+  });
+
+  const setSource = (next: { repository?: string; branch?: string }) => {
+    const { config: _omit, ...rest } = instance;
+    const nextConfig = setVercelSource(instance.config, next);
+    const nextInstance =
+      nextConfig !== undefined
+        ? ({ ...rest, config: nextConfig } as SandboxProviderInstanceConfig)
+        : (rest as SandboxProviderInstanceConfig);
+    // Keep the settings envelope repositoryKey aligned with the source so saved
+    // per-repo settings key consistently with the server derivation.
+    const source = nextConfig ? readVercelSource(nextConfig) : null;
+    const withKey = source
+      ? ({
+          ...nextInstance,
+          repositoryKey: vercelSourceRepositoryKey(source.repository),
+        } as SandboxProviderInstanceConfig)
+      : (() => {
+          const { repositoryKey: _dropKey, ...withoutKey } = nextInstance;
+          return withoutKey as SandboxProviderInstanceConfig;
+        })();
+    onUpdate(withKey);
+  };
+
   return (
     <div className="border-t border-border/60 first:border-t-0">
       <div className="px-4 py-3.5 sm:px-5">
@@ -798,12 +843,29 @@ export function DeploymentTargetCard({
             </div>
 
             {isVercel ? (
-              <VercelConfigFields
-                config={instance.config}
-                idPrefix={`sandbox-instance-${instanceId}`}
-                onChange={updateConfig}
-                machineSizeLocked={sessionStatus !== undefined}
-              />
+              <>
+                <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                  <VercelSourcePicker
+                    idPrefix={`sandbox-instance-${instanceId}`}
+                    repository={vercelSource?.repository}
+                    branch={vercelSource?.branch}
+                    locked={sourceLocked}
+                    onRepositoryChange={({ repository, defaultBranch }) =>
+                      setSource({
+                        repository,
+                        ...(defaultBranch.length > 0 ? { branch: defaultBranch } : {}),
+                      })
+                    }
+                    onBranchChange={(branch) => setSource({ branch })}
+                  />
+                </div>
+                <VercelConfigFields
+                  config={instance.config}
+                  idPrefix={`sandbox-instance-${instanceId}`}
+                  onChange={updateConfig}
+                  machineSizeLocked={sessionStatus !== undefined}
+                />
+              </>
             ) : (
               <DockerConfigFields
                 config={instance.config}
@@ -830,9 +892,17 @@ export function DeploymentTargetCard({
               <SavedEnvironmentEditor
                 projects={projects}
                 savedSandboxEnvironments={savedSandboxEnvironments}
-                selectedRepositoryKey={selectedRepositoryKey}
-                onSelectedRepositoryKeyChange={onSelectedRepositoryKeyChange}
+                selectedRepositoryKey={isVercel ? vercelSourceKey : selectedRepositoryKey}
+                onSelectedRepositoryKeyChange={isVercel ? () => {} : onSelectedRepositoryKeyChange}
                 onChange={onSavedEnvironmentChange}
+                {...(isVercel && vercelSource
+                  ? {
+                      fixedRepository: {
+                        repositoryKey: vercelSourceKey as string,
+                        label: vercelSource.repository,
+                      },
+                    }
+                  : {})}
               />
             </div>
 
@@ -896,7 +966,7 @@ export function DeploymentTargetCard({
                   <>
                     <Button
                       size="sm"
-                      disabled={instanceBusy !== undefined || !available}
+                      disabled={instanceBusy !== undefined || !available || createDisabledForSource}
                       onClick={onStart}
                     >
                       {instanceBusy === "start" ? "Starting…" : "Create & run sandbox"}
