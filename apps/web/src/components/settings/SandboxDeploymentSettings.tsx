@@ -843,29 +843,12 @@ export function DeploymentTargetCard({
             </div>
 
             {isVercel ? (
-              <>
-                <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-                  <VercelSourcePicker
-                    idPrefix={`sandbox-instance-${instanceId}`}
-                    repository={vercelSource?.repository}
-                    branch={vercelSource?.branch}
-                    locked={sourceLocked}
-                    onRepositoryChange={({ repository, defaultBranch }) =>
-                      setSource({
-                        repository,
-                        ...(defaultBranch.length > 0 ? { branch: defaultBranch } : {}),
-                      })
-                    }
-                    onBranchChange={(branch) => setSource({ branch })}
-                  />
-                </div>
-                <VercelConfigFields
-                  config={instance.config}
-                  idPrefix={`sandbox-instance-${instanceId}`}
-                  onChange={updateConfig}
-                  machineSizeLocked={sessionStatus !== undefined}
-                />
-              </>
+              <VercelConfigFields
+                config={instance.config}
+                idPrefix={`sandbox-instance-${instanceId}`}
+                onChange={updateConfig}
+                machineSizeLocked={sessionStatus !== undefined}
+              />
             ) : (
               <DockerConfigFields
                 config={instance.config}
@@ -889,21 +872,45 @@ export function DeploymentTargetCard({
             </div>
 
             <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-              <SavedEnvironmentEditor
-                projects={projects}
-                savedSandboxEnvironments={savedSandboxEnvironments}
-                selectedRepositoryKey={isVercel ? vercelSourceKey : selectedRepositoryKey}
-                onSelectedRepositoryKeyChange={isVercel ? () => {} : onSelectedRepositoryKeyChange}
-                onChange={onSavedEnvironmentChange}
-                {...(isVercel && vercelSource
-                  ? {
-                      fixedRepository: {
-                        repositoryKey: vercelSourceKey as string,
-                        label: vercelSource.repository,
-                      },
+              {isVercel ? (
+                <div className="grid gap-4">
+                  <VercelSourcePicker
+                    idPrefix={`sandbox-instance-${instanceId}`}
+                    repository={vercelSource?.repository}
+                    branch={vercelSource?.branch}
+                    locked={sourceLocked}
+                    onRepositoryChange={({ repository, defaultBranch }) =>
+                      setSource({
+                        repository,
+                        ...(defaultBranch.length > 0 ? { branch: defaultBranch } : {}),
+                      })
                     }
-                  : {})}
-              />
+                    onBranchChange={(branch) => setSource({ branch })}
+                  />
+                  {vercelSource && vercelSourceKey ? (
+                    <SavedEnvironmentEditor
+                      projects={projects}
+                      savedSandboxEnvironments={savedSandboxEnvironments}
+                      selectedRepositoryKey={undefined}
+                      onSelectedRepositoryKeyChange={() => {}}
+                      onChange={onSavedEnvironmentChange}
+                      fixedRepositoryKey={vercelSourceKey}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Choose a GitHub repository and branch to configure its setup.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <SavedEnvironmentEditor
+                  projects={projects}
+                  savedSandboxEnvironments={savedSandboxEnvironments}
+                  selectedRepositoryKey={selectedRepositoryKey}
+                  onSelectedRepositoryKeyChange={onSelectedRepositoryKeyChange}
+                  onChange={onSavedEnvironmentChange}
+                />
+              )}
             </div>
 
             <div className="space-y-3 border-t border-border/60 px-4 py-3 sm:px-5">

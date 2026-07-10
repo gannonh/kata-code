@@ -113,9 +113,11 @@ Vercel cards replace the local-project “Saved environment” selector with com
 
 1. **GitHub repository** is a keyboard-accessible searchable combobox with loading, empty, and error states.
 2. **Branch** is disabled until a repository is selected, initializes to the repository default branch, and uses a searchable paginated combobox.
-3. Existing install, start, terminal, and repository environment-variable fields appear under the selected source and continue to edit saved settings for that repository key.
+3. Existing install, start, terminal, and repository environment-variable fields appear immediately under the selected source controls and continue to edit saved settings for that repository key.
 
-`SavedEnvironmentEditor` receives the selected canonical repository key and display label directly for Vercel, rather than a list of open local projects and its own repository selector. Docker continues supplying its local-project selector.
+`SavedEnvironmentEditor` receives the selected canonical repository key directly for Vercel and renders no second repository field. The GitHub repository and branch controls are the sole Vercel source selector. Docker continues supplying its local-project selector.
+
+When Add Project opens for a Vercel sandbox, its filesystem browser starts at `/vercel/sandbox/`, Vercel's native Git clone root. This lets repository identity resolution group the remote source with the matching local project.
 
 `Create & run sandbox` is disabled until both controls are selected. Test connection remains available without a source because it only validates Vercel credentials. When a Vercel sandbox is running or stopped, source controls are disabled with a clear instruction to delete the sandbox before changing repository or branch.
 
@@ -182,6 +184,7 @@ Implement only Vercel native Git source, GitHub repository/branch selection, rem
 3. `923f8914d` feat(sandbox-vercel): clone from native git source — SDK wrapper Git-source union; provision builds `{type:"git", url, username:"x-access-token", password, depth:1, revision}` from config + a reserved transient token env excluded from create/serve env.
 4. `0300210c2` feat(sandbox): seed vercel github source setup — provision routing (Vercel vs Docker), injected host GitHub token, trap-cleaned auth seed, remote `.kata/environment.json` read at `/vercel/sandbox`, dynamic setup workspace, non-secret `sourceFingerprint` persisted and enforced on lifecycle start.
 5. `c46acf4a7` feat(web): add vercel github source picker — accessible searchable repository/branch comboboxes with pagination, source-required Create gating, source locking, and saved-env binding to the selected source.
+6. `555789ed7` fix(web): open Vercel projects at clone root — Add Project now starts at `/vercel/sandbox/` for Vercel so its Git identity groups with the matching project.
 
 ### Acceptance status
 

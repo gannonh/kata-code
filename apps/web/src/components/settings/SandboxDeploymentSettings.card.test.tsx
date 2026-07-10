@@ -186,6 +186,11 @@ describe("DeploymentTargetCard lifecycle actions (AC-L10/L11/L12)", () => {
     expect(html).toContain("stopped");
   });
 
+  it("docker: retains the saved environment selector", () => {
+    const html = renderCard(makeProps({ summary: noSessionSummary() }));
+    expect(html).toContain(">Saved environment<");
+  });
+
   it("vercel: renders machine size select and chevron affordance", () => {
     const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
     const instance = {
@@ -216,6 +221,37 @@ describe("DeploymentTargetCard lifecycle actions (AC-L10/L11/L12)", () => {
     expect(html).toContain(">GitHub repository<");
     expect(html).toContain(">Branch<");
     expect(html).toContain("Select a repository");
+    expect(html).toContain("Choose a GitHub repository and branch to configure its setup.");
+    expect(html).not.toContain(">Saved environment<");
+  });
+
+  it("vercel: groups source selection with repository setup without a second repository field", () => {
+    const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
+    const instance = {
+      driver: VERCEL_KIND,
+      config: {
+        runtime: "node24",
+        persistent: true,
+        timeoutMs: 86_400_000,
+        port: 13773,
+        vcpus: 2,
+        source: { repository: "octocat/Hello-World", branch: "main" },
+      },
+    } as unknown as SandboxProviderInstanceConfig;
+    const html = renderCard({
+      ...makeProps({ summary: noSessionSummary() }),
+      instance,
+      displayName: "Cloud",
+    });
+
+    const runtimeEnvironment = html.indexOf("Runtime environment variables");
+    const repository = html.indexOf(">GitHub repository<");
+    const branch = html.indexOf(">Branch<");
+    const install = html.indexOf(">Install<");
+    expect(runtimeEnvironment).toBeLessThan(repository);
+    expect(repository).toBeLessThan(branch);
+    expect(branch).toBeLessThan(install);
+    expect(html).not.toContain(">Saved environment<");
   });
 
   it("vercel: disables Create when no source is selected (AC-GS4)", () => {
