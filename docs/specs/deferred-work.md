@@ -30,6 +30,16 @@ Each entry should include:
 
 ## Deferred / review queue
 
+### Docker GitHub remote-source seeding
+
+- **Status:** deferred
+- **Tracking issue:** [#29](https://github.com/gannonh/kata-code/issues/29)
+- **Area:** sandbox, docker, source-control
+- **Source:** [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md)
+- **Rationale:** The approved source-selection work targets Vercel native Git source. Docker retains its established local-worktree archive seed path so the feature does not introduce two provisioning redesigns together.
+- **Revisit trigger:** When a separately approved Docker source-selection and provisioning design is scheduled.
+- **Notes:** Define Docker repository/branch UX, local-versus-remote seed behavior, GitHub credential handling, lifecycle semantics, migration path, automated coverage, and maintainer validation without regressing local Docker deployment.
+
 ### Pi provider full adapter parity
 
 - **Status:** closed
