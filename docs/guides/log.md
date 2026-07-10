@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-07-10 (Repository environment configuration)
+
+Added [Repository environment configuration](/user/repository-environment-config.md), a user reference for `.kata/environment.json`: supported setup fields, an example, per-field precedence over saved Settings values, Vercel and Docker paths, lifecycle behavior, and secret handling. Linked it from the User section of the [guides index](/guides/index.md).
+
 ## 2026-07-01 (E2E test catalog — Cursor gates correction)
 
 - Corrected the [E2E test catalog](/guides/e2e-test-catalog.md#cursor-e2e-gates) Cursor E2E gates section (added in `feat/cursor-skills`) to include the required `KATACODE_E2E_CURSOR_API_KEY` env var alongside `KATACODE_E2E_ENABLE_CURSOR` and `KATACODE_E2E_CURSOR_MODEL`. The `@cursor` flow (`e2e/src/flows/cursorSkills.ts`) authenticates the Cursor Agent CLI via API key, which skips interactive OAuth; the API key is a hard requirement in `readCursorSkillsConfig`.

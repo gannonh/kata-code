@@ -888,14 +888,21 @@ export function DeploymentTargetCard({
                     onBranchChange={(branch) => setSource({ branch })}
                   />
                   {vercelSource && vercelSourceKey ? (
-                    <SavedEnvironmentEditor
-                      projects={projects}
-                      savedSandboxEnvironments={savedSandboxEnvironments}
-                      selectedRepositoryKey={undefined}
-                      onSelectedRepositoryKeyChange={() => {}}
-                      onChange={onSavedEnvironmentChange}
-                      fixedRepositoryKey={vercelSourceKey}
-                    />
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Kata reads <code>.kata/environment.json</code> from the selected branch when
+                        creating this sandbox. Its install, start, and terminal fields override the
+                        corresponding saved settings below.
+                      </p>
+                      <SavedEnvironmentEditor
+                        projects={projects}
+                        savedSandboxEnvironments={savedSandboxEnvironments}
+                        selectedRepositoryKey={undefined}
+                        onSelectedRepositoryKeyChange={() => {}}
+                        onChange={onSavedEnvironmentChange}
+                        fixedRepositoryKey={vercelSourceKey}
+                      />
+                    </>
                   ) : (
                     <p className="text-xs text-muted-foreground">
                       Choose a GitHub repository and branch to configure its setup.

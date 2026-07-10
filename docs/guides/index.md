@@ -30,10 +30,11 @@ Setup, user workflows, providers, cloud, and integrations.
 
 ## User
 
-| Document                                | Summary                  |
-| --------------------------------------- | ------------------------ |
-| [Keybindings](/user/keybindings.md)     | Keyboard shortcuts       |
-| [Remote access](/user/remote-access.md) | SSH and remote workflows |
+| Document                                                                       | Summary                                       |
+| ------------------------------------------------------------------------------ | --------------------------------------------- |
+| [Keybindings](/user/keybindings.md)                                            | Keyboard shortcuts                            |
+| [Remote access](/user/remote-access.md)                                        | SSH and remote workflows                      |
+| [Repository environment configuration](/user/repository-environment-config.md) | Sandbox setup file, precedence, and lifecycle |
 
 ## Providers
 

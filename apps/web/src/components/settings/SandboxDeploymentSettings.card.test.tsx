@@ -222,6 +222,7 @@ describe("DeploymentTargetCard lifecycle actions (AC-L10/L11/L12)", () => {
     expect(html).toContain(">Branch<");
     expect(html).toContain("Select a repository");
     expect(html).toContain("Choose a GitHub repository and branch to configure its setup.");
+    expect(html).not.toContain("Kata reads");
     expect(html).not.toContain(">Saved environment<");
   });
 
@@ -251,6 +252,9 @@ describe("DeploymentTargetCard lifecycle actions (AC-L10/L11/L12)", () => {
     expect(runtimeEnvironment).toBeLessThan(repository);
     expect(repository).toBeLessThan(branch);
     expect(branch).toBeLessThan(install);
+    expect(html).toContain("Kata reads");
+    expect(html).toContain(".kata/environment.json");
+    expect(html).toContain("override the corresponding saved settings below.");
     expect(html).not.toContain(">Saved environment<");
   });
 

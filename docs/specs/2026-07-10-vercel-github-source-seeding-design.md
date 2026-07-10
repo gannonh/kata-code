@@ -115,7 +115,7 @@ Vercel cards replace the local-project “Saved environment” selector with com
 2. **Branch** is disabled until a repository is selected, initializes to the repository default branch, and uses a searchable paginated combobox.
 3. Existing install, start, terminal, and repository environment-variable fields appear immediately under the selected source controls and continue to edit saved settings for that repository key.
 
-`SavedEnvironmentEditor` receives the selected canonical repository key directly for Vercel and renders no second repository field. The GitHub repository and branch controls are the sole Vercel source selector. Docker continues supplying its local-project selector.
+`SavedEnvironmentEditor` receives the selected canonical repository key directly for Vercel and renders no second repository field. The GitHub repository and branch controls are the sole Vercel source selector. Beneath a selected source, the card states that `.kata/environment.json` is read from the selected branch at creation and that its install, start, and terminal fields override corresponding saved settings. Docker continues supplying its local-project selector.
 
 When Add Project opens for a Vercel sandbox, its filesystem browser starts at `/vercel/sandbox/`, Vercel's native Git clone root. This lets repository identity resolution group the remote source with the matching local project.
 
