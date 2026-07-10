@@ -78,7 +78,7 @@ The Vercel SDK wrapper expands `source` to model native Git source. On initial V
 - `depth: 1`.
 - `revision` set to the selected branch.
 
-The wrapper models the installed SDK's Git source union as `{ type: "git", url, username: "x-access-token", password: token, depth: 1, revision: branch }`. The source clone supplies `.git` metadata without transferring host Git packs or local generated files. The Vercel setup workspace is `/vercel/sandbox`.
+The wrapper models the installed SDK's Git source union as `{ type: "git", url, username: "x-access-token", password: token, depth: 1, revision: branch }`. The source clone supplies `.git` metadata without transferring host Git packs or local generated files. Vercel can resolve the revision to a detached `HEAD`, so the provider creates the selected local branch at that revision before Kata starts its server. Lifecycle start repairs a detached source checkout and preserves an existing branch checkout. The Vercel setup workspace is `/vercel/sandbox`.
 
 The Vercel provider remains responsible for the Vercel SDK source payload. The server resolves the active GitHub token immediately before provisioning and appends it under a reserved transient provision-environment name. The Vercel provider extracts that value only when both a configured source and transient token exist, then excludes it from create-time and serve-time sandbox environment variables. This preserves the frozen required provision signature while keeping the token out of persisted config, the provider handle, and the session record. `testConnection` omits the transient value, so its disposable Vercel probe remains source-less even when a target has a configured source.
 
@@ -137,7 +137,7 @@ The picker follows the existing accessible combobox primitives and exposes label
 2. **AC-GS2** — Authenticated repository and branch discovery use the existing host `gh` session. RPC results contain only repository/branch metadata and pagination data; they contain no GitHub token or credential path.
 3. **AC-GS3** — The Vercel settings card provides labeled, keyboard-operable searchable repository and branch comboboxes. Selecting a repository initializes Branch to its default branch. Loading, no-result, and GitHub-authentication failures have observable accessible status text.
 4. **AC-GS4** — A Vercel sandbox cannot be created without a selected repository and branch. Test connection remains usable without a source and creates a disposable source-less Vercel probe. Docker retains its existing local-project selection and local seed behavior.
-5. **AC-GS5** — Initial Vercel provision sends `{ type: "git", url, username, password, depth: 1, revision }` with the selected HTTPS repository URL, `x-access-token` username, in-memory GitHub token, and selected branch. The cloned workspace is `/vercel/sandbox`.
+5. **AC-GS5** — Initial Vercel provision sends `{ type: "git", url, username, password, depth: 1, revision }` with the selected HTTPS repository URL, `x-access-token` username, in-memory GitHub token, and selected branch. The cloned workspace is `/vercel/sandbox`, and the selected revision is attached to a local branch before Kata accepts worktree requests.
 6. **AC-GS6** — Vercel creation never calls `buildRepoSeedArchive`, never uploads a host repository tar, and does not invoke the Vercel repository `copyInto` path. Provider credential seeds and the small GitHub-auth seed still use supported small-file transfer.
 7. **AC-GS7** — Vercel reads `.kata/environment.json` from `/vercel/sandbox` through driver exec, preserves current saved-environment merge precedence using the derived canonical GitHub key, rejects a Dockerfile build for Vercel, and runs install/start/terminal commands in `/vercel/sandbox`. Docker retains `/workspace` setup behavior.
 8. **AC-GS8 — Maintainer-local UAT** — A created Vercel sandbox has executable `gh`, an authenticated `gh auth status`, and Git credential-helper configuration. An authenticated Git operation succeeds against a private repository selected by the maintainer-local UAT account.
@@ -145,8 +145,8 @@ The picker follows the existing accessible combobox primitives and exposes label
 10. **AC-GS10** — Stop/start resumes the same Vercel filesystem: the selected clone, `gh auth status`, and authenticated Git operation remain available without another clone or credential seed.
 11. **AC-GS11** — A Vercel source control is locked while a sandbox record exists. After Delete sandbox, the selection becomes editable; the next Create clones the new source. Server lifecycle start rejects a source fingerprint mismatch.
 12. **AC-GS12** — Missing host GitHub auth, inaccessible repository/branch, clone failure, `gh` installation/auth failure, malformed remote environment config, and setup failure surface actionable errors. A new sandbox created for a failed setup is deleted.
-13. **AC-GS13** — Unit and browser tests cover source validation, GitHub discovery parsing/errors, SDK source payload, no-local-archive Vercel path, dynamic workspace setup, config precedence, source locking, and token redaction. The tagged Electron E2E for interactive source selection and locked lifecycle state is maintainer-local (no CI Vercel secret) and deferred to [#32](https://github.com/gannonh/kata-code/issues/32); interactive `VercelSourcePicker` component tests are deferred to [#31](https://github.com/gannonh/kata-code/issues/31).
-14. **AC-GS14** — `vp check`, `vp run typecheck`, `vp run test`, `vp run release:smoke`, and the focused `@environments-deploy` Electron E2E pass. Maintainer-local Vercel UAT records evidence for private clone, branch checkout, `gh auth status`, authenticated Git, and persistence after stop/start.
+13. **AC-GS13** — Unit and browser tests cover source validation, GitHub discovery parsing/errors, SDK source payload, attached source branch, no-local-archive Vercel path, dynamic workspace setup, config precedence, source locking, and token redaction. The tagged Electron E2E for interactive source selection, New worktree base-branch selection, and locked lifecycle state is maintainer-local (no CI Vercel secret) and deferred to [#32](https://github.com/gannonh/kata-code/issues/32); interactive `VercelSourcePicker` component tests are deferred to [#31](https://github.com/gannonh/kata-code/issues/31).
+14. **AC-GS14** — `vp check`, `vp run typecheck`, `vp run test`, `vp run release:smoke`, and the focused `@environments-deploy` Electron E2E pass. Maintainer-local Vercel UAT records evidence for private clone, local branch checkout, New worktree base-branch selection, `gh auth status`, authenticated Git, and persistence after stop/start.
 
 ## Implementation phases
 
@@ -195,6 +195,10 @@ Implement only Vercel native Git source, GitHub repository/branch selection, rem
 ### Verification
 
 `vp check` (0 errors), `vp run typecheck`, `vp run test` (all packages green), and `vp run release:smoke` pass on head `c46acf4a7`.
+
+### Post-implementation correction
+
+Vercel's native Git `revision` checkout can leave `HEAD` detached. The provider now creates the selected local branch at that revision before bootstrap, so the chat worktree picker has a base ref. Lifecycle start conditionally repairs a detached checkout while preserving an existing branch checkout. A sandbox created before this correction receives the repair after Stop and Start.
 
 ### Deferred follow-ups
 

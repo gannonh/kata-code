@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-07-10 (Vercel worktree base ref)
+
+Updated [Repository environment configuration](/user/repository-environment-config.md) to document that Kata attaches Vercel's selected source revision to a local branch, providing New worktree with its base ref.
+
 ## 2026-07-10 (Repository environment configuration)
 
 Added [Repository environment configuration](/user/repository-environment-config.md), a user reference for `.kata/environment.json`: supported setup fields, an example, per-field precedence over saved Settings values, Vercel and Docker paths, lifecycle behavior, and secret handling. Linked it from the User section of the [guides index](/guides/index.md).

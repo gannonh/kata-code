@@ -15,7 +15,7 @@ Create the file at the repository root:
 .kata/environment.json
 ```
 
-For a Vercel sandbox, Kata reads the file from the selected GitHub branch after Vercel clones it into `/vercel/sandbox`. Docker reads the same repository-relative path from the local repository it seeds into `/workspace`.
+For a Vercel sandbox, Kata reads the file from the selected GitHub branch after Vercel clones it into `/vercel/sandbox`. Kata also attaches that revision to the selected local branch, so New worktree has a base ref. Docker reads the same repository-relative path from the local repository it seeds into `/workspace`.
 
 ## Format
 

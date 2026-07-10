@@ -57,7 +57,7 @@ import {
   decodeVercelSandboxConfig,
 } from "./config.ts";
 import type { VercelGitSource } from "./sdk.ts";
-import type { VercelAuthParams, VercelSdk } from "./sdk.ts";
+import type { VercelAuthParams, VercelSandboxInstance, VercelSdk } from "./sdk.ts";
 import { isAuthError, isNotFound, liveVercelSdk } from "./sdk.ts";
 import { buildBootstrapScript, buildServeCommand, SANDBOX_HOME } from "./bootstrap.ts";
 
@@ -102,6 +102,8 @@ export interface VercelSandboxHandleState {
  *  dashes, project-unique. The instance-derived slug is clamped to keep the
  *  whole name within the SDK's name rules. */
 const SANDBOX_NAME_PREFIX = "kata-";
+/** Native Git sources are cloned into this writable sandbox workspace. */
+const VERCEL_GIT_WORKSPACE = "/vercel/sandbox";
 
 /** Slugify a fragment for Vercel sandbox names (`[a-z0-9-]+`). */
 function vercelNameSlug(value: string): string {
@@ -238,6 +240,51 @@ function buildGitSource(
   };
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Vercel's native Git revision can be a detached HEAD. Create the selected
+ * local branch at that revision so Git worktree creation has a concrete base.
+ * On lifecycle resume, preserve a user-selected branch and repair only a
+ * detached checkout left by an older provision.
+ */
+function buildSourceBranchAttachCommand(branch: string, onlyWhenDetached: boolean): string {
+  const checkout = `git checkout -B ${shellQuote(branch)} HEAD`;
+  return onlyWhenDetached
+    ? `if [ -z "$(git branch --show-current)" ]; then ${checkout}; fi`
+    : checkout;
+}
+
+function attachSourceBranch(
+  sandbox: VercelSandboxInstance,
+  source: { readonly branch: string } | undefined,
+  onlyWhenDetached: boolean,
+): Effect.Effect<void, SandboxProviderError> {
+  if (source === undefined) return Effect.void;
+  return Effect.gen(function* () {
+    const result = yield* trySdk(
+      "source.branch",
+      () =>
+        sandbox.runCommand({
+          cmd: "sh",
+          args: ["-c", buildSourceBranchAttachCommand(source.branch, onlyWhenDetached)],
+          cwd: VERCEL_GIT_WORKSPACE,
+        }),
+      "provision-failed",
+    );
+    if (result.exitCode === 0) return;
+    const stderr = yield* Effect.promise(() => result.stderr()).pipe(
+      Effect.orElseSucceed(() => ""),
+    );
+    return yield* new SandboxProviderError({
+      reason: "provision-failed",
+      message: `failed to attach the selected source branch (exit ${result.exitCode}): ${stderr.trim().slice(-512) || "git checkout failed"}`,
+    });
+  });
+}
+
 /** Env passed into `Sandbox.create` — excludes the auth trio + source token, adds KATA_* server env. */
 function buildCreateEnv(req: SandboxProvisionRequest): Record<string, string> {
   const env: Record<string, string> = {};
@@ -364,6 +411,15 @@ export function makeVercelSandboxProvider(
                   cause: error,
                 })
               : error,
+          ),
+        );
+        yield* attachSourceBranch(sb, decoded.source, true).pipe(
+          Effect.catch((error: SandboxProviderError) =>
+            trySdk(
+              "lifecycle.start.source-branch.cleanup",
+              () => sb.stop(),
+              "provision-failed",
+            ).pipe(Effect.ignore, Effect.andThen(Effect.fail(error))),
           ),
         );
         if (persistent !== state.persistent) {
@@ -590,6 +646,15 @@ export function makeVercelSandboxProvider(
         );
         // Capture the domain now so reachability does not require a re-fetch.
         const domainBase = sb.domain(decoded.port);
+
+        yield* attachSourceBranch(sb, decoded.source, false).pipe(
+          Effect.catch((error: SandboxProviderError) =>
+            trySdk("provision.source-branch.cleanup", () => sb.delete(), "dispose-failed").pipe(
+              Effect.ignore,
+              Effect.andThen(Effect.fail(error)),
+            ),
+          ),
+        );
 
         // Cold boot: install CLIs (the only boot path now; snapshot boot removed).
         const bootstrap = yield* trySdk(

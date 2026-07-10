@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-10 (Vercel detached source revision repair)
+
+Updated [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) after confirming that Vercel's native Git `revision` checkout can leave `HEAD` detached. The Vercel provider now creates the selected local branch before serving a newly provisioned sandbox and conditionally repairs a detached checkout during Start, enabling New worktree branch selection while preserving an existing branch checkout.
+
 ## 2026-07-10 (Vercel source setup grouping and project identity follow-up)
 
 Grouped Vercel's GitHub repository and branch controls with its existing repository-specific setup fields, removing the redundant local-project Saved environment selector from Vercel cards while retaining it for Docker. Add Project now starts at `/vercel/sandbox/` for Vercel sandbox records rather than Docker's `/workspace/`, so repository identity resolves from Vercel's native Git clone and groups the remote source with its matching local project.

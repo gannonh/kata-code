@@ -21,6 +21,7 @@ interface FakeRun {
   readonly cmd: string;
   readonly args?: ReadonlyArray<string>;
   readonly detached?: boolean;
+  readonly cwd?: string;
 }
 
 interface FakeSdkState {
@@ -87,6 +88,7 @@ function fakeSdk(
         cmd: opts.cmd,
         ...(opts.args !== undefined ? { args: opts.args } : {}),
         ...(opts.detached !== undefined ? { detached: opts.detached } : {}),
+        ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
       });
       return {
         exitCode: overrides.runExitCode ?? 0,
@@ -131,7 +133,7 @@ function fakeSdk(
   const sdk: VercelSdk = {
     create: async (params) => {
       state.createCalls = [...state.createCalls, params];
-      return makeInstance("sandbox-1");
+      return makeInstance(params.name ?? "sandbox-1");
     },
     get: async (params) => {
       state.getCalls = [
@@ -414,6 +416,54 @@ describe("VercelSandboxProvider", () => {
       }),
   );
 
+  vitIt.effect("provision attaches a native source revision to its selected local branch", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk();
+      const provider = makeProvider(sdk);
+      yield* provider.provision({
+        instanceId: "inst_1",
+        config: configWithAuth({
+          source: { repository: "octocat/Hello-World", branch: "feature/worktrees" },
+        }),
+        image: "",
+        env: [[VERCEL_SOURCE_TOKEN_ENV, "gho_secrettoken"]],
+      });
+
+      // Vercel's `revision` checkout can leave HEAD detached. Kata must
+      // establish the selected branch before its server accepts worktree
+      // requests from the chat UI.
+      expect(state.runCommands).toContainEqual({
+        cmd: "sh",
+        args: ["-c", "git checkout -B 'feature/worktrees' HEAD"],
+        cwd: "/vercel/sandbox",
+      });
+    }),
+  );
+
+  vitIt.effect("provision deletes the sandbox when source branch attachment fails", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk({
+        runExitCode: 1,
+        runStderr: "fatal: could not create branch",
+      });
+      const provider = makeProvider(sdk);
+      const result = yield* either(
+        provider.provision({
+          instanceId: "inst_1",
+          config: configWithAuth({
+            source: { repository: "octocat/Hello-World", branch: "feature/worktrees" },
+          }),
+          image: "",
+          env: [],
+        }),
+      );
+
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") expect(result.left.reason).toBe("provision-failed");
+      expect(state.deleted).toEqual([INST_1_NAME]);
+    }),
+  );
+
   vitIt.effect("provision omits the source when no source is configured", () =>
     Effect.gen(function* () {
       const { sdk, state } = fakeSdk();
@@ -550,6 +600,37 @@ describe("VercelSandboxProvider", () => {
         expect((started.handle as { sandboxId: string }).sandboxId).toBe(INST_1_NAME);
         // persistence unchanged -> no update call.
         expect(state.updateCalls).toHaveLength(0);
+      }),
+  );
+
+  vitIt.effect(
+    "lifecycle.start repairs a detached native source checkout without changing a branch checkout",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        const config = configWithAuth({
+          source: { repository: "octocat/Hello-World", branch: "feature/worktrees" },
+        });
+        const handle = yield* provider.provision({
+          instanceId: "inst_1",
+          config,
+          image: "",
+          env: [],
+        });
+        yield* provider.lifecycle!.stop(handle);
+        const commandCountBeforeStart = state.runCommands.length;
+
+        yield* provider.lifecycle!.start(handle, { config, env: [] });
+
+        expect(state.runCommands.slice(commandCountBeforeStart)).toContainEqual({
+          cmd: "sh",
+          args: [
+            "-c",
+            "if [ -z \"$(git branch --show-current)\" ]; then git checkout -B 'feature/worktrees' HEAD; fi",
+          ],
+          cwd: "/vercel/sandbox",
+        });
       }),
   );
 

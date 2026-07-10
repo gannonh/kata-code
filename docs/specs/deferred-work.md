@@ -30,15 +30,15 @@ Each entry should include:
 
 ## Deferred / review queue
 
-### Vercel source-selection Electron E2E
+### Vercel source-selection and worktree Electron E2E
 
 - **Status:** deferred
 - **Tracking issue:** [#32](https://github.com/gannonh/kata-code/issues/32)
 - **Area:** sandbox, vercel, web, testing
-- **Source:** [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) (AC-GS13)
+- **Source:** [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) (AC-GS5, AC-GS13, AC-GS14)
 - **Rationale:** The E2E harness spawns its own isolated stack and the Vercel path is maintainer-local UAT with no CI secret. A live source-selection E2E cannot run in default CI; static card/logic tests already cover source gating, canonical key, and lock copy.
 - **Revisit trigger:** When a maintainer-local credentialed Vercel E2E lane exists, or before release sign-off for this feature.
-- **Notes:** Drive repository + branch selection, assert Create disabled without a source, and assert locked source controls with the delete-to-change hint once a sandbox exists; record manual UAT evidence.
+- **Notes:** Drive repository + branch selection, assert Create disabled without a source, assert the selected revision is a local base branch for a New worktree chat, and assert locked source controls with the delete-to-change hint once a sandbox exists; record manual UAT evidence.
 
 ### Vercel source picker component tests
 
