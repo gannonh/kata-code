@@ -267,6 +267,159 @@ describe("GitHubCli.layer", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("reads the active host auth token", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(Effect.succeed(processOutput("gho_exampletoken\n")));
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const token = yield* gh.getAuthToken({ cwd: "/repo" });
+      expect(token).toBe("gho_exampletoken");
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: ["auth", "token", "--hostname", "github.com"],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("fails when the host auth token is empty", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(Effect.succeed(processOutput("\n")));
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const error = yield* gh.getAuthToken({ cwd: "/repo" }).pipe(Effect.flip);
+      assert.equal(error.operation, "getAuthToken");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("searches accessible repositories with pagination metadata", () =>
+    Effect.gen(function* () {
+      const page = Array.from({ length: 30 }, (_unused, index) => ({
+        name: `repo-${index}`,
+        full_name: `octocat/repo-${index}`,
+        html_url: `https://github.com/octocat/repo-${index}`,
+        default_branch: "main",
+        visibility: index % 2 === 0 ? "public" : "private",
+      }));
+      mockRun.mockReturnValueOnce(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        Effect.succeed(processOutput(JSON.stringify(page))),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.searchRepositories({ cwd: "/repo", page: 1 });
+
+      expect(result.hasMore).toBe(true);
+      expect(result.repositories).toHaveLength(30);
+      assert.deepStrictEqual(result.repositories[0], {
+        nameWithOwner: "octocat/repo-0",
+        url: "https://github.com/octocat/repo-0",
+        defaultBranch: "main",
+        visibility: "public",
+      });
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: [
+          "api",
+          "--method",
+          "GET",
+          "/user/repos",
+          "-f",
+          "affiliation=owner,collaborator,organization",
+          "-f",
+          "sort=updated",
+          "-F",
+          "per_page=30",
+          "-F",
+          "page=1",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("reports hasMore=false when a repository page is not full", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                name: "only",
+                full_name: "octocat/only",
+                html_url: "https://github.com/octocat/only",
+                default_branch: "trunk",
+                visibility: "private",
+              },
+            ]),
+          ),
+        ),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.searchRepositories({ cwd: "/repo" });
+      expect(result.hasMore).toBe(false);
+      expect(result.repositories).toHaveLength(1);
+      expect(result.repositories[0]?.defaultBranch).toBe("trunk");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("lists branches for a repository with pagination metadata", () =>
+    Effect.gen(function* () {
+      const page = Array.from({ length: 30 }, (_unused, index) => ({
+        name: `branch-${index}`,
+      }));
+      mockRun.mockReturnValueOnce(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        Effect.succeed(processOutput(JSON.stringify(page))),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.listBranches({
+        cwd: "/repo",
+        repository: "octocat/Hello-World",
+        page: 2,
+      });
+
+      expect(result.hasMore).toBe(true);
+      expect(result.branches).toHaveLength(30);
+      expect(result.branches[0]).toBe("branch-0");
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: [
+          "api",
+          "--method",
+          "GET",
+          "/repos/octocat/Hello-World/branches",
+          "-F",
+          "per_page=30",
+          "-F",
+          "page=2",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("fails with invalid JSON when the branches response is malformed", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(Effect.succeed(processOutput("not json")));
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const error = yield* gh
+        .listBranches({ cwd: "/repo", repository: "octocat/Hello-World" })
+        .pipe(Effect.flip);
+      assert.equal(error.operation, "listBranches");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("surfaces a friendly error when the pull request is not found", () =>
     Effect.gen(function* () {
       mockRun.mockReturnValueOnce(

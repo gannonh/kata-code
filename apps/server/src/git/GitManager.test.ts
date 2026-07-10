@@ -610,6 +610,27 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           cwd: input.cwd,
           args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
         }).pipe(Effect.asVoid),
+      searchRepositories: () =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "searchRepositories",
+            detail: "searchRepositories is not stubbed in this test.",
+          }),
+        ),
+      listBranches: () =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "listBranches",
+            detail: "listBranches is not stubbed in this test.",
+          }),
+        ),
+      getAuthToken: () =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "getAuthToken",
+            detail: "getAuthToken is not stubbed in this test.",
+          }),
+        ),
     },
     ghCalls,
   };

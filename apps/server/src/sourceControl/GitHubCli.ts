@@ -44,6 +44,26 @@ export interface GitHubRepositoryCloneUrls {
   readonly sshUrl: string;
 }
 
+/** A GitHub repository accessible to the host `gh` session (source picker). */
+export interface GitHubAccessibleRepository {
+  readonly nameWithOwner: string;
+  readonly url: string;
+  readonly defaultBranch: string;
+  readonly visibility: "public" | "private";
+}
+
+/** One page of accessible repositories plus a `hasMore` flag (full page ⇒ more). */
+export interface GitHubRepositoryPage {
+  readonly repositories: ReadonlyArray<GitHubAccessibleRepository>;
+  readonly hasMore: boolean;
+}
+
+/** One page of branch names plus a `hasMore` flag. */
+export interface GitHubBranchPage {
+  readonly branches: ReadonlyArray<string>;
+  readonly hasMore: boolean;
+}
+
 export interface GitHubCliShape {
   readonly execute: (input: {
     readonly cwd: string;
@@ -85,11 +105,24 @@ export interface GitHubCliShape {
     readonly cwd: string;
   }) => Effect.Effect<string | null, GitHubCliError>;
 
+  readonly searchRepositories: (input: {
+    readonly cwd: string;
+    readonly page?: number;
+  }) => Effect.Effect<GitHubRepositoryPage, GitHubCliError>;
+
+  readonly listBranches: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly page?: number;
+  }) => Effect.Effect<GitHubBranchPage, GitHubCliError>;
+
   readonly checkoutPullRequest: (input: {
     readonly cwd: string;
     readonly reference: string;
     readonly force?: boolean;
   }) => Effect.Effect<void, GitHubCliError>;
+
+  readonly getAuthToken: (input: { readonly cwd: string }) => Effect.Effect<string, GitHubCliError>;
 }
 
 export class GitHubCli extends Context.Service<GitHubCli, GitHubCliShape>()(
@@ -161,6 +194,20 @@ const RawGitHubRepositoryCloneUrlsSchema = Schema.Struct({
   sshUrl: TrimmedNonEmptyString,
 });
 
+/** Page size for the source-picker discovery calls (GitHub REST max is 100). */
+const DISCOVERY_PAGE_SIZE = 30;
+
+const RawGitHubAccessibleRepositorySchema = Schema.Struct({
+  full_name: TrimmedNonEmptyString,
+  html_url: TrimmedNonEmptyString,
+  default_branch: TrimmedNonEmptyString,
+  visibility: Schema.Literals(["public", "private"]),
+});
+const RawGitHubAccessibleRepositoryListSchema = Schema.Array(RawGitHubAccessibleRepositorySchema);
+
+const RawGitHubBranchSchema = Schema.Struct({ name: TrimmedNonEmptyString });
+const RawGitHubBranchListSchema = Schema.Array(RawGitHubBranchSchema);
+
 function normalizeRepositoryCloneUrls(
   raw: Schema.Schema.Type<typeof RawGitHubRepositoryCloneUrlsSchema>,
 ): GitHubRepositoryCloneUrls {
@@ -211,7 +258,12 @@ function deriveRepositoryCloneUrlsFromCreateOutput(
 function decodeGitHubJson<S extends Schema.Top>(
   raw: string,
   schema: S,
-  operation: "listOpenPullRequests" | "getPullRequest" | "getRepositoryCloneUrls",
+  operation:
+    | "listOpenPullRequests"
+    | "getPullRequest"
+    | "getRepositoryCloneUrls"
+    | "searchRepositories"
+    | "listBranches",
   invalidDetail: string,
 ): Effect.Effect<S["Type"], GitHubCliError, S["DecodingServices"]> {
   return Schema.decodeEffect(Schema.fromJsonString(schema))(raw).pipe(
@@ -364,11 +416,97 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           return trimmed.length > 0 ? trimmed : null;
         }),
       ),
+    searchRepositories: (input) => {
+      const page = input.page ?? 1;
+      return execute({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "--method",
+          "GET",
+          "/user/repos",
+          "-f",
+          "affiliation=owner,collaborator,organization",
+          "-f",
+          "sort=updated",
+          "-F",
+          `per_page=${DISCOVERY_PAGE_SIZE}`,
+          "-F",
+          `page=${page}`,
+        ],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          decodeGitHubJson(
+            raw,
+            RawGitHubAccessibleRepositoryListSchema,
+            "searchRepositories",
+            "GitHub CLI returned invalid repository list JSON.",
+          ),
+        ),
+        Effect.map((rows) => ({
+          repositories: rows.map((row) => ({
+            nameWithOwner: row.full_name,
+            url: row.html_url,
+            defaultBranch: row.default_branch,
+            visibility: row.visibility,
+          })),
+          hasMore: rows.length === DISCOVERY_PAGE_SIZE,
+        })),
+      );
+    },
+    listBranches: (input) => {
+      const page = input.page ?? 1;
+      return execute({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "--method",
+          "GET",
+          `/repos/${input.repository}/branches`,
+          "-F",
+          `per_page=${DISCOVERY_PAGE_SIZE}`,
+          "-F",
+          `page=${page}`,
+        ],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          decodeGitHubJson(
+            raw,
+            RawGitHubBranchListSchema,
+            "listBranches",
+            "GitHub CLI returned invalid branch list JSON.",
+          ),
+        ),
+        Effect.map((rows) => ({
+          branches: rows.map((row) => row.name),
+          hasMore: rows.length === DISCOVERY_PAGE_SIZE,
+        })),
+      );
+    },
     checkoutPullRequest: (input) =>
       execute({
         cwd: input.cwd,
         args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
       }).pipe(Effect.asVoid),
+    getAuthToken: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["auth", "token", "--hostname", "github.com"],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((token) =>
+          token.length > 0
+            ? Effect.succeed(token)
+            : Effect.fail(
+                new GitHubCliError({
+                  operation: "getAuthToken",
+                  detail: "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
+                }),
+              ),
+        ),
+      ),
   });
 });
 

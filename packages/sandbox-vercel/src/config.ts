@@ -73,6 +73,12 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
         }),
       ),
     ),
+    source: Schema.optionalKey(
+      Schema.Struct({
+        repository: TrimmedNonEmptyString,
+        branch: TrimmedNonEmptyString,
+      }).pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
     auth: Schema.optionalKey(
       Schema.Struct({
         token: TrimmedNonEmptyString,
@@ -81,7 +87,7 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
       }).pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
   },
-  { order: ["runtime", "persistent", "timeoutMs", "port", "vcpus", "auth"] },
+  { order: ["runtime", "persistent", "timeoutMs", "port", "vcpus", "source", "auth"] },
 );
 
 export type VercelSandboxConfig = typeof VercelSandboxConfig.Type;

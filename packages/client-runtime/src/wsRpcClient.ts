@@ -200,6 +200,10 @@ export interface WsRpcClient {
       typeof WS_METHODS.sandboxProviderLoginSubmitCode
     >;
     readonly providerLoginCancel: RpcUnaryMethod<typeof WS_METHODS.sandboxProviderLoginCancel>;
+    readonly searchGitHubRepositories: RpcUnaryMethod<
+      typeof WS_METHODS.sandboxSearchGitHubRepositories
+    >;
+    readonly listGitHubBranches: RpcUnaryMethod<typeof WS_METHODS.sandboxListGitHubBranches>;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -463,6 +467,10 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.sandboxProviderLoginSubmitCode](input)),
       providerLoginCancel: (input) =>
         transport.request((client) => client[WS_METHODS.sandboxProviderLoginCancel](input)),
+      searchGitHubRepositories: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxSearchGitHubRepositories](input)),
+      listGitHubBranches: (input) =>
+        transport.request((client) => client[WS_METHODS.sandboxListGitHubBranches](input)),
     },
     orchestration: {
       dispatchCommand: (input) =>

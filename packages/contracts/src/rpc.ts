@@ -97,6 +97,10 @@ import {
   SandboxStopSessionInput,
   SandboxStopSessionResult,
   SandboxIssuePairingTokenInput,
+  SandboxSearchGitHubRepositoriesInput,
+  SandboxSearchGitHubRepositoriesResult,
+  SandboxListGitHubBranchesInput,
+  SandboxListGitHubBranchesResult,
   SandboxIssuePairingTokenResult,
   SandboxTestConnectionInput,
   SandboxTestConnectionProgressEvent,
@@ -265,6 +269,8 @@ export const WS_METHODS = {
   sandboxProviderLoginStart: "sandbox.providerLoginStart",
   sandboxProviderLoginSubmitCode: "sandbox.providerLoginSubmitCode",
   sandboxProviderLoginCancel: "sandbox.providerLoginCancel",
+  sandboxSearchGitHubRepositories: "sandbox.searchGitHubRepositories",
+  sandboxListGitHubBranches: "sandbox.listGitHubBranches",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -379,6 +385,21 @@ export const WsSandboxProviderLoginSubmitCodeRpc = Rpc.make(
 export const WsSandboxProviderLoginCancelRpc = Rpc.make(WS_METHODS.sandboxProviderLoginCancel, {
   payload: SandboxProviderLoginCancelInput,
   success: SandboxProviderLoginCancelResult,
+  error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+});
+
+export const WsSandboxSearchGitHubRepositoriesRpc = Rpc.make(
+  WS_METHODS.sandboxSearchGitHubRepositories,
+  {
+    payload: SandboxSearchGitHubRepositoriesInput,
+    success: SandboxSearchGitHubRepositoriesResult,
+    error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsSandboxListGitHubBranchesRpc = Rpc.make(WS_METHODS.sandboxListGitHubBranches, {
+  payload: SandboxListGitHubBranchesInput,
+  success: SandboxListGitHubBranchesResult,
   error: Schema.Union([SandboxRpcError, EnvironmentAuthorizationError]),
 });
 
@@ -796,6 +817,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxProviderLoginStartRpc,
   WsSandboxProviderLoginSubmitCodeRpc,
   WsSandboxProviderLoginCancelRpc,
+  WsSandboxSearchGitHubRepositoriesRpc,
+  WsSandboxListGitHubBranchesRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
