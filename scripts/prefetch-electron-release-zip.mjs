@@ -49,8 +49,11 @@ function requireEnv(name) {
 }
 
 function expectedSha256(shasumsText, zipName) {
+  // Electron ships GNU coreutils-style SHASUMS256.txt lines:
+  //   <hex> *<filename>   (binary mode; leading `*` is not part of the name)
+  // Also accept text-mode lines without the marker for robustness.
   for (const line of shasumsText.split("\n")) {
-    const match = line.trim().match(/^([0-9a-fA-F]{64})\s+(\S+)$/);
+    const match = line.trim().match(/^([0-9a-fA-F]{64})\s+\*?(\S+)$/);
     if (match && match[2] === zipName) return match[1].toLowerCase();
   }
   return null;
