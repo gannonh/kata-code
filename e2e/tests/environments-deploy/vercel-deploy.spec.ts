@@ -8,7 +8,7 @@ import {
   openConnectionsSettings,
   selectVercelSource,
 } from "../../src/flows/settings.ts";
-import { dismissBlockingToasts, openCommandPalette } from "../../src/flows/navigation.ts";
+import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
 import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
 
@@ -17,7 +17,7 @@ import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
  * `E2E_VERCEL_TOKEN`/`E2E_VERCEL_TEAM_ID`/`E2E_VERCEL_PROJECT_ID` are absent (CI runs
  * uncredentialed; the Docker `container-deploy.spec.ts` covers AC-3b.13).
  *
- * The source-picker + worktree test additionally needs a GitHub source the host
+ * The create-and-run path additionally needs a GitHub source the host
  * `gh` session can access (`E2E_VERCEL_SOURCE_REPOSITORY`, optional
  * `E2E_VERCEL_SOURCE_BRANCH`).
  *
@@ -148,78 +148,5 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     await dismissBlockingToasts(page);
     await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
     await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
-  });
-
-  test("selected source becomes a New worktree base branch on the sandbox (AC-GS5)", async ({
-    appWindow,
-    runContext,
-  }, testInfo) => {
-    const creds = readVercelCredentials()!;
-    const source = readVercelSourceSelection();
-    test.skip(
-      source === null,
-      "E2E_VERCEL_SOURCE_REPOSITORY not set; the source-picker/worktree flow is maintainer-local",
-    );
-    console.log(
-      `[e2e] Vercel source selection: repo=${source!.repository} branch=${source!.branch ?? "(repo default)"}`,
-    );
-    const page = appWindow;
-    await openConnectionsSettings(page);
-    await dismissBlockingToasts(page);
-
-    const card = await addVercelEnvironment(page, "E2E Vercel Worktree");
-    await card.getByRole("button", { name: /Toggle .* details/ }).click();
-    await fillVercelAuthTrio(card, creds);
-    await selectVercelSource(page, card, source!);
-
-    await authorizeIsolatedConnect(runContext);
-
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Create & run sandbox" }).click();
-    const sessionLine = card.getByText(/Session ready:/);
-    await expect(sessionLine).toBeVisible({ timeout: VERCEL_CLOUD_STEP_MS });
-
-    // Open a project on the sandbox at its native clone root, then switch the
-    // composer to New worktree. Vercel's native clone leaves a detached HEAD;
-    // the driver attaches the selected branch so it is a selectable base ref.
-    await openCommandPalette(page);
-    const palette = page.getByTestId("command-palette");
-    await palette.getByText("Add project", { exact: true }).click();
-    await palette.getByText("E2E Vercel Worktree", { exact: true }).click();
-    await palette.getByText("Local folder", { exact: true }).click();
-    // The picker opens at /vercel/sandbox/ (the native clone root); add it.
-    await page.getByRole("button", { name: /^Add \(Enter\)$/ }).click();
-    await page
-      .getByTestId("composer-editor")
-      .waitFor({ state: "visible", timeout: E2E_TIMEOUTS.agentReplyMs });
-
-    await page.getByRole("button", { name: "Workspace" }).click();
-    await page.getByRole("option", { name: "New worktree" }).click();
-
-    // The branch toolbar exposes the selected source branch as the base ref
-    // ("From <branch>"), instead of the empty "Select ref" a detached HEAD gives.
-    const expectedBranch = source!.branch;
-    const baseRefButton = expectedBranch
-      ? page.getByRole("button", { name: `From ${expectedBranch}` })
-      : page.getByRole("button", { name: /^From / });
-    await expect(baseRefButton).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
-    await expect(page.getByRole("button", { name: "Select ref" })).toBeHidden();
-
-    await page.screenshot({
-      path: testInfo.outputPath("vercel-worktree-base-branch.png"),
-      fullPage: true,
-    });
-
-    // Clean up: settings → stop → delete sandbox + environment.
-    await openConnectionsSettings(page);
-    await dismissBlockingToasts(page);
-    const cleanupCard = card;
-    await cleanupCard.getByRole("button", { name: /Toggle .* details/ }).click();
-    await cleanupCard.getByRole("button", { name: "Stop" }).last().click();
-    await cleanupCard.getByRole("button", { name: "Delete sandbox", exact: true }).click();
-    await expect(sessionLine).toBeHidden({ timeout: VERCEL_CLOUD_STEP_MS });
-    await dismissBlockingToasts(page);
-    await cleanupCard.getByRole("button", { name: /Delete sandbox environment/ }).click();
-    await expect(cleanupCard).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
   });
 });

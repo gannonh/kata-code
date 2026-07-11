@@ -608,6 +608,13 @@ function sendShellThreadUpsert(
   });
 }
 
+function sendShellSnapshot(): void {
+  rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeShell, {
+    kind: "snapshot",
+    snapshot: toShellSnapshot(fixture.snapshot),
+  });
+}
+
 async function waitForWsClient(): Promise<void> {
   await vi.waitFor(
     () => {
@@ -5449,7 +5456,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("adds a project from browse mode with Enter when no directory is highlighted", async () => {
+  it("adds a project from browse mode with Enter and exposes the checkout branch as a worktree base", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -5496,7 +5503,57 @@ describe("ChatView timeline estimator parity (full app)", () => {
           };
         }
 
+        if (body._tag === WS_METHODS.vcsListRefs) {
+          return {
+            isRepo: true,
+            hasPrimaryRemote: true,
+            nextCursor: null,
+            totalCount: 2,
+            refs: [
+              {
+                name: "main",
+                current: true,
+                isDefault: true,
+                worktreePath: null,
+              },
+              {
+                name: "feature/other",
+                current: false,
+                isDefault: false,
+                worktreePath: null,
+              },
+            ],
+          };
+        }
+
         if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          if (body.type === "project.create") {
+            const projectId = body.projectId as ProjectId;
+            const workspaceRoot =
+              typeof body.workspaceRoot === "string" ? body.workspaceRoot : "~/Development";
+            const title = typeof body.title === "string" ? body.title : "Development";
+            fixture.snapshot = {
+              ...fixture.snapshot,
+              snapshotSequence: fixture.snapshot.snapshotSequence + 1,
+              projects: [
+                ...fixture.snapshot.projects,
+                {
+                  id: projectId,
+                  title,
+                  workspaceRoot,
+                  defaultModelSelection: {
+                    instanceId: ProviderInstanceId.make("codex"),
+                    model: "gpt-5",
+                  },
+                  scripts: [],
+                  createdAt: NOW_ISO,
+                  updatedAt: NOW_ISO,
+                  deletedAt: null,
+                },
+              ],
+            };
+            sendShellSnapshot();
+          }
           return {
             sequence: fixture.snapshot.snapshotSequence + 1,
           };
@@ -5554,6 +5611,18 @@ describe("ChatView timeline estimator parity (full app)", () => {
         mounted.router,
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a new draft thread after adding a project with Enter.",
+      );
+
+      // The initial checkout branch is exposed as the worktree base ref instead
+      // of falling back to an empty detached-HEAD selector.
+      (await waitForButtonByText("Current checkout")).click();
+      await page.getByText("New worktree", { exact: true }).click();
+      await vi.waitFor(
+        () => {
+          expect(findButtonByText("From main")).toBeTruthy();
+          expect(findButtonByText("Select ref")).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
       );
     } finally {
       await mounted.cleanup();

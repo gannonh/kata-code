@@ -474,6 +474,8 @@ function OpenCommandPaletteDialog() {
   ]);
   const defaultAddProjectEnvironmentId = addProjectEnvironmentOptions[0]?.environmentId ?? null;
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
+  const hasBrowseEnvironmentApi =
+    browseEnvironmentId !== null && readEnvironmentApi(browseEnvironmentId) !== undefined;
   const browseEnvironmentPlatform = useMemo(() => {
     const os =
       browseEnvironmentId && primaryEnvironmentId && browseEnvironmentId === primaryEnvironmentId
@@ -570,6 +572,7 @@ function OpenCommandPaletteDialog() {
       isBrowsing &&
       browseDirectoryPath.length > 0 &&
       browseEnvironmentId !== null &&
+      hasBrowseEnvironmentApi &&
       !relativePathNeedsActiveProject,
   });
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
@@ -1373,7 +1376,8 @@ function OpenCommandPaletteDialog() {
     getCommandPaletteInputPlaceholder(paletteMode);
   const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse";
   const hasHighlightedBrowseItem = highlightedItemValue?.startsWith("browse:") ?? false;
-  const canSubmitBrowsePath = isBrowsing && !relativePathNeedsActiveProject;
+  const canSubmitBrowsePath =
+    isBrowsing && hasBrowseEnvironmentApi && !relativePathNeedsActiveProject;
   const willCreateProjectPath =
     canSubmitBrowsePath &&
     !isBrowsePending &&
