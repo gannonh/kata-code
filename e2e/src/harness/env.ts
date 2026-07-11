@@ -228,6 +228,10 @@ export function readVercelCredentials(): {
  * session can access; `E2E_VERCEL_SOURCE_BRANCH` defaults to the repository
  * default branch when omitted (the picker auto-selects it). Maintainer-local:
  * callers SKIP the source flow when the repository is absent.
+ *
+ * Shell-exported values win over `.env` (see `loadRepoEnv`). If a stale
+ * `E2E_VERCEL_SOURCE_BRANCH=main` is exported in the terminal, it overrides
+ * `master` in `.env` — `unset E2E_VERCEL_SOURCE_BRANCH` before re-running.
  */
 export function readVercelSourceSelection(): {
   readonly repository: string;

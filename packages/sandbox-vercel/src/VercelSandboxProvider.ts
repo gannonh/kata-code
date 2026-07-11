@@ -223,18 +223,23 @@ function readSourceToken(req: {
   return undefined;
 }
 
-/** Build the native Git source payload from a configured source + token.
- *  Returns `undefined` when no source is configured. */
+/**
+ * Build the native Git source payload from a configured source + token.
+ * Returns `undefined` when either is missing — both are required so
+ * `testConnection`'s disposable probe (which omits the transient token) stays
+ * source-less even when the target has a configured repository/branch.
+ */
 function buildGitSource(
   config: VercelSandboxConfig,
   token: string | undefined,
 ): VercelGitSource | undefined {
   const source = config.source;
-  if (source === undefined) return undefined;
+  if (source === undefined || token === undefined) return undefined;
   return {
     type: "git",
     url: `https://github.com/${source.repository}.git`,
-    ...(token !== undefined ? { username: GITHUB_TOKEN_GIT_USERNAME, password: token } : {}),
+    username: GITHUB_TOKEN_GIT_USERNAME,
+    password: token,
     depth: 1,
     revision: source.branch,
   };
@@ -647,7 +652,15 @@ export function makeVercelSandboxProvider(
         // Capture the domain now so reachability does not require a re-fetch.
         const domainBase = sb.domain(decoded.port);
 
-        yield* attachSourceBranch(sb, decoded.source, false).pipe(
+        // Only attach a local branch when create actually cloned a Git source.
+        // testConnection's disposable probe omits the transient token, so create
+        // is source-less even when the saved config has a repository/branch —
+        // running git checkout there would fail with "not a git repository".
+        yield* attachSourceBranch(
+          sb,
+          source !== undefined ? decoded.source : undefined,
+          false,
+        ).pipe(
           Effect.catch((error: SandboxProviderError) =>
             trySdk("provision.source-branch.cleanup", () => sb.delete(), "dispose-failed").pipe(
               Effect.ignore,

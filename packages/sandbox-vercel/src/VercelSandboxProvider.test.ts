@@ -454,7 +454,7 @@ describe("VercelSandboxProvider", () => {
             source: { repository: "octocat/Hello-World", branch: "feature/worktrees" },
           }),
           image: "",
-          env: [],
+          env: [[VERCEL_SOURCE_TOKEN_ENV, "gho_secrettoken"]],
         }),
       );
 
@@ -483,6 +483,31 @@ describe("VercelSandboxProvider", () => {
       expect(createCall.runtime).toBe("node24");
       expect(createCall.env[VERCEL_SOURCE_TOKEN_ENV]).toBeUndefined();
     }),
+  );
+
+  vitIt.effect(
+    "provision omits a configured source when the transient token is absent (AC-GS4 testConnection)",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        // testConnection passes the saved config (including source) but never
+        // the transient GitHub token — the probe must stay source-less and must
+        // not attempt a post-create branch attach against an empty workspace.
+        yield* provider.provision({
+          instanceId: "inst_1__probe_deadbeef",
+          config: configWithAuth({
+            source: { repository: "octocat/Hello-World", branch: "main" },
+          }),
+          image: "",
+          env: [],
+        });
+        const createCall = state.createCalls[0] as { source?: unknown };
+        expect(createCall.source).toBeUndefined();
+        expect(state.runCommands.some((r) => r.args?.join(" ")?.includes("git checkout -B"))).toBe(
+          false,
+        );
+      }),
   );
 
   vitIt.effect("reachability maps domain to https/wss public URLs (AC-3b.4)", () =>

@@ -70,6 +70,27 @@ async function provisionIsolatedKeychain(homePath: string): Promise<void> {
   await runSecurity(["default-keychain", "-s", keychainPath]);
 }
 
+/**
+ * Resolve the host `gh` auth token so the isolated harness can forward it as
+ * `GH_TOKEN`. The harness overrides `HOME`, so the in-app GitHub source picker
+ * (which shells out to `gh`) cannot read the real `~/.config/gh` auth. `gh`
+ * honors `GH_TOKEN`/`GITHUB_TOKEN` regardless of `HOME`, so forwarding the
+ * host token restores authenticated repository/branch discovery for the
+ * credentialed Vercel source flow. Returns `undefined` when `gh` is missing or
+ * unauthenticated (non-credentialed runs are unaffected).
+ */
+async function resolveHostGitHubToken(): Promise<string | undefined> {
+  const preset = process.env.GH_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim();
+  if (preset) return preset;
+  try {
+    const { stdout } = await execFileAsync("gh", ["auth", "token"], { env: process.env });
+    const token = stdout.trim();
+    return token.length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Provision an isolated E2E home, ports, and dev env for one Playwright worker. */
 export async function createIsolatedRun(input: {
   readonly projectName: string;
@@ -136,6 +157,9 @@ export async function createIsolatedRun(input: {
   // `agent login` token storage is unavailable; the API-key auth path skips
   // the keychain entirely and works on all platforms including CI.
   const cursorApiKey = process.env.KATACODE_E2E_CURSOR_API_KEY?.trim();
+  // Forward the host `gh` token so the GitHub source picker stays authenticated
+  // under the isolated HOME (see resolveHostGitHubToken).
+  const githubToken = await resolveHostGitHubToken();
   const { CURSOR_API_KEY: _ambientCursorApiKey, ...inheritedEnv } = process.env;
 
   const baseEnv = {
@@ -144,6 +168,7 @@ export async function createIsolatedRun(input: {
     HOME: katacodeHome,
     USERPROFILE: katacodeHome,
     ...(cursorApiKey ? { CURSOR_API_KEY: cursorApiKey } : {}),
+    ...(githubToken ? { GH_TOKEN: githubToken } : {}),
     KATACODE_PORT_OFFSET: String(offset),
     KATACODE_ELECTRON_RUNTIME_DIR: electronRuntimeDir,
     // Unique per-worker dev app bundle ID so macOS Launch Services treats each

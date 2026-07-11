@@ -11,6 +11,10 @@ const THEME_OPTION_LABELS: Record<ThemePreference, string> = {
   dark: "Dark",
 };
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
 export async function openSettings(page: Page): Promise<void> {
   const themePreference = page.getByLabel("Theme preference");
   if (await themePreference.isVisible().catch(() => false)) {
@@ -123,20 +127,40 @@ export async function selectVercelSource(
   card: Locator,
   input: { readonly repository: string; readonly branch?: string | undefined },
 ): Promise<void> {
-  await card.getByRole("button", { name: "Select a repository" }).click();
-  const repoSearch = page.getByRole("textbox", { name: "Search GitHub repositories" });
-  await repoSearch.fill(input.repository);
-  await page
-    .getByRole("option", { name: new RegExp(input.repository, "i") })
-    .first()
-    .click();
+  // The repository/branch triggers are comboboxes labeled by an associated
+  // <label htmlFor>; getByLabel resolves them even after the branch trigger
+  // shows the auto-selected default branch name. Search fields use
+  // getByPlaceholder (same pattern as the model picker) because Base UI's
+  // ComboboxInput is role=combobox, not textbox — so getByRole("textbox")
+  // never matches even when aria-label is set.
+  //
+  // Repo option accessible names include a "default <branch>" subtitle, so
+  // match the owner/name with a word-boundary-ish pattern and prefer the
+  // option whose name starts with the repository key.
+  await card.getByLabel("GitHub repository").click();
+  await page.getByPlaceholder("Search repositories…").fill(input.repository);
+  const repoOption = page
+    .getByRole("option", { name: new RegExp(`^${escapeRegExp(input.repository)}\\b`, "i") })
+    .first();
+  await repoOption.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
+  await repoOption.click();
 
-  if (input.branch !== undefined) {
-    await card.getByRole("button", { name: /Select a branch|^Branch$/ }).click();
-    const branchSearch = page.getByRole("textbox", { name: "Search branches" });
-    await branchSearch.fill(input.branch);
-    await page.getByRole("option", { name: input.branch, exact: true }).first().click();
-  }
+  // Selecting a repository auto-fills the repo's default branch. Only open the
+  // branch picker when an explicit branch was requested and it differs.
+  const branchTrigger = card.getByLabel("Branch", { exact: true });
+  await expect(branchTrigger).not.toHaveText(/Select a (branch|repository)/, {
+    timeout: E2E_TIMEOUTS.assertionMs,
+  });
+  if (input.branch === undefined) return;
+
+  const currentBranch = (await branchTrigger.innerText()).trim();
+  if (currentBranch === input.branch) return;
+
+  await branchTrigger.click();
+  await page.getByPlaceholder("Search branches…").fill(input.branch);
+  const branchOption = page.getByRole("option", { name: input.branch, exact: true }).first();
+  await branchOption.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
+  await branchOption.click();
 }
 
 export async function setTheme(page: Page, theme: ThemePreference): Promise<void> {
