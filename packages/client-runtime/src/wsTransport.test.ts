@@ -323,9 +323,12 @@ describe("WsTransport", () => {
       expect(sockets).toHaveLength(2);
     });
 
+    await waitFor(() => {
+      expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
+    });
+
     const secondSocket = getSocket();
     expect(secondSocket).not.toBe(firstSocket);
-    expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
 
     const requestPromise = transport.request((client) =>
       client[WS_METHODS.serverUpsertKeybinding]({
@@ -360,6 +363,62 @@ describe("WsTransport", () => {
       issues: [],
     });
 
+    await transport.dispose();
+  });
+
+  it("sends requests while the previous session is still closing", async () => {
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+    let releaseClose!: () => void;
+    const pendingClose = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closeSession = vi
+      .spyOn(
+        transport as unknown as {
+          closeSession: (session: unknown) => Promise<void>;
+        },
+        "closeSession",
+      )
+      .mockReturnValue(pendingClose);
+
+    await transport.reconnect();
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    const secondSocket = getSocket();
+    const requestPromise = transport.request((client) =>
+      client[WS_METHODS.serverUpsertKeybinding]({
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      }),
+    );
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(1);
+    });
+    const requestMessage = JSON.parse(secondSocket.sent[0] ?? "{}") as { id: string };
+    secondSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: requestMessage.id,
+        exit: {
+          _tag: "Success",
+          value: { keybindings: [], issues: [] },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({ keybindings: [], issues: [] });
+    releaseClose();
+    closeSession.mockRestore();
     await transport.dispose();
   });
 
@@ -643,9 +702,12 @@ describe("WsTransport", () => {
       expect(sockets).toHaveLength(2);
     });
 
+    await waitFor(() => {
+      expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
+    });
+
     const secondSocket = getSocket();
     expect(secondSocket).not.toBe(firstSocket);
-    expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
 
     secondSocket.open();
 

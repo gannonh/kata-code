@@ -12,7 +12,9 @@ export async function dismissBlockingToasts(page: Page): Promise<void> {
       return;
     }
 
-    await first.click().catch(() => undefined);
+    // Toasts can be replaced while the close animation is running. Keep a
+    // transient toast from consuming Playwright's full default click timeout.
+    await first.click({ timeout: 1_000 }).catch(() => undefined);
   }
 }
 

@@ -974,10 +974,6 @@ export const SandboxServiceLive = {
       if (record === undefined) return false;
       busyInstances.add(sessionKey);
       return yield* Effect.gen(function* () {
-        // Unlink the environment from the relay so it disappears from the
-        // Connect pool immediately. Non-fatal: if the unlink fails, the relay
-        // link lapses when the sandbox becomes unreachable.
-        yield* unlinkSandboxFromRelay(record);
         // Delete the provider sandbox via the driver.
         const live = liveSessions.get(sessionKey);
         if (live !== undefined) {
@@ -1026,6 +1022,10 @@ export const SandboxServiceLive = {
             );
           }
         }
+        // Relay unlink is best-effort and may involve a separate network
+        // request. Detach it after the provider delete so a slow relay cannot
+        // keep the lifecycle RPC (and its durable record) open.
+        yield* unlinkSandboxFromRelay(record).pipe(Effect.forkDetach);
         // Remove the store record.
         yield* removeSessionRecord(instanceId);
         liveSessions.delete(sessionKey);

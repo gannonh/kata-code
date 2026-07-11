@@ -237,7 +237,11 @@ export class WsTransport {
       this.lastHeartbeatPongAt = null;
       const previousSession = this.session;
       this.session = this.createSession();
-      await this.closeSession(previousSession);
+      // A live subscription can keep the previous scope closing while the
+      // protocol is retrying a failed socket. The replacement session is
+      // usable independently, so do not make reconnect callers wait for
+      // best-effort cleanup of the old session.
+      this.closeSessionInBackground(previousSession);
     });
 
     this.reconnectChain = reconnectOperation.catch(() => undefined);
@@ -265,6 +269,12 @@ export class WsTransport {
       this.intentionalCloseDepth = Math.max(0, this.intentionalCloseDepth - 1);
       session.runtime.dispose();
     });
+  }
+
+  private closeSessionInBackground(session: TransportSession): void {
+    void Promise.resolve()
+      .then(() => this.closeSession(session))
+      .catch(() => undefined);
   }
 
   private createSession(): TransportSession {

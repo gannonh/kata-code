@@ -361,7 +361,14 @@ export function SandboxDeploymentSettings({
       withBusy(instanceId, "dispose", async () => {
         try {
           const session = activeSession[instanceId];
-          const result = await getPrimaryEnvironmentConnection().client.sandbox.disposeSession({
+          const connection = getPrimaryEnvironmentConnection();
+          // Long cloud lifecycle calls can outlive the primary RPC heartbeat.
+          // Rotate the transport before disposal so a socket that still
+          // answers pings cannot leave the delete request queued forever. The
+          // full environment reconnect also waits for a shell snapshot, which
+          // is unrelated to this lifecycle request and can block recovery.
+          await connection.client.reconnect();
+          const result = await connection.client.sandbox.disposeSession({
             instanceId: instanceId as never,
           });
           if (!result.disposed) {
@@ -373,7 +380,10 @@ export function SandboxDeploymentSettings({
             return;
           }
           if (session) {
-            await removeSavedEnvironment(EnvironmentId.make(session.environmentId)).catch(
+            // The remote sandbox can disappear before its saved WebSocket
+            // connection finishes closing. Do not hold the lifecycle UI open
+            // on that best-effort local cleanup.
+            void removeSavedEnvironment(EnvironmentId.make(session.environmentId)).catch(
               (error) => {
                 toastManager.add({
                   type: "error",
@@ -383,6 +393,11 @@ export function SandboxDeploymentSettings({
               },
             );
           }
+          setActiveSession((prev) => {
+            const next = { ...prev };
+            delete next[instanceId];
+            return next;
+          });
           refreshManagedRelayEnvironments();
           await refreshList();
           setActiveSession((prev) => {
