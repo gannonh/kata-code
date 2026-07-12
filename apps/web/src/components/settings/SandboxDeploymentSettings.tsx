@@ -345,20 +345,23 @@ export function SandboxDeploymentSettings({
           if (hasCloudPublicConfig() && !connectAuthToken) {
             throw new Error("Sign in to Kata Code Connect before starting a deployment session.");
           }
-          const result = await withRpcTimeout("Start session", () =>
-            getPrimaryEnvironmentConnection().client.sandbox.startSession({
-              instanceId: instanceId as never,
-              ...(connectAuthToken ? { connectAuthToken } : {}),
-              ...(project?.repositoryIdentity
-                ? {
-                    repository: {
-                      repoRoot: project.cwd,
-                      repositoryIdentity: project.repositoryIdentity,
-                    },
-                  }
-                : {}),
-            }),
-          );
+          // Vercel provisioning can legitimately exceed the UI's generic
+          // lifecycle deadline while the provider sandbox is already running.
+          // The transport rejects this request if its session is replaced, and
+          // the server owns provider-stage deadlines, so await the authoritative
+          // result instead of reporting a false client-side timeout.
+          const result = await getPrimaryEnvironmentConnection().client.sandbox.startSession({
+            instanceId: instanceId as never,
+            ...(connectAuthToken ? { connectAuthToken } : {}),
+            ...(project?.repositoryIdentity
+              ? {
+                  repository: {
+                    repoRoot: project.cwd,
+                    repositoryIdentity: project.repositoryIdentity,
+                  },
+                }
+              : {}),
+          });
           setActiveSession((prev) => ({
             ...prev,
             [instanceId]: {
