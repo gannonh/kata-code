@@ -2,7 +2,12 @@ import type { Locator } from "@playwright/test";
 import { readVercelCredentials, readVercelSourceSelection } from "../../src/harness/env.ts";
 import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
-import { authorizeConnectCli, withConnectBrowser } from "../../src/flows/connect.ts";
+import {
+  authorizeConnectCli,
+  listConnectEnvironmentIds,
+  registerConnectEnvironmentCleanup,
+  withConnectBrowser,
+} from "../../src/flows/connect.ts";
 import {
   addVercelEnvironment,
   openConnectionsSettings,
@@ -132,6 +137,9 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     expect(sessionText, "session text did not expose a public URL").toMatch(
       /https:\/\/[a-z0-9-]+\.vercel\.run/i,
     );
+    const environmentId = sessionText?.match(/\(env ([^)]+)\)/u)?.[1];
+    expect(environmentId, "session text did not expose the Connect environment id").toBeTruthy();
+    registerConnectEnvironmentCleanup(runContext, environmentId!);
 
     // Source controls lock once a sandbox exists (AC-GS11).
     await expect(
@@ -144,6 +152,12 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     await card.getByRole("button", { name: "Stop" }).last().click();
     await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
     await expect(sessionLine).toBeHidden({ timeout: VERCEL_CLOUD_STEP_MS });
+    await expect
+      .poll(async () => (await listConnectEnvironmentIds(runContext)).includes(environmentId!), {
+        timeout: E2E_TIMEOUTS.assertionMs,
+        message: "disposed sandbox remained in Kata Code Connect discovery",
+      })
+      .toBe(false);
 
     await dismissBlockingToasts(page);
     await card.getByRole("button", { name: /Delete sandbox environment/ }).click();

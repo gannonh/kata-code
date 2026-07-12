@@ -1,7 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 import { chromium, type Browser, type Page } from "@playwright/test";
 import { clerk, setupClerkTestingToken } from "@clerk/testing/playwright";
 
@@ -13,7 +14,66 @@ import {
   readGoogleTestUserEmail,
   readGoogleTestUserPrerequisites,
 } from "../harness/env.ts";
-import type { E2ERunContext } from "../harness/isolatedRun.ts";
+import { registerCleanup, type E2ERunContext } from "../harness/isolatedRun.ts";
+
+const execFileAsync = promisify(execFile);
+
+async function runConnectCleanupCli(
+  runContext: E2ERunContext,
+  args: ReadonlyArray<string>,
+): Promise<string> {
+  const bin = join(runContext.repoRoot, "apps/server/dist/bin.mjs");
+  const { stdout } = await execFileAsync(process.execPath, [bin, "connect", ...args], {
+    env: {
+      ...process.env,
+      KATACODE_HOME: runContext.katacodeHome,
+      VITE_DEV_SERVER_URL: `http://127.0.0.1:${runContext.webPort}`,
+    },
+  });
+  return stdout.trim();
+}
+
+/** Register cloud cleanup before the isolated token/home is destroyed. */
+export function registerConnectEnvironmentCleanup(
+  runContext: E2ERunContext,
+  environmentId: string,
+): void {
+  registerCleanup(runContext, async () => {
+    try {
+      await runConnectCleanupCli(runContext, [
+        "cleanup",
+        "--environment",
+        environmentId,
+        "--yes",
+        "--base-dir",
+        runContext.katacodeHome,
+      ]);
+    } catch (error) {
+      logHarnessPhase(
+        `Connect teardown could not remove ${environmentId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  });
+}
+
+export async function listConnectEnvironmentIds(
+  runContext: E2ERunContext,
+): Promise<ReadonlyArray<string>> {
+  const output = await runConnectCleanupCli(runContext, [
+    "cleanup",
+    "--json",
+    "--base-dir",
+    runContext.katacodeHome,
+  ]);
+  const decoded: unknown = JSON.parse(output);
+  if (!Array.isArray(decoded)) return [];
+  return decoded.flatMap((entry) =>
+    entry && typeof entry === "object" && "environmentId" in entry
+      ? [String(entry.environmentId)]
+      : [],
+  );
+}
 
 /**
  * E2E flow helpers for Kata Code Connect (the headless CLI OAuth path). The
