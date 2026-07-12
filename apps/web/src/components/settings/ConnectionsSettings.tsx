@@ -2165,9 +2165,13 @@ export function ConnectionsSettings() {
       setSandboxSummariesLoaded(false);
     }
   }, []);
+  // Same readiness gate as SandboxDeploymentSettings: wait for the primary
+  // config snapshot so the first listInstances does not race WS auth.
+  const primaryServerConfigReady = primaryServerConfig !== null;
   useEffect(() => {
+    if (!primaryServerConfigReady) return;
     void refreshSandboxSummaries();
-  }, [refreshSandboxSummaries]);
+  }, [primaryServerConfigReady, refreshSandboxSummaries, settings.sandboxProviderInstances]);
   // Orphan sandbox records (lifecycle state "gone"/"unknown") are NOT
   // auto-deleted. Destructive cleanup happens only on server-confirmed
   // disposeSession or via the explicit per-row Remove action (identity

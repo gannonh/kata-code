@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-11 (Web Environments listInstances refresh + Docker gating)
+
+Fixed Environments cards on local web showing configured targets with no Start/Create/Test actions. Badges and lifecycle actions depend on `sandbox.listInstances`; a one-shot fetch that raced primary WS auth left `summaries` empty so cards looked inert. Settings now waits for the primary config snapshot, tracks loaded/error/pending, shows an inline Retry banner, and retries when the instance map changes. ConnectionsSettings uses the same readiness gate for Available Runtimes joins. Docker remains offered in the browser Add Environment dialog (server-backed via `docker.sock`); SSH stays desktop-only (`desktopBridge`). Electron `dev` state lives under `~/.katacode/dev` while CLI web uses `~/.katacode/userdata` — separate homes can still diverge even with identical UI.
+
 ## 2026-07-10 (environments-deploy E2E rewrite for reworked setup UI)
 
 Rewrote the `@environments-deploy` Electron E2E for the reworked Environments UI. The shared [`settings.ts`](../../e2e/src/flows/settings.ts) flow now targets the `Add environment` mode-card dialog and `Environments` section, with `addContainerEnvironment`, `addVercelEnvironment`, `selectVercelSource`, and a shared `deploymentTargetCard` helper. [`container-deploy.spec.ts`](../../e2e/tests/environments-deploy/container-deploy.spec.ts) consumes the shared helpers; [`vercel-deploy.spec.ts`](../../e2e/tests/environments-deploy/vercel-deploy.spec.ts) adds GitHub source selection, a source-required Create gate, source-lock copy, and a New worktree base-branch assertion proving the detached-HEAD repair. Source-selecting tests are credential-gated on `E2E_VERCEL_SOURCE_REPOSITORY`. Marked deferred-work [#32](https://github.com/gannonh/kata-code/issues/32) accepted (specs authored; execution remains maintainer-local). Playwright lists all 9 specs.

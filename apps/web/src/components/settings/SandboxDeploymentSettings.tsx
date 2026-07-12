@@ -25,6 +25,7 @@ import {
   useSavedEnvironmentRegistryStore,
 } from "../../environments/runtime";
 import { cn } from "../../lib/utils";
+import { useServerConfig } from "../../rpc/serverState";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import type { Project } from "../../types";
 import { Button } from "../ui/button";
@@ -45,6 +46,8 @@ import {
   readVercelSource,
   setVercelSource,
   vercelSourceRepositoryKey,
+  resolveSandboxListUiState,
+  type SandboxListUiState,
 } from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
 
@@ -93,12 +96,17 @@ export function SandboxDeploymentSettings({
   const { getToken, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useHostedConnectAuthPrompt();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const serverConfig = useServerConfig();
+  const serverConfigReady = serverConfig !== null;
   const instanceMap = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
   const savedSandboxEnvironments = settings.savedSandboxEnvironments as
     | SavedSandboxEnvironmentMap
     | undefined;
 
   const [summaries, setSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>([]);
+  const [summariesLoaded, setSummariesLoaded] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [listPending, setListPending] = useState(false);
   const [testProgress, setTestProgress] = useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [selectedRepositoryKeyByInstance, setSelectedRepositoryKeyByInstance] = useState<
@@ -108,6 +116,12 @@ export function SandboxDeploymentSettings({
     Record<string, { environmentId: string; httpBaseUrl: string }>
   >({});
   const [busy, setBusy] = useState<Record<string, BusyOp>>({});
+
+  const listUiState = resolveSandboxListUiState({
+    summariesLoaded,
+    listError,
+    listPending,
+  });
 
   /** Mark an instance busy for `op` while `fn` runs, then clear it. Centralizes
    * the `finally { setBusy ... delete }` cleanup that every long-running
@@ -129,6 +143,7 @@ export function SandboxDeploymentSettings({
   );
 
   const refreshList = useCallback(async () => {
+    setListPending(true);
     try {
       const result = await getPrimaryEnvironmentConnection().client.sandbox.listInstances();
       setSummaries(result.instances);
@@ -148,18 +163,28 @@ export function SandboxDeploymentSettings({
           }),
         ),
       );
+      setSummariesLoaded(true);
+      setListError(null);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error.";
+      setSummariesLoaded(false);
+      setListError(message);
       toastManager.add({
         type: "error",
         title: "Failed to list sandbox targets",
-        description: error instanceof Error ? error.message : "Unknown error.",
+        description: message,
       });
+    } finally {
+      setListPending(false);
     }
   }, []);
 
+  // Retry when the primary WS config snapshot arrives (first paint can race
+  // auth) and whenever the configured instance map changes.
   useEffect(() => {
+    if (!serverConfigReady) return;
     void refreshList();
-  }, [refreshList, settings.sandboxProviderInstances]);
+  }, [refreshList, settings.sandboxProviderInstances, serverConfigReady]);
 
   const summaryById = useMemo(() => {
     const map: Record<string, SandboxInstanceSummary> = {};
@@ -548,19 +573,43 @@ export function SandboxDeploymentSettings({
   return (
     <>
       <SettingsSection title="Environments" headerAction={headerAction}>
+        {listUiState === "error" ? (
+          <div className="flex flex-col gap-2 border-t border-border/60 px-4 py-3 first:border-t-0 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <p className="text-xs text-destructive">
+              Could not load sandbox status
+              {listError ? `: ${listError}` : "."}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={listPending}
+              onClick={() => void refreshList()}
+            >
+              {listPending ? "Retrying…" : "Retry"}
+            </Button>
+          </div>
+        ) : null}
+        {listUiState === "loading" && instanceEntries.length > 0 ? (
+          <div className="border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5">
+            <p className="text-xs text-muted-foreground">Loading sandbox status…</p>
+          </div>
+        ) : null}
         {hasSavedEnvironmentRows ? savedEnvironmentRows : null}
         {instanceEntries.length === 0 && !hasSavedEnvironmentRows ? (
           <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
             <p className="text-xs text-muted-foreground">
-              No environments configured. Add one to define a remote link, SSH host, Docker
-              container, or cloud provider.
+              No environments configured. Add a remote link, Docker container, or cloud provider
+              {typeof window !== "undefined" && window.desktopBridge ? ", or SSH host" : ""}.
             </p>
           </div>
         ) : (
           instanceEntries.map(([id, config]) => {
             const summary = summaryById[id];
-            const available = summary?.kind === "available";
-            const reason = summary?.kind === "unavailable" ? summary.reason : undefined;
+            const available = listUiState === "ready" && summary?.kind === "available";
+            const reason =
+              listUiState === "ready" && summary?.kind === "unavailable"
+                ? summary.reason
+                : undefined;
             const session = activeSession[id];
             const progress = testProgress[id] ?? [];
             const instanceBusy = busy[id];
@@ -580,7 +629,8 @@ export function SandboxDeploymentSettings({
                 available={available}
                 reason={reason}
                 session={session}
-                summary={summary}
+                summary={listUiState === "ready" ? summary : undefined}
+                listUiState={listUiState}
                 progress={progress}
                 instanceBusy={instanceBusy}
                 isExpanded={isOpen}
@@ -621,6 +671,8 @@ interface DeploymentTargetCardProps {
   readonly reason: string | undefined;
   readonly session: { environmentId: string; httpBaseUrl: string } | undefined;
   readonly summary: SandboxInstanceSummary | undefined;
+  /** Environments list fetch phase — keeps Create/Test from looking silently dead. */
+  readonly listUiState: SandboxListUiState;
   readonly progress: string[];
   readonly instanceBusy: BusyOp | undefined;
   readonly isExpanded: boolean;
@@ -654,6 +706,7 @@ export function DeploymentTargetCard({
   reason,
   session,
   summary,
+  listUiState,
   progress,
   instanceBusy,
   isExpanded,
@@ -727,6 +780,8 @@ export function DeploymentTargetCard({
     isVercel,
     config: instance.config,
   });
+  const actionsBlocked = listUiState !== "ready" || instanceBusy !== undefined;
+  const createBlocked = actionsBlocked || !available || createDisabledForSource;
 
   const setSource = (next: { repository?: string; branch?: string }) => {
     const { config: _omit, ...rest } = instance;
@@ -804,21 +859,11 @@ export function DeploymentTargetCard({
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
             {sessionStatus === "running" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={instanceBusy !== undefined}
-                onClick={onStop}
-              >
+              <Button size="sm" variant="outline" disabled={actionsBlocked} onClick={onStop}>
                 {instanceBusy === "stop" ? "Stopping…" : "Stop"}
               </Button>
             ) : sessionStatus === "stopped" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={instanceBusy !== undefined}
-                onClick={onStart}
-              >
+              <Button size="sm" variant="outline" disabled={actionsBlocked} onClick={onStart}>
                 {instanceBusy === "start" ? "Starting…" : "Start"}
               </Button>
             ) : null}
@@ -993,32 +1038,36 @@ export function DeploymentTargetCard({
               <div className="flex flex-wrap items-center gap-2">
                 {sessionStatus === undefined ? (
                   <>
-                    <Button
-                      size="sm"
-                      disabled={instanceBusy !== undefined || !available || createDisabledForSource}
-                      onClick={onStart}
-                    >
-                      {instanceBusy === "start" ? "Starting…" : "Create & run sandbox"}
+                    <Button size="sm" disabled={createBlocked} onClick={onStart}>
+                      {listUiState === "loading"
+                        ? "Loading…"
+                        : instanceBusy === "start"
+                          ? "Starting…"
+                          : "Create & run sandbox"}
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={instanceBusy !== undefined || !available}
+                      disabled={actionsBlocked || !available}
                       onClick={onTest}
                     >
-                      {instanceBusy === "test" ? "Testing…" : "Test connection"}
+                      {listUiState === "loading"
+                        ? "Loading…"
+                        : instanceBusy === "test"
+                          ? "Testing…"
+                          : "Test connection"}
                     </Button>
                   </>
                 ) : sessionStatus === "stopped" ? (
                   <>
-                    <Button size="sm" disabled={instanceBusy !== undefined} onClick={onStart}>
+                    <Button size="sm" disabled={actionsBlocked} onClick={onStart}>
                       {instanceBusy === "start" ? "Starting…" : "Start"}
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                      disabled={instanceBusy !== undefined}
+                      disabled={actionsBlocked}
                       onClick={onDispose}
                     >
                       {instanceBusy === "dispose" ? "Deleting…" : "Delete sandbox"}

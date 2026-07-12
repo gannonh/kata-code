@@ -194,6 +194,23 @@ export function makeSandboxProviderInstanceId(input: {
   return SandboxProviderInstanceId.make(instanceId) as string;
 }
 
+/** UI phase for the Environments `sandbox.listInstances` fetch. */
+export type SandboxListUiState = "loading" | "error" | "ready";
+
+/** Derive the Environments list fetch phase so cards do not look "inert"
+ *  (no badges, disabled Create/Test) when summaries are still pending or the
+ *  RPC failed. `pending` wins over a prior error so Retry shows progress. */
+export function resolveSandboxListUiState(input: {
+  readonly summariesLoaded: boolean;
+  readonly listError: string | null;
+  readonly listPending: boolean;
+}): SandboxListUiState {
+  if (input.listPending && !input.summariesLoaded) return "loading";
+  if (input.listError !== null && !input.summariesLoaded) return "error";
+  if (input.summariesLoaded) return "ready";
+  return "loading";
+}
+
 /** The lifecycle state of a saved sandbox runtime record, joined to its
  *  instance's `SandboxInstanceSummary` from `sandbox.listInstances`.
  *  `unknown` = the record could not be joined by id (legacy record without

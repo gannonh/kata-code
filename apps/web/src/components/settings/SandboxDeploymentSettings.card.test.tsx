@@ -21,17 +21,20 @@ function makeInstance(): SandboxProviderInstanceConfig {
 
 /** Common props with overrides for summary (which drives the lifecycle state). */
 function makeProps(overrides: {
-  readonly summary?: SandboxInstanceSummary;
+  readonly summary?: SandboxInstanceSummary | null;
   readonly instanceBusy?: "test" | "start" | "dispose" | "renew" | "stop";
+  readonly listUiState?: "loading" | "error" | "ready";
+  readonly available?: boolean;
 }): React.ComponentProps<typeof DeploymentTargetCard> {
   return {
     instanceId: "docker_test_01",
     instance: makeInstance(),
     displayName: "Test",
-    available: true,
+    available: overrides.available ?? true,
     reason: undefined,
     session: undefined,
-    summary: overrides.summary,
+    summary: overrides.summary === null ? undefined : overrides.summary,
+    listUiState: overrides.listUiState ?? "ready",
     progress: [],
     instanceBusy: overrides.instanceBusy,
     isExpanded: true,
@@ -159,6 +162,33 @@ describe("DeploymentTargetCard lifecycle actions (AC-L10/L11/L12)", () => {
   it("stopped: header shows a 'Start' secondary button (AC-L10)", () => {
     const html = renderCard(makeProps({ summary: stoppedSummary() }));
     expect(html).toContain(">Start<");
+  });
+
+  it("loading list: Create/Test show Loading and stay disabled", () => {
+    const html = renderCard(
+      makeProps({
+        summary: null,
+        available: false,
+        listUiState: "loading",
+      }),
+    );
+    expect(html).toContain(">Loading…<");
+    expect(html).not.toContain(">Start<");
+    // Both action buttons are disabled while summaries are pending.
+    expect(html.match(/disabled[^>]*>Loading…</g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("list error with no summary: Create/Test stay disabled (section Retry owns recovery)", () => {
+    const html = renderCard(
+      makeProps({
+        summary: null,
+        available: false,
+        listUiState: "error",
+      }),
+    );
+    expect(html).toContain("Create &amp; run sandbox");
+    expect(html).toContain("Test connection");
+    expect(html).not.toContain(">Start<");
   });
 
   it("no sandbox: header does not show a Stop or Start secondary button (AC-L10)", () => {

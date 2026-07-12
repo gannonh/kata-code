@@ -10,6 +10,7 @@ import {
   parseSandboxPort,
   readVercelVcpus,
   resolveSandboxLifecycleState,
+  resolveSandboxListUiState,
   sandboxInstanceIdForLabel,
   shouldSeedRepositoryForStart,
   slugifySandboxLabel,
@@ -18,6 +19,62 @@ import {
   vercelSourceRepositoryKey,
   canCreateVercelSandbox,
 } from "./SandboxDeploymentSettings.logic";
+
+describe("resolveSandboxListUiState", () => {
+  it("is loading until the first successful listInstances", () => {
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: false,
+        listError: null,
+        listPending: false,
+      }),
+    ).toBe("loading");
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: false,
+        listError: null,
+        listPending: true,
+      }),
+    ).toBe("loading");
+  });
+
+  it("is error when the fetch failed and summaries are not loaded", () => {
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: false,
+        listError: "Failed to list sandbox targets",
+        listPending: false,
+      }),
+    ).toBe("error");
+  });
+
+  it("stays loading while a retry is in flight after an error", () => {
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: false,
+        listError: "Failed to list sandbox targets",
+        listPending: true,
+      }),
+    ).toBe("loading");
+  });
+
+  it("is ready once summaries loaded, even if a later refresh is pending", () => {
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: true,
+        listError: null,
+        listPending: false,
+      }),
+    ).toBe("ready");
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: true,
+        listError: null,
+        listPending: true,
+      }),
+    ).toBe("ready");
+  });
+});
 
 describe("vercel source selection logic", () => {
   it("reads a complete source and rejects an incomplete one", () => {

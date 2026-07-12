@@ -260,6 +260,9 @@ vi.mock("../../environments/runtime", () => {
         subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
           authAccessHarness.subscribe(listener),
       },
+      sandbox: {
+        listInstances: vi.fn().mockResolvedValue({ instances: [] }),
+      },
     },
     ensureBootstrapped: async () => undefined,
     reconnect: async () => undefined,
@@ -1345,6 +1348,35 @@ describe("GeneralSettingsPanel observability", () => {
         { label: "" },
       );
     });
+  });
+
+  it("offers Docker and Cloud on web without desktopBridge, but not SSH", async () => {
+    Reflect.deleteProperty(window, "desktopBridge");
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ConnectionsSettings />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page.getByRole("button", { name: "Add environment", exact: true }).click();
+    const addEnvironmentDialog = page.getByRole("dialog", { name: "Add Environment" });
+    await expect
+      .element(addEnvironmentDialog.getByRole("heading", { name: "Add Environment", exact: true }))
+      .toBeInTheDocument();
+    await expect
+      .element(addEnvironmentDialog.getByRole("button", { name: /^Remote link\b/ }))
+      .toBeInTheDocument();
+    await expect
+      .element(addEnvironmentDialog.getByRole("button", { name: /^Docker container\b/ }))
+      .toBeInTheDocument();
+    await expect
+      .element(addEnvironmentDialog.getByRole("button", { name: /^Cloud Provider\b/ }))
+      .toBeInTheDocument();
+    await expect
+      .element(addEnvironmentDialog.getByRole("button", { name: /^SSH\b/ }))
+      .not.toBeInTheDocument();
   });
 
   it("opens the logs folder in the preferred editor", async () => {
