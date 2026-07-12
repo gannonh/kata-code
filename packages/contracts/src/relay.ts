@@ -269,7 +269,9 @@ export const RelayEnvironmentLinkResponse = Schema.Struct({
   relayIssuer: TrimmedNonEmptyString,
   environmentCredential: TrimmedNonEmptyString,
   cloudMintPublicKey: TrimmedNonEmptyString,
-  leaseExpiresAt: TrimmedNonEmptyString,
+  // Optional: production relay may predate lease expiry (added 2026-07-12).
+  // Same tolerance as RelayClientEnvironmentRecord.
+  leaseExpiresAt: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type RelayEnvironmentLinkResponse = typeof RelayEnvironmentLinkResponse.Type;
 
