@@ -1,10 +1,11 @@
 "use client";
 
 import { GitBranchIcon, GithubIcon, SearchIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SandboxGitHubRepository } from "@kata-sh/code-contracts";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
+import { createRequestGeneration } from "./VercelSourcePicker.logic";
 import { Button } from "../ui/button";
 import {
   Combobox,
@@ -59,40 +60,62 @@ export function VercelSourcePicker({
   const [branchError, setBranchError] = useState<string | null>(null);
   const [branchPage, setBranchPage] = useState(0);
   const [branchHasMore, setBranchHasMore] = useState(false);
+  const repositoryRequests = useRef(createRequestGeneration()).current;
+  const branchRequests = useRef(createRequestGeneration()).current;
 
-  const loadRepositories = useCallback(async (page: number) => {
-    setRepoState("loading");
-    setRepoError(null);
-    try {
-      const result =
-        await getPrimaryEnvironmentConnection().client.sandbox.searchGitHubRepositories({ page });
-      setRepos((prev) => (page <= 1 ? result.repositories : [...prev, ...result.repositories]));
-      setRepoPage(page);
-      setRepoHasMore(result.hasMore);
-      setRepoState("idle");
-    } catch (error) {
-      setRepoState("error");
-      setRepoError(error instanceof Error ? error.message : "Failed to load repositories.");
-    }
-  }, []);
+  const loadRepositories = useCallback(
+    async (page: number) => {
+      const generation = repositoryRequests.begin();
+      setRepoState("loading");
+      setRepoError(null);
+      try {
+        const result =
+          await getPrimaryEnvironmentConnection().client.sandbox.searchGitHubRepositories({ page });
+        if (!repositoryRequests.isCurrent(generation)) return;
+        setRepos((prev) => (page <= 1 ? result.repositories : [...prev, ...result.repositories]));
+        setRepoPage(page);
+        setRepoHasMore(result.hasMore);
+        setRepoState("idle");
+      } catch (error) {
+        if (!repositoryRequests.isCurrent(generation)) return;
+        setRepoState("error");
+        setRepoError(error instanceof Error ? error.message : "Failed to load repositories.");
+      }
+    },
+    [repositoryRequests],
+  );
 
-  const loadBranches = useCallback(async (repo: string, page: number) => {
-    setBranchState("loading");
-    setBranchError(null);
-    try {
-      const result = await getPrimaryEnvironmentConnection().client.sandbox.listGitHubBranches({
-        repository: repo,
-        page,
-      });
-      setBranches((prev) => (page <= 1 ? result.branches : [...prev, ...result.branches]));
-      setBranchPage(page);
-      setBranchHasMore(result.hasMore);
-      setBranchState("idle");
-    } catch (error) {
-      setBranchState("error");
-      setBranchError(error instanceof Error ? error.message : "Failed to load branches.");
-    }
-  }, []);
+  const loadBranches = useCallback(
+    async (repo: string, page: number) => {
+      const generation = branchRequests.begin();
+      setBranchState("loading");
+      setBranchError(null);
+      try {
+        const result = await getPrimaryEnvironmentConnection().client.sandbox.listGitHubBranches({
+          repository: repo,
+          page,
+        });
+        if (!branchRequests.isCurrent(generation)) return;
+        setBranches((prev) => (page <= 1 ? result.branches : [...prev, ...result.branches]));
+        setBranchPage(page);
+        setBranchHasMore(result.hasMore);
+        setBranchState("idle");
+      } catch (error) {
+        if (!branchRequests.isCurrent(generation)) return;
+        setBranchState("error");
+        setBranchError(error instanceof Error ? error.message : "Failed to load branches.");
+      }
+    },
+    [branchRequests],
+  );
+
+  useEffect(
+    () => () => {
+      repositoryRequests.invalidate();
+      branchRequests.invalidate();
+    },
+    [branchRequests, repositoryRequests],
+  );
 
   useEffect(() => {
     if (repoOpen && repoState === "idle" && repos.length === 0) {
