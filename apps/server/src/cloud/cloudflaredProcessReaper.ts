@@ -1,8 +1,7 @@
 /**
- * Reclaims orphaned `cloudflared tunnel run` processes left behind when the
- * server exits uncleanly (force-quit, SIGKILL, crash) before Scope finalizers run.
- *
- * Matches only the exact resolved executable path so PATH/Docker copies are left alone.
+ * Reclaims the one `cloudflared tunnel run` process recorded by Kata Code after
+ * an unclean exit. Ownership is verified from the pidfile's executable, exact
+ * observed command, and process start identity before a signal is sent.
  */
 // @effect-diagnostics nodeBuiltinImport:off — intentional Node process control for host reaping
 import { execFileSync } from "node:child_process";
@@ -25,6 +24,8 @@ const PIDFILE_NAME = "managed-endpoint-cloudflared.pid";
 const PidfileRecord = Schema.Struct({
   pid: Schema.Number,
   executablePath: Schema.String,
+  command: Schema.String,
+  startedAt: Schema.String,
 });
 type PidfileRecord = typeof PidfileRecord.Type;
 
@@ -33,9 +34,9 @@ const decodePidfileJson = Schema.decodeEffect(PidfileJson);
 const encodePidfileJson = Schema.encodeEffect(PidfileJson);
 
 export interface CloudflaredProcessReaperShape {
-  /** Kill pidfile target (if alive) and any host `tunnel run` for `executablePath`. */
+  /** Reclaim the verified pidfile owner, if it belongs to this executable. */
   readonly reclaim: (executablePath: string) => Effect.Effect<readonly number[]>;
-  /** Kill whatever the pidfile points at (if any), then clear it. Used on disable. */
+  /** Reclaim the verified pidfile owner, then clear stale ownership state. */
   readonly reclaimPidfileAndClear: () => Effect.Effect<readonly number[]>;
   readonly writePidfile: (input: {
     readonly pid: number;
@@ -50,72 +51,30 @@ export class CloudflaredProcessReaper extends Context.Service<
 >()("@kata-sh/code-cli/cloud/cloudflaredProcessReaper") {}
 
 export function isCloudflaredTunnelRunCommand(command: string, executablePath: string): boolean {
-  if (!command.includes(executablePath)) {
-    return false;
-  }
-  return /\btunnel\s+run\b/.test(command);
+  return command === `${executablePath} tunnel run`;
 }
 
-export type ProcessListing = ReadonlyArray<{
-  readonly pid: number;
+export interface CloudflaredProcessIdentity {
   readonly command: string;
-}>;
-
-export function parsePsEoPidCommand(stdout: string): ProcessListing {
-  const listing: Array<{ pid: number; command: string }> = [];
-  for (const line of stdout.split("\n")) {
-    const match = /^\s*(\d+)\s+(.*)$/.exec(line);
-    if (!match) continue;
-    const pid = Number.parseInt(match[1] ?? "", 10);
-    const command = match[2];
-    if (!Number.isInteger(pid) || typeof command !== "string" || command.length === 0) {
-      continue;
-    }
-    listing.push({ pid, command });
-  }
-  return listing;
+  readonly startedAt: string;
 }
 
-export function findTunnelRunPids(
-  listing: ProcessListing,
-  executablePath: string,
-  selfPid: number = process.pid,
-): number[] {
-  const pids: number[] = [];
-  for (const entry of listing) {
-    if (entry.pid === selfPid) continue;
-    if (isCloudflaredTunnelRunCommand(entry.command, executablePath)) {
-      pids.push(entry.pid);
-    }
-  }
-  return pids;
+export interface CloudflaredProcessControl {
+  readonly inspect: (pid: number, platform: NodeJS.Platform) => CloudflaredProcessIdentity | null;
+  readonly kill: (pid: number) => boolean;
 }
 
-function listHostProcesses(platform: NodeJS.Platform): ProcessListing {
-  if (platform === "win32") {
-    return [];
-  }
+function inspectProcess(pid: number, platform: NodeJS.Platform): CloudflaredProcessIdentity | null {
+  if (platform === "win32") return null;
   try {
-    const stdout = execFileSync("ps", ["-eo", "pid=,command="], {
-      encoding: "utf8",
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    return parsePsEoPidCommand(stdout);
-  } catch {
-    return [];
-  }
-}
-
-function commandForPid(pid: number, platform: NodeJS.Platform): string {
-  if (platform === "win32") {
-    return "";
-  }
-  try {
-    return execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+    const stdout = execFileSync("ps", ["-p", String(pid), "-o", "lstart=", "-o", "command="], {
       encoding: "utf8",
     }).trim();
+    const match = /^(\S+\s+\S+\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.+)$/u.exec(stdout);
+    if (!match?.[1] || !match[2]) return null;
+    return { startedAt: match[1], command: match[2] };
   } catch {
-    return "";
+    return null;
   }
 }
 
@@ -123,56 +82,25 @@ function killPid(pid: number): boolean {
   try {
     process.kill(pid, "SIGTERM");
   } catch {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      return false;
-    }
-    return true;
-  }
-  try {
-    process.kill(pid, 0);
-    process.kill(pid, "SIGKILL");
-  } catch {
-    // Already gone after SIGTERM.
+    return false;
   }
   return true;
 }
 
-function killMatchingPids(
-  pids: ReadonlyArray<number>,
-  executablePath: string,
-  platform: NodeJS.Platform,
-): number[] {
-  const killed: number[] = [];
-  for (const pid of pids) {
-    const command = commandForPid(pid, platform);
-    if (command.length > 0 && !isCloudflaredTunnelRunCommand(command, executablePath)) {
-      continue;
-    }
-    if (killPid(pid)) {
-      killed.push(pid);
-    }
-  }
-  return killed;
-}
+const liveProcessControl: CloudflaredProcessControl = { inspect: inspectProcess, kill: killPid };
 
 export const makeCloudflaredProcessReaper = Effect.fn("cloudflaredProcessReaper.make")(function* (
   pidfilePath: string,
+  processControl: CloudflaredProcessControl = liveProcessControl,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const platform = yield* HostProcessPlatform;
 
   const readPidfile = Effect.gen(function* () {
-    const exists = yield* fileSystem.exists(pidfilePath);
-    if (!exists) {
-      return null as PidfileRecord | null;
-    }
+    if (!(yield* fileSystem.exists(pidfilePath))) return null as PidfileRecord | null;
     const raw = yield* fileSystem.readFileString(pidfilePath).pipe(Effect.option);
-    if (Option.isNone(raw)) {
-      return null;
-    }
+    if (Option.isNone(raw)) return null;
     return yield* decodePidfileJson(raw.value).pipe(Effect.option, Effect.map(Option.getOrNull));
   }).pipe(Effect.orElseSucceed(() => null as PidfileRecord | null));
 
@@ -181,44 +109,58 @@ export const makeCloudflaredProcessReaper = Effect.fn("cloudflaredProcessReaper.
 
   const writePidfile: CloudflaredProcessReaperShape["writePidfile"] = (input) =>
     Effect.gen(function* () {
+      const identity = processControl.inspect(input.pid, platform);
+      if (
+        identity === null ||
+        !isCloudflaredTunnelRunCommand(identity.command, input.executablePath)
+      ) {
+        yield* Effect.logWarning(
+          "Could not verify cloudflared process ownership; pidfile omitted",
+          {
+            pid: input.pid,
+          },
+        );
+        return;
+      }
       yield* fileSystem.makeDirectory(pathService.dirname(pidfilePath), { recursive: true });
-      const encoded = yield* encodePidfileJson({
-        pid: input.pid,
-        executablePath: input.executablePath,
-      });
+      const encoded = yield* encodePidfileJson({ ...input, ...identity });
       yield* fileSystem.writeFileString(pidfilePath, `${encoded}\n`);
     }).pipe(Effect.ignore);
 
+  const reclaimRecord = (record: PidfileRecord, executablePath: string) =>
+    Effect.sync(() => {
+      if (record.executablePath !== executablePath) return [] as readonly number[];
+      const current = processControl.inspect(record.pid, platform);
+      if (
+        current === null ||
+        current.command !== record.command ||
+        current.startedAt !== record.startedAt ||
+        !isCloudflaredTunnelRunCommand(current.command, record.executablePath)
+      ) {
+        return [] as readonly number[];
+      }
+      return processControl.kill(record.pid) ? ([record.pid] as const) : ([] as const);
+    });
+
   const reclaim: CloudflaredProcessReaperShape["reclaim"] = (executablePath) =>
     Effect.gen(function* () {
-      const killed = new Set<number>();
       const record = yield* readPidfile;
-      if (record) {
-        for (const pid of killMatchingPids([record.pid], record.executablePath, platform)) {
-          killed.add(pid);
-        }
-      }
-      for (const pid of findTunnelRunPids(listHostProcesses(platform), executablePath)) {
-        if (killPid(pid)) {
-          killed.add(pid);
-        }
-      }
-      if (killed.size > 0) {
-        yield* Effect.logInfo("Reclaimed orphaned cloudflared tunnel process(es)", {
+      const killed = record ? yield* reclaimRecord(record, executablePath) : ([] as const);
+      yield* clearPidfile();
+      if (killed.length > 0) {
+        yield* Effect.logInfo("Reclaimed owned cloudflared tunnel process", {
           executablePath,
-          pids: [...killed],
+          pids: killed,
         });
       }
-      return [...killed] as const;
+      return killed;
     });
 
   const reclaimPidfileAndClear: CloudflaredProcessReaperShape["reclaimPidfileAndClear"] = () =>
     Effect.gen(function* () {
       const record = yield* readPidfile;
-      const killed = record ? yield* reclaim(record.executablePath) : ([] as const);
-      yield* clearPidfile();
-      return killed;
-    });
+      return record ? yield* reclaim(record.executablePath) : ([] as const);
+    }).pipe(Effect.ensuring(clearPidfile()));
 
   return CloudflaredProcessReaper.of({
     reclaim,
@@ -237,5 +179,5 @@ export const layer = Layer.effect(
   }),
 );
 
-export const layerTest = (pidfilePath: string) =>
-  Layer.effect(CloudflaredProcessReaper, makeCloudflaredProcessReaper(pidfilePath));
+export const layerTest = (pidfilePath: string, processControl?: CloudflaredProcessControl) =>
+  Layer.effect(CloudflaredProcessReaper, makeCloudflaredProcessReaper(pidfilePath, processControl));
