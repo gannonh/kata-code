@@ -497,9 +497,12 @@ function removeSessionRecord(instanceId: SandboxProviderInstanceId): Effect.Effe
 export const SandboxServiceLive = {
   listInstances: (settings: ServerSettings) =>
     Effect.gen(function* () {
-      // Refresh stored statuses from the provider on every list so concurrent
-      // orchestrators (web + Electron) stay aligned after start/stop.
-      yield* reconcileSessions(settings);
+      // Always refresh provider status, but never block the UI RPC on it.
+      // Awaiting reconcile here made Environments time out (client 30s) whenever
+      // a Vercel/Docker status probe was slow — while Available Runtimes stayed
+      // green because they use the live WS, not this list. Concurrent
+      // orchestrators still converge via the background pass + join Deferred.
+      yield* Effect.forkDetach(reconcileSessions(settings));
       const registry = buildRegistry();
       const rawMap = settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
       const resolvedMap: SandboxProviderInstanceConfigMap = Object.fromEntries(
