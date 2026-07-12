@@ -1,17 +1,22 @@
+import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import { it as vitIt } from "@effect/vitest";
 import { describe, expect, it } from "vite-plus/test";
 
-import type {
-  SandboxExecResult,
-  SandboxHandle,
-  SandboxProvider,
+import {
+  SandboxProviderError,
+  type SandboxExecResult,
+  type SandboxHandle,
+  type SandboxProvider,
 } from "@kata-sh/code-sandbox/driver";
 
 import {
   VERCEL_WORKSPACE,
   buildGitHubAuthSeedCommand,
   readRemoteEnvironmentConfig,
+  seedGitHubAuth,
 } from "./vercelRemoteSetup.ts";
 
 const handle: SandboxHandle = {
@@ -99,4 +104,154 @@ describe("vercelRemoteSetup", () => {
     expect(command).toContain("/tmp/kata-github-auth-abc/token");
     expect(command).toContain("trap");
   });
+
+  vitIt.effect("attempts independent cleanup when auth exec fails", () =>
+    Effect.gen(function* () {
+      const commands: string[] = [];
+      const driver = execDriver(() => undefined);
+      const failingDriver = {
+        ...driver,
+        exec: (_h: SandboxHandle, command: string) => {
+          commands.push(command);
+          return command.includes("gh auth login")
+            ? Effect.fail(
+                new SandboxProviderError({ reason: "unreachable", message: "transport failed" }),
+              )
+            : Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+        },
+      } as SandboxProvider;
+
+      const outcome = yield* seedGitHubAuth({
+        driver: failingDriver,
+        handle,
+        token: "secret-token",
+        nonce: "exec-failure",
+      }).pipe(Effect.result);
+
+      expect(outcome._tag).toBe("Failure");
+      expect(commands).toHaveLength(2);
+      expect(commands[1]).toContain("rm -rf");
+      expect(commands[1]).toContain("/tmp/kata-github-auth-exec-failure");
+      expect(commands.join(" ")).not.toContain("secret-token");
+    }),
+  );
+
+  vitIt.effect("cleans the unique credential directory after successful auth", () =>
+    Effect.gen(function* () {
+      const driver = execDriver(() => undefined);
+      yield* seedGitHubAuth({ driver, handle, token: "secret-token", nonce: "success" });
+
+      expect(driver.execs).toHaveLength(2);
+      expect(driver.execs[1]?.command).toBe("rm -rf -- '/tmp/kata-github-auth-success'");
+      expect(driver.execs[1]?.cwd).toBe("/tmp");
+    }),
+  );
+
+  vitIt.effect("cleans after a nonzero auth exit and redacts its output", () =>
+    Effect.gen(function* () {
+      const driver = execDriver((command) =>
+        command.includes("gh auth login")
+          ? { exitCode: 1, stdout: "", stderr: "rejected secret-token" }
+          : undefined,
+      );
+      const outcome = yield* seedGitHubAuth({
+        driver,
+        handle,
+        token: "secret-token",
+        nonce: "nonzero",
+      }).pipe(Effect.exit);
+
+      expect(outcome._tag).toBe("Failure");
+      expect(driver.execs[1]?.command).toContain("/tmp/kata-github-auth-nonzero");
+      if (outcome._tag === "Failure") {
+        const detail = Cause.pretty(outcome.cause);
+        expect(detail).toContain("gh auth seed failed");
+        expect(detail).not.toContain("secret-token");
+      }
+    }),
+  );
+
+  vitIt.effect("surfaces cleanup failure after successful auth", () =>
+    Effect.gen(function* () {
+      const driver = execDriver((command) =>
+        command.startsWith("rm -rf")
+          ? { exitCode: 2, stdout: "", stderr: "cleanup failed" }
+          : undefined,
+      );
+      const outcome = yield* seedGitHubAuth({
+        driver,
+        handle,
+        token: "secret-token",
+        nonce: "cleanup-failure",
+      }).pipe(Effect.exit);
+
+      expect(outcome._tag).toBe("Failure");
+      if (outcome._tag === "Failure") {
+        const detail = Cause.pretty(outcome.cause);
+        expect(detail).toContain("failed to remove temporary GitHub credential directory");
+        expect(detail).not.toContain("secret-token");
+      }
+    }),
+  );
+
+  vitIt.effect("surfaces redacted primary and cleanup failures together", () =>
+    Effect.gen(function* () {
+      const commands: string[] = [];
+      const base = execDriver(() => undefined);
+      const driver = {
+        ...base,
+        exec: (_h: SandboxHandle, command: string) => {
+          commands.push(command);
+          return Effect.succeed(
+            command.includes("gh auth login")
+              ? { exitCode: 1, stdout: "", stderr: "auth rejected secret-token" }
+              : { exitCode: 2, stdout: "", stderr: "cleanup rejected secret-token" },
+          );
+        },
+      } as SandboxProvider;
+      const outcome = yield* seedGitHubAuth({
+        driver,
+        handle,
+        token: "secret-token",
+        nonce: "combined",
+      }).pipe(Effect.exit);
+
+      expect(outcome._tag).toBe("Failure");
+      expect(commands).toHaveLength(2);
+      if (outcome._tag === "Failure") {
+        const detail = Cause.pretty(outcome.cause);
+        expect(detail).toContain("gh auth seed failed");
+        expect(detail).toContain("failed to remove temporary GitHub credential directory");
+        expect(detail).not.toContain("secret-token");
+      }
+    }),
+  );
+
+  vitIt.effect("cleans after interruption once upload succeeds", () =>
+    Effect.gen(function* () {
+      const authStarted = yield* Deferred.make<void>();
+      const commands: string[] = [];
+      const base = execDriver(() => undefined);
+      const driver = {
+        ...base,
+        exec: (_h: SandboxHandle, command: string) => {
+          commands.push(command);
+          return command.includes("gh auth login")
+            ? Deferred.succeed(authStarted, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+        },
+      } as SandboxProvider;
+      const fiber = yield* seedGitHubAuth({
+        driver,
+        handle,
+        token: "secret-token",
+        nonce: "interrupt",
+      }).pipe(Effect.forkChild);
+      yield* Deferred.await(authStarted);
+      yield* Fiber.interrupt(fiber);
+
+      expect(commands).toHaveLength(2);
+      expect(commands[1]).toBe("rm -rf -- '/tmp/kata-github-auth-interrupt'");
+    }),
+  );
 });
