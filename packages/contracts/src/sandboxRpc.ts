@@ -170,6 +170,8 @@ export type SandboxDisposeSessionInput = typeof SandboxDisposeSessionInput.Type;
 export const SandboxDisposeSessionResult = Schema.Struct({
   instanceId: SandboxProviderInstanceId,
   disposed: Schema.Boolean,
+  environmentId: Schema.optionalKey(TrimmedNonEmptyString),
+  connectCleanup: Schema.Literals(["not-linked", "unlinked", "pending"]),
 });
 export type SandboxDisposeSessionResult = typeof SandboxDisposeSessionResult.Type;
 

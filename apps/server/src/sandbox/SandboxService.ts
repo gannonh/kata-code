@@ -208,14 +208,14 @@ let reconcileInProgress = false;
  *  `listInstances` if it hasn't run yet. */
 let reconcileDone = false;
 
-/** Best-effort relay unlink for a session record (dispose + gone-eviction
- *  share this). The bearer token is never stored; re-resolve it. All failures
- *  log and succeed — a dead relay link lapses on its own eventually. */
+/** Bounded relay unlink for a session record (dispose + gone-eviction share
+ *  this). The bearer token is never stored; re-resolve it. The boolean makes
+ *  partial cleanup observable while lease expiry remains the crash backstop. */
 function unlinkSandboxFromRelay(
   record: SandboxSessionRecord,
-): Effect.Effect<void, never, CliTokenManager.CloudCliTokenManager> {
+): Effect.Effect<boolean, never, CliTokenManager.CloudCliTokenManager> {
   return Effect.gen(function* () {
-    if (record.relay === undefined) return;
+    if (record.relay === undefined) return true;
     const bearerToken = yield* resolveConnectAuthToken(undefined, "stored-first").pipe(
       Effect.orElseSucceed(() => null),
     );
@@ -223,19 +223,20 @@ function unlinkSandboxFromRelay(
       yield* Effect.logWarning("Sandbox relay unlink skipped: no Connect credential", {
         environmentId: record.sandboxEnvironmentId,
       });
-      return;
+      return false;
     }
-    yield* deleteJson(
+    return yield* deleteJson(
       RelayOkResponse,
       `${record.relay.relayUrl}/v1/client/environment-links/${record.sandboxEnvironmentId}`,
       bearerToken,
     ).pipe(
-      Effect.asVoid,
-      Effect.catch((error: SandboxRpcError) =>
+      Effect.timeout("5 seconds"),
+      Effect.as(true),
+      Effect.catchCause((cause) =>
         Effect.logWarning("Could not unlink sandbox from relay", {
           environmentId: record.sandboxEnvironmentId,
-          message: error.message,
-        }).pipe(Effect.asVoid),
+          cause,
+        }).pipe(Effect.as(false)),
       ),
     );
   });
@@ -294,7 +295,7 @@ function reconcileSessions(
         registry: buildRegistry(),
         settings,
         liveSessions,
-        unlinkRelay: (record) => unlinkSandboxFromRelay(record),
+        unlinkRelay: (record) => unlinkSandboxFromRelay(record).pipe(Effect.asVoid),
       });
       // Discovery: for configured instances with supportsLifecycle and no store
       // record, probe the provider for an existing sandbox (e.g. created before
@@ -1010,7 +1011,9 @@ export const SandboxServiceLive = {
       // Read from the store — works even when the client that started the
       // session is gone (AC-L9).
       const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
-      if (record === undefined) return false;
+      if (record === undefined) {
+        return { disposed: false, connectCleanup: "not-linked" as const };
+      }
       busyInstances.add(sessionKey);
       return yield* Effect.gen(function* () {
         // Delete the provider sandbox via the driver.
@@ -1061,14 +1064,22 @@ export const SandboxServiceLive = {
             );
           }
         }
-        // Relay unlink is best-effort and may involve a separate network
-        // request. Detach it after the provider delete so a slow relay cannot
-        // keep the lifecycle RPC (and its durable record) open.
-        yield* unlinkSandboxFromRelay(record).pipe(Effect.forkDetach);
+        // Provider deletion and Connect cleanup are reported independently.
+        // Bound the unlink so relay degradation cannot hang lifecycle RPCs.
+        const connectUnlinked = yield* unlinkSandboxFromRelay(record);
         // Remove the store record.
         yield* removeSessionRecord(instanceId);
         liveSessions.delete(sessionKey);
-        return true;
+        return {
+          disposed: true,
+          environmentId: record.sandboxEnvironmentId,
+          connectCleanup:
+            record.relay === undefined
+              ? ("not-linked" as const)
+              : connectUnlinked
+                ? ("unlinked" as const)
+                : ("pending" as const),
+        };
       }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
     }),
 

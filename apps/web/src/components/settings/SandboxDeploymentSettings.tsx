@@ -430,11 +430,20 @@ export function SandboxDeploymentSettings({
             delete next[instanceId];
             return next;
           });
-          toastManager.add({
-            type: "success",
-            title: "Sandbox deleted",
-            description: `Sandbox '${instanceId}' released.`,
-          });
+          toastManager.add(
+            result.connectCleanup === "pending"
+              ? {
+                  type: "error",
+                  title: "Sandbox deleted; Connect cleanup pending",
+                  description:
+                    "The sandbox is gone, but its Connect record could not be removed. Retry from Available Runtimes.",
+                }
+              : {
+                  type: "success",
+                  title: "Sandbox deleted",
+                  description: `Sandbox '${instanceId}' released.`,
+                },
+          );
         } catch (error) {
           toastManager.add({
             type: "error",

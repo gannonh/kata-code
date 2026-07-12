@@ -1135,7 +1135,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             serverSettings.getSettings.pipe(
               Effect.flatMap((settings) =>
                 SandboxServiceLive.disposeSession(instanceId, settings).pipe(
-                  Effect.map((disposed) => ({ instanceId, disposed })),
+                  Effect.map((outcome) => ({ instanceId, ...outcome })),
                 ),
               ),
             ),

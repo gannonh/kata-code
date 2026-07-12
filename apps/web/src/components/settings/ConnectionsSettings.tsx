@@ -6,6 +6,7 @@ import {
   RefreshCwIcon,
   TerminalIcon,
   TriangleAlertIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useState } from "react";
@@ -138,6 +139,7 @@ import {
   isCloudSessionRejectedError,
   linkPrimaryEnvironmentToCloud,
   unlinkPrimaryEnvironmentFromCloud,
+  unlinkManagedRelayEnvironment,
   updatePrimaryCloudPreferences,
 } from "~/cloud/linkEnvironment";
 import {
@@ -2025,6 +2027,7 @@ function ConfiguredCloudRemoteEnvironmentRows({
   const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
+  const [removingEnvironmentId, setRemovingEnvironmentId] = useState<EnvironmentId | null>(null);
   const savedIds = useMemo(() => new Set(savedEnvironmentIds), [savedEnvironmentIds]);
 
   const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
@@ -2064,6 +2067,32 @@ function ConfiguredCloudRemoteEnvironmentRows({
       !sandboxEnvironmentIds.has(environment.environmentId as string),
   );
 
+  const removeEnvironment = async (environment: RelayClientEnvironmentRecord) => {
+    if (!window.confirm(`Remove ${environment.label} from Kata Code Connect?`)) return;
+    setRemovingEnvironmentId(environment.environmentId);
+    try {
+      const clerkToken = await getToken(resolveRelayClerkTokenOptions());
+      if (!clerkToken) throw new Error("Sign in to Kata Code Connect before removing this record.");
+      await webRuntime.runPromise(
+        unlinkManagedRelayEnvironment({ clerkToken, environmentId: environment.environmentId }),
+      );
+      refreshManagedRelayEnvironments();
+      toastManager.add({
+        type: "success",
+        title: "Connect record removed",
+        description: `${environment.label} is no longer available through Kata Code Connect.`,
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Could not remove Connect record",
+        description: cause instanceof Error ? cause.message : "Unknown error.",
+      });
+    } finally {
+      setRemovingEnvironmentId(null);
+    }
+  };
+
   if (savedEnvironmentIds.length === 0 && environmentsState.data === null) {
     return <RemoteEnvironmentRowsSkeleton />;
   }
@@ -2097,6 +2126,15 @@ function ConfiguredCloudRemoteEnvironmentRows({
             onClick={() => void connectEnvironment(environment)}
           >
             {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={`Remove ${environment.label} from Kata Code Connect`}
+            disabled={removingEnvironmentId !== null}
+            onClick={() => void removeEnvironment(environment)}
+          >
+            <Trash2Icon className="size-3.5" />
           </Button>
         </div>
       </div>
