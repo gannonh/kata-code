@@ -1022,7 +1022,10 @@ describe("WsTransport", () => {
     await waitFor(() => {
       expect(attempts).toBe(1);
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const stableSince = performance.now();
+    await waitFor(() => {
+      expect(performance.now() - stableSince).toBeGreaterThanOrEqual(50);
+    });
 
     expect(attempts).toBe(1);
     expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription failed", {
