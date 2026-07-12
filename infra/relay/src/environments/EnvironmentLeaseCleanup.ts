@@ -1,6 +1,9 @@
 import * as Effect from "effect/Effect";
 
-import { EnvironmentCredentials } from "./EnvironmentCredentials.ts";
+import {
+  EnvironmentCredentialRevokePersistenceError,
+  EnvironmentCredentials,
+} from "./EnvironmentCredentials.ts";
 import { EnvironmentLinks } from "./EnvironmentLinks.ts";
 import { ManagedEndpointProvider } from "./ManagedEndpointProvider.ts";
 
@@ -23,10 +26,20 @@ export const cleanupExpiredEnvironmentLinks = Effect.gen(function* () {
         })
         .pipe(
           Effect.andThen(
-            credentials.revokeForEnvironmentPublicKey({
-              environmentId: record.environmentId,
-              environmentPublicKey: record.environmentPublicKey,
-            }),
+            credentials
+              .revokeForEnvironmentPublicKey({
+                environmentId: record.environmentId,
+                environmentPublicKey: record.environmentPublicKey,
+              })
+              .pipe(
+                Effect.filterOrFail(
+                  (cleaned) => cleaned,
+                  () =>
+                    new EnvironmentCredentialRevokePersistenceError({
+                      cause: "Credential remains protected by an active environment link.",
+                    }),
+                ),
+              ),
           ),
           Effect.andThen(
             links.revokeForUser({

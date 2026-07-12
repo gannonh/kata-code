@@ -17,6 +17,51 @@ const record = {
 };
 
 describe("cleanupExpiredEnvironmentLinks", () => {
+  it.effect("keeps claimed links pending when credential cleanup is incomplete", () => {
+    let revoked = false;
+    const links = EnvironmentLinks.of({
+      claimExpired: () => Effect.succeed([record]),
+      listExpired: () => Effect.succeed(revoked ? [] : [record]),
+      revokeForUser: () =>
+        Effect.sync(() => {
+          revoked = true;
+          return true;
+        }),
+      upsert: () => Effect.die("unused"),
+      listUsersForEnvironment: () => Effect.die("unused"),
+      listDeliveryUsersForEnvironment: () => Effect.die("unused"),
+      listPublicKeysForEnvironment: () => Effect.die("unused"),
+      listForUser: () => Effect.die("unused"),
+      getForUser: () => Effect.die("unused"),
+      renewForUser: () => Effect.die("unused"),
+      purgeRevokedBefore: () => Effect.die("unused"),
+    });
+    const services = Layer.mergeAll(
+      Layer.succeed(EnvironmentLinks, links),
+      Layer.succeed(
+        EnvironmentCredentials,
+        EnvironmentCredentials.of({
+          create: () => Effect.die("unused"),
+          authenticate: () => Effect.die("unused"),
+          revokeForEnvironmentPublicKey: () => Effect.succeed(false),
+        }),
+      ),
+      Layer.succeed(
+        ManagedEndpointProvider,
+        ManagedEndpointProvider.of({
+          provision: () => Effect.die("unused"),
+          deprovision: () => Effect.void,
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      yield* cleanupExpiredEnvironmentLinks;
+      expect(revoked).toBe(false);
+      expect(yield* links.listExpired()).toEqual([record]);
+    }).pipe(Effect.provide(services));
+  });
+
   it.effect("keeps claimed links pending until credential cleanup succeeds", () => {
     let claimed = false;
     let revoked = false;

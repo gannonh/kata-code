@@ -199,6 +199,7 @@ const make = Effect.gen(function* () {
                       eq(relayEnvironmentLinks.environmentId, input.environmentId),
                       eq(relayEnvironmentLinks.environmentPublicKey, input.environmentPublicKey),
                       isNull(relayEnvironmentLinks.revokedAt),
+                      isNull(relayEnvironmentLinks.cleanupClaimedAt),
                     ),
                   ),
               ),
@@ -207,7 +208,21 @@ const make = Effect.gen(function* () {
           .returning({
             credentialId: relayEnvironmentCredentials.credentialId,
           });
-        return rows.length > 0;
+        if (rows.length > 0) {
+          return true;
+        }
+        const remaining = yield* db
+          .select({ credentialId: relayEnvironmentCredentials.credentialId })
+          .from(relayEnvironmentCredentials)
+          .where(
+            and(
+              eq(relayEnvironmentCredentials.environmentId, input.environmentId),
+              eq(relayEnvironmentCredentials.environmentPublicKey, input.environmentPublicKey),
+              isNull(relayEnvironmentCredentials.revokedAt),
+            ),
+          )
+          .limit(1);
+        return remaining.length === 0;
       },
       Effect.mapError((cause) => new EnvironmentCredentialRevokePersistenceError({ cause })),
     ),
