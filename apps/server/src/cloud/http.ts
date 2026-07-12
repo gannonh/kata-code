@@ -79,6 +79,7 @@ import { relayUrlConfig } from "./publicConfig.ts";
 import * as CliState from "./CliState.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "./environmentKeys.ts";
+import { consumeCloudReplayGuards } from "./replayGuards.ts";
 
 const CLOUD_MINT_NONCE_PREFIX = "cloud-mint-nonce-";
 const CLOUD_MINT_JTI_PREFIX = "cloud-mint-jti-";
@@ -132,26 +133,6 @@ function bytesToString(bytes: Uint8Array): string {
 
 function stringToBytes(value: string): Uint8Array {
   return new TextEncoder().encode(value);
-}
-
-export function consumeCloudReplayGuards(input: {
-  readonly secrets: ServerSecretStore.ServerSecretStoreShape;
-  readonly names: ReadonlyArray<string>;
-  readonly value: Uint8Array;
-}) {
-  return Effect.all(
-    input.names.map((name) =>
-      input.secrets.create(name, input.value).pipe(
-        Effect.as(true),
-        Effect.catchTag("SecretStoreError", (error) =>
-          ServerSecretStore.isSecretAlreadyExistsError(error)
-            ? Effect.succeed(false)
-            : Effect.fail(error),
-        ),
-      ),
-    ),
-    { concurrency: input.names.length },
-  ).pipe(Effect.map((created) => created.every(Boolean)));
 }
 
 function normalizePemForSignedPayload(value: string): string {

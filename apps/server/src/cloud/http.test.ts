@@ -11,11 +11,8 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
-import {
-  consumeCloudReplayGuards,
-  reconcileDesiredCloudLink,
-  traceRelayBrokerHandler,
-} from "./http.ts";
+import { reconcileDesiredCloudLink, traceRelayBrokerHandler } from "./http.ts";
+import { consumeCloudReplayGuards } from "./replayGuards.ts";
 import {
   CloudManagedEndpointRuntime,
   type CloudManagedEndpointRuntimeShape,
