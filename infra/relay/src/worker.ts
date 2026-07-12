@@ -41,6 +41,7 @@ import * as Devices from "./agentActivity/Devices.ts";
 import * as DpopProofs from "./auth/DpopProofs.ts";
 import * as RelayTokens from "./auth/RelayTokens.ts";
 import * as EnvironmentCredentials from "./environments/EnvironmentCredentials.ts";
+import { cleanupExpiredEnvironmentLinks } from "./environments/EnvironmentLeaseCleanup.ts";
 import * as EnvironmentLinks from "./environments/EnvironmentLinks.ts";
 import * as ManagedEndpointAllocations from "./environments/ManagedEndpointAllocations.ts";
 import * as LiveActivities from "./agentActivity/LiveActivities.ts";
@@ -249,43 +250,10 @@ export default class Api extends Cloudflare.Worker<Api>()(
     yield* Cloudflare.cron("*/5 * * * *").subscribe(() =>
       Effect.gen(function* () {
         const links = yield* EnvironmentLinks.EnvironmentLinks;
-        const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
-        const endpoints = yield* ManagedEndpointProvider.ManagedEndpointProvider;
         yield* DpopProofs.DpopProofReplay.pipe(
           Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
         );
-        yield* links.claimExpired();
-        const expired = yield* links.listExpired();
-        yield* Effect.forEach(
-          expired,
-          (record) =>
-            endpoints
-              .deprovision({
-                userId: record.userId,
-                environmentId: record.environmentId,
-              })
-              .pipe(
-                Effect.andThen(
-                  links.revokeForUser({
-                    userId: record.userId,
-                    environmentId: record.environmentId,
-                  }),
-                ),
-                Effect.andThen(
-                  credentials.revokeForEnvironmentPublicKey({
-                    environmentId: record.environmentId,
-                    environmentPublicKey: record.environmentPublicKey,
-                  }),
-                ),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("Expired environment cleanup was incomplete", {
-                    environmentId: record.environmentId,
-                    cause,
-                  }),
-                ),
-              ),
-          { concurrency: 4 },
-        );
+        yield* cleanupExpiredEnvironmentLinks;
         const retentionCutoff = DateTime.formatIso(
           DateTime.subtract(yield* DateTime.now, { days: 30 }),
         );
