@@ -36,18 +36,7 @@ export function searchGitHubRepositories(input: {
       cwd: input.cwd,
       ...(input.page !== undefined ? { page: input.page } : {}),
     })
-    .pipe(
-      Effect.map((result) => ({
-        repositories: result.repositories.map((repository) => ({
-          nameWithOwner: repository.nameWithOwner,
-          url: repository.url,
-          defaultBranch: repository.defaultBranch,
-          visibility: repository.visibility,
-        })),
-        hasMore: result.hasMore,
-      })),
-      Effect.mapError(mapGitHubError),
-    );
+    .pipe(Effect.mapError(mapGitHubError));
 }
 
 /** List branches of a selected GitHub repository via the host `gh` session. */
@@ -63,11 +52,5 @@ export function listGitHubBranches(input: {
       repository: input.repository,
       ...(input.page !== undefined ? { page: input.page } : {}),
     })
-    .pipe(
-      Effect.map((result) => ({
-        branches: result.branches,
-        hasMore: result.hasMore,
-      })),
-      Effect.mapError(mapGitHubError),
-    );
+    .pipe(Effect.mapError(mapGitHubError));
 }

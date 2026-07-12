@@ -209,9 +209,8 @@ export function clearLiveSessionForTests(instanceId: string): void {
   liveSessions.delete(instanceId);
 }
 
-/** Whether a status refresh is currently running. Concurrent listInstances
- *  callers join this deferred instead of skipping (stale) or racing. */
-let reconcileInProgress = false;
+/** Serializes status refreshes so concurrent listInstances callers join
+ *  the active refresh instead of skipping a probe or racing. */
 let reconcileJoin: Deferred.Deferred<void, never> | null = null;
 
 /** Whether untracked-session discovery has run. Discovery stays one-shot;
@@ -302,7 +301,6 @@ function reconcileSessions(
     }
     const join = yield* Deferred.make<void, never>();
     reconcileJoin = join;
-    reconcileInProgress = true;
     yield* Effect.gen(function* () {
       const store = getSessionStore();
       // Always refresh from provider lifecycle.status. Skip instances under a
@@ -330,7 +328,6 @@ function reconcileSessions(
     }).pipe(
       Effect.ensuring(
         Effect.gen(function* () {
-          reconcileInProgress = false;
           reconcileJoin = null;
           yield* Deferred.succeed(join, undefined);
         }),

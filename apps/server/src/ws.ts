@@ -1144,28 +1144,21 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         [WS_METHODS.sandboxRenewSession]: ({ instanceId, extendMs }) =>
           observeRpcEffect(
             WS_METHODS.sandboxRenewSession,
-            SandboxServiceLive.renewSession(
-              instanceId,
-              extendMs !== undefined ? { extendMs } : {},
-            ).pipe(Effect.map((result) => result)),
+            SandboxServiceLive.renewSession(instanceId, extendMs !== undefined ? { extendMs } : {}),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.sandboxStopSession]: ({ instanceId }) =>
           observeRpcEffect(
             WS_METHODS.sandboxStopSession,
             serverSettings.getSettings.pipe(
-              Effect.flatMap((settings) =>
-                SandboxServiceLive.stopSession(instanceId, settings).pipe(
-                  Effect.map((result) => result),
-                ),
-              ),
+              Effect.flatMap((settings) => SandboxServiceLive.stopSession(instanceId, settings)),
             ),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.sandboxIssuePairingToken]: ({ instanceId }) =>
           observeRpcEffect(
             WS_METHODS.sandboxIssuePairingToken,
-            SandboxServiceLive.issuePairingToken(instanceId).pipe(Effect.map((result) => result)),
+            SandboxServiceLive.issuePairingToken(instanceId),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.sandboxProviderLoginStart]: ({ instanceId, providerId }) =>

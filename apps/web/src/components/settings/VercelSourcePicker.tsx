@@ -2,11 +2,7 @@
 
 import { GitBranchIcon, GithubIcon, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type {
-  SandboxGitHubRepository,
-  SandboxListGitHubBranchesResult,
-  SandboxSearchGitHubRepositoriesResult,
-} from "@kata-sh/code-contracts";
+import type { SandboxGitHubRepository } from "@kata-sh/code-contracts";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
 import { Button } from "../ui/button";
@@ -68,7 +64,7 @@ export function VercelSourcePicker({
     setRepoState("loading");
     setRepoError(null);
     try {
-      const result: SandboxSearchGitHubRepositoriesResult =
+      const result =
         await getPrimaryEnvironmentConnection().client.sandbox.searchGitHubRepositories({ page });
       setRepos((prev) => (page <= 1 ? result.repositories : [...prev, ...result.repositories]));
       setRepoPage(page);
@@ -84,11 +80,10 @@ export function VercelSourcePicker({
     setBranchState("loading");
     setBranchError(null);
     try {
-      const result: SandboxListGitHubBranchesResult =
-        await getPrimaryEnvironmentConnection().client.sandbox.listGitHubBranches({
-          repository: repo,
-          page,
-        });
+      const result = await getPrimaryEnvironmentConnection().client.sandbox.listGitHubBranches({
+        repository: repo,
+        page,
+      });
       setBranches((prev) => (page <= 1 ? result.branches : [...prev, ...result.branches]));
       setBranchPage(page);
       setBranchHasMore(result.hasMore);

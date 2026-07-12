@@ -508,11 +508,6 @@ export function SandboxDeploymentSettings({
           });
           refreshManagedRelayEnvironments();
           await refreshList();
-          setActiveSession((prev) => {
-            const next = { ...prev };
-            delete next[instanceId];
-            return next;
-          });
           toastManager.add(
             result.connectCleanup === "pending"
               ? {
