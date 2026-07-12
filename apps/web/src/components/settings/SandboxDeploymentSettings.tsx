@@ -468,12 +468,6 @@ export function SandboxDeploymentSettings({
         try {
           const session = activeSession[instanceId];
           const connection = getPrimaryEnvironmentConnection();
-          // Long cloud lifecycle calls can outlive the primary RPC heartbeat.
-          // Rotate the transport before disposal so a socket that still
-          // answers pings cannot leave the delete request queued forever. The
-          // full environment reconnect also waits for a shell snapshot, which
-          // is unrelated to this lifecycle request and can block recovery.
-          await connection.client.reconnect();
           const result = await withRpcTimeout("Delete sandbox", () =>
             connection.client.sandbox.disposeSession({
               instanceId: instanceId as never,
