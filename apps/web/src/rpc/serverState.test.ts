@@ -214,6 +214,46 @@ describe("serverState", () => {
     stop();
   });
 
+  it("retries the initial config fetch until it succeeds after a restart", async () => {
+    // The WS is not open yet on the first attempt (post-restart), then answers.
+    serverApi.getConfig
+      .mockRejectedValueOnce(new Error("WebSocket is not connected"))
+      .mockResolvedValueOnce(baseServerConfig);
+
+    const stop = startServerStateSync(serverApi);
+
+    // First attempt rejected: atom stays null, no snapshot yet.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getServerConfig()).toBeNull();
+
+    // Backoff retry lands the snapshot without any remount/refresh.
+    await waitFor(() => {
+      expect(getServerConfig()).toEqual(baseServerConfig);
+    });
+    expect(serverApi.getConfig.mock.calls.length).toBeGreaterThanOrEqual(2);
+    stop();
+  });
+
+  it("stops retrying the initial fetch once the subscription snapshot arrives", async () => {
+    serverApi.getConfig.mockRejectedValue(new Error("WebSocket is not connected"));
+    const stop = startServerStateSync(serverApi);
+
+    emitServerConfigEvent({
+      version: 1,
+      type: "snapshot",
+      config: baseServerConfig,
+    });
+
+    await waitFor(() => {
+      expect(getServerConfig()).toEqual(baseServerConfig);
+    });
+
+    const callsAfterSnapshot = serverApi.getConfig.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(serverApi.getConfig.mock.calls.length).toBe(callsAfterSnapshot);
+    stop();
+  });
+
   it("replays welcome events to late subscribers", async () => {
     serverApi.getConfig.mockResolvedValueOnce(baseServerConfig);
     const stop = startServerStateSync(serverApi);
