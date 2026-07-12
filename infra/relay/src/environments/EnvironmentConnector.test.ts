@@ -220,10 +220,14 @@ function makeLinks(
           providerKind: "cloudflare_tunnel",
         },
         linkedAt: "2026-05-25T00:00:00.000Z",
+        leaseExpiresAt: "2026-05-25T00:15:00.000Z",
         environmentPublicKey: environmentKeyPair.publicKey,
         ...overrides,
       }),
     revokeForUser: () => Effect.succeed(false),
+    renewForUser: () => Effect.succeed(null),
+    revokeExpired: () => Effect.succeed([]),
+    purgeRevokedBefore: () => Effect.succeed(0),
   };
 }
 

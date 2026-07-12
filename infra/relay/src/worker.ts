@@ -3,6 +3,7 @@ import * as Cloudflare from "alchemy/Cloudflare";
 import * as Drizzle from "alchemy/Drizzle";
 import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -246,11 +247,41 @@ export default class Api extends Cloudflare.Worker<Api>()(
     );
 
     yield* Cloudflare.cron("*/5 * * * *").subscribe(() =>
-      DpopProofs.DpopProofReplay.pipe(
-        Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
-        Effect.withSpan("relay.cron.prune_expired_dpop_proofs"),
-        Effect.provide(runtimeLayer),
-      ),
+      Effect.gen(function* () {
+        const links = yield* EnvironmentLinks.EnvironmentLinks;
+        const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
+        const endpoints = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+        yield* DpopProofs.DpopProofReplay.pipe(
+          Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
+        );
+        const expired = yield* links.revokeExpired();
+        yield* Effect.forEach(
+          expired,
+          (record) =>
+            Effect.all([
+              endpoints.deprovision({
+                userId: record.userId,
+                environmentId: record.environmentId,
+              }),
+              credentials.revokeForEnvironmentPublicKey({
+                environmentId: record.environmentId,
+                environmentPublicKey: record.environmentPublicKey,
+              }),
+            ]).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Expired environment cleanup was incomplete", {
+                  environmentId: record.environmentId,
+                  cause,
+                }),
+              ),
+            ),
+          { concurrency: 4 },
+        );
+        const retentionCutoff = DateTime.formatIso(
+          DateTime.subtract(yield* DateTime.now, { days: 30 }),
+        );
+        yield* links.purgeRevokedBefore(retentionCutoff);
+      }).pipe(Effect.withSpan("relay.cron.maintenance"), Effect.provide(runtimeLayer)),
     );
 
     const fetch = Layer.merge(

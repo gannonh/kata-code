@@ -269,6 +269,7 @@ export const RelayEnvironmentLinkResponse = Schema.Struct({
   relayIssuer: TrimmedNonEmptyString,
   environmentCredential: TrimmedNonEmptyString,
   cloudMintPublicKey: TrimmedNonEmptyString,
+  leaseExpiresAt: TrimmedNonEmptyString,
 });
 export type RelayEnvironmentLinkResponse = typeof RelayEnvironmentLinkResponse.Type;
 
@@ -591,6 +592,7 @@ export const RelayClientEnvironmentRecord = Schema.Struct({
   label: TrimmedNonEmptyString,
   endpoint: RelayManagedEndpoint,
   linkedAt: TrimmedNonEmptyString,
+  leaseExpiresAt: TrimmedNonEmptyString,
 });
 export type RelayClientEnvironmentRecord = typeof RelayClientEnvironmentRecord.Type;
 
@@ -598,6 +600,11 @@ export const RelayListEnvironmentsResponse = Schema.Struct({
   environments: Schema.Array(RelayClientEnvironmentRecord),
 });
 export type RelayListEnvironmentsResponse = typeof RelayListEnvironmentsResponse.Type;
+
+export const RelayEnvironmentLeaseRenewalResponse = Schema.Struct({
+  ok: Schema.Boolean,
+  leaseExpiresAt: TrimmedNonEmptyString,
+});
 
 export const RelayEnvironmentConnectRequest = Schema.Struct({
   deviceId: Schema.optional(
@@ -928,6 +935,16 @@ export const RelayClientGroup = HttpApiGroup.make("client")
       success: RelayOkResponse,
       error: RelayAuthAndInternalErrors,
     }).annotate(OpenApi.Summary, "Unlink an environment"),
+    HttpApiEndpoint.post(
+      "renewEnvironmentLease",
+      "/v1/client/environment-links/:environmentId/lease",
+      {
+        headers: RelayBearerRequestHeaders,
+        params: RelayEnvironmentUnlinkParams,
+        success: RelayEnvironmentLeaseRenewalResponse,
+        error: RelayAuthAndInternalErrors,
+      },
+    ).annotate(OpenApi.Summary, "Renew an environment link lease"),
   )
   .annotate(OpenApi.Description, "Cloud-user environment links and registered devices.")
   .middleware(RelayClientAuth);

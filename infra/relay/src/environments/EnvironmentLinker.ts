@@ -66,6 +66,7 @@ export interface EnvironmentLinkerShape {
         | ManagedEndpointProvider.ManagedEndpointProvisioningResult["runtime"]
         | null;
       readonly environmentCredential: string;
+      readonly leaseExpiresAt: string;
     },
     EnvironmentLinkError
   >;
@@ -271,6 +272,7 @@ const make = Effect.gen(function* () {
         });
       }
       yield* links.upsert({ ...input, proof: verified, endpoint });
+      const leaseExpiresAt = EnvironmentLinks.environmentLeaseExpiry(yield* DateTime.now);
       const environmentCredential = yield* credentials.create({
         environmentId: verified.environmentId,
         environmentPublicKey: verified.environmentPublicKey,
@@ -280,6 +282,7 @@ const make = Effect.gen(function* () {
         endpoint,
         endpointRuntime: provisioned?.runtime ?? null,
         environmentCredential,
+        leaseExpiresAt,
       };
     }),
   });

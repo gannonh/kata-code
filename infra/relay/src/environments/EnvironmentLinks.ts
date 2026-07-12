@@ -9,7 +9,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lt, or } from "drizzle-orm";
 
 import { RelayDb } from "../db.ts";
 import { relayEnvironmentLinks } from "../persistence/schema.ts";
@@ -22,6 +22,12 @@ export interface AgentAwarenessDeliveryUserRecord {
   readonly userId: string;
   readonly notificationsEnabled: boolean;
   readonly liveActivitiesEnabled: boolean;
+}
+
+export interface ExpiredEnvironmentLinkRecord {
+  readonly environmentId: string;
+  readonly environmentPublicKey: string;
+  readonly userId: string;
 }
 
 export class EnvironmentLinkUpsertPersistenceError extends Schema.TaggedErrorClass<EnvironmentLinkUpsertPersistenceError>()(
@@ -112,6 +118,25 @@ export interface EnvironmentLinksShape {
     readonly userId: string;
     readonly environmentId: string;
   }) => Effect.Effect<boolean, EnvironmentLinkRevokePersistenceError>;
+  readonly renewForUser: (input: {
+    readonly userId: string;
+    readonly environmentId: string;
+  }) => Effect.Effect<string | null, EnvironmentLinkRevokePersistenceError>;
+  readonly revokeExpired: () => Effect.Effect<
+    ReadonlyArray<ExpiredEnvironmentLinkRecord>,
+    EnvironmentLinkRevokePersistenceError
+  >;
+  readonly purgeRevokedBefore: (
+    cutoff: string,
+  ) => Effect.Effect<number, EnvironmentLinkRevokePersistenceError>;
+}
+
+export const RELAY_ENVIRONMENT_LEASE_DURATION_MS = 15 * 60 * 1_000;
+
+export function environmentLeaseExpiry(now: DateTime.DateTime): string {
+  return DateTime.formatIso(
+    DateTime.add(now, { milliseconds: RELAY_ENVIRONMENT_LEASE_DURATION_MS }),
+  );
 }
 
 export class EnvironmentLinks extends Context.Service<EnvironmentLinks, EnvironmentLinksShape>()(
@@ -148,7 +173,9 @@ const make = Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({
           "relay.environment_id": input.proof.environmentId,
         });
-        const now = DateTime.formatIso(yield* DateTime.now);
+        const nowDateTime = yield* DateTime.now;
+        const now = DateTime.formatIso(nowDateTime);
+        const leaseExpiresAt = environmentLeaseExpiry(nowDateTime);
         const { request, proof } = input;
         const environmentId = proof.environmentId;
         const { endpoint } = input;
@@ -166,6 +193,7 @@ const make = Effect.gen(function* () {
             liveActivitiesEnabled: request.liveActivitiesEnabled,
             managedTunnelsEnabled: request.managedTunnelsEnabled,
             createdByDeviceId: request.deviceId ?? null,
+            leaseExpiresAt,
             revokedAt: null,
             createdAt: now,
             updatedAt: now,
@@ -182,6 +210,7 @@ const make = Effect.gen(function* () {
               liveActivitiesEnabled: request.liveActivitiesEnabled,
               managedTunnelsEnabled: request.managedTunnelsEnabled,
               createdByDeviceId: request.deviceId ?? null,
+              leaseExpiresAt,
               revokedAt: null,
               updatedAt: now,
             },
@@ -250,6 +279,7 @@ const make = Effect.gen(function* () {
     }),
 
     listForUser: Effect.fn("relay.environment_links.list_for_user")(function* (input) {
+      const now = DateTime.formatIso(yield* DateTime.now);
       return yield* db
         .select({
           environmentId: relayEnvironmentLinks.environmentId,
@@ -258,12 +288,14 @@ const make = Effect.gen(function* () {
           endpointWsBaseUrl: relayEnvironmentLinks.endpointWsBaseUrl,
           endpointProviderKind: relayEnvironmentLinks.endpointProviderKind,
           createdAt: relayEnvironmentLinks.createdAt,
+          leaseExpiresAt: relayEnvironmentLinks.leaseExpiresAt,
         })
         .from(relayEnvironmentLinks)
         .where(
           and(
             eq(relayEnvironmentLinks.userId, input.userId),
             isNull(relayEnvironmentLinks.revokedAt),
+            gt(relayEnvironmentLinks.leaseExpiresAt, now),
           ),
         )
         .pipe(
@@ -279,6 +311,7 @@ const make = Effect.gen(function* () {
                   row.endpointProviderKind as RelayClientEnvironmentRecord["endpoint"]["providerKind"],
               },
               linkedAt: row.createdAt,
+              leaseExpiresAt: row.leaseExpiresAt,
             })),
           ),
           Effect.mapError((cause) => new EnvironmentLinkListPersistenceError({ cause })),
@@ -298,6 +331,7 @@ const make = Effect.gen(function* () {
           endpointWsBaseUrl: relayEnvironmentLinks.endpointWsBaseUrl,
           endpointProviderKind: relayEnvironmentLinks.endpointProviderKind,
           createdAt: relayEnvironmentLinks.createdAt,
+          leaseExpiresAt: relayEnvironmentLinks.leaseExpiresAt,
         })
         .from(relayEnvironmentLinks)
         .where(
@@ -326,6 +360,7 @@ const make = Effect.gen(function* () {
                   },
                   environmentPublicKey: row.environmentPublicKey,
                   linkedAt: row.createdAt,
+                  leaseExpiresAt: row.leaseExpiresAt,
                 }
               : null;
           }),
@@ -354,6 +389,65 @@ const make = Effect.gen(function* () {
           )
           .returning({ environmentId: relayEnvironmentLinks.environmentId });
         return rows.length > 0;
+      },
+      Effect.mapError((cause) => new EnvironmentLinkRevokePersistenceError({ cause })),
+    ),
+
+    renewForUser: Effect.fn("relay.environment_links.renew_for_user")(
+      function* (input) {
+        const nowDateTime = yield* DateTime.now;
+        const updatedAt = DateTime.formatIso(nowDateTime);
+        const leaseExpiresAt = environmentLeaseExpiry(nowDateTime);
+        const rows = yield* db
+          .update(relayEnvironmentLinks)
+          .set({ leaseExpiresAt, updatedAt })
+          .where(
+            and(
+              eq(relayEnvironmentLinks.userId, input.userId),
+              eq(relayEnvironmentLinks.environmentId, input.environmentId),
+              isNull(relayEnvironmentLinks.revokedAt),
+            ),
+          )
+          .returning({ environmentId: relayEnvironmentLinks.environmentId });
+        return rows.length > 0 ? leaseExpiresAt : null;
+      },
+      Effect.mapError((cause) => new EnvironmentLinkRevokePersistenceError({ cause })),
+    ),
+
+    revokeExpired: Effect.fn("relay.environment_links.revoke_expired")(
+      function* () {
+        const now = DateTime.formatIso(yield* DateTime.now);
+        const rows = yield* db
+          .update(relayEnvironmentLinks)
+          .set({ revokedAt: now, updatedAt: now })
+          .where(
+            and(
+              isNull(relayEnvironmentLinks.revokedAt),
+              lt(relayEnvironmentLinks.leaseExpiresAt, now),
+            ),
+          )
+          .returning({
+            environmentId: relayEnvironmentLinks.environmentId,
+            environmentPublicKey: relayEnvironmentLinks.environmentPublicKey,
+            userId: relayEnvironmentLinks.userId,
+          });
+        return rows;
+      },
+      Effect.mapError((cause) => new EnvironmentLinkRevokePersistenceError({ cause })),
+    ),
+
+    purgeRevokedBefore: Effect.fn("relay.environment_links.purge_revoked_before")(
+      function* (cutoff) {
+        const rows = yield* db
+          .delete(relayEnvironmentLinks)
+          .where(
+            and(
+              isNotNull(relayEnvironmentLinks.revokedAt),
+              lt(relayEnvironmentLinks.revokedAt, cutoff),
+            ),
+          )
+          .returning({ environmentId: relayEnvironmentLinks.environmentId });
+        return rows.length;
       },
       Effect.mapError((cause) => new EnvironmentLinkRevokePersistenceError({ cause })),
     ),
