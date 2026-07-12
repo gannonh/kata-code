@@ -1,7 +1,6 @@
 import { EnvironmentHttpApi } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Schedule from "effect/Schedule";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
@@ -80,6 +79,7 @@ import {
   reconcileDesiredCloudLink,
   renewDesiredCloudLinkLease,
 } from "./cloud/http.ts";
+import { startEnvironmentLeaseMaintenance } from "./cloud/environmentLeaseMaintenance.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
@@ -465,14 +465,7 @@ export const makeServerLayer = Layer.unwrap(
             renewSandboxRelayLeases(),
           ],
           { concurrency: 2 },
-        ).pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("Failed to renew Kata Code Connect environment lease", {
-              cause,
-            }).pipe(Effect.as([false, 0] as const)),
-          ),
-          Effect.repeat(Schedule.spaced("5 minutes")),
-        );
+        ).pipe(Effect.asVoid);
         const startupReconcile = primaryLinkDesired
           ? Effect.sleep("250 millis").pipe(
               Effect.andThen(reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`)),
@@ -482,16 +475,10 @@ export const makeServerLayer = Layer.unwrap(
               ),
             )
           : Effect.void;
-        yield* Effect.forkScoped(
-          startupReconcile.pipe(
-            Effect.andThen(renewLeases),
-            Effect.catch((cause) =>
-              Effect.logWarning("Failed to reconcile Kata Code Connect desired link on startup", {
-                cause,
-              }),
-            ),
-          ),
-        );
+        yield* startEnvironmentLeaseMaintenance({
+          startupReconcile: startupReconcile.pipe(Effect.asVoid),
+          renewLeases,
+        });
       }),
     );
 
