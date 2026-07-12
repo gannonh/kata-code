@@ -192,15 +192,17 @@ export function reconcileStoredRecords<R = never>(input: {
         }),
       { concurrency: 4 },
     );
-    const updated = outcomes.filter((record): record is SandboxSessionRecord => record !== null);
-    yield* input.store.save(updated).pipe(
+    const changes = records.map((expected, index) => ({
+      expected,
+      next: outcomes[index] === undefined ? expected : outcomes[index],
+    }));
+    return yield* input.store.applyIfCurrent(changes).pipe(
       Effect.catch((error: unknown) =>
         Effect.logError("Sandbox session store save failed during reconcile", {
           message: error instanceof Error ? error.message : String(error),
-        }),
+        }).pipe(Effect.as(input.store.records)),
       ),
     );
-    return updated;
   });
 }
 

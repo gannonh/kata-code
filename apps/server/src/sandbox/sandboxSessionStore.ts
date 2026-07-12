@@ -112,16 +112,26 @@ function atomicWriteFile(filePath: string, contents: string): Effect.Effect<void
   });
 }
 
+export interface SandboxSessionStoreChange {
+  /** Record reference returned by this store's load operation. */
+  readonly expected: SandboxSessionRecord;
+  /** Replacement record, or null to remove the expected record. */
+  readonly next: SandboxSessionRecord | null;
+}
+
 /** A durable sandbox session store backed by a JSON file. */
 export interface SandboxSessionStore {
   /** Load all records (schema-validated; invalid entries evicted + logged). */
   load(): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, Error>;
-  /** Replace the full record set (atomic write). */
-  save(records: ReadonlyArray<SandboxSessionRecord>): Effect.Effect<void, Error>;
   /** Read + upsert one record by instance id, then save. */
   upsert(record: SandboxSessionRecord): Effect.Effect<void, Error>;
   /** Remove a record by instance id, then save. No-op when absent. */
   remove(instanceId: SandboxProviderInstanceId): Effect.Effect<void, Error>;
+  /** Apply snapshot-derived replacements only while each original record is
+   *  still current. Preserves records added or changed after the snapshot. */
+  applyIfCurrent(
+    changes: ReadonlyArray<SandboxSessionStoreChange>,
+  ): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, Error>;
   /** Read the current records without re-loading from disk. */
   readonly records: ReadonlyArray<SandboxSessionRecord>;
 }
@@ -157,7 +167,7 @@ function decodeStore(raw: unknown): ReadonlyArray<SandboxSessionRecord> {
  * Create a sandbox session store backed by `<stateDir>/sandbox-sessions.json`.
  * Pass `ServerConfig.stateDir` (respects `KATACODE_HOME` / `--base-dir`) so the
  * store lives with the rest of server state. The store loads lazily on first
- * access and caches records in memory; `save` persists atomically and updates
+ * access and caches records in memory; mutations persist atomically and update
  * the cache.
  */
 export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
@@ -224,7 +234,6 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
 
   return {
     load: () => loadOnce,
-    save: (records) => withWriteLock(persist(records)),
     upsert: (record) =>
       withWriteLock(
         Effect.gen(function* () {
@@ -241,6 +250,30 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
           const next = current.filter((r) => r.instanceId !== (instanceId as string));
           if (next.length === current.length) return; // absent — no write
           yield* persist(next);
+        }),
+      ),
+    applyIfCurrent: (changes) =>
+      withWriteLock(
+        Effect.gen(function* () {
+          const current = yield* loadOnce;
+          const nextByInstanceId = new Map(current.map((record) => [record.instanceId, record]));
+          let changed = false;
+          for (const change of changes) {
+            if (nextByInstanceId.get(change.expected.instanceId) !== change.expected) {
+              continue;
+            }
+            if (change.next === null) {
+              nextByInstanceId.delete(change.expected.instanceId);
+              changed = true;
+            } else if (change.next !== change.expected) {
+              nextByInstanceId.set(change.expected.instanceId, change.next);
+              changed = true;
+            }
+          }
+          if (!changed) return current;
+          const next = [...nextByInstanceId.values()];
+          yield* persist(next);
+          return next;
         }),
       ),
     get records() {
