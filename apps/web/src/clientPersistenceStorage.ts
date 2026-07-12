@@ -31,6 +31,11 @@ const BrowserSavedEnvironmentRecordSchema = Schema.Struct({
   sandbox: Schema.optionalKey(
     Schema.Struct({
       providerKind: Schema.String,
+      // Join key to sandboxProviderInstances. Must round-trip: a schema that
+      // only kept providerKind stripped instanceId on every browser persist,
+      // which resurfaced linked sandboxes as Environments orphans beside their
+      // deployment-target cards.
+      instanceId: Schema.optionalKey(Schema.String),
     }),
   ),
   bearerToken: Schema.optionalKey(Schema.String),

@@ -83,4 +83,26 @@ describe("clientPersistenceStorage", () => {
       ],
     });
   });
+
+  it("round-trips sandbox.instanceId through browser persistence", async () => {
+    getTestWindow();
+    const { readBrowserSavedEnvironmentRegistry, writeBrowserSavedEnvironmentRegistry } =
+      await import("./clientPersistenceStorage");
+
+    const sandboxRecord: PersistedSavedEnvironmentRecord = {
+      environmentId: testEnvironmentId,
+      label: "kata-code-sandbox",
+      httpBaseUrl: "https://sandbox.example.com/",
+      wsBaseUrl: "wss://sandbox.example.com/",
+      createdAt: "2026-07-12T00:00:00.000Z",
+      lastConnectedAt: null,
+      sandbox: {
+        providerKind: "vercel",
+        instanceId: "vercel_kata-code-sandbox",
+      },
+    };
+
+    writeBrowserSavedEnvironmentRegistry([sandboxRecord]);
+    expect(readBrowserSavedEnvironmentRegistry()).toEqual([sandboxRecord]);
+  });
 });
