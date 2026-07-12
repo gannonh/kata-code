@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -19,7 +20,9 @@ const PidfileRecord = Schema.Struct({
   command: Schema.String,
   startedAt: Schema.String,
 });
-const decodePidfile = Schema.decodeEffect(Schema.fromJsonString(PidfileRecord));
+const PidfileJson = Schema.fromJsonString(PidfileRecord);
+const decodePidfile = Schema.decodeEffect(PidfileJson);
+const encodePidfile = Schema.encodeEffect(PidfileJson);
 
 const executablePath = "/tmp/fake-cloudflared";
 const ownedIdentity = {
@@ -34,6 +37,7 @@ function withReaper<E>(
     readonly fs: FileSystem.FileSystem;
     readonly pidfilePath: string;
   }) => Effect.Effect<void, E>,
+  platform: NodeJS.Platform = "linux",
 ) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -45,7 +49,11 @@ function withReaper<E>(
       yield* run({ reaper, fs, pidfilePath });
     }).pipe(Effect.provide(layerTest(pidfilePath, processControl)));
     yield* fs.remove(dir, { recursive: true, force: true });
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
+  }).pipe(
+    Effect.provideService(HostProcessPlatform, platform),
+    Effect.provide(NodeServices.layer),
+    Effect.scoped,
+  );
 }
 
 describe("cloudflaredProcessReaper ownership", () => {
@@ -101,6 +109,27 @@ describe("cloudflaredProcessReaper ownership", () => {
     );
   });
 
+  it.effect("rejects a changed command for the same PID and start identity", () => {
+    const killed: number[] = [];
+    let identity = ownedIdentity;
+    const control: CloudflaredProcessControl = {
+      inspect: () => identity,
+      kill: (pid) => {
+        killed.push(pid);
+        return true;
+      },
+    };
+    return withReaper(control, ({ reaper, fs, pidfilePath }) =>
+      Effect.gen(function* () {
+        yield* reaper.writePidfile({ pid: 45, executablePath });
+        identity = { ...ownedIdentity, command: `${executablePath} tunnel run replaced` };
+        expect(yield* reaper.reclaim(executablePath)).toEqual([]);
+        expect(killed).toEqual([]);
+        expect(yield* fs.exists(pidfilePath)).toBe(false);
+      }),
+    );
+  });
+
   it.effect("does not kill when command identity is unavailable", () => {
     let available = true;
     let killCalled = false;
@@ -113,12 +142,44 @@ describe("cloudflaredProcessReaper ownership", () => {
     };
     return withReaper(control, ({ reaper, fs, pidfilePath }) =>
       Effect.gen(function* () {
-        yield* reaper.writePidfile({ pid: 45, executablePath });
+        yield* reaper.writePidfile({ pid: 46, executablePath });
         available = false;
         expect(yield* reaper.reclaim(executablePath)).toEqual([]);
         expect(killCalled).toBe(false);
         expect(yield* fs.exists(pidfilePath)).toBe(false);
       }),
+    );
+  });
+
+  it.effect("clears stale Windows ownership without inspecting or killing", () => {
+    let inspectCalled = false;
+    let killCalled = false;
+    const control: CloudflaredProcessControl = {
+      inspect: (_pid, platform) => {
+        inspectCalled = true;
+        return platform === "win32" ? null : ownedIdentity;
+      },
+      kill: () => {
+        killCalled = true;
+        return true;
+      },
+    };
+    return withReaper(
+      control,
+      ({ reaper, fs, pidfilePath }) =>
+        Effect.gen(function* () {
+          const encoded = yield* encodePidfile({
+            pid: 47,
+            executablePath,
+            ...ownedIdentity,
+          });
+          yield* fs.writeFileString(pidfilePath, `${encoded}\n`);
+          expect(yield* reaper.reclaim(executablePath)).toEqual([]);
+          expect(inspectCalled).toBe(true);
+          expect(killCalled).toBe(false);
+          expect(yield* fs.exists(pidfilePath)).toBe(false);
+        }),
+      "win32",
     );
   });
 
@@ -142,7 +203,7 @@ describe("cloudflaredProcessReaper ownership", () => {
   it.effect("omits a pidfile when initial ownership cannot be verified", () =>
     withReaper({ inspect: () => null, kill: () => true }, ({ reaper, fs, pidfilePath }) =>
       Effect.gen(function* () {
-        yield* reaper.writePidfile({ pid: 46, executablePath });
+        yield* reaper.writePidfile({ pid: 48, executablePath });
         expect(yield* fs.exists(pidfilePath)).toBe(false);
       }),
     ),
