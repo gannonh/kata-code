@@ -307,6 +307,32 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("rejects an in-flight request when its session is replaced by a reconnect", async () => {
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    getSocket().open();
+
+    // Dispatch a request on the first session, then reconnect before the server
+    // answers. Without the session-replacement race this promise would hang
+    // forever (the old runtime's scope is closed in the background), which left
+    // UI callers stuck on "Loading…" with no error to react to.
+    const requestPromise = transport.request((client) =>
+      client[WS_METHODS.serverUpsertKeybinding]({
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      }),
+    );
+
+    await transport.reconnect();
+
+    await expect(requestPromise).rejects.toThrow(/replaced by a reconnect/);
+
+    await transport.dispose();
+  });
+
   it("reconnects the websocket session without disposing the transport", async () => {
     const transport = createTransport("ws://localhost:3020");
 
@@ -993,6 +1019,7 @@ describe("WsTransport", () => {
       session: {
         clientScope: {} as never,
         runtime,
+        markReplaced: () => undefined,
       },
       closeSession: (
         WsTransport.prototype as unknown as {

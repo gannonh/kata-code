@@ -51,6 +51,22 @@ interface TransportSession {
   readonly clientPromise: Promise<WsRpcProtocolClient>;
   readonly clientScope: Scope.Closeable;
   readonly runtime: ManagedRuntime.ManagedRuntime<RpcClient.Protocol, never>;
+  /** Rejects when this session is replaced by a reconnect. In-flight one-shot
+   *  requests race this so they never hang forever on a superseded socket
+   *  (which left UI callers stuck on "Loading…" with no error to react to). */
+  readonly replaced: Promise<never>;
+  /** Trip {@link TransportSession.replaced}. Called when the session is swapped
+   *  out on reconnect or torn down on dispose. */
+  readonly markReplaced: () => void;
+}
+
+/** Error thrown into an in-flight request whose session was replaced by a
+ *  reconnect. Callers should retry on a fresh session rather than hang. */
+export class TransportSessionReplacedError extends Error {
+  constructor() {
+    super("WebSocket session was replaced by a reconnect");
+    this.name = "TransportSessionReplacedError";
+  }
 }
 
 function formatErrorMessage(error: unknown): string {
@@ -96,8 +112,15 @@ export class WsTransport {
     }
 
     const session = this.session;
-    const client = await session.clientPromise;
-    return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
+    // Race the request against session replacement so a reconnect that swaps
+    // the socket rejects the caller instead of leaving the promise pending
+    // forever. The old runtime's scope is closed in the background on
+    // reconnect; without this race, its runPromise never settles.
+    const client = await Promise.race([session.clientPromise, session.replaced]);
+    return await Promise.race([
+      session.runtime.runPromise(Effect.suspend(() => execute(client))),
+      session.replaced,
+    ]);
   }
 
   async requestStream<TValue>(
@@ -236,6 +259,7 @@ export class WsTransport {
 
       this.lastHeartbeatPongAt = null;
       const previousSession = this.session;
+      previousSession.markReplaced();
       this.session = this.createSession();
       // A live subscription can keep the previous scope closing while the
       // protocol is retrying a failed socket. The replacement session is
@@ -260,6 +284,7 @@ export class WsTransport {
     }
 
     this.disposed = true;
+    this.session.markReplaced();
     await this.closeSession(this.session);
   }
 
@@ -312,10 +337,20 @@ export class WsTransport {
       : protocolLayer;
     const runtime = ManagedRuntime.make(rootLayer);
     const clientScope = runtime.runSync(Scope.make());
+    let markReplaced: () => void = NOOP;
+    const replaced = new Promise<never>((_, reject) => {
+      markReplaced = () => reject(new TransportSessionReplacedError());
+    });
+    // This promise exists to interrupt in-flight requests; nothing awaits it on
+    // the happy path. Attach a no-op catch so its rejection is always handled
+    // (no unhandledrejection when a session is replaced with no pending calls).
+    replaced.catch(() => undefined);
     return {
       runtime,
       clientScope,
       clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+      replaced,
+      markReplaced,
     };
   }
 
