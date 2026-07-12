@@ -33,10 +33,20 @@ describe("EnvironmentLinks", () => {
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });
 
-  it.effect("renews an active lease and revokes expired leases", () => {
+  it.effect("renews an active lease and discovers expired leases for cleanup", () => {
     const updates: Array<Record<string, unknown>> = [];
     const conditions: Array<unknown> = [];
     const fakeDb = {
+      select: () => ({
+        from: () => ({
+          where: (condition: unknown) => {
+            conditions.push(condition);
+            return Effect.succeed([
+              { environmentId: "env-1", environmentPublicKey: "key-1", userId: "user-1" },
+            ]);
+          },
+        }),
+      }),
       update: () => ({
         set: (values: Record<string, unknown>) => ({
           where: (condition: unknown) => ({
@@ -59,8 +69,9 @@ describe("EnvironmentLinks", () => {
       expect(renewedUntil).toBe(updates[0]?.leaseExpiresAt);
       expect(String(updates[0]?.leaseExpiresAt) > String(updates[0]?.updatedAt)).toBe(true);
 
-      expect(yield* links.revokeExpired()).toEqual([{ environmentId: "env-1" }]);
-      expect(updates[1]?.revokedAt).toBe(updates[1]?.updatedAt);
+      expect(yield* links.listExpired()).toEqual([
+        { environmentId: "env-1", environmentPublicKey: "key-1", userId: "user-1" },
+      ]);
       const expiryQuery = new PgDialect().sqlToQuery(conditions[1] as never);
       expect(expiryQuery.sql).toContain('"relay_environment_links"."lease_expires_at" < $1');
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));

@@ -226,7 +226,7 @@ function makeLinks(
       }),
     revokeForUser: () => Effect.succeed(false),
     renewForUser: () => Effect.succeed(null),
-    revokeExpired: () => Effect.succeed([]),
+    listExpired: () => Effect.succeed([]),
     purgeRevokedBefore: () => Effect.succeed(0),
   };
 }

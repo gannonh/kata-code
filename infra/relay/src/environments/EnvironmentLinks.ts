@@ -122,7 +122,7 @@ export interface EnvironmentLinksShape {
     readonly userId: string;
     readonly environmentId: string;
   }) => Effect.Effect<string | null, EnvironmentLinkRevokePersistenceError>;
-  readonly revokeExpired: () => Effect.Effect<
+  readonly listExpired: () => Effect.Effect<
     ReadonlyArray<ExpiredEnvironmentLinkRecord>,
     EnvironmentLinkRevokePersistenceError
   >;
@@ -414,24 +414,22 @@ const make = Effect.gen(function* () {
       Effect.mapError((cause) => new EnvironmentLinkRevokePersistenceError({ cause })),
     ),
 
-    revokeExpired: Effect.fn("relay.environment_links.revoke_expired")(
+    listExpired: Effect.fn("relay.environment_links.list_expired")(
       function* () {
         const now = DateTime.formatIso(yield* DateTime.now);
-        const rows = yield* db
-          .update(relayEnvironmentLinks)
-          .set({ revokedAt: now, updatedAt: now })
+        return yield* db
+          .select({
+            environmentId: relayEnvironmentLinks.environmentId,
+            environmentPublicKey: relayEnvironmentLinks.environmentPublicKey,
+            userId: relayEnvironmentLinks.userId,
+          })
+          .from(relayEnvironmentLinks)
           .where(
             and(
               isNull(relayEnvironmentLinks.revokedAt),
               lt(relayEnvironmentLinks.leaseExpiresAt, now),
             ),
-          )
-          .returning({
-            environmentId: relayEnvironmentLinks.environmentId,
-            environmentPublicKey: relayEnvironmentLinks.environmentPublicKey,
-            userId: relayEnvironmentLinks.userId,
-          });
-        return rows;
+          );
       },
       Effect.mapError((cause) => new EnvironmentLinkRevokePersistenceError({ cause })),
     ),

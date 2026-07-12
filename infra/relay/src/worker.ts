@@ -254,20 +254,29 @@ export default class Api extends Cloudflare.Worker<Api>()(
         yield* DpopProofs.DpopProofReplay.pipe(
           Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
         );
-        const expired = yield* links.revokeExpired();
+        const expired = yield* links.listExpired();
         yield* Effect.forEach(
           expired,
           (record) =>
-            Effect.all([
-              endpoints.deprovision({
-                userId: record.userId,
-                environmentId: record.environmentId,
-              }),
-              credentials.revokeForEnvironmentPublicKey({
-                environmentId: record.environmentId,
-                environmentPublicKey: record.environmentPublicKey,
-              }),
-            ]).pipe(
+            Effect.all(
+              [
+                endpoints.deprovision({
+                  userId: record.userId,
+                  environmentId: record.environmentId,
+                }),
+                credentials.revokeForEnvironmentPublicKey({
+                  environmentId: record.environmentId,
+                  environmentPublicKey: record.environmentPublicKey,
+                }),
+              ],
+              { concurrency: 2 },
+            ).pipe(
+              Effect.andThen(
+                links.revokeForUser({
+                  userId: record.userId,
+                  environmentId: record.environmentId,
+                }),
+              ),
               Effect.catchCause((cause) =>
                 Effect.logWarning("Expired environment cleanup was incomplete", {
                   environmentId: record.environmentId,
