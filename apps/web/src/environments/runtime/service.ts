@@ -1495,18 +1495,7 @@ async function ensureSavedEnvironmentConnection(
 ): Promise<EnvironmentConnection> {
   const existing = environmentConnections.get(record.environmentId);
   if (existing) {
-    // Reconcile a stale runtime dot: the connection is live but the store may
-    // still read a transient "disconnected"/"connecting" from before this
-    // connection opened (e.g. panel re-mount racing the open). Snap it to
-    // connected when the transport heartbeat is fresh so the status dot matches
-    // reality without waiting for the next socket event or a page refresh.
-    if (
-      existing.client.isHeartbeatFresh() &&
-      useSavedEnvironmentRuntimeStore.getState().byId[record.environmentId]?.connectionState !==
-        "connected"
-    ) {
-      setRuntimeConnected(record.environmentId);
-    }
+    reconcileSavedEnvironmentConnectionState(record.environmentId);
     return existing;
   }
 
@@ -1791,9 +1780,13 @@ export function readEnvironmentConnection(
  * Reconcile a saved environment's runtime `connectionState` dot with its live
  * transport. A panel re-mount can read a stale "disconnected"/"connecting"
  * from before the connection opened; when a live connection has a fresh
- * heartbeat, snap the store to "connected" so the status dot is green without
- * waiting for the next socket event or a page refresh. Returns true when it
- * corrected the state.
+ * heartbeat, snap the runtime dot to "connected" so the status dot is green
+ * without waiting for the next socket event or a page refresh.
+ *
+ * Only the runtime store is touched (not the registry): this is a display
+ * correction, so it must not persist or re-write the saved-environment
+ * registry (which drives Environments orphan classification). Returns true
+ * when it corrected the state.
  */
 export function reconcileSavedEnvironmentConnectionState(environmentId: EnvironmentId): boolean {
   const connection = environmentConnections.get(environmentId);
@@ -1801,7 +1794,14 @@ export function reconcileSavedEnvironmentConnectionState(environmentId: Environm
   const current =
     useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.connectionState ?? null;
   if (current === "connected") return false;
-  setRuntimeConnected(environmentId);
+  useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+    connectionState: "connected",
+    authState: "authenticated",
+    connectedAt: isoNow(),
+    disconnectedAt: null,
+    lastError: null,
+    lastErrorAt: null,
+  });
   return true;
 }
 
