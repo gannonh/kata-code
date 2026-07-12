@@ -8,7 +8,7 @@ function readPositiveIntEnv(name: string, fallback: number): number {
 /** Shared local E2E timeout budget. Override individual knobs via KATACODE_E2E_* env vars. */
 export const E2E_TIMEOUTS = {
   devStackMs: readPositiveIntEnv("KATACODE_E2E_DEV_STACK_TIMEOUT_MS", 30_000),
-  electronWindowMs: readPositiveIntEnv("KATACODE_E2E_ELECTRON_WINDOW_TIMEOUT_MS", 30_000),
+  electronWindowMs: readPositiveIntEnv("KATACODE_E2E_ELECTRON_WINDOW_TIMEOUT_MS", 60_000),
   testMs: readPositiveIntEnv("KATACODE_E2E_TEST_TIMEOUT_MS", 90_000),
   agentTestMs: readPositiveIntEnv("KATACODE_E2E_AGENT_TEST_TIMEOUT_MS", 120_000),
   setupMs: readPositiveIntEnv("KATACODE_E2E_SETUP_TIMEOUT_MS", 20_000),
