@@ -22,6 +22,7 @@ import {
   RelayEnvironmentConfigRequest,
   RelayEnvironmentLinkChallengeResponse,
   RelayEnvironmentLinkResponse,
+  RelayEnvironmentLeaseRenewalResponse,
   RelayEnvironmentMintResponseProofPayload,
   type RelayEnvironmentMintResponse as RelayEnvironmentMintResponseShape,
   RelayEnvironmentLinkProof,
@@ -646,6 +647,24 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
 export const reconcileDesiredCloudLink = Effect.fn("environment.cloud.reconcileDesiredLink")(
   function* (localOrigin: string) {
     return yield* reconcileDesiredCloudLinkWith(yield* cloudHttpDependencies, localOrigin);
+  },
+);
+
+/** Renew the primary environment's relay lease without reprovisioning its endpoint. */
+export const renewDesiredCloudLinkLease = Effect.fn("environment.cloud.renewDesiredLinkLease")(
+  function* () {
+    const dependencies = yield* cloudHttpDependencies;
+    const token = yield* dependencies.cliTokenManager.getExisting;
+    if (Option.isNone(token)) return false;
+    const relayUrl = yield* requireRelayUrl;
+    const environmentId = yield* dependencies.environment.getEnvironmentId;
+    const renewed = yield* relayClientRequest(dependencies, {
+      url: `${relayUrl}/v1/client/environment-links/${encodeURIComponent(environmentId)}/lease`,
+      token: token.value.accessToken,
+      payload: {},
+      schema: RelayEnvironmentLeaseRenewalResponse,
+    });
+    return renewed.ok;
   },
 );
 

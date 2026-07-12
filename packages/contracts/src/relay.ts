@@ -592,7 +592,7 @@ export const RelayClientEnvironmentRecord = Schema.Struct({
   label: TrimmedNonEmptyString,
   endpoint: RelayManagedEndpoint,
   linkedAt: TrimmedNonEmptyString,
-  leaseExpiresAt: TrimmedNonEmptyString,
+  leaseExpiresAt: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type RelayClientEnvironmentRecord = typeof RelayClientEnvironmentRecord.Type;
 

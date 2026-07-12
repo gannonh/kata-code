@@ -80,6 +80,7 @@ import {
   resolveConnectAuthToken,
   issueSandboxPairingCredential,
   deleteJson,
+  renewSandboxConnectLease,
 } from "./sandboxConnect.ts";
 import {
   either,
@@ -239,6 +240,44 @@ function unlinkSandboxFromRelay(
     );
   });
 }
+
+/** Renew every persisted sandbox Connect lease managed by this server. */
+export const renewSandboxRelayLeases = Effect.fn("sandbox.renewRelayLeases")(function* () {
+  const records = yield* getSessionStore()
+    .load()
+    .pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not load sandbox sessions for Connect lease renewal", {
+          cause,
+        }).pipe(Effect.as([] as ReadonlyArray<SandboxSessionRecord>)),
+      ),
+    );
+  const linkedRecords = records.filter((record) => record.relay !== undefined);
+  if (linkedRecords.length === 0) return 0;
+  const bearerToken = yield* resolveConnectAuthToken(undefined, "stored-first").pipe(
+    Effect.orElseSucceed(() => null),
+  );
+  if (bearerToken === null) return 0;
+  const renewed = yield* Effect.forEach(
+    linkedRecords,
+    (record) =>
+      renewSandboxConnectLease({
+        relayUrl: record.relay!.relayUrl,
+        environmentId: record.sandboxEnvironmentId,
+        bearerToken,
+      }).pipe(
+        Effect.as(1),
+        Effect.catch((cause) =>
+          Effect.logWarning("Could not renew sandbox Connect lease", {
+            environmentId: record.sandboxEnvironmentId,
+            cause,
+          }).pipe(Effect.as(0)),
+        ),
+      ),
+    { concurrency: 4 },
+  );
+  return renewed.reduce((total, value) => total + value, 0);
+});
 
 function reconcileSessions(
   settings: ServerSettings,

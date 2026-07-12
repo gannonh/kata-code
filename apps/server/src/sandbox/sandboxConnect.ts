@@ -31,6 +31,7 @@ import {
   type RelayEnvironmentConfigRequest,
   RelayEnvironmentLinkChallengeResponse,
   RelayEnvironmentLinkResponse,
+  RelayEnvironmentLeaseRenewalResponse,
   type RelayLinkProofRequest,
   type RelayManagedEndpointProviderKind,
 } from "@kata-sh/code-contracts/relay";
@@ -127,6 +128,19 @@ export function postJson<S extends Schema.Decoder<unknown>>(
     },
     body: JSON.stringify(payload),
   });
+}
+
+export function renewSandboxConnectLease(input: {
+  readonly relayUrl: string;
+  readonly environmentId: string;
+  readonly bearerToken: string;
+}) {
+  return postJson(
+    RelayEnvironmentLeaseRenewalResponse,
+    `${input.relayUrl}/v1/client/environment-links/${encodeURIComponent(input.environmentId)}/lease`,
+    {},
+    input.bearerToken,
+  );
 }
 
 export function deleteJson<S extends Schema.Decoder<unknown>>(
