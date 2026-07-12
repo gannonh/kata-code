@@ -108,6 +108,12 @@ export function seedGitHubAuth(input: {
         message: "driver does not support copyInto; cannot seed GitHub auth",
       });
     }
+    if (!/^[0-9a-f]{16}$/u.test(input.nonce)) {
+      return yield* new VercelRemoteSetupError({
+        stage: "github-auth",
+        message: "invalid GitHub credential nonce",
+      });
+    }
     const dir = `/tmp/kata-github-auth-${input.nonce}`;
     const tokenFilePath = `${dir}/token`;
     // Upload the token as a mode-0600 file under the random dir. copyInto

@@ -105,6 +105,36 @@ describe("vercelRemoteSetup", () => {
     expect(command).toContain("trap");
   });
 
+  vitIt.effect("rejects nonces outside the caller-generated lowercase hex format", () =>
+    Effect.gen(function* () {
+      const invalidNonces = [
+        "../outside",
+        "01234567/abcdefg",
+        "01234567;rm-rf-x",
+        "0123456789ABCDEF",
+        "0123456789abcde",
+      ];
+
+      yield* Effect.forEach(invalidNonces, (nonce) =>
+        Effect.gen(function* () {
+          const driver = execDriver(() => undefined);
+          const outcome = yield* seedGitHubAuth({
+            driver,
+            handle,
+            token: "secret-token",
+            nonce,
+          }).pipe(Effect.exit);
+
+          expect(outcome._tag).toBe("Failure");
+          expect(driver.execs).toHaveLength(0);
+          if (outcome._tag === "Failure") {
+            expect(Cause.pretty(outcome.cause)).toContain("invalid GitHub credential nonce");
+          }
+        }),
+      );
+    }),
+  );
+
   vitIt.effect("attempts independent cleanup when auth exec fails", () =>
     Effect.gen(function* () {
       const commands: string[] = [];
@@ -125,13 +155,13 @@ describe("vercelRemoteSetup", () => {
         driver: failingDriver,
         handle,
         token: "secret-token",
-        nonce: "exec-failure",
+        nonce: "0000000000000001",
       }).pipe(Effect.result);
 
       expect(outcome._tag).toBe("Failure");
       expect(commands).toHaveLength(2);
       expect(commands[1]).toContain("rm -rf");
-      expect(commands[1]).toContain("/tmp/kata-github-auth-exec-failure");
+      expect(commands[1]).toContain("/tmp/kata-github-auth-0000000000000001");
       expect(commands.join(" ")).not.toContain("secret-token");
     }),
   );
@@ -139,10 +169,10 @@ describe("vercelRemoteSetup", () => {
   vitIt.effect("cleans the unique credential directory after successful auth", () =>
     Effect.gen(function* () {
       const driver = execDriver(() => undefined);
-      yield* seedGitHubAuth({ driver, handle, token: "secret-token", nonce: "success" });
+      yield* seedGitHubAuth({ driver, handle, token: "secret-token", nonce: "0000000000000002" });
 
       expect(driver.execs).toHaveLength(2);
-      expect(driver.execs[1]?.command).toBe("rm -rf -- '/tmp/kata-github-auth-success'");
+      expect(driver.execs[1]?.command).toBe("rm -rf -- '/tmp/kata-github-auth-0000000000000002'");
       expect(driver.execs[1]?.cwd).toBe("/tmp");
     }),
   );
@@ -158,11 +188,11 @@ describe("vercelRemoteSetup", () => {
         driver,
         handle,
         token: "secret-token",
-        nonce: "nonzero",
+        nonce: "0000000000000003",
       }).pipe(Effect.exit);
 
       expect(outcome._tag).toBe("Failure");
-      expect(driver.execs[1]?.command).toContain("/tmp/kata-github-auth-nonzero");
+      expect(driver.execs[1]?.command).toContain("/tmp/kata-github-auth-0000000000000003");
       if (outcome._tag === "Failure") {
         const detail = Cause.pretty(outcome.cause);
         expect(detail).toContain("gh auth seed failed");
@@ -182,7 +212,7 @@ describe("vercelRemoteSetup", () => {
         driver,
         handle,
         token: "secret-token",
-        nonce: "cleanup-failure",
+        nonce: "0000000000000004",
       }).pipe(Effect.exit);
 
       expect(outcome._tag).toBe("Failure");
@@ -213,7 +243,7 @@ describe("vercelRemoteSetup", () => {
         driver,
         handle,
         token: "secret-token",
-        nonce: "combined",
+        nonce: "0000000000000005",
       }).pipe(Effect.exit);
 
       expect(outcome._tag).toBe("Failure");
@@ -245,13 +275,13 @@ describe("vercelRemoteSetup", () => {
         driver,
         handle,
         token: "secret-token",
-        nonce: "interrupt",
+        nonce: "0000000000000006",
       }).pipe(Effect.forkChild);
       yield* Deferred.await(authStarted);
       yield* Fiber.interrupt(fiber);
 
       expect(commands).toHaveLength(2);
-      expect(commands[1]).toBe("rm -rf -- '/tmp/kata-github-auth-interrupt'");
+      expect(commands[1]).toBe("rm -rf -- '/tmp/kata-github-auth-0000000000000006'");
     }),
   );
 });
