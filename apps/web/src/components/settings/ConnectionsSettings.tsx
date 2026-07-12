@@ -127,9 +127,11 @@ import {
   connectDesktopSshEnvironment,
   disconnectSavedEnvironment,
   getPrimaryEnvironmentConnection,
+  reconcileSavedEnvironmentConnectionState,
   reconnectSavedEnvironment,
   removeSavedEnvironment,
   resolveSavedEnvironmentDisplayLabel,
+  subscribeEnvironmentConnections,
 } from "~/environments/runtime";
 import { useUiStateStore } from "~/uiStateStore";
 import { resolveServerConfigVersionMismatch } from "~/versionSkew";
@@ -1531,6 +1533,17 @@ export function SavedBackendListRow({
   const record = useSavedEnvironmentRegistryStore((state) => state.byId[environmentId] ?? null);
   const runtime = useSavedEnvironmentRuntimeStore((state) => state.byId[environmentId] ?? null);
 
+  // Correct a stale status dot: on mount and whenever the connection set
+  // changes, snap the dot to connected when the live transport is fresh. This
+  // covers the panel re-mounting against an already-open connection whose
+  // runtime state still reads a transient "disconnected".
+  useEffect(() => {
+    reconcileSavedEnvironmentConnectionState(environmentId);
+    return subscribeEnvironmentConnections(() => {
+      reconcileSavedEnvironmentConnectionState(environmentId);
+    });
+  }, [environmentId]);
+
   if (!record) {
     return null;
   }
@@ -2094,7 +2107,20 @@ function ConfiguredCloudRemoteEnvironmentRows({
   };
 
   if (savedEnvironmentIds.length === 0 && environmentsState.data === null) {
-    return <RemoteEnvironmentRowsSkeleton />;
+    // Only skeleton while the managed-relay query is in flight. A failed or
+    // idle null must not hang Available Runtimes forever.
+    if (environmentsState.isPending) {
+      return <RemoteEnvironmentRowsSkeleton />;
+    }
+    return (
+      <>
+        <EmptyAvailableRuntimes {...(!isSignedIn ? { onConnectFromCloud: openAuthPrompt } : {})} />
+        {environmentsState.error ? (
+          <p className="px-1 text-xs text-amber-600">{environmentsState.error}</p>
+        ) : null}
+        {authPrompt}
+      </>
+    );
   }
 
   if (savedEnvironmentIds.length === 0 && connectableEnvironments.length === 0) {

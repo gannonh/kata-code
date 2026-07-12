@@ -205,9 +205,12 @@ export function resolveSandboxListUiState(input: {
   readonly listError: string | null;
   readonly listPending: boolean;
 }): SandboxListUiState {
-  if (input.listPending && !input.summariesLoaded) return "loading";
-  if (input.listError !== null && !input.summariesLoaded) return "error";
+  // Once we have successfully loaded once, stay ready even while a refresh is
+  // in flight or a later refresh fails — otherwise Start/Stop lock behind an
+  // indefinite "Loading sandbox status…" banner.
   if (input.summariesLoaded) return "ready";
+  if (input.listPending) return "loading";
+  if (input.listError !== null) return "error";
   return "loading";
 }
 

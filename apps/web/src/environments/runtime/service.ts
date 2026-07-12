@@ -1495,6 +1495,18 @@ async function ensureSavedEnvironmentConnection(
 ): Promise<EnvironmentConnection> {
   const existing = environmentConnections.get(record.environmentId);
   if (existing) {
+    // Reconcile a stale runtime dot: the connection is live but the store may
+    // still read a transient "disconnected"/"connecting" from before this
+    // connection opened (e.g. panel re-mount racing the open). Snap it to
+    // connected when the transport heartbeat is fresh so the status dot matches
+    // reality without waiting for the next socket event or a page refresh.
+    if (
+      existing.client.isHeartbeatFresh() &&
+      useSavedEnvironmentRuntimeStore.getState().byId[record.environmentId]?.connectionState !==
+        "connected"
+    ) {
+      setRuntimeConnected(record.environmentId);
+    }
     return existing;
   }
 
@@ -1773,6 +1785,24 @@ export function readEnvironmentConnection(
   environmentId: EnvironmentId,
 ): EnvironmentConnection | null {
   return environmentConnections.get(environmentId) ?? null;
+}
+
+/**
+ * Reconcile a saved environment's runtime `connectionState` dot with its live
+ * transport. A panel re-mount can read a stale "disconnected"/"connecting"
+ * from before the connection opened; when a live connection has a fresh
+ * heartbeat, snap the store to "connected" so the status dot is green without
+ * waiting for the next socket event or a page refresh. Returns true when it
+ * corrected the state.
+ */
+export function reconcileSavedEnvironmentConnectionState(environmentId: EnvironmentId): boolean {
+  const connection = environmentConnections.get(environmentId);
+  if (!connection || !connection.client.isHeartbeatFresh()) return false;
+  const current =
+    useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.connectionState ?? null;
+  if (current === "connected") return false;
+  setRuntimeConnected(environmentId);
+  return true;
 }
 
 export function requireEnvironmentConnection(environmentId: EnvironmentId): EnvironmentConnection {

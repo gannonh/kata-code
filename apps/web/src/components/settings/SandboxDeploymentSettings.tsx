@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/react";
 import { ChevronDownIcon, Trash2Icon } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EnvironmentId,
   SandboxProviderDriverKind,
@@ -59,6 +59,32 @@ const VERCEL_REQUIRED_ENV_NAMES = ["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PRO
 /** Per-instance busy state for the long-running RPCs. */
 type BusyOp = "test" | "start" | "dispose" | "renew" | "stop";
 
+/** Reject a lifecycle RPC that never settles (server restart / dropped WS /
+ * interrupted fiber) so the button cannot stick on "Stopping…"/"Starting…".
+ * The provider work may still complete server-side; a follow-up refresh
+ * reconciles the real status. */
+async function withRpcTimeout<T>(
+  label: string,
+  run: () => Promise<T>,
+  timeoutMs = 60_000,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      run(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(`${label} timed out. The server may still be finishing; refresh to check.`),
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /** Render a non-empty failure message for the progress log and toasts.
  * Effect fiber failures can surface as objects whose `message` is empty. */
 function failureMessage(error: unknown): string {
@@ -107,6 +133,7 @@ export function SandboxDeploymentSettings({
   const [summariesLoaded, setSummariesLoaded] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [listPending, setListPending] = useState(false);
+  const listRefreshGenerationRef = useRef(0);
   const [testProgress, setTestProgress] = useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [selectedRepositoryKeyByInstance, setSelectedRepositoryKeyByInstance] = useState<
@@ -143,9 +170,17 @@ export function SandboxDeploymentSettings({
   );
 
   const refreshList = useCallback(async () => {
+    const generation = ++listRefreshGenerationRef.current;
     setListPending(true);
     try {
-      const result = await getPrimaryEnvironmentConnection().client.sandbox.listInstances();
+      // Bound the RPC so a hung listInstances (WS interrupt / slow Vercel status)
+      // cannot leave Environments on "Loading sandbox status…" forever.
+      const result = await withRpcTimeout(
+        "Loading sandbox status",
+        () => getPrimaryEnvironmentConnection().client.sandbox.listInstances(),
+        30_000,
+      );
+      if (generation !== listRefreshGenerationRef.current) return;
       setSummaries(result.instances);
       setActiveSession(
         Object.fromEntries(
@@ -166,8 +201,10 @@ export function SandboxDeploymentSettings({
       setSummariesLoaded(true);
       setListError(null);
     } catch (error) {
+      if (generation !== listRefreshGenerationRef.current) return;
       const message = error instanceof Error ? error.message : "Unknown error.";
-      setSummariesLoaded(false);
+      // Do not clear summariesLoaded — keep a prior successful list so Start/Stop
+      // stay usable after a refresh blip or timeout.
       setListError(message);
       toastManager.add({
         type: "error",
@@ -175,7 +212,9 @@ export function SandboxDeploymentSettings({
         description: message,
       });
     } finally {
-      setListPending(false);
+      if (generation === listRefreshGenerationRef.current) {
+        setListPending(false);
+      }
     }
   }, []);
 
@@ -287,18 +326,20 @@ export function SandboxDeploymentSettings({
           if (hasCloudPublicConfig() && !connectAuthToken) {
             throw new Error("Sign in to Kata Code Connect before starting a deployment session.");
           }
-          const result = await getPrimaryEnvironmentConnection().client.sandbox.startSession({
-            instanceId: instanceId as never,
-            ...(connectAuthToken ? { connectAuthToken } : {}),
-            ...(project?.repositoryIdentity
-              ? {
-                  repository: {
-                    repoRoot: project.cwd,
-                    repositoryIdentity: project.repositoryIdentity,
-                  },
-                }
-              : {}),
-          });
+          const result = await withRpcTimeout("Start session", () =>
+            getPrimaryEnvironmentConnection().client.sandbox.startSession({
+              instanceId: instanceId as never,
+              ...(connectAuthToken ? { connectAuthToken } : {}),
+              ...(project?.repositoryIdentity
+                ? {
+                    repository: {
+                      repoRoot: project.cwd,
+                      repositoryIdentity: project.repositoryIdentity,
+                    },
+                  }
+                : {}),
+            }),
+          );
           setActiveSession((prev) => ({
             ...prev,
             [instanceId]: {
@@ -366,6 +407,9 @@ export function SandboxDeploymentSettings({
             title: "Start session failed",
             description: message,
           });
+          // Start-from-stopped keeps the VM on Connect failure; refresh so the
+          // card shows provider truth (running/stopped) instead of a stale list.
+          await refreshList();
         }
       }),
     [
@@ -393,9 +437,11 @@ export function SandboxDeploymentSettings({
           // full environment reconnect also waits for a shell snapshot, which
           // is unrelated to this lifecycle request and can block recovery.
           await connection.client.reconnect();
-          const result = await connection.client.sandbox.disposeSession({
-            instanceId: instanceId as never,
-          });
+          const result = await withRpcTimeout("Delete sandbox", () =>
+            connection.client.sandbox.disposeSession({
+              instanceId: instanceId as never,
+            }),
+          );
           if (!result.disposed) {
             toastManager.add({
               type: "error",
@@ -459,9 +505,11 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "stop", async () => {
         try {
-          await getPrimaryEnvironmentConnection().client.sandbox.stopSession({
-            instanceId: instanceId as never,
-          });
+          await withRpcTimeout("Stop session", () =>
+            getPrimaryEnvironmentConnection().client.sandbox.stopSession({
+              instanceId: instanceId as never,
+            }),
+          );
           refreshManagedRelayEnvironments();
           await refreshList();
           toastManager.add({
@@ -475,6 +523,8 @@ export function SandboxDeploymentSettings({
             title: "Stop failed",
             description: error instanceof Error ? error.message : "Unknown error.",
           });
+          // A timed-out/interrupted stop may still be settling server-side.
+          await refreshList();
         }
       }),
     [refreshList, withBusy],
@@ -484,9 +534,11 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "renew", async () => {
         try {
-          await getPrimaryEnvironmentConnection().client.sandbox.renewSession({
-            instanceId: instanceId as never,
-          });
+          await withRpcTimeout("Extend session", () =>
+            getPrimaryEnvironmentConnection().client.sandbox.renewSession({
+              instanceId: instanceId as never,
+            }),
+          );
           await refreshList();
         } catch (error) {
           toastManager.add({
@@ -507,9 +559,11 @@ export function SandboxDeploymentSettings({
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
         try {
-          const issued = await getPrimaryEnvironmentConnection().client.sandbox.issuePairingToken({
-            instanceId: instanceId as never,
-          });
+          const issued = await withRpcTimeout("Retry pairing", () =>
+            getPrimaryEnvironmentConnection().client.sandbox.issuePairingToken({
+              instanceId: instanceId as never,
+            }),
+          );
           await addSavedEnvironment({
             label: instance?.displayName?.trim() || issued.endpoint.label,
             host: issued.endpoint.httpBaseUrl,
@@ -860,7 +914,9 @@ export function DeploymentTargetCard({
             </div>
             <p className="text-xs text-muted-foreground/80">
               {session
-                ? `Session ready: ${session.httpBaseUrl} (env ${session.environmentId})`
+                ? hasSavedRecordForSession
+                  ? `Session ready: ${session.httpBaseUrl} (env ${session.environmentId})`
+                  : `Running at ${session.httpBaseUrl} — not paired. Retry pairing to use it in Add project.`
                 : isVercel
                   ? "Provisions an ephemeral Vercel Sandbox microVM, reached over a public URL."
                   : "Provision an isolated container reached over localhost."}
@@ -868,9 +924,16 @@ export function DeploymentTargetCard({
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
             {sessionStatus === "running" ? (
-              <Button size="sm" variant="outline" disabled={actionsBlocked} onClick={onStop}>
-                {instanceBusy === "stop" ? "Stopping…" : "Stop"}
-              </Button>
+              <>
+                {!hasSavedRecordForSession ? (
+                  <Button size="sm" disabled={actionsBlocked} onClick={onRetryPairing}>
+                    {instanceBusy === "start" ? "Pairing…" : "Retry pairing"}
+                  </Button>
+                ) : null}
+                <Button size="sm" variant="outline" disabled={actionsBlocked} onClick={onStop}>
+                  {instanceBusy === "stop" ? "Stopping…" : "Stop"}
+                </Button>
+              </>
             ) : sessionStatus === "stopped" ? (
               <Button size="sm" variant="outline" disabled={actionsBlocked} onClick={onStart}>
                 {instanceBusy === "start" ? "Starting…" : "Start"}
