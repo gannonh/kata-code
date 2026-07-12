@@ -33,11 +33,12 @@ Observed 2026-07-12 with `vercel_kata-code-sandbox` (`https://sb-mj6gwes724iq.ve
 
 ### 1. Always-refresh status; one-shot discovery; join in-flight refresh
 
-- **Status refresh** — every `listInstances` runs `reconcileStoredRecords` (provider `lifecycle.status` → store). Concurrent callers **await the in-flight refresh** (Deferred join) instead of skipping.
+- **Status refresh** — every `listInstances` **forks** `reconcileStoredRecords` (provider `lifecycle.status` → store) and **returns last-known store summaries immediately**. Blocking the RPC on Vercel/Docker probes made Environments time out (client 30s) while Available Runtimes stayed green. Concurrent forks still **join one in-flight refresh** (Deferred) so probes are not duplicated.
 - **Busy instances** — records under a lifecycle lock are skipped in the full refresh (last-known status kept); the locked op uses a single-instance probe.
 - **Discovery** — `discoverUntrackedSessions` remains one-shot (`discoveryDone`), and only when no instance is busy.
 - **Lifecycle vs list** — Start/Stop/Delete refuse only on **per-instance busy**, not on `reconcileInProgress`, so Environments refresh cannot flake Start.
 - **Admin token** — `cacheLiveSession` preserves `adminAccessToken` across refresh so Retry pairing still works after listInstances.
+- **Client follow-up** — Environments does a silent re-list ~2.5s after mount to pick up the background reconcile without blocking first paint.
 
 ### 2. Locked single-instance status probe before Start/Stop branch
 
@@ -71,7 +72,7 @@ If the provider reports `running` after the locked probe, return the existing �
 ## Acceptance criteria
 
 1. With Electron and web both running against the **same** server `stateDir` and the same Vercel sandbox, after Electron starts it, a web Environments refresh shows `running` (provider-API refresh — not file coalescing) without restarting the web server.
-2. Concurrent `listInstances` during an in-flight refresh join that refresh and do not return a skipped/stale probe.
+2. Concurrent `listInstances` during an in-flight refresh join that refresh (via forked reconcile Deferred) and do not each start a duplicate probe set; the RPC itself returns store summaries without waiting for probes.
 3. Vercel `lifecycle.start` kills prior `katacode serve` on the port (blocking), waits for the listener to drop, then relaunches serve detached with the new bootstrap env (unit-tested).
 4. Readiness requires `/.well-known/kata/environment` JSON with `environmentId` — SPA `/healthz` HTML 200 does not count as ready.
 5. Start-from-stopped against a sandbox that still had an old serve process exchanges the fresh bootstrap token successfully (no `invalid_credential` from leftover serve).
