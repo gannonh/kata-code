@@ -1,3 +1,8 @@
+import type {
+  RelayEnvironmentLinkProofPayload,
+  RelayEnvironmentLinkRequest,
+  RelayManagedEndpoint,
+} from "@kata-sh/code-contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -85,6 +90,60 @@ describe("EnvironmentLinks", () => {
       expect(pendingQuery.sql).toContain(
         '"relay_environment_links"."cleanup_claimed_at" is not null',
       );
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
+  });
+
+  it.effect("rejects relinking a cleanup-claimed environment", () => {
+    let cleanupClaimed = true;
+    let setWhere: unknown;
+    const fakeDb = {
+      insert: () => ({
+        values: () => ({
+          onConflictDoUpdate: (config: { readonly setWhere?: unknown }) => ({
+            returning: () => {
+              setWhere = config.setWhere;
+              if (cleanupClaimed && config.setWhere !== undefined) {
+                return Effect.succeed([]);
+              }
+              cleanupClaimed = false;
+              return Effect.succeed([{ environmentId: "env-1" }]);
+            },
+          }),
+        }),
+      }),
+    } as unknown as RelayDatabase;
+    const request = {
+      notificationsEnabled: true,
+      liveActivitiesEnabled: true,
+      managedTunnelsEnabled: true,
+    } as RelayEnvironmentLinkRequest;
+    const proof = {
+      environmentId: "env-1",
+      environmentPublicKey: "key-1",
+      descriptor: { label: "Environment" },
+    } as RelayEnvironmentLinkProofPayload;
+    const endpoint = {
+      httpBaseUrl: "https://example.test",
+      wsBaseUrl: "wss://example.test",
+      providerKind: "manual",
+    } as RelayManagedEndpoint;
+
+    return Effect.gen(function* () {
+      const links = yield* EnvironmentLinks;
+      const rejected = yield* links.upsert({ userId: "user-1", request, proof, endpoint }).pipe(
+        Effect.as(false),
+        Effect.orElseSucceed(() => true),
+      );
+      expect(rejected).toBe(true);
+      expect(cleanupClaimed).toBe(true);
+      const condition = new PgDialect().sqlToQuery(setWhere as never);
+      expect(condition.sql).toContain('"relay_environment_links"."cleanup_claimed_at" is null');
+      expect(condition.sql).toContain('"relay_environment_links"."revoked_at" is not null');
+      expect(condition.sql).toContain(" or ");
+
+      cleanupClaimed = false;
+      yield* links.upsert({ userId: "user-1", request, proof, endpoint });
+      expect(cleanupClaimed).toBe(false);
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });
 

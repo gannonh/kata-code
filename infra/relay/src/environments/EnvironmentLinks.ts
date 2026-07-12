@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
         const { request, proof } = input;
         const environmentId = proof.environmentId;
         const { endpoint } = input;
-        yield* db
+        const rows = yield* db
           .insert(relayEnvironmentLinks)
           .values({
             userId: input.userId,
@@ -222,7 +222,18 @@ const make = Effect.gen(function* () {
               revokedAt: null,
               updatedAt: now,
             },
-          });
+            // A cleanup claim owns a terminal transition. Relinking may revive
+            // previously revoked rows, but it cannot reactivate a row while
+            // destructive cleanup is in flight.
+            setWhere: or(
+              isNull(relayEnvironmentLinks.cleanupClaimedAt),
+              isNotNull(relayEnvironmentLinks.revokedAt),
+            )!,
+          })
+          .returning({ environmentId: relayEnvironmentLinks.environmentId });
+        if (rows.length === 0) {
+          return yield* Effect.fail("Environment link cleanup is already in progress");
+        }
       },
       Effect.mapError((cause) => new EnvironmentLinkUpsertPersistenceError({ cause })),
     ),
