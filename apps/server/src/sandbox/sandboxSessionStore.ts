@@ -173,6 +173,7 @@ function decodeStore(raw: unknown): ReadonlyArray<SandboxSessionRecord> {
 export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
   const filePath = storeFilePath(stateDir);
   let cached: ReadonlyArray<SandboxSessionRecord> | null = null;
+  let initialLoad: Promise<ReadonlyArray<SandboxSessionRecord>> | null = null;
   /** Serialize mutations so concurrent upsert/save/remove cannot interleave
    *  read-modify-write against the in-memory cache. */
   let writeTail: Promise<void> = Promise.resolve();
@@ -190,8 +191,7 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
       catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
     });
 
-  const loadOnce = Effect.gen(function* () {
-    if (cached !== null) return cached;
+  const loadFromDisk = Effect.gen(function* () {
     const raw = yield* Effect.tryPromise({
       try: async () => {
         try {
@@ -204,10 +204,7 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
       },
       catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
     });
-    if (raw === null) {
-      cached = [];
-      return cached;
-    }
+    if (raw === null) return [];
     const parsed = yield* Effect.try({
       try: () => JSON.parse(raw) as unknown,
       catch: () => new Error("corrupt sandbox session store JSON"),
@@ -217,12 +214,27 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
       yield* Effect.logWarning("Sandbox session store JSON is corrupt; starting empty", {
         path: filePath,
       });
-      cached = [];
-      return cached;
+      return [];
     }
-    const decoded = decodeStore(parsed.value);
-    cached = decoded;
-    return cached;
+    return decodeStore(parsed.value);
+  });
+
+  const loadOnce = Effect.tryPromise({
+    try: () => {
+      if (cached !== null) return Promise.resolve(cached);
+      initialLoad ??= Effect.runPromise(loadFromDisk).then(
+        (records) => {
+          cached = records;
+          return records;
+        },
+        (error) => {
+          initialLoad = null;
+          throw error;
+        },
+      );
+      return initialLoad;
+    },
+    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
   });
 
   const persist = (records: ReadonlyArray<SandboxSessionRecord>) =>
