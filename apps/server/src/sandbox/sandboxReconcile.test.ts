@@ -23,6 +23,7 @@ import { makeSandboxSessionStore, type SandboxSessionRecord } from "./sandboxSes
 import {
   reconcileStoredRecords,
   discoverUntrackedSessions,
+  cacheLiveSession,
   sanitizeHandleForStore,
   reinjectVercelAuth,
   connectAuthTokenPreferenceForEndpoint,
@@ -193,6 +194,66 @@ describe("reconcileStoredRecords (AC-L7)", () => {
     expect(updated).toHaveLength(1);
     expect(updated[0]?.status).toBe("stopped");
     expect(updated[0]?.statusDetail).toBeUndefined();
+  });
+
+  it("keeps last-known status for skipInstanceIds without calling lifecycle.status", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    await Effect.runPromise(store.upsert(makeRecord("fake_01", "stopped")));
+    const { driver, statusCalls } = makeFakeDriver(() => "running");
+    const registry = new SandboxProviderRegistry();
+    registry.register(driver, () => ({}));
+
+    const updated = await Effect.runPromise(
+      reconcileStoredRecords({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions: new Map<string, LiveSession>(),
+        skipInstanceIds: new Set(["fake_01"]),
+      }),
+    );
+
+    expect(updated).toHaveLength(1);
+    expect(updated[0]?.status).toBe("stopped");
+    expect(statusCalls).toEqual([]);
+  });
+
+  it("preserves adminAccessToken across reconcile live-session cache updates", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    await Effect.runPromise(store.upsert(makeRecord("fake_01", "stopped")));
+    const { driver } = makeFakeDriver(() => "running");
+    const registry = new SandboxProviderRegistry();
+    registry.register(driver, () => ({}));
+    const liveSessions = new Map<string, LiveSession>();
+    const handle: SandboxHandle = {
+      driverKind: FAKE_KIND,
+      instanceId: "fake_01",
+      handle: { id: "h1" },
+    };
+    cacheLiveSession(liveSessions, "fake_01", {
+      handle,
+      driver,
+      instanceConfig: { driver: "fake-lifecycle" } as never,
+      environmentId: "env_1",
+    });
+    liveSessions.set("fake_01", {
+      ...liveSessions.get("fake_01")!,
+      adminAccessToken: "admin-token",
+    });
+
+    await Effect.runPromise(
+      reconcileStoredRecords({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions,
+      }),
+    );
+
+    expect(liveSessions.get("fake_01")?.adminAccessToken).toBe("admin-token");
+    expect(liveSessions.get("fake_01")?.environmentId).toBe("env_fake_01");
   });
 
   it("evicts a record when the provider lifecycle.status returns gone", async () => {

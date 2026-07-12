@@ -31,6 +31,20 @@ import {
   VERCEL_ENDPOINT_PROVIDER,
 } from "./sandboxSessionHelpers.ts";
 
+/** Cache a live session while preserving any in-memory admin access token
+ *  minted at start (needed for Retry pairing after status refresh). */
+export function cacheLiveSession(
+  liveSessions: Map<string, LiveSession>,
+  instanceId: string,
+  next: Omit<LiveSession, "adminAccessToken">,
+): void {
+  const priorToken = liveSessions.get(instanceId)?.adminAccessToken;
+  liveSessions.set(
+    instanceId,
+    priorToken !== undefined ? { ...next, adminAccessToken: priorToken } : next,
+  );
+}
+
 /** Reconcile stored records against the providers. For each stored record:
  *  re-resolve config from settings, find the driver, call `lifecycle.status`;
  *  update the stored status, evict `gone` records, keep `stopped`/`running`.
@@ -45,6 +59,9 @@ export function reconcileStoredRecords<R = never>(input: {
   /** Best-effort relay unlink for records evicted as `gone` (identity
    *  recovery R3). Log-only failure; absent in unit tests. */
   readonly unlinkRelay?: (record: SandboxSessionRecord) => Effect.Effect<void, never, R>;
+  /** Instance ids currently under a lifecycle lock — keep last-known status
+   *  rather than racing provider.status against an in-flight start/stop. */
+  readonly skipInstanceIds?: ReadonlySet<string>;
 }): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, never, R> {
   return Effect.gen(function* () {
     const records = yield* input.store
@@ -54,6 +71,10 @@ export function reconcileStoredRecords<R = never>(input: {
     const rawMap = input.settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
     const updated: SandboxSessionRecord[] = [];
     for (const record of records) {
+      if (input.skipInstanceIds?.has(record.instanceId) === true) {
+        updated.push(record);
+        continue;
+      }
       const config = rawMap[record.instanceId as SandboxProviderInstanceId];
       if (config === undefined) {
         // Instance no longer in settings — evict.
@@ -128,7 +149,7 @@ export function reconcileStoredRecords<R = never>(input: {
             ...restRecord,
             status: statusResult.right,
           });
-          input.liveSessions.set(record.instanceId, {
+          cacheLiveSession(input.liveSessions, record.instanceId, {
             handle,
             driver: inst.driver,
             instanceConfig: resolved,
@@ -141,7 +162,7 @@ export function reconcileStoredRecords<R = never>(input: {
             ...record,
             statusDetail: `Reconcile failed: ${statusResult.left.message}`,
           });
-          input.liveSessions.set(record.instanceId, {
+          cacheLiveSession(input.liveSessions, record.instanceId, {
             handle,
             driver: inst.driver,
             instanceConfig: resolved,
@@ -151,7 +172,7 @@ export function reconcileStoredRecords<R = never>(input: {
       } else {
         // No lifecycle capability — keep as-is and cache the live session.
         updated.push(record);
-        input.liveSessions.set(record.instanceId, {
+        cacheLiveSession(input.liveSessions, record.instanceId, {
           handle,
           driver: inst.driver,
           instanceConfig: resolved,

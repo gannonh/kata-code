@@ -18,6 +18,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 // @effect-diagnostics nodeBuiltinImport:on
 import * as os from "node:os";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 
@@ -69,7 +70,11 @@ import {
   reinjectVercelAuth,
   sanitizeHandleForStore,
 } from "./sandboxSessionHelpers.ts";
-import { reconcileStoredRecords, discoverUntrackedSessions } from "./sandboxReconcile.ts";
+import {
+  reconcileStoredRecords,
+  discoverUntrackedSessions,
+  cacheLiveSession,
+} from "./sandboxReconcile.ts";
 import type { LiveSession } from "./sandboxSessionTypes.ts";
 import {
   cancelProviderLogin,
@@ -100,7 +105,11 @@ import {
 
 export type { LiveSession } from "./sandboxSessionTypes.ts";
 export { sanitizeHandleForStore, reinjectVercelAuth } from "./sandboxSessionHelpers.ts";
-export { reconcileStoredRecords, discoverUntrackedSessions } from "./sandboxReconcile.ts";
+export {
+  reconcileStoredRecords,
+  discoverUntrackedSessions,
+  cacheLiveSession,
+} from "./sandboxReconcile.ts";
 /** Re-export for existing tests that import from SandboxService. */
 export { connectAuthTokenPreferenceForEndpoint } from "./sandboxConnect.ts";
 
@@ -154,8 +163,8 @@ export function configureSandboxRuntime(input: {
   if (sessionStore !== null && configuredStateDir === input.stateDir) return;
   configuredStateDir = input.stateDir;
   sessionStore = makeSandboxSessionStore(input.stateDir);
-  // A new store must re-reconcile against providers.
-  reconcileDone = false;
+  // A new store must re-discover untracked sandboxes; status refresh is always on.
+  discoveryDone = false;
   liveSessions.clear();
 }
 
@@ -200,13 +209,14 @@ export function clearLiveSessionForTests(instanceId: string): void {
   liveSessions.delete(instanceId);
 }
 
-/** Whether a boot reconcile is currently running. Lifecycle ops wait/fail
- *  rather than racing a full-store rewrite. */
+/** Whether a status refresh is currently running. Concurrent listInstances
+ *  callers join this deferred instead of skipping (stale) or racing. */
 let reconcileInProgress = false;
+let reconcileJoin: Deferred.Deferred<void, never> | null = null;
 
-/** Whether boot reconcile has run. Reconcile runs lazily on first
- *  `listInstances` if it hasn't run yet. */
-let reconcileDone = false;
+/** Whether untracked-session discovery has run. Discovery stays one-shot;
+ *  provider status refresh runs on every list/lifecycle entry. */
+let discoveryDone = false;
 
 /** Bounded relay unlink for a session record (dispose + gone-eviction share
  *  this). The bearer token is never stored; re-resolve it. The boolean makes
@@ -284,34 +294,131 @@ function reconcileSessions(
   settings: ServerSettings,
 ): Effect.Effect<void, never, CliTokenManager.CloudCliTokenManager> {
   return Effect.gen(function* () {
-    if (reconcileDone) return;
-    // Do not rewrite the store while a lifecycle op holds an instance lock.
-    if (busyInstances.size > 0) return;
+    // Join an in-flight refresh so concurrent listInstances never return on a
+    // skipped probe (stale stopped/running).
+    if (reconcileJoin !== null) {
+      yield* Deferred.await(reconcileJoin);
+      return;
+    }
+    const join = yield* Deferred.make<void, never>();
+    reconcileJoin = join;
     reconcileInProgress = true;
-    try {
+    yield* Effect.gen(function* () {
       const store = getSessionStore();
+      // Always refresh from provider lifecycle.status. Skip instances under a
+      // lifecycle lock — those use refreshLockedInstanceStatus instead.
       yield* reconcileStoredRecords({
         store,
         registry: buildRegistry(),
         settings,
         liveSessions,
         unlinkRelay: (record) => unlinkSandboxFromRelay(record).pipe(Effect.asVoid),
+        skipInstanceIds: new Set(busyInstances),
       });
-      // Discovery: for configured instances with supportsLifecycle and no store
-      // record, probe the provider for an existing sandbox (e.g. created before
-      // the durable store existed, or after a store reset). Found sandboxes are
-      // persisted so the UI reports them as running/stopped with the right actions.
-      yield* discoverUntrackedSessions({
-        store,
-        registry: buildRegistry(),
-        settings,
-        liveSessions,
-        ...(sandboxNameNamespace !== undefined ? { nameNamespace: sandboxNameNamespace } : {}),
+      // Discovery stays one-shot and only runs when no lifecycle op holds a
+      // lock (avoid adopting a sandbox another op is creating/deleting).
+      if (!discoveryDone && busyInstances.size === 0) {
+        yield* discoverUntrackedSessions({
+          store,
+          registry: buildRegistry(),
+          settings,
+          liveSessions,
+          ...(sandboxNameNamespace !== undefined ? { nameNamespace: sandboxNameNamespace } : {}),
+        });
+        discoveryDone = true;
+      }
+    }).pipe(
+      Effect.ensuring(
+        Effect.gen(function* () {
+          reconcileInProgress = false;
+          reconcileJoin = null;
+          yield* Deferred.succeed(join, undefined);
+        }),
+      ),
+    );
+  });
+}
+
+/**
+ * Refresh one instance's stored status while its lifecycle lock is held.
+ * `reconcileSessions` skips when any instance is busy, so start/stop/delete
+ * must probe the provider for *this* instance before branching on status.
+ */
+function refreshLockedInstanceStatus(
+  sessionKey: string,
+  settings: ServerSettings,
+): Effect.Effect<void, never, CliTokenManager.CloudCliTokenManager> {
+  return Effect.gen(function* () {
+    const store = getSessionStore();
+    const record = store.records.find((r) => r.instanceId === sessionKey);
+    if (record === undefined) return;
+    const rawMap = settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
+    const config = rawMap[sessionKey as SandboxProviderInstanceId];
+    if (config === undefined) return;
+    const resolved = resolveInstanceEnvelope(config);
+    const inst = buildRegistry().materializeOne(sessionKey as SandboxProviderInstanceId, resolved);
+    if (inst.kind !== "available" || inst.driver.lifecycle === undefined) return;
+    const handle: SandboxHandle = {
+      driverKind: inst.driver.kind,
+      instanceId: sessionKey,
+      handle: reinjectVercelAuth(inst.driver.kind as string, record.handle.handle, resolved.config),
+    };
+    // Bound the provider status probe so a hung daemon/socket cannot stall the
+    // stop/start RPC that gates on it (the button would stick on "Stopping…").
+    const statusResult = yield* inst.driver.lifecycle.status(handle).pipe(
+      Effect.timeout("15 seconds"),
+      Effect.catchTag("TimeoutError", () =>
+        Effect.fail(
+          new SandboxProviderError({
+            reason: "unreachable",
+            message: "Provider status probe timed out.",
+          }),
+        ),
+      ),
+      Effect.matchEffect({
+        onFailure: (left) =>
+          Effect.succeed<{ _tag: "Left"; left: typeof left }>({ _tag: "Left", left }),
+        onSuccess: (right) =>
+          Effect.succeed<{ _tag: "Right"; right: typeof right }>({ _tag: "Right", right }),
+      }),
+    );
+    if (statusResult._tag === "Left") {
+      const { statusDetail: _drop, ...rest } = record;
+      yield* store
+        .upsert({
+          ...rest,
+          statusDetail: `Reconcile failed: ${statusResult.left.message}`,
+        })
+        .pipe(Effect.ignore);
+      cacheLiveSession(liveSessions, sessionKey, {
+        handle,
+        driver: inst.driver,
+        instanceConfig: resolved,
+        environmentId: record.sandboxEnvironmentId,
       });
-      reconcileDone = true;
-    } finally {
-      reconcileInProgress = false;
+      return;
     }
+    if (statusResult.right === "gone") {
+      liveSessions.delete(sessionKey);
+      if (record.relay !== undefined) {
+        yield* unlinkSandboxFromRelay(record).pipe(Effect.asVoid);
+      }
+      yield* store.remove(sessionKey as never).pipe(Effect.ignore);
+      return;
+    }
+    const { statusDetail: _dropDetail, ...restRecord } = record;
+    yield* store
+      .upsert({
+        ...restRecord,
+        status: statusResult.right,
+      })
+      .pipe(Effect.ignore);
+    cacheLiveSession(liveSessions, sessionKey, {
+      handle,
+      driver: inst.driver,
+      instanceConfig: resolved,
+      environmentId: record.sandboxEnvironmentId,
+    });
   });
 }
 
@@ -390,8 +497,8 @@ function removeSessionRecord(instanceId: SandboxProviderInstanceId): Effect.Effe
 export const SandboxServiceLive = {
   listInstances: (settings: ServerSettings) =>
     Effect.gen(function* () {
-      // Lazy boot reconcile: on first listInstances, reconcile stored records
-      // against provider lifecycle.status.
+      // Refresh stored statuses from the provider on every list so concurrent
+      // orchestrators (web + Electron) stay aligned after start/stop.
       yield* reconcileSessions(settings);
       const registry = buildRegistry();
       const rawMap = settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
@@ -523,7 +630,7 @@ export const SandboxServiceLive = {
       // Operation lock: prevents concurrent start/stop/delete on the same instance.
       // Add to the lock BEFORE any yield (reconcile) so a concurrent startSession
       // for the same instance cannot pass the guard and orphan a second container.
-      if (busyInstances.has(sessionKey) || reconcileInProgress) {
+      if (busyInstances.has(sessionKey)) {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
           message: "An operation is already in progress for this sandbox environment.",
@@ -531,8 +638,8 @@ export const SandboxServiceLive = {
       }
       busyInstances.add(sessionKey);
       return yield* Effect.gen(function* () {
-        // Ensure reconcile has run so the store is populated.
-        yield* reconcileSessions(settings);
+        // Provider status while this instance is locked (full reconcile skips busy).
+        yield* refreshLockedInstanceStatus(sessionKey, settings);
         const existing = getSessionStore().records.find((r) => r.instanceId === sessionKey);
         if (existing !== undefined && existing.status === "running") {
           return yield* new SandboxRpcError({
@@ -952,37 +1059,49 @@ export const SandboxServiceLive = {
       }).pipe(Effect.ensuring(Effect.sync(() => busyInstances.delete(sessionKey))));
     }),
 
-  stopSession: (instanceId: SandboxProviderInstanceId) =>
+  stopSession: (instanceId: SandboxProviderInstanceId, settings: ServerSettings) =>
     Effect.gen(function* () {
       const sessionKey = instanceId as string;
-      if (busyInstances.has(sessionKey) || reconcileInProgress) {
+      if (busyInstances.has(sessionKey)) {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
           message: "An operation is already in progress for this sandbox environment.",
         });
       }
-      const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
-      if (record === undefined) {
-        return yield* new SandboxRpcError({
-          reason: "not-running",
-          message: "No sandbox session to stop.",
-        });
-      }
-      if (record.status === "stopped") {
-        return { instanceId, stopped: true };
-      }
-      // Resolve the driver to call lifecycle.stop.
-      const live = liveSessions.get(sessionKey);
-      if (live === undefined || live.driver.lifecycle === undefined) {
-        return yield* new SandboxRpcError({
-          reason: "not-running",
-          message: "This sandbox driver does not support lifecycle stop.",
-        });
-      }
       busyInstances.add(sessionKey);
-      const lifecycle = live.driver.lifecycle;
       return yield* Effect.gen(function* () {
-        yield* lifecycle.stop(live.handle).pipe(Effect.mapError(mapDriverError));
+        yield* refreshLockedInstanceStatus(sessionKey, settings);
+        const record = getSessionStore().records.find((r) => r.instanceId === sessionKey);
+        if (record === undefined) {
+          return yield* new SandboxRpcError({
+            reason: "not-running",
+            message: "No sandbox session to stop.",
+          });
+        }
+        if (record.status === "stopped") {
+          return { instanceId, stopped: true };
+        }
+        // Resolve the driver to call lifecycle.stop.
+        const live = liveSessions.get(sessionKey);
+        if (live === undefined || live.driver.lifecycle === undefined) {
+          return yield* new SandboxRpcError({
+            reason: "not-running",
+            message: "This sandbox driver does not support lifecycle stop.",
+          });
+        }
+        const lifecycle = live.driver.lifecycle;
+        yield* lifecycle.stop(live.handle).pipe(
+          Effect.timeout("30 seconds"),
+          Effect.catchTag("TimeoutError", () =>
+            Effect.fail(
+              new SandboxProviderError({
+                reason: "provision-failed",
+                message: "Provider stop timed out.",
+              }),
+            ),
+          ),
+          Effect.mapError(mapDriverError),
+        );
         // Update the store record to stopped; keep the relay link (log on failure).
         const { statusDetail: _dropDetail, ...restRecord } = record;
         yield* getSessionStore()
@@ -1002,7 +1121,7 @@ export const SandboxServiceLive = {
   disposeSession: (instanceId: SandboxProviderInstanceId, settings: ServerSettings) =>
     Effect.gen(function* () {
       const sessionKey = instanceId as string;
-      if (busyInstances.has(sessionKey) || reconcileInProgress) {
+      if (busyInstances.has(sessionKey)) {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
           message: "An operation is already in progress for this sandbox environment.",
@@ -1086,7 +1205,7 @@ export const SandboxServiceLive = {
   renewSession: (instanceId: SandboxProviderInstanceId, input?: { readonly extendMs?: number }) =>
     Effect.gen(function* () {
       const sessionKey = instanceId as string;
-      if (busyInstances.has(sessionKey) || reconcileInProgress) {
+      if (busyInstances.has(sessionKey)) {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
           message: "An operation is already in progress for this sandbox environment.",

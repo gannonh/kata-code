@@ -1153,7 +1153,13 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         [WS_METHODS.sandboxStopSession]: ({ instanceId }) =>
           observeRpcEffect(
             WS_METHODS.sandboxStopSession,
-            SandboxServiceLive.stopSession(instanceId).pipe(Effect.map((result) => result)),
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) =>
+                SandboxServiceLive.stopSession(instanceId, settings).pipe(
+                  Effect.map((result) => result),
+                ),
+              ),
+            ),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.sandboxIssuePairingToken]: ({ instanceId }) =>
