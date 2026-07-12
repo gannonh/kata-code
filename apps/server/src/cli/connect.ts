@@ -4,17 +4,19 @@ import {
   type RelayClientInstallProgressEvent,
   type RelayClientInstallProgressStage,
 } from "@kata-sh/code-contracts";
-import { RelayOkResponse } from "@kata-sh/code-contracts/relay";
+import { RelayListEnvironmentsResponse, RelayOkResponse } from "@kata-sh/code-contracts/relay";
 import * as RelayClient from "@kata-sh/code-shared/relayClient";
 import { withRelayClientTracing } from "@kata-sh/code-shared/relayTracing";
 import * as Console from "effect/Console";
 import * as Duration from "effect/Duration";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as References from "effect/References";
+import * as Schema from "effect/Schema";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/unstable/cli";
 import {
   FetchHttpClient,
@@ -41,6 +43,7 @@ const jsonFlag = Flag.boolean("json").pipe(
   Flag.withDescription("Emit JSON instead of human-readable output."),
   Flag.withDefault(false),
 );
+const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
 function bytesToString(value: Uint8Array): string {
   return new TextDecoder().decode(value);
@@ -419,6 +422,115 @@ const connectLogoutCommand = Command.make("logout", {
   ),
 );
 
+const cleanupEnvironmentFlag = Flag.string("environment").pipe(
+  Flag.withDescription("Remove one Connect environment id."),
+  Flag.optional,
+);
+const cleanupOlderThanHoursFlag = Flag.integer("older-than-hours").pipe(
+  Flag.withDescription("Remove records linked at least this many hours ago."),
+  Flag.optional,
+);
+const cleanupYesFlag = Flag.boolean("yes").pipe(
+  Flag.withDescription("Confirm bulk cleanup without prompting."),
+  Flag.withDefault(false),
+);
+
+const connectCleanupCommand = Command.make("cleanup", {
+  ...projectLocationFlags,
+  environment: cleanupEnvironmentFlag,
+  olderThanHours: cleanupOlderThanHoursFlag,
+  yes: cleanupYesFlag,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription("List or remove stale Kata Code Connect records."),
+  Command.withHandler((flags) =>
+    runCloudCommand(
+      flags,
+      Effect.gen(function* () {
+        const tokens = yield* CliTokenManager.CloudCliTokenManager;
+        const token = yield* tokens.getExisting;
+        if (Option.isNone(token)) {
+          yield* Console.log("Sign in with `katacode connect login` before cleanup.");
+          return;
+        }
+        const relayUrl = yield* relayUrlConfig;
+        const httpClient = yield* HttpClient.HttpClient;
+        const listed = yield* HttpClientRequest.get(`${relayUrl}/v1/environments`).pipe(
+          HttpClientRequest.bearerToken(token.value.accessToken),
+          httpClient.execute,
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayListEnvironmentsResponse)),
+          withRelayClientTracing,
+        );
+        const cutoff = Option.isSome(flags.olderThanHours)
+          ? DateTime.formatIso(
+              DateTime.subtract(yield* DateTime.now, { hours: flags.olderThanHours.value }),
+            )
+          : null;
+        const candidates = listed.environments.filter(
+          (record) =>
+            (Option.isNone(flags.environment) ||
+              record.environmentId === flags.environment.value) &&
+            (cutoff === null || record.linkedAt <= cutoff),
+        );
+        if (Option.isNone(flags.environment) && Option.isNone(flags.olderThanHours)) {
+          yield* Console.log(
+            flags.json
+              ? yield* encodeJsonString(listed.environments)
+              : listed.environments.length === 0
+                ? "No active Kata Code Connect records."
+                : listed.environments
+                    .map(
+                      (record) =>
+                        `${record.environmentId}\t${record.label}\tlinked ${record.linkedAt}`,
+                    )
+                    .join("\n"),
+          );
+          return;
+        }
+        if (candidates.length === 0) {
+          yield* Console.log("No matching Kata Code Connect records.");
+          return;
+        }
+        if (candidates.length > 1 && !flags.yes) {
+          const confirmed = yield* Prompt.run(
+            Prompt.confirm({
+              message: `Remove ${candidates.length} Kata Code Connect records?`,
+              initial: false,
+            }),
+          );
+          if (!confirmed) {
+            yield* Console.log("Cleanup cancelled.");
+            return;
+          }
+        }
+        const removed = yield* Effect.forEach(
+          candidates,
+          (record) =>
+            HttpClientRequest.delete(
+              `${relayUrl}/v1/client/environment-links/${encodeURIComponent(record.environmentId)}`,
+            ).pipe(
+              HttpClientRequest.bearerToken(token.value.accessToken),
+              httpClient.execute,
+              Effect.flatMap(HttpClientResponse.filterStatusOk),
+              Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayOkResponse)),
+              Effect.map((response) => (response.ok ? record.environmentId : null)),
+              withRelayClientTracing,
+            ),
+          { concurrency: 4 },
+        );
+        const removedIds = removed.filter((id): id is NonNullable<typeof id> => id !== null);
+        yield* Console.log(
+          flags.json
+            ? yield* encodeJsonString({ removed: removedIds })
+            : `Removed ${removedIds.length} Kata Code Connect record${removedIds.length === 1 ? "" : "s"}.`,
+        );
+      }),
+      { quietLogs: flags.json },
+    ),
+  ),
+);
+
 export const connectCommand = Command.make("connect").pipe(
   Command.withDescription("Manage headless Kata Code Connect access."),
   Command.withSubcommands([
@@ -427,5 +539,6 @@ export const connectCommand = Command.make("connect").pipe(
     connectStatusCommand,
     connectUnlinkCommand,
     connectLogoutCommand,
+    connectCleanupCommand,
   ]),
 );
