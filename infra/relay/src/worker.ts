@@ -258,32 +258,31 @@ export default class Api extends Cloudflare.Worker<Api>()(
         yield* Effect.forEach(
           expired,
           (record) =>
-            Effect.all(
-              [
-                endpoints.deprovision({
-                  userId: record.userId,
-                  environmentId: record.environmentId,
-                }),
-                credentials.revokeForEnvironmentPublicKey({
-                  environmentId: record.environmentId,
-                  environmentPublicKey: record.environmentPublicKey,
-                }),
-              ],
-              { concurrency: 2 },
-            ).pipe(
-              Effect.andThen(
-                links.revokeForUser({
-                  userId: record.userId,
-                  environmentId: record.environmentId,
-                }),
+            endpoints
+              .deprovision({
+                userId: record.userId,
+                environmentId: record.environmentId,
+              })
+              .pipe(
+                Effect.andThen(
+                  links.revokeForUser({
+                    userId: record.userId,
+                    environmentId: record.environmentId,
+                  }),
+                ),
+                Effect.andThen(
+                  credentials.revokeForEnvironmentPublicKey({
+                    environmentId: record.environmentId,
+                    environmentPublicKey: record.environmentPublicKey,
+                  }),
+                ),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Expired environment cleanup was incomplete", {
+                    environmentId: record.environmentId,
+                    cause,
+                  }),
+                ),
               ),
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Expired environment cleanup was incomplete", {
-                  environmentId: record.environmentId,
-                  cause,
-                }),
-              ),
-            ),
           { concurrency: 4 },
         );
         const retentionCutoff = DateTime.formatIso(

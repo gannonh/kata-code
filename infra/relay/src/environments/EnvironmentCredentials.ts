@@ -6,7 +6,7 @@ import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { and, eq, isNull, ne, notExists } from "drizzle-orm";
+import { and, eq, exists, gt, isNull, ne, notExists } from "drizzle-orm";
 
 import { RelayDb } from "../db.ts";
 import { relayEnvironmentCredentials, relayEnvironmentLinks } from "../persistence/schema.ts";
@@ -124,6 +124,7 @@ const make = Effect.gen(function* () {
     authenticate: Effect.fn("relay.environment_credentials.authenticate")(
       function* (token) {
         const credentialHash = yield* hashToken(token);
+        const now = DateTime.formatIso(yield* DateTime.now);
         const rows = yield* db
           .select({
             credentialId: relayEnvironmentCredentials.credentialId,
@@ -135,6 +136,25 @@ const make = Effect.gen(function* () {
             and(
               eq(relayEnvironmentCredentials.credentialHash, credentialHash),
               isNull(relayEnvironmentCredentials.revokedAt),
+              exists(
+                db
+                  .select({ userId: relayEnvironmentLinks.userId })
+                  .from(relayEnvironmentLinks)
+                  .where(
+                    and(
+                      eq(
+                        relayEnvironmentLinks.environmentId,
+                        relayEnvironmentCredentials.environmentId,
+                      ),
+                      eq(
+                        relayEnvironmentLinks.environmentPublicKey,
+                        relayEnvironmentCredentials.environmentPublicKey,
+                      ),
+                      isNull(relayEnvironmentLinks.revokedAt),
+                      gt(relayEnvironmentLinks.leaseExpiresAt, now),
+                    ),
+                  ),
+              ),
             ),
           )
           .limit(1);
