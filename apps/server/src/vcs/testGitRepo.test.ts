@@ -27,6 +27,14 @@ describe("testGitRepo template helper", () => {
         expect(first.cwd).not.toBe(second.cwd);
         expect(first.initialBranch).toBe("main");
         expect(second.initialBranch).toBe("main");
+        const git = yield* GitVcsDriver.GitVcsDriver;
+        const log = yield* git.execute({
+          operation: "testGitRepo.log",
+          cwd: first.cwd,
+          args: ["log", "-1", "--pretty=%s"],
+          timeoutMs: 10_000,
+        });
+        expect(log.stdout.trim()).toBe("initial commit");
       }).pipe(Effect.provide(layer), Effect.scoped),
     );
   });

@@ -54,7 +54,7 @@ export const ensureGitRepoTemplate: Effect.Effect<
   yield* runGitInDir(templateDir, ["config", "user.name", "Test User"]);
   yield* fileSystem.writeFileString(path.join(templateDir, "README.md"), "hello\n");
   yield* runGitInDir(templateDir, ["add", "README.md"]);
-  yield* runGitInDir(templateDir, ["commit", "-m", "Initial commit"]);
+  yield* runGitInDir(templateDir, ["commit", "-m", "initial commit"]);
   const initialBranch = yield* runGitInDir(templateDir, ["branch", "--show-current"]);
 
   sharedTemplateDir = templateDir;
