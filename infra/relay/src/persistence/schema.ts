@@ -77,6 +77,7 @@ export const relayEnvironmentLinks = pgTable(
     cleanupClaimedAt: varchar("cleanup_claimed_at", { length: 64 }),
     cleanupAttemptToken: varchar("cleanup_attempt_token", { length: 191 }),
     cleanupAttemptExpiresAt: varchar("cleanup_attempt_expires_at", { length: 64 }),
+    managedEndpointAllocationId: varchar("managed_endpoint_allocation_id", { length: 64 }),
     revokedAt: varchar("revoked_at", { length: 64 }),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
@@ -93,6 +94,7 @@ export const relayManagedEndpointAllocations = pgTable(
   {
     userId: varchar("user_id", { length: 191 }).notNull(),
     environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    allocationId: varchar("allocation_id", { length: 64 }).notNull(),
     hostname: text("hostname").notNull(),
     tunnelId: varchar("tunnel_id", { length: 191 }),
     tunnelName: text("tunnel_name").notNull(),

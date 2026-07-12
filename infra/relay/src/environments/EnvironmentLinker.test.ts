@@ -188,6 +188,7 @@ function testLayer(input?: {
           deprovision: () => Effect.void,
           provision: () =>
             Effect.succeed({
+              allocationId: "allocation-1",
               endpoint: {
                 httpBaseUrl: "https://managed.example.test/",
                 wsBaseUrl: "wss://managed.example.test/ws",

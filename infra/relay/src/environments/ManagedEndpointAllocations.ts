@@ -13,6 +13,7 @@ import { relayManagedEndpointAllocations } from "../persistence/schema.ts";
 export interface ManagedEndpointAllocation {
   readonly userId: string;
   readonly environmentId: string;
+  readonly allocationId: string;
   readonly hostname: string;
   readonly tunnelId: string | null;
   readonly tunnelName: string;
@@ -54,6 +55,7 @@ interface ManagedEndpointAllocationKey {
 }
 
 interface ReserveManagedEndpointAllocationInput extends ManagedEndpointAllocationKey {
+  readonly allocationId: string;
   readonly hostname: string;
   readonly tunnelName: string;
 }
@@ -83,13 +85,14 @@ export interface ManagedEndpointAllocationsShape {
     input: ManagedEndpointAllocationKey,
   ) => Effect.Effect<void, ManagedEndpointAllocationPersistenceError>;
   readonly remove: (
-    input: ManagedEndpointAllocationKey,
+    input: ManagedEndpointAllocationKey & { readonly allocationId: string },
   ) => Effect.Effect<void, ManagedEndpointAllocationPersistenceError>;
 }
 
 const allocationSelection = {
   userId: relayManagedEndpointAllocations.userId,
   environmentId: relayManagedEndpointAllocations.environmentId,
+  allocationId: relayManagedEndpointAllocations.allocationId,
   hostname: relayManagedEndpointAllocations.hostname,
   tunnelId: relayManagedEndpointAllocations.tunnelId,
   tunnelName: relayManagedEndpointAllocations.tunnelName,
@@ -191,9 +194,16 @@ const make = Effect.gen(function* () {
         .where(whereAllocation(input));
     }, Effect.mapError(persistenceError)),
     remove: Effect.fn("relay.managed_endpoint_allocations.remove")(function* (
-      input: ManagedEndpointAllocationKey,
+      input: ManagedEndpointAllocationKey & { readonly allocationId: string },
     ) {
-      yield* db.delete(relayManagedEndpointAllocations).where(whereAllocation(input));
+      yield* db
+        .delete(relayManagedEndpointAllocations)
+        .where(
+          and(
+            whereAllocation(input),
+            eq(relayManagedEndpointAllocations.allocationId, input.allocationId),
+          ),
+        );
     }, Effect.mapError(persistenceError)),
   });
 });

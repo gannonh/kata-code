@@ -48,6 +48,9 @@ export function cleanupExpiredEnvironmentLinksWithToken(attemptToken: string) {
             .deprovision({
               userId: attempt.userId,
               environmentId: attempt.environmentId,
+              ...(attempt.managedEndpointAllocationId === null
+                ? {}
+                : { allocationId: attempt.managedEndpointAllocationId }),
             })
             .pipe(Effect.timeout(CLEANUP_OPERATION_TIMEOUT));
 

@@ -29,6 +29,7 @@ export interface ExpiredEnvironmentLinkRecord {
   readonly environmentPublicKey: string;
   readonly userId: string;
   readonly cleanupClaimedAt: string;
+  readonly managedEndpointAllocationId: string | null;
 }
 
 export interface EnvironmentCleanupAttempt extends ExpiredEnvironmentLinkRecord {
@@ -95,6 +96,7 @@ export interface EnvironmentLinksShape {
     readonly request: RelayEnvironmentLinkRequest;
     readonly proof: RelayEnvironmentLinkProofPayload;
     readonly endpoint: RelayManagedEndpoint;
+    readonly managedEndpointAllocationId: string | null;
   }) => Effect.Effect<void, EnvironmentLinkUpsertPersistenceError>;
   readonly listUsersForEnvironment: (input: {
     readonly environmentId: string;
@@ -221,6 +223,7 @@ const make = Effect.gen(function* () {
             cleanupClaimedAt: null,
             cleanupAttemptToken: null,
             cleanupAttemptExpiresAt: null,
+            managedEndpointAllocationId: input.managedEndpointAllocationId,
             revokedAt: null,
             createdAt: now,
             updatedAt: now,
@@ -241,6 +244,7 @@ const make = Effect.gen(function* () {
               cleanupClaimedAt: null,
               cleanupAttemptToken: null,
               cleanupAttemptExpiresAt: null,
+              managedEndpointAllocationId: input.managedEndpointAllocationId,
               revokedAt: null,
               updatedAt: now,
             },
@@ -485,6 +489,7 @@ const make = Effect.gen(function* () {
             environmentPublicKey: relayEnvironmentLinks.environmentPublicKey,
             userId: relayEnvironmentLinks.userId,
             cleanupClaimedAt: relayEnvironmentLinks.cleanupClaimedAt,
+            managedEndpointAllocationId: relayEnvironmentLinks.managedEndpointAllocationId,
           });
         return rows.map((row) => ({ ...row, cleanupClaimedAt: row.cleanupClaimedAt ?? claimedAt }));
       },
@@ -520,6 +525,7 @@ const make = Effect.gen(function* () {
             environmentPublicKey: relayEnvironmentLinks.environmentPublicKey,
             userId: relayEnvironmentLinks.userId,
             cleanupClaimedAt: relayEnvironmentLinks.cleanupClaimedAt,
+            managedEndpointAllocationId: relayEnvironmentLinks.managedEndpointAllocationId,
           });
         return rows.flatMap((row) =>
           row.cleanupClaimedAt === null
@@ -597,6 +603,7 @@ const make = Effect.gen(function* () {
               eq(relayEnvironmentLinks.environmentId, input.environmentId),
               eq(relayEnvironmentLinks.cleanupClaimedAt, input.cleanupClaimedAt),
               eq(relayEnvironmentLinks.cleanupAttemptToken, input.attemptToken),
+              gt(relayEnvironmentLinks.cleanupAttemptExpiresAt, revokedAt),
               isNull(relayEnvironmentLinks.revokedAt),
             ),
           )

@@ -21,6 +21,7 @@ const baseRecord = {
   environmentPublicKey: "key-1",
   userId: "user-1",
   cleanupClaimedAt: "2026-07-12T20:00:00.000Z",
+  managedEndpointAllocationId: "allocation-1",
 };
 
 function makeLinkState() {
@@ -120,6 +121,66 @@ describe("cleanupExpiredEnvironmentLinks", () => {
       expect(credentialAttempts).toBe(2);
     }).pipe(Effect.provide(layer));
   });
+
+  it.effect(
+    "keeps a replacement allocation when stale cleanup resumes after ownership validation",
+    () =>
+      Effect.gen(function* () {
+        const ownershipValidated = yield* Deferred.make<void>();
+        const resumeStaleAttempt = yield* Deferred.make<void>();
+        let ownershipChecks = 0;
+        let currentAllocationId = "allocation-1";
+        let replacementDeleted = false;
+
+        const links = makeLinkState();
+        const linkService = EnvironmentLinks.of({
+          ...links.service,
+          ownsCleanupAttempt: () => {
+            ownershipChecks += 1;
+            if (ownershipChecks > 1) return Effect.succeed(false);
+            return Effect.gen(function* () {
+              yield* Deferred.succeed(ownershipValidated, undefined);
+              yield* Deferred.await(resumeStaleAttempt);
+              return true;
+            });
+          },
+        });
+        const layer = services({
+          links: linkService,
+          credentials: EnvironmentCredentials.of({
+            create: () => Effect.die("unused"),
+            authenticate: () => Effect.die("unused"),
+            revokeForEnvironmentPublicKey: () => Effect.succeed(true),
+          }),
+          endpoints: ManagedEndpointProvider.of({
+            provision: () => Effect.die("unused"),
+            deprovision: (input) =>
+              Effect.sync(() => {
+                if (
+                  input.allocationId === undefined ||
+                  input.allocationId === currentAllocationId
+                ) {
+                  replacementDeleted = true;
+                }
+              }),
+          }),
+        });
+
+        const stale = yield* Effect.forkChild(
+          cleanupExpiredEnvironmentLinksWithToken("attempt-1").pipe(Effect.provide(layer)),
+        );
+        yield* Deferred.await(ownershipValidated);
+
+        // Another worker completed the old claim and the environment relinked
+        // with a new immutable allocation before this stale fiber resumed.
+        currentAllocationId = "allocation-2";
+        yield* Deferred.succeed(resumeStaleAttempt, undefined);
+        yield* Fiber.join(stale);
+
+        expect(replacementDeleted).toBe(false);
+        expect(currentAllocationId).toBe("allocation-2");
+      }),
+  );
 
   it.effect("gives overlapping cleanup runs one exclusive destructive attempt", () =>
     Effect.gen(function* () {

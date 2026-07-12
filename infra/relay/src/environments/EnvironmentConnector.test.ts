@@ -184,6 +184,7 @@ function makeAllocations(
   allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null = {
     userId: "user_123",
     environmentId: "env-connector-test",
+    allocationId: "allocation-1",
     hostname: "env.example.test",
     tunnelId: "tunnel-id",
     tunnelName: "tunnel-name",
@@ -471,6 +472,7 @@ describe("EnvironmentConnector", () => {
           allocations: makeAllocations({
             userId: "user_123",
             environmentId: "env-connector-test",
+            allocationId: "allocation-1",
             hostname: "env.example.test",
             tunnelId: "tunnel-id",
             tunnelName: "tunnel-name",

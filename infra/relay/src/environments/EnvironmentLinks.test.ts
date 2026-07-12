@@ -64,6 +64,7 @@ describe("EnvironmentLinks", () => {
                   environmentPublicKey: "key-1",
                   userId: "user-1",
                   cleanupClaimedAt: "2026-07-12T20:00:00.000Z",
+                  managedEndpointAllocationId: "allocation-1",
                 },
               ]);
             },
@@ -87,6 +88,7 @@ describe("EnvironmentLinks", () => {
           environmentPublicKey: "key-1",
           userId: "user-1",
           cleanupClaimedAt: "2026-07-12T20:00:00.000Z",
+          managedEndpointAllocationId: "allocation-1",
         },
       ]);
       const attempt = {
@@ -94,6 +96,7 @@ describe("EnvironmentLinks", () => {
         environmentPublicKey: "key-1",
         userId: "user-1",
         cleanupClaimedAt: "2026-07-12T20:00:00.000Z",
+        managedEndpointAllocationId: "allocation-1",
         attemptToken: "attempt-1",
       } as const;
       expect(yield* links.acquireCleanupAttempts({ attemptToken: "attempt-1" })).toEqual([attempt]);
@@ -126,6 +129,40 @@ describe("EnvironmentLinks", () => {
       expect(completionQuery.sql).toContain(
         '"relay_environment_links"."cleanup_attempt_token" = $4',
       );
+      expect(completionQuery.sql).toContain(
+        '"relay_environment_links"."cleanup_attempt_expires_at" > $5',
+      );
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
+  });
+
+  it.effect("rejects cleanup finalization after the ownership lease expires", () => {
+    let completionCondition: unknown;
+    const fakeDb = {
+      update: () => ({
+        set: () => ({
+          where: (condition: unknown) => ({
+            returning: () => {
+              completionCondition = condition;
+              return Effect.succeed([]);
+            },
+          }),
+        }),
+      }),
+    } as unknown as RelayDatabase;
+    const attempt = {
+      environmentId: "env-1",
+      environmentPublicKey: "key-1",
+      userId: "user-1",
+      cleanupClaimedAt: "2026-07-12T20:00:00.000Z",
+      managedEndpointAllocationId: "allocation-1",
+      attemptToken: "expired-attempt",
+    } as const;
+
+    return Effect.gen(function* () {
+      const links = yield* EnvironmentLinks;
+      expect(yield* links.completeCleanupAttempt(attempt)).toBe(false);
+      const query = new PgDialect().sqlToQuery(completionCondition as never);
+      expect(query.sql).toContain('"relay_environment_links"."cleanup_attempt_expires_at" > $5');
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });
 
@@ -166,10 +203,18 @@ describe("EnvironmentLinks", () => {
 
     return Effect.gen(function* () {
       const links = yield* EnvironmentLinks;
-      const rejected = yield* links.upsert({ userId: "user-1", request, proof, endpoint }).pipe(
-        Effect.as(false),
-        Effect.orElseSucceed(() => true),
-      );
+      const rejected = yield* links
+        .upsert({
+          userId: "user-1",
+          request,
+          proof,
+          endpoint,
+          managedEndpointAllocationId: null,
+        })
+        .pipe(
+          Effect.as(false),
+          Effect.orElseSucceed(() => true),
+        );
       expect(rejected).toBe(true);
       expect(cleanupClaimed).toBe(true);
       const condition = new PgDialect().sqlToQuery(setWhere as never);
@@ -178,7 +223,13 @@ describe("EnvironmentLinks", () => {
       expect(condition.sql).toContain(" or ");
 
       cleanupClaimed = false;
-      yield* links.upsert({ userId: "user-1", request, proof, endpoint });
+      yield* links.upsert({
+        userId: "user-1",
+        request,
+        proof,
+        endpoint,
+        managedEndpointAllocationId: null,
+      });
       expect(cleanupClaimed).toBe(false);
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });

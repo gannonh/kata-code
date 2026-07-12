@@ -271,7 +271,12 @@ const make = Effect.gen(function* () {
           reason: "endpoint_not_secure",
         });
       }
-      yield* links.upsert({ ...input, proof: verified, endpoint });
+      yield* links.upsert({
+        ...input,
+        proof: verified,
+        endpoint,
+        managedEndpointAllocationId: provisioned?.allocationId ?? null,
+      });
       const leaseExpiresAt = EnvironmentLinks.environmentLeaseExpiry(yield* DateTime.now);
       const environmentCredential = yield* credentials.create({
         environmentId: verified.environmentId,
