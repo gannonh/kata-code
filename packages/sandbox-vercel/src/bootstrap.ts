@@ -84,6 +84,33 @@ function shellSingleQuote(value: string): string {
 }
 
 /**
+ * Best-effort kill of any prior `katacode serve` on the sandbox port.
+ * Used by lifecycle start so a fresh bootstrap token is not exchanged against
+ * a leftover process that still owns `/oauth/token`. The `[k]` pattern avoids
+ * matching the pkill argv itself. Waits briefly for the port to free before
+ * returning so the subsequent serve launch binds cleanly.
+ */
+export function buildKillServeCommand(port: number): string {
+  return [
+    `(pkill -9 -f '[k]atacode serve --port ${port}' 2>/dev/null || true)`,
+    // Up to ~5s for the old listener to release the port.
+    `for i in 1 2 3 4 5 6 7 8 9 10; do (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || true) | grep -q ':${port} ' || break; sleep 0.5; done`,
+  ].join("; ");
+}
+
+/**
+ * Kill any prior serve on the port, wait for the listener to drop, then launch
+ * detached `katacode serve` with the fresh bootstrap env — single shell so the
+ * relaunch cannot race a leftover process between separate runCommands.
+ */
+export function buildReplaceServeCommand(input: {
+  readonly port: number;
+  readonly env: ReadonlyArray<readonly [string, string]>;
+}): string {
+  return `${buildKillServeCommand(input.port)}; ${buildServeCommand(input)}`;
+}
+
+/**
  * Build the detached `katacode serve` launch command. Env is inlined at launch
  * (not baked at create) so resume can restart with a fresh bootstrap token.
  * Output is redirected to `/tmp/katacode-serve.log` for diagnostics.

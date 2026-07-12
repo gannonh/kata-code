@@ -619,9 +619,15 @@ describe("VercelSandboxProvider", () => {
         // start resumes via get(resume: true).
         const resumeGet = state.getCalls.find((c) => c.resume === true);
         expect(resumeGet).toBeDefined();
-        // serve is relaunched detached.
+        // Prior serve is killed (blocking), then relaunched detached with fresh env.
+        const killRun = state.runCommands.find((r) =>
+          r.args?.join(" ").includes("pkill -9 -f '[k]atacode serve --port"),
+        );
+        expect(killRun).toBeDefined();
+        expect(killRun?.detached).not.toBe(true);
         const serveRun = [...state.runCommands].toReversed().find((r) => r.detached === true);
         expect(serveRun?.args?.join(" ")).toContain("katacode serve");
+        expect(serveRun?.args?.join(" ")).toContain("KATACODE_DESKTOP_BOOTSTRAP_TOKEN");
         expect((started.handle as { sandboxId: string }).sandboxId).toBe(INST_1_NAME);
         // persistence unchanged -> no update call.
         expect(state.updateCalls).toHaveLength(0);

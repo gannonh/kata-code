@@ -8,7 +8,8 @@
  *
  * Provision creates a sandbox from a configured runtime or snapshot, runs the
  * bootstrap script (runtime only; snapshots already have the CLIs), launches
- * `katacode serve` detached, and polls the public `/healthz` until ready.
+ * `katacode serve` detached, and polls `/.well-known/kata/environment` until
+ * the real server answers with JSON (SPA `/healthz` HTML 200 is not ready).
  * Reachability returns the public `https://<sandbox.domain(port)>` URL.
  * Lifecycle: `renewTimeout` forwards to `sb.extendTimeout`, `snapshot` stops
  * the VM (caller treats the session as lapsed), `copyInto` writes a tar
@@ -59,7 +60,12 @@ import {
 import type { VercelGitSource } from "./sdk.ts";
 import type { VercelAuthParams, VercelSandboxInstance, VercelSdk } from "./sdk.ts";
 import { isAuthError, isNotFound, liveVercelSdk } from "./sdk.ts";
-import { buildBootstrapScript, buildServeCommand, SANDBOX_HOME } from "./bootstrap.ts";
+import {
+  buildBootstrapScript,
+  buildKillServeCommand,
+  buildServeCommand,
+  SANDBOX_HOME,
+} from "./bootstrap.ts";
 
 export const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
@@ -321,17 +327,39 @@ export interface VercelSandboxProviderOptions {
   readonly healthzProbe?: (httpBaseUrl: string) => Effect.Effect<boolean, SandboxProviderError>;
 }
 
-/** Default public-healthz probe against `sandbox.domain(port)`. */
+/**
+ * Readiness probe against the public sandbox domain.
+ *
+ * Do **not** use `/healthz`: when `katacode serve` is up it falls through to the
+ * SPA shell (HTTP 200 HTML), and when nothing listens Vercel returns
+ * `SANDBOX_NOT_LISTENING`. Both made waitForReady lie or hang. The
+ * well-known environment descriptor is JSON only when the real server is up.
+ */
 function defaultHealthzProbe(httpBaseUrl: string): Effect.Effect<boolean, SandboxProviderError> {
-  const healthUrl = `${httpBaseUrl}/healthz`;
+  const readyUrl = `${httpBaseUrl.replace(/\/$/, "")}/.well-known/kata/environment`;
   return Effect.tryPromise({
-    try: () => fetch(healthUrl, { signal: AbortSignal.timeout(HEALTHZ_PROBE_TIMEOUT_MS) }),
+    try: async () => {
+      const res = await fetch(readyUrl, {
+        signal: AbortSignal.timeout(HEALTHZ_PROBE_TIMEOUT_MS),
+        redirect: "manual",
+      });
+      if (res.status !== 200) return false;
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) return false;
+      const body: unknown = await res.json();
+      return (
+        typeof body === "object" &&
+        body !== null &&
+        "environmentId" in body &&
+        typeof (body as { environmentId: unknown }).environmentId === "string"
+      );
+    },
     catch: () =>
-      new SandboxProviderError({ reason: "unreachable", message: "healthz fetch failed" }),
+      new SandboxProviderError({ reason: "unreachable", message: "readiness fetch failed" }),
   }).pipe(
     Effect.matchEffect({
       onFailure: () => Effect.succeed(false),
-      onSuccess: (res) => Effect.succeed(res.status === 200),
+      onSuccess: (ok) => Effect.succeed(ok),
     }),
   );
 }
@@ -434,7 +462,18 @@ export function makeVercelSandboxProvider(
             "provision-failed",
           );
         }
-        // Relaunch serve detached with the new env.
+        // Kill (blocking) then relaunch detached. A single detached replace
+        // race waitForReady against a dead port (SANDBOX_NOT_LISTENING) and can
+        // orphan the relaunch. Kill must finish before we poll readiness.
+        yield* trySdk(
+          "lifecycle.start.kill-serve",
+          () =>
+            sb.runCommand({
+              cmd: "sh",
+              args: ["-c", buildKillServeCommand(state.port)],
+            }),
+          "exec-failed",
+        );
         const serveCmd = buildServeCommand({ port: state.port, env: buildServeEnv(req) });
         yield* trySdk(
           "lifecycle.start.serve",

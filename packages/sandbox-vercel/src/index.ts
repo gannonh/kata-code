@@ -28,5 +28,7 @@ export {
   KATA_CLI_PACKAGE,
   PROVIDER_CLI_PACKAGES,
   buildBootstrapScript,
+  buildKillServeCommand,
+  buildReplaceServeCommand,
   buildServeCommand,
 } from "./bootstrap.ts";
