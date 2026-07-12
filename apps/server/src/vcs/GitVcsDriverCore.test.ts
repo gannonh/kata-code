@@ -11,6 +11,7 @@ import { GitCommandError } from "@kata-sh/code-contracts";
 import { ServerConfig } from "../config.ts";
 import { splitNullSeparatedGitStdoutPaths } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { cloneGitRepoFromTemplate } from "./testGitRepo.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-git-vcs-driver-test-",
@@ -58,24 +59,13 @@ const git = (
     return result.stdout.trim();
   });
 
-const initRepoWithCommit = (
-  cwd: string,
+const makeRepoFromTemplate = (
+  prefix = "git-vcs-driver-test-",
 ): Effect.Effect<
-  { readonly initialBranch: string },
+  { readonly cwd: string; readonly initialBranch: string },
   GitCommandError | PlatformError.PlatformError,
-  GitVcsDriver.GitVcsDriver | FileSystem.FileSystem | Path.Path
-> =>
-  Effect.gen(function* () {
-    const driver = yield* GitVcsDriver.GitVcsDriver;
-    yield* driver.initRepo({ cwd });
-    yield* git(cwd, ["config", "user.email", "test@test.com"]);
-    yield* git(cwd, ["config", "user.name", "Test"]);
-    yield* writeTextFile(cwd, "README.md", "# test\n");
-    yield* git(cwd, ["add", "."]);
-    yield* git(cwd, ["commit", "-m", "initial commit"]);
-    const initialBranch = yield* git(cwd, ["branch", "--show-current"]);
-    return { initialBranch };
-  });
+  GitVcsDriver.GitVcsDriver | FileSystem.FileSystem | Path.Path | Scope.Scope
+> => cloneGitRepoFromTemplate(prefix);
 
 it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   describe("review diff previews", () => {
@@ -116,8 +106,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
     it.effect("reports refName and dirty state for a repository", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
-        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const { cwd, initialBranch } = yield* makeRepoFromTemplate();
         yield* writeTextFile(cwd, "feature.ts", "export const value = 1;\n");
 
         const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
@@ -134,9 +123,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
     it.effect("reports default-branch delta separately from upstream delta", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
+        const { cwd, initialBranch } = yield* makeRepoFromTemplate();
         const remote = yield* makeTmpDir("git-vcs-driver-remote-");
-        const { initialBranch } = yield* initRepoWithCommit(cwd);
+
         yield* git(remote, ["init", "--bare"]);
         yield* git(cwd, ["remote", "add", "origin", remote]);
         yield* git(cwd, ["push", "-u", "origin", initialBranch]);
@@ -157,9 +146,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
     it.effect("reports remote divergence without reading working-tree details", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
+        const { cwd, initialBranch } = yield* makeRepoFromTemplate();
         const remote = yield* makeTmpDir("git-vcs-driver-remote-");
-        const { initialBranch } = yield* initRepoWithCommit(cwd);
+
         yield* git(remote, ["init", "--bare"]);
         yield* git(cwd, ["remote", "add", "origin", remote]);
         yield* git(cwd, ["push", "-u", "origin", initialBranch]);
@@ -185,10 +174,10 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
     it.effect("uses origin HEAD for default-branch detection with a non-origin upstream", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
+        const { cwd } = yield* makeRepoFromTemplate();
         const origin = yield* makeTmpDir("git-vcs-driver-origin-");
         const upstream = yield* makeTmpDir("git-vcs-driver-upstream-");
-        yield* initRepoWithCommit(cwd);
+
         yield* git(origin, ["init", "--bare"]);
         yield* git(upstream, ["init", "--bare"]);
         yield* git(cwd, ["branch", "-M", "main"]);
@@ -218,9 +207,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
     it.effect("disables SSH askpass for background upstream status fetches", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
+        const { cwd, initialBranch } = yield* makeRepoFromTemplate();
         const tempDir = yield* makeTmpDir("git-vcs-driver-ssh-env-");
-        const { initialBranch } = yield* initRepoWithCommit(cwd);
+
         const fileSystem = yield* FileSystem.FileSystem;
         const pathService = yield* Path.Path;
         const sshLogPath = pathService.join(tempDir, "ssh-env.txt");
@@ -277,9 +266,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
     it.effect("reuses the no-upstream fallback ahead count for default-branch delta", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
+        const { cwd, initialBranch } = yield* makeRepoFromTemplate();
         const remote = yield* makeTmpDir("git-vcs-driver-remote-");
-        const { initialBranch } = yield* initRepoWithCommit(cwd);
+
         yield* git(remote, ["init", "--bare"]);
         yield* git(cwd, ["remote", "add", "origin", remote]);
         yield* git(cwd, ["push", "-u", "origin", initialBranch]);
@@ -301,8 +290,8 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   describe("refName operations", () => {
     it.effect("creates, checks out, renames, and lists refs", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
-        yield* initRepoWithCommit(cwd);
+        const { cwd } = yield* makeRepoFromTemplate();
+
         const driver = yield* GitVcsDriver.GitVcsDriver;
 
         yield* driver.createRef({ cwd, refName: "feature/original" });
@@ -327,8 +316,8 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
     it.effect("returns the existing refName when rename source and target match", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
-        yield* initRepoWithCommit(cwd);
+        const { cwd } = yield* makeRepoFromTemplate();
+
         const driver = yield* GitVcsDriver.GitVcsDriver;
 
         const current = yield* git(cwd, ["branch", "--show-current"]);
@@ -346,8 +335,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   describe("worktree operations", () => {
     it.effect("creates and removes a worktree for a new refName", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
-        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const { cwd, initialBranch } = yield* makeRepoFromTemplate();
         const pathService = yield* Path.Path;
         const worktreePath = pathService.join(
           yield* makeTmpDir("git-worktrees-"),
@@ -376,8 +364,8 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   describe("commit context", () => {
     it.effect("stages selected files and commits only those files", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
-        yield* initRepoWithCommit(cwd);
+        const { cwd } = yield* makeRepoFromTemplate();
+
         const driver = yield* GitVcsDriver.GitVcsDriver;
 
         yield* writeTextFile(cwd, "a.txt", "a\n");
@@ -401,9 +389,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   describe("remote operations", () => {
     it.effect("pushes with upstream setup and skips when already up to date", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
+        const { cwd } = yield* makeRepoFromTemplate();
         const remote = yield* makeTmpDir("git-remote-");
-        yield* initRepoWithCommit(cwd);
+
         yield* git(remote, ["init", "--bare"]);
         yield* git(cwd, ["remote", "add", "origin", remote]);
         yield* (yield* GitVcsDriver.GitVcsDriver).createRef({
@@ -441,9 +429,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       "pushes upstream branches to the remote branch name, not the upstream shorthand",
       () =>
         Effect.gen(function* () {
-          const cwd = yield* makeTmpDir();
+          const { cwd } = yield* makeRepoFromTemplate();
           const remote = yield* makeTmpDir("git-remote-");
-          yield* initRepoWithCommit(cwd);
+
           const driver = yield* GitVcsDriver.GitVcsDriver;
           yield* git(cwd, ["branch", "-M", "main"]);
           yield* git(remote, ["init", "--bare"]);
@@ -478,10 +466,10 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
     it.effect("pushes to the requested remote instead of the primary remote", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
+        const { cwd } = yield* makeRepoFromTemplate();
         const originRemote = yield* makeTmpDir("git-origin-remote-");
         const publishRemote = yield* makeTmpDir("git-publish-remote-");
-        yield* initRepoWithCommit(cwd);
+
         const driver = yield* GitVcsDriver.GitVcsDriver;
         yield* git(cwd, ["branch", "-M", "main"]);
         yield* git(originRemote, ["init", "--bare"]);

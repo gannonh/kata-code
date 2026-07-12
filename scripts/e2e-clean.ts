@@ -38,6 +38,10 @@ const COMMAND_MARKERS = [
   `--katacode-dev-root=${repoRoot}/apps/desktop`,
 ];
 
+function isLeakedManagedCloudflared(command: string): boolean {
+  return command.includes("/.katacode/tools/cloudflared/") && /\btunnel\s+run\b/.test(command);
+}
+
 function safeExec(cmd: string, args: string[]): string {
   try {
     return execFileSync(cmd, args, { encoding: "utf8" });
@@ -72,7 +76,10 @@ function pidsMatchingCommand(): Map<number, string> {
     const pid = Number.parseInt(match[1] ?? "", 10);
     const command = match[2];
     if (typeof command !== "string") continue;
-    if (COMMAND_MARKERS.some((marker) => command.includes(marker))) {
+    if (
+      COMMAND_MARKERS.some((marker) => command.includes(marker)) ||
+      isLeakedManagedCloudflared(command)
+    ) {
       matched.set(pid, command);
     }
   }

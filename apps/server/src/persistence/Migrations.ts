@@ -123,15 +123,26 @@ export interface RunMigrationsOptions {
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
+  const verbose = process.env.KATACODE_LOG_MIGRATIONS === "1";
   yield* Effect.log(
     toMigrationInclusive === undefined
       ? "Running all migrations..."
       : `Running migrations 1 through ${toMigrationInclusive}...`,
   );
   const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
-  yield* Effect.log("Migrations ran successfully").pipe(
-    Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
-  );
+  if (verbose) {
+    yield* Effect.log("Migrations ran successfully").pipe(
+      Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
+    );
+  } else {
+    const tip = executedMigrations.at(-1);
+    yield* Effect.log("Migrations ran successfully").pipe(
+      Effect.annotateLogs({
+        count: executedMigrations.length,
+        ...(tip ? { tip: `${tip[0]}_${tip[1]}` } : {}),
+      }),
+    );
+  }
   return executedMigrations;
 });
 
