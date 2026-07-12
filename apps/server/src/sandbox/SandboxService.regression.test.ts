@@ -7,6 +7,7 @@ import * as Option from "effect/Option";
 import * as NodeFs from "node:fs/promises";
 import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import { SandboxProviderInstanceId } from "@kata-sh/code-contracts/sandboxProviderInstance";
 import type { ServerSettings } from "@kata-sh/code-contracts";
@@ -15,6 +16,7 @@ import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachab
 import type { SandboxHandle, SandboxProvider } from "@kata-sh/code-sandbox/driver";
 import * as Stream from "effect/Stream";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as CloudCliTokenManager from "../cloud/CliTokenManager.ts";
 import {
   SandboxServiceLive,
@@ -23,6 +25,7 @@ import {
   configureSandboxRuntime,
   makeTestConnectionProbeInstanceId,
   markSandboxInstanceBusyForTests,
+  renewSandboxRelayLeases,
   setLiveSessionForTests,
 } from "./SandboxService.ts";
 
@@ -41,6 +44,20 @@ const stubCloudCliTokenManager = Layer.mock(CloudCliTokenManager.CloudCliTokenMa
   hasCredential: Effect.succeed(false),
   clear: Effect.void,
 });
+
+const stubServerSecretStore = Layer.mock(ServerSecretStore.ServerSecretStore)({
+  get: () => Effect.succeed(null),
+  set: () => Effect.void,
+  create: () => Effect.void,
+  getOrCreateRandom: () => Effect.die(new Error("Unexpected secret generation request.")),
+  remove: () => Effect.void,
+});
+
+const startSessionTestLayer = Layer.mergeAll(
+  stubCloudCliTokenManager,
+  stubServerSecretStore,
+  NodeServices.layer,
+);
 
 describe("SandboxService regression guards", () => {
   it("makeTestConnectionProbeInstanceId never equals the durable instance id", () => {
@@ -138,6 +155,63 @@ describe("SandboxService regression guards", () => {
     } finally {
       clearLiveSessionForTests(instanceId as string);
       await NodeFs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("startSession resolves the configured store when the effect executes", async () => {
+    const firstHome = await NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-sandbox-first-"));
+    const secondHome = await NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-sandbox-second-"));
+    const instanceId = SandboxProviderInstanceId.make("missing_lazy_store");
+    const settings = {
+      sandboxProviderInstances: {
+        [instanceId]: { driver: "missing-driver", config: {} },
+      },
+      savedSandboxEnvironments: {},
+    } as unknown as ServerSettings;
+
+    try {
+      configureSandboxRuntime({ stateDir: firstHome });
+      const start = SandboxServiceLive.startSession(instanceId, settings).pipe(
+        Effect.provide(startSessionTestLayer),
+      );
+
+      await NodeFs.writeFile(
+        NodePath.join(secondHome, "sandbox-sessions.json"),
+        JSON.stringify({
+          records: [
+            {
+              instanceId: instanceId as string,
+              driverKind: "missing-driver",
+              environmentId: instanceId as string,
+              sandboxEnvironmentId: "env_lazy_store",
+              handle: { driverKind: "missing-driver", handle: {} },
+              endpoint: {
+                id: "sandbox-missing_lazy_store",
+                label: "Lazy store",
+                httpBaseUrl: "http://localhost:1",
+              },
+              status: "running",
+            },
+          ],
+        }),
+        "utf8",
+      );
+      configureSandboxRuntime({ stateDir: secondHome });
+      await Effect.runPromise(
+        renewSandboxRelayLeases().pipe(Effect.provide(stubCloudCliTokenManager)),
+      );
+
+      const result = await Effect.runPromise(either(start));
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect(result.left.message).toContain("already running");
+      }
+    } finally {
+      clearSandboxInstanceBusyForTests(instanceId as string);
+      await Promise.all([
+        NodeFs.rm(firstHome, { recursive: true, force: true }),
+        NodeFs.rm(secondHome, { recursive: true, force: true }),
+      ]);
     }
   });
 

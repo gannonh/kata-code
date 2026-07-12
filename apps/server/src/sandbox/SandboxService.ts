@@ -595,7 +595,7 @@ export const SandboxServiceLive = {
     startSandboxSession(
       {
         busyInstances,
-        store: getSessionStore(),
+        getStore: getSessionStore,
         liveSessions,
         nameNamespace: sandboxNameNamespace,
         refreshLockedInstanceStatus,

@@ -66,7 +66,7 @@ export interface PersistSandboxSessionInput {
 
 export interface SandboxStartSessionRuntime {
   readonly busyInstances: Set<string>;
-  readonly store: SandboxSessionStore;
+  readonly getStore: () => SandboxSessionStore;
   readonly liveSessions: Map<string, LiveSession>;
   readonly nameNamespace: string | undefined;
   readonly refreshLockedInstanceStatus: (
@@ -112,7 +112,7 @@ export const startSandboxSession = (
     return yield* Effect.gen(function* () {
       // Provider status while this instance is locked (full reconcile skips busy).
       yield* runtime.refreshLockedInstanceStatus(sessionKey, settings);
-      const existing = runtime.store.records.find((r) => r.instanceId === sessionKey);
+      const existing = runtime.getStore().records.find((r) => r.instanceId === sessionKey);
       if (existing !== undefined && existing.status === "running") {
         return yield* new SandboxRpcError({
           reason: "provision-failed",
