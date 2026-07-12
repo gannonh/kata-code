@@ -122,6 +122,12 @@ export interface EnvironmentLinksShape {
     readonly userId: string;
     readonly environmentId: string;
   }) => Effect.Effect<string | null, EnvironmentLinkRevokePersistenceError>;
+  /** Atomically reserve every currently expired link for cleanup. */
+  readonly claimExpired: () => Effect.Effect<
+    ReadonlyArray<ExpiredEnvironmentLinkRecord>,
+    EnvironmentLinkRevokePersistenceError
+  >;
+  /** List claimed links whose external cleanup has not completed. */
   readonly listExpired: () => Effect.Effect<
     ReadonlyArray<ExpiredEnvironmentLinkRecord>,
     EnvironmentLinkRevokePersistenceError
@@ -194,6 +200,7 @@ const make = Effect.gen(function* () {
             managedTunnelsEnabled: request.managedTunnelsEnabled,
             createdByDeviceId: request.deviceId ?? null,
             leaseExpiresAt,
+            cleanupClaimedAt: null,
             revokedAt: null,
             createdAt: now,
             updatedAt: now,
@@ -211,6 +218,7 @@ const make = Effect.gen(function* () {
               managedTunnelsEnabled: request.managedTunnelsEnabled,
               createdByDeviceId: request.deviceId ?? null,
               leaseExpiresAt,
+              cleanupClaimedAt: null,
               revokedAt: null,
               updatedAt: now,
             },
@@ -406,6 +414,7 @@ const make = Effect.gen(function* () {
               eq(relayEnvironmentLinks.userId, input.userId),
               eq(relayEnvironmentLinks.environmentId, input.environmentId),
               isNull(relayEnvironmentLinks.revokedAt),
+              isNull(relayEnvironmentLinks.cleanupClaimedAt),
             ),
           )
           .returning({ environmentId: relayEnvironmentLinks.environmentId });
@@ -414,9 +423,30 @@ const make = Effect.gen(function* () {
       Effect.mapError((cause) => new EnvironmentLinkRevokePersistenceError({ cause })),
     ),
 
+    claimExpired: Effect.fn("relay.environment_links.claim_expired")(
+      function* () {
+        const claimedAt = DateTime.formatIso(yield* DateTime.now);
+        return yield* db
+          .update(relayEnvironmentLinks)
+          .set({ cleanupClaimedAt: claimedAt, updatedAt: claimedAt })
+          .where(
+            and(
+              isNull(relayEnvironmentLinks.revokedAt),
+              isNull(relayEnvironmentLinks.cleanupClaimedAt),
+              lt(relayEnvironmentLinks.leaseExpiresAt, claimedAt),
+            ),
+          )
+          .returning({
+            environmentId: relayEnvironmentLinks.environmentId,
+            environmentPublicKey: relayEnvironmentLinks.environmentPublicKey,
+            userId: relayEnvironmentLinks.userId,
+          });
+      },
+      Effect.mapError((cause) => new EnvironmentLinkRevokePersistenceError({ cause })),
+    ),
+
     listExpired: Effect.fn("relay.environment_links.list_expired")(
       function* () {
-        const now = DateTime.formatIso(yield* DateTime.now);
         return yield* db
           .select({
             environmentId: relayEnvironmentLinks.environmentId,
@@ -427,7 +457,7 @@ const make = Effect.gen(function* () {
           .where(
             and(
               isNull(relayEnvironmentLinks.revokedAt),
-              lt(relayEnvironmentLinks.leaseExpiresAt, now),
+              isNotNull(relayEnvironmentLinks.cleanupClaimedAt),
             ),
           );
       },

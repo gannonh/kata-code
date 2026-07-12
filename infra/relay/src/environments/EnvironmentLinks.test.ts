@@ -33,7 +33,7 @@ describe("EnvironmentLinks", () => {
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });
 
-  it.effect("renews an active lease and discovers expired leases for cleanup", () => {
+  it.effect("renews active leases and atomically claims expired leases for cleanup", () => {
     const updates: Array<Record<string, unknown>> = [];
     const conditions: Array<unknown> = [];
     const fakeDb = {
@@ -69,12 +69,83 @@ describe("EnvironmentLinks", () => {
       expect(renewedUntil).toBe(updates[0]?.leaseExpiresAt);
       expect(String(updates[0]?.leaseExpiresAt) > String(updates[0]?.updatedAt)).toBe(true);
 
+      expect(yield* links.claimExpired()).toEqual([{ environmentId: "env-1" }]);
       expect(yield* links.listExpired()).toEqual([
         { environmentId: "env-1", environmentPublicKey: "key-1", userId: "user-1" },
       ]);
-      const expiryQuery = new PgDialect().sqlToQuery(conditions[1] as never);
-      expect(expiryQuery.sql).toContain('"relay_environment_links"."lease_expires_at" < $1');
+
+      const dialect = new PgDialect();
+      const renewQuery = dialect.sqlToQuery(conditions[0] as never);
+      expect(renewQuery.sql).toContain('"relay_environment_links"."cleanup_claimed_at" is null');
+      const claimQuery = dialect.sqlToQuery(conditions[1] as never);
+      expect(claimQuery.sql).toContain('"relay_environment_links"."revoked_at" is null');
+      expect(claimQuery.sql).toContain('"relay_environment_links"."cleanup_claimed_at" is null');
+      expect(claimQuery.sql).toContain('"relay_environment_links"."lease_expires_at" < $1');
+      const pendingQuery = dialect.sqlToQuery(conditions[2] as never);
+      expect(pendingQuery.sql).toContain(
+        '"relay_environment_links"."cleanup_claimed_at" is not null',
+      );
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
+  });
+
+  it.effect("makes renewal and cleanup claims mutually exclusive", () => {
+    const makeLinks = (initialLeaseExpiresAt: string) => {
+      const state = {
+        cleanupClaimed: false,
+        leaseExpiresAt: initialLeaseExpiresAt,
+        renewed: false,
+        revoked: false,
+      };
+      const fakeDb = {
+        update: () => ({
+          set: (values: Record<string, unknown>) => ({
+            where: () => ({
+              returning: () => {
+                if (!("leaseExpiresAt" in values)) {
+                  if (state.revoked || state.cleanupClaimed || state.renewed) {
+                    return Effect.succeed([]);
+                  }
+                  state.cleanupClaimed = true;
+                  return Effect.succeed([
+                    { environmentId: "env-1", environmentPublicKey: "key-1", userId: "user-1" },
+                  ]);
+                }
+                if (state.revoked || state.cleanupClaimed) {
+                  return Effect.succeed([]);
+                }
+                state.leaseExpiresAt = String(values.leaseExpiresAt);
+                state.renewed = true;
+                return Effect.succeed([{ environmentId: "env-1" }]);
+              },
+            }),
+          }),
+        }),
+      } as unknown as RelayDatabase;
+      return {
+        effect: EnvironmentLinks.pipe(
+          Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))),
+        ),
+        state,
+      };
+    };
+
+    return Effect.gen(function* () {
+      const renewalFirst = makeLinks("2000-01-01T00:00:00.000Z");
+      const renewalLinks = yield* renewalFirst.effect;
+      expect(
+        yield* renewalLinks.renewForUser({ userId: "user-1", environmentId: "env-1" }),
+      ).not.toBeNull();
+      expect(yield* renewalLinks.claimExpired()).toEqual([]);
+      expect(renewalFirst.state.cleanupClaimed).toBe(false);
+
+      const cleanupFirst = makeLinks("2000-01-01T00:00:00.000Z");
+      const cleanupLinks = yield* cleanupFirst.effect;
+      expect(yield* cleanupLinks.claimExpired()).toHaveLength(1);
+      expect(
+        yield* cleanupLinks.renewForUser({ userId: "user-1", environmentId: "env-1" }),
+      ).toBeNull();
+      expect(cleanupFirst.state.cleanupClaimed).toBe(true);
+    });
   });
 
   it.effect("selects users when either notifications or Live Activities are enabled", () => {

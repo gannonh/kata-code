@@ -84,6 +84,7 @@ function makeEnvironmentLinks(
     getForUser: () => Effect.succeed(null),
     revokeForUser: () => Effect.succeed(false),
     renewForUser: () => Effect.succeed(null),
+    claimExpired: () => Effect.succeed([]),
     listExpired: () => Effect.succeed([]),
     purgeRevokedBefore: () => Effect.succeed(0),
     ...overrides,

@@ -254,6 +254,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
         yield* DpopProofs.DpopProofReplay.pipe(
           Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
         );
+        yield* links.claimExpired();
         const expired = yield* links.listExpired();
         yield* Effect.forEach(
           expired,
