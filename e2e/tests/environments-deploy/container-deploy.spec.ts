@@ -275,7 +275,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     // Stop (running) then Delete sandbox (stopped) instead of the old Dispose
     // (AC-L8/L9). The session line disappears once the sandbox is deleted.
     await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Stop" }).click();
+    await card.getByRole("button", { name: "Stop" }).last().click();
     await card.getByRole("button", { name: "Delete sandbox" }).click();
     await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
@@ -393,7 +393,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     expect(workspaceSecretSearch.exitCode).not.toBe(0);
 
     await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Stop" }).click();
+    await card.getByRole("button", { name: "Stop" }).last().click();
     await card.getByRole("button", { name: "Delete sandbox" }).click();
     await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
@@ -459,7 +459,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       }
 
       await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: "Stop" }).click();
+      await card.getByRole("button", { name: "Stop" }).last().click();
       await card.getByRole("button", { name: "Delete sandbox" }).click();
       await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
@@ -511,7 +511,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // Stop the sandbox: the container transitions to exited (not removed),
       // the card shows the stopped state with a Start button (AC-L8).
       await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: "Stop" }).click();
+      await card.getByRole("button", { name: "Stop" }).last().click();
       await expect(card.getByRole("button", { name: "Start" })).toBeVisible({
         timeout: E2E_TIMEOUTS.assertionMs,
       });
@@ -541,7 +541,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
 
       // Stop then delete the sandbox and remove the target.
       await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: "Stop" }).click();
+      await card.getByRole("button", { name: "Stop" }).last().click();
       await card.getByRole("button", { name: "Delete sandbox" }).click();
       await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
 
