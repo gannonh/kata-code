@@ -58,7 +58,14 @@ describe("EnvironmentLinks", () => {
             returning: () => {
               updates.push(values);
               conditions.push(condition);
-              return Effect.succeed([{ environmentId: "env-1" }]);
+              return Effect.succeed([
+                {
+                  environmentId: "env-1",
+                  environmentPublicKey: "key-1",
+                  userId: "user-1",
+                  cleanupClaimedAt: "2026-07-12T20:00:00.000Z",
+                },
+              ]);
             },
           }),
         }),
@@ -74,10 +81,24 @@ describe("EnvironmentLinks", () => {
       expect(renewedUntil).toBe(updates[0]?.leaseExpiresAt);
       expect(String(updates[0]?.leaseExpiresAt) > String(updates[0]?.updatedAt)).toBe(true);
 
-      expect(yield* links.claimExpired()).toEqual([{ environmentId: "env-1" }]);
-      expect(yield* links.listExpired()).toEqual([
-        { environmentId: "env-1", environmentPublicKey: "key-1", userId: "user-1" },
+      expect(yield* links.claimExpired()).toEqual([
+        {
+          environmentId: "env-1",
+          environmentPublicKey: "key-1",
+          userId: "user-1",
+          cleanupClaimedAt: "2026-07-12T20:00:00.000Z",
+        },
       ]);
+      const attempt = {
+        environmentId: "env-1",
+        environmentPublicKey: "key-1",
+        userId: "user-1",
+        cleanupClaimedAt: "2026-07-12T20:00:00.000Z",
+        attemptToken: "attempt-1",
+      } as const;
+      expect(yield* links.acquireCleanupAttempts({ attemptToken: "attempt-1" })).toEqual([attempt]);
+      expect(yield* links.ownsCleanupAttempt(attempt)).toBe(true);
+      expect(yield* links.completeCleanupAttempt(attempt)).toBe(true);
 
       const dialect = new PgDialect();
       const renewQuery = dialect.sqlToQuery(conditions[0] as never);
@@ -86,9 +107,24 @@ describe("EnvironmentLinks", () => {
       expect(claimQuery.sql).toContain('"relay_environment_links"."revoked_at" is null');
       expect(claimQuery.sql).toContain('"relay_environment_links"."cleanup_claimed_at" is null');
       expect(claimQuery.sql).toContain('"relay_environment_links"."lease_expires_at" < $1');
-      const pendingQuery = dialect.sqlToQuery(conditions[2] as never);
-      expect(pendingQuery.sql).toContain(
+      const acquireQuery = dialect.sqlToQuery(conditions[2] as never);
+      expect(acquireQuery.sql).toContain(
         '"relay_environment_links"."cleanup_claimed_at" is not null',
+      );
+      expect(acquireQuery.sql).toContain(
+        '"relay_environment_links"."cleanup_attempt_token" is null',
+      );
+      const ownershipQuery = dialect.sqlToQuery(conditions[3] as never);
+      expect(ownershipQuery.sql).toContain(
+        '"relay_environment_links"."cleanup_attempt_token" = $4',
+      );
+      expect(ownershipQuery.sql).toContain(
+        '"relay_environment_links"."cleanup_attempt_expires_at" > $5',
+      );
+      const completionQuery = dialect.sqlToQuery(conditions[4] as never);
+      expect(completionQuery.sql).toContain('"relay_environment_links"."cleanup_claimed_at" = $3');
+      expect(completionQuery.sql).toContain(
+        '"relay_environment_links"."cleanup_attempt_token" = $4',
       );
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });
