@@ -862,6 +862,96 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("ignores superseded subscription events while the replacement stream stays active", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const listener = vi.fn();
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+    );
+
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const firstSocket = getSocket();
+    firstSocket.open();
+    await waitFor(() => expect(firstSocket.sent).toHaveLength(1));
+    const firstRequest = JSON.parse(firstSocket.sent[0] ?? "{}") as { id: string };
+
+    let releaseClose!: () => void;
+    const pendingClose = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closeSession = vi
+      .spyOn(
+        transport as unknown as { closeSession: (session: unknown) => Promise<void> },
+        "closeSession",
+      )
+      .mockReturnValue(pendingClose);
+
+    await transport.reconnect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const replacementSocket = getSocket();
+    replacementSocket.open();
+    await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+    const replacementRequest = JSON.parse(replacementSocket.sent[0] ?? "{}") as { id: string };
+
+    const staleEvent = {
+      version: 1,
+      sequence: 1,
+      type: "welcome",
+      payload: {
+        environment: {
+          environmentId: "environment-stale",
+          label: "Stale environment",
+          platform: { os: "darwin", arch: "arm64" },
+          serverVersion: "0.0.0-test",
+          capabilities: { repositoryIdentity: true },
+        },
+        cwd: "/tmp/stale",
+        projectName: "stale",
+      },
+    };
+    firstSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: firstRequest.id,
+        values: [staleEvent],
+      }),
+    );
+    await Effect.runPromise(Effect.sleep("1 millis"));
+    expect(listener).not.toHaveBeenCalled();
+
+    const replacementEvent = {
+      version: 1,
+      sequence: 2,
+      type: "welcome",
+      payload: {
+        environment: {
+          environmentId: "environment-current",
+          label: "Current environment",
+          platform: { os: "darwin", arch: "arm64" },
+          serverVersion: "0.0.0-test",
+          capabilities: { repositoryIdentity: true },
+        },
+        cwd: "/tmp/current",
+        projectName: "current",
+      },
+    };
+    replacementSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: replacementRequest.id,
+        values: [replacementEvent],
+      }),
+    );
+    await waitFor(() => expect(listener).toHaveBeenCalledOnce());
+    expect(listener).toHaveBeenLastCalledWith(replacementEvent);
+
+    unsubscribe();
+    closeSession.mockRestore();
+    releaseClose();
+    await transport.dispose();
+  });
+
   it("does not fire onResubscribe when the first stream attempt exits before any value", async () => {
     const transport = createTransport("ws://localhost:3020");
     const listener = vi.fn();

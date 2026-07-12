@@ -197,7 +197,7 @@ export class WsTransport {
             session,
             connect,
             listener,
-            () => active,
+            () => active && session === this.session,
             () => {
               this.hasReportedTransportDisconnect = false;
               hasReceivedValue = true;
@@ -421,6 +421,10 @@ export class WsTransport {
   } {
     let cancelled = false;
     let cancelRuntime: () => void = NOOP;
+    void session.replaced.catch(() => {
+      cancelled = true;
+      cancelRuntime();
+    });
     const completed = this.runOnSession(
       session,
       (client) =>
