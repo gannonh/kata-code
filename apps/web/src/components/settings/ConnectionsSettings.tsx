@@ -48,6 +48,8 @@ import {
   buildDockerSandboxProviderInstance,
   buildVercelSandboxProviderInstance,
   makeSandboxProviderInstanceId,
+  resolveInferredSandboxInstanceId,
+  resolveRepairedSandboxInstanceId,
   resolveSandboxLifecycleState,
   sandboxInstanceIdForLabel,
 } from "./SandboxDeploymentSettings.logic";
@@ -1559,15 +1561,19 @@ export function SavedBackendListRow({
   // case it is reachable) plus an explicit Remove so a dead orphan is never a
   // dead end. Never auto-removed.
   const isUnknownSandbox = sandboxLifecycleState === "unknown";
-  const stateDotClassName = isStoppedSandbox
-    ? "bg-muted-foreground/40"
-    : connectionState === "connected"
+  // Prefer live connectionState over a stale listInstances "stopped" join.
+  // Environments refreshes its own summaries on Start, but Available Runtimes
+  // can lag until the next parent refresh — a live WS must still show green.
+  const stateDotClassName =
+    connectionState === "connected"
       ? "bg-success"
-      : connectionState === "connecting"
-        ? "bg-warning"
-        : connectionState === "error"
-          ? "bg-destructive"
-          : "bg-muted-foreground/40";
+      : isStoppedSandbox
+        ? "bg-muted-foreground/40"
+        : connectionState === "connecting"
+          ? "bg-warning"
+          : connectionState === "error"
+            ? "bg-destructive"
+            : "bg-muted-foreground/40";
   const descriptorLabel = runtime?.descriptor?.label ?? null;
   const displayLabel =
     resolveSavedEnvironmentDisplayLabel({
@@ -2229,6 +2235,13 @@ export function ConnectionsSettings() {
       setSandboxSummariesLoaded(false);
     }
   }, []);
+  const handleSandboxInstancesChanged = useCallback(
+    (instances: ReadonlyArray<SandboxInstanceSummary>) => {
+      setSandboxSummaries(instances);
+      setSandboxSummariesLoaded(true);
+    },
+    [],
+  );
   // Same readiness gate as SandboxDeploymentSettings: wait for the primary
   // config snapshot so the first listInstances does not race WS auth.
   const primaryServerConfigReady = primaryServerConfig !== null;
@@ -2262,6 +2275,13 @@ export function ConnectionsSettings() {
     const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
     return new Set(Object.keys(map));
   }, [settings.sandboxProviderInstances]);
+  const configuredSandboxInstances = useMemo(() => {
+    const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
+    return Object.entries(map).map(([instanceId, config]) => ({
+      instanceId,
+      driver: config.driver as string,
+    }));
+  }, [settings.sandboxProviderInstances]);
   const savedEnvironmentDefinitionIds = useMemo(
     () =>
       Object.values(savedEnvironmentsById)
@@ -2282,12 +2302,69 @@ export function ConnectionsSettings() {
           if (sandboxInstanceId !== undefined && sandboxInstanceIds.has(sandboxInstanceId)) {
             return false;
           }
+          // Browser persistence historically stripped sandbox.instanceId. A
+          // record whose environment id is claimed by a configured instance's
+          // session is still linked — not an orphan — even without the join key.
+          if (
+            record.sandbox !== undefined &&
+            sandboxSessionEnvironmentIds.has(record.environmentId)
+          ) {
+            for (const summary of sandboxSummaries) {
+              if (summary.kind !== "available") continue;
+              const session = summary.runningSession;
+              if (
+                session !== undefined &&
+                (session.environmentId as string) === record.environmentId &&
+                sandboxInstanceIds.has(summary.instanceId as string)
+              ) {
+                return false;
+              }
+            }
+          }
+          // Unique-driver inference: when listInstances is slow/timed out and
+          // instanceId was stripped, a single configured instance of that
+          // provider kind is enough to treat the record as linked.
+          const inferredInstanceId = resolveInferredSandboxInstanceId(
+            record,
+            configuredSandboxInstances,
+          );
+          if (inferredInstanceId !== null && sandboxInstanceIds.has(inferredInstanceId)) {
+            return false;
+          }
           return true;
         })
         .toSorted((left, right) => left.label.localeCompare(right.label))
         .map((record) => record.environmentId),
-    [primaryServerConfig, sandboxInstanceIds, savedEnvironmentsById],
+    [
+      configuredSandboxInstances,
+      primaryServerConfig,
+      sandboxInstanceIds,
+      sandboxSessionEnvironmentIds,
+      sandboxSummaries,
+      savedEnvironmentsById,
+    ],
   );
+
+  // Repair records whose sandbox.instanceId was stripped by the old browser
+  // persistence schema (session join when available; unique-driver inference
+  // otherwise so Environments does not depend on a healthy listInstances).
+  useEffect(() => {
+    if (primaryServerConfig === null) return;
+    const upsert = useSavedEnvironmentRegistryStore.getState().upsert;
+    for (const record of Object.values(savedEnvironmentsById)) {
+      const repairedInstanceId =
+        resolveRepairedSandboxInstanceId(record, sandboxSummaries) ??
+        resolveInferredSandboxInstanceId(record, configuredSandboxInstances);
+      if (repairedInstanceId === null || record.sandbox === undefined) continue;
+      upsert({
+        ...record,
+        sandbox: {
+          ...record.sandbox,
+          instanceId: repairedInstanceId,
+        },
+      });
+    }
+  }, [configuredSandboxInstances, primaryServerConfig, sandboxSummaries, savedEnvironmentsById]);
   const savedDesktopSshEnvironmentsByAlias = useMemo(
     () =>
       Object.values(savedEnvironmentsById).reduce<Record<string, SavedEnvironmentRecord>>(
@@ -3784,6 +3861,7 @@ export function ConnectionsSettings() {
             onRemove={handleRemoveSavedBackend}
           />
         ))}
+        onInstancesChanged={handleSandboxInstancesChanged}
       />
 
       <SettingsSection title="Available Runtimes">

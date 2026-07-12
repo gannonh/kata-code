@@ -25,7 +25,7 @@ import {
   useSavedEnvironmentRegistryStore,
 } from "../../environments/runtime";
 import { cn } from "../../lib/utils";
-import { useServerConfig } from "../../rpc/serverState";
+import { useServerConfig, useServerWelcomeSubscription } from "../../rpc/serverState";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import type { Project } from "../../types";
 import { Button } from "../ui/button";
@@ -110,12 +110,16 @@ interface SandboxDeploymentSettingsProps {
   readonly headerAction?: ReactNode;
   readonly savedEnvironmentRows?: ReactNode;
   readonly hasSavedEnvironmentRows?: boolean;
+  /** Fired after a successful `listInstances` so Available Runtimes can reuse
+   *  the same summaries (avoids a second RPC and a stale stopped/running join). */
+  readonly onInstancesChanged?: (instances: ReadonlyArray<SandboxInstanceSummary>) => void;
 }
 
 export function SandboxDeploymentSettings({
   headerAction,
   savedEnvironmentRows,
   hasSavedEnvironmentRows = false,
+  onInstancesChanged,
 }: SandboxDeploymentSettingsProps) {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
@@ -131,6 +135,8 @@ export function SandboxDeploymentSettings({
 
   const [summaries, setSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>([]);
   const [summariesLoaded, setSummariesLoaded] = useState(false);
+  const summariesLoadedRef = useRef(false);
+  summariesLoadedRef.current = summariesLoaded;
   const [listError, setListError] = useState<string | null>(null);
   const [listPending, setListPending] = useState(false);
   const listRefreshGenerationRef = useRef(0);
@@ -149,6 +155,10 @@ export function SandboxDeploymentSettings({
     listError,
     listPending,
   });
+  // Settings come from the primary WS config snapshot. Until it arrives,
+  // useSettings() falls back to DEFAULT empty sandboxProviderInstances —
+  // showing "No environments configured" would flash incorrectly.
+  const settingsReady = serverConfigReady;
 
   /** Mark an instance busy for `op` while `fn` runs, then clear it. Centralizes
    * the `finally { setBusy ... delete }` cleanup that every long-running
@@ -169,61 +179,88 @@ export function SandboxDeploymentSettings({
     [],
   );
 
-  const refreshList = useCallback(async () => {
-    const generation = ++listRefreshGenerationRef.current;
-    setListPending(true);
-    try {
-      // Bound the RPC so a hung listInstances (WS interrupt / slow Vercel status)
-      // cannot leave Environments on "Loading sandbox status…" forever.
-      const result = await withRpcTimeout(
-        "Loading sandbox status",
-        () => getPrimaryEnvironmentConnection().client.sandbox.listInstances(),
-        30_000,
-      );
-      if (generation !== listRefreshGenerationRef.current) return;
-      setSummaries(result.instances);
-      setActiveSession(
-        Object.fromEntries(
-          result.instances.flatMap((summary) => {
-            if (summary.kind !== "available" || !summary.runningSession) return [];
-            return [
-              [
-                summary.instanceId as string,
-                {
-                  environmentId: summary.runningSession.environmentId,
-                  httpBaseUrl: summary.runningSession.endpoint.httpBaseUrl,
-                },
-              ],
-            ];
-          }),
-        ),
-      );
-      setSummariesLoaded(true);
-      setListError(null);
-    } catch (error) {
-      if (generation !== listRefreshGenerationRef.current) return;
-      const message = error instanceof Error ? error.message : "Unknown error.";
-      // Do not clear summariesLoaded — keep a prior successful list so Start/Stop
-      // stay usable after a refresh blip or timeout.
-      setListError(message);
-      toastManager.add({
-        type: "error",
-        title: "Failed to list sandbox targets",
-        description: message,
-      });
-    } finally {
-      if (generation === listRefreshGenerationRef.current) {
-        setListPending(false);
+  const refreshList = useCallback(
+    async (options?: { readonly silent?: boolean }) => {
+      const generation = ++listRefreshGenerationRef.current;
+      const silent = options?.silent === true;
+      if (!silent) setListPending(true);
+      try {
+        // Bound the RPC so a hung listInstances (WS interrupt) cannot leave
+        // Environments on "Loading sandbox status…" forever. Provider status
+        // reconcile runs in the background on the server and must not own this
+        // deadline.
+        const result = await withRpcTimeout(
+          "Loading sandbox status",
+          () => getPrimaryEnvironmentConnection().client.sandbox.listInstances(),
+          30_000,
+        );
+        if (generation !== listRefreshGenerationRef.current) return;
+        setSummaries(result.instances);
+        setActiveSession(
+          Object.fromEntries(
+            result.instances.flatMap((summary) => {
+              if (summary.kind !== "available" || !summary.runningSession) return [];
+              return [
+                [
+                  summary.instanceId as string,
+                  {
+                    environmentId: summary.runningSession.environmentId,
+                    httpBaseUrl: summary.runningSession.endpoint.httpBaseUrl,
+                  },
+                ],
+              ];
+            }),
+          ),
+        );
+        setSummariesLoaded(true);
+        setListError(null);
+        onInstancesChanged?.(result.instances);
+      } catch (error) {
+        if (generation !== listRefreshGenerationRef.current) return;
+        const message = error instanceof Error ? error.message : "Unknown error.";
+        // Do not clear summariesLoaded — keep a prior successful list so Start/Stop
+        // stay usable after a refresh blip or timeout.
+        setListError(message);
+        // Toast only on a cold failure (no prior list). Background/silent
+        // refreshes and refreshes that already have cards must not spam errors.
+        if (!silent && !summariesLoadedRef.current) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to list sandbox targets",
+            description: message,
+          });
+        }
+      } finally {
+        if (generation === listRefreshGenerationRef.current && !silent) {
+          setListPending(false);
+        }
       }
-    }
-  }, []);
+    },
+    [onInstancesChanged],
+  );
 
   // Retry when the primary WS config snapshot arrives (first paint can race
-  // auth) and whenever the configured instance map changes.
+  // auth) and whenever the configured instance map changes. A short silent
+  // follow-up picks up background provider-status reconcile without blocking
+  // first paint.
   useEffect(() => {
     if (!serverConfigReady) return;
     void refreshList();
+    const followUp = window.setTimeout(() => {
+      void refreshList({ silent: true });
+    }, 2_500);
+    return () => window.clearTimeout(followUp);
   }, [refreshList, settings.sandboxProviderInstances, serverConfigReady]);
+
+  // Re-list on every (re)connect. A listInstances dispatched on a socket that
+  // is then replaced by a reconnect now rejects (TransportSessionReplacedError)
+  // instead of hanging — this welcome-driven refresh reloads against the fresh
+  // session so "Loading sandbox status…" always resolves without a page reload.
+  useServerWelcomeSubscription(
+    useCallback(() => {
+      void refreshList({ silent: true });
+    }, [refreshList]),
+  );
 
   const summaryById = useMemo(() => {
     const map: Record<string, SandboxInstanceSummary> = {};
@@ -661,8 +698,11 @@ export function SandboxDeploymentSettings({
         {instanceEntries.length === 0 && !hasSavedEnvironmentRows ? (
           <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
             <p className="text-xs text-muted-foreground">
-              No environments configured. Add a remote link, Docker container, or cloud provider
-              {typeof window !== "undefined" && window.desktopBridge ? ", or SSH host" : ""}.
+              {!settingsReady
+                ? "Loading environments…"
+                : `No environments configured. Add a remote link, Docker container, or cloud provider${
+                    typeof window !== "undefined" && window.desktopBridge ? ", or SSH host" : ""
+                  }.`}
             </p>
           </div>
         ) : (

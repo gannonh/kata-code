@@ -285,3 +285,51 @@ export function resolveSandboxLifecycleState(
   // Legacy record without an instance id and no session match: unknown.
   return "unknown";
 }
+
+/**
+ * Recover a stripped `sandbox.instanceId` by joining the saved record's
+ * environment id to a `listInstances` session (identity recovery R1: id-only).
+ * Returns null when no session claims this environment.
+ */
+export function resolveRepairedSandboxInstanceId(
+  record: {
+    readonly environmentId: string;
+    readonly sandbox?:
+      | { readonly providerKind: string; readonly instanceId?: string | undefined }
+      | undefined;
+  },
+  summaries: ReadonlyArray<SandboxInstanceSummary>,
+): string | null {
+  if (record.sandbox === undefined) return null;
+  if (record.sandbox.instanceId !== undefined) return null;
+  for (const summary of summaries) {
+    if (summary.kind !== "available") continue;
+    const session = summary.runningSession;
+    if (session !== undefined && (session.environmentId as string) === record.environmentId) {
+      return summary.instanceId as string;
+    }
+  }
+  return null;
+}
+
+/**
+ * When browser persistence stripped `sandbox.instanceId` and no session join
+ * is available yet, recover the join key if exactly one configured instance
+ * has the record's provider kind. Ambiguous (0 or 2+) matches return null so
+ * we never invent a join under identity-recovery R1.
+ */
+export function resolveInferredSandboxInstanceId(
+  record: {
+    readonly sandbox?:
+      | { readonly providerKind: string; readonly instanceId?: string | undefined }
+      | undefined;
+  },
+  configuredInstances: ReadonlyArray<{ readonly instanceId: string; readonly driver: string }>,
+): string | null {
+  if (record.sandbox === undefined) return null;
+  if (record.sandbox.instanceId !== undefined) return null;
+  const providerKind = record.sandbox.providerKind;
+  const matches = configuredInstances.filter((instance) => instance.driver === providerKind);
+  if (matches.length !== 1) return null;
+  return matches[0]?.instanceId ?? null;
+}

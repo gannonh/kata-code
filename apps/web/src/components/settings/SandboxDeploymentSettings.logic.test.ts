@@ -9,6 +9,8 @@ import {
   makeSandboxProviderInstanceId,
   parseSandboxPort,
   readVercelVcpus,
+  resolveInferredSandboxInstanceId,
+  resolveRepairedSandboxInstanceId,
   resolveSandboxLifecycleState,
   resolveSandboxListUiState,
   sandboxInstanceIdForLabel,
@@ -320,5 +322,73 @@ describe("resolveSandboxLifecycleState (identity recovery R1: id-based join)", (
     const record = savedSandbox({ environmentId: "env_legacy" });
     expect(resolveSandboxLifecycleState(record, [summary("docker_x")])).toBe("unknown");
     expect(resolveSandboxLifecycleState(record, [])).toBe("unknown");
+  });
+});
+
+describe("resolveRepairedSandboxInstanceId", () => {
+  it("recovers instanceId from a session that claims the environment id", () => {
+    const record = {
+      environmentId: "env_1",
+      sandbox: { providerKind: "vercel" },
+    };
+    const summaries = [
+      {
+        kind: "available",
+        instanceId: "vercel_kata-code-sandbox",
+        runningSession: {
+          environmentId: "env_1",
+          endpoint: { id: "e", label: "L", httpBaseUrl: "https://x/" },
+          status: "running",
+        },
+      } as never,
+    ];
+    expect(resolveRepairedSandboxInstanceId(record, summaries)).toBe("vercel_kata-code-sandbox");
+  });
+
+  it("returns null when the record already has an instanceId", () => {
+    const record = {
+      environmentId: "env_1",
+      sandbox: { providerKind: "docker", instanceId: "docker_web-docker" },
+    };
+    const summaries = [
+      {
+        kind: "available",
+        instanceId: "docker_other",
+        runningSession: {
+          environmentId: "env_1",
+          endpoint: { id: "e", label: "L", httpBaseUrl: "http://x/" },
+          status: "running",
+        },
+      } as never,
+    ];
+    expect(resolveRepairedSandboxInstanceId(record, summaries)).toBeNull();
+  });
+
+  it("returns null when no session claims the environment", () => {
+    const record = {
+      environmentId: "env_missing",
+      sandbox: { providerKind: "docker" },
+    };
+    expect(resolveRepairedSandboxInstanceId(record, [])).toBeNull();
+  });
+});
+
+describe("resolveInferredSandboxInstanceId", () => {
+  it("recovers instanceId when exactly one configured instance matches providerKind", () => {
+    expect(
+      resolveInferredSandboxInstanceId({ sandbox: { providerKind: "vercel" } }, [
+        { instanceId: "vercel_kata-code-sandbox", driver: "vercel" },
+        { instanceId: "docker_web-docker", driver: "docker" },
+      ]),
+    ).toBe("vercel_kata-code-sandbox");
+  });
+
+  it("returns null when multiple configured instances share the provider kind", () => {
+    expect(
+      resolveInferredSandboxInstanceId({ sandbox: { providerKind: "docker" } }, [
+        { instanceId: "docker_a", driver: "docker" },
+        { instanceId: "docker_b", driver: "docker" },
+      ]),
+    ).toBeNull();
   });
 });
