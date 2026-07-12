@@ -801,6 +801,67 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("re-subscribes when the replaced session never acquires a client", async () => {
+    const transport = createTransport("ws://localhost:3020", undefined, {
+      sessionCloseTimeout: 10,
+    });
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const firstSession = (transport as unknown as { session: TransportSessionForTest }).session;
+    firstSession.clientPromise = new Promise<never>(() => undefined);
+
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      vi.fn(),
+    );
+
+    await transport.reconnect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const replacementSocket = getSocket();
+    replacementSocket.open();
+
+    await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+    expect(JSON.parse(replacementSocket.sent[0] ?? "{}")).toMatchObject({
+      tag: WS_METHODS.subscribeServerLifecycle,
+    });
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("re-subscribes while the replaced stream and session cleanup never settle", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    getSocket().open();
+
+    let attempts = 0;
+    const unsubscribe = transport.subscribe(() => {
+      attempts += 1;
+      return Stream.never;
+    }, vi.fn());
+    await waitFor(() => expect(attempts).toBe(1));
+
+    let releaseClose!: () => void;
+    const pendingClose = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closeSession = vi
+      .spyOn(
+        transport as unknown as { closeSession: (session: unknown) => Promise<void> },
+        "closeSession",
+      )
+      .mockReturnValue(pendingClose);
+
+    await transport.reconnect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    getSocket().open();
+    await waitFor(() => expect(attempts).toBe(2));
+
+    unsubscribe();
+    closeSession.mockRestore();
+    releaseClose();
+    await transport.dispose();
+  });
+
   it("does not fire onResubscribe when the first stream attempt exits before any value", async () => {
     const transport = createTransport("ws://localhost:3020");
     const listener = vi.fn();

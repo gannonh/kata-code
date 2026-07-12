@@ -419,45 +419,53 @@ export class WsTransport {
     readonly cancel: () => void;
     readonly completed: Promise<void>;
   } {
-    let resolveCompleted!: () => void;
-    let rejectCompleted!: (error: unknown) => void;
-    const completed = new Promise<void>((resolve, reject) => {
-      resolveCompleted = resolve;
-      rejectCompleted = reject;
-    });
-    const cancel = session.runtime.runCallback(
-      Effect.promise(() => session.clientPromise).pipe(
-        Effect.flatMap((client) =>
-          Stream.runForEach(connect(client), (value) =>
-            Effect.sync(() => {
-              if (!isActive()) {
-                return;
-              }
-
-              markValueReceived();
-              try {
-                listener(value);
-              } catch {
-                // Ignore listener errors so the stream stays live.
-              }
-            }),
-          ),
-        ),
-      ),
-      {
-        onExit: (exit) => {
-          if (Exit.isSuccess(exit)) {
-            resolveCompleted();
+    let cancelled = false;
+    let cancelRuntime: () => void = NOOP;
+    const completed = this.runOnSession(
+      session,
+      (client) =>
+        new Promise<void>((resolve, reject) => {
+          if (cancelled) {
+            resolve();
             return;
           }
+          cancelRuntime = session.runtime.runCallback(
+            Stream.runForEach(connect(client), (value) =>
+              Effect.sync(() => {
+                if (!isActive()) {
+                  return;
+                }
 
-          rejectCompleted(Cause.squash(exit.cause));
-        },
-      },
+                markValueReceived();
+                try {
+                  listener(value);
+                } catch {
+                  // Ignore listener errors so the stream stays live.
+                }
+              }),
+            ),
+            {
+              onExit: (exit) => {
+                if (Exit.isSuccess(exit)) {
+                  resolve();
+                  return;
+                }
+
+                reject(Cause.squash(exit.cause));
+              },
+            },
+          );
+          if (cancelled) {
+            cancelRuntime();
+          }
+        }),
     );
 
     return {
-      cancel,
+      cancel: () => {
+        cancelled = true;
+        cancelRuntime();
+      },
       completed,
     };
   }
