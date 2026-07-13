@@ -67,6 +67,10 @@ class MockWebSocket {
     this.emit("error", { type: "error" });
   }
 
+  listenerCount(type: WsEventType): number {
+    return this.listeners.get(type)?.size ?? 0;
+  }
+
   private emit(type: WsEventType, event?: WsEvent) {
     const listeners = this.listeners.get(type);
     if (!listeners) return;
@@ -800,6 +804,98 @@ describe("WsTransport", () => {
     unsubscribe();
     await transport.dispose();
   });
+
+  it(
+    "re-subscribes live streams after a heartbeat timeout reconnects the physical socket",
+    { timeout: 15_000 },
+    async () => {
+      const transport = createTransport("ws://localhost:3020");
+      const listener = vi.fn();
+      const unsubscribe = transport.subscribe(
+        (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+        listener,
+      );
+
+      await waitFor(() => {
+        expect(sockets).toHaveLength(1);
+      });
+      const firstSocket = getSocket();
+      firstSocket.open();
+      await waitFor(() => {
+        expect(
+          firstSocket.sent.some((message) => {
+            const parsed = JSON.parse(message) as { _tag?: string; tag?: string };
+            return parsed._tag === "Request" && parsed.tag === WS_METHODS.subscribeServerLifecycle;
+          }),
+        ).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(sockets).toHaveLength(2);
+      }, 12_000);
+      let replacementSocket: MockWebSocket | undefined;
+      await waitFor(() => {
+        for (const socket of sockets.slice(1)) {
+          if (socket.readyState === MockWebSocket.CONNECTING && socket.listenerCount("open") >= 2) {
+            socket.open();
+          }
+          if (
+            socket.sent.some((message) => {
+              const parsed = JSON.parse(message) as { _tag?: string; tag?: string };
+              return (
+                parsed._tag === "Request" && parsed.tag === WS_METHODS.subscribeServerLifecycle
+              );
+            })
+          ) {
+            replacementSocket = socket;
+          }
+        }
+        expect(replacementSocket).toBeDefined();
+      }, 3_000);
+
+      if (!replacementSocket) {
+        throw new Error("Expected a replacement socket with a replayed subscription");
+      }
+      const activeReplacementSocket = replacementSocket;
+      const replacementRequest = activeReplacementSocket.sent
+        .map((message) => JSON.parse(message) as { _tag?: string; id?: string; tag?: string })
+        .find(
+          (message) =>
+            message._tag === "Request" && message.tag === WS_METHODS.subscribeServerLifecycle,
+        );
+      expect(replacementRequest?.id).toBeDefined();
+
+      const event = {
+        version: 1,
+        sequence: 2,
+        type: "welcome",
+        payload: {
+          environment: {
+            environmentId: "environment-local",
+            label: "Local environment",
+            platform: { os: "darwin", arch: "arm64" },
+            serverVersion: "0.0.0-test",
+            capabilities: { repositoryIdentity: true },
+          },
+          cwd: "/tmp/reconnected",
+          projectName: "reconnected",
+        },
+      };
+      activeReplacementSocket.serverMessage(
+        JSON.stringify({
+          _tag: "Chunk",
+          requestId: replacementRequest!.id,
+          values: [event],
+        }),
+      );
+      await waitFor(() => {
+        expect(listener).toHaveBeenLastCalledWith(event);
+      });
+
+      unsubscribe();
+      await transport.dispose();
+    },
+  );
 
   it("re-subscribes when the replaced session never acquires a client", async () => {
     const transport = createTransport("ws://localhost:3020", undefined, {

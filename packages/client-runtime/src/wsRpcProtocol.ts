@@ -276,7 +276,9 @@ export function createWsRpcProtocolLayer(
     Effect.map(
       RpcClient.makeProtocolSocket({
         retryPolicy,
-        retryTransientErrors: true,
+        // The protocol still retries the socket. Surface every disconnect to
+        // active RPCs so stream owners can resubscribe on the replacement.
+        retryTransientErrors: false,
       }),
       (protocol) => ({
         ...protocol,
