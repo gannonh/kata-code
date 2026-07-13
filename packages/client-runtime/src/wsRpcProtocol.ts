@@ -69,6 +69,18 @@ export type WsRpcProtocolClient =
   RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;
 export type WsRpcProtocolSocketUrlProvider = string | (() => Promise<string>);
 
+function isBrowserPageHidden(): boolean {
+  const browserGlobal = globalThis as { readonly document?: { readonly visibilityState?: string } };
+  return browserGlobal.document?.visibilityState === "hidden";
+}
+
+export function shouldReconnectAfterHeartbeatTimeout(
+  lastPingSentWhilePageHidden: boolean,
+  pageHidden = isBrowserPageHidden(),
+): boolean {
+  return !lastPingSentWhilePageHidden && !pageHidden;
+}
+
 function formatSocketErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -200,6 +212,7 @@ export function createWsRpcProtocolLayer(
   const lifecycle = resolveLifecycleHandlers(handlers, options?.telemetryLifecycle);
   const backoff = options?.backoff ?? DEFAULT_RECONNECT_BACKOFF;
   const requestTelemetry = options?.requestTelemetry;
+  let lastPingSentWhilePageHidden = false;
   const resolvedUrl =
     typeof url === "function"
       ? Effect.promise(() => url()).pipe(
@@ -308,8 +321,20 @@ export function createWsRpcProtocolLayer(
   const connectionHooksLayer = Layer.succeed(
     RpcClient.ConnectionHooks,
     RpcClient.ConnectionHooks.of({
-      onConnect: Effect.void,
+      onConnect: Effect.sync(() => {
+        lastPingSentWhilePageHidden = false;
+      }),
       onDisconnect: Effect.void,
+      onPing: Effect.sync(() => {
+        lastPingSentWhilePageHidden = isBrowserPageHidden();
+        lifecycle.onHeartbeatPing();
+      }),
+      onPingTimeout: Effect.sync(() => {
+        lifecycle.onHeartbeatTimeout();
+      }),
+      isPingTimeoutEnabled: Effect.sync(() =>
+        shouldReconnectAfterHeartbeatTimeout(lastPingSentWhilePageHidden),
+      ),
     }),
   );
 
