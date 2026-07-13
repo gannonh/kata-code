@@ -2,7 +2,8 @@
 type: Spec
 title: "Environment connection recovery architecture"
 description: "Define one per-environment connection owner, safe stream recovery, bounded VCS refresh work, and real-runtime fault acceptance across web and Electron."
-status: Draft
+status: Approved
+approved_at: 2026-07-13T23:23:47Z
 tags: [transport, websocket, environments, reliability, e2e]
 timestamp: 2026-07-13T22:48:00Z
 ---
@@ -11,14 +12,14 @@ timestamp: 2026-07-13T22:48:00Z
 
 ## Status
 
-Draft
+Approved
 
 Phase 0 was completed on 2026-07-13 by commit `65ba4f3b8`, which reverted
 `5b2e494df` and discarded the uncommitted Effect request-replay experiment. The
 focused transport and web recovery suite passed 39 tests after the rollback.
 
-This spec covers Phases 1 through 5. It requires maintainer approval before the
-Build phase.
+This spec covers Phases 1 through 5. The maintainer approved it for the Build
+phase on 2026-07-13.
 
 ## Review history
 
