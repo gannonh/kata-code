@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-13 (Environment connection recovery architecture drafted)
+
+Completed the Phase 0 transport rollback in `65ba4f3b8`: restored the committed Effect patch and lockfile, reverted the regressive `5b2e494df` stream-recovery change, and passed 39 focused transport/web tests. Drafted the [environment connection recovery architecture](/specs/2026-07-13-environment-connection-recovery-architecture-design.md) for Phases 1–5. The design selects one application-owned, per-environment connection module; separates durable subscription recovery from unary and mutating request failure; isolates primary and saved environment state; bounds remote Git status fetches; and requires real-runtime web/Electron fault acceptance plus full E2E gates. The draft awaits maintainer review and approval.
+
 ## 2026-07-11 (Web Environments listInstances refresh + Docker gating)
 
 Fixed Environments cards on local web showing configured targets with no Start/Create/Test actions. Badges and lifecycle actions depend on `sandbox.listInstances`; a one-shot fetch that raced primary WS auth left `summaries` empty so cards looked inert. Settings now waits for the primary config snapshot, tracks loaded/error/pending, shows an inline Retry banner, and retries when the instance map changes. ConnectionsSettings uses the same readiness gate for Available Runtimes joins. Docker remains offered in the browser Add Environment dialog (server-backed via `docker.sock`); SSH stays desktop-only (`desktopBridge`). Electron `dev` state lives under `~/.katacode/dev` while CLI web uses `~/.katacode/userdata` — separate homes can still diverge even with identical UI.

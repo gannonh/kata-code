@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-13 (Environment connection recovery architecture drafted)
+
+Added the Draft [environment connection recovery architecture](/specs/2026-07-13-environment-connection-recovery-architecture-design.md) and linked it from the [specs roadmap](/specs/index.md). The spec records the completed Phase 0 rollback and defines Phases 1–5: explicit connection invariants and observability, one application-owned per-environment reconnect module, safe subscription/request recovery classes, a server-wide VCS remote refresh scheduler, and real-runtime fault acceptance across web and Electron. The draft awaits maintainer review and approval.
+
 ## 2026-07-09 (Phase 3b lifecycle and identity recovery closeout)
 
 Reconciled the complete `feat/deployments-phase-3b.md` branch with the OKF bundle. Marked the original [Phase 3b implementation plan](/specs/2026-07-04-kata-environments-deployments-phase-3b-plan.md) as historical for lifecycle behavior; updated the [Phase 3b deep-dive](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md) and [ADR 0007](/adrs/0007-vercel-sandbox-first-cloud-sandbox-driver.md) for persistent named stop/start/delete sandboxes; recorded the strict-quality remediation in the [lifecycle design](/specs/2026-07-07-kata-sandbox-lifecycle-design.md) and [build report](/specs/2026-07-07-kata-sandbox-lifecycle-build-report.md); and marked the [identity recovery plan](/specs/2026-07-08-sandbox-identity-recovery-plan.md) implemented. Closed deferred entries for durable session reclamation and sandbox provider sign-in. Updated the roadmap and section logs. Validation: `vp check`, `vp run typecheck`, `vp run test`, and `vp run release:smoke` passed before this documentation update.
