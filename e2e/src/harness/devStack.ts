@@ -9,6 +9,7 @@ import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
 import { spawnWithArtifactLogs, terminateChildProcess } from "./processSpawn.ts";
+import { waitForWebDevServer } from "./readiness.ts";
 import { withTimeout } from "./withTimeout.ts";
 
 export interface DevStackHandle {
@@ -157,7 +158,7 @@ export async function startWebDevStack(
 
 async function startDevStackInner(
   context: E2ERunContext,
-  _signal: AbortSignal,
+  signal: AbortSignal,
 ): Promise<DevStackHandle> {
   await assertDesktopBuildArtifacts(context.repoRoot);
 
@@ -182,8 +183,9 @@ async function startDevStackInner(
     await terminateChildProcess(child);
   });
 
-  // Electron startup and renderer-window detection are the authoritative Vite
-  // readiness checks, so the stack can continue as soon as the process owns its
-  // claimed ports.
+  logHarnessPhase("Waiting for Vite dev server...");
+  await waitForWebDevServer(context.webPort, E2E_TIMEOUTS.devStackMs, signal);
+  logHarnessPhase("Vite dev server is ready.");
+
   return { process: child };
 }
