@@ -258,12 +258,31 @@ export const renewSandboxRelayLeases = Effect.fn("sandbox.renewRelayLeases")(fun
         bearerToken,
       }).pipe(
         Effect.as(1),
-        Effect.catch((cause) =>
-          Effect.logWarning("Could not renew sandbox Connect lease", {
+        Effect.catch((cause) => {
+          if (cause.httpStatus === 404) {
+            const { relay: _staleRelay, ...unlinkedRecord } = record;
+            return getSessionStore()
+              .upsert(unlinkedRecord)
+              .pipe(
+                Effect.tap(() =>
+                  Effect.logInfo("Sandbox Connect link no longer exists; pairing is required", {
+                    environmentId: record.sandboxEnvironmentId,
+                  }),
+                ),
+                Effect.as(0),
+                Effect.catch((persistCause) =>
+                  Effect.logWarning("Could not clear stale sandbox Connect link", {
+                    environmentId: record.sandboxEnvironmentId,
+                    cause: persistCause,
+                  }).pipe(Effect.as(0)),
+                ),
+              );
+          }
+          return Effect.logWarning("Could not renew sandbox Connect lease", {
             environmentId: record.sandboxEnvironmentId,
             cause,
-          }).pipe(Effect.as(0)),
-        ),
+          }).pipe(Effect.as(0));
+        }),
       ),
     { concurrency: 4 },
   );

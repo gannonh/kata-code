@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - tmp-dir setup for store-backed dispose regression.
 /* eslint-disable kata-code/no-manual-effect-runtime-in-tests -- regression tests use Effect.runPromise for busy-dispose assertions. */
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -66,6 +66,68 @@ describe("SandboxService regression guards", () => {
     expect(probe).not.toBe(durable);
     expect(probe.startsWith(`${durable}__probe_`)).toBe(true);
     expect(makeTestConnectionProbeInstanceId(durable)).not.toBe(probe);
+  });
+
+  it("clears stale relay metadata when lease renewal reports a missing link", async () => {
+    const home = await NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-sandbox-relay-"));
+    const token = {
+      accessToken: "relay-access-token",
+      refreshToken: "relay-refresh-token",
+      expiresAtEpochMs: 2_000_000_000_000,
+    };
+    const tokenLayer = Layer.mock(CloudCliTokenManager.CloudCliTokenManager)({
+      get: Effect.succeed(token),
+      getExisting: Effect.succeed(Option.some(token)),
+      hasCredential: Effect.succeed(true),
+      clear: Effect.void,
+    });
+    const fetchMock = vi.fn(
+      async () => new Response(null, { status: 404, statusText: "Not Found" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await NodeFs.writeFile(
+        NodePath.join(home, "sandbox-sessions.json"),
+        JSON.stringify({
+          records: [
+            {
+              instanceId: "vercel_missing-link",
+              driverKind: "vercel",
+              environmentId: "vercel_missing-link",
+              sandboxEnvironmentId: "env-missing-link",
+              handle: { driverKind: "vercel", handle: { sandboxId: "sandbox-1" } },
+              endpoint: {
+                id: "sandbox-vercel_missing-link",
+                label: "Missing link",
+                httpBaseUrl: "https://sandbox.example.test",
+              },
+              status: "running",
+              relay: { relayUrl: "https://relay.example.test" },
+            },
+          ],
+        }),
+        "utf8",
+      );
+      configureSandboxRuntime({ stateDir: home });
+
+      const renewed = await Effect.runPromise(
+        renewSandboxRelayLeases().pipe(Effect.provide(tokenLayer)),
+      );
+      expect(renewed).toBe(0);
+
+      const persisted = JSON.parse(
+        await NodeFs.readFile(NodePath.join(home, "sandbox-sessions.json"), "utf8"),
+      ) as { records: Array<{ relay?: unknown; status: string }> };
+      expect(persisted.records[0]).not.toHaveProperty("relay");
+      expect(persisted.records[0]?.status).toBe("running");
+
+      await Effect.runPromise(renewSandboxRelayLeases().pipe(Effect.provide(tokenLayer)));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await NodeFs.rm(home, { recursive: true, force: true });
+    }
   });
 
   it("providerLoginStart refuses when the durable store marks the session stopped", async () => {

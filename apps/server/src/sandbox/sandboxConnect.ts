@@ -41,6 +41,16 @@ import { cloudCliOAuthConfig, relayUrlConfig } from "../cloud/publicConfig.ts";
 
 const SANDBOX_FETCH_TIMEOUT_MS = 30_000;
 
+class SandboxConnectHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "SandboxConnectHttpError";
+    this.status = status;
+  }
+}
+
 /** Append a user-facing hint when a Connect registration error is caused by
  *  a stale or invalid relay bearer token (e.g. after a relay redeploy). The
  *  desktop UI passes a Clerk session token as `connectAuthToken`; signing out
@@ -94,7 +104,10 @@ async function fetchAndDecodeJson<S extends Schema.Decoder<unknown>>(
     signal: AbortSignal.timeout(SANDBOX_FETCH_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`${url} failed: ${await readResponseBody(response)}`);
+    throw new SandboxConnectHttpError(
+      response.status,
+      `${url} failed: ${await readResponseBody(response)}`,
+    );
   }
   return Schema.decodeUnknownSync(schema)(await response.json());
 }
@@ -110,6 +123,7 @@ export function fetchJson<S extends Schema.Decoder<unknown>>(
       new SandboxRpcError({
         reason: "connect-failed",
         message: errorToMessage(cause),
+        ...(cause instanceof SandboxConnectHttpError ? { httpStatus: cause.status } : {}),
       }),
   });
 }

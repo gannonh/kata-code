@@ -295,4 +295,5 @@ export class SandboxRpcError extends Schema.TaggedErrorClass<SandboxRpcError>()(
     "internal",
   ]),
   message: Schema.String,
+  httpStatus: Schema.optional(Schema.Number),
 }) {}
