@@ -16,9 +16,7 @@ Feature tags live in `e2e/src/config/tags.ts` (`E2E_TAGS`); treat that file as t
 
 ## How to explore a new flow (preferred)
 
-**Default: Playwright UI / debug on the spec**, not `playwright-cli`.
-
-Electron E2E runs through an isolated dev stack (Vite + Playwright-launched Electron). Playwright UI/debug uses the same launch, pairing, auth, and ports as the real test. `playwright-cli attach --cdp=…` is optional and brittle here (port conflicts, short-lived test processes).
+Electron E2E runs through an isolated dev stack (Vite + Playwright-launched Electron). Playwright UI/debug uses the same launch, pairing, auth, and ports as the real test. `playwright-cli attach --cdp=…` is optional, `agent-browser` is often preffered for exploration/discovery.
 
 ```bash
 # Pick the smallest existing spec closest to your flow, then:
