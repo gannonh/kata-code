@@ -186,6 +186,13 @@ const savedEnvironmentHarness = vi.hoisted(() => {
     };
   });
 
+  const upsert = vi.fn((record: RegistryRecord) => {
+    registryById = {
+      ...registryById,
+      [record.environmentId]: record,
+    };
+  });
+
   const remove = vi.fn((environmentId: string) => {
     const { [environmentId]: _removedRecord, ...remainingRegistry } = registryById;
     const { [environmentId]: _removedRuntime, ...remainingRuntime } = runtimeById;
@@ -198,6 +205,7 @@ const savedEnvironmentHarness = vi.hoisted(() => {
       registryById = {};
       runtimeById = {};
       rename.mockClear();
+      upsert.mockClear();
       remove.mockClear();
     },
     setRegistry(next: Record<string, RegistryRecord>) {
@@ -210,6 +218,7 @@ const savedEnvironmentHarness = vi.hoisted(() => {
       return {
         byId: registryById,
         rename,
+        upsert,
         remove,
       };
     },
@@ -241,20 +250,21 @@ vi.mock("@clerk/react", () => ({
   }),
 }));
 
-vi.mock("../../environments/runtime", () => {
+const runtimeMockModule = vi.hoisted(() => {
+  const environmentId = "environment-local" as EnvironmentId;
   const primaryConnection = {
     kind: "primary" as const,
     knownEnvironment: {
       id: "environment-local",
       label: "Local environment",
       source: "manual" as const,
-      environmentId: EnvironmentId.make("environment-local"),
+      environmentId,
       target: {
         httpBaseUrl: "http://localhost:3000",
         wsBaseUrl: "ws://localhost:3000",
       },
     },
-    environmentId: EnvironmentId.make("environment-local"),
+    environmentId,
     client: {
       server: {
         subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
@@ -271,10 +281,8 @@ vi.mock("../../environments/runtime", () => {
 
   return {
     getEnvironmentHttpBaseUrl: () => "http://localhost:3000",
-    getSavedEnvironmentRecord: (environmentId: string) =>
-      savedEnvironmentHarness.getRecord(environmentId),
-    getSavedEnvironmentRuntimeState: (environmentId: string) =>
-      savedEnvironmentHarness.getRuntime(environmentId),
+    getSavedEnvironmentRecord: (id: string) => savedEnvironmentHarness.getRecord(id),
+    getSavedEnvironmentRuntimeState: (id: string) => savedEnvironmentHarness.getRuntime(id),
     hasSavedEnvironmentRegistryHydrated: () => true,
     listSavedEnvironmentRecords: () => savedEnvironmentHarness.listRecords(),
     resetSavedEnvironmentRegistryStoreForTests: () => undefined,
@@ -296,22 +304,40 @@ vi.mock("../../environments/runtime", () => {
     ensureEnvironmentConnectionBootstrapped: async () => undefined,
     getPrimaryEnvironmentConnection: () => primaryConnection,
     readEnvironmentConnection: () => primaryConnection,
+    reconcileSavedEnvironmentConnectionState: () => false,
     reconnectSavedEnvironment: vi.fn(),
-    removeSavedEnvironment: vi.fn(async (environmentId: string) => {
-      savedEnvironmentHarness.remove(environmentId);
+    removeSavedEnvironment: vi.fn(async (id: string) => {
+      savedEnvironmentHarness.remove(id);
     }),
     requireEnvironmentConnection: () => primaryConnection,
     resetEnvironmentServiceForTests: () => undefined,
     startEnvironmentConnectionService: () => undefined,
     subscribeEnvironmentConnections: () => () => {},
-    useSavedEnvironmentRegistryStore: (
-      selector: (state: ReturnType<typeof savedEnvironmentHarness.getRegistryState>) => unknown,
-    ) => selector(savedEnvironmentHarness.getRegistryState()),
-    useSavedEnvironmentRuntimeStore: (
-      selector: (state: ReturnType<typeof savedEnvironmentHarness.getRuntimeState>) => unknown,
-    ) => selector(savedEnvironmentHarness.getRuntimeState()),
+    useSavedEnvironmentRegistryStore: Object.assign(
+      (selector: (state: ReturnType<typeof savedEnvironmentHarness.getRegistryState>) => unknown) =>
+        selector(savedEnvironmentHarness.getRegistryState()),
+      {
+        getState: () => savedEnvironmentHarness.getRegistryState(),
+      },
+    ),
+    useSavedEnvironmentRuntimeStore: Object.assign(
+      (selector: (state: ReturnType<typeof savedEnvironmentHarness.getRuntimeState>) => unknown) =>
+        selector(savedEnvironmentHarness.getRuntimeState()),
+      {
+        getState: () => savedEnvironmentHarness.getRuntimeState(),
+      },
+    ),
   };
 });
+
+// ConnectionsSettings imports leaf modules to avoid a barrel↔service circular
+// ESM re-export failure in browser mode; mock all three resolution paths.
+vi.mock("../../environments/runtime", () => runtimeMockModule);
+vi.mock("../../environments/runtime/catalog", () => runtimeMockModule);
+vi.mock("../../environments/runtime/service", () => runtimeMockModule);
+vi.mock("~/environments/runtime", () => runtimeMockModule);
+vi.mock("~/environments/runtime/catalog", () => runtimeMockModule);
+vi.mock("~/environments/runtime/service", () => runtimeMockModule);
 
 function createBaseServerConfig(): ServerConfig {
   return {

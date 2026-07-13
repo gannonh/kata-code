@@ -124,6 +124,9 @@ import {
   type SavedEnvironmentRuntimeState,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
+  resolveSavedEnvironmentDisplayLabel,
+} from "~/environments/runtime/catalog";
+import {
   addSavedEnvironment,
   addManagedRelayEnvironment,
   connectDesktopSshEnvironment,
@@ -132,9 +135,8 @@ import {
   reconcileSavedEnvironmentConnectionState,
   reconnectSavedEnvironment,
   removeSavedEnvironment,
-  resolveSavedEnvironmentDisplayLabel,
   subscribeEnvironmentConnections,
-} from "~/environments/runtime";
+} from "~/environments/runtime/service";
 import { useUiStateStore } from "~/uiStateStore";
 import { resolveServerConfigVersionMismatch } from "~/versionSkew";
 import { useServerConfig } from "~/rpc/serverState";
