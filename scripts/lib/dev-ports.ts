@@ -64,9 +64,15 @@ export function resolveStartOffsetFromEnv(env: NodeJS.ProcessEnv = process.env):
   });
 }
 
+function createPortClaimServer(): ReturnType<typeof createServer> {
+  // Port probes reserve sockets only. Immediately close accidental health-check
+  // connections so Server.close() cannot wait indefinitely for a client.
+  return createServer((socket) => socket.destroy());
+}
+
 async function canListenOnHost(port: number, host: string): Promise<boolean> {
   return await new Promise((resolve) => {
-    const server = createServer();
+    const server = createPortClaimServer();
     server.unref();
     server.once("error", () => resolve(false));
     server.listen(port, host, () => {
@@ -166,7 +172,7 @@ async function tryClaimPortPair(
   const servers: ReturnType<typeof createServer>[] = [];
   const tryBind = (port: number, host: string) =>
     new Promise<boolean>((resolve) => {
-      const server = createServer();
+      const server = createPortClaimServer();
       server.once("error", () => {
         server.close(() => resolve(false));
       });
