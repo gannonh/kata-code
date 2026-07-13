@@ -59,9 +59,8 @@ export async function configureDefaultPiProvider(page: Page, config: PiSmokeConf
   }
 
   await dismissBlockingToasts(page);
-  const refreshButton = page.getByLabel("Refresh provider status");
-  await refreshButton.click();
-  await expect(refreshButton).toBeEnabled({ timeout: E2E_TIMEOUTS.authMs });
+  const piCard = toggleDetails.locator("xpath=ancestor::div[contains(@class, 'border-t')][1]");
+  await expect(piCard).toContainText("Authenticated", { timeout: E2E_TIMEOUTS.authMs });
 
   await page.getByRole("button", { name: "Back" }).click();
   await page
