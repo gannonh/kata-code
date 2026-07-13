@@ -41,7 +41,10 @@ export async function signInWithClerkGoogleTestUser(page: Page): Promise<void> {
   logHarnessPhase("Clerk ticket sign-in submitted.");
 }
 
-export async function expectSignedInClerkState(page: Page): Promise<void> {
+export async function expectSignedInClerkState(
+  page: Page,
+  options: { readonly requireVisibleAvatar?: boolean } = {},
+): Promise<void> {
   logHarnessPhase("Waiting for Clerk signed-in state...");
   try {
     await page.waitForFunction(() => window.Clerk?.user != null, undefined, {
@@ -53,6 +56,8 @@ export async function expectSignedInClerkState(page: Page): Promise<void> {
     );
   }
   logHarnessPhase("Clerk signed-in state confirmed.");
+
+  if (options.requireVisibleAvatar === false) return;
 
   const avatar = page.locator(".cl-userButton-root").first();
   await avatar.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.authMs }).catch(async () => {

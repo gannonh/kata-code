@@ -9,31 +9,50 @@ import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
 import { spawnWithArtifactLogs, terminateChildProcess } from "./processSpawn.ts";
-import { waitForWebDevServer } from "./readiness.ts";
 import { withTimeout } from "./withTimeout.ts";
 
 export interface DevStackHandle {
   readonly process: ChildProcess;
 }
 
-export function buildDevRunnerArgs(input: {
+interface DevRunnerArgsInput {
   readonly katacodeHome: string;
   readonly serverPort: number;
   readonly webPort: number;
-}): string[] {
-  // Vite only. Playwright launches the single Electron instance — dev:desktop would
-  // also auto-spawn Electron via dev-electron.mjs and cause duplicate backends/tokens.
+}
+
+function buildRunnerArgs(
+  mode: "dev" | "dev:web",
+  input: DevRunnerArgsInput,
+  webHost: "127.0.0.1" | "localhost",
+): string[] {
   return [
     "scripts/dev-runner.ts",
-    "dev:web",
+    mode,
     "--home-dir",
     input.katacodeHome,
     "--no-browser",
     "--port",
     String(input.serverPort),
     "--dev-url",
-    `http://127.0.0.1:${input.webPort}`,
+    `http://${webHost}:${input.webPort}`,
   ];
+}
+
+export function buildDevRunnerArgs(input: DevRunnerArgsInput): string[] {
+  // Vite only. Playwright launches the single Electron instance — dev:desktop would
+  // also auto-spawn Electron via dev-electron.mjs and cause duplicate backends/tokens.
+  return buildRunnerArgs("dev:web", input, "127.0.0.1");
+}
+
+export function buildWebDevRunnerArgs(input: DevRunnerArgsInput): string[] {
+  // The web runtime emits localhost API/WS URLs. Keep the pairing page on the
+  // same cookie host so its session credential authenticates those requests.
+  return buildRunnerArgs("dev", input, "localhost");
+}
+
+export function parsePairingUrl(output: string): string | undefined {
+  return output.match(/(?:Pairing URL|pairingUrl):\s*(https?:\/\/\S+)/u)?.[1];
 }
 
 async function readDevStackLogTail(
@@ -49,10 +68,13 @@ async function readDevStackLogTail(
   }
 }
 
-async function devStackTimeoutDetails(context: E2ERunContext): Promise<string> {
-  const stderr = await readDevStackLogTail(context, "dev-stack-stderr");
-  const stdout = await readDevStackLogTail(context, "dev-stack-stdout");
-  const spawnError = await readDevStackLogTail(context, "dev-stack-spawn-error");
+async function devStackTimeoutDetails(
+  context: E2ERunContext,
+  label = "dev-stack",
+): Promise<string> {
+  const stderr = await readDevStackLogTail(context, `${label}-stderr`);
+  const stdout = await readDevStackLogTail(context, `${label}-stdout`);
+  const spawnError = await readDevStackLogTail(context, `${label}-spawn-error`);
   const sections = [
     `artifactRoot=${context.artifactRoot}`,
     spawnError ? `dev-stack-spawn-error:\n${spawnError}` : undefined,
@@ -65,15 +87,77 @@ async function devStackTimeoutDetails(context: E2ERunContext): Promise<string> {
 export async function startDevStack(context: E2ERunContext): Promise<DevStackHandle> {
   return await withTimeout(
     "Dev stack startup",
-    E2E_TIMEOUTS.devStackMs,
+    Math.max(E2E_TIMEOUTS.devStackMs, E2E_TIMEOUTS.pairingMs),
     async (signal) => startDevStackInner(context, signal),
     () => devStackTimeoutDetails(context),
   );
 }
 
+function createOutputWaiter(
+  signal: AbortSignal,
+  match: (output: string) => string | undefined,
+): { readonly push: (chunk: string) => void; readonly result: Promise<string> } {
+  let output = "";
+  let settled = false;
+  let resolveResult!: (value: string) => void;
+  let rejectResult!: (error: unknown) => void;
+  const result = new Promise<string>((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject;
+  });
+  signal.addEventListener("abort", () => rejectResult(signal.reason), { once: true });
+  return {
+    push: (chunk) => {
+      if (settled) return;
+      output += chunk;
+      const matched = match(output);
+      if (matched !== undefined) {
+        settled = true;
+        output = "";
+        resolveResult(matched);
+      }
+    },
+    result,
+  };
+}
+
+export async function startWebDevStack(
+  context: E2ERunContext,
+): Promise<DevStackHandle & { readonly pairingUrl: string }> {
+  return await withTimeout(
+    "Web dev stack startup",
+    Math.max(E2E_TIMEOUTS.devStackMs, E2E_TIMEOUTS.pairingMs),
+    async (signal) => {
+      logHarnessPhase(
+        `Starting full web dev stack (web=${context.webPort}, api=${context.serverPort}, home=${context.katacodeHome})`,
+      );
+      const pairingUrlWaiter = createOutputWaiter(signal, parsePairingUrl);
+      await context.releasePortClaim();
+      const { process: child } = spawnWithArtifactLogs(context, {
+        label: "web-stack",
+        command: process.execPath,
+        args: buildWebDevRunnerArgs({
+          katacodeHome: context.katacodeHome,
+          serverPort: context.serverPort,
+          webPort: context.webPort,
+        }),
+        cwd: context.repoRoot,
+        env: buildDevStackEnv(context),
+        onOutput: pairingUrlWaiter.push,
+      });
+      registerCleanup(context, async () => terminateChildProcess(child));
+      // The pairing URL is emitted only after both the server and Vite startup
+      // have completed. Browser navigation is the authoritative HTTP check.
+      const pairingUrl = await pairingUrlWaiter.result;
+      return { process: child, pairingUrl };
+    },
+    () => devStackTimeoutDetails(context, "web-stack"),
+  );
+}
+
 async function startDevStackInner(
   context: E2ERunContext,
-  signal: AbortSignal,
+  _signal: AbortSignal,
 ): Promise<DevStackHandle> {
   await assertDesktopBuildArtifacts(context.repoRoot);
 
@@ -81,6 +165,7 @@ async function startDevStackInner(
     `Starting Vite dev server (web=${context.webPort}, api will be provided by Electron on ${context.serverPort}, home=${context.katacodeHome})`,
   );
 
+  await context.releasePortClaim();
   const { process: child } = spawnWithArtifactLogs(context, {
     label: "dev-stack",
     command: process.execPath,
@@ -97,14 +182,8 @@ async function startDevStackInner(
     await terminateChildProcess(child);
   });
 
-  // Vite is about to bind the ports; release the placeholder sockets so the
-  // bind succeeds. Releasing after spawn keeps the claim held through the
-  // fork/exec gap, closing the TOCTOU window.
-  await context.releasePortClaim();
-
-  logHarnessPhase("Waiting for Vite dev server...");
-  await waitForWebDevServer(context.webPort, E2E_TIMEOUTS.devStackMs, signal);
-  logHarnessPhase("Vite dev server is ready.");
-
+  // Electron startup and renderer-window detection are the authoritative Vite
+  // readiness checks, so the stack can continue as soon as the process owns its
+  // claimed ports.
   return { process: child };
 }

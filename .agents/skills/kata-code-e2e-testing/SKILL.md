@@ -1,9 +1,9 @@
 ---
 name: kata-code-e2e-testing
-description: Author, debug, and run local Playwright Electron E2E tests for Kata Code using the reusable harness and Kata-specific flows. Use whenever working with anything under e2e/ — adding or updating specs, fixing a flaky or hanging Electron test, discovering locators, composing harness/flow helpers, choosing a feature tag (@smoke, @auth, @settings, @agent), or running e2e:dev/headed/ui/release. Also use when the request implies Electron desktop UI verification ("add a smoke check for X", "why does my test stall at pairing", "the theme spec is failing") even if E2E is not named explicitly. For mobile Maestro iOS-Simulator E2E, see the Mobile section and the dedicated mobile-e2e-test-author skill.
+description: Author, debug, and run local Playwright web and Electron E2E tests for Kata Code using the reusable harness and Kata-specific flows. Use whenever working with anything under e2e/ — adding or updating shared specs, fixing flaky browser or Electron tests, discovering locators, composing harness/flow helpers, choosing a feature tag (@smoke, @auth, @settings, @agent), or running web/desktop/headed/ui/release projects. For mobile Maestro iOS-Simulator E2E, see the Mobile section and the dedicated mobile-e2e-test-author skill.
 ---
 
-# E2E test author
+# Web and Electron E2E test author
 
 ## Before writing code
 
@@ -49,6 +49,8 @@ The harness forwards `KATACODE_DESKTOP_REMOTE_DEBUGGING_PORT` as `--remote-debug
 ## Rules
 
 - Compose tests from `e2e/src/harness/` and `e2e/src/flows/` — do not duplicate launch, auth, isolation, or navigation logic in spec files.
+- Shared specs import `test` from `testFixtures.ts` and use `appPage` or `authenticatedAppPage`. They run under both `desktop-dev` and `web-dev`.
+- Guard Electron-native behavior explicitly with `appTarget === "desktop"`. Keep browser codegen output in `e2e/tests/web/recorded.spec.ts` using `webTest`; that template remains web-only.
 - Keep generic Electron/process concerns in `harness/` and Kata UI/product language in `flows/`.
 - Do **not** mock application services: no Playwright `route().fulfill()`, HAR replay, MSW, or fake provider backends.
 - Store secrets and auth state only under ignored paths (`e2e/.auth/`, Playwright output dirs, local `.env.local`).
@@ -107,8 +109,9 @@ Do not run `dev:desktop` inside E2E — it would spawn a second Electron and cau
 
 ### Harness (`e2e/src/harness/`)
 
-- `testFixtures.ts` — `test`, `appWindow`, `authenticatedAppWindow`, `runContext`, `launchTarget`
-- `appLaunch.ts` — dev stack + Electron launch (technical readiness only)
+- `testFixtures.ts` — `test`, portable `appPage` / `authenticatedAppPage`, compatibility window aliases, `appTarget`, `runContext`, `launchTarget`
+- `appLaunch.ts` — Electron dev/release launch (technical readiness only)
+- `devStack.ts` — isolated Vite-only desktop renderer and full web stack launch
 - `isolatedRun.ts` — temp `KATACODE_HOME`, shared dev-runner port allocation, cleanup
 - `readiness.ts` — TCP / Vite readiness probes
 - `env.ts` — prerequisite checks (`readClerkPrerequisites`, `readAgentProviderPrerequisites`, …)
@@ -139,11 +142,11 @@ import { E2E_TAGS } from "../../src/config/tags.ts";
 import { test, expect } from "../../src/harness/testFixtures.ts";
 
 test.describe(`App launch ${E2E_TAGS.smoke}`, () => {
-  test("launches Electron past pairing and reaches the app shell", async ({
+  test("launches the app past pairing and reaches the app shell", async ({
     launchedApp,
-    appWindow,
+    appPage,
   }) => {
-    await expect(appWindow.getByTestId("command-palette-trigger")).toBeVisible();
+    await expect(appPage.getByTestId("command-palette-trigger")).toBeVisible();
     assertNoFatalLaunchErrors(launchedApp.readFatalErrors());
   });
 });
@@ -157,12 +160,12 @@ import { expectResolvedTheme, openSettings, setTheme } from "../../src/flows/set
 import { test } from "../../src/harness/testFixtures.ts";
 
 test.describe(`Settings theme ${E2E_TAGS.settings}`, () => {
-  test("persists dark theme after reload", async ({ authenticatedAppWindow }) => {
-    await openSettings(authenticatedAppWindow);
-    await setTheme(authenticatedAppWindow, "dark");
-    await authenticatedAppWindow.reload();
-    await openSettings(authenticatedAppWindow);
-    await expectResolvedTheme(authenticatedAppWindow, "dark");
+  test("persists dark theme after reload", async ({ authenticatedAppPage }) => {
+    await openSettings(authenticatedAppPage);
+    await setTheme(authenticatedAppPage, "dark");
+    await authenticatedAppPage.reload();
+    await openSettings(authenticatedAppPage);
+    await expectResolvedTheme(authenticatedAppPage, "dark");
   });
 });
 ```
@@ -185,15 +188,15 @@ test.describe(`Deterministic agent chat ${E2E_TAGS.agent}`, () => {
   test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
 
   test("returns the exact expected assistant message from a real provider", async ({
-    authenticatedAppWindow,
+    authenticatedAppPage,
     runContext,
   }) => {
     const turn = assertAgentPrerequisites("deterministic agent chat");
     const seededPath = await createSeededWorkspace(runContext, "agent-chat-basic");
-    await createOrOpenProject(authenticatedAppWindow, seededPath);
-    await selectComposerModel(authenticatedAppWindow, turn.model);
-    await sendAgentInstruction(authenticatedAppWindow, turn.prompt);
-    await expectAssistantReply(authenticatedAppWindow, turn.expected, turn);
+    await createOrOpenProject(authenticatedAppPage, seededPath);
+    await selectComposerModel(authenticatedAppPage, turn.model);
+    await sendAgentInstruction(authenticatedAppPage, turn.prompt);
+    await expectAssistantReply(authenticatedAppPage, turn.expected, turn);
   });
 });
 ```
@@ -202,6 +205,9 @@ test.describe(`Deterministic agent chat ${E2E_TAGS.agent}`, () => {
 
 ```bash
 vp run e2e --list --grep @your-tag
+vp run e2e:desktop --grep @your-tag                         # Electron dev
+vp run e2e:web --grep @your-tag                             # Chromium dev
+vp run e2e:cross-platform --grep @your-tag                  # both dev targets
 vp run e2e:headed --project desktop-dev --grep @your-tag   # maintainer verify
 vp run e2e:ui --project desktop-dev --grep @your-tag       # explore / debug
 vp check

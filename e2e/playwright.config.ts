@@ -11,7 +11,6 @@ const e2eRoot = resolveE2eRoot();
 const webUrl = process.env["KATACODE_WEB_URL"] ?? "http://localhost:5733";
 
 const WEB_TEST_IGNORE = /web\/.*\.spec\.ts/;
-const WEB_TEST_MATCH = /web\/.*\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./tests",
@@ -48,6 +47,7 @@ export default defineConfig({
       testIgnore: WEB_TEST_IGNORE,
       dependencies: ["setup"],
       metadata: {
+        appTarget: "desktop",
         launchTarget: "dev",
       },
     },
@@ -57,12 +57,18 @@ export default defineConfig({
       testIgnore: WEB_TEST_IGNORE,
       dependencies: ["setup"],
       metadata: {
+        appTarget: "desktop",
         launchTarget: "release",
       },
     },
     {
       name: "web-dev",
-      testMatch: WEB_TEST_MATCH,
+      testMatch: /.*\.spec\.ts/,
+      dependencies: ["setup"],
+      metadata: {
+        appTarget: "web",
+        launchTarget: "dev",
+      },
       use: {
         baseURL: webUrl,
       },

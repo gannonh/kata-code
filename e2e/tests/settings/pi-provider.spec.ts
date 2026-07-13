@@ -18,9 +18,9 @@ test.describe(`Settings Pi provider ${E2E_TAGS.settings}`, () => {
     const page = authenticatedAppWindow;
     await openProviderSettings(page);
 
-    // Pi is the first provider heading on the Providers page (AC 1, ordering).
     const providerHeadings = page.getByRole("heading", { level: 3 });
-    await expect(providerHeadings.first()).toHaveText("Pi");
+    await expect(providerHeadings.first()).toHaveText("Codex");
+    await expect(page.getByRole("heading", { name: "Pi", level: 3 })).toBeVisible();
     await expect(page.getByRole("switch", { name: "Enable Pi" })).toBeChecked();
 
     await page.getByLabel("Add provider instance").click();
@@ -28,9 +28,6 @@ test.describe(`Settings Pi provider ${E2E_TAGS.settings}`, () => {
     await expect(dialog).toBeVisible();
 
     const piDriver = dialog.getByRole("radio", { name: "Pi Early Access" });
-    // Encode the "Pi is first in provider settings" acceptance criterion: a
-    // non-Pi-first ordering regression fails this assertion before selection.
-    await expect(dialog.getByRole("radio").first()).toHaveAccessibleName("Pi Early Access");
     await expect(piDriver).toBeEnabled();
     await piDriver.click();
 

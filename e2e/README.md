@@ -1,6 +1,6 @@
-# Kata Code local Electron E2E
+# Kata Code web and Electron E2E
 
-Local-only Playwright end-to-end tests for the Kata Code Electron desktop app on macOS. The suite uses real Clerk, real provider APIs, and real local workspace data. It is intentionally **not** wired into CI.
+Playwright end-to-end tests for the Kata Code web and Electron desktop apps. Shared specs run against either target using the same page-oriented fixture contract and real services.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Local-only Playwright end-to-end tests for the Kata Code Electron desktop app on
 
 Set these in `.env.local` (gitignored; recommended) or export them in your shell. The E2E runner loads `.env` and `.env.local` from the repo root automatically.
 
-### Clerk (required for `@auth`, `@smoke`, `@settings`)
+### Clerk (required for authenticated specs such as `@settings` and `@agent`)
 
 | Variable                       | Purpose                                              |
 | ------------------------------ | ---------------------------------------------------- |
@@ -67,12 +67,7 @@ Release launches use isolated `KATACODE_HOME` and `KATACODE_PORT` only. The harn
 
 ### Session model
 
-Each spec file shares **one session** (one Electron app, one Vite dev stack,
-one isolated `KATACODE_HOME`, one Clerk sign-in) across all of its tests. The
-first test in a file pays the startup cost; subsequent tests reuse the session
-and run in seconds. Tests run serially within a file (`fullyParallel: false`)
-and each file is isolated from the others. Multi-test files reset to the
-threads home between tests via `resetAppToHome`.
+Each spec file shares one isolated session with its own `KATACODE_HOME`, ports, workspace root, and artifact manifest. Tests run serially within the file and should call `resetAppToHome` in `beforeEach` when they mutate navigation or shared UI state. Desktop projects launch Electron with the Vite renderer; `web-dev` launches the full server and web stack and pairs a browser context. The harness cleans up after the file. Clerk sign-in runs lazily when a test requests `authenticatedAppPage` or its compatibility alias `authenticatedAppWindow`.
 
 If a provider turn fails (out of credits, auth error, rate limit, model
 unavailable), the agent-chat flows fail fast on the thread error banner with
@@ -111,10 +106,16 @@ pass `--all`.
 # List tests
 vp run e2e --list
 
-# Dev target (desktop-dev)
-vp run e2e --project desktop-dev --grep @smoke
+# Desktop dev target
+vp run e2e:desktop --grep @smoke
 
-# Dev target with Playwright --headed (inspector / PWDEBUG workflows)
+# Web dev target
+vp run e2e:web --grep @smoke
+
+# Run shared specs against both targets
+vp run e2e:cross-platform --grep @smoke
+
+# Desktop dev target with Playwright --headed (inspector / PWDEBUG workflows)
 vp run e2e:headed --project desktop-dev --grep @smoke
 
 # Interactive Playwright UI
@@ -128,13 +129,13 @@ On macOS, Playwright Electron launches always open a visible app window. **`e2e:
 
 ### Feature tags
 
-| Tag         | Coverage                              |
-| ----------- | ------------------------------------- |
-| `@smoke`    | Electron launch + signed-in surface   |
-| `@auth`     | Clerk Google test-user sign-in        |
-| `@settings` | Settings theme persistence            |
-| `@agent`    | Real LLM deterministic reply          |
-| `@cursor`   | Cursor skill discovery and invocation |
+| Tag         | Coverage                               |
+| ----------- | -------------------------------------- |
+| `@smoke`    | App launch, pairing, and shell surface |
+| `@auth`     | Clerk Google test-user sign-in         |
+| `@settings` | Settings theme persistence             |
+| `@agent`    | Real LLM deterministic reply           |
+| `@cursor`   | Cursor skill discovery and invocation  |
 
 Filter with `--grep`, for example `vp run e2e --project desktop-dev --grep @settings`.
 
@@ -158,12 +159,12 @@ Additional outputs:
 
 ## Architecture
 
-- `e2e/src/harness/` — reusable Electron/process/isolation helpers (no Kata product selectors)
+- `e2e/src/harness/` — reusable web/Electron process, browser, and isolation helpers (no Kata product selectors)
 - `e2e/src/flows/` — Kata-specific UI workflows (auth, settings, workspace, agent chat)
 - `e2e/src/assertions/` — launch health checks only (`assertNoFatalLaunchErrors`)
 - `e2e/tests/` — small starter specs composing harness + flows
 
-Default `vp run e2e` targets the `desktop-dev` project. Use `vp run e2e:release` for packaged app validation.
+Default `vp run e2e` targets `desktop-dev`. Use `vp run e2e:web` for Chromium, `vp run e2e:cross-platform` for both development targets, and `vp run e2e:release` for a packaged app.
 
 Service mocking (`route().fulfill()`, HAR replay, MSW, fake backends) is out of scope. Native OS dialog control through Electron main-process hooks is allowed only for OS UI determinism and must be documented at the call site.
 
@@ -191,11 +192,14 @@ pnpm run dev:web
 # Open codegen recorder
 pnpm run e2e:codegen
 
-# Run recorded web tests
+# Run only recorded web tests with the codegen config
+pnpm run e2e:recorded
+
+# Run all shared and recorded specs against web-dev
 pnpm run e2e:web
 ```
 
-Config: [`e2e/playwright.codegen.config.ts`](e2e/playwright.codegen.config.ts). Recorded tests go in [`e2e/tests/web/`](e2e/tests/web/). Override the URL with `KATACODE_WEB_URL`.
+Config: [`e2e/playwright.codegen.config.ts`](e2e/playwright.codegen.config.ts). Recorded tests go in [`e2e/tests/web/`](e2e/tests/web/). `KATACODE_WEB_URL` overrides the URL for codegen and recorded-only runs; shared `web-dev` specs always use their isolated allocated URL.
 
 ## Adopting this foundation in other repos
 

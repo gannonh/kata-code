@@ -12,13 +12,13 @@ Every end-to-end test in the repo, across both suites, in one place. Tests live 
 
 Tag selection differs by suite: desktop uses Playwright `--grep @tag`; mobile uses `--include-tags @tag`.
 
-## Desktop / web E2E — Playwright Electron
+## Shared desktop / web E2E — Playwright
 
-Specs under [`e2e/tests/`](../../e2e/tests/). Runs in CI.
+Specs under [`e2e/tests/`](../../e2e/tests/) use a project-aware fixture and can run against Electron (`desktop-dev`) or Chromium (`web-dev`). The browser recording template under `e2e/tests/web/` remains web-only.
 
 | Test                                                                                   | Tag         | Covers                                                                               |
 | -------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| [`smoke/app-launch.spec.ts`](../../e2e/tests/smoke/app-launch.spec.ts)                 | `@smoke`    | Launches Electron past pairing, reaches the app shell                                |
+| [`smoke/app-launch.spec.ts`](../../e2e/tests/smoke/app-launch.spec.ts)                 | `@smoke`    | Launches either target past pairing and reaches the app shell                        |
 | [`agent/deterministic-chat.spec.ts`](../../e2e/tests/agent/deterministic-chat.spec.ts) | `@agent`    | Exact assistant reply from a real provider                                           |
 | [`agent/cursor-skills.spec.ts`](../../e2e/tests/agent/cursor-skills.spec.ts)           | `@cursor`   | Cursor filesystem skills in the Composer menu and path-qualified token insertion     |
 | [`agent/pi-smoke.spec.ts`](../../e2e/tests/agent/pi-smoke.spec.ts)                     | `@pi`       | Pi streaming, interrupt/stop, tool-call work row, runtime-mode warning (creds-gated) |
@@ -48,9 +48,10 @@ pnpm exec playwright install
 ### Commands
 
 ```bash
-vp run e2e --list                                  # list tests
-vp run e2e --project desktop-dev                   # run all (dev)
-vp run e2e --project desktop-dev --grep @smoke     # by tag: @smoke | @agent | @settings
+vp run e2e --list                                  # list desktop tests
+vp run e2e:desktop                                 # run shared specs on Electron
+vp run e2e:web                                     # run shared specs + recording template on Chromium
+vp run e2e:cross-platform --grep @smoke            # run a selection on both dev targets
 vp run e2e:headed --project desktop-dev --grep @smoke
 vp run e2e:ui --grep @settings                     # Playwright UI mode
 
@@ -96,7 +97,7 @@ For locator discovery, editing flows, and authoring new tests, see [Mobile E2E a
 
 ## Web E2E — Playwright (browser)
 
-Web tests run in a Chromium browser against the full dev stack (`pnpm run dev`). The [`webSetup.ts`](../../e2e/src/harness/webSetup.ts) fixture starts the dev server as a child process, captures the `pairingUrl` from server stdout, and authenticates by navigating to the pairing URL. Tests receive an authenticated `webPage` with the app shell ready.
+The `web-dev` project runs shared specs in Chromium against an isolated full dev stack. The project-aware fixture allocates a temporary home, ports, workspace and artifacts, captures the startup pairing URL, and supplies `appPage` or `authenticatedAppPage`. [`webSetup.ts`](../../e2e/src/harness/webSetup.ts) remains available to the browser-only recording template.
 
 Specs under [`e2e/tests/web/`](../../e2e/tests/web/). Template: [`recorded.spec.ts`](../../e2e/tests/web/recorded.spec.ts). Config: [`e2e/playwright.config.ts`](../../e2e/playwright.config.ts) (project `web-dev`), [`e2e/playwright.codegen.config.ts`](../../e2e/playwright.codegen.config.ts) (codegen).
 
@@ -107,22 +108,22 @@ Specs under [`e2e/tests/web/`](../../e2e/tests/web/). Template: [`recorded.spec.
 ### Commands
 
 ```bash
-# Run web tests (fixture starts the dev server automatically)
-npx playwright test --config e2e/playwright.config.ts --project web-dev
+# Run shared and recorded web tests (fixtures start isolated dev servers)
+pnpm run e2e:web
 
 # Open codegen — records interactions in the browser
 pnpm run dev   # start the full dev stack
 npx playwright codegen --config e2e/playwright.codegen.config.ts
 
-# Run web tests with the codegen config
-npx playwright test --config e2e/playwright.codegen.config.ts
+# Run only browser-recorded tests with the codegen config
+pnpm run e2e:recorded
 ```
 
-Override the web URL with `KATACODE_WEB_URL` (default `http://localhost:5733`).
+`KATACODE_WEB_URL` overrides the URL for codegen and recorded-only runs (default `http://localhost:5733`). Shared `web-dev` specs use an isolated allocated URL.
 
 ### Writing web tests
 
-Use the `webTest` fixture from [`webSetup.ts`](../../e2e/src/harness/webSetup.ts) instead of `@playwright/test` directly. The `webPage` fixture provides an authenticated page:
+Shared tests use `test` from `testFixtures.ts` and the portable `appPage` or `authenticatedAppPage` fixtures. Codegen output kept under `tests/web/` uses the `webTest` fixture from [`webSetup.ts`](../../e2e/src/harness/webSetup.ts); `webPage` provides a paired page:
 
 ```ts
 import { webTest as test, expect } from "../../src/harness/webSetup.ts";
