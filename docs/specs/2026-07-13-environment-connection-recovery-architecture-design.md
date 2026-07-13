@@ -20,6 +20,20 @@ focused transport and web recovery suite passed 39 tests after the rollback.
 This spec covers Phases 1 through 5. It requires maintainer approval before the
 Build phase.
 
+## Review history
+
+A fresh `cursor/grok-4.5:fas` reviewer completed an adversarial read-only pass on
+2026-07-13 and recommended **Approve after fixes**. This revision incorporates
+all blocking and pre-approval findings: separate environment and subscription
+readiness, remove the transport subscription retry schedule, prove server turn
+continuity in Phase 1, migrate all connection-state vocabularies, delete inferred
+retry deadlines, classify RPC methods, define the shared web/Electron fault
+proxy, scope request tracking per environment, and name the manual evidence set.
+The review's description of `WsTransport.subscribe` as a physical reconnect
+owner was narrowed: its retry loop does not create sockets, but it remains an
+independent stream retry scheduler and must be removed before the single-owner
+invariant is true.
+
 ## Goal
 
 Make one deep environment connection module the sole owner of connection
@@ -38,10 +52,13 @@ never replay mutating RPC requests without an idempotency contract.
 - [Provider architecture](/architecture/providers.md)
 - [E2E testing foundation](/specs/2026-06-21-e2e-testing-foundation-design.md)
 - `packages/client-runtime/src/environmentConnection.ts`
+- `packages/client-runtime/src/environmentRuntimeState.ts`
+- `packages/client-runtime/src/wsRpcClient.ts`
 - `packages/client-runtime/src/wsTransport.ts`
 - `packages/client-runtime/src/wsRpcProtocol.ts`
 - `apps/web/src/environments/runtime/service.ts`
 - `apps/web/src/rpc/wsConnectionState.ts`
+- `apps/web/src/rpc/requestLatencyState.ts`
 - `apps/web/src/components/WebSocketConnectionSurface.tsx`
 - `apps/server/src/vcs/VcsStatusBroadcaster.ts`
 - `apps/server/src/vcs/GitVcsDriverCore.ts`
@@ -152,13 +169,25 @@ Its observable state is a discriminated union with these states:
 
 - `idle`: connection has not been requested.
 - `connecting`: one generation is opening, with generation and attempt identity.
-- `connected`: the generation is open and required bootstrap snapshots arrived.
+- `connected`: the generation is open and the environment-level bootstrap gate
+  resolved.
 - `backingOff`: the next retry deadline and last failure are known.
 - `failed`: configured automatic attempts are exhausted.
 - `disposed`: terminal state with no active socket or retry timer.
 
+The environment-level bootstrap gate covers shell state plus lifecycle and
+configuration snapshots when that connection observes them. Per-thread detail,
+terminal attachment, preview, VCS, and other optional streams have independent
+per-subscription readiness. They never block the environment from becoming
+`connected`.
+
 Network availability is explicit state metadata. The UI derives `offline` from
-that metadata instead of creating a second recovery state machine.
+that metadata instead of creating a second recovery state machine. This union is
+the canonical connection model and replaces or maps the current
+`EnvironmentConnectionState` in `environmentRuntimeState.ts`, the web
+`WsConnectionStatus` phase fields, and saved-environment connection strings.
+Web and mobile consume the same shared state and only project platform display
+labels.
 
 The module exposes connection intent, state observation, RPC access, durable
 subscription registration, explicit manual retry, and disposal. Exact
@@ -194,8 +223,13 @@ reconnect owner.
   generation.
 - Old-generation lifecycle events and stream values are rejected by generation
   identity.
+- `WsTransport.subscribe` no longer owns a forever retry delay or starts stream
+  attempts against a failed protocol session. Subscription lifetimes are bound
+  to one generation; Phase 3's registry is the only restart path.
 - The state exposed to the UI contains the scheduler's actual attempt count and
-  retry deadline. UI code does not reconstruct retry timing.
+  retry deadline. UI code does not reconstruct retry timing. The existing
+  `applyDisconnectState` deadline inference and coordinator retry watchdog are
+  removed during migration.
 
 ### Environment isolation
 
@@ -206,6 +240,8 @@ by that environment connection.
 - Saved environment cards observe their own state.
 - A saved environment event cannot mutate primary state, request latency, retry
   count, toast state, or socket generation.
+- `clearAllTrackedRpcRequests` is replaced by per-environment request tracking;
+  one connection clears only its own pending acknowledgements.
 - Browser resume may call connection intent for each environment independently.
 
 The singleton `wsConnectionStatusAtom` and global request-clear behavior are
@@ -225,9 +261,26 @@ RPC work has three recovery classes:
    ambiguous disconnect surfaces an error that tells the caller to reconcile
    current state before another action.
 
-`subscribe()`-style long-lived state streams use class 1. Progress streams tied
-to one operation use class 3 unless their server contract explicitly defines a
-resumable cursor.
+The preliminary method inventory is:
+
+| Recovery class                       | Methods and default                                                                                                                                                                                                                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Durable read subscription            | `subscribeServerLifecycle`, `subscribeServerConfig`, `subscribeAuthAccess`, `subscribeShell`, `subscribeThread`, `subscribeVcsStatus`, `subscribeTerminalEvents`, `subscribeTerminalMetadata`, `subscribePreviewEvents`, and `subscribeDiscoveredLocalServers` restart from authoritative server state. |
+| Unary request                        | Every unary request fails on generation loss. The ADR may opt in idempotent reads such as list/get/browse/diff/status methods only after documenting evidence and caller behavior.                                                                                                                      |
+| Mutating request or operation stream | Mutation methods, `gitRunStackedAction`, `cloudInstallRelayClient`, sandbox test/login progress, `terminalAttach`, and `previewAutomationConnect` never restart automatically unless a later server contract adds an operation ID or resumable cursor.                                                  |
+
+Phase 1 produces an exhaustive method-by-method ADR inventory. An unlisted
+stream defaults to class 3, and an unlisted unary request fails without automatic
+retry.
+
+### Server turn continuity contract
+
+A client WebSocket disconnect must not abort an accepted provider turn or its
+orchestration processing. After reconnect, a new `subscribeThread` snapshot must
+contain the current partial or completed turn. Phase 1 proves this behavior with
+a real server integration test before Phase 2 starts. If the server aborts or
+loses accepted turn state on client disconnect, Build stops and returns to Plan
+to redefine AC-10 and the reconciliation UX.
 
 ### VCS remote refresh scheduler
 
@@ -256,21 +309,37 @@ failure cooldown.
 5. Prove in an integration spike that a non-retrying Effect protocol session
    terminates cleanly on socket loss and can be disposed without leaving a
    physical retry active. Phase 2 is blocked until this proof passes.
-6. Correct the stale client transport section in provider architecture and link
-   the new ADR and this spec.
+6. Prove the server turn continuity contract: client disconnect does not cancel
+   an accepted turn, and a later thread snapshot contains its partial or
+   completed state. Phase 2 is blocked until this proof passes.
+7. Prove one harness-owned WebSocket reverse proxy can route both `web-dev` and
+   `desktop-dev` through an advertised proxy port to a separate real server
+   upstream port. Phase 5 fault work is blocked until both targets pass.
+8. Inventory every RPC method into the three recovery classes in the ADR. Treat
+   unlisted streams as operation streams and never auto-retry them.
+9. Define the canonical state migration from `EnvironmentConnectionState`,
+   `WsConnectionStatus`, and saved-environment state to the shared union.
+10. Correct the stale client transport section in provider architecture and
+    link the new ADR and this spec.
 
 ### Phase 2: Install one reconnect owner
 
 1. Deepen `EnvironmentConnection` to own one physical session generation and
    the retry scheduler.
 2. Configure Effect protocol sessions without internal automatic reconnect.
-3. Migrate primary and saved connections to per-environment observable state.
+3. Migrate primary, saved, web, and mobile consumers to the canonical
+   per-environment observable state; remove or deprecate the prior state
+   vocabularies in the same phase.
 4. Replace focus, online, visibility, pageshow, timeout, and manual replacement
    calls with coalesced connection intents.
 5. Make the web connection coordinator display primary state and submit manual
-   intent only. Remove its inferred retry watchdog.
-6. Fence lifecycle events and physical sockets by environment and generation.
-7. Remove the singleton connection state once all consumers use environment
+   intent only. Remove its inferred retry watchdog and all locally reconstructed
+   retry deadlines.
+6. Remove `WsTransport.subscribe`'s independent retry schedule. A stream attempt
+   is generation-scoped and cannot open a socket, replace a session, or retry
+   against a failed protocol.
+7. Fence lifecycle events and physical sockets by environment and generation.
+8. Remove the singleton connection state once all consumers use environment
    state.
 
 ### Phase 3: Separate subscription and request recovery
@@ -279,9 +348,10 @@ failure cooldown.
    module.
 2. Restart each active durable subscription exactly once after a generation
    reaches the open state.
-3. Require authoritative snapshots for shell, thread detail, server lifecycle,
-   config, terminals, and other retained state streams before their bootstrap
-   gates resolve.
+3. Resolve the environment-level bootstrap gate from shell plus applicable
+   lifecycle/config snapshots. Resolve thread, terminal, preview, VCS, and other
+   retained streams through independent per-subscription readiness after their
+   authoritative snapshot or first contract-defined ready event.
 4. Keep old-generation events fenced after replacement.
 5. Return typed connection-loss errors for unary requests and operation streams.
 6. Add explicit retry only at call sites whose operations are proven idempotent.
@@ -303,10 +373,12 @@ failure cooldown.
 
 ### Phase 5: Real-runtime fault acceptance
 
-1. Add a harness-controlled WebSocket fault adapter that sits between a real
-   client runtime and real Kata server. It records attempts and can close,
-   pause, or restore one environment connection without manually opening mock
-   replacement sockets.
+1. Add a harness-owned local WebSocket reverse proxy on the client's advertised
+   server port, with the real Kata server on a separately allocated upstream
+   port. Both `web-dev` and `desktop-dev` route through this same proxy seam. It
+   records attempts and can close, pause, reject, or restore one environment
+   connection without production fault RPCs or manually opened mock replacement
+   sockets.
 2. Cover primary recovery while one saved environment fails repeatedly.
 3. Cover an interrupted active chat response and assert completion appears
    without refresh.
@@ -325,11 +397,14 @@ failure cooldown.
 ## Acceptance criteria
 
 1. **AC-1, recovery decision:** An accepted ADR names the environment connection
-   module as the only automatic reconnect owner and defines the three RPC
-   recovery classes.
+   module as the only automatic reconnect owner, defines the three RPC recovery
+   classes, and classifies every current RPC method. Unlisted streams default to
+   class 3 and unlisted unary requests receive no automatic retry.
 2. **AC-2, explicit state:** Connection state is a discriminated union covering
    `idle`, `connecting`, `connected`, `backingOff`, `failed`, and `disposed`;
-   transition tests reject invalid transitions and stale generations.
+   transition tests reject invalid transitions and stale generations. Web,
+   mobile, primary, and saved-environment consumers no longer maintain a second
+   connection-state vocabulary.
 3. **AC-3, diagnostic identity:** Every connection transition diagnostic carries
    `environmentId`, generation, attempt, and reason. A captured recovery log can
    reconstruct one environment's complete sequence without relying on socket
@@ -342,23 +417,30 @@ failure cooldown.
    disconnected environment create one connection generation. Intents while
    connected create none.
 6. **AC-6, actual retry state:** UI attempt count and retry deadline equal values
-   emitted by the connection scheduler. No web timer computes a replacement
-   retry deadline or replaces a session because a deadline appears stalled.
+   emitted by the connection scheduler. No web timer or disconnect reducer
+   computes a replacement retry deadline or replaces a session because a
+   deadline appears stalled.
 7. **AC-7, environment isolation:** A saved environment can exhaust retries while
-   the primary connection remains `connected`; primary retry count, latency
-   tracking, toast state, and generation remain unchanged.
+   the primary connection remains `connected`; primary retry count, per-environment
+   latency tracker, toast state, and generation remain unchanged. Clearing the
+   saved connection's tracked requests does not clear the primary tracker.
 8. **AC-8, browser lifecycle safety:** Focus, visibility, pageshow, and online
    events do not replace a healthy or currently connecting generation. An
    offline connection resumes through one coalesced intent when network state
    returns.
 9. **AC-9, durable subscription recovery:** Each retained durable subscription
-   restarts exactly once on a new generation, receives its authoritative
-   snapshot, and ignores values emitted by prior generations.
-10. **AC-10, live chat recovery:** With a deterministic real server fixture
-    producing a multi-event response, an induced WebSocket loss recovers and
-    renders the completed assistant response without page refresh on both
-    `web-dev` and `desktop-dev`. Maintainer-local UAT repeats the interruption
-    with one configured real provider on each client and captures evidence.
+   restarts exactly once on a new generation, resolves its own readiness after
+   an authoritative snapshot or contract-defined ready event, and ignores values
+   emitted by prior generations. Optional thread and terminal subscriptions do
+   not block the environment-level `connected` state.
+10. **AC-10, live chat recovery:** A Phase 1 real-server integration test first
+    proves that client disconnect does not abort an accepted turn and that a
+    later thread snapshot contains its partial or completed state. With a
+    deterministic real server fixture producing a multi-event response, an
+    induced WebSocket loss then recovers and renders the completed assistant
+    response without page refresh on both `web-dev` and `desktop-dev`.
+    Maintainer-local UAT repeats the interruption with one configured real
+    provider on each client and captures evidence.
 11. **AC-11, request safety:** A transport test proves an unacknowledged mutating
     RPC request is never automatically resent. The caller receives a typed
     connection-loss result and must reconcile before another action.
@@ -374,13 +456,16 @@ failure cooldown.
 15. **AC-15, poller retention:** Disconnecting and reconnecting subscribers for
     one repository retains one remote poller and one cache identity; repeated
     failing refreshes obey the configured failure cooldown.
-16. **AC-16, real-runtime fault suite:** Automated fault tests cover saved
-    environment failure, ten-second server outage, server restart, browser
-    lifecycle events, active chat, and VCS load without manually opening mock
-    replacement sockets.
-17. **AC-17, user-visible evidence:** Manual Playwright validation captures web
-    and Electron snapshots showing reconnecting, recovered, and completed-chat
-    states for the acceptance artifact set.
+16. **AC-16, real-runtime fault suite:** A harness-owned reverse proxy routes both
+    `web-dev` and `desktop-dev` to a separate real server port. Automated fault
+    tests use it to cover saved-environment failure, ten-second server outage,
+    server restart, browser lifecycle events, active chat, and VCS load without
+    production fault hooks or manually opened mock replacement sockets.
+17. **AC-17, user-visible evidence:** Manual Playwright validation captures these
+    named artifacts for both web and Electron: `reconnecting`,
+    `recovered-completed-chat`, and `saved-failed-primary-connected`. Each
+    artifact includes the visible app state and its corresponding connection
+    transition log.
 18. **AC-18, cross-platform E2E:** New tests use target-aware shared fixtures on
     `web-dev` and `desktop-dev`; browser-only recording tests, codegen support,
     and `desktop-release` remain present and discoverable.
@@ -409,9 +494,11 @@ failure cooldown.
 
 - Real Effect RPC client and local WebSocket server.
 - Physical disconnect without Effect-owned retry.
+- Server turn continuity across client disconnect and thread-snapshot recovery.
 - Environment connection recreation and disposal with socket-attempt counting.
 - Multiple environment connections sharing one browser process while retaining
   isolated state.
+- Shared reverse-proxy routing for `web-dev` and `desktop-dev`.
 - Real `VcsStatusBroadcaster` with controlled Git workflow adapters.
 
 ### E2E and manual acceptance
@@ -446,7 +533,8 @@ counters on failure.
 1. Phase 1 may change types, diagnostics, tests, ADRs, and architecture docs. It
    does not change production reconnect ownership except for the Effect
    non-retry feasibility spike under test.
-2. Phase 2 starts only after the Phase 1 integration proof passes.
+2. Phase 2 starts only after the Effect non-retry, server turn continuity, and
+   shared web/Electron fault-proxy integration proofs pass.
 3. Phase 3 starts only after primary and saved connection isolation passes in
    integration tests.
 4. Phase 4 can proceed in parallel with Phase 3 only in an isolated worktree and
@@ -465,13 +553,21 @@ counters on failure.
 - **Effect session termination behavior:** Phase 1 blocks implementation until a
   real integration spike proves a session can terminate and dispose cleanly
   without hidden retry.
+- **Server turn continuity:** Phase 1 blocks implementation until a real server
+  proves an accepted turn survives client disconnect and is recoverable through
+  a later thread snapshot.
+- **Fault-proxy routing:** Phase 1 blocks Phase 5 harness work until the same
+  harness-owned proxy seam can route both web and Electron to separate real
+  server ports.
 - **Large call-site migration:** Preserve the RPC method facade while removing
   lifecycle methods from consumer reach. Migrate connection ownership before
   moving unrelated environment service logic.
 - **Duplicate operations after ambiguous disconnect:** No encoded request replay;
   mutations fail with an explicit reconciliation requirement.
-- **Subscription snapshot gaps:** A new generation does not report bootstrap
-  complete until required authoritative snapshots arrive.
+- **Subscription snapshot gaps:** A new generation reports environment
+  bootstrap from shell plus applicable lifecycle/config snapshots. Optional
+  subscriptions expose separate readiness and do not hold the environment in a
+  reconnecting state.
 - **Browser timer throttling:** Retry deadlines belong to the connection module;
   resume events submit intent and never infer socket health from elapsed browser
   time alone.
@@ -488,9 +584,6 @@ Likely new or deepened modules:
 
 - `packages/client-runtime/src/environmentConnection.ts`
 - `packages/client-runtime/src/environmentConnectionState.ts`
-- `packages/client-runtime/src/durableSubscriptions.ts`
-- `packages/client-runtime/src/connectionLoss.ts`
-- `apps/web/src/environments/runtime/connectionStateAdapter.ts`
 - `apps/server/src/vcs/RemoteStatusRefreshScheduler.ts`
 - `e2e/src/harness/wsFaultAdapter.ts`
 - `e2e/src/flows/connectionRecovery.ts`
@@ -516,9 +609,11 @@ not replace them with several shallow forwarding modules.
 Build begins only after this spec is Approved.
 
 Start with Phase 1 and write failing invariant tests before production changes.
-The first blocking decision is the real Effect non-retry integration proof. If
-that proof fails, stop with the observed session behavior and return to Plan;
-do not add another reconnect owner or patch Effect request replay.
+The blocking proofs are non-retrying Effect session termination, server turn
+continuity across client disconnect, and one shared web/Electron fault-proxy
+route. If any proof fails, stop with the observed behavior and return to Plan;
+do not add another reconnect owner, patch Effect request replay, or defer the
+failed proof to Phase 5.
 
 The Build completion report must map every acceptance criterion to a test,
 command, snapshot, or explicit Blocked result. Verification cannot call the

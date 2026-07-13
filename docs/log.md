@@ -2,7 +2,7 @@
 
 ## 2026-07-13 (Environment connection recovery architecture drafted)
 
-Added the Draft [environment connection recovery architecture](/specs/2026-07-13-environment-connection-recovery-architecture-design.md) and linked it from the [specs roadmap](/specs/index.md). The spec records the completed Phase 0 rollback and defines Phases 1–5: explicit connection invariants and observability, one application-owned per-environment reconnect module, safe subscription/request recovery classes, a server-wide VCS remote refresh scheduler, and real-runtime fault acceptance across web and Electron. The draft awaits maintainer review and approval.
+Added the Draft [environment connection recovery architecture](/specs/2026-07-13-environment-connection-recovery-architecture-design.md) and linked it from the [specs roadmap](/specs/index.md). The spec records the completed Phase 0 rollback and defines Phases 1–5: explicit connection invariants and observability, one application-owned per-environment reconnect module, safe subscription/request recovery classes, a server-wide VCS remote refresh scheduler, and real-runtime fault acceptance across web and Electron. A fresh `cursor/grok-4.5:fas` adversarial review recommended Approve after fixes; its blocking and pre-approval corrections were incorporated into the Draft. The draft awaits maintainer review and approval.
 
 ## 2026-07-09 (Phase 3b lifecycle and identity recovery closeout)
 
