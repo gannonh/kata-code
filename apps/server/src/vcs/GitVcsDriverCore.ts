@@ -50,6 +50,7 @@ const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
+const STATUS_UPSTREAM_REFRESH_CONCURRENCY = 2;
 
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
@@ -650,6 +651,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig;
   const crypto = yield* Crypto.Crypto;
+  const statusUpstreamRefreshSemaphore = yield* Semaphore.make(STATUS_UPSTREAM_REFRESH_CONCURRENCY);
 
   const executeRaw: GitVcsDriver.GitVcsDriverShape["execute"] = Effect.fnUntraced(
     function* (input) {
@@ -914,7 +916,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       fetchCwd,
       ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", remoteName],
       {
-        allowNonZeroExit: true,
         env: STATUS_UPSTREAM_REFRESH_ENV,
         timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
       },
@@ -932,7 +933,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const refreshStatusRemoteCacheEntry = Effect.fn("refreshStatusRemoteCacheEntry")(function* (
     cacheKey: StatusRemoteRefreshCacheKey,
   ) {
-    yield* fetchRemoteForStatus(cacheKey.gitCommonDir, cacheKey.remoteName);
+    yield* statusUpstreamRefreshSemaphore.withPermit(
+      fetchRemoteForStatus(cacheKey.gitCommonDir, cacheKey.remoteName),
+    );
     return true as const;
   });
 
@@ -1422,6 +1425,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const ignoreStatusUpstreamRefreshFailure = <A>(
+    cwd: string,
+    effect: Effect.Effect<A, GitCommandError>,
+  ): Effect.Effect<void, never> =>
+    effect.pipe(
+      Effect.asVoid,
+      Effect.catchIf(isMissingGitCwdError, () => Effect.void),
+      Effect.catch((error) =>
+        Effect.logDebug("Git upstream status refresh failed; using cached refs", {
+          cwd,
+          detail: error.message,
+        }),
+      ),
+    );
+
   const statusDetailsLocal: GitVcsDriver.GitVcsDriverShape["statusDetailsLocal"] = Effect.fn(
     "statusDetailsLocal",
   )(function* (cwd) {
@@ -1430,10 +1448,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const statusDetails: GitVcsDriver.GitVcsDriverShape["statusDetails"] = Effect.fn("statusDetails")(
     function* (cwd) {
-      yield* refreshStatusUpstreamIfStale(cwd).pipe(
-        Effect.catchIf(isMissingGitCwdError, () => Effect.void),
-        Effect.ignoreCause({ log: true }),
-      );
+      yield* ignoreStatusUpstreamRefreshFailure(cwd, refreshStatusUpstreamIfStale(cwd));
       return yield* readStatusDetailsLocal(cwd);
     },
   );
@@ -1441,10 +1456,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const statusDetailsRemote: GitVcsDriver.GitVcsDriverShape["statusDetailsRemote"] = Effect.fn(
     "statusDetailsRemote",
   )(function* (cwd) {
-    yield* refreshStatusUpstreamIfStale(cwd).pipe(
-      Effect.catchIf(isMissingGitCwdError, () => Effect.void),
-      Effect.ignoreCause({ log: true }),
-    );
+    yield* ignoreStatusUpstreamRefreshFailure(cwd, refreshStatusUpstreamIfStale(cwd));
     return yield* readStatusDetailsRemote(cwd);
   });
 
