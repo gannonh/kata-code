@@ -35,7 +35,7 @@ Credentialed `@pi` tests require `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AG
 
 ### Cursor E2E gates
 
-Credentialed `@cursor` tests require `KATACODE_E2E_ENABLE_CURSOR=1`, `KATACODE_E2E_CURSOR_MODEL`, and `KATACODE_E2E_CURSOR_API_KEY` (the flow authenticates the Cursor Agent CLI via API key, which skips interactive OAuth). Set `KATACODE_E2E_CURSOR_BINARY_PATH` when the Cursor `agent` binary is not available on `PATH`.
+Credentialed `@cursor` tests require `KATACODE_E2E_ENABLE_CURSOR=1`, `KATACODE_E2E_CURSOR_MODEL`, `KATACODE_E2E_CURSOR_API_KEY`, and an explicit `KATACODE_E2E_CURSOR_BINARY_PATH` (for example `cursor-agent`). The explicit binary avoids selecting another installed tool named `agent`; the flow authenticates the Cursor CLI via API key, which skips interactive OAuth.
 
 ### Setup (first run)
 
