@@ -107,6 +107,12 @@ export interface PiDiscoveryResult {
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
 }
 
+export interface PiResourceDiscoveryInput {
+  readonly agentDir: string;
+  readonly cwd: string;
+  readonly projectTrustPolicy: "never" | "always";
+}
+
 export class PiProviderDiscoveryError extends Schema.TaggedErrorClass<PiProviderDiscoveryError>()(
   "PiProviderDiscoveryError",
   {
@@ -303,8 +309,42 @@ const probePiVersion = (
   }).pipe(Effect.catchCause(() => Effect.succeed<string | null>(null)));
 
 /**
+ * Discover the skills and prompt commands shown in Kata's Pi provider UI.
+ * Provider health checks must not execute extensions, load themes, or scan
+ * context files because those runtime-only resources can synchronously block
+ * the server event loop and starve WebSocket heartbeats.
+ */
+export const discoverPiResources = Effect.fn("discoverPiResources")(function* (
+  input: PiResourceDiscoveryInput,
+): Effect.fn.Return<Pick<PiDiscoveryResult, "skills" | "slashCommands">, never, never> {
+  const raw = yield* Effect.promise(async () => {
+    const loader = new DefaultResourceLoader({
+      cwd: input.cwd,
+      agentDir: input.agentDir || getAgentDir(),
+      additionalSkillPaths: [...resolvePiProjectSkillPaths(input.cwd)],
+      noExtensions: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await loader.reload({
+      resolveProjectTrust: () => Promise.resolve(input.projectTrustPolicy === "always"),
+    });
+
+    return {
+      skills: loader.getSkills().skills,
+      prompts: loader.getPrompts().prompts,
+    };
+  });
+
+  return {
+    skills: mapPiSkills(raw.skills as ReadonlyArray<Skill>),
+    slashCommands: mapPiSlashCommands(raw.prompts as ReadonlyArray<PromptTemplate>),
+  };
+});
+
+/**
  * Real SDK discovery: CLI version probe + `ModelRegistry.getAvailable()` for
- * authenticated models + `DefaultResourceLoader` for skills and prompt
+ * authenticated models + bounded resource discovery for skills and prompt
  * commands. Returns the mapped `PiDiscoveryResult`. Tests inject a fake
  * `discover` into `checkPiProviderStatus` instead.
  */
@@ -313,37 +353,15 @@ export const discoverPiProvider = Effect.fn("discoverPiProvider")(function* (
 ): Effect.fn.Return<PiDiscoveryResult, never, ChildProcessSpawner.ChildProcessSpawner> {
   const environment = input.environment ?? process.env;
   const version = yield* probePiVersion(input.binaryPath, environment);
-
-  const raw = yield* Effect.promise(async () => {
-    const { modelRegistry } = createPiRegistries(input.agentDir);
-
-    const loader = new DefaultResourceLoader({
-      cwd: input.cwd,
-      agentDir: input.agentDir || getAgentDir(),
-      additionalSkillPaths: [...resolvePiProjectSkillPaths(input.cwd)],
-    });
-    // Keep prompt commands/extensions behind Pi project trust, while explicit
-    // provider skills are loaded through `additionalSkillPaths` above to match
-    // the other provider skill `$` invocation behavior.
-    await loader.reload({
-      resolveProjectTrust: () => Promise.resolve(input.projectTrustPolicy === "always"),
-    });
-
-    const skillsResult = loader.getSkills();
-    const promptsResult = loader.getPrompts();
-
-    return {
-      models: modelRegistry.getAvailable(),
-      skills: skillsResult.skills,
-      prompts: promptsResult.prompts,
-    };
-  });
+  const models = yield* Effect.sync(() =>
+    createPiRegistries(input.agentDir).modelRegistry.getAvailable(),
+  );
+  const resources = yield* discoverPiResources(input);
 
   return {
     version,
-    models: mapPiModels(raw.models as ReadonlyArray<PiModelShape>, input.customModels),
-    skills: mapPiSkills(raw.skills as ReadonlyArray<Skill>),
-    slashCommands: mapPiSlashCommands(raw.prompts as ReadonlyArray<PromptTemplate>),
+    models: mapPiModels(models as ReadonlyArray<PiModelShape>, input.customModels),
+    ...resources,
   };
 });
 
