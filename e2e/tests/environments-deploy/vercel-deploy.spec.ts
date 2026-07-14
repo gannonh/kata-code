@@ -16,6 +16,10 @@ import {
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
 import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
+import {
+  inspectSmallVercelSource,
+  VERCEL_E2E_SOURCE_MAX_BYTES,
+} from "../../src/harness/vercelSourceAssets.ts";
 
 /**
  * Vercel Sandbox deployment target — credentialed, maintainer-local. SKIP when
@@ -61,12 +65,11 @@ async function fillVercelAuthTrio(
 }
 
 /**
- * Vercel cloud create/dispose is slow (~100s for Test connection's disposable
- * probe alone; Create & run with a Git clone is longer). `agentReplyMs` is
- * sized for LLM replies and is too short here.
+ * Vercel cloud create/dispose is slow because the sandbox cold-boots Kata and
+ * provider tooling. `agentReplyMs` is sized for LLM replies and is too short.
  */
 const VERCEL_CLOUD_STEP_MS = Math.max(E2E_TIMEOUTS.agentReplyMs, 150_000);
-/** Full lifecycle: Test connection + Create & run + stop/delete. */
+/** One billable sandbox lifecycle: Create & run + stop/delete. */
 const VERCEL_CLOUD_TEST_MS = Math.max(E2E_TIMEOUTS.agentTestMs, 480_000);
 
 test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDeploy}`, () => {
@@ -77,8 +80,8 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     "VERCEL_* credentials not set; credentialed Vercel checks are maintainer-local",
   );
 
-  test("add vercel target, enter trio, test connection, start + dispose (AC-3b.8/12)", async ({
-    appWindow,
+  test("add vercel target, enter trio, start + dispose (AC-3b.8/12)", async ({
+    authenticatedAppWindow,
     runContext,
   }, testInfo) => {
     const creds = readVercelCredentials()!;
@@ -87,12 +90,14 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
       source === null,
       "E2E_VERCEL_SOURCE_REPOSITORY not set; a GitHub source is required to create a Vercel sandbox",
     );
-    // Surface the resolved source so a stale shell export (which wins over
-    // `.env`) is obvious in the headed run log.
+    // Measure the exact selected branch before any Vercel provisioning. This
+    // blocks stale env configuration from cloning a large repository into a
+    // billable sandbox. The native Vercel source clone is already depth=1.
+    const sourceAssets = await inspectSmallVercelSource(source!);
     console.log(
-      `[e2e] Vercel source selection: repo=${source!.repository} branch=${source!.branch ?? "(repo default)"}`,
+      `[e2e] Vercel source selection: repo=${source!.repository} branch=${sourceAssets.branch} assets=${sourceAssets.bytes} bytes/${sourceAssets.files} files (limit ${VERCEL_E2E_SOURCE_MAX_BYTES} bytes)`,
     );
-    const page = appWindow;
+    const page = authenticatedAppWindow;
     await openConnectionsSettings(page);
     await dismissBlockingToasts(page);
 
@@ -107,14 +112,8 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
       timeout: E2E_TIMEOUTS.assertionMs,
     });
 
-    // Test connection: validate -> provision -> dispose -> done. Test connection
-    // uses a disposable source-less probe, so it works regardless of source.
-    // validate is immediate; provision/dispose take ~100s on a live Vercel project.
-    await card.getByRole("button", { name: "Test connection" }).click();
-    const progress = card.locator("pre");
-    await expect(progress).toContainText("validate: ok", { timeout: E2E_TIMEOUTS.assertionMs });
-    await expect(progress).toContainText("provision: ok", { timeout: VERCEL_CLOUD_STEP_MS });
-    await expect(progress).toContainText("done: ok", { timeout: VERCEL_CLOUD_STEP_MS });
+    // Do not run the Test connection probe here. It provisions and cold-boots a
+    // second disposable sandbox, doubling package ingress before this lifecycle.
 
     // Public Vercel registration uses the stored Connect CLI token (stored-first).
     // App Clerk sign-in alone is not enough — mint the CLI OAuth credential into

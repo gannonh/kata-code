@@ -49,6 +49,18 @@ Canonical `KATACODE_CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` are al
 | `KATACODE_E2E_CURSOR_API_KEY`     | Cursor API key forwarded to `CURSOR_API_KEY` for headless Cursor auth in E2E                                             |
 | `KATACODE_E2E_CURSOR_BINARY_PATH` | Required Cursor CLI executable path or command, for example `cursor-agent`; explicit to avoid another tool named `agent` |
 
+### Vercel deployment tests (`@environments-deploy`)
+
+| Variable                       | Purpose                                                          |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `E2E_VERCEL_TOKEN`             | Vercel Sandbox access token                                      |
+| `E2E_VERCEL_TEAM_ID`           | Vercel team that owns the test project                           |
+| `E2E_VERCEL_PROJECT_ID`        | Vercel project used by the sandbox test                          |
+| `E2E_VERCEL_SOURCE_REPOSITORY` | Dedicated minimal GitHub fixture repository in `owner/name` form |
+| `E2E_VERCEL_SOURCE_BRANCH`     | Optional fixture branch; defaults to the repository default      |
+
+Before provisioning, the test reads the selected branch's recursive Git tree through `gh` and fails if its checked-out blobs exceed 256 KiB. Vercel receives a depth-one native clone. Keep package caches, generated files, binaries, and large lockfiles out of the fixture repository. The lifecycle runs only under `desktop-dev`, so cross-platform and release selections do not duplicate billable provisioning. It creates one sandbox and does not run the disposable **Test connection** provision first because that would duplicate the cold-bootstrap package ingress.
+
 ### Release target (`desktop-release` project)
 
 | Variable                   | Purpose                                                                           |
