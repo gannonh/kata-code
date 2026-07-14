@@ -13,7 +13,7 @@ import {
 } from "../../src/flows/settings.ts";
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
 import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/workspace.ts";
-import { expect, test } from "../../src/harness/testFixtures.ts";
+import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts";
 
 /**
  * Container sandbox environment — provisions the real `katacode:local` image
@@ -220,15 +220,21 @@ const REAL_IMAGE_E2E_TIMEOUT_MS = Math.max(E2E_TIMEOUTS.agentTestMs, 240_000);
 test.describe(`Environments/deployments container target ${E2E_TAGS.environmentsDeploy}`, () => {
   test.describe.configure({ timeout: REAL_IMAGE_E2E_TIMEOUT_MS });
 
-  test("add sandbox environment, test connection + start session boot the real katacode image", async ({
-    appWindow,
-  }, testInfo) => {
-    // Fail loud if Docker or the katacode image isn't available — the flow
-    // provisions the real Kata server, so either is a hard prerequisite.
+  test.beforeAll(async () => {
+    // Check the shared prerequisites before launching Electron. The running app
+    // also reconciles Docker targets, which can briefly contend for the Engine API.
     await assertDockerDaemonReachable();
     await assertKatacodeImageBuilt();
+  });
 
-    const page = appWindow;
+  test.beforeEach(async ({ authenticatedAppWindow }) => {
+    await resetAppToHome(authenticatedAppWindow);
+  });
+
+  test("add sandbox environment, test connection + start session boot the real katacode image", async ({
+    authenticatedAppWindow,
+  }, testInfo) => {
+    const page = authenticatedAppWindow;
     await openConnectionsSettings(page);
     await dismissBlockingToasts(page);
 
@@ -276,8 +282,8 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     // (AC-L8/L9). The session line disappears once the sandbox is deleted.
     await dismissBlockingToasts(page);
     await card.getByRole("button", { name: "Stop" }).last().click();
-    await card.getByRole("button", { name: "Delete sandbox" }).click();
-    await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+    await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+    await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
     // Clean up the target via the trash button on the card row.
     await dismissBlockingToasts(page);
@@ -286,13 +292,10 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
   });
 
   test("saved repo environment seeds, injects secrets, and launches setup processes", async ({
-    appWindow,
+    authenticatedAppWindow,
     runContext,
   }, testInfo) => {
-    await assertDockerDaemonReachable();
-    await assertKatacodeImageBuilt();
-
-    const page = appWindow;
+    const page = authenticatedAppWindow;
     const secret = `phase2-secret-${Date.now()}`;
     const workspacePath = await createSeededGitWorkspace(runContext, {
       name: "phase2-env",
@@ -394,8 +397,8 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
 
     await dismissBlockingToasts(page);
     await card.getByRole("button", { name: "Stop" }).last().click();
-    await card.getByRole("button", { name: "Delete sandbox" }).click();
-    await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+    await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+    await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
     await dismissBlockingToasts(page);
     await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
@@ -405,11 +408,8 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
   test(
     "started sandbox has /bin/sh as SHELL and provider CLIs on PATH (AC-3a.1/2/3)",
     { tag: [E2E_TAGS.sandbox] },
-    async ({ appWindow }, testInfo) => {
-      await assertDockerDaemonReachable();
-      await assertKatacodeImageBuilt();
-
-      const page = appWindow;
+    async ({ authenticatedAppWindow }, testInfo) => {
+      const page = authenticatedAppWindow;
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
 
@@ -460,8 +460,8 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
 
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Stop" }).last().click();
-      await card.getByRole("button", { name: "Delete sandbox" }).click();
-      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
@@ -472,11 +472,8 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
   test(
     "stop/start lifecycle preserves the container and its filesystem (AC-L5/L8)",
     { tag: [E2E_TAGS.sandbox] },
-    async ({ appWindow }, testInfo) => {
-      await assertDockerDaemonReachable();
-      await assertKatacodeImageBuilt();
-
-      const page = appWindow;
+    async ({ authenticatedAppWindow }, testInfo) => {
+      const page = authenticatedAppWindow;
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
 
@@ -542,8 +539,8 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // Stop then delete the sandbox and remove the target.
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Stop" }).last().click();
-      await card.getByRole("button", { name: "Delete sandbox" }).click();
-      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
