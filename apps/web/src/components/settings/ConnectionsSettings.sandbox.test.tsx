@@ -15,14 +15,30 @@ const mockRecord = {
   sandbox: { providerKind: "docker" },
 };
 
+const registryStoreMock = {
+  useSavedEnvironmentRegistryStore: Object.assign(
+    (selector: (state: unknown) => unknown) => selector({ byId: { [ENV_ID]: mockRecord } }),
+    { getState: () => ({ byId: { [ENV_ID]: mockRecord }, upsert: vi.fn() }) },
+  ),
+  useSavedEnvironmentRuntimeStore: Object.assign(
+    (selector: (state: unknown) => unknown) => selector({ byId: {} }),
+    { getState: () => ({ byId: {} }) },
+  ),
+};
+
+vi.mock("~/environments/runtime/catalog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/environments/runtime/catalog")>();
+  return {
+    ...actual,
+    ...registryStoreMock,
+  };
+});
+
 vi.mock("~/environments/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/environments/runtime")>();
   return {
     ...actual,
-    useSavedEnvironmentRegistryStore: (selector: (state: unknown) => unknown) =>
-      selector({ byId: { [ENV_ID]: mockRecord } }),
-    useSavedEnvironmentRuntimeStore: (selector: (state: unknown) => unknown) =>
-      selector({ byId: {} }),
+    ...registryStoreMock,
   };
 });
 
