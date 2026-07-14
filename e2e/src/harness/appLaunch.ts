@@ -12,6 +12,27 @@ import { logHarnessPhase } from "./log.ts";
 import { resolveReleaseExecutablePath } from "./releaseTarget.ts";
 import { buildElectronLaunchEnv, isRendererWindow, resolveRendererTarget } from "./launchEnv.ts";
 
+const ELECTRON_CLOSE_TIMEOUT_MS = 5_000;
+
+async function closeElectronApp(app: ElectronApplication): Promise<void> {
+  let settled = false;
+  const close = app
+    .close()
+    .catch(() => undefined)
+    .finally(() => {
+      settled = true;
+    });
+
+  await Promise.race([close, delay(ELECTRON_CLOSE_TIMEOUT_MS)]);
+  if (settled) return;
+
+  try {
+    app.process().kill("SIGKILL");
+  } catch {
+    // The process exited between the timeout check and the forced kill.
+  }
+}
+
 async function resolveDevElectronLaunchCommand(
   args: string[],
   context: E2ERunContext,
@@ -165,9 +186,7 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
       env,
     });
   }
-  registerCleanup(context, async () => {
-    await electronApp.close();
-  });
+  registerCleanup(context, () => closeElectronApp(electronApp));
 
   attachElectronLogging(context, electronApp);
   logHarnessPhase("Waiting for the Electron renderer window...");

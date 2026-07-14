@@ -57,10 +57,8 @@ async function bootDesktopSession(project: AppProject, fileKey: string): Promise
     launchTarget: project.launchTarget,
   });
   await writeRunManifest(runContext);
-  let electronApp: ElectronApplication | undefined;
   try {
     const launchedApp = await launchApp(runContext);
-    electronApp = launchedApp.electronApp;
     await waitForAppEnvironmentReady(launchedApp.window, runContext);
     let authentication: Promise<Page> | undefined;
     const authenticate = () =>
@@ -73,13 +71,9 @@ async function bootDesktopSession(project: AppProject, fileKey: string): Promise
       appWindow: launchedApp.window,
       authenticatedAppWindow: launchedApp.window,
       authenticate,
-      close: async () => {
-        await launchedApp.electronApp.close().catch(() => undefined);
-        await cleanupRunState(runContext);
-      },
+      close: () => cleanupRunState(runContext),
     };
   } catch (error) {
-    await electronApp?.close().catch(() => undefined);
     await cleanupRunState(runContext).catch(() => undefined);
     throw error;
   }
