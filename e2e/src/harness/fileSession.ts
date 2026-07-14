@@ -67,7 +67,7 @@ async function bootDesktopSession(project: AppProject, fileKey: string): Promise
       appTarget: "desktop",
       runContext,
       launchedApp,
-      electronApp,
+      electronApp: launchedApp.electronApp,
       appWindow: launchedApp.window,
       authenticatedAppWindow: launchedApp.window,
       authenticate,
