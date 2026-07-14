@@ -49,7 +49,7 @@ export interface GitHubAccessibleRepository {
   readonly nameWithOwner: string;
   readonly url: string;
   readonly defaultBranch: string;
-  readonly visibility: "public" | "private";
+  readonly visibility: "public" | "private" | "internal";
 }
 
 /** One page of accessible repositories plus a `hasMore` flag (full page ⇒ more). */
@@ -201,7 +201,7 @@ const RawGitHubAccessibleRepositorySchema = Schema.Struct({
   full_name: TrimmedNonEmptyString,
   html_url: TrimmedNonEmptyString,
   default_branch: TrimmedNonEmptyString,
-  visibility: Schema.Literals(["public", "private"]),
+  visibility: Schema.Literals(["public", "private", "internal"]),
 });
 const RawGitHubAccessibleRepositoryListSchema = Schema.Array(RawGitHubAccessibleRepositorySchema);
 
@@ -426,7 +426,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "GET",
           "/user/repos",
           "-f",
-          "affiliation=owner,collaborator,organization",
+          "affiliation=owner,collaborator,organization_member",
           "-f",
           "sort=updated",
           "-F",

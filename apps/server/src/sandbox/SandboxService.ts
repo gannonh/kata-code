@@ -294,12 +294,14 @@ function reconcileSessions(
 ): Effect.Effect<void, never, CliTokenManager.CloudCliTokenManager> {
   return Effect.gen(function* () {
     // Join an in-flight refresh so concurrent listInstances never return on a
-    // skipped probe (stale stopped/running).
+    // skipped probe (stale stopped/running). Claim ownership synchronously
+    // (makeUnsafe + assign before any yield) so two fibers cannot both create
+    // Deferreds; cleanup only clears the join this fiber owns.
     if (reconcileJoin !== null) {
       yield* Deferred.await(reconcileJoin);
       return;
     }
-    const join = yield* Deferred.make<void, never>();
+    const join = Deferred.makeUnsafe<void, never>();
     reconcileJoin = join;
     yield* Effect.gen(function* () {
       const store = getSessionStore();
@@ -328,7 +330,9 @@ function reconcileSessions(
     }).pipe(
       Effect.ensuring(
         Effect.gen(function* () {
-          reconcileJoin = null;
+          if (reconcileJoin === join) {
+            reconcileJoin = null;
+          }
           yield* Deferred.succeed(join, undefined);
         }),
       ),

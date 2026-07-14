@@ -38,6 +38,36 @@ describe("EnvironmentLinks", () => {
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });
 
+  it.effect("looks up only active unclaimed leases for getForUser", () => {
+    const whereConditions: Array<unknown> = [];
+    const fakeDb = {
+      select: () => ({
+        from: () => ({
+          where: (condition: unknown) => {
+            whereConditions.push(condition);
+            return {
+              limit: () => Effect.succeed([]),
+            };
+          },
+        }),
+      }),
+    } as unknown as RelayDatabase;
+
+    return Effect.gen(function* () {
+      const links = yield* EnvironmentLinks;
+      expect(yield* links.getForUser({ userId: "user-1", environmentId: "env-1" })).toBeNull();
+      const query = new PgDialect().sqlToQuery(whereConditions[0] as never);
+      expect(query.sql).toContain('"relay_environment_links"."user_id" = $1');
+      expect(query.sql).toContain('"relay_environment_links"."environment_id" = $2');
+      expect(query.sql).toContain('"relay_environment_links"."revoked_at" is null');
+      expect(query.sql).toContain('"relay_environment_links"."cleanup_claimed_at" is null');
+      expect(query.sql).toContain('"relay_environment_links"."lease_expires_at" > $3');
+      expect(query.params[0]).toBe("user-1");
+      expect(query.params[1]).toBe("env-1");
+      expect(typeof query.params[2]).toBe("string");
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
+  });
+
   it.effect("renews active leases and atomically claims expired leases for cleanup", () => {
     const updates: Array<Record<string, unknown>> = [];
     const conditions: Array<unknown> = [];

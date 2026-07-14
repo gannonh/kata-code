@@ -26,10 +26,20 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope)
+      if [[ $# -lt 2 || -z ${2:-} || ${2:-} == -* ]]; then
+        printf '%s requires a value\n' "$1" >&2
+        usage >&2
+        exit 2
+      fi
       scope="$2"
       shift 2
       ;;
     --project)
+      if [[ $# -lt 2 || -z ${2:-} || ${2:-} == -* ]]; then
+        printf '%s requires a value\n' "$1" >&2
+        usage >&2
+        exit 2
+      fi
       project="$2"
       shift 2
       ;;
@@ -65,7 +75,7 @@ while :; do
   output=$("${command[@]}")
   while IFS= read -r name; do
     names+=("$name")
-  done < <(printf '%s\n' "$output" | awk '$2 ~ /^(creating|running|stopping|stopped|failed)$/ { print $1 }')
+  done < <(printf '%s\n' "$output" | awk 'NF >= 2 && $1 !~ /^-/ && $1 != "NAME" { print $1 }')
 
   cursor=$(printf '%s\n' "$output" | sed -n 's/.*--cursor \([^[:space:]]*\).*/\1/p')
   [[ -n "$cursor" ]] || break

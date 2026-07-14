@@ -110,6 +110,18 @@ export const startSandboxSession = (
     }
     runtime.busyInstances.add(sessionKey);
     return yield* Effect.gen(function* () {
+      // Ensure durable records are loaded before branching on existing status.
+      // After a server restart the in-memory cache is empty until load() runs.
+      yield* runtime
+        .getStore()
+        .load()
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not load sandbox sessions before start", { cause }).pipe(
+              Effect.as([] as const),
+            ),
+          ),
+        );
       // Provider status while this instance is locked (full reconcile skips busy).
       yield* runtime.refreshLockedInstanceStatus(sessionKey, settings);
       const existing = runtime.getStore().records.find((r) => r.instanceId === sessionKey);
@@ -151,11 +163,11 @@ export const startSandboxSession = (
             message: "The sandbox already has a seeded workspace; delete it to re-seed.",
           });
         }
-        // Reject a changed source: a record created with a source fingerprint
-        // must start against a resolvable, matching current source. A removed
-        // or edited source (including one cleared from settings) fails loud;
-        // delete and recreate to re-clone.
-        if (existing.sourceFingerprint !== undefined) {
+        // Reject a changed or newly-added source: sourced sandboxes must match
+        // their stored fingerprint; source-less sandboxes cannot gain a source
+        // on resume (attachSourceBranch would fail in a non-git workspace).
+        // Delete and recreate to re-clone.
+        {
           const startSource = resolveVercelSource(resolvedConfig.config);
           const currentFingerprint =
             startSource !== null
@@ -164,11 +176,19 @@ export const startSandboxSession = (
                   branch: startSource.branch,
                 })
               : undefined;
-          if (currentFingerprint !== existing.sourceFingerprint) {
+          if (existing.sourceFingerprint !== undefined) {
+            if (currentFingerprint !== existing.sourceFingerprint) {
+              return yield* new SandboxRpcError({
+                reason: "invalid-config",
+                message:
+                  "The sandbox source changed since it was created. Delete this sandbox and create it again to clone the new source.",
+              });
+            }
+          } else if (currentFingerprint !== undefined) {
             return yield* new SandboxRpcError({
               reason: "invalid-config",
               message:
-                "The sandbox source changed since it was created. Delete this sandbox and create it again to clone the new source.",
+                "This sandbox was created without a GitHub source. Delete it and create it again to clone a repository.",
             });
           }
         }

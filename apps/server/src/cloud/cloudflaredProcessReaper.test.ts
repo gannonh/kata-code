@@ -151,7 +151,7 @@ describe("cloudflaredProcessReaper ownership", () => {
     );
   });
 
-  it.effect("clears stale Windows ownership without inspecting or killing", () => {
+  it.effect("clears stale Windows ownership without killing", () => {
     let inspectCalled = false;
     let killCalled = false;
     const control: CloudflaredProcessControl = {

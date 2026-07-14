@@ -21,8 +21,8 @@ export const SandboxGitHubRepository = Schema.Struct({
   url: TrimmedNonEmptyString,
   /** Repository default branch. */
   defaultBranch: TrimmedNonEmptyString,
-  /** `public` or `private`; UI-only annotation. */
-  visibility: Schema.Literals(["public", "private"]),
+  /** `public`, `private`, or Enterprise `internal`; UI-only annotation. */
+  visibility: Schema.Literals(["public", "private", "internal"]),
 });
 export type SandboxGitHubRepository = typeof SandboxGitHubRepository.Type;
 

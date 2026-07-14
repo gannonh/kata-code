@@ -492,7 +492,7 @@ const connectCleanupCommand = Command.make("cleanup", {
           yield* Console.log("No matching Kata Code Connect records.");
           return;
         }
-        if (candidates.length > 1 && !flags.yes) {
+        if (!flags.yes) {
           const confirmed = yield* Prompt.run(
             Prompt.confirm({
               message: `Remove ${candidates.length} Kata Code Connect records?`,

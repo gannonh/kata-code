@@ -328,7 +328,7 @@ describe("GitHubCli.layer", () => {
           "GET",
           "/user/repos",
           "-f",
-          "affiliation=owner,collaborator,organization",
+          "affiliation=owner,collaborator,organization_member",
           "-f",
           "sort=updated",
           "-F",
@@ -366,6 +366,38 @@ describe("GitHubCli.layer", () => {
       expect(result.hasMore).toBe(false);
       expect(result.repositories).toHaveLength(1);
       expect(result.repositories[0]?.defaultBranch).toBe("trunk");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("decodes GitHub Enterprise internal visibility", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                name: "enterprise-repo",
+                full_name: "acme/enterprise-repo",
+                html_url: "https://github.com/acme/enterprise-repo",
+                default_branch: "main",
+                visibility: "internal",
+              },
+            ]),
+          ),
+        ),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.searchRepositories({ cwd: "/repo" });
+      expect(result.repositories).toEqual([
+        {
+          nameWithOwner: "acme/enterprise-repo",
+          url: "https://github.com/acme/enterprise-repo",
+          defaultBranch: "main",
+          visibility: "internal",
+        },
+      ]);
     }).pipe(Effect.provide(layer)),
   );
 

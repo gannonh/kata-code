@@ -373,6 +373,9 @@ const make = Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({
         "relay.environment_id": input.environmentId,
       });
+      // Match listForUser / credential auth: expired or cleanup-claimed links
+      // must not authorize status/connect, even when revokedAt is still null.
+      const now = DateTime.formatIso(yield* DateTime.now);
       return yield* db
         .select({
           environmentId: relayEnvironmentLinks.environmentId,
@@ -390,6 +393,8 @@ const make = Effect.gen(function* () {
             eq(relayEnvironmentLinks.userId, input.userId),
             eq(relayEnvironmentLinks.environmentId, input.environmentId),
             isNull(relayEnvironmentLinks.revokedAt),
+            isNull(relayEnvironmentLinks.cleanupClaimedAt),
+            gt(relayEnvironmentLinks.leaseExpiresAt, now),
           ),
         )
         .limit(1)

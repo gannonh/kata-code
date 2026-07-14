@@ -30,6 +30,9 @@ describe("serve replace helpers", () => {
     const kill = buildKillServeCommand(13773);
     expect(kill).toContain("pkill -9 -f '[k]atacode serve --port 13773'");
     expect(kill).toContain("grep -q ':13773 '");
+    expect(kill).toContain(
+      "! ((ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || true) | grep -q ':13773 ')",
+    );
   });
 
   it("atomically kills then launches serve with a fresh bootstrap token", () => {

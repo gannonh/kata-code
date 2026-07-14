@@ -393,6 +393,7 @@ const make = Effect.gen(function* () {
         .recordTunnel({
           userId: input.userId,
           environmentId: input.environmentId,
+          allocationId: allocation.allocationId,
           tunnelId: tunnel.id,
         })
         .pipe(Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })));
@@ -424,6 +425,7 @@ const make = Effect.gen(function* () {
         .recordDns({
           userId: input.userId,
           environmentId: input.environmentId,
+          allocationId: allocation.allocationId,
           dnsRecordId,
         })
         .pipe(Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })));
@@ -435,6 +437,7 @@ const make = Effect.gen(function* () {
         .markReady({
           userId: input.userId,
           environmentId: input.environmentId,
+          allocationId: allocation.allocationId,
         })
         .pipe(Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })));
 

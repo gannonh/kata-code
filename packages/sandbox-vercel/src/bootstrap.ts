@@ -95,6 +95,8 @@ export function buildKillServeCommand(port: number): string {
     `(pkill -9 -f '[k]atacode serve --port ${port}' 2>/dev/null || true)`,
     // Up to ~5s for the old listener to release the port.
     `for i in 1 2 3 4 5 6 7 8 9 10; do (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || true) | grep -q ':${port} ' || break; sleep 0.5; done`,
+    // Fail if the port is still occupied so callers can detect a stuck listener.
+    `! ((ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || true) | grep -q ':${port} ')`,
   ].join("; ");
 }
 
