@@ -44,22 +44,21 @@ export async function configureDefaultPiProvider(page: Page, config: PiSmokeConf
   const toggleDetails = page.getByLabel("Toggle Pi details");
   await toggleDetails.click();
 
+  const piCard = toggleDetails.locator("xpath=ancestor::div[contains(@class, 'border-t')][1]");
   const agentDir = page.getByLabel("Agent directory");
-  await agentDir.fill(config.agentDir);
-  await agentDir.press("Enter");
+  if ((await agentDir.inputValue()) !== config.agentDir) {
+    await agentDir.fill(config.agentDir);
+    await agentDir.press("Enter");
+  }
 
   const customModelInput = page.locator("#provider-instance-pi-custom-model");
   await customModelInput.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
-  // Scope the presence check to the Pi custom-model field itself instead of
-  // searching the whole page, so the fill path only skips when that specific
-  // input already holds the configured model.
-  if ((await customModelInput.inputValue()) !== config.model) {
+  if ((await piCard.getByText(config.model, { exact: true }).count()) === 0) {
     await customModelInput.fill(config.model);
     await customModelInput.press("Enter");
   }
 
   await dismissBlockingToasts(page);
-  const piCard = toggleDetails.locator("xpath=ancestor::div[contains(@class, 'border-t')][1]");
   await expect(piCard).toContainText("Authenticated", { timeout: E2E_TIMEOUTS.authMs });
 
   await page.getByRole("button", { name: "Back" }).click();

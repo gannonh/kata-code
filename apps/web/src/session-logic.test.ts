@@ -13,6 +13,7 @@ import {
   deriveActivePlanState,
   derivePendingApprovals,
   derivePendingUserInputs,
+  derivePhase,
   deriveTimelineEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
@@ -31,6 +32,12 @@ describe("PROVIDER_OPTIONS", () => {
     expect(pi).toBeDefined();
     expect(pi?.available).toBe(true);
     expect(pi?.label).toBe("Pi");
+  });
+});
+
+describe("derivePhase", () => {
+  it("keeps the composer interruptible while active work precedes its session projection", () => {
+    expect(derivePhase(null, true)).toBe("running");
   });
 });
 

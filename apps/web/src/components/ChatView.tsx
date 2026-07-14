@@ -1823,7 +1823,10 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
-  const phase = derivePhase(activeThread?.session ?? null);
+  const projectedPhase = derivePhase(
+    activeThread?.session ?? null,
+    activeLatestTurn !== null && !latestTurnSettled,
+  );
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
@@ -1906,12 +1909,16 @@ function ChatViewContent(props: ChatViewProps) {
   } = useLocalDispatchState({
     activeThread,
     activeLatestTurn,
-    phase,
+    phase: projectedPhase,
     activePendingApproval: activePendingApproval?.requestId ?? null,
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const phase = derivePhase(
+    activeThread?.session ?? null,
+    isSendBusy || (activeLatestTurn !== null && !latestTurnSettled),
+  );
+  const isWorking = phase === "running" || isConnecting || isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,

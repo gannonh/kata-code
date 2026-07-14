@@ -23,7 +23,7 @@ const piSmoke = readPiSmokeConfig();
 
 test.describe(`Pi provider smoke ${E2E_TAGS.pi}`, () => {
   test.skip(!piSmoke.ok, piSmoke.ok ? undefined : formatPiSmokeSkipReason(piSmoke.missing));
-  test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
+  test.describe.configure({ timeout: E2E_TIMEOUTS.piAgentTestMs });
 
   // Shared worker session: reset to the threads home between tests so each
   // starts from a known navigation point without re-launching Electron.
@@ -60,10 +60,11 @@ test.describe(`Pi provider smoke ${E2E_TAGS.pi}`, () => {
     await writeRunManifest(runContext);
     await createOrOpenProject(authenticatedAppWindow, seededPath);
     await selectComposerModelForProvider(authenticatedAppWindow, "Pi", turn.model);
-    // A long prompt keeps the turn running long enough to interrupt.
+    // A real long-running tool call keeps the turn interruptible even when the
+    // configured model can generate a long text response in under ten seconds.
     await sendAgentInstruction(
       authenticatedAppWindow,
-      "Count from 1 to 200 slowly, one number per line, with no other text.",
+      "Use the bash tool to run exactly `sleep 30`, wait for it to finish, then reply with only: done",
     );
     await interruptAgentTurn(authenticatedAppWindow);
     // The working indicator is gone and the composer accepts a new message.

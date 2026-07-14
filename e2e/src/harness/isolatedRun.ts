@@ -130,9 +130,10 @@ export async function createIsolatedRun(input: {
 
   cleanupCallbacks.push(async () => {
     await releasePortClaimIdempotent();
-    await rm(katacodeHome, { recursive: true, force: true });
-    await rm(workspaceRoot, { recursive: true, force: true });
-    await rm(electronRuntimeDir, { recursive: true, force: true });
+    const removeOptions = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
+    await rm(katacodeHome, removeOptions);
+    await rm(workspaceRoot, removeOptions);
+    await rm(electronRuntimeDir, removeOptions);
   });
   cleanupCallbacksByRunId.set(runId, cleanupCallbacks);
 

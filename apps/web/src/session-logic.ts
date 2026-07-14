@@ -1379,7 +1379,8 @@ export function inferCheckpointTurnCountByTurnId(
   return result;
 }
 
-export function derivePhase(session: ThreadSession | null): SessionPhase {
+export function derivePhase(session: ThreadSession | null, hasActiveWork = false): SessionPhase {
+  if (hasActiveWork) return "running";
   if (!session || session.status === "closed") return "disconnected";
   if (session.status === "connecting") return "connecting";
   if (session.status === "running") return "running";
