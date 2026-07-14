@@ -2,7 +2,8 @@
 type: Spec
 title: "Sidebar v2: recency-first hybrid thread list"
 description: "Replace the project-grouped thread sidebar with a recency-first list combining adaptive row density, a pinned needs-you section, and a rich meta row."
-status: Draft
+status: Approved
+approved_at: 2026-07-14T17:10:14Z
 tags: [web, sidebar, ux, orchestration, contracts]
 timestamp: 2026-07-14T00:00:00Z
 ---
@@ -11,7 +12,7 @@ timestamp: 2026-07-14T00:00:00Z
 
 ## Status
 
-Draft
+Approved
 
 ## Goal
 

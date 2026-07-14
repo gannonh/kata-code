@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-14 (Sidebar v2 hybrid design approved)
+
+Drafted and approved the [Sidebar v2 recency-first hybrid design](/specs/2026-07-14-sidebar-v2-hybrid-design.md). The spec replaces the project-grouped thread sidebar (web + desktop) with one recency-first list: adaptive row density (concept 4), a pinned needs-you section sorted by wait time (concept 3), and a rich-card meta row (concept 1), per the concept exploration captured in `docs/comps/SCR-20260714-ivzt-2.png`. Adds `latestActivity`, `latestTurnDiffStats`, and `blockedSince` to `OrchestrationThreadShell` (projection pipeline + migration for the pending-input timestamp), a Failed status state for `session.lastError`, and removes the per-project "show more" collapse. An adversarial subagent review returned Approve-after-fixes; all 12 findings were incorporated (relocated new-thread/add-project chrome, Failed lifetime, Vitest-browser vs E2E verification split, settings and dnd-kit cleanup scope). Four build phases: contracts/projection, logic, list UI, cleanup + `@sidebar` E2E.
+
 ## 2026-07-13 (Environment connection recovery architecture approved)
 
 Approved the [environment connection recovery architecture](/specs/2026-07-13-environment-connection-recovery-architecture-design.md) after the adversarial review corrections. Frontmatter and body status now show Approved; Phase 1 begins with three blocking proofs: non-retrying Effect session termination, server turn continuity across client disconnect, and one shared web/Electron fault-proxy route.
