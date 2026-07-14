@@ -113,8 +113,8 @@ async function startDevServerAndCapturePairingUrl(): Promise<{
 async function authenticatePage(page: Page, pairingUrl: string | null): Promise<void> {
   if (pairingUrl) {
     await page.goto(pairingUrl);
-    // The app auto-submits the token and redirects to "/".
-    await page.waitForURL("/", { timeout: 30_000 });
+    // The app auto-submits the one-time token and leaves the pairing route.
+    await page.waitForURL((url) => url.pathname !== "/pair", { timeout: 30_000 });
   } else {
     await page.goto("/");
   }
@@ -127,7 +127,7 @@ export const webTest = base.extend<{
   webPage: Page;
   webFixture: WebFixture;
 }>({
-  webFixture: async ({}, use) => {
+  webFixture: async ({ browserName: _browserName }, use) => {
     const { pairingUrl, process: serverProcess } = await startDevServerAndCapturePairingUrl();
 
     try {

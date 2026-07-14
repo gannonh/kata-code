@@ -66,6 +66,7 @@ export interface EnvironmentLinkerShape {
         | ManagedEndpointProvider.ManagedEndpointProvisioningResult["runtime"]
         | null;
       readonly environmentCredential: string;
+      readonly leaseExpiresAt: string;
     },
     EnvironmentLinkError
   >;
@@ -270,7 +271,39 @@ const make = Effect.gen(function* () {
           reason: "endpoint_not_secure",
         });
       }
-      yield* links.upsert({ ...input, proof: verified, endpoint });
+      const persistLink = links.upsert({
+        ...input,
+        proof: verified,
+        endpoint,
+        managedEndpointAllocationId: provisioned?.allocationId ?? null,
+      });
+      yield* provisioned === null
+        ? persistLink
+        : persistLink.pipe(
+            Effect.catch((originalCause) =>
+              managedEndpointProvider
+                .deprovision({
+                  userId: input.userId,
+                  environmentId: verified.environmentId,
+                  allocationId: provisioned.allocationId,
+                })
+                .pipe(
+                  Effect.matchEffect({
+                    onSuccess: () => Effect.fail(originalCause),
+                    onFailure: (rollbackCause) =>
+                      Effect.fail(
+                        new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
+                          cause: new AggregateError(
+                            [originalCause, rollbackCause],
+                            "Failed to persist environment link and roll back its managed endpoint allocation",
+                          ),
+                        }),
+                      ),
+                  }),
+                ),
+            ),
+          );
+      const leaseExpiresAt = EnvironmentLinks.environmentLeaseExpiry(yield* DateTime.now);
       const environmentCredential = yield* credentials.create({
         environmentId: verified.environmentId,
         environmentPublicKey: verified.environmentPublicKey,
@@ -280,6 +313,7 @@ const make = Effect.gen(function* () {
         endpoint,
         endpointRuntime: provisioned?.runtime ?? null,
         environmentCredential,
+        leaseExpiresAt,
       };
     }),
   });

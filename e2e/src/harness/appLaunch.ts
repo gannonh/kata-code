@@ -45,7 +45,7 @@ function attachElectronLogging(context: E2ERunContext, app: ElectronApplication)
   });
 }
 
-function attachFatalLaunchErrorTracking(page: Page): () => readonly string[] {
+export function attachFatalLaunchErrorTracking(page: Page): () => readonly string[] {
   const errors: string[] = [];
   const record = (message: string) => {
     errors.push(message);

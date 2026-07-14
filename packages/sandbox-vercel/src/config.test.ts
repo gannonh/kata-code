@@ -38,6 +38,26 @@ describe("VercelSandboxConfig", () => {
     expect((decoded as unknown as Record<string, unknown>).snapshotId).toBeUndefined();
   });
 
+  it("decodes an optional GitHub source (repository + branch)", () => {
+    const decoded = decodeConfig({
+      ...DEFAULT_VERCEL_CONFIG,
+      source: { repository: "octocat/Hello-World", branch: "main" },
+    });
+    expect(decoded.source).toEqual({ repository: "octocat/Hello-World", branch: "main" });
+  });
+
+  it("omits the source when absent (legacy targets keep decoding)", () => {
+    const decoded = decodeConfig(DEFAULT_VERCEL_CONFIG);
+    expect(decoded.source).toBeUndefined();
+  });
+
+  it("rejects a source missing repository or branch", () => {
+    expect(() =>
+      decodeConfig({ ...DEFAULT_VERCEL_CONFIG, source: { repository: "octocat/Hello-World" } }),
+    ).toThrow();
+    expect(() => decodeConfig({ ...DEFAULT_VERCEL_CONFIG, source: { branch: "main" } })).toThrow();
+  });
+
   it("VERCEL_AUTH_ENV_VARS lists the trio the server materializes", () => {
     expect([...VERCEL_AUTH_ENV_VARS]).toEqual([
       "VERCEL_TOKEN",

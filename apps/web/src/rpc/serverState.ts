@@ -173,7 +173,6 @@ export function onProvidersUpdated(
 }
 
 export function startServerStateSync(client: ServerStateClient): () => void {
-  let disposed = false;
   const cleanups = [
     client.subscribeLifecycle((event) => {
       if (event.type === "welcome") {
@@ -185,7 +184,26 @@ export function startServerStateSync(client: ServerStateClient): () => void {
     }),
   ];
 
-  if (getServerConfig() === null) {
+  // Populate the initial snapshot. The one-shot getConfig() used to swallow its
+  // rejection: right after a server restart the primary WS is often not open
+  // yet, so the fetch failed once and nothing retried — serverConfig stayed
+  // null until a browser refresh remounted and tried again. Every gate that
+  // reads serverConfig (Environments list, sandbox refresh, orphan
+  // classification) hung on that null. Retry with backoff until it lands so a
+  // reconnect never requires a manual refresh. The config subscription also
+  // pushes a snapshot, so this stops as soon as either path succeeds.
+  let disposed = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearRetryTimer = () => {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  };
+  const fetchInitialConfig = (attempt: number): void => {
+    if (disposed || getServerConfig() !== null) {
+      return;
+    }
     void client
       .getConfig()
       .then((config) => {
@@ -194,11 +212,21 @@ export function startServerStateSync(client: ServerStateClient): () => void {
         }
         setServerConfigSnapshot(config);
       })
-      .catch(() => undefined);
-  }
+      .catch(() => {
+        if (disposed || getServerConfig() !== null) {
+          return;
+        }
+        // Backoff 250ms -> 2s. The WS reconnects on its own; we just keep asking
+        // until it answers or the subscription snapshot beats us to it.
+        const delayMs = Math.min(250 * 2 ** attempt, 2_000);
+        retryTimer = setTimeout(() => fetchInitialConfig(attempt + 1), delayMs);
+      });
+  };
+  fetchInitialConfig(0);
 
   return () => {
     disposed = true;
+    clearRetryTimer();
     for (const cleanup of cleanups) {
       cleanup();
     }

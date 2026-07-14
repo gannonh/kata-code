@@ -13,6 +13,7 @@ import { relayManagedEndpointAllocations } from "../persistence/schema.ts";
 export interface ManagedEndpointAllocation {
   readonly userId: string;
   readonly environmentId: string;
+  readonly allocationId: string;
   readonly hostname: string;
   readonly tunnelId: string | null;
   readonly tunnelName: string;
@@ -54,15 +55,18 @@ interface ManagedEndpointAllocationKey {
 }
 
 interface ReserveManagedEndpointAllocationInput extends ManagedEndpointAllocationKey {
+  readonly allocationId: string;
   readonly hostname: string;
   readonly tunnelName: string;
 }
 
 interface RecordManagedEndpointTunnelInput extends ManagedEndpointAllocationKey {
+  readonly allocationId: string;
   readonly tunnelId: string;
 }
 
 interface RecordManagedEndpointDnsInput extends ManagedEndpointAllocationKey {
+  readonly allocationId: string;
   readonly dnsRecordId: string;
 }
 
@@ -80,16 +84,17 @@ export interface ManagedEndpointAllocationsShape {
     input: RecordManagedEndpointDnsInput,
   ) => Effect.Effect<void, ManagedEndpointAllocationPersistenceError>;
   readonly markReady: (
-    input: ManagedEndpointAllocationKey,
+    input: ManagedEndpointAllocationKey & { readonly allocationId: string },
   ) => Effect.Effect<void, ManagedEndpointAllocationPersistenceError>;
   readonly remove: (
-    input: ManagedEndpointAllocationKey,
+    input: ManagedEndpointAllocationKey & { readonly allocationId: string },
   ) => Effect.Effect<void, ManagedEndpointAllocationPersistenceError>;
 }
 
 const allocationSelection = {
   userId: relayManagedEndpointAllocations.userId,
   environmentId: relayManagedEndpointAllocations.environmentId,
+  allocationId: relayManagedEndpointAllocations.allocationId,
   hostname: relayManagedEndpointAllocations.hostname,
   tunnelId: relayManagedEndpointAllocations.tunnelId,
   tunnelName: relayManagedEndpointAllocations.tunnelName,
@@ -165,7 +170,12 @@ const make = Effect.gen(function* () {
           tunnelId: input.tunnelId,
           updatedAt: DateTime.formatIso(yield* DateTime.now),
         })
-        .where(whereAllocation(input));
+        .where(
+          and(
+            whereAllocation(input),
+            eq(relayManagedEndpointAllocations.allocationId, input.allocationId),
+          ),
+        );
     }, Effect.mapError(persistenceError)),
     recordDns: Effect.fn("relay.managed_endpoint_allocations.record_dns")(function* (
       input: RecordManagedEndpointDnsInput,
@@ -176,10 +186,15 @@ const make = Effect.gen(function* () {
           dnsRecordId: input.dnsRecordId,
           updatedAt: DateTime.formatIso(yield* DateTime.now),
         })
-        .where(whereAllocation(input));
+        .where(
+          and(
+            whereAllocation(input),
+            eq(relayManagedEndpointAllocations.allocationId, input.allocationId),
+          ),
+        );
     }, Effect.mapError(persistenceError)),
     markReady: Effect.fn("relay.managed_endpoint_allocations.mark_ready")(function* (
-      input: ManagedEndpointAllocationKey,
+      input: ManagedEndpointAllocationKey & { readonly allocationId: string },
     ) {
       const now = DateTime.formatIso(yield* DateTime.now);
       yield* db
@@ -188,12 +203,24 @@ const make = Effect.gen(function* () {
           readyAt: now,
           updatedAt: now,
         })
-        .where(whereAllocation(input));
+        .where(
+          and(
+            whereAllocation(input),
+            eq(relayManagedEndpointAllocations.allocationId, input.allocationId),
+          ),
+        );
     }, Effect.mapError(persistenceError)),
     remove: Effect.fn("relay.managed_endpoint_allocations.remove")(function* (
-      input: ManagedEndpointAllocationKey,
+      input: ManagedEndpointAllocationKey & { readonly allocationId: string },
     ) {
-      yield* db.delete(relayManagedEndpointAllocations).where(whereAllocation(input));
+      yield* db
+        .delete(relayManagedEndpointAllocations)
+        .where(
+          and(
+            whereAllocation(input),
+            eq(relayManagedEndpointAllocations.allocationId, input.allocationId),
+          ),
+        );
     }, Effect.mapError(persistenceError)),
   });
 });

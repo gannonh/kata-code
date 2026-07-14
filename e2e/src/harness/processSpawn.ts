@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync } from "node:fs";
+import { appendFileSync, closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 
 import { appendProcessLog } from "./artifacts.ts";
@@ -23,15 +23,21 @@ export function spawnWithArtifactLogs(
     readonly args: readonly string[];
     readonly env: NodeJS.ProcessEnv;
     readonly cwd: string;
+    readonly onOutput?: (chunk: string) => void;
   },
 ): LoggedChildProcess {
-  const stdoutFd = openArtifactLogFd(context.artifactRoot, `${input.label}-stdout`);
-  const stderrFd = openArtifactLogFd(context.artifactRoot, `${input.label}-stderr`);
+  const pipeOutput = input.onOutput !== undefined;
+  const stdoutFd = pipeOutput
+    ? undefined
+    : openArtifactLogFd(context.artifactRoot, `${input.label}-stdout`);
+  const stderrFd = pipeOutput
+    ? undefined
+    : openArtifactLogFd(context.artifactRoot, `${input.label}-stderr`);
 
   const child = spawn(input.command, [...input.args], {
     cwd: input.cwd,
     env: input.env,
-    stdio: ["ignore", stdoutFd, stderrFd],
+    stdio: ["ignore", pipeOutput ? "pipe" : stdoutFd!, pipeOutput ? "pipe" : stderrFd!],
     // Own process group so the whole tree (dev-runner -> Vite -> esbuild
     // workers) can be killed together via the negative PID. Without this only
     // the direct child is signalled and its descendants orphan as leaked
@@ -39,8 +45,19 @@ export function spawnWithArtifactLogs(
     detached: true,
   });
 
-  closeSync(stdoutFd);
-  closeSync(stderrFd);
+  if (pipeOutput) {
+    mkdirSync(context.artifactRoot, { recursive: true });
+    const forward = (label: "stdout" | "stderr") => (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      input.onOutput?.(text);
+      appendFileSync(join(context.artifactRoot, `${input.label}-${label}.log`), text);
+    };
+    child.stdout?.on("data", forward("stdout"));
+    child.stderr?.on("data", forward("stderr"));
+  } else {
+    closeSync(stdoutFd!);
+    closeSync(stderrFd!);
+  }
 
   // Register the PID so a global teardown / signal handler can reap the group
   // even when Playwright skips fixture teardown (aborted run, crash, Ctrl-C).

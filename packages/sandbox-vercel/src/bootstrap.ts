@@ -29,6 +29,17 @@ export const PROVIDER_CLI_PACKAGES: ReadonlyArray<string> = [
   "@earendil-works/pi-coding-agent",
 ];
 
+/** Install GitHub CLI from its official RPM repository on Amazon Linux 2023.
+ * Live-verified in a Vercel `node24` sandbox on 2026-07-10. */
+export function buildGitHubCliInstallScript(): string {
+  return [
+    "sudo dnf install -y 'dnf-command(config-manager)'",
+    "sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo",
+    "sudo dnf install -y gh",
+    "gh --version",
+  ].join(" && ");
+}
+
 /**
  * Build the bootstrap script run after a runtime provision. Creates
  * `SANDBOX_HOME` owned by the current user (with a no-sudo fallback for
@@ -59,6 +70,8 @@ export function buildBootstrapScript(): string {
     // Amazon Linux 2023 (Vercel sandbox runtime) uses dnf. node-pty needs
     // python3 + make + gcc-c++ for node-gyp to compile its native addon.
     `sudo dnf install -y python3 make gcc-c++ || true`,
+    `echo "[kata:bootstrap] installing GitHub CLI"`,
+    buildGitHubCliInstallScript(),
     `echo "[kata:bootstrap] installing CLIs"`,
     `npm install -g ${packagesSpec}`,
     `echo "[kata:bootstrap] done"`,
@@ -68,6 +81,35 @@ export function buildBootstrapScript(): string {
 /** Escape a value for single-quote wrapping in a shell command. */
 function shellSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Best-effort kill of any prior `katacode serve` on the sandbox port.
+ * Used by lifecycle start so a fresh bootstrap token is not exchanged against
+ * a leftover process that still owns `/oauth/token`. The `[k]` pattern avoids
+ * matching the pkill argv itself. Waits briefly for the port to free before
+ * returning so the subsequent serve launch binds cleanly.
+ */
+export function buildKillServeCommand(port: number): string {
+  return [
+    `(pkill -9 -f '[k]atacode serve --port ${port}' 2>/dev/null || true)`,
+    // Up to ~5s for the old listener to release the port.
+    `for i in 1 2 3 4 5 6 7 8 9 10; do (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || true) | grep -q ':${port} ' || break; sleep 0.5; done`,
+    // Fail if the port is still occupied so callers can detect a stuck listener.
+    `! ((ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || true) | grep -q ':${port} ')`,
+  ].join("; ");
+}
+
+/**
+ * Kill any prior serve on the port, wait for the listener to drop, then launch
+ * detached `katacode serve` with the fresh bootstrap env — single shell so the
+ * relaunch cannot race a leftover process between separate runCommands.
+ */
+export function buildReplaceServeCommand(input: {
+  readonly port: number;
+  readonly env: ReadonlyArray<readonly [string, string]>;
+}): string {
+  return `${buildKillServeCommand(input.port)}; ${buildServeCommand(input)}`;
 }
 
 /**

@@ -199,6 +199,29 @@ describe("SandboxSessionStore", () => {
     }
   });
 
+  it("shares a cold load while a concurrent mutation preserves newer state", async () => {
+    const home = await tmpKatacodeHome();
+    try {
+      const seedStore = makeSandboxSessionStore(home);
+      await Effect.runPromise(seedStore.upsert(makeRecord({ instanceId: "seed" })));
+
+      const store = makeSandboxSessionStore(home);
+      const loadPromises = Array.from({ length: 8 }, () => Effect.runPromise(store.load()));
+      const upsert = Effect.runPromise(store.upsert(makeRecord({ instanceId: "new" })));
+      const loadedSnapshots = await Promise.all(loadPromises);
+      await upsert;
+
+      for (const snapshot of loadedSnapshots.slice(1)) {
+        expect(snapshot).toBe(loadedSnapshots[0]);
+      }
+      expect(store.records.map((record) => record.instanceId).toSorted()).toEqual(["new", "seed"]);
+      const reloaded = await Effect.runPromise(makeSandboxSessionStore(home).load());
+      expect(reloaded.map((record) => record.instanceId).toSorted()).toEqual(["new", "seed"]);
+    } finally {
+      await NodeFs.rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("serializes concurrent upserts without losing records or throwing ENOENT", async () => {
     const home = await tmpKatacodeHome();
     try {

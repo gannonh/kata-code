@@ -149,7 +149,7 @@ const portDiscoverySubscriptions = new Map<EnvironmentId, () => void>();
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
 let lastBrowserHiddenAt: number | null = null;
-let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
+let lastSavedEnvironmentResumeReconnectAt = Number.NEGATIVE_INFINITY;
 
 // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
 // This file still owns web's legacy thread-detail subscription cache. Mobile
@@ -1495,6 +1495,7 @@ async function ensureSavedEnvironmentConnection(
 ): Promise<EnvironmentConnection> {
   const existing = environmentConnections.get(record.environmentId);
   if (existing) {
+    reconcileSavedEnvironmentConnectionState(record.environmentId);
     return existing;
   }
 
@@ -1699,19 +1700,22 @@ function stopActiveService() {
   activeService = null;
 }
 
-function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void {
+function reconnectSavedEnvironmentConnectionsAfterBrowserResume(reason: string): void {
   const now = Date.now();
-  if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
+  if (now - lastSavedEnvironmentResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
     return;
   }
 
   for (const connection of environmentConnections.values()) {
-    if (connection.client.isHeartbeatFresh()) {
+    // Effect RPC and the connection coordinator own primary recovery. Browser
+    // timer throttling makes heartbeat age stale even while that socket is healthy,
+    // so resume alone must not replace it. Saved streams need explicit replacement.
+    if (connection.kind !== "saved" || connection.client.isHeartbeatFresh()) {
       continue;
     }
-    lastBrowserResumeReconnectAt = now;
+    lastSavedEnvironmentResumeReconnectAt = now;
     void connection.reconnect().catch((error) => {
-      console.warn("Environment reconnect after browser resume failed", {
+      console.warn("Saved environment reconnect after browser resume failed", {
         environmentId: connection.environmentId,
         reason,
         error: error instanceof Error ? error.message : String(error),
@@ -1720,7 +1724,7 @@ function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void
   }
 }
 
-function subscribeBrowserResumeReconnects(): () => void {
+function subscribeSavedEnvironmentBrowserResumeReconnects(): () => void {
   if (typeof document === "undefined" || typeof window === "undefined") {
     return NOOP;
   }
@@ -1732,14 +1736,14 @@ function subscribeBrowserResumeReconnects(): () => void {
     }
     if (document.visibilityState === "visible" && lastBrowserHiddenAt !== null) {
       lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("visibilitychange");
+      reconnectSavedEnvironmentConnectionsAfterBrowserResume("visibilitychange");
     }
   };
 
   const handlePageShow = (event: PageTransitionEvent) => {
     if (event.persisted || lastBrowserHiddenAt !== null) {
       lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("pageshow");
+      reconnectSavedEnvironmentConnectionsAfterBrowserResume("pageshow");
     }
   };
 
@@ -1773,6 +1777,35 @@ export function readEnvironmentConnection(
   environmentId: EnvironmentId,
 ): EnvironmentConnection | null {
   return environmentConnections.get(environmentId) ?? null;
+}
+
+/**
+ * Reconcile a saved environment's runtime `connectionState` dot with its live
+ * transport. A panel re-mount can read a stale "disconnected"/"connecting"
+ * from before the connection opened; when a live connection has a fresh
+ * heartbeat, snap the runtime dot to "connected" so the status dot is green
+ * without waiting for the next socket event or a page refresh.
+ *
+ * Only the runtime store is touched (not the registry): this is a display
+ * correction, so it must not persist or re-write the saved-environment
+ * registry (which drives Environments orphan classification). Returns true
+ * when it corrected the state.
+ */
+export function reconcileSavedEnvironmentConnectionState(environmentId: EnvironmentId): boolean {
+  const connection = environmentConnections.get(environmentId);
+  if (!connection || !connection.client.isHeartbeatFresh()) return false;
+  const current =
+    useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.connectionState ?? null;
+  if (current === "connected") return false;
+  useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+    connectionState: "connected",
+    authState: "authenticated",
+    connectedAt: isoNow(),
+    disconnectedAt: null,
+    lastError: null,
+    lastErrorAt: null,
+  });
+  return true;
 }
 
 export function requireEnvironmentConnection(environmentId: EnvironmentId): EnvironmentConnection {
@@ -2062,7 +2095,8 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     .then(() => requestSavedEnvironmentSync())
     .catch(() => undefined);
 
-  const unsubscribeBrowserResumeReconnects = subscribeBrowserResumeReconnects();
+  const unsubscribeSavedEnvironmentResumeReconnects =
+    subscribeSavedEnvironmentBrowserResumeReconnects();
 
   activeService = {
     queryClient,
@@ -2070,7 +2104,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     refCount: 1,
     stop: () => {
       unsubscribeSavedEnvironments();
-      unsubscribeBrowserResumeReconnects();
+      unsubscribeSavedEnvironmentResumeReconnects();
       queryInvalidationThrottler.cancel();
     },
   };
@@ -2089,7 +2123,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
 export async function resetEnvironmentServiceForTests(): Promise<void> {
   stopActiveService();
   lastBrowserHiddenAt = null;
-  lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
+  lastSavedEnvironmentResumeReconnectAt = Number.NEGATIVE_INFINITY;
   lastAppliedProjectionVersionByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();
   savedEnvironmentConnectionAttempts.clear();

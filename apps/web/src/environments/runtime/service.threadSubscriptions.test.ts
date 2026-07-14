@@ -96,6 +96,8 @@ vi.mock("@kata-sh/code-client-runtime", async (importOriginal) => {
       providerLoginStart: vi.fn(),
       providerLoginSubmitCode: vi.fn(),
       providerLoginCancel: vi.fn(),
+      searchGitHubRepositories: vi.fn(),
+      listGitHubBranches: vi.fn(),
     },
     orchestration: {
       dispatchCommand: vi.fn(),
@@ -521,7 +523,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("keeps healthy environment streams connected when the browser resumes from the background", async () => {
+  it("reconnects stale saved streams without replacing the primary session on resume", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -536,67 +538,29 @@ describe("retainThreadDetailSubscription", () => {
       addEventListener: windowTarget.addEventListener.bind(windowTarget),
       removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
     });
-
-    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
-      await import("./service");
-    mockCreateEnvironmentConnection.mockImplementation((input) => {
-      const reconnect = vi.fn(async () => undefined);
-      mockConnectionReconnects.push(reconnect);
-      queueMicrotask(() => {
-        input.onConfigSnapshot?.({
-          environment: {
-            environmentId: input.knownEnvironment.environmentId,
-            label: input.knownEnvironment.label,
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
-        });
-      });
-      return {
-        kind: input.kind,
-        environmentId: input.knownEnvironment.environmentId,
-        knownEnvironment: input.knownEnvironment,
-        client: {
-          ...input.client,
-          isHeartbeatFresh: vi.fn(() => true),
-        },
-        ensureBootstrapped: vi.fn(async () => undefined),
-        reconnect,
-        dispose: vi.fn(async () => undefined),
-      };
-    });
-
-    const stop = startEnvironmentConnectionService(new QueryClient());
-    expect(mockConnectionReconnects).toHaveLength(1);
-
-    visibilityState = "hidden";
-    documentTarget.dispatchEvent(new Event("visibilitychange"));
-    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
-
-    visibilityState = "visible";
-    documentTarget.dispatchEvent(new Event("visibilitychange"));
-    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
-
-    stop();
-    await resetEnvironmentServiceForTests();
-  });
-
-  it("reconnects stale environment streams when the browser resumes from the background", async () => {
-    let visibilityState: DocumentVisibilityState = "visible";
-    const documentTarget = new EventTarget();
-    const windowTarget = new EventTarget();
-    vi.stubGlobal("document", {
-      addEventListener: documentTarget.addEventListener.bind(documentTarget),
-      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
-      get visibilityState() {
-        return visibilityState;
-      },
-    });
-    vi.stubGlobal("window", {
-      addEventListener: windowTarget.addEventListener.bind(windowTarget),
-      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
-    });
+    const staleSavedRecord = {
+      environmentId: EnvironmentId.make("env-saved-stale"),
+      label: "Stale saved env",
+      httpBaseUrl: "http://stale.example.test",
+      wsBaseUrl: "ws://stale.example.test",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+    };
+    const freshSavedRecord = {
+      environmentId: EnvironmentId.make("env-saved-fresh"),
+      label: "Fresh saved env",
+      httpBaseUrl: "http://fresh.example.test",
+      wsBaseUrl: "ws://fresh.example.test",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+    };
+    const savedRecords = [staleSavedRecord, freshSavedRecord];
+    const reconnectByEnvironmentId = new Map<EnvironmentId, ReturnType<typeof vi.fn>>();
+    mockListSavedEnvironmentRecords.mockReturnValue(savedRecords);
+    mockGetSavedEnvironmentRecord.mockImplementation((environmentId: EnvironmentId) =>
+      savedRecords.find((record) => record.environmentId === environmentId),
+    );
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("bearer-token");
     mockCreateWsRpcClient.mockReturnValue({
       server: {
         getConfig: vi.fn(async () => ({
@@ -614,20 +578,73 @@ describe("retainThreadDetailSubscription", () => {
         subscribeThread: mockSubscribeThread,
       },
     });
+    mockCreateEnvironmentConnection.mockImplementation((input) => {
+      const reconnect = vi.fn(async () => undefined);
+      mockConnectionReconnects.push(reconnect);
+      reconnectByEnvironmentId.set(input.knownEnvironment.environmentId, reconnect);
+      queueMicrotask(() => {
+        input.onConfigSnapshot?.({
+          environment: {
+            environmentId: input.knownEnvironment.environmentId,
+            label: input.knownEnvironment.label,
+            platform: { os: "darwin", arch: "arm64" },
+            serverVersion: "0.0.0-test",
+            capabilities: { repositoryIdentity: true },
+          },
+        });
+      });
+      return {
+        kind: input.kind,
+        environmentId: input.knownEnvironment.environmentId,
+        knownEnvironment: input.knownEnvironment,
+        client: {
+          ...input.client,
+          isHeartbeatFresh: vi.fn(
+            () => input.knownEnvironment.environmentId === freshSavedRecord.environmentId,
+          ),
+        },
+        ensureBootstrapped: vi.fn(async () => undefined),
+        reconnect,
+        dispose: vi.fn(async () => undefined),
+      };
+    });
 
     const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
       await import("./service");
 
     const stop = startEnvironmentConnectionService(new QueryClient());
-    expect(mockConnectionReconnects).toHaveLength(1);
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(reconnectByEnvironmentId.size).toBe(3);
+    });
+    const primaryReconnect = reconnectByEnvironmentId.get(EnvironmentId.make("env-1"))!;
+    const staleSavedReconnect = reconnectByEnvironmentId.get(staleSavedRecord.environmentId)!;
+    const freshSavedReconnect = reconnectByEnvironmentId.get(freshSavedRecord.environmentId)!;
 
     visibilityState = "hidden";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
-    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+    expect(primaryReconnect).not.toHaveBeenCalled();
+    expect(staleSavedReconnect).not.toHaveBeenCalled();
+    expect(freshSavedReconnect).not.toHaveBeenCalled();
 
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
-    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    expect(primaryReconnect).not.toHaveBeenCalled();
+    expect(staleSavedReconnect).toHaveBeenCalledTimes(1);
+    expect(freshSavedReconnect).not.toHaveBeenCalled();
+
+    const persistedPageShow = new Event("pageshow");
+    Object.defineProperty(persistedPageShow, "persisted", { value: true });
+    windowTarget.dispatchEvent(persistedPageShow);
+    expect(staleSavedReconnect).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2_001);
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    windowTarget.dispatchEvent(persistedPageShow);
+    expect(primaryReconnect).not.toHaveBeenCalled();
+    expect(staleSavedReconnect).toHaveBeenCalledTimes(2);
+    expect(freshSavedReconnect).not.toHaveBeenCalled();
 
     stop();
     await resetEnvironmentServiceForTests();

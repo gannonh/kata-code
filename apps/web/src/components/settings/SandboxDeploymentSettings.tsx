@@ -1,12 +1,10 @@
 "use client";
 
 import { useAuth } from "@clerk/react";
-import { ChevronDownIcon, Trash2Icon } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EnvironmentId,
   SandboxProviderDriverKind,
-  type ProviderInstanceEnvironmentVariable,
   type SavedSandboxEnvironmentMap,
   type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
@@ -22,32 +20,52 @@ import {
   addSavedEnvironment,
   getPrimaryEnvironmentConnection,
   removeSavedEnvironment,
-  useSavedEnvironmentRegistryStore,
 } from "../../environments/runtime";
-import { cn } from "../../lib/utils";
+import { useServerConfig, useServerWelcomeSubscription } from "../../rpc/serverState";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import type { Project } from "../../types";
 import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Collapsible, CollapsibleContent } from "../ui/collapsible";
-import { DraftInput } from "../ui/draft-input";
 import { toastManager } from "../ui/toast";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt";
-import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
-import { ProviderSignInDialog } from "./ProviderSignInDialog";
-import { DockerConfigFields, VercelConfigFields } from "./SandboxDriverConfigFields";
-import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
-import { shouldSeedRepositoryForStart } from "./SandboxDeploymentSettings.logic";
+import { DeploymentTargetCard } from "./SandboxDeploymentTargetCard";
+import {
+  shouldSeedRepositoryForStart,
+  resolveSandboxListUiState,
+} from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
+
+export { DeploymentTargetCard };
 
 const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
-/** Credentials the Vercel sandbox driver requires at session start. */
-const VERCEL_REQUIRED_ENV_NAMES = ["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID"] as const;
-
 /** Per-instance busy state for the long-running RPCs. */
 type BusyOp = "test" | "start" | "dispose" | "renew" | "stop";
+
+/** Reject a lifecycle RPC that never settles (server restart / dropped WS /
+ * interrupted fiber) so the button cannot stick on "Stopping…"/"Starting…".
+ * The provider work may still complete server-side; a follow-up refresh
+ * reconciles the real status. */
+async function withRpcTimeout<T>(
+  label: string,
+  run: () => Promise<T>,
+  timeoutMs = 60_000,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      run(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(`${label} timed out. The server may still be finishing; refresh to check.`),
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 /** Render a non-empty failure message for the progress log and toasts.
  * Effect fiber failures can surface as objects whose `message` is empty. */
@@ -74,24 +92,36 @@ interface SandboxDeploymentSettingsProps {
   readonly headerAction?: ReactNode;
   readonly savedEnvironmentRows?: ReactNode;
   readonly hasSavedEnvironmentRows?: boolean;
+  /** Fired after a successful `listInstances` so Available Runtimes can reuse
+   *  the same summaries (avoids a second RPC and a stale stopped/running join). */
+  readonly onInstancesChanged?: (instances: ReadonlyArray<SandboxInstanceSummary>) => void;
 }
 
 export function SandboxDeploymentSettings({
   headerAction,
   savedEnvironmentRows,
   hasSavedEnvironmentRows = false,
+  onInstancesChanged,
 }: SandboxDeploymentSettingsProps) {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { getToken, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useHostedConnectAuthPrompt();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const serverConfig = useServerConfig();
+  const serverConfigReady = serverConfig !== null;
   const instanceMap = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
   const savedSandboxEnvironments = settings.savedSandboxEnvironments as
     | SavedSandboxEnvironmentMap
     | undefined;
 
   const [summaries, setSummaries] = useState<ReadonlyArray<SandboxInstanceSummary>>([]);
+  const [summariesLoaded, setSummariesLoaded] = useState(false);
+  const summariesLoadedRef = useRef(false);
+  summariesLoadedRef.current = summariesLoaded;
+  const [listError, setListError] = useState<string | null>(null);
+  const [listPending, setListPending] = useState(false);
+  const listRefreshGenerationRef = useRef(0);
   const [testProgress, setTestProgress] = useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [selectedRepositoryKeyByInstance, setSelectedRepositoryKeyByInstance] = useState<
@@ -101,6 +131,16 @@ export function SandboxDeploymentSettings({
     Record<string, { environmentId: string; httpBaseUrl: string }>
   >({});
   const [busy, setBusy] = useState<Record<string, BusyOp>>({});
+
+  const listUiState = resolveSandboxListUiState({
+    summariesLoaded,
+    listError,
+    listPending,
+  });
+  // Settings come from the primary WS config snapshot. Until it arrives,
+  // useSettings() falls back to DEFAULT empty sandboxProviderInstances —
+  // showing "No environments configured" would flash incorrectly.
+  const settingsReady = serverConfigReady;
 
   /** Mark an instance busy for `op` while `fn` runs, then clear it. Centralizes
    * the `finally { setBusy ... delete }` cleanup that every long-running
@@ -121,38 +161,88 @@ export function SandboxDeploymentSettings({
     [],
   );
 
-  const refreshList = useCallback(async () => {
-    try {
-      const result = await getPrimaryEnvironmentConnection().client.sandbox.listInstances();
-      setSummaries(result.instances);
-      setActiveSession(
-        Object.fromEntries(
-          result.instances.flatMap((summary) => {
-            if (summary.kind !== "available" || !summary.runningSession) return [];
-            return [
-              [
-                summary.instanceId as string,
-                {
-                  environmentId: summary.runningSession.environmentId,
-                  httpBaseUrl: summary.runningSession.endpoint.httpBaseUrl,
-                },
-              ],
-            ];
-          }),
-        ),
-      );
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Failed to list sandbox targets",
-        description: error instanceof Error ? error.message : "Unknown error.",
-      });
-    }
-  }, []);
+  const refreshList = useCallback(
+    async (options?: { readonly silent?: boolean }) => {
+      const generation = ++listRefreshGenerationRef.current;
+      const silent = options?.silent === true;
+      if (!silent) setListPending(true);
+      try {
+        // Bound the RPC so a hung listInstances (WS interrupt) cannot leave
+        // Environments on "Loading sandbox status…" forever. Provider status
+        // reconcile runs in the background on the server and must not own this
+        // deadline.
+        const result = await withRpcTimeout(
+          "Loading sandbox status",
+          () => getPrimaryEnvironmentConnection().client.sandbox.listInstances(),
+          30_000,
+        );
+        if (generation !== listRefreshGenerationRef.current) return;
+        setSummaries(result.instances);
+        setActiveSession(
+          Object.fromEntries(
+            result.instances.flatMap((summary) => {
+              if (summary.kind !== "available" || !summary.runningSession) return [];
+              return [
+                [
+                  summary.instanceId as string,
+                  {
+                    environmentId: summary.runningSession.environmentId,
+                    httpBaseUrl: summary.runningSession.endpoint.httpBaseUrl,
+                  },
+                ],
+              ];
+            }),
+          ),
+        );
+        setSummariesLoaded(true);
+        setListError(null);
+        onInstancesChanged?.(result.instances);
+      } catch (error) {
+        if (generation !== listRefreshGenerationRef.current) return;
+        const message = error instanceof Error ? error.message : "Unknown error.";
+        // Do not clear summariesLoaded — keep a prior successful list so Start/Stop
+        // stay usable after a refresh blip or timeout.
+        setListError(message);
+        // Toast only on a cold failure (no prior list). Background/silent
+        // refreshes and refreshes that already have cards must not spam errors.
+        if (!silent && !summariesLoadedRef.current) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to list sandbox targets",
+            description: message,
+          });
+        }
+      } finally {
+        if (generation === listRefreshGenerationRef.current && !silent) {
+          setListPending(false);
+        }
+      }
+    },
+    [onInstancesChanged],
+  );
 
+  // Retry when the primary WS config snapshot arrives (first paint can race
+  // auth) and whenever the configured instance map changes. A short silent
+  // follow-up picks up background provider-status reconcile without blocking
+  // first paint.
   useEffect(() => {
+    if (!serverConfigReady) return;
     void refreshList();
-  }, [refreshList, settings.sandboxProviderInstances]);
+    const followUp = window.setTimeout(() => {
+      void refreshList({ silent: true });
+    }, 2_500);
+    return () => window.clearTimeout(followUp);
+  }, [refreshList, settings.sandboxProviderInstances, serverConfigReady]);
+
+  // Re-list on every (re)connect. A listInstances dispatched on a socket that
+  // is then replaced by a reconnect now rejects (TransportSessionReplacedError)
+  // instead of hanging — this welcome-driven refresh reloads against the fresh
+  // session so "Loading sandbox status…" always resolves without a page reload.
+  useServerWelcomeSubscription(
+    useCallback(() => {
+      void refreshList({ silent: true });
+    }, [refreshList]),
+  );
 
   const summaryById = useMemo(() => {
     const map: Record<string, SandboxInstanceSummary> = {};
@@ -235,7 +325,11 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
-        const shouldSeedRepository = shouldSeedRepositoryForStart(summaryById[instanceId]);
+        // Vercel clones its GitHub source server-side from config; never attach
+        // a local project repository for it.
+        const isVercelInstance = (instance?.driver as string) === (VERCEL_KIND as string);
+        const shouldSeedRepository =
+          !isVercelInstance && shouldSeedRepositoryForStart(summaryById[instanceId]);
         const project = shouldSeedRepository ? resolveSelectedProject(instanceId) : undefined;
         const startedRepositoryKey = shouldSeedRepository
           ? (project?.repositoryIdentity?.canonicalKey as string | undefined)
@@ -251,6 +345,11 @@ export function SandboxDeploymentSettings({
           if (hasCloudPublicConfig() && !connectAuthToken) {
             throw new Error("Sign in to Kata Code Connect before starting a deployment session.");
           }
+          // Vercel provisioning can legitimately exceed the UI's generic
+          // lifecycle deadline while the provider sandbox is already running.
+          // The transport rejects this request if its session is replaced, and
+          // the server owns provider-stage deadlines, so await the authoritative
+          // result instead of reporting a false client-side timeout.
           const result = await getPrimaryEnvironmentConnection().client.sandbox.startSession({
             instanceId: instanceId as never,
             ...(connectAuthToken ? { connectAuthToken } : {}),
@@ -330,6 +429,9 @@ export function SandboxDeploymentSettings({
             title: "Start session failed",
             description: message,
           });
+          // Start-from-stopped keeps the VM on Connect failure; refresh so the
+          // card shows provider truth (running/stopped) instead of a stale list.
+          await refreshList();
         }
       }),
     [
@@ -350,9 +452,12 @@ export function SandboxDeploymentSettings({
       withBusy(instanceId, "dispose", async () => {
         try {
           const session = activeSession[instanceId];
-          const result = await getPrimaryEnvironmentConnection().client.sandbox.disposeSession({
-            instanceId: instanceId as never,
-          });
+          const connection = getPrimaryEnvironmentConnection();
+          const result = await withRpcTimeout("Delete sandbox", () =>
+            connection.client.sandbox.disposeSession({
+              instanceId: instanceId as never,
+            }),
+          );
           if (!result.disposed) {
             toastManager.add({
               type: "error",
@@ -362,7 +467,10 @@ export function SandboxDeploymentSettings({
             return;
           }
           if (session) {
-            await removeSavedEnvironment(EnvironmentId.make(session.environmentId)).catch(
+            // The remote sandbox can disappear before its saved WebSocket
+            // connection finishes closing. Do not hold the lifecycle UI open
+            // on that best-effort local cleanup.
+            void removeSavedEnvironment(EnvironmentId.make(session.environmentId)).catch(
               (error) => {
                 toastManager.add({
                   type: "error",
@@ -372,18 +480,27 @@ export function SandboxDeploymentSettings({
               },
             );
           }
-          refreshManagedRelayEnvironments();
-          await refreshList();
           setActiveSession((prev) => {
             const next = { ...prev };
             delete next[instanceId];
             return next;
           });
-          toastManager.add({
-            type: "success",
-            title: "Sandbox deleted",
-            description: `Sandbox '${instanceId}' released.`,
-          });
+          refreshManagedRelayEnvironments();
+          await refreshList();
+          toastManager.add(
+            result.connectCleanup === "pending"
+              ? {
+                  type: "error",
+                  title: "Sandbox deleted; Connect cleanup pending",
+                  description:
+                    "The sandbox is gone, but its Connect record could not be removed. Retry from Available Runtimes.",
+                }
+              : {
+                  type: "success",
+                  title: "Sandbox deleted",
+                  description: `Sandbox '${instanceId}' released.`,
+                },
+          );
         } catch (error) {
           toastManager.add({
             type: "error",
@@ -399,9 +516,11 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "stop", async () => {
         try {
-          await getPrimaryEnvironmentConnection().client.sandbox.stopSession({
-            instanceId: instanceId as never,
-          });
+          await withRpcTimeout("Stop session", () =>
+            getPrimaryEnvironmentConnection().client.sandbox.stopSession({
+              instanceId: instanceId as never,
+            }),
+          );
           refreshManagedRelayEnvironments();
           await refreshList();
           toastManager.add({
@@ -415,6 +534,8 @@ export function SandboxDeploymentSettings({
             title: "Stop failed",
             description: error instanceof Error ? error.message : "Unknown error.",
           });
+          // A timed-out/interrupted stop may still be settling server-side.
+          await refreshList();
         }
       }),
     [refreshList, withBusy],
@@ -424,9 +545,11 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "renew", async () => {
         try {
-          await getPrimaryEnvironmentConnection().client.sandbox.renewSession({
-            instanceId: instanceId as never,
-          });
+          await withRpcTimeout("Extend session", () =>
+            getPrimaryEnvironmentConnection().client.sandbox.renewSession({
+              instanceId: instanceId as never,
+            }),
+          );
           await refreshList();
         } catch (error) {
           toastManager.add({
@@ -447,9 +570,11 @@ export function SandboxDeploymentSettings({
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
         try {
-          const issued = await getPrimaryEnvironmentConnection().client.sandbox.issuePairingToken({
-            instanceId: instanceId as never,
-          });
+          const issued = await withRpcTimeout("Retry pairing", () =>
+            getPrimaryEnvironmentConnection().client.sandbox.issuePairingToken({
+              instanceId: instanceId as never,
+            }),
+          );
           await addSavedEnvironment({
             label: instance?.displayName?.trim() || issued.endpoint.label,
             host: issued.endpoint.httpBaseUrl,
@@ -522,19 +647,46 @@ export function SandboxDeploymentSettings({
   return (
     <>
       <SettingsSection title="Environments" headerAction={headerAction}>
+        {listUiState === "error" ? (
+          <div className="flex flex-col gap-2 border-t border-border/60 px-4 py-3 first:border-t-0 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <p className="text-xs text-destructive">
+              Could not load sandbox status
+              {listError ? `: ${listError}` : "."}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={listPending}
+              onClick={() => void refreshList()}
+            >
+              {listPending ? "Retrying…" : "Retry"}
+            </Button>
+          </div>
+        ) : null}
+        {listUiState === "loading" && instanceEntries.length > 0 ? (
+          <div className="border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5">
+            <p className="text-xs text-muted-foreground">Loading sandbox status…</p>
+          </div>
+        ) : null}
         {hasSavedEnvironmentRows ? savedEnvironmentRows : null}
         {instanceEntries.length === 0 && !hasSavedEnvironmentRows ? (
           <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
             <p className="text-xs text-muted-foreground">
-              No environments configured. Add one to define a remote link, SSH host, Docker
-              container, or cloud provider.
+              {!settingsReady
+                ? "Loading environments…"
+                : `No environments configured. Add a remote link, Docker container, or cloud provider${
+                    typeof window !== "undefined" && window.desktopBridge ? ", or SSH host" : ""
+                  }.`}
             </p>
           </div>
         ) : (
           instanceEntries.map(([id, config]) => {
             const summary = summaryById[id];
-            const available = summary?.kind === "available";
-            const reason = summary?.kind === "unavailable" ? summary.reason : undefined;
+            const available = listUiState === "ready" && summary?.kind === "available";
+            const reason =
+              listUiState === "ready" && summary?.kind === "unavailable"
+                ? summary.reason
+                : undefined;
             const session = activeSession[id];
             const progress = testProgress[id] ?? [];
             const instanceBusy = busy[id];
@@ -554,7 +706,8 @@ export function SandboxDeploymentSettings({
                 available={available}
                 reason={reason}
                 session={session}
-                summary={summary}
+                summary={listUiState === "ready" ? summary : undefined}
+                listUiState={listUiState}
                 progress={progress}
                 instanceBusy={instanceBusy}
                 isExpanded={isOpen}
@@ -585,377 +738,4 @@ export function SandboxDeploymentSettings({
       {authPrompt}
     </>
   );
-}
-
-interface DeploymentTargetCardProps {
-  readonly instanceId: string;
-  readonly instance: SandboxProviderInstanceConfig;
-  readonly displayName: string;
-  readonly available: boolean;
-  readonly reason: string | undefined;
-  readonly session: { environmentId: string; httpBaseUrl: string } | undefined;
-  readonly summary: SandboxInstanceSummary | undefined;
-  readonly progress: string[];
-  readonly instanceBusy: BusyOp | undefined;
-  readonly isExpanded: boolean;
-  readonly projects: ReadonlyArray<Project>;
-  readonly savedSandboxEnvironments: SavedSandboxEnvironmentMap | undefined;
-  readonly selectedRepositoryKey: string | undefined;
-  readonly onExpandedChange: (open: boolean) => void;
-  readonly onUpdate: (next: SandboxProviderInstanceConfig) => void;
-  readonly onSavedEnvironmentChange: (next: SavedSandboxEnvironmentMap) => void;
-  readonly onSelectedRepositoryKeyChange: (repositoryKey: string) => void;
-  readonly onDelete: () => void;
-  readonly onTest: () => void;
-  readonly onStart: () => void;
-  readonly onStop: () => void;
-  readonly onDispose: () => void;
-  readonly onRenew: () => void;
-  readonly onRetryPairing: () => void;
-}
-
-/**
- * A single deployment-target row: title + driver/status badges + delete +
- * status badge + secondary Stop/Start button + chevron in the header, and a
- * `Collapsible` with display name, config fields, env vars, and state-driven
- * actions (Create & run sandbox / Stop / Start / Delete sandbox) + progress.
- */
-export function DeploymentTargetCard({
-  instanceId,
-  instance,
-  displayName,
-  available,
-  reason,
-  session,
-  summary,
-  progress,
-  instanceBusy,
-  isExpanded,
-  projects,
-  savedSandboxEnvironments,
-  selectedRepositoryKey,
-  onExpandedChange,
-  onUpdate,
-  onSavedEnvironmentChange,
-  onSelectedRepositoryKeyChange,
-  onDelete,
-  onTest,
-  onStart,
-  onStop,
-  onDispose,
-  onRenew,
-  onRetryPairing,
-}: DeploymentTargetCardProps) {
-  const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
-  const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
-  const supportsRenewTimeout =
-    summary?.kind === "available" ? summary.supportsRenewTimeout : undefined;
-  const sessionStatus = runningSession?.status;
-  const deadlineEpochMs = runningSession?.deadlineEpochMs;
-  const statusDetail = runningSession?.statusDetail;
-  const [signInFor, setSignInFor] = useState<string | null>(null);
-  // Recovery R2: a running sandbox whose environment id has no saved record
-  // is unreachable from Add Project — offer Retry pairing instead of a dead end.
-  const hasSavedRecordForSession = useSavedEnvironmentRegistryStore((state) =>
-    runningSession !== undefined && sessionStatus === "running"
-      ? state.byId[runningSession.environmentId as never] !== undefined
-      : true,
-  );
-  const updateDisplayName = (value: string) => {
-    const trimmed = value.trim();
-    const { displayName: _omit, ...rest } = instance;
-    onUpdate(
-      trimmed.length > 0
-        ? ({ ...rest, displayName: trimmed } as SandboxProviderInstanceConfig)
-        : (rest as SandboxProviderInstanceConfig),
-    );
-  };
-
-  const updateConfig = (nextConfig: Record<string, unknown> | undefined) => {
-    const { config: _omit, ...rest } = instance;
-    onUpdate(
-      nextConfig !== undefined
-        ? ({ ...rest, config: nextConfig } as SandboxProviderInstanceConfig)
-        : (rest as SandboxProviderInstanceConfig),
-    );
-  };
-
-  const updateEnvironment = (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => {
-    const cleaned = environment.filter((variable) => variable.name.trim().length > 0);
-    const { environment: _omit, ...rest } = instance;
-    onUpdate(
-      cleaned.length > 0
-        ? ({ ...rest, environment: cleaned } as SandboxProviderInstanceConfig)
-        : (rest as SandboxProviderInstanceConfig),
-    );
-  };
-
-  return (
-    <div className="border-t border-border/60 first:border-t-0">
-      <div className="px-4 py-3.5 sm:px-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h3 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">
-                {displayName}
-              </h3>
-              <code className="truncate rounded bg-muted/60 px-1 py-0.5 text-[10px] text-muted-foreground">
-                {instanceId}
-              </code>
-              <Badge variant="secondary">{instance.driver}</Badge>
-              {available ? (
-                <Badge variant="default">available</Badge>
-              ) : reason ? (
-                <Badge variant="destructive">{reason}</Badge>
-              ) : null}
-              {sessionStatus === "running" ? (
-                <Badge variant="default" className="bg-green-600 text-green-50">
-                  running
-                </Badge>
-              ) : sessionStatus === "stopped" ? (
-                <Badge variant="secondary" className="bg-muted text-muted-foreground">
-                  stopped
-                </Badge>
-              ) : null}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      className="size-5 rounded-sm p-0 text-muted-foreground hover:text-destructive"
-                      onClick={onDelete}
-                      aria-label={`Delete sandbox environment ${instanceId}`}
-                    >
-                      <Trash2Icon className="size-3" />
-                    </Button>
-                  }
-                />
-                <TooltipPopup side="top">Delete sandbox environment</TooltipPopup>
-              </Tooltip>
-            </div>
-            <p className="text-xs text-muted-foreground/80">
-              {session
-                ? `Session ready: ${session.httpBaseUrl} (env ${session.environmentId})`
-                : isVercel
-                  ? "Provisions an ephemeral Vercel Sandbox microVM, reached over a public URL."
-                  : "Provision an isolated container reached over localhost."}
-            </p>
-          </div>
-          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-            {sessionStatus === "running" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={instanceBusy !== undefined}
-                onClick={onStop}
-              >
-                {instanceBusy === "stop" ? "Stopping…" : "Stop"}
-              </Button>
-            ) : sessionStatus === "stopped" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={instanceBusy !== undefined}
-                onClick={onStart}
-              >
-                {instanceBusy === "start" ? "Starting…" : "Start"}
-              </Button>
-            ) : null}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => onExpandedChange(!isExpanded)}
-              aria-label={`Toggle ${displayName} details`}
-            >
-              <ChevronDownIcon
-                className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")}
-              />
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <Collapsible open={isExpanded} onOpenChange={onExpandedChange}>
-        <CollapsibleContent>
-          <div className="space-y-0">
-            <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-              <label htmlFor={`sandbox-instance-${instanceId}-display-name`} className="block">
-                <span className="text-xs font-medium text-foreground">Display name</span>
-                <DraftInput
-                  id={`sandbox-instance-${instanceId}-display-name`}
-                  className="mt-1.5"
-                  value={instance.displayName ?? ""}
-                  onCommit={updateDisplayName}
-                  placeholder="Instance label"
-                  spellCheck={false}
-                />
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Optional label shown in the deployment list.
-                </span>
-              </label>
-            </div>
-
-            {isVercel ? (
-              <VercelConfigFields
-                config={instance.config}
-                idPrefix={`sandbox-instance-${instanceId}`}
-                onChange={updateConfig}
-                machineSizeLocked={sessionStatus !== undefined}
-              />
-            ) : (
-              <DockerConfigFields
-                config={instance.config}
-                idPrefix={`sandbox-instance-${instanceId}`}
-                onChange={updateConfig}
-              />
-            )}
-
-            <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-              <ProviderEnvironmentSection
-                environment={instance.environment ?? []}
-                onChange={updateEnvironment}
-                title="Runtime environment variables"
-                {...(isVercel ? { prefillNames: VERCEL_REQUIRED_ENV_NAMES } : {})}
-                description={
-                  isVercel
-                    ? "Apply to every session on this target. Add VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID here as sensitive variables."
-                    : "Apply to every session on this target (e.g. API keys the sandbox server needs at boot)."
-                }
-              />
-            </div>
-
-            <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-              <SavedEnvironmentEditor
-                projects={projects}
-                savedSandboxEnvironments={savedSandboxEnvironments}
-                selectedRepositoryKey={selectedRepositoryKey}
-                onSelectedRepositoryKeyChange={onSelectedRepositoryKeyChange}
-                onChange={onSavedEnvironmentChange}
-              />
-            </div>
-
-            <div className="space-y-3 border-t border-border/60 px-4 py-3 sm:px-5">
-              {statusDetail ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-amber-600">{statusDetail}</span>
-                </div>
-              ) : null}
-              {sessionStatus === "running" ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  {session ? (
-                    <span className="text-xs text-muted-foreground">
-                      {session.httpBaseUrl} (env {session.environmentId})
-                    </span>
-                  ) : null}
-                  {deadlineEpochMs !== undefined ? (
-                    <span className="text-xs text-muted-foreground">
-                      Expires in {formatRemaining(deadlineEpochMs)}
-                    </span>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={instanceBusy !== undefined}
-                    onClick={onStop}
-                  >
-                    {instanceBusy === "stop" ? "Stopping…" : "Stop"}
-                  </Button>
-                  {supportsRenewTimeout ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={instanceBusy !== undefined}
-                      onClick={onRenew}
-                    >
-                      {instanceBusy === "renew" ? "Extending…" : "Extend"}
-                    </Button>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={instanceBusy !== undefined}
-                    onClick={() => setSignInFor("claude")}
-                  >
-                    Sign in to Claude
-                  </Button>
-                  {!hasSavedRecordForSession ? (
-                    <Button
-                      size="sm"
-                      disabled={instanceBusy !== undefined}
-                      onClick={onRetryPairing}
-                    >
-                      {instanceBusy === "start" ? "Pairing…" : "Retry pairing"}
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-2">
-                {sessionStatus === undefined ? (
-                  <>
-                    <Button
-                      size="sm"
-                      disabled={instanceBusy !== undefined || !available}
-                      onClick={onStart}
-                    >
-                      {instanceBusy === "start" ? "Starting…" : "Create & run sandbox"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={instanceBusy !== undefined || !available}
-                      onClick={onTest}
-                    >
-                      {instanceBusy === "test" ? "Testing…" : "Test connection"}
-                    </Button>
-                  </>
-                ) : sessionStatus === "stopped" ? (
-                  <>
-                    <Button size="sm" disabled={instanceBusy !== undefined} onClick={onStart}>
-                      {instanceBusy === "start" ? "Starting…" : "Start"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                      disabled={instanceBusy !== undefined}
-                      onClick={onDispose}
-                    >
-                      {instanceBusy === "dispose" ? "Deleting…" : "Delete sandbox"}
-                    </Button>
-                  </>
-                ) : null}
-              </div>
-              {progress.length > 0 || instanceBusy === "test" ? (
-                <pre className="text-xs whitespace-pre-wrap text-muted-foreground">
-                  {progress.join("\n")}
-                </pre>
-              ) : null}
-            </div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-      {signInFor !== null ? (
-        <ProviderSignInDialog
-          instanceId={instanceId}
-          providerId={signInFor}
-          onClose={() => setSignInFor(null)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/** Format the remaining lifetime from an epoch-ms deadline. */
-function formatRemaining(deadlineEpochMs: number): string {
-  const remaining = deadlineEpochMs - Date.now();
-  if (remaining <= 0) return "soon";
-  const minutes = Math.floor(remaining / 60_000);
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours}h ${mins}m`;
-  }
-  return `${minutes}m`;
 }

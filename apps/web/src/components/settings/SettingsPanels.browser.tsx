@@ -160,7 +160,7 @@ const savedEnvironmentHarness = vi.hoisted(() => {
     readonly lastConnectedAt: string | null;
     readonly desktopSsh?: unknown;
     readonly relayManaged?: unknown;
-    readonly sandbox?: { readonly providerKind: string };
+    readonly sandbox?: { readonly providerKind: string; readonly instanceId?: string };
   };
   type RuntimeState = {
     readonly connectionState: "connecting" | "connected" | "disconnected" | "error";
@@ -186,6 +186,13 @@ const savedEnvironmentHarness = vi.hoisted(() => {
     };
   });
 
+  const upsert = vi.fn((record: RegistryRecord) => {
+    registryById = {
+      ...registryById,
+      [record.environmentId]: record,
+    };
+  });
+
   const remove = vi.fn((environmentId: string) => {
     const { [environmentId]: _removedRecord, ...remainingRegistry } = registryById;
     const { [environmentId]: _removedRuntime, ...remainingRuntime } = runtimeById;
@@ -198,6 +205,7 @@ const savedEnvironmentHarness = vi.hoisted(() => {
       registryById = {};
       runtimeById = {};
       rename.mockClear();
+      upsert.mockClear();
       remove.mockClear();
     },
     setRegistry(next: Record<string, RegistryRecord>) {
@@ -210,6 +218,7 @@ const savedEnvironmentHarness = vi.hoisted(() => {
       return {
         byId: registryById,
         rename,
+        upsert,
         remove,
       };
     },
@@ -241,24 +250,28 @@ vi.mock("@clerk/react", () => ({
   }),
 }));
 
-vi.mock("../../environments/runtime", () => {
+const runtimeMockModule = vi.hoisted(() => {
+  const environmentId = "environment-local" as EnvironmentId;
   const primaryConnection = {
     kind: "primary" as const,
     knownEnvironment: {
       id: "environment-local",
       label: "Local environment",
       source: "manual" as const,
-      environmentId: EnvironmentId.make("environment-local"),
+      environmentId,
       target: {
         httpBaseUrl: "http://localhost:3000",
         wsBaseUrl: "ws://localhost:3000",
       },
     },
-    environmentId: EnvironmentId.make("environment-local"),
+    environmentId,
     client: {
       server: {
         subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
           authAccessHarness.subscribe(listener),
+      },
+      sandbox: {
+        listInstances: vi.fn().mockResolvedValue({ instances: [] }),
       },
     },
     ensureBootstrapped: async () => undefined,
@@ -268,10 +281,8 @@ vi.mock("../../environments/runtime", () => {
 
   return {
     getEnvironmentHttpBaseUrl: () => "http://localhost:3000",
-    getSavedEnvironmentRecord: (environmentId: string) =>
-      savedEnvironmentHarness.getRecord(environmentId),
-    getSavedEnvironmentRuntimeState: (environmentId: string) =>
-      savedEnvironmentHarness.getRuntime(environmentId),
+    getSavedEnvironmentRecord: (id: string) => savedEnvironmentHarness.getRecord(id),
+    getSavedEnvironmentRuntimeState: (id: string) => savedEnvironmentHarness.getRuntime(id),
     hasSavedEnvironmentRegistryHydrated: () => true,
     listSavedEnvironmentRecords: () => savedEnvironmentHarness.listRecords(),
     resetSavedEnvironmentRegistryStoreForTests: () => undefined,
@@ -293,22 +304,40 @@ vi.mock("../../environments/runtime", () => {
     ensureEnvironmentConnectionBootstrapped: async () => undefined,
     getPrimaryEnvironmentConnection: () => primaryConnection,
     readEnvironmentConnection: () => primaryConnection,
+    reconcileSavedEnvironmentConnectionState: () => false,
     reconnectSavedEnvironment: vi.fn(),
-    removeSavedEnvironment: vi.fn(async (environmentId: string) => {
-      savedEnvironmentHarness.remove(environmentId);
+    removeSavedEnvironment: vi.fn(async (id: string) => {
+      savedEnvironmentHarness.remove(id);
     }),
     requireEnvironmentConnection: () => primaryConnection,
     resetEnvironmentServiceForTests: () => undefined,
     startEnvironmentConnectionService: () => undefined,
     subscribeEnvironmentConnections: () => () => {},
-    useSavedEnvironmentRegistryStore: (
-      selector: (state: ReturnType<typeof savedEnvironmentHarness.getRegistryState>) => unknown,
-    ) => selector(savedEnvironmentHarness.getRegistryState()),
-    useSavedEnvironmentRuntimeStore: (
-      selector: (state: ReturnType<typeof savedEnvironmentHarness.getRuntimeState>) => unknown,
-    ) => selector(savedEnvironmentHarness.getRuntimeState()),
+    useSavedEnvironmentRegistryStore: Object.assign(
+      (selector: (state: ReturnType<typeof savedEnvironmentHarness.getRegistryState>) => unknown) =>
+        selector(savedEnvironmentHarness.getRegistryState()),
+      {
+        getState: () => savedEnvironmentHarness.getRegistryState(),
+      },
+    ),
+    useSavedEnvironmentRuntimeStore: Object.assign(
+      (selector: (state: ReturnType<typeof savedEnvironmentHarness.getRuntimeState>) => unknown) =>
+        selector(savedEnvironmentHarness.getRuntimeState()),
+      {
+        getState: () => savedEnvironmentHarness.getRuntimeState(),
+      },
+    ),
   };
 });
+
+// ConnectionsSettings imports leaf modules to avoid a barrel↔service circular
+// ESM re-export failure in browser mode; mock all three resolution paths.
+vi.mock("../../environments/runtime", () => runtimeMockModule);
+vi.mock("../../environments/runtime/catalog", () => runtimeMockModule);
+vi.mock("../../environments/runtime/service", () => runtimeMockModule);
+vi.mock("~/environments/runtime", () => runtimeMockModule);
+vi.mock("~/environments/runtime/catalog", () => runtimeMockModule);
+vi.mock("~/environments/runtime/service", () => runtimeMockModule);
 
 function createBaseServerConfig(): ServerConfig {
   return {
@@ -755,6 +784,39 @@ describe("GeneralSettingsPanel observability", () => {
       expect(availableRuntimesSection?.textContent).toContain("Disconnect");
       expect(availableRuntimesSection?.textContent).not.toContain("Delete");
     });
+  });
+
+  it("waits for a settings snapshot before classifying a linked sandbox as orphaned", async () => {
+    const sandboxEnvironmentId = "environment-sandbox-vercel-pending";
+    window.desktopBridge = createDesktopBridgeStub();
+    authAccessHarness.setSnapshot({ pairingLinks: [], clientSessions: [] });
+    savedEnvironmentHarness.setRegistry({
+      [sandboxEnvironmentId]: {
+        environmentId: sandboxEnvironmentId,
+        label: "kata-code-sandbox",
+        httpBaseUrl: "https://vercel-test.example",
+        wsBaseUrl: "wss://vercel-test.example",
+        createdAt: "2036-04-07T00:00:00.000Z",
+        lastConnectedAt: "2036-04-07T09:21:00.000Z",
+        sandbox: {
+          providerKind: "vercel",
+          instanceId: "vercel_kata-code-sandbox",
+        },
+      },
+    });
+
+    // The saved environment registry can hydrate before the server's settings
+    // snapshot. Its target id must not be treated as absent during that window.
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ConnectionsSettings />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect
+      .element(page.getByRole("heading", { name: "Environments", exact: true }))
+      .toBeInTheDocument();
+    await expect.element(page.getByText("Orphaned sandbox runtime")).not.toBeInTheDocument();
   });
 
   it("hides advertised endpoint rows when desktop network access is disabled", async () => {
@@ -1312,6 +1374,35 @@ describe("GeneralSettingsPanel observability", () => {
         { label: "" },
       );
     });
+  });
+
+  it("offers Docker and Cloud on web without desktopBridge, but not SSH", async () => {
+    Reflect.deleteProperty(window, "desktopBridge");
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ConnectionsSettings />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page.getByRole("button", { name: "Add environment", exact: true }).click();
+    const addEnvironmentDialog = page.getByRole("dialog", { name: "Add Environment" });
+    await expect
+      .element(addEnvironmentDialog.getByRole("heading", { name: "Add Environment", exact: true }))
+      .toBeInTheDocument();
+    await expect
+      .element(addEnvironmentDialog.getByRole("button", { name: /^Remote link\b/ }))
+      .toBeInTheDocument();
+    await expect
+      .element(addEnvironmentDialog.getByRole("button", { name: /^Docker container\b/ }))
+      .toBeInTheDocument();
+    await expect
+      .element(addEnvironmentDialog.getByRole("button", { name: /^Cloud Provider\b/ }))
+      .toBeInTheDocument();
+    await expect
+      .element(addEnvironmentDialog.getByRole("button", { name: /^SSH\b/ }))
+      .not.toBeInTheDocument();
   });
 
   it("opens the logs folder in the preferred editor", async () => {

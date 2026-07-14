@@ -6,7 +6,7 @@ import type { SandboxProvider } from "@kata-sh/code-sandbox/driver";
 
 import { makeVercelSandboxProvider, vercelSandboxName } from "./VercelSandboxProvider.ts";
 import type { VercelAuthParams, VercelSandboxInstance, VercelSdk } from "./sdk.ts";
-import { DEFAULT_VERCEL_CONFIG } from "./config.ts";
+import { DEFAULT_VERCEL_CONFIG, VERCEL_SOURCE_TOKEN_ENV } from "./config.ts";
 
 const AUTH: VercelAuthParams = { token: "tok", teamId: "team_1", projectId: "prj_1" };
 /** Deterministic Vercel name for the common `inst_1` fixture (includes hash suffix). */
@@ -21,6 +21,7 @@ interface FakeRun {
   readonly cmd: string;
   readonly args?: ReadonlyArray<string>;
   readonly detached?: boolean;
+  readonly cwd?: string;
 }
 
 interface FakeSdkState {
@@ -87,6 +88,7 @@ function fakeSdk(
         cmd: opts.cmd,
         ...(opts.args !== undefined ? { args: opts.args } : {}),
         ...(opts.detached !== undefined ? { detached: opts.detached } : {}),
+        ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
       });
       return {
         exitCode: overrides.runExitCode ?? 0,
@@ -131,7 +133,7 @@ function fakeSdk(
   const sdk: VercelSdk = {
     create: async (params) => {
       state.createCalls = [...state.createCalls, params];
-      return makeInstance("sandbox-1");
+      return makeInstance(params.name ?? "sandbox-1");
     },
     get: async (params) => {
       state.getCalls = [
@@ -170,11 +172,13 @@ function fakeSdk(
 const configWithAuth = (
   overrides: Partial<{
     persistent: boolean;
+    source: { repository: string; branch: string };
   }> = {},
 ) => ({
   ...DEFAULT_VERCEL_CONFIG,
   auth: AUTH,
   ...(overrides.persistent !== undefined ? { persistent: overrides.persistent } : {}),
+  ...(overrides.source !== undefined ? { source: overrides.source } : {}),
 });
 
 /** Collapse an effect's error channel into a `{ _tag: "Left"|"Right" }` value (Effect v4 has no `Effect.either`). */
@@ -371,6 +375,141 @@ describe("VercelSandboxProvider", () => {
     }),
   );
 
+  vitIt.effect(
+    "provision passes a native Git source with token credentials and shallow depth (AC-GS5)",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        yield* provider.provision({
+          instanceId: "inst_1",
+          config: configWithAuth({
+            source: { repository: "octocat/Hello-World", branch: "main" },
+          }),
+          image: "",
+          env: [[VERCEL_SOURCE_TOKEN_ENV, "gho_secrettoken"]],
+        });
+        const createCall = state.createCalls[0] as {
+          source?: {
+            type: string;
+            url: string;
+            username?: string;
+            password?: string;
+            depth?: number;
+            revision?: string;
+          };
+          env: Record<string, string>;
+        };
+        expect(createCall.source).toEqual({
+          type: "git",
+          url: "https://github.com/octocat/Hello-World.git",
+          username: "x-access-token",
+          password: "gho_secrettoken",
+          depth: 1,
+          revision: "main",
+        });
+        // The transient token must never reach the sandbox env.
+        expect(createCall.env[VERCEL_SOURCE_TOKEN_ENV]).toBeUndefined();
+        expect(
+          Object.values(createCall.env).some((value) => value.includes("gho_secrettoken")),
+        ).toBe(false);
+      }),
+  );
+
+  vitIt.effect("provision attaches a native source revision to its selected local branch", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk();
+      const provider = makeProvider(sdk);
+      yield* provider.provision({
+        instanceId: "inst_1",
+        config: configWithAuth({
+          source: { repository: "octocat/Hello-World", branch: "feature/worktrees" },
+        }),
+        image: "",
+        env: [[VERCEL_SOURCE_TOKEN_ENV, "gho_secrettoken"]],
+      });
+
+      // Vercel's `revision` checkout can leave HEAD detached. Kata must
+      // establish the selected branch before its server accepts worktree
+      // requests from the chat UI.
+      expect(state.runCommands).toContainEqual({
+        cmd: "sh",
+        args: ["-c", "git checkout -B 'feature/worktrees' HEAD"],
+        cwd: "/vercel/sandbox",
+      });
+    }),
+  );
+
+  vitIt.effect("provision deletes the sandbox when source branch attachment fails", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk({
+        runExitCode: 1,
+        runStderr: "fatal: could not create branch",
+      });
+      const provider = makeProvider(sdk);
+      const result = yield* either(
+        provider.provision({
+          instanceId: "inst_1",
+          config: configWithAuth({
+            source: { repository: "octocat/Hello-World", branch: "feature/worktrees" },
+          }),
+          image: "",
+          env: [[VERCEL_SOURCE_TOKEN_ENV, "gho_secrettoken"]],
+        }),
+      );
+
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") expect(result.left.reason).toBe("provision-failed");
+      expect(state.deleted).toEqual([INST_1_NAME]);
+    }),
+  );
+
+  vitIt.effect("provision omits the source when no source is configured", () =>
+    Effect.gen(function* () {
+      const { sdk, state } = fakeSdk();
+      const provider = makeProvider(sdk);
+      yield* provider.provision({
+        instanceId: "inst_1",
+        config: configWithAuth(),
+        image: "",
+        env: [[VERCEL_SOURCE_TOKEN_ENV, "gho_secrettoken"]],
+      });
+      const createCall = state.createCalls[0] as {
+        source?: unknown;
+        runtime?: string;
+        env: Record<string, string>;
+      };
+      expect(createCall.source).toBeUndefined();
+      expect(createCall.runtime).toBe("node24");
+      expect(createCall.env[VERCEL_SOURCE_TOKEN_ENV]).toBeUndefined();
+    }),
+  );
+
+  vitIt.effect(
+    "provision omits a configured source when the transient token is absent (AC-GS4 testConnection)",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        // testConnection passes the saved config (including source) but never
+        // the transient GitHub token — the probe must stay source-less and must
+        // not attempt a post-create branch attach against an empty workspace.
+        yield* provider.provision({
+          instanceId: "inst_1__probe_deadbeef",
+          config: configWithAuth({
+            source: { repository: "octocat/Hello-World", branch: "main" },
+          }),
+          image: "",
+          env: [],
+        });
+        const createCall = state.createCalls[0] as { source?: unknown };
+        expect(createCall.source).toBeUndefined();
+        expect(state.runCommands.some((r) => r.args?.join(" ")?.includes("git checkout -B"))).toBe(
+          false,
+        );
+      }),
+  );
+
   vitIt.effect("reachability maps domain to https/wss public URLs (AC-3b.4)", () =>
     Effect.gen(function* () {
       const { sdk } = fakeSdk({ domain: "https://sandbox-xyz.vercel.run" });
@@ -480,12 +619,49 @@ describe("VercelSandboxProvider", () => {
         // start resumes via get(resume: true).
         const resumeGet = state.getCalls.find((c) => c.resume === true);
         expect(resumeGet).toBeDefined();
-        // serve is relaunched detached.
+        // Prior serve is killed (blocking), then relaunched detached with fresh env.
+        const killRun = state.runCommands.find((r) =>
+          r.args?.join(" ").includes("pkill -9 -f '[k]atacode serve --port"),
+        );
+        expect(killRun).toBeDefined();
+        expect(killRun?.detached).not.toBe(true);
         const serveRun = [...state.runCommands].toReversed().find((r) => r.detached === true);
         expect(serveRun?.args?.join(" ")).toContain("katacode serve");
+        expect(serveRun?.args?.join(" ")).toContain("KATACODE_DESKTOP_BOOTSTRAP_TOKEN");
         expect((started.handle as { sandboxId: string }).sandboxId).toBe(INST_1_NAME);
         // persistence unchanged -> no update call.
         expect(state.updateCalls).toHaveLength(0);
+      }),
+  );
+
+  vitIt.effect(
+    "lifecycle.start repairs a detached native source checkout without changing a branch checkout",
+    () =>
+      Effect.gen(function* () {
+        const { sdk, state } = fakeSdk();
+        const provider = makeProvider(sdk);
+        const config = configWithAuth({
+          source: { repository: "octocat/Hello-World", branch: "feature/worktrees" },
+        });
+        const handle = yield* provider.provision({
+          instanceId: "inst_1",
+          config,
+          image: "",
+          env: [],
+        });
+        yield* provider.lifecycle!.stop(handle);
+        const commandCountBeforeStart = state.runCommands.length;
+
+        yield* provider.lifecycle!.start(handle, { config, env: [] });
+
+        expect(state.runCommands.slice(commandCountBeforeStart)).toContainEqual({
+          cmd: "sh",
+          args: [
+            "-c",
+            "if [ -z \"$(git branch --show-current)\" ]; then git checkout -B 'feature/worktrees' HEAD; fi",
+          ],
+          cwd: "/vercel/sandbox",
+        });
       }),
   );
 

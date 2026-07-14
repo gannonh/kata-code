@@ -99,6 +99,8 @@ import { SourceControlRepositoryService } from "./sourceControl/SourceControlRep
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
+import { searchGitHubRepositories, listGitHubBranches } from "./sandbox/sandboxGitHubDiscovery.ts";
+import { SandboxRpcError } from "@kata-sh/code-contracts/sandboxRpc";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -160,6 +162,8 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.serverSignalProcess, AuthOrchestrationOperateScope],
   [WS_METHODS.cloudGetRelayClientStatus, AuthRelayWriteScope],
   [WS_METHODS.cloudInstallRelayClient, AuthRelayWriteScope],
+  [WS_METHODS.sandboxSearchGitHubRepositories, AuthOrchestrationReadScope],
+  [WS_METHODS.sandboxListGitHubBranches, AuthOrchestrationReadScope],
   [WS_METHODS.sourceControlLookupRepository, AuthOrchestrationReadScope],
   [WS_METHODS.sourceControlCloneRepository, AuthOrchestrationOperateScope],
   [WS_METHODS.sourceControlPublishRepository, AuthOrchestrationOperateScope],
@@ -304,6 +308,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         ),
       );
       const sourceControlRepositories = yield* SourceControlRepositoryService;
+      const githubCli = yield* GitHubCli.GitHubCli;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
@@ -1109,6 +1114,16 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 SandboxServiceLive.startSession(instanceId, settings, {
                   connectAuthToken,
                   repository,
+                  // Resolve the active host GitHub token for the Vercel native
+                  // clone. Injected so GitHubCli stays out of startSession's R.
+                  resolveGitHubToken: githubCli
+                    .getAuthToken({ cwd: config.cwd })
+                    .pipe(
+                      Effect.mapError(
+                        (error) =>
+                          new SandboxRpcError({ reason: "invalid-config", message: error.detail }),
+                      ),
+                    ),
                 }),
               ),
             ),
@@ -1120,7 +1135,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             serverSettings.getSettings.pipe(
               Effect.flatMap((settings) =>
                 SandboxServiceLive.disposeSession(instanceId, settings).pipe(
-                  Effect.map((disposed) => ({ instanceId, disposed })),
+                  Effect.map((outcome) => ({ instanceId, ...outcome })),
                 ),
               ),
             ),
@@ -1129,22 +1144,21 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         [WS_METHODS.sandboxRenewSession]: ({ instanceId, extendMs }) =>
           observeRpcEffect(
             WS_METHODS.sandboxRenewSession,
-            SandboxServiceLive.renewSession(
-              instanceId,
-              extendMs !== undefined ? { extendMs } : {},
-            ).pipe(Effect.map((result) => result)),
+            SandboxServiceLive.renewSession(instanceId, extendMs !== undefined ? { extendMs } : {}),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.sandboxStopSession]: ({ instanceId }) =>
           observeRpcEffect(
             WS_METHODS.sandboxStopSession,
-            SandboxServiceLive.stopSession(instanceId).pipe(Effect.map((result) => result)),
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) => SandboxServiceLive.stopSession(instanceId, settings)),
+            ),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.sandboxIssuePairingToken]: ({ instanceId }) =>
           observeRpcEffect(
             WS_METHODS.sandboxIssuePairingToken,
-            SandboxServiceLive.issuePairingToken(instanceId).pipe(Effect.map((result) => result)),
+            SandboxServiceLive.issuePairingToken(instanceId),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.sandboxProviderLoginStart]: ({ instanceId, providerId }) =>
@@ -1163,6 +1177,27 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(
             WS_METHODS.sandboxProviderLoginCancel,
             SandboxServiceLive.providerLoginCancel({ instanceId, loginSessionId }),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxSearchGitHubRepositories]: ({ page }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxSearchGitHubRepositories,
+            searchGitHubRepositories({
+              github: githubCli,
+              cwd: config.cwd,
+              ...(page !== undefined ? { page } : {}),
+            }),
+            { "rpc.aggregate": "sandbox" },
+          ),
+        [WS_METHODS.sandboxListGitHubBranches]: ({ repository, page }) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxListGitHubBranches,
+            listGitHubBranches({
+              github: githubCli,
+              cwd: config.cwd,
+              repository,
+              ...(page !== undefined ? { page } : {}),
+            }),
             { "rpc.aggregate": "sandbox" },
           ),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
@@ -1745,6 +1780,10 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(PreviewAutomationBroker.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
+              // The GitHub source picker RPCs resolve `GitHubCli` directly (the
+              // source-control registry consumes its own copy without exposing
+              // it), so provide it to the RPC layer here.
+              Layer.provide(GitHubCli.layer.pipe(Layer.provide(VcsProcess.layer))),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(
                   Layer.provide(

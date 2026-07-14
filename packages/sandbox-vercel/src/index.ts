@@ -17,6 +17,8 @@ export {
   DEFAULT_VERCEL_CONFIG,
   DEFAULT_VERCEL_VCPUS,
   VERCEL_AUTH_ENV_VARS,
+  VERCEL_SOURCE_TOKEN_ENV,
+  GITHUB_TOKEN_GIT_USERNAME,
   mergeVercelAuthIntoConfig,
 } from "./config.ts";
 export type { VercelSdk, VercelSandboxInstance, VercelAuthParams } from "./sdk.ts";
@@ -26,5 +28,7 @@ export {
   KATA_CLI_PACKAGE,
   PROVIDER_CLI_PACKAGES,
   buildBootstrapScript,
+  buildKillServeCommand,
+  buildReplaceServeCommand,
   buildServeCommand,
 } from "./bootstrap.ts";

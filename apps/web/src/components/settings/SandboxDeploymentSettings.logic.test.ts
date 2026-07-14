@@ -9,11 +9,120 @@ import {
   makeSandboxProviderInstanceId,
   parseSandboxPort,
   readVercelVcpus,
+  resolveInferredSandboxInstanceId,
+  resolveRepairedSandboxInstanceId,
   resolveSandboxLifecycleState,
+  resolveSandboxListUiState,
   sandboxInstanceIdForLabel,
   shouldSeedRepositoryForStart,
   slugifySandboxLabel,
+  readVercelSource,
+  setVercelSource,
+  vercelSourceRepositoryKey,
+  canCreateVercelSandbox,
 } from "./SandboxDeploymentSettings.logic";
+
+describe("resolveSandboxListUiState", () => {
+  it("is loading until the first successful listInstances", () => {
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: false,
+        listError: null,
+        listPending: false,
+      }),
+    ).toBe("loading");
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: false,
+        listError: null,
+        listPending: true,
+      }),
+    ).toBe("loading");
+  });
+
+  it("is error when the fetch failed and summaries are not loaded", () => {
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: false,
+        listError: "Failed to list sandbox targets",
+        listPending: false,
+      }),
+    ).toBe("error");
+  });
+
+  it("stays loading while a retry is in flight after an error", () => {
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: false,
+        listError: "Failed to list sandbox targets",
+        listPending: true,
+      }),
+    ).toBe("loading");
+  });
+
+  it("is ready once summaries loaded, even if a later refresh is pending", () => {
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: true,
+        listError: null,
+        listPending: false,
+      }),
+    ).toBe("ready");
+    expect(
+      resolveSandboxListUiState({
+        summariesLoaded: true,
+        listError: null,
+        listPending: true,
+      }),
+    ).toBe("ready");
+  });
+});
+
+describe("vercel source selection logic", () => {
+  it("reads a complete source and rejects an incomplete one", () => {
+    expect(
+      readVercelSource({ source: { repository: "octocat/Hello-World", branch: "main" } }),
+    ).toEqual({ repository: "octocat/Hello-World", branch: "main" });
+    expect(readVercelSource({ source: { repository: "octocat/Hello-World" } })).toBeNull();
+    expect(readVercelSource({})).toBeNull();
+    expect(readVercelSource(null)).toBeNull();
+  });
+
+  it("sets the repository and resets the branch when the repository changes", () => {
+    const withRepo = setVercelSource({ runtime: "node24" }, { repository: "octocat/Hello-World" });
+    expect(withRepo?.source).toEqual({ repository: "octocat/Hello-World" });
+    expect(withRepo?.runtime).toBe("node24");
+    const withBranch = setVercelSource(withRepo, { branch: "main" });
+    expect(withBranch?.source).toEqual({ repository: "octocat/Hello-World", branch: "main" });
+    // Changing the repository clears the previously selected branch.
+    const changed = setVercelSource(withBranch, { repository: "octocat/Spoon-Knife" });
+    expect(changed?.source).toEqual({ repository: "octocat/Spoon-Knife" });
+  });
+
+  it("clears the source when the repository is emptied", () => {
+    const withSource = setVercelSource({}, { repository: "octocat/Hello-World", branch: "main" });
+    expect(setVercelSource(withSource, { repository: "" })?.source).toBeUndefined();
+  });
+
+  it("derives the canonical repository key like the server", () => {
+    expect(vercelSourceRepositoryKey("Octocat/Hello-World")).toBe("github.com/octocat/hello-world");
+    expect(vercelSourceRepositoryKey("octocat/Hello-World.git")).toBe(
+      "github.com/octocat/hello-world",
+    );
+  });
+
+  it("requires a complete source before a Vercel sandbox can be created", () => {
+    expect(canCreateVercelSandbox({ isVercel: true, config: {} })).toBe(false);
+    expect(
+      canCreateVercelSandbox({
+        isVercel: true,
+        config: { source: { repository: "octocat/Hello-World", branch: "main" } },
+      }),
+    ).toBe(true);
+    // Non-Vercel drivers are unaffected.
+    expect(canCreateVercelSandbox({ isVercel: false, config: {} })).toBe(true);
+  });
+});
 
 describe("sandbox deployment settings logic", () => {
   it("derives stable instance ids from environment labels", () => {
@@ -213,5 +322,73 @@ describe("resolveSandboxLifecycleState (identity recovery R1: id-based join)", (
     const record = savedSandbox({ environmentId: "env_legacy" });
     expect(resolveSandboxLifecycleState(record, [summary("docker_x")])).toBe("unknown");
     expect(resolveSandboxLifecycleState(record, [])).toBe("unknown");
+  });
+});
+
+describe("resolveRepairedSandboxInstanceId", () => {
+  it("recovers instanceId from a session that claims the environment id", () => {
+    const record = {
+      environmentId: "env_1",
+      sandbox: { providerKind: "vercel" },
+    };
+    const summaries = [
+      {
+        kind: "available",
+        instanceId: "vercel_kata-code-sandbox",
+        runningSession: {
+          environmentId: "env_1",
+          endpoint: { id: "e", label: "L", httpBaseUrl: "https://x/" },
+          status: "running",
+        },
+      } as never,
+    ];
+    expect(resolveRepairedSandboxInstanceId(record, summaries)).toBe("vercel_kata-code-sandbox");
+  });
+
+  it("returns null when the record already has an instanceId", () => {
+    const record = {
+      environmentId: "env_1",
+      sandbox: { providerKind: "docker", instanceId: "docker_web-docker" },
+    };
+    const summaries = [
+      {
+        kind: "available",
+        instanceId: "docker_other",
+        runningSession: {
+          environmentId: "env_1",
+          endpoint: { id: "e", label: "L", httpBaseUrl: "http://x/" },
+          status: "running",
+        },
+      } as never,
+    ];
+    expect(resolveRepairedSandboxInstanceId(record, summaries)).toBeNull();
+  });
+
+  it("returns null when no session claims the environment", () => {
+    const record = {
+      environmentId: "env_missing",
+      sandbox: { providerKind: "docker" },
+    };
+    expect(resolveRepairedSandboxInstanceId(record, [])).toBeNull();
+  });
+});
+
+describe("resolveInferredSandboxInstanceId", () => {
+  it("recovers instanceId when exactly one configured instance matches providerKind", () => {
+    expect(
+      resolveInferredSandboxInstanceId({ sandbox: { providerKind: "vercel" } }, [
+        { instanceId: "vercel_kata-code-sandbox", driver: "vercel" },
+        { instanceId: "docker_web-docker", driver: "docker" },
+      ]),
+    ).toBe("vercel_kata-code-sandbox");
+  });
+
+  it("returns null when multiple configured instances share the provider kind", () => {
+    expect(
+      resolveInferredSandboxInstanceId({ sandbox: { providerKind: "docker" } }, [
+        { instanceId: "docker_a", driver: "docker" },
+        { instanceId: "docker_b", driver: "docker" },
+      ]),
+    ).toBeNull();
   });
 });

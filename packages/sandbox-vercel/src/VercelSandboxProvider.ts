@@ -8,7 +8,8 @@
  *
  * Provision creates a sandbox from a configured runtime or snapshot, runs the
  * bootstrap script (runtime only; snapshots already have the CLIs), launches
- * `katacode serve` detached, and polls the public `/healthz` until ready.
+ * `katacode serve` detached, and polls `/.well-known/kata/environment` until
+ * the real server answers with JSON (SPA `/healthz` HTML 200 is not ready).
  * Reachability returns the public `https://<sandbox.domain(port)>` URL.
  * Lifecycle: `renewTimeout` forwards to `sb.extendTimeout`, `snapshot` stops
  * the VM (caller treats the session as lapsed), `copyInto` writes a tar
@@ -49,10 +50,22 @@ import {
 } from "@kata-sh/code-sandbox/driver";
 import type { SandboxProviderDescriptor } from "@kata-sh/code-sandbox/descriptor";
 
-import { VercelSandboxConfig, VERCEL_AUTH_ENV_VARS, decodeVercelSandboxConfig } from "./config.ts";
-import type { VercelAuthParams, VercelSdk } from "./sdk.ts";
+import {
+  VercelSandboxConfig,
+  VERCEL_AUTH_ENV_VARS,
+  VERCEL_SOURCE_TOKEN_ENV,
+  GITHUB_TOKEN_GIT_USERNAME,
+  decodeVercelSandboxConfig,
+} from "./config.ts";
+import type { VercelGitSource } from "./sdk.ts";
+import type { VercelAuthParams, VercelSandboxInstance, VercelSdk } from "./sdk.ts";
 import { isAuthError, isNotFound, liveVercelSdk } from "./sdk.ts";
-import { buildBootstrapScript, buildServeCommand, SANDBOX_HOME } from "./bootstrap.ts";
+import {
+  buildBootstrapScript,
+  buildKillServeCommand,
+  buildServeCommand,
+  SANDBOX_HOME,
+} from "./bootstrap.ts";
 
 export const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
@@ -95,6 +108,8 @@ export interface VercelSandboxHandleState {
  *  dashes, project-unique. The instance-derived slug is clamped to keep the
  *  whole name within the SDK's name rules. */
 const SANDBOX_NAME_PREFIX = "kata-";
+/** Native Git sources are cloned into this writable sandbox workspace. */
+const VERCEL_GIT_WORKSPACE = "/vercel/sandbox";
 
 /** Slugify a fragment for Vercel sandbox names (`[a-z0-9-]+`). */
 function vercelNameSlug(value: string): string {
@@ -201,26 +216,104 @@ function resolveAuth(config: VercelSandboxConfig): VercelAuthParams | undefined 
   return config.auth;
 }
 
-/** Env passed into `Sandbox.create` — excludes the auth trio and adds KATA_* server env. */
+/** Env names never passed into the sandbox (auth trio + transient source token). */
+const EXCLUDED_SANDBOX_ENV = new Set<string>([...VERCEL_AUTH_ENV_VARS, VERCEL_SOURCE_TOKEN_ENV]);
+
+/** Read the transient GitHub source token from a provision request's env. */
+function readSourceToken(req: {
+  readonly env?: ReadonlyArray<readonly [string, string]>;
+}): string | undefined {
+  for (const [k, v] of req.env ?? []) {
+    if (k === VERCEL_SOURCE_TOKEN_ENV && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Build the native Git source payload from a configured source + token.
+ * Returns `undefined` when either is missing — both are required so
+ * `testConnection`'s disposable probe (which omits the transient token) stays
+ * source-less even when the target has a configured repository/branch.
+ */
+function buildGitSource(
+  config: VercelSandboxConfig,
+  token: string | undefined,
+): VercelGitSource | undefined {
+  const source = config.source;
+  if (source === undefined || token === undefined) return undefined;
+  return {
+    type: "git",
+    url: `https://github.com/${source.repository}.git`,
+    username: GITHUB_TOKEN_GIT_USERNAME,
+    password: token,
+    depth: 1,
+    revision: source.branch,
+  };
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Vercel's native Git revision can be a detached HEAD. Create the selected
+ * local branch at that revision so Git worktree creation has a concrete base.
+ * On lifecycle resume, preserve a user-selected branch and repair only a
+ * detached checkout left by an older provision.
+ */
+function buildSourceBranchAttachCommand(branch: string, onlyWhenDetached: boolean): string {
+  const checkout = `git checkout -B ${shellQuote(branch)} HEAD`;
+  return onlyWhenDetached
+    ? `if [ -z "$(git branch --show-current)" ]; then ${checkout}; fi`
+    : checkout;
+}
+
+function attachSourceBranch(
+  sandbox: VercelSandboxInstance,
+  source: { readonly branch: string } | undefined,
+  onlyWhenDetached: boolean,
+): Effect.Effect<void, SandboxProviderError> {
+  if (source === undefined) return Effect.void;
+  return Effect.gen(function* () {
+    const result = yield* trySdk(
+      "source.branch",
+      () =>
+        sandbox.runCommand({
+          cmd: "sh",
+          args: ["-c", buildSourceBranchAttachCommand(source.branch, onlyWhenDetached)],
+          cwd: VERCEL_GIT_WORKSPACE,
+        }),
+      "provision-failed",
+    );
+    if (result.exitCode === 0) return;
+    const stderr = yield* Effect.promise(() => result.stderr()).pipe(
+      Effect.orElseSucceed(() => ""),
+    );
+    return yield* new SandboxProviderError({
+      reason: "provision-failed",
+      message: `failed to attach the selected source branch (exit ${result.exitCode}): ${stderr.trim().slice(-512) || "git checkout failed"}`,
+    });
+  });
+}
+
+/** Env passed into `Sandbox.create` — excludes the auth trio + source token, adds KATA_* server env. */
 function buildCreateEnv(req: SandboxProvisionRequest): Record<string, string> {
   const env: Record<string, string> = {};
-  const excluded = new Set<string>(VERCEL_AUTH_ENV_VARS);
   for (const [k, v] of req.env ?? []) {
-    if (excluded.has(k)) continue;
+    if (EXCLUDED_SANDBOX_ENV.has(k)) continue;
     env[k] = v;
   }
   for (const [k, v] of KATA_SERVER_ENV) env[k] = v;
   return env;
 }
 
-/** Env inlined at `katacode serve` launch — excludes the auth trio, adds KATA_* server env. */
+/** Env inlined at `katacode serve` launch — excludes the auth trio + source token, adds KATA_* server env. */
 function buildServeEnv(req: {
   readonly env?: ReadonlyArray<readonly [string, string]>;
 }): ReadonlyArray<readonly [string, string]> {
-  const excluded = new Set<string>(VERCEL_AUTH_ENV_VARS);
   const env: Array<readonly [string, string]> = [];
   for (const [k, v] of req.env ?? []) {
-    if (excluded.has(k)) continue;
+    if (EXCLUDED_SANDBOX_ENV.has(k)) continue;
     env.push([k, v]);
   }
   for (const [k, v] of KATA_SERVER_ENV) env.push([k, v]);
@@ -234,17 +327,39 @@ export interface VercelSandboxProviderOptions {
   readonly healthzProbe?: (httpBaseUrl: string) => Effect.Effect<boolean, SandboxProviderError>;
 }
 
-/** Default public-healthz probe against `sandbox.domain(port)`. */
+/**
+ * Readiness probe against the public sandbox domain.
+ *
+ * Do **not** use `/healthz`: when `katacode serve` is up it falls through to the
+ * SPA shell (HTTP 200 HTML), and when nothing listens Vercel returns
+ * `SANDBOX_NOT_LISTENING`. Both made waitForReady lie or hang. The
+ * well-known environment descriptor is JSON only when the real server is up.
+ */
 function defaultHealthzProbe(httpBaseUrl: string): Effect.Effect<boolean, SandboxProviderError> {
-  const healthUrl = `${httpBaseUrl}/healthz`;
+  const readyUrl = `${httpBaseUrl.replace(/\/$/, "")}/.well-known/kata/environment`;
   return Effect.tryPromise({
-    try: () => fetch(healthUrl, { signal: AbortSignal.timeout(HEALTHZ_PROBE_TIMEOUT_MS) }),
+    try: async () => {
+      const res = await fetch(readyUrl, {
+        signal: AbortSignal.timeout(HEALTHZ_PROBE_TIMEOUT_MS),
+        redirect: "manual",
+      });
+      if (res.status !== 200) return false;
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) return false;
+      const body: unknown = await res.json();
+      return (
+        typeof body === "object" &&
+        body !== null &&
+        "environmentId" in body &&
+        typeof (body as { environmentId: unknown }).environmentId === "string"
+      );
+    },
     catch: () =>
-      new SandboxProviderError({ reason: "unreachable", message: "healthz fetch failed" }),
+      new SandboxProviderError({ reason: "unreachable", message: "readiness fetch failed" }),
   }).pipe(
     Effect.matchEffect({
       onFailure: () => Effect.succeed(false),
-      onSuccess: (res) => Effect.succeed(res.status === 200),
+      onSuccess: (ok) => Effect.succeed(ok),
     }),
   );
 }
@@ -331,6 +446,15 @@ export function makeVercelSandboxProvider(
               : error,
           ),
         );
+        yield* attachSourceBranch(sb, decoded.source, true).pipe(
+          Effect.catch((error: SandboxProviderError) =>
+            trySdk(
+              "lifecycle.start.source-branch.cleanup",
+              () => sb.stop(),
+              "provision-failed",
+            ).pipe(Effect.ignore, Effect.andThen(Effect.fail(error))),
+          ),
+        );
         if (persistent !== state.persistent) {
           yield* trySdk(
             "lifecycle.start.update",
@@ -338,7 +462,18 @@ export function makeVercelSandboxProvider(
             "provision-failed",
           );
         }
-        // Relaunch serve detached with the new env.
+        // Kill (blocking) then relaunch detached. A single detached replace
+        // race waitForReady against a dead port (SANDBOX_NOT_LISTENING) and can
+        // orphan the relaunch. Kill must finish before we poll readiness.
+        yield* trySdk(
+          "lifecycle.start.kill-serve",
+          () =>
+            sb.runCommand({
+              cmd: "sh",
+              args: ["-c", buildKillServeCommand(state.port)],
+            }),
+          "exec-failed",
+        );
         const serveCmd = buildServeCommand({ port: state.port, env: buildServeEnv(req) });
         yield* trySdk(
           "lifecycle.start.serve",
@@ -529,6 +664,10 @@ export function makeVercelSandboxProvider(
         const createEnv = buildCreateEnv(req);
         const name = vercelSandboxName(req.instanceId, req.nameNamespace);
         const persistent = decoded.persistent;
+        // Native Git source (when configured): clone the selected repo/branch
+        // into /vercel/sandbox using the transient GitHub token supplied in the
+        // provision env. The token is excluded from the sandbox env above.
+        const source = buildGitSource(decoded, readSourceToken(req));
         // NEVER retry create — it is billable and non-idempotent.
         const sb = yield* trySdk(
           "provision.create",
@@ -537,6 +676,7 @@ export function makeVercelSandboxProvider(
               ...auth,
               name,
               runtime: decoded.runtime,
+              ...(source !== undefined ? { source } : {}),
               ...(decoded.vcpus !== undefined ? { resources: { vcpus: decoded.vcpus } } : {}),
               ports: [decoded.port],
               timeout: decoded.timeoutMs,
@@ -550,6 +690,23 @@ export function makeVercelSandboxProvider(
         );
         // Capture the domain now so reachability does not require a re-fetch.
         const domainBase = sb.domain(decoded.port);
+
+        // Only attach a local branch when create actually cloned a Git source.
+        // testConnection's disposable probe omits the transient token, so create
+        // is source-less even when the saved config has a repository/branch —
+        // running git checkout there would fail with "not a git repository".
+        yield* attachSourceBranch(
+          sb,
+          source !== undefined ? decoded.source : undefined,
+          false,
+        ).pipe(
+          Effect.catch((error: SandboxProviderError) =>
+            trySdk("provision.source-branch.cleanup", () => sb.delete(), "dispose-failed").pipe(
+              Effect.ignore,
+              Effect.andThen(Effect.fail(error)),
+            ),
+          ),
+        );
 
         // Cold boot: install CLIs (the only boot path now; snapshot boot removed).
         const bootstrap = yield* trySdk(

@@ -1,5 +1,33 @@
 # Specs log
 
+## 2026-07-13 (Environment connection recovery architecture approved)
+
+Approved the [environment connection recovery architecture](/specs/2026-07-13-environment-connection-recovery-architecture-design.md) after the adversarial review corrections. Frontmatter and body status now show Approved; Phase 1 begins with three blocking proofs: non-retrying Effect session termination, server turn continuity across client disconnect, and one shared web/Electron fault-proxy route.
+
+## 2026-07-13 (Environment connection recovery architecture drafted)
+
+Completed the Phase 0 transport rollback in `65ba4f3b8`: restored the committed Effect patch and lockfile, reverted the regressive `5b2e494df` stream-recovery change, and passed 39 focused transport/web tests. Drafted the [environment connection recovery architecture](/specs/2026-07-13-environment-connection-recovery-architecture-design.md) for Phases 1–5. The design selects one application-owned, per-environment connection module; separates durable subscription recovery from unary and mutating request failure; isolates primary and saved environment state; bounds remote Git status fetches; and requires real-runtime web/Electron fault acceptance plus full E2E gates. A fresh `cursor/grok-4.5:fas` adversarial review recommended Approve after fixes; the Draft now separates environment/per-stream readiness, adds Phase 1 turn-continuity and shared fault-proxy blockers, retires the transport subscription retry schedule in Phase 2, inventories RPC recovery defaults, and names the required acceptance artifacts. The draft awaits maintainer review and approval.
+
+## 2026-07-11 (Web Environments listInstances refresh + Docker gating)
+
+Fixed Environments cards on local web showing configured targets with no Start/Create/Test actions. Badges and lifecycle actions depend on `sandbox.listInstances`; a one-shot fetch that raced primary WS auth left `summaries` empty so cards looked inert. Settings now waits for the primary config snapshot, tracks loaded/error/pending, shows an inline Retry banner, and retries when the instance map changes. ConnectionsSettings uses the same readiness gate for Available Runtimes joins. Docker remains offered in the browser Add Environment dialog (server-backed via `docker.sock`); SSH stays desktop-only (`desktopBridge`). Electron `dev` state lives under `~/.katacode/dev` while CLI web uses `~/.katacode/userdata` — separate homes can still diverge even with identical UI.
+
+## 2026-07-10 (environments-deploy E2E rewrite for reworked setup UI)
+
+Rewrote the `@environments-deploy` Electron E2E for the reworked Environments UI. The shared [`settings.ts`](../../e2e/src/flows/settings.ts) flow now targets the `Add environment` mode-card dialog and `Environments` section, with `addContainerEnvironment`, `addVercelEnvironment`, `selectVercelSource`, and a shared `deploymentTargetCard` helper. [`container-deploy.spec.ts`](../../e2e/tests/environments-deploy/container-deploy.spec.ts) consumes the shared helpers; [`vercel-deploy.spec.ts`](../../e2e/tests/environments-deploy/vercel-deploy.spec.ts) adds GitHub source selection, a source-required Create gate, source-lock copy, and a New worktree base-branch assertion proving the detached-HEAD repair. Source-selecting tests are credential-gated on `E2E_VERCEL_SOURCE_REPOSITORY`. Marked deferred-work [#32](https://github.com/gannonh/kata-code/issues/32) accepted (specs authored; execution remains maintainer-local). Playwright lists all 9 specs.
+
+## 2026-07-10 (Vercel detached source revision repair)
+
+Updated [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) after confirming that Vercel's native Git `revision` checkout can leave `HEAD` detached. The Vercel provider now creates the selected local branch before serving a newly provisioned sandbox and conditionally repairs a detached checkout during Start, enabling New worktree branch selection while preserving an existing branch checkout.
+
+## 2026-07-10 (Vercel source setup grouping and project identity follow-up)
+
+Grouped Vercel's GitHub repository and branch controls with its existing repository-specific setup fields, removing the redundant local-project Saved environment selector from Vercel cards while retaining it for Docker. Add Project now starts at `/vercel/sandbox/` for Vercel sandbox records rather than Docker's `/workspace/`, so repository identity resolves from Vercel's native Git clone and groups the remote source with its matching local project.
+
+## 2026-07-10 (Vercel GitHub repository and branch seeding implemented)
+
+Marked [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) `Implemented` (base `5e40de257`, head `c46acf4a7`). Vercel sandboxes now clone a selected GitHub repository/branch through native Git source instead of uploading the local worktree: live-verified `gh` RPM install on the Vercel runtime, an optional source config field with host-`gh` repository/branch discovery over read-scoped RPCs, an authenticated shallow Git-source clone using a reserved transient token excluded from create/serve env, a trap-cleaned in-sandbox `gh`/Git auth seed, remote `.kata/environment.json` setup at `/vercel/sandbox`, a persisted non-secret source fingerprint enforced on lifecycle start, and a searchable source picker with source-required creation and source locking. Docker keeps its local worktree seed. Gates: `vp check`, `vp run typecheck`, `vp run test`, `vp run release:smoke` pass. Deferred: Docker remote source [#29](https://github.com/gannonh/kata-code/issues/29), Vercel orchestration tests [#30](https://github.com/gannonh/kata-code/issues/30), picker component tests [#31](https://github.com/gannonh/kata-code/issues/31), source-selection/lock E2E [#32](https://github.com/gannonh/kata-code/issues/32), and maintainer-local Vercel UAT (AC-GS8/AC-GS14).
+
 ## 2026-07-10 (Vercel GitHub repository and branch seeding approved)
 
 Approved [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) for the Build phase. The Vercel `gh` installation procedure remains the first build gate.

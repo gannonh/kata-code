@@ -245,6 +245,7 @@ describe("ManagedEndpointProvider", () => {
       });
 
       expect(result).toEqual({
+        allocationId: expect.any(String),
         endpoint: {
           httpBaseUrl: `https://${hostname}/`,
           wsBaseUrl: `wss://${hostname}/ws`,
@@ -566,6 +567,33 @@ describe("ManagedEndpointProvider", () => {
       }).pipe(Effect.provide(layer));
     },
   );
+
+  it.effect("does not deprovision a replacement allocation through a stale identity", () => {
+    const tunnelCalls: TunnelCall[] = [];
+    const dnsCalls: DnsCall[] = [];
+    const allocationCalls: AllocationCall[] = [];
+    const layer = providerLayer(
+      makePersistentTunnelClient(tunnelCalls),
+      makeDnsClient(dnsCalls),
+      makeAllocations(allocationCalls),
+    );
+
+    return Effect.gen(function* () {
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      const key = { userId: "user_ABC", environmentId: "env_ABC" } as const;
+      const replacement = yield* provider.provision({
+        ...key,
+        origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+      });
+
+      yield* provider.deprovision({ ...key, allocationId: "stale-allocation" });
+
+      expect(replacement.allocationId).not.toBe("stale-allocation");
+      expect(tunnelCalls.map((call) => call.operation)).not.toContain("delete");
+      expect(dnsCalls.map((call) => call.operation)).not.toContain("deleteRecord");
+      expect(allocationCalls.map((call) => call.operation)).not.toContain("remove");
+    }).pipe(Effect.provide(layer));
+  });
 
   it.effect("treats an absent allocation as already deprovisioned", () => {
     const tunnelCalls: TunnelCall[] = [];

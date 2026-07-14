@@ -7,10 +7,52 @@
  */
 import * as Schema from "effect/Schema";
 
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { RepositoryIdentity } from "./environment.ts";
 import { SandboxProviderInstanceId } from "./sandboxProviderInstance.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
+
+/** A GitHub repository accessible to the host `gh` session, for the sandbox
+ *  source picker. Carries no credential material. */
+export const SandboxGitHubRepository = Schema.Struct({
+  /** Canonical `owner/name`. */
+  nameWithOwner: TrimmedNonEmptyString,
+  /** Web URL for display. */
+  url: TrimmedNonEmptyString,
+  /** Repository default branch. */
+  defaultBranch: TrimmedNonEmptyString,
+  /** `public`, `private`, or Enterprise `internal`; UI-only annotation. */
+  visibility: Schema.Literals(["public", "private", "internal"]),
+});
+export type SandboxGitHubRepository = typeof SandboxGitHubRepository.Type;
+
+/** Search accessible GitHub repositories via the host `gh` session (paged). */
+export const SandboxSearchGitHubRepositoriesInput = Schema.Struct({
+  /** 1-based page number. */
+  page: Schema.optional(PositiveInt),
+});
+export type SandboxSearchGitHubRepositoriesInput = typeof SandboxSearchGitHubRepositoriesInput.Type;
+export const SandboxSearchGitHubRepositoriesResult = Schema.Struct({
+  repositories: Schema.Array(SandboxGitHubRepository),
+  /** True when another page is available. */
+  hasMore: Schema.Boolean,
+});
+export type SandboxSearchGitHubRepositoriesResult =
+  typeof SandboxSearchGitHubRepositoriesResult.Type;
+
+/** List branches of a selected GitHub repository via the host `gh` session. */
+export const SandboxListGitHubBranchesInput = Schema.Struct({
+  /** Canonical `owner/name`. */
+  repository: TrimmedNonEmptyString,
+  /** 1-based page number. */
+  page: Schema.optional(PositiveInt),
+});
+export type SandboxListGitHubBranchesInput = typeof SandboxListGitHubBranchesInput.Type;
+export const SandboxListGitHubBranchesResult = Schema.Struct({
+  branches: Schema.Array(TrimmedNonEmptyString),
+  hasMore: Schema.Boolean,
+});
+export type SandboxListGitHubBranchesResult = typeof SandboxListGitHubBranchesResult.Type;
 
 /** Why a configured sandbox instance is unavailable (mirrors the registry). */
 export const SandboxInstanceUnavailableReason = Schema.Literals([
@@ -128,6 +170,8 @@ export type SandboxDisposeSessionInput = typeof SandboxDisposeSessionInput.Type;
 export const SandboxDisposeSessionResult = Schema.Struct({
   instanceId: SandboxProviderInstanceId,
   disposed: Schema.Boolean,
+  environmentId: Schema.optionalKey(TrimmedNonEmptyString),
+  connectCleanup: Schema.Literals(["not-linked", "unlinked", "pending"]),
 });
 export type SandboxDisposeSessionResult = typeof SandboxDisposeSessionResult.Type;
 
@@ -251,4 +295,5 @@ export class SandboxRpcError extends Schema.TaggedErrorClass<SandboxRpcError>()(
     "internal",
   ]),
   message: Schema.String,
+  httpStatus: Schema.optional(Schema.Number),
 }) {}

@@ -181,6 +181,46 @@ describe("runSandboxSetup (seed via copyInto, AC-2.2/2.4)", () => {
   );
 });
 
+describe("runSandboxSetup (explicit workspace, AC-GS7)", () => {
+  vitIt.effect("runs install in the configured workspace without a host seed", () =>
+    Effect.gen(function* () {
+      const driver = createRecordingDriver({
+        execResults: new Map([["pnpm i", { exitCode: 0, stdout: "ok", stderr: "" }]]),
+      });
+      yield* runSandboxSetup({
+        driver,
+        handle,
+        resolved: resolved({ install: "pnpm i" }),
+        secretValues: [],
+        workspace: { path: "/vercel/sandbox" },
+      });
+      const recorded = (driver as unknown as { recordedExecs: Array<{ cwd?: string }> })
+        .recordedExecs;
+      expect(recorded[0]?.cwd).toBe("/vercel/sandbox");
+    }),
+  );
+
+  vitIt.effect("does not seed via copyInto when the workspace has no host seed", () =>
+    Effect.gen(function* () {
+      let copyIntoCalls = 0;
+      const driver = createRecordingDriver({
+        copyInto: () => {
+          copyIntoCalls += 1;
+          return Effect.void;
+        },
+      });
+      yield* runSandboxSetup({
+        driver,
+        handle,
+        resolved: resolved({ install: "pnpm i" }),
+        secretValues: [],
+        workspace: { path: "/vercel/sandbox" },
+      });
+      expect(copyIntoCalls).toBe(0);
+    }),
+  );
+});
+
 describe("runSandboxSetup (detached start/terminals, AC-2.3)", () => {
   vitIt.effect("launches start detached and records the process", () =>
     Effect.gen(function* () {

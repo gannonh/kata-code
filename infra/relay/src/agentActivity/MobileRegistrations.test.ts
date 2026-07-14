@@ -103,6 +103,13 @@ function makeEnvironmentLinks(
     listForUser: () => Effect.succeed([]),
     getForUser: () => Effect.succeed(null),
     revokeForUser: () => Effect.succeed(false),
+    renewForUser: () => Effect.succeed(null),
+    claimExpired: () => Effect.succeed([]),
+    acquireCleanupAttempts: () => Effect.succeed([]),
+    ownsCleanupAttempt: () => Effect.succeed(false),
+    releaseCleanupAttempt: () => Effect.void,
+    completeCleanupAttempt: () => Effect.succeed(false),
+    purgeRevokedBefore: () => Effect.succeed(0),
     ...overrides,
   };
 }

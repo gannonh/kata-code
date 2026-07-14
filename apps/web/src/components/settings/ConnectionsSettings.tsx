@@ -6,6 +6,7 @@ import {
   RefreshCwIcon,
   TerminalIcon,
   TriangleAlertIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useState } from "react";
@@ -47,6 +48,8 @@ import {
   buildDockerSandboxProviderInstance,
   buildVercelSandboxProviderInstance,
   makeSandboxProviderInstanceId,
+  resolveInferredSandboxInstanceId,
+  resolveRepairedSandboxInstanceId,
   resolveSandboxLifecycleState,
   sandboxInstanceIdForLabel,
 } from "./SandboxDeploymentSettings.logic";
@@ -121,15 +124,19 @@ import {
   type SavedEnvironmentRuntimeState,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
+  resolveSavedEnvironmentDisplayLabel,
+} from "~/environments/runtime/catalog";
+import {
   addSavedEnvironment,
   addManagedRelayEnvironment,
   connectDesktopSshEnvironment,
   disconnectSavedEnvironment,
   getPrimaryEnvironmentConnection,
+  reconcileSavedEnvironmentConnectionState,
   reconnectSavedEnvironment,
   removeSavedEnvironment,
-  resolveSavedEnvironmentDisplayLabel,
-} from "~/environments/runtime";
+  subscribeEnvironmentConnections,
+} from "~/environments/runtime/service";
 import { useUiStateStore } from "~/uiStateStore";
 import { resolveServerConfigVersionMismatch } from "~/versionSkew";
 import { useServerConfig } from "~/rpc/serverState";
@@ -138,6 +145,7 @@ import {
   isCloudSessionRejectedError,
   linkPrimaryEnvironmentToCloud,
   unlinkPrimaryEnvironmentFromCloud,
+  unlinkManagedRelayEnvironment,
   updatePrimaryCloudPreferences,
 } from "~/cloud/linkEnvironment";
 import {
@@ -1529,6 +1537,17 @@ export function SavedBackendListRow({
   const record = useSavedEnvironmentRegistryStore((state) => state.byId[environmentId] ?? null);
   const runtime = useSavedEnvironmentRuntimeStore((state) => state.byId[environmentId] ?? null);
 
+  // Correct a stale status dot: on mount and whenever the connection set
+  // changes, snap the dot to connected when the live transport is fresh. This
+  // covers the panel re-mounting against an already-open connection whose
+  // runtime state still reads a transient "disconnected".
+  useEffect(() => {
+    reconcileSavedEnvironmentConnectionState(environmentId);
+    return subscribeEnvironmentConnections(() => {
+      reconcileSavedEnvironmentConnectionState(environmentId);
+    });
+  }, [environmentId]);
+
   if (!record) {
     return null;
   }
@@ -1544,15 +1563,19 @@ export function SavedBackendListRow({
   // case it is reachable) plus an explicit Remove so a dead orphan is never a
   // dead end. Never auto-removed.
   const isUnknownSandbox = sandboxLifecycleState === "unknown";
-  const stateDotClassName = isStoppedSandbox
-    ? "bg-muted-foreground/40"
-    : connectionState === "connected"
+  // Prefer live connectionState over a stale listInstances "stopped" join.
+  // Environments refreshes its own summaries on Start, but Available Runtimes
+  // can lag until the next parent refresh — a live WS must still show green.
+  const stateDotClassName =
+    connectionState === "connected"
       ? "bg-success"
-      : connectionState === "connecting"
-        ? "bg-warning"
-        : connectionState === "error"
-          ? "bg-destructive"
-          : "bg-muted-foreground/40";
+      : isStoppedSandbox
+        ? "bg-muted-foreground/40"
+        : connectionState === "connecting"
+          ? "bg-warning"
+          : connectionState === "error"
+            ? "bg-destructive"
+            : "bg-muted-foreground/40";
   const descriptorLabel = runtime?.descriptor?.label ?? null;
   const displayLabel =
     resolveSavedEnvironmentDisplayLabel({
@@ -2025,6 +2048,7 @@ function ConfiguredCloudRemoteEnvironmentRows({
   const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
+  const [removingEnvironmentId, setRemovingEnvironmentId] = useState<EnvironmentId | null>(null);
   const savedIds = useMemo(() => new Set(savedEnvironmentIds), [savedEnvironmentIds]);
 
   const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
@@ -2064,8 +2088,47 @@ function ConfiguredCloudRemoteEnvironmentRows({
       !sandboxEnvironmentIds.has(environment.environmentId as string),
   );
 
+  const removeEnvironment = async (environment: RelayClientEnvironmentRecord) => {
+    if (!window.confirm(`Remove ${environment.label} from Kata Code Connect?`)) return;
+    setRemovingEnvironmentId(environment.environmentId);
+    try {
+      const clerkToken = await getToken(resolveRelayClerkTokenOptions());
+      if (!clerkToken) throw new Error("Sign in to Kata Code Connect before removing this record.");
+      await webRuntime.runPromise(
+        unlinkManagedRelayEnvironment({ clerkToken, environmentId: environment.environmentId }),
+      );
+      refreshManagedRelayEnvironments();
+      toastManager.add({
+        type: "success",
+        title: "Connect record removed",
+        description: `${environment.label} is no longer available through Kata Code Connect.`,
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Could not remove Connect record",
+        description: cause instanceof Error ? cause.message : "Unknown error.",
+      });
+    } finally {
+      setRemovingEnvironmentId(null);
+    }
+  };
+
   if (savedEnvironmentIds.length === 0 && environmentsState.data === null) {
-    return <RemoteEnvironmentRowsSkeleton />;
+    // Only skeleton while the managed-relay query is in flight. A failed or
+    // idle null must not hang Available Runtimes forever.
+    if (environmentsState.isPending) {
+      return <RemoteEnvironmentRowsSkeleton />;
+    }
+    return (
+      <>
+        <EmptyAvailableRuntimes {...(!isSignedIn ? { onConnectFromCloud: openAuthPrompt } : {})} />
+        {environmentsState.error ? (
+          <p className="px-1 text-xs text-amber-600">{environmentsState.error}</p>
+        ) : null}
+        {authPrompt}
+      </>
+    );
   }
 
   if (savedEnvironmentIds.length === 0 && connectableEnvironments.length === 0) {
@@ -2097,6 +2160,15 @@ function ConfiguredCloudRemoteEnvironmentRows({
             onClick={() => void connectEnvironment(environment)}
           >
             {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={`Remove ${environment.label} from Kata Code Connect`}
+            disabled={removingEnvironmentId !== null}
+            onClick={() => void removeEnvironment(environment)}
+          >
+            <Trash2Icon className="size-3.5" />
           </Button>
         </div>
       </div>
@@ -2130,6 +2202,7 @@ export function ConnectionsSettings() {
   const { updateSettings } = useUpdateSettings();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primarySessionState = usePrimarySessionState();
+  const primaryServerConfig = useServerConfig();
   const currentSessionScopes = desktopBridge
     ? AuthAdministrativeScopes
     : primarySessionState.data?.authenticated
@@ -2164,9 +2237,20 @@ export function ConnectionsSettings() {
       setSandboxSummariesLoaded(false);
     }
   }, []);
+  const handleSandboxInstancesChanged = useCallback(
+    (instances: ReadonlyArray<SandboxInstanceSummary>) => {
+      setSandboxSummaries(instances);
+      setSandboxSummariesLoaded(true);
+    },
+    [],
+  );
+  // Same readiness gate as SandboxDeploymentSettings: wait for the primary
+  // config snapshot so the first listInstances does not race WS auth.
+  const primaryServerConfigReady = primaryServerConfig !== null;
   useEffect(() => {
+    if (!primaryServerConfigReady) return;
     void refreshSandboxSummaries();
-  }, [refreshSandboxSummaries]);
+  }, [primaryServerConfigReady, refreshSandboxSummaries, settings.sandboxProviderInstances]);
   // Orphan sandbox records (lifecycle state "gone"/"unknown") are NOT
   // auto-deleted. Destructive cleanup happens only on server-confirmed
   // disposeSession or via the explicit per-row Remove action (identity
@@ -2193,11 +2277,24 @@ export function ConnectionsSettings() {
     const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
     return new Set(Object.keys(map));
   }, [settings.sandboxProviderInstances]);
+  const configuredSandboxInstances = useMemo(() => {
+    const map = (settings.sandboxProviderInstances ?? {}) as SandboxProviderInstanceConfigMap;
+    return Object.entries(map).map(([instanceId, config]) => ({
+      instanceId,
+      driver: config.driver as string,
+    }));
+  }, [settings.sandboxProviderInstances]);
   const savedEnvironmentDefinitionIds = useMemo(
     () =>
       Object.values(savedEnvironmentsById)
         .filter((record) => {
           if (record.relayManaged) return false;
+          // The saved-environment registry can hydrate before the server
+          // settings snapshot. Do not classify a linked sandbox as orphaned
+          // until its deployment-target map is known.
+          if (record.sandbox !== undefined && primaryServerConfig === null) {
+            return false;
+          }
           // Sandbox saved records are the runtime side of a sandbox instance
           // defined in `sandboxProviderInstances`. Skip when that instance
           // already renders its own expandable definition row; keep orphans
@@ -2207,12 +2304,69 @@ export function ConnectionsSettings() {
           if (sandboxInstanceId !== undefined && sandboxInstanceIds.has(sandboxInstanceId)) {
             return false;
           }
+          // Browser persistence historically stripped sandbox.instanceId. A
+          // record whose environment id is claimed by a configured instance's
+          // session is still linked — not an orphan — even without the join key.
+          if (
+            record.sandbox !== undefined &&
+            sandboxSessionEnvironmentIds.has(record.environmentId)
+          ) {
+            for (const summary of sandboxSummaries) {
+              if (summary.kind !== "available") continue;
+              const session = summary.runningSession;
+              if (
+                session !== undefined &&
+                (session.environmentId as string) === record.environmentId &&
+                sandboxInstanceIds.has(summary.instanceId as string)
+              ) {
+                return false;
+              }
+            }
+          }
+          // Unique-driver inference: when listInstances is slow/timed out and
+          // instanceId was stripped, a single configured instance of that
+          // provider kind is enough to treat the record as linked.
+          const inferredInstanceId = resolveInferredSandboxInstanceId(
+            record,
+            configuredSandboxInstances,
+          );
+          if (inferredInstanceId !== null && sandboxInstanceIds.has(inferredInstanceId)) {
+            return false;
+          }
           return true;
         })
         .toSorted((left, right) => left.label.localeCompare(right.label))
         .map((record) => record.environmentId),
-    [sandboxInstanceIds, savedEnvironmentsById],
+    [
+      configuredSandboxInstances,
+      primaryServerConfig,
+      sandboxInstanceIds,
+      sandboxSessionEnvironmentIds,
+      sandboxSummaries,
+      savedEnvironmentsById,
+    ],
   );
+
+  // Repair records whose sandbox.instanceId was stripped by the old browser
+  // persistence schema (session join when available; unique-driver inference
+  // otherwise so Environments does not depend on a healthy listInstances).
+  useEffect(() => {
+    if (primaryServerConfig === null) return;
+    const upsert = useSavedEnvironmentRegistryStore.getState().upsert;
+    for (const record of Object.values(savedEnvironmentsById)) {
+      const repairedInstanceId =
+        resolveRepairedSandboxInstanceId(record, sandboxSummaries) ??
+        resolveInferredSandboxInstanceId(record, configuredSandboxInstances);
+      if (repairedInstanceId === null || record.sandbox === undefined) continue;
+      upsert({
+        ...record,
+        sandbox: {
+          ...record.sandbox,
+          instanceId: repairedInstanceId,
+        },
+      });
+    }
+  }, [configuredSandboxInstances, primaryServerConfig, sandboxSummaries, savedEnvironmentsById]);
   const savedDesktopSshEnvironmentsByAlias = useMemo(
     () =>
       Object.values(savedEnvironmentsById).reduce<Record<string, SavedEnvironmentRecord>>(
@@ -2318,7 +2472,6 @@ export function ConnectionsSettings() {
   const [pendingDesktopServerExposureMode, setPendingDesktopServerExposureMode] = useState<
     DesktopServerExposureState["mode"] | null
   >(null);
-  const primaryServerConfig = useServerConfig();
   const primaryVersionMismatch = resolveServerConfigVersionMismatch(primaryServerConfig);
   const [isAdvertisedEndpointListExpanded, setIsAdvertisedEndpointListExpanded] = useState(false);
   const defaultAdvertisedEndpointKey = useUiStateStore(
@@ -3710,6 +3863,7 @@ export function ConnectionsSettings() {
             onRemove={handleRemoveSavedBackend}
           />
         ))}
+        onInstancesChanged={handleSandboxInstancesChanged}
       />
 
       <SettingsSection title="Available Runtimes">

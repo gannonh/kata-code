@@ -31,6 +31,20 @@ import {
   VERCEL_ENDPOINT_PROVIDER,
 } from "./sandboxSessionHelpers.ts";
 
+/** Cache a live session while preserving any in-memory admin access token
+ *  minted at start (needed for Retry pairing after status refresh). */
+export function cacheLiveSession(
+  liveSessions: Map<string, LiveSession>,
+  instanceId: string,
+  next: Omit<LiveSession, "adminAccessToken">,
+): void {
+  const priorToken = liveSessions.get(instanceId)?.adminAccessToken;
+  liveSessions.set(
+    instanceId,
+    priorToken !== undefined ? { ...next, adminAccessToken: priorToken } : next,
+  );
+}
+
 /** Reconcile stored records against the providers. For each stored record:
  *  re-resolve config from settings, find the driver, call `lifecycle.status`;
  *  update the stored status, evict `gone` records, keep `stopped`/`running`.
@@ -45,6 +59,9 @@ export function reconcileStoredRecords<R = never>(input: {
   /** Best-effort relay unlink for records evicted as `gone` (identity
    *  recovery R3). Log-only failure; absent in unit tests. */
   readonly unlinkRelay?: (record: SandboxSessionRecord) => Effect.Effect<void, never, R>;
+  /** Instance ids currently under a lifecycle lock — keep last-known status
+   *  rather than racing provider.status against an in-flight start/stop. */
+  readonly skipInstanceIds?: ReadonlySet<string>;
 }): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, never, R> {
   return Effect.gen(function* () {
     const records = yield* input.store
@@ -52,121 +69,140 @@ export function reconcileStoredRecords<R = never>(input: {
       .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<SandboxSessionRecord>));
     if (records.length === 0) return [];
     const rawMap = input.settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap;
-    const updated: SandboxSessionRecord[] = [];
-    for (const record of records) {
-      const config = rawMap[record.instanceId as SandboxProviderInstanceId];
-      if (config === undefined) {
-        // Instance no longer in settings — evict.
-        yield* Effect.logWarning(
-          "Sandbox session store: instance no longer in settings; evicting",
-          {
-            instanceId: record.instanceId,
-          },
-        );
-        continue;
-      }
-      const resolved = resolveInstanceEnvelope(config);
-      const inst = input.registry.materializeOne(
-        record.instanceId as SandboxProviderInstanceId,
-        resolved,
-      );
-      if (inst.kind !== "available") {
-        // Driver unavailable — keep the record with a statusDetail.
-        updated.push({
-          ...record,
-          statusDetail: `Instance unavailable: ${inst.reason} (${inst.message})`,
-        });
-        continue;
-      }
-      // Re-inject the Vercel auth trio into the stored (sanitized) handle
-      // from the resolved config before passing it to the driver.
-      const rehydratedHandleState = reinjectVercelAuth(
-        inst.driver.kind as string,
-        record.handle.handle,
-        resolved.config,
-      );
-      const handle: SandboxHandle = {
-        driverKind: inst.driver.kind,
-        instanceId: record.instanceId,
-        handle: rehydratedHandleState,
-      };
-      // If the driver supports lifecycle, reconcile the status before caching.
-      // `gone` records are evicted and never cached so providerLogin cannot
-      // operate on a sandbox the provider reports as gone.
-      if (inst.driver.lifecycle) {
-        const statusResult = yield* inst.driver.lifecycle.status(handle).pipe(
-          Effect.matchEffect({
-            onFailure: (left) =>
-              Effect.succeed<{ _tag: "Left"; left: SandboxProviderError }>({
-                _tag: "Left",
-                left,
-              }),
-            onSuccess: (right) =>
-              Effect.succeed<{ _tag: "Right"; right: typeof right }>({
-                _tag: "Right",
-                right,
-              }),
-          }),
-        );
-        if (statusResult._tag === "Right") {
-          if (statusResult.right === "gone") {
-            input.liveSessions.delete(record.instanceId);
-            yield* Effect.logWarning("Sandbox session store: provider reports gone; evicting", {
-              instanceId: record.instanceId,
-            });
-            // R3: best-effort relay unlink so the evicted sandbox does not
-            // linger in the Connect pool as a dead relay row.
-            if (input.unlinkRelay !== undefined && record.relay !== undefined) {
-              yield* input.unlinkRelay(record);
-            }
-            continue; // evict
+    // Probe instances in parallel (bounded) so a slow Vercel status cannot
+    // serialize past the client's listInstances timeout.
+    const outcomes = yield* Effect.forEach(
+      records,
+      (record) =>
+        Effect.gen(function* () {
+          if (input.skipInstanceIds?.has(record.instanceId) === true) {
+            return record;
           }
-          // Drop any prior statusDetail (exactOptionalPropertyTypes: omit the
-          // key rather than assigning undefined).
-          const { statusDetail: _dropDetail, ...restRecord } = record;
-          updated.push({
-            ...restRecord,
-            status: statusResult.right,
-          });
-          input.liveSessions.set(record.instanceId, {
+          const config = rawMap[record.instanceId as SandboxProviderInstanceId];
+          if (config === undefined) {
+            // Instance no longer in settings — evict.
+            yield* Effect.logWarning(
+              "Sandbox session store: instance no longer in settings; evicting",
+              {
+                instanceId: record.instanceId,
+              },
+            );
+            return null;
+          }
+          const resolved = resolveInstanceEnvelope(config);
+          const inst = input.registry.materializeOne(
+            record.instanceId as SandboxProviderInstanceId,
+            resolved,
+          );
+          if (inst.kind !== "available") {
+            // Driver unavailable — keep the record with a statusDetail.
+            return {
+              ...record,
+              statusDetail: `Instance unavailable: ${inst.reason} (${inst.message})`,
+            };
+          }
+          // Re-inject the Vercel auth trio into the stored (sanitized) handle
+          // from the resolved config before passing it to the driver.
+          const rehydratedHandleState = reinjectVercelAuth(
+            inst.driver.kind as string,
+            record.handle.handle,
+            resolved.config,
+          );
+          const handle: SandboxHandle = {
+            driverKind: inst.driver.kind,
+            instanceId: record.instanceId,
+            handle: rehydratedHandleState,
+          };
+          // If the driver supports lifecycle, reconcile the status before caching.
+          // `gone` records are evicted and never cached so providerLogin cannot
+          // operate on a sandbox the provider reports as gone.
+          if (inst.driver.lifecycle) {
+            const statusResult = yield* inst.driver.lifecycle.status(handle).pipe(
+              Effect.timeout("15 seconds"),
+              Effect.catchTag("TimeoutError", () =>
+                Effect.fail(
+                  new SandboxProviderError({
+                    reason: "unreachable",
+                    message: "Provider status probe timed out.",
+                  }),
+                ),
+              ),
+              Effect.matchEffect({
+                onFailure: (left) =>
+                  Effect.succeed<{ _tag: "Left"; left: SandboxProviderError }>({
+                    _tag: "Left",
+                    left,
+                  }),
+                onSuccess: (right) =>
+                  Effect.succeed<{ _tag: "Right"; right: typeof right }>({
+                    _tag: "Right",
+                    right,
+                  }),
+              }),
+            );
+            if (statusResult._tag === "Right") {
+              if (statusResult.right === "gone") {
+                input.liveSessions.delete(record.instanceId);
+                yield* Effect.logWarning("Sandbox session store: provider reports gone; evicting", {
+                  instanceId: record.instanceId,
+                });
+                // R3: best-effort relay unlink so the evicted sandbox does not
+                // linger in the Connect pool as a dead relay row.
+                if (input.unlinkRelay !== undefined && record.relay !== undefined) {
+                  yield* input.unlinkRelay(record);
+                }
+                return null; // evict
+              }
+              // Drop any prior statusDetail (exactOptionalPropertyTypes: omit the
+              // key rather than assigning undefined).
+              const { statusDetail: _dropDetail, ...restRecord } = record;
+              const nextRecord = {
+                ...restRecord,
+                status: statusResult.right,
+              };
+              cacheLiveSession(input.liveSessions, record.instanceId, {
+                handle,
+                driver: inst.driver,
+                instanceConfig: resolved,
+                environmentId: record.sandboxEnvironmentId,
+              });
+              return nextRecord;
+            }
+            // Reconcile failure — keep last-known status, set statusDetail. Still
+            // cache the live session so stop/dispose can reach the driver.
+            cacheLiveSession(input.liveSessions, record.instanceId, {
+              handle,
+              driver: inst.driver,
+              instanceConfig: resolved,
+              environmentId: record.sandboxEnvironmentId,
+            });
+            return {
+              ...record,
+              statusDetail: `Reconcile failed: ${statusResult.left.message}`,
+            };
+          }
+          // No lifecycle capability — keep as-is and cache the live session.
+          cacheLiveSession(input.liveSessions, record.instanceId, {
             handle,
             driver: inst.driver,
             instanceConfig: resolved,
             environmentId: record.sandboxEnvironmentId,
           });
-        } else {
-          // Reconcile failure — keep last-known status, set statusDetail. Still
-          // cache the live session so stop/dispose can reach the driver.
-          updated.push({
-            ...record,
-            statusDetail: `Reconcile failed: ${statusResult.left.message}`,
-          });
-          input.liveSessions.set(record.instanceId, {
-            handle,
-            driver: inst.driver,
-            instanceConfig: resolved,
-            environmentId: record.sandboxEnvironmentId,
-          });
-        }
-      } else {
-        // No lifecycle capability — keep as-is and cache the live session.
-        updated.push(record);
-        input.liveSessions.set(record.instanceId, {
-          handle,
-          driver: inst.driver,
-          instanceConfig: resolved,
-          environmentId: record.sandboxEnvironmentId,
-        });
-      }
-    }
-    yield* input.store.save(updated).pipe(
+          return record;
+        }),
+      { concurrency: 4 },
+    );
+    const changes = records.map((expected, index) => ({
+      expected,
+      next: outcomes[index] === undefined ? expected : outcomes[index],
+    }));
+    return yield* input.store.applyIfCurrent(changes).pipe(
       Effect.catch((error: unknown) =>
         Effect.logError("Sandbox session store save failed during reconcile", {
           message: error instanceof Error ? error.message : String(error),
-        }),
+        }).pipe(Effect.as(input.store.records)),
       ),
     );
-    return updated;
   });
 }
 

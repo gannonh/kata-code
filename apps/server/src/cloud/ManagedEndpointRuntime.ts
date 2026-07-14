@@ -12,6 +12,10 @@ import * as Scope from "effect/Scope";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import {
+  CloudflaredProcessReaper,
+  layer as cloudflaredProcessReaperLayer,
+} from "./cloudflaredProcessReaper.ts";
 import { CLOUD_ENDPOINT_RUNTIME_CONFIG, decodeRuntimeConfig } from "./config.ts";
 
 function bytesToString(bytes: Uint8Array): string {
@@ -92,6 +96,7 @@ const stopConnector = (connector: ActiveConnector | null) =>
 export const makeCloudManagedEndpointRuntime = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const relayClient = yield* RelayClient.RelayClient;
+  const reaper = yield* CloudflaredProcessReaper;
   const activeRef = yield* Ref.make<ActiveConnector | null>(null);
   const desiredConfigRef = yield* Ref.make<RelayManagedEndpointRuntimeConfig | null>(null);
   const reconcileSemaphore = yield* Semaphore.make(1);
@@ -144,6 +149,7 @@ export const makeCloudManagedEndpointRuntime = Effect.gen(function* () {
   reconcileConfig = Effect.fn("CloudManagedEndpointRuntime.reconcileConfig")(function* (config) {
     if (!config || config.providerKind !== "cloudflare_tunnel") {
       yield* stopActive;
+      yield* reaper.reclaimPidfileAndClear().pipe(Effect.ignore);
       return config
         ? { status: "unsupported", providerKind: config.providerKind }
         : { status: "disabled" };
@@ -179,6 +185,9 @@ export const makeCloudManagedEndpointRuntime = Effect.gen(function* () {
         ...(config.tunnelName ? { tunnelName: config.tunnelName } : {}),
       } satisfies CloudManagedEndpointRuntimeStatus;
     }
+
+    // Unclean prior exits leave orphaned tunnel replicas; reclaim before spawn.
+    yield* reaper.reclaim(executable.executablePath).pipe(Effect.ignore);
 
     const connectorScope = yield* Scope.make("sequential");
     const child = yield* spawner
@@ -232,6 +241,12 @@ export const makeCloudManagedEndpointRuntime = Effect.gen(function* () {
         config,
       } satisfies ActiveConnector;
       yield* Ref.set(activeRef, connector);
+      yield* reaper
+        .writePidfile({
+          pid: Number(child.pid),
+          executablePath: executable.executablePath,
+        })
+        .pipe(Effect.ignore);
       yield* Effect.forkIn(superviseConnector(connector), connectorScope);
       return {
         status: "running",
@@ -278,4 +293,4 @@ export const layer = Layer.effect(
     yield* Effect.addFinalizer(() => runtime.applyConfig(null));
     return runtime;
   }),
-);
+).pipe(Layer.provide(cloudflaredProcessReaperLayer));

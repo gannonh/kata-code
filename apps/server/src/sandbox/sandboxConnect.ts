@@ -31,6 +31,7 @@ import {
   type RelayEnvironmentConfigRequest,
   RelayEnvironmentLinkChallengeResponse,
   RelayEnvironmentLinkResponse,
+  RelayEnvironmentLeaseRenewalResponse,
   type RelayLinkProofRequest,
   type RelayManagedEndpointProviderKind,
 } from "@kata-sh/code-contracts/relay";
@@ -39,6 +40,16 @@ import * as CliTokenManager from "../cloud/CliTokenManager.ts";
 import { cloudCliOAuthConfig, relayUrlConfig } from "../cloud/publicConfig.ts";
 
 const SANDBOX_FETCH_TIMEOUT_MS = 30_000;
+
+class SandboxConnectHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "SandboxConnectHttpError";
+    this.status = status;
+  }
+}
 
 /** Append a user-facing hint when a Connect registration error is caused by
  *  a stale or invalid relay bearer token (e.g. after a relay redeploy). The
@@ -93,7 +104,10 @@ async function fetchAndDecodeJson<S extends Schema.Decoder<unknown>>(
     signal: AbortSignal.timeout(SANDBOX_FETCH_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`${url} failed: ${await readResponseBody(response)}`);
+    throw new SandboxConnectHttpError(
+      response.status,
+      `${url} failed: ${await readResponseBody(response)}`,
+    );
   }
   return Schema.decodeUnknownSync(schema)(await response.json());
 }
@@ -109,6 +123,7 @@ export function fetchJson<S extends Schema.Decoder<unknown>>(
       new SandboxRpcError({
         reason: "connect-failed",
         message: errorToMessage(cause),
+        ...(cause instanceof SandboxConnectHttpError ? { httpStatus: cause.status } : {}),
       }),
   });
 }
@@ -127,6 +142,19 @@ export function postJson<S extends Schema.Decoder<unknown>>(
     },
     body: JSON.stringify(payload),
   });
+}
+
+export function renewSandboxConnectLease(input: {
+  readonly relayUrl: string;
+  readonly environmentId: string;
+  readonly bearerToken: string;
+}) {
+  return postJson(
+    RelayEnvironmentLeaseRenewalResponse,
+    `${input.relayUrl}/v1/client/environment-links/${encodeURIComponent(input.environmentId)}/lease`,
+    {},
+    input.bearerToken,
+  );
 }
 
 export function deleteJson<S extends Schema.Decoder<unknown>>(

@@ -32,6 +32,8 @@ export interface WsTransportOptions {
     lifecycleHandlers?: WsProtocolLifecycleHandlers,
   ) => Layer.Layer<RpcClient.Protocol, never, never>;
   readonly logWarning?: (message: string, metadata: { readonly error: string }) => void;
+  /** Maximum time allowed for each graceful session-close or forced runtime-dispose step. */
+  readonly sessionCloseTimeout?: Duration.Input;
   /**
    * Invoked at the start of {@link WsTransport.reconnect} before the session is replaced.
    */
@@ -45,12 +47,29 @@ interface SubscribeOptions {
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY = Duration.millis(250);
+const DEFAULT_SESSION_CLOSE_TIMEOUT = Duration.seconds(5);
 const NOOP: () => void = () => undefined;
 
 interface TransportSession {
   readonly clientPromise: Promise<WsRpcProtocolClient>;
   readonly clientScope: Scope.Closeable;
   readonly runtime: ManagedRuntime.ManagedRuntime<RpcClient.Protocol, never>;
+  /** Rejects when this session is replaced by a reconnect. In-flight one-shot
+   *  requests race this so they never hang forever on a superseded socket
+   *  (which left UI callers stuck on "Loading…" with no error to react to). */
+  readonly replaced: Promise<never>;
+  /** Trip {@link TransportSession.replaced}. Called when the session is swapped
+   *  out on reconnect or torn down on dispose. */
+  readonly markReplaced: () => void;
+}
+
+/** Error thrown into an in-flight request whose session was replaced by a
+ *  reconnect. Callers should retry on a fresh session rather than hang. */
+export class TransportSessionReplacedError extends Error {
+  constructor() {
+    super("WebSocket session was replaced by a reconnect");
+    this.name = "TransportSessionReplacedError";
+  }
 }
 
 function formatErrorMessage(error: unknown): string {
@@ -66,6 +85,7 @@ export class WsTransport {
   private readonly lifecycleHandlers: WsProtocolLifecycleHandlers | undefined;
   private readonly options: WsTransportOptions | undefined;
   private disposed = false;
+  private disposalPromise: Promise<void> | null = null;
   private hasReportedTransportDisconnect = false;
   private intentionalCloseDepth = 0;
   private nextSessionId = 0;
@@ -75,6 +95,7 @@ export class WsTransport {
     (info: { readonly tag: string }) => void
   >();
   private reconnectChain: Promise<void> = Promise.resolve();
+  private readonly retiringSessions = new Set<Promise<void>>();
   private session: TransportSession;
 
   constructor(
@@ -96,8 +117,9 @@ export class WsTransport {
     }
 
     const session = this.session;
-    const client = await session.clientPromise;
-    return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
+    return await this.runOnSession(session, (client) =>
+      session.runtime.runPromise(Effect.suspend(() => execute(client))),
+    );
   }
 
   async requestStream<TValue>(
@@ -109,16 +131,17 @@ export class WsTransport {
     }
 
     const session = this.session;
-    const client = await session.clientPromise;
-    await session.runtime.runPromise(
-      Stream.runForEach(connect(client), (value) =>
-        Effect.sync(() => {
-          try {
-            listener(value);
-          } catch {
-            // Ignore listener errors so the stream can finish cleanly.
-          }
-        }),
+    await this.runOnSession(session, (client) =>
+      session.runtime.runPromise(
+        Stream.runForEach(connect(client), (value) =>
+          Effect.sync(() => {
+            try {
+              listener(value);
+            } catch {
+              // Ignore listener errors so the stream can finish cleanly.
+            }
+          }),
+        ),
       ),
     );
   }
@@ -174,7 +197,7 @@ export class WsTransport {
             session,
             connect,
             listener,
-            () => active,
+            () => active && session === this.session,
             () => {
               this.hasReportedTransportDisconnect = false;
               hasReceivedValue = true;
@@ -236,8 +259,11 @@ export class WsTransport {
 
       this.lastHeartbeatPongAt = null;
       const previousSession = this.session;
+      previousSession.markReplaced();
       this.session = this.createSession();
-      await this.closeSession(previousSession);
+      // The replacement session is usable while bounded retirement drains the
+      // superseded runtime in the background.
+      this.retireSession(previousSession);
     });
 
     this.reconnectChain = reconnectOperation.catch(() => undefined);
@@ -250,21 +276,76 @@ export class WsTransport {
     );
   }
 
-  async dispose() {
-    if (this.disposed) {
-      return;
+  dispose(): Promise<void> {
+    if (this.disposalPromise !== null) {
+      return this.disposalPromise;
     }
 
     this.disposed = true;
-    await this.closeSession(this.session);
+    this.disposalPromise = (async () => {
+      await this.reconnectChain.catch(() => undefined);
+      this.session.markReplaced();
+      this.retireSession(this.session);
+      await Promise.all(this.retiringSessions);
+    })();
+    return this.disposalPromise;
   }
 
-  private closeSession(session: TransportSession) {
+  private async runOnSession<T>(
+    session: TransportSession,
+    execute: (client: WsRpcProtocolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await Promise.race([session.clientPromise, session.replaced]);
+    return await Promise.race([execute(client), session.replaced]);
+  }
+
+  private retireSession(session: TransportSession): void {
+    let retirement!: Promise<void>;
+    retirement = this.closeSession(session)
+      .catch((error: unknown) => {
+        this.logWarning("WebSocket session retirement failed", {
+          error: formatErrorMessage(error),
+        });
+      })
+      .finally(() => {
+        this.retiringSessions.delete(retirement);
+      });
+    this.retiringSessions.add(retirement);
+  }
+
+  private async closeSession(session: TransportSession): Promise<void> {
     this.intentionalCloseDepth += 1;
-    return session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)).finally(() => {
+    try {
+      await this.runCleanupStep(
+        () => session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)),
+        "WebSocket session scope close failed",
+      );
+    } finally {
+      await this.runCleanupStep(
+        () => session.runtime.dispose(),
+        "WebSocket session runtime disposal failed",
+      );
       this.intentionalCloseDepth = Math.max(0, this.intentionalCloseDepth - 1);
-      session.runtime.dispose();
-    });
+    }
+  }
+
+  private async runCleanupStep(operation: () => Promise<unknown>, message: string): Promise<void> {
+    // Promise assimilation observes synchronous throws and late rejections even
+    // when the timeout wins the race.
+    const observed = Promise.resolve().then(operation);
+    const timeoutMs = Duration.toMillis(
+      Duration.fromInputUnsafe(this.options?.sessionCloseTimeout ?? DEFAULT_SESSION_CLOSE_TIMEOUT),
+    );
+    try {
+      await Promise.race([
+        observed,
+        sleep(timeoutMs).then(() => {
+          throw new Error(`timed out after ${timeoutMs}ms`);
+        }),
+      ]);
+    } catch (error) {
+      this.logWarning(message, { error: formatErrorMessage(error) });
+    }
   }
 
   private createSession(): TransportSession {
@@ -302,10 +383,20 @@ export class WsTransport {
       : protocolLayer;
     const runtime = ManagedRuntime.make(rootLayer);
     const clientScope = runtime.runSync(Scope.make());
+    let markReplaced: () => void = NOOP;
+    const replaced = new Promise<never>((_, reject) => {
+      markReplaced = () => reject(new TransportSessionReplacedError());
+    });
+    // This promise exists to interrupt in-flight requests; nothing awaits it on
+    // the happy path. Attach a no-op catch so its rejection is always handled
+    // (no unhandledrejection when a session is replaced with no pending calls).
+    replaced.catch(() => undefined);
     return {
       runtime,
       clientScope,
       clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+      replaced,
+      markReplaced,
     };
   }
 
@@ -328,45 +419,57 @@ export class WsTransport {
     readonly cancel: () => void;
     readonly completed: Promise<void>;
   } {
-    let resolveCompleted!: () => void;
-    let rejectCompleted!: (error: unknown) => void;
-    const completed = new Promise<void>((resolve, reject) => {
-      resolveCompleted = resolve;
-      rejectCompleted = reject;
+    let cancelled = false;
+    let cancelRuntime: () => void = NOOP;
+    void session.replaced.catch(() => {
+      cancelled = true;
+      cancelRuntime();
     });
-    const cancel = session.runtime.runCallback(
-      Effect.promise(() => session.clientPromise).pipe(
-        Effect.flatMap((client) =>
-          Stream.runForEach(connect(client), (value) =>
-            Effect.sync(() => {
-              if (!isActive()) {
-                return;
-              }
-
-              markValueReceived();
-              try {
-                listener(value);
-              } catch {
-                // Ignore listener errors so the stream stays live.
-              }
-            }),
-          ),
-        ),
-      ),
-      {
-        onExit: (exit) => {
-          if (Exit.isSuccess(exit)) {
-            resolveCompleted();
+    const completed = this.runOnSession(
+      session,
+      (client) =>
+        new Promise<void>((resolve, reject) => {
+          if (cancelled) {
+            resolve();
             return;
           }
+          cancelRuntime = session.runtime.runCallback(
+            Stream.runForEach(connect(client), (value) =>
+              Effect.sync(() => {
+                if (!isActive()) {
+                  return;
+                }
 
-          rejectCompleted(Cause.squash(exit.cause));
-        },
-      },
+                markValueReceived();
+                try {
+                  listener(value);
+                } catch {
+                  // Ignore listener errors so the stream stays live.
+                }
+              }),
+            ),
+            {
+              onExit: (exit) => {
+                if (Exit.isSuccess(exit)) {
+                  resolve();
+                  return;
+                }
+
+                reject(Cause.squash(exit.cause));
+              },
+            },
+          );
+          if (cancelled) {
+            cancelRuntime();
+          }
+        }),
     );
 
     return {
-      cancel,
+      cancel: () => {
+        cancelled = true;
+        cancelRuntime();
+      },
       completed,
     };
   }

@@ -73,6 +73,12 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
         }),
       ),
     ),
+    source: Schema.optionalKey(
+      Schema.Struct({
+        repository: TrimmedNonEmptyString,
+        branch: TrimmedNonEmptyString,
+      }).pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
     auth: Schema.optionalKey(
       Schema.Struct({
         token: TrimmedNonEmptyString,
@@ -81,7 +87,7 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
       }).pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
   },
-  { order: ["runtime", "persistent", "timeoutMs", "port", "vcpus", "auth"] },
+  { order: ["runtime", "persistent", "timeoutMs", "port", "vcpus", "source", "auth"] },
 );
 
 export type VercelSandboxConfig = typeof VercelSandboxConfig.Type;
@@ -143,6 +149,18 @@ export const VERCEL_AUTH_ENV_VARS = [
   "VERCEL_TEAM_ID",
   "VERCEL_PROJECT_ID",
 ] as const;
+
+/**
+ * Reserved transient provision-environment name carrying the active GitHub
+ * token for the native Git source clone. The server appends it to the
+ * provision env immediately before `Sandbox.create`; the driver extracts it for
+ * the source payload and excludes it from create-time and serve-time sandbox
+ * environment variables. It is never persisted or seeded into the sandbox.
+ */
+export const VERCEL_SOURCE_TOKEN_ENV = "KATACODE_VERCEL_SOURCE_GITHUB_TOKEN";
+
+/** HTTPS Git username used with a GitHub token as the password. */
+export const GITHUB_TOKEN_GIT_USERNAME = "x-access-token";
 
 /**
  * Merge the materialized Vercel auth trio from an instance envelope's

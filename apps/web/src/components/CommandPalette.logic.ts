@@ -9,6 +9,13 @@ import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-muted-foreground/80";
+
+/** The native repository root exposed by each sandbox driver when Add Project
+ * opens its filesystem browser. Docker seeds `/workspace`; Vercel clones Git
+ * sources into `/vercel/sandbox`. */
+export function defaultSandboxProjectBrowsePath(providerKind: string): string {
+  return providerKind === "vercel" ? "/vercel/sandbox/" : "/workspace/";
+}
 export const ADDON_ICON_CLASS = "size-4";
 
 export interface CommandPaletteItem {

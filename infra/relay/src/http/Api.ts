@@ -460,6 +460,7 @@ export const clientApi = HttpApiBuilder.group(
               relayIssuer: config.relayIssuer,
               environmentCredential: result.environmentCredential,
               cloudMintPublicKey: config.cloudMintPublicKey,
+              leaseExpiresAt: result.leaseExpiresAt,
             };
           },
           mapErrorTags({
@@ -534,6 +535,19 @@ export const clientApi = HttpApiBuilder.group(
             })
             .pipe(Effect.catch(() => relayInternalErrorResponse("internal_error")));
           return { challenge, expiresAt: DateTime.formatIso(expiresAt) };
+        }, mapRelayCommonApiErrors("not_authorized")),
+      )
+      .handle(
+        "renewEnvironmentLease",
+        Effect.fn("relay.api.client.renewEnvironmentLease")(function* (args) {
+          const { userId } = yield* RelayClientPrincipal;
+          const leaseExpiresAt = yield* links.renewForUser({
+            userId,
+            environmentId: args.params.environmentId,
+          });
+          return leaseExpiresAt === null
+            ? { ok: false, leaseExpiresAt: DateTime.formatIso(yield* DateTime.now) }
+            : { ok: true, leaseExpiresAt };
         }, mapRelayCommonApiErrors("not_authorized")),
       )
       .handle(

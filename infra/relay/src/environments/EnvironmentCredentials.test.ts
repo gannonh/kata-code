@@ -94,6 +94,43 @@ describe("EnvironmentCredentials", () => {
     },
   );
 
+  it.effect("reports whether credential cleanup is complete when no row is updated", () => {
+    const makeCredentials = (credentialRemains: boolean) => {
+      const selectBuilder = {
+        from: () => selectBuilder,
+        where: () => selectBuilder,
+        limit: () => Effect.succeed(credentialRemains ? [{ credentialId: "credential-1" }] : []),
+      };
+      const fakeDb = {
+        select: () => selectBuilder,
+        update: () => ({
+          set: () => ({
+            where: () => ({ returning: () => Effect.succeed([]) }),
+          }),
+        }),
+      } as unknown as RelayDatabase;
+      return Effect.gen(function* () {
+        const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
+        return yield* credentials.revokeForEnvironmentPublicKey({
+          environmentId: "env_test",
+          environmentPublicKey: "environment-public-key",
+        });
+      }).pipe(
+        Effect.provide(
+          EnvironmentCredentials.layer.pipe(
+            Layer.provide(NodeCryptoLayer.layer),
+            Layer.provide(Layer.succeed(RelayDb, fakeDb)),
+          ),
+        ),
+      );
+    };
+
+    return Effect.gen(function* () {
+      expect(yield* makeCredentials(false)).toBe(true);
+      expect(yield* makeCredentials(true)).toBe(false);
+    });
+  });
+
   it.effect("revokes active credentials for an environment public key", () => {
     const updateValues: Array<Record<string, unknown>> = [];
     const whereConditions: Array<unknown> = [];
@@ -140,6 +177,7 @@ describe("EnvironmentCredentials", () => {
       expect(query.sql).toContain('"relay_environment_links"."environment_id" = $3');
       expect(query.sql).toContain('"relay_environment_links"."environment_public_key" = $4');
       expect(query.sql).toContain('"relay_environment_links"."revoked_at" is null');
+      expect(query.sql).toContain('"relay_environment_links"."cleanup_claimed_at" is null');
       expect(query.params).toEqual([
         "env_test",
         "environment-public-key",

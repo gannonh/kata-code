@@ -1,28 +1,49 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { EnvironmentId } from "@kata-sh/code-contracts";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 
-const ENV_ID = EnvironmentId.make("env_sandbox_01");
+const { ENV_ID, registryStoreMock } = vi.hoisted(() => {
+  // Plain branded string — EnvironmentId.make is unavailable inside vi.hoisted
+  // (import TDZ). The cast matches how other settings browser harnesses seed IDs.
+  const ENV_ID = "env_sandbox_01" as EnvironmentId;
+  const mockRecord = {
+    environmentId: ENV_ID,
+    label: "My Container",
+    wsBaseUrl: "ws://localhost:1",
+    httpBaseUrl: "http://localhost:1",
+    createdAt: "",
+    lastConnectedAt: null,
+    sandbox: { providerKind: "docker" },
+  };
+  return {
+    ENV_ID,
+    registryStoreMock: {
+      useSavedEnvironmentRegistryStore: Object.assign(
+        (selector: (state: unknown) => unknown) => selector({ byId: { [ENV_ID]: mockRecord } }),
+        { getState: () => ({ byId: { [ENV_ID]: mockRecord }, upsert: vi.fn() }) },
+      ),
+      useSavedEnvironmentRuntimeStore: Object.assign(
+        (selector: (state: unknown) => unknown) => selector({ byId: {} }),
+        { getState: () => ({ byId: {} }) },
+      ),
+    },
+  };
+});
 
-const mockRecord = {
-  environmentId: ENV_ID,
-  label: "My Container",
-  wsBaseUrl: "ws://localhost:1",
-  httpBaseUrl: "http://localhost:1",
-  createdAt: "",
-  lastConnectedAt: null,
-  sandbox: { providerKind: "docker" },
-};
+vi.mock("~/environments/runtime/catalog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/environments/runtime/catalog")>();
+  return {
+    ...actual,
+    ...registryStoreMock,
+  };
+});
 
 vi.mock("~/environments/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/environments/runtime")>();
   return {
     ...actual,
-    useSavedEnvironmentRegistryStore: (selector: (state: unknown) => unknown) =>
-      selector({ byId: { [ENV_ID]: mockRecord } }),
-    useSavedEnvironmentRuntimeStore: (selector: (state: unknown) => unknown) =>
-      selector({ byId: {} }),
+    ...registryStoreMock,
   };
 });
 

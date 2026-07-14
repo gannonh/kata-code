@@ -66,6 +66,10 @@ export const SandboxSessionRecord = Schema.Struct({
   relay: Schema.optional(SandboxStoredRelay),
   /** Host-side deadline (epoch ms) the keepalive scheduler maintains. */
   deadlineEpochMs: Schema.optional(Schema.Number),
+  /** Non-secret fingerprint of the configured source (Vercel GitHub
+   *  repository/branch). Lifecycle start rejects a changed source. Optional so
+   *  older records and source-less sandboxes decode. */
+  sourceFingerprint: Schema.optional(Schema.String),
 });
 export type SandboxSessionRecord = typeof SandboxSessionRecord.Type;
 
@@ -108,16 +112,26 @@ function atomicWriteFile(filePath: string, contents: string): Effect.Effect<void
   });
 }
 
+export interface SandboxSessionStoreChange {
+  /** Record reference returned by this store's load operation. */
+  readonly expected: SandboxSessionRecord;
+  /** Replacement record, or null to remove the expected record. */
+  readonly next: SandboxSessionRecord | null;
+}
+
 /** A durable sandbox session store backed by a JSON file. */
 export interface SandboxSessionStore {
   /** Load all records (schema-validated; invalid entries evicted + logged). */
   load(): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, Error>;
-  /** Replace the full record set (atomic write). */
-  save(records: ReadonlyArray<SandboxSessionRecord>): Effect.Effect<void, Error>;
   /** Read + upsert one record by instance id, then save. */
   upsert(record: SandboxSessionRecord): Effect.Effect<void, Error>;
   /** Remove a record by instance id, then save. No-op when absent. */
   remove(instanceId: SandboxProviderInstanceId): Effect.Effect<void, Error>;
+  /** Apply snapshot-derived replacements only while each original record is
+   *  still current. Preserves records added or changed after the snapshot. */
+  applyIfCurrent(
+    changes: ReadonlyArray<SandboxSessionStoreChange>,
+  ): Effect.Effect<ReadonlyArray<SandboxSessionRecord>, Error>;
   /** Read the current records without re-loading from disk. */
   readonly records: ReadonlyArray<SandboxSessionRecord>;
 }
@@ -153,12 +167,13 @@ function decodeStore(raw: unknown): ReadonlyArray<SandboxSessionRecord> {
  * Create a sandbox session store backed by `<stateDir>/sandbox-sessions.json`.
  * Pass `ServerConfig.stateDir` (respects `KATACODE_HOME` / `--base-dir`) so the
  * store lives with the rest of server state. The store loads lazily on first
- * access and caches records in memory; `save` persists atomically and updates
+ * access and caches records in memory; mutations persist atomically and update
  * the cache.
  */
 export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
   const filePath = storeFilePath(stateDir);
   let cached: ReadonlyArray<SandboxSessionRecord> | null = null;
+  let initialLoad: Promise<ReadonlyArray<SandboxSessionRecord>> | null = null;
   /** Serialize mutations so concurrent upsert/save/remove cannot interleave
    *  read-modify-write against the in-memory cache. */
   let writeTail: Promise<void> = Promise.resolve();
@@ -176,8 +191,7 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
       catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
     });
 
-  const loadOnce = Effect.gen(function* () {
-    if (cached !== null) return cached;
+  const loadFromDisk = Effect.gen(function* () {
     const raw = yield* Effect.tryPromise({
       try: async () => {
         try {
@@ -190,10 +204,7 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
       },
       catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
     });
-    if (raw === null) {
-      cached = [];
-      return cached;
-    }
+    if (raw === null) return [];
     const parsed = yield* Effect.try({
       try: () => JSON.parse(raw) as unknown,
       catch: () => new Error("corrupt sandbox session store JSON"),
@@ -203,12 +214,27 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
       yield* Effect.logWarning("Sandbox session store JSON is corrupt; starting empty", {
         path: filePath,
       });
-      cached = [];
-      return cached;
+      return [];
     }
-    const decoded = decodeStore(parsed.value);
-    cached = decoded;
-    return cached;
+    return decodeStore(parsed.value);
+  });
+
+  const loadOnce = Effect.tryPromise({
+    try: () => {
+      if (cached !== null) return Promise.resolve(cached);
+      initialLoad ??= Effect.runPromise(loadFromDisk).then(
+        (records) => {
+          cached = records;
+          return records;
+        },
+        (error) => {
+          initialLoad = null;
+          throw error;
+        },
+      );
+      return initialLoad;
+    },
+    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
   });
 
   const persist = (records: ReadonlyArray<SandboxSessionRecord>) =>
@@ -220,7 +246,6 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
 
   return {
     load: () => loadOnce,
-    save: (records) => withWriteLock(persist(records)),
     upsert: (record) =>
       withWriteLock(
         Effect.gen(function* () {
@@ -237,6 +262,30 @@ export function makeSandboxSessionStore(stateDir: string): SandboxSessionStore {
           const next = current.filter((r) => r.instanceId !== (instanceId as string));
           if (next.length === current.length) return; // absent — no write
           yield* persist(next);
+        }),
+      ),
+    applyIfCurrent: (changes) =>
+      withWriteLock(
+        Effect.gen(function* () {
+          const current = yield* loadOnce;
+          const nextByInstanceId = new Map(current.map((record) => [record.instanceId, record]));
+          let changed = false;
+          for (const change of changes) {
+            if (nextByInstanceId.get(change.expected.instanceId) !== change.expected) {
+              continue;
+            }
+            if (change.next === null) {
+              nextByInstanceId.delete(change.expected.instanceId);
+              changed = true;
+            } else if (change.next !== change.expected) {
+              nextByInstanceId.set(change.expected.instanceId, change.next);
+              changed = true;
+            }
+          }
+          if (!changed) return current;
+          const next = [...nextByInstanceId.values()];
+          yield* persist(next);
+          return next;
         }),
       ),
     get records() {

@@ -74,11 +74,17 @@ import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import { connectHttpApiLayer, reconcileDesiredCloudLink } from "./cloud/http.ts";
+import {
+  connectHttpApiLayer,
+  reconcileDesiredCloudLink,
+  renewDesiredCloudLinkLease,
+} from "./cloud/http.ts";
+import { startEnvironmentLeaseMaintenance } from "./cloud/environmentLeaseMaintenance.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
+import { renewSandboxRelayLeases } from "./sandbox/SandboxService.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -449,24 +455,30 @@ export const makeServerLayer = Layer.unwrap(
     const cloudDesiredLinkReconcileLayer = Layer.effectDiscard(
       Effect.gen(function* () {
         if (!hasCloudPublicConfig) return;
-        if (!(yield* CloudCliState.readCliDesiredCloudLink)) return;
+        const primaryLinkDesired = yield* CloudCliState.readCliDesiredCloudLink;
         const server = yield* HttpServer.HttpServer;
         const address = server.address;
         if (typeof address === "string" || !("port" in address)) return;
-        yield* Effect.forkScoped(
-          Effect.sleep("250 millis").pipe(
-            Effect.andThen(reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`)),
-            Effect.retry({ times: 4 }),
-            Effect.tap(() =>
-              Effect.logInfo("Kata Code Connect desired link reconciled on startup"),
-            ),
-            Effect.catch((cause) =>
-              Effect.logWarning("Failed to reconcile Kata Code Connect desired link on startup", {
-                cause,
-              }),
-            ),
-          ),
-        );
+        const renewLeases = Effect.all(
+          [
+            primaryLinkDesired ? renewDesiredCloudLinkLease() : Effect.succeed(false),
+            renewSandboxRelayLeases(),
+          ],
+          { concurrency: 2 },
+        ).pipe(Effect.asVoid);
+        const startupReconcile = primaryLinkDesired
+          ? Effect.sleep("250 millis").pipe(
+              Effect.andThen(reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`)),
+              Effect.retry({ times: 4 }),
+              Effect.tap(() =>
+                Effect.logInfo("Kata Code Connect desired link reconciled on startup"),
+              ),
+            )
+          : Effect.void;
+        yield* startEnvironmentLeaseMaintenance({
+          startupReconcile: startupReconcile.pipe(Effect.asVoid),
+          renewLeases,
+        });
       }),
     );
 

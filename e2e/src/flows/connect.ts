@@ -1,6 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 import { chromium, type Browser, type Page } from "@playwright/test";
 import { clerk, setupClerkTestingToken } from "@clerk/testing/playwright";
 
@@ -12,7 +14,66 @@ import {
   readGoogleTestUserEmail,
   readGoogleTestUserPrerequisites,
 } from "../harness/env.ts";
-import type { E2ERunContext } from "../harness/isolatedRun.ts";
+import { registerCleanup, type E2ERunContext } from "../harness/isolatedRun.ts";
+
+const execFileAsync = promisify(execFile);
+
+async function runConnectCleanupCli(
+  runContext: E2ERunContext,
+  args: ReadonlyArray<string>,
+): Promise<string> {
+  const bin = join(runContext.repoRoot, "apps/server/dist/bin.mjs");
+  const { stdout } = await execFileAsync(process.execPath, [bin, "connect", ...args], {
+    env: {
+      ...process.env,
+      KATACODE_HOME: runContext.katacodeHome,
+      VITE_DEV_SERVER_URL: `http://127.0.0.1:${runContext.webPort}`,
+    },
+  });
+  return stdout.trim();
+}
+
+/** Register cloud cleanup before the isolated token/home is destroyed. */
+export function registerConnectEnvironmentCleanup(
+  runContext: E2ERunContext,
+  environmentId: string,
+): void {
+  registerCleanup(runContext, async () => {
+    try {
+      await runConnectCleanupCli(runContext, [
+        "cleanup",
+        "--environment",
+        environmentId,
+        "--yes",
+        "--base-dir",
+        runContext.katacodeHome,
+      ]);
+    } catch (error) {
+      logHarnessPhase(
+        `Connect teardown could not remove ${environmentId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  });
+}
+
+export async function listConnectEnvironmentIds(
+  runContext: E2ERunContext,
+): Promise<ReadonlyArray<string>> {
+  const output = await runConnectCleanupCli(runContext, [
+    "cleanup",
+    "--json",
+    "--base-dir",
+    runContext.katacodeHome,
+  ]);
+  const decoded: unknown = JSON.parse(output);
+  if (!Array.isArray(decoded)) return [];
+  return decoded.flatMap((entry) =>
+    entry && typeof entry === "object" && "environmentId" in entry
+      ? [String(entry.environmentId)]
+      : [],
+  );
+}
 
 /**
  * E2E flow helpers for Kata Code Connect (the headless CLI OAuth path). The
@@ -57,14 +118,25 @@ interface ConnectLoginHandle {
  * Spawn `katacode connect login` against the isolated e2e home. The CLI starts a
  * callback server on `127.0.0.1:34338`, prints the authorize URL, and waits for
  * the OAuth callback to exchange the code for a token (then exits 0).
+ *
+ * Must pass `VITE_DEV_SERVER_URL` so the CLI stores the OAuth token under
+ * `{KATACODE_HOME}/dev/secrets/` — the same state dir the Electron-embedded
+ * server uses in desktop-dev. Without it the CLI writes `userdata/secrets/`
+ * and Create & run falls through to a short-lived Clerk JWT that the relay
+ * rejects as `invalid_bearer`.
  */
 function spawnConnectLogin(runContext: E2ERunContext): ConnectLoginHandle {
   const bin = join(runContext.repoRoot, "apps/server/dist/bin.mjs");
+  const viteDevServerUrl = `http://127.0.0.1:${runContext.webPort}`;
   const child: ChildProcess = spawn(
     process.execPath,
     [bin, "connect", "login", "--base-dir", runContext.katacodeHome],
     {
-      env: { ...process.env, KATACODE_HOME: runContext.katacodeHome },
+      env: {
+        ...process.env,
+        KATACODE_HOME: runContext.katacodeHome,
+        VITE_DEV_SERVER_URL: viteDevServerUrl,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -177,9 +249,13 @@ export async function authorizeConnectCli(runContext: E2ERunContext, page: Page)
   logHarnessPhase(`Opening Clerk authorize URL and signing in the Google test user (${email})...`);
   await page.goto(authorizeUrl, { waitUntil: "domcontentloaded", timeout: E2E_TIMEOUTS.authMs });
 
-  // The authorize URL redirects to the Account Portal sign-in page. Wait for
-  // Clerk to load, then sign in via the ticket strategy.
-  await clerk.loaded({ page });
+  // The authorize URL redirects to the Account Portal sign-in page. Its Clerk
+  // global can be replaced during the redirect, while @clerk/testing's
+  // `loaded()` helper dereferences `window.Clerk` without optional chaining.
+  // Wait on the stable, optional-chained signal before using the ticket flow.
+  await page.waitForFunction(() => Boolean(window.Clerk?.loaded), undefined, {
+    timeout: E2E_TIMEOUTS.authMs,
+  });
   await clerk.signIn({ page, emailAddress: email });
 
   // After sign-in, Clerk redirects to the OAuth consent screen. Approve the
@@ -202,5 +278,22 @@ export async function authorizeConnectCli(runContext: E2ERunContext, page: Page)
       );
     }),
   ]);
-  logHarnessPhase("Kata Code Connect CLI authorized.");
+
+  // Fail loud if the token landed outside the Electron server's secrets dir.
+  const expectedTokenPath = join(
+    runContext.katacodeHome,
+    "dev",
+    "secrets",
+    "cloud-cli-oauth-token.bin",
+  );
+  try {
+    await access(expectedTokenPath);
+  } catch {
+    throw new Error(
+      `Kata Code Connect CLI authorized, but the OAuth token was not written to ${expectedTokenPath}. ` +
+        "The Electron server reads `{KATACODE_HOME}/dev/secrets/` in desktop-dev; without that file, " +
+        "Create & run falls through to a Clerk JWT and the relay returns invalid_bearer.",
+    );
+  }
+  logHarnessPhase(`Kata Code Connect CLI authorized (${expectedTokenPath}).`);
 }

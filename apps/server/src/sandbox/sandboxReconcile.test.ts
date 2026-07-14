@@ -23,6 +23,7 @@ import { makeSandboxSessionStore, type SandboxSessionRecord } from "./sandboxSes
 import {
   reconcileStoredRecords,
   discoverUntrackedSessions,
+  cacheLiveSession,
   sanitizeHandleForStore,
   reinjectVercelAuth,
   connectAuthTokenPreferenceForEndpoint,
@@ -128,6 +129,38 @@ function makeRecord(instanceId: string, status: "running" | "stopped"): SandboxS
   };
 }
 
+function makeDelayedStatusDriver(status: SandboxLifecycleStatus): {
+  readonly driver: SandboxProvider;
+  readonly statusStarted: Promise<void>;
+  readonly releaseStatus: () => void;
+} {
+  let releaseStatus!: () => void;
+  let markStatusStarted!: () => void;
+  const statusStarted = new Promise<void>((resolve) => {
+    markStatusStarted = resolve;
+  });
+  const statusReleased = new Promise<void>((resolve) => {
+    releaseStatus = resolve;
+  });
+  const baseDriver = makeFakeDriver(() => status).driver;
+  return {
+    driver: {
+      ...baseDriver,
+      lifecycle: {
+        ...baseDriver.lifecycle!,
+        status: () =>
+          Effect.promise(async () => {
+            markStatusStarted();
+            await statusReleased;
+            return status;
+          }),
+      },
+    },
+    statusStarted,
+    releaseStatus,
+  };
+}
+
 describe("Connect token selection for sandbox registration", () => {
   it("prefers the freshly supplied desktop token for loopback/Docker registration", () => {
     expect(connectAuthTokenPreferenceForEndpoint("cloudflare_tunnel" as never)).toBe(
@@ -193,6 +226,121 @@ describe("reconcileStoredRecords (AC-L7)", () => {
     expect(updated).toHaveLength(1);
     expect(updated[0]?.status).toBe("stopped");
     expect(updated[0]?.statusDetail).toBeUndefined();
+  });
+
+  it("preserves a session added while a status probe is in flight", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    await Effect.runPromise(store.upsert(makeRecord("fake_01", "running")));
+    const delayed = makeDelayedStatusDriver("stopped");
+    const registry = new SandboxProviderRegistry();
+    registry.register(delayed.driver, () => ({}));
+
+    const reconcile = Effect.runPromise(
+      reconcileStoredRecords({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions: new Map<string, LiveSession>(),
+      }),
+    );
+    await delayed.statusStarted;
+    await Effect.runPromise(store.upsert(makeRecord("fake_02", "running")));
+    delayed.releaseStatus();
+    await reconcile;
+
+    expect(store.records.map((record) => record.instanceId).sort()).toEqual(["fake_01", "fake_02"]);
+    const reloaded = await Effect.runPromise(makeSandboxSessionStore(home).load());
+    expect(reloaded.map((record) => record.instanceId).sort()).toEqual(["fake_01", "fake_02"]);
+  });
+
+  it("preserves a newer lifecycle write while an older status probe is in flight", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    await Effect.runPromise(store.upsert(makeRecord("fake_01", "running")));
+    const delayed = makeDelayedStatusDriver("stopped");
+    const registry = new SandboxProviderRegistry();
+    registry.register(delayed.driver, () => ({}));
+
+    const reconcile = Effect.runPromise(
+      reconcileStoredRecords({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions: new Map<string, LiveSession>(),
+      }),
+    );
+    await delayed.statusStarted;
+    await Effect.runPromise(
+      store.upsert({ ...makeRecord("fake_01", "running"), deadlineEpochMs: 42 }),
+    );
+    delayed.releaseStatus();
+    await reconcile;
+
+    const expected = { ...makeRecord("fake_01", "running"), deadlineEpochMs: 42 };
+    expect(store.records).toEqual([expected]);
+    const reloaded = await Effect.runPromise(makeSandboxSessionStore(home).load());
+    expect(reloaded).toEqual([expected]);
+  });
+
+  it("keeps last-known status for skipInstanceIds without calling lifecycle.status", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    await Effect.runPromise(store.upsert(makeRecord("fake_01", "stopped")));
+    const { driver, statusCalls } = makeFakeDriver(() => "running");
+    const registry = new SandboxProviderRegistry();
+    registry.register(driver, () => ({}));
+
+    const updated = await Effect.runPromise(
+      reconcileStoredRecords({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions: new Map<string, LiveSession>(),
+        skipInstanceIds: new Set(["fake_01"]),
+      }),
+    );
+
+    expect(updated).toHaveLength(1);
+    expect(updated[0]?.status).toBe("stopped");
+    expect(statusCalls).toEqual([]);
+  });
+
+  it("preserves adminAccessToken across reconcile live-session cache updates", async () => {
+    const home = await tmpKatacodeHome();
+    const store = makeSandboxSessionStore(home);
+    await Effect.runPromise(store.upsert(makeRecord("fake_01", "stopped")));
+    const { driver } = makeFakeDriver(() => "running");
+    const registry = new SandboxProviderRegistry();
+    registry.register(driver, () => ({}));
+    const liveSessions = new Map<string, LiveSession>();
+    const handle: SandboxHandle = {
+      driverKind: FAKE_KIND,
+      instanceId: "fake_01",
+      handle: { id: "h1" },
+    };
+    cacheLiveSession(liveSessions, "fake_01", {
+      handle,
+      driver,
+      instanceConfig: { driver: "fake-lifecycle" } as never,
+      environmentId: "env_1",
+    });
+    liveSessions.set("fake_01", {
+      ...liveSessions.get("fake_01")!,
+      adminAccessToken: "admin-token",
+    });
+
+    await Effect.runPromise(
+      reconcileStoredRecords({
+        store,
+        registry,
+        settings: settingsWithInstance("fake_01"),
+        liveSessions,
+      }),
+    );
+
+    expect(liveSessions.get("fake_01")?.adminAccessToken).toBe("admin-token");
+    expect(liveSessions.get("fake_01")?.environmentId).toBe("env_fake_01");
   });
 
   it("evicts a record when the provider lifecycle.status returns gone", async () => {

@@ -73,6 +73,11 @@ export const relayEnvironmentLinks = pgTable(
     liveActivitiesEnabled: boolean("live_activities_enabled").notNull().default(true),
     managedTunnelsEnabled: boolean("managed_tunnels_enabled").notNull().default(false),
     createdByDeviceId: varchar("created_by_device_id", { length: 191 }),
+    leaseExpiresAt: varchar("lease_expires_at", { length: 64 }).notNull(),
+    cleanupClaimedAt: varchar("cleanup_claimed_at", { length: 64 }),
+    cleanupAttemptToken: varchar("cleanup_attempt_token", { length: 191 }),
+    cleanupAttemptExpiresAt: varchar("cleanup_attempt_expires_at", { length: 64 }),
+    managedEndpointAllocationId: varchar("managed_endpoint_allocation_id", { length: 64 }),
     revokedAt: varchar("revoked_at", { length: 64 }),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
@@ -80,6 +85,7 @@ export const relayEnvironmentLinks = pgTable(
   (table) => [
     primaryKey({ columns: [table.userId, table.environmentId] }),
     index("idx_relay_environment_links_environment").on(table.environmentId, table.revokedAt),
+    index("idx_relay_environment_links_lease").on(table.leaseExpiresAt, table.revokedAt),
   ],
 );
 
@@ -88,6 +94,7 @@ export const relayManagedEndpointAllocations = pgTable(
   {
     userId: varchar("user_id", { length: 191 }).notNull(),
     environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    allocationId: varchar("allocation_id", { length: 64 }).notNull(),
     hostname: text("hostname").notNull(),
     tunnelId: varchar("tunnel_id", { length: 191 }),
     tunnelName: text("tunnel_name").notNull(),

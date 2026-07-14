@@ -3,6 +3,7 @@ import * as Cloudflare from "alchemy/Cloudflare";
 import * as Drizzle from "alchemy/Drizzle";
 import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -40,6 +41,7 @@ import * as Devices from "./agentActivity/Devices.ts";
 import * as DpopProofs from "./auth/DpopProofs.ts";
 import * as RelayTokens from "./auth/RelayTokens.ts";
 import * as EnvironmentCredentials from "./environments/EnvironmentCredentials.ts";
+import { cleanupExpiredEnvironmentLinks } from "./environments/EnvironmentLeaseCleanup.ts";
 import * as EnvironmentLinks from "./environments/EnvironmentLinks.ts";
 import * as ManagedEndpointAllocations from "./environments/ManagedEndpointAllocations.ts";
 import * as LiveActivities from "./agentActivity/LiveActivities.ts";
@@ -246,11 +248,17 @@ export default class Api extends Cloudflare.Worker<Api>()(
     );
 
     yield* Cloudflare.cron("*/5 * * * *").subscribe(() =>
-      DpopProofs.DpopProofReplay.pipe(
-        Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
-        Effect.withSpan("relay.cron.prune_expired_dpop_proofs"),
-        Effect.provide(runtimeLayer),
-      ),
+      Effect.gen(function* () {
+        const links = yield* EnvironmentLinks.EnvironmentLinks;
+        yield* DpopProofs.DpopProofReplay.pipe(
+          Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
+        );
+        yield* cleanupExpiredEnvironmentLinks;
+        const retentionCutoff = DateTime.formatIso(
+          DateTime.subtract(yield* DateTime.now, { days: 30 }),
+        );
+        yield* links.purgeRevokedBefore(retentionCutoff);
+      }).pipe(Effect.withSpan("relay.cron.maintenance"), Effect.provide(runtimeLayer)),
     );
 
     const fetch = Layer.merge(

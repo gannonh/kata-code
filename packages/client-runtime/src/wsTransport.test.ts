@@ -9,6 +9,13 @@ import { WsTransport } from "./wsTransport.ts";
 type WsEventType = "open" | "message" | "close" | "error";
 type WsEvent = { code?: number; data?: unknown; reason?: string; type?: string };
 type WsListener = (event?: WsEvent) => void;
+type TransportSessionForTest = {
+  clientPromise: Promise<never>;
+  readonly runtime: {
+    runPromise: (...args: never[]) => Promise<unknown>;
+    dispose: () => Promise<void>;
+  };
+};
 
 const sockets: MockWebSocket[] = [];
 
@@ -307,6 +314,44 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("rejects client acquisition when its session is replaced", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const session = (transport as unknown as { session: TransportSessionForTest }).session;
+    session.clientPromise = new Promise<never>(() => undefined);
+
+    const requestPromise = transport.request(() => Effect.succeed("unexpected"));
+    await transport.reconnect();
+
+    await expect(requestPromise).rejects.toThrow(/replaced by a reconnect/);
+  });
+
+  it("rejects an in-flight request when its session is replaced by a reconnect", async () => {
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    getSocket().open();
+
+    // Dispatch a request on the first session, then reconnect before the server
+    // answers. Without the session-replacement race this promise would hang
+    // forever (the old runtime's scope is closed in the background), which left
+    // UI callers stuck on "Loading…" with no error to react to.
+    const requestPromise = transport.request((client) =>
+      client[WS_METHODS.serverUpsertKeybinding]({
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      }),
+    );
+
+    await transport.reconnect();
+
+    await expect(requestPromise).rejects.toThrow(/replaced by a reconnect/);
+
+    await transport.dispose();
+  });
+
   it("reconnects the websocket session without disposing the transport", async () => {
     const transport = createTransport("ws://localhost:3020");
 
@@ -323,9 +368,12 @@ describe("WsTransport", () => {
       expect(sockets).toHaveLength(2);
     });
 
+    await waitFor(() => {
+      expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
+    });
+
     const secondSocket = getSocket();
     expect(secondSocket).not.toBe(firstSocket);
-    expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
 
     const requestPromise = transport.request((client) =>
       client[WS_METHODS.serverUpsertKeybinding]({
@@ -360,6 +408,62 @@ describe("WsTransport", () => {
       issues: [],
     });
 
+    await transport.dispose();
+  });
+
+  it("sends requests while the previous session is still closing", async () => {
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+    let releaseClose!: () => void;
+    const pendingClose = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closeSession = vi
+      .spyOn(
+        transport as unknown as {
+          closeSession: (session: unknown) => Promise<void>;
+        },
+        "closeSession",
+      )
+      .mockReturnValue(pendingClose);
+
+    await transport.reconnect();
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    const secondSocket = getSocket();
+    const requestPromise = transport.request((client) =>
+      client[WS_METHODS.serverUpsertKeybinding]({
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      }),
+    );
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(1);
+    });
+    const requestMessage = JSON.parse(secondSocket.sent[0] ?? "{}") as { id: string };
+    secondSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: requestMessage.id,
+        exit: {
+          _tag: "Success",
+          value: { keybindings: [], issues: [] },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({ keybindings: [], issues: [] });
+    releaseClose();
+    closeSession.mockRestore();
     await transport.dispose();
   });
 
@@ -643,9 +747,12 @@ describe("WsTransport", () => {
       expect(sockets).toHaveLength(2);
     });
 
+    await waitFor(() => {
+      expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
+    });
+
     const secondSocket = getSocket();
     expect(secondSocket).not.toBe(firstSocket);
-    expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
 
     secondSocket.open();
 
@@ -691,6 +798,157 @@ describe("WsTransport", () => {
     });
 
     unsubscribe();
+    await transport.dispose();
+  });
+
+  it("re-subscribes when the replaced session never acquires a client", async () => {
+    const transport = createTransport("ws://localhost:3020", undefined, {
+      sessionCloseTimeout: 10,
+    });
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const firstSession = (transport as unknown as { session: TransportSessionForTest }).session;
+    firstSession.clientPromise = new Promise<never>(() => undefined);
+
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      vi.fn(),
+    );
+
+    await transport.reconnect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const replacementSocket = getSocket();
+    replacementSocket.open();
+
+    await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+    expect(JSON.parse(replacementSocket.sent[0] ?? "{}")).toMatchObject({
+      tag: WS_METHODS.subscribeServerLifecycle,
+    });
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("re-subscribes while the replaced stream and session cleanup never settle", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    getSocket().open();
+
+    let attempts = 0;
+    const unsubscribe = transport.subscribe(() => {
+      attempts += 1;
+      return Stream.never;
+    }, vi.fn());
+    await waitFor(() => expect(attempts).toBe(1));
+
+    let releaseClose!: () => void;
+    const pendingClose = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closeSession = vi
+      .spyOn(
+        transport as unknown as { closeSession: (session: unknown) => Promise<void> },
+        "closeSession",
+      )
+      .mockReturnValue(pendingClose);
+
+    await transport.reconnect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    getSocket().open();
+    await waitFor(() => expect(attempts).toBe(2));
+
+    unsubscribe();
+    closeSession.mockRestore();
+    releaseClose();
+    await transport.dispose();
+  });
+
+  it("ignores superseded subscription events while the replacement stream stays active", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const listener = vi.fn();
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+    );
+
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const firstSocket = getSocket();
+    firstSocket.open();
+    await waitFor(() => expect(firstSocket.sent).toHaveLength(1));
+    const firstRequest = JSON.parse(firstSocket.sent[0] ?? "{}") as { id: string };
+
+    let releaseClose!: () => void;
+    const pendingClose = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closeSession = vi
+      .spyOn(
+        transport as unknown as { closeSession: (session: unknown) => Promise<void> },
+        "closeSession",
+      )
+      .mockReturnValue(pendingClose);
+
+    await transport.reconnect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const replacementSocket = getSocket();
+    replacementSocket.open();
+    await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+    const replacementRequest = JSON.parse(replacementSocket.sent[0] ?? "{}") as { id: string };
+
+    const staleEvent = {
+      version: 1,
+      sequence: 1,
+      type: "welcome",
+      payload: {
+        environment: {
+          environmentId: "environment-stale",
+          label: "Stale environment",
+          platform: { os: "darwin", arch: "arm64" },
+          serverVersion: "0.0.0-test",
+          capabilities: { repositoryIdentity: true },
+        },
+        cwd: "/tmp/stale",
+        projectName: "stale",
+      },
+    };
+    firstSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: firstRequest.id,
+        values: [staleEvent],
+      }),
+    );
+    await Effect.runPromise(Effect.sleep("1 millis"));
+    expect(listener).not.toHaveBeenCalled();
+
+    const replacementEvent = {
+      version: 1,
+      sequence: 2,
+      type: "welcome",
+      payload: {
+        environment: {
+          environmentId: "environment-current",
+          label: "Current environment",
+          platform: { os: "darwin", arch: "arm64" },
+          serverVersion: "0.0.0-test",
+          capabilities: { repositoryIdentity: true },
+        },
+        cwd: "/tmp/current",
+        projectName: "current",
+      },
+    };
+    replacementSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: replacementRequest.id,
+        values: [replacementEvent],
+      }),
+    );
+    await waitFor(() => expect(listener).toHaveBeenCalledOnce());
+    expect(listener).toHaveBeenLastCalledWith(replacementEvent);
+
+    unsubscribe();
+    closeSession.mockRestore();
+    releaseClose();
     await transport.dispose();
   });
 
@@ -764,7 +1022,10 @@ describe("WsTransport", () => {
     await waitFor(() => {
       expect(attempts).toBe(1);
     });
-    await Effect.runPromise(Effect.sleep(Duration.millis(50)));
+    const stableSince = performance.now();
+    await waitFor(() => {
+      expect(performance.now() - stableSince).toBeGreaterThanOrEqual(50);
+    });
 
     expect(attempts).toBe(1);
     expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription failed", {
@@ -845,6 +1106,32 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("rejects an active finite stream request when its session is replaced", async () => {
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    getSocket().open();
+
+    const requestPromise = transport.requestStream(
+      (client) =>
+        client[WS_METHODS.gitRunStackedAction]({
+          actionId: "action-1",
+          cwd: "/repo",
+          action: "commit",
+        }),
+      vi.fn(),
+    );
+
+    await waitFor(() => {
+      expect(getSocket().sent).toHaveLength(1);
+    });
+    await transport.reconnect();
+
+    await expect(requestPromise).rejects.toThrow(/replaced by a reconnect/);
+  });
+
   it("streams finite request events without re-subscribing", async () => {
     const transport = createTransport("ws://localhost:3020");
     const listener = vi.fn();
@@ -908,52 +1195,64 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
-  it("closes the client scope on the transport runtime before disposing the runtime", async () => {
-    const callOrder: string[] = [];
-    let resolveClose!: () => void;
-    const closePromise = new Promise<void>((resolve) => {
-      resolveClose = resolve;
+  it("tracks repeated reconnect retirements and dispose drains all of them", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    getSocket().open();
+
+    const releases: Array<() => void> = [];
+    const closeSession = vi
+      .spyOn(
+        transport as unknown as { closeSession: (session: unknown) => Promise<void> },
+        "closeSession",
+      )
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            releases.push(resolve);
+          }),
+      );
+
+    await transport.reconnect();
+    await transport.reconnect();
+    await transport.reconnect();
+    const disposePromise = transport.dispose();
+
+    await waitFor(() => expect(closeSession).toHaveBeenCalledTimes(4));
+    let disposed = false;
+    void disposePromise.then(() => {
+      disposed = true;
     });
+    await Promise.resolve();
+    expect(disposed).toBe(false);
 
-    const runtime = {
-      runPromise: vi.fn(async () => {
-        callOrder.push("close:start");
-        await closePromise;
-        callOrder.push("close:done");
-        return undefined;
-      }),
-      dispose: vi.fn(async () => {
-        callOrder.push("runtime:dispose");
-      }),
-    };
-    const transport = {
-      disposed: false,
-      session: {
-        clientScope: {} as never,
-        runtime,
-      },
-      closeSession: (
-        WsTransport.prototype as unknown as {
-          closeSession: (session: {
-            clientScope: unknown;
-            runtime: { dispose: () => Promise<void>; runPromise: () => Promise<void> };
-          }) => Promise<void>;
-        }
-      ).closeSession,
-    } as unknown as WsTransport;
+    for (const release of releases) release();
+    await disposePromise;
+    expect(disposed).toBe(true);
+    closeSession.mockRestore();
+  });
 
-    void WsTransport.prototype.dispose.call(transport);
-
-    expect(runtime.runPromise).toHaveBeenCalledTimes(1);
-    expect(runtime.dispose).not.toHaveBeenCalled();
-    expect((transport as unknown as { disposed: boolean }).disposed).toBe(true);
-
-    resolveClose();
-
-    await waitFor(() => {
-      expect(runtime.dispose).toHaveBeenCalledTimes(1);
+  it("bounds failed session cleanup, logs it, and still drains on dispose", async () => {
+    const warnSpy = vi.fn();
+    const transport = createTransport("ws://localhost:3020", undefined, {
+      logWarning: warnSpy,
+      sessionCloseTimeout: "10 millis",
     });
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    getSocket().open();
 
-    expect(callOrder).toEqual(["close:start", "close:done", "runtime:dispose"]);
+    const session = (transport as unknown as { session: TransportSessionForTest }).session;
+    vi.spyOn(session.runtime, "runPromise").mockReturnValueOnce(new Promise(() => undefined));
+    vi.spyOn(session.runtime, "dispose").mockRejectedValueOnce(new Error("dispose exploded"));
+
+    await transport.reconnect();
+    await transport.dispose();
+
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket session scope close failed", {
+      error: "timed out after 10ms",
+    });
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket session runtime disposal failed", {
+      error: "dispose exploded",
+    });
   });
 });

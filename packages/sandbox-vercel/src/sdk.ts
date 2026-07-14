@@ -34,6 +34,17 @@ export interface VercelAuthParams {
   readonly projectId: string;
 }
 
+/** Native Git source for `Sandbox.create`. Authenticated clones pass
+ *  `username`/`password` (GitHub uses `x-access-token` + token). */
+export interface VercelGitSource {
+  readonly type: "git";
+  readonly url: string;
+  readonly username?: string;
+  readonly password?: string;
+  readonly depth?: number;
+  readonly revision?: string;
+}
+
 /** A live or fake Vercel sandbox instance, addressed by `sandboxId` (the SDK `name`). */
 export interface VercelSandboxInstance {
   /** The SDK sandbox `name` used to re-fetch the instance. */
@@ -76,7 +87,7 @@ export interface VercelSdk {
       readonly name?: string;
       readonly runtime?: string;
       readonly image?: string;
-      readonly source?: { readonly type: "snapshot"; readonly snapshotId: string };
+      readonly source?: VercelGitSource;
       readonly resources?: { readonly vcpus: number };
       readonly ports: ReadonlyArray<number>;
       readonly timeout: number;
@@ -204,15 +215,25 @@ export const liveVercelSdk: VercelSdk = {
         ? { keepLastSnapshots: params.keepLastSnapshots }
         : {}),
     };
-    const sb =
+    // A Git source clones into /vercel/sandbox and still needs a runtime/image
+    // to execute; only runtime and image are mutually exclusive.
+    const withSource =
       params.source !== undefined
-        ? await Sandbox.create({
-            ...base,
-            source: { type: "snapshot", snapshotId: params.source.snapshotId },
-          })
-        : params.image !== undefined
-          ? await Sandbox.create({ ...base, image: params.image })
-          : await Sandbox.create({ ...base, runtime: params.runtime ?? "node24" });
+        ? {
+            source: {
+              type: "git" as const,
+              url: params.source.url,
+              ...(params.source.username !== undefined ? { username: params.source.username } : {}),
+              ...(params.source.password !== undefined ? { password: params.source.password } : {}),
+              ...(params.source.depth !== undefined ? { depth: params.source.depth } : {}),
+              ...(params.source.revision !== undefined ? { revision: params.source.revision } : {}),
+            },
+          }
+        : {};
+    const sb =
+      params.image !== undefined
+        ? await Sandbox.create({ ...base, ...withSource, image: params.image })
+        : await Sandbox.create({ ...base, ...withSource, runtime: params.runtime ?? "node24" });
     return adaptSandbox(sb);
   },
   get: async (params) => {

@@ -54,56 +54,57 @@ function signTestJwt(payload: object, typ: string, privateKey: string): string {
   return `${signingInput}.${NodeCrypto.sign(null, Buffer.from(signingInput), privateKey).toString("base64url")}`;
 }
 
-const makeRequest = Effect.gen(function* () {
-  const now = yield* DateTime.now;
-  const expiresAt = DateTime.add(now, { minutes: 5 });
-  const relayTokens = yield* RelayTokens.RelayTokens;
-  const challenge = yield* relayTokens.issueLinkChallenge({
-    userId: "user_123",
-    request: {
-      notificationsEnabled: true,
-      liveActivitiesEnabled: true,
-      managedTunnelsEnabled: true,
-    },
-    jti: "challenge-jti",
-    issuedAtEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
-    expiresAtEpochSeconds: Math.floor(expiresAt.epochMilliseconds / 1_000),
-  });
-  const payload = {
-    iss: wireEnvironmentIssuer("env-link-test"),
-    aud: "https://relay.example.test",
-    sub: "env-link-test",
-    jti: "link-proof-jti",
-    iat: Math.floor(now.epochMilliseconds / 1_000),
-    exp: Math.floor(expiresAt.epochMilliseconds / 1_000),
-    challenge,
-    environmentId: "env-link-test" as RelayEnvironmentLinkProofPayload["environmentId"],
-    descriptor: {
+const makeRequest = (managedTunnelsEnabled = false) =>
+  Effect.gen(function* () {
+    const now = yield* DateTime.now;
+    const expiresAt = DateTime.add(now, { minutes: 5 });
+    const relayTokens = yield* RelayTokens.RelayTokens;
+    const challenge = yield* relayTokens.issueLinkChallenge({
+      userId: "user_123",
+      request: {
+        notificationsEnabled: true,
+        liveActivitiesEnabled: true,
+        managedTunnelsEnabled,
+      },
+      jti: "challenge-jti",
+      issuedAtEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
+      expiresAtEpochSeconds: Math.floor(expiresAt.epochMilliseconds / 1_000),
+    });
+    const payload = {
+      iss: wireEnvironmentIssuer("env-link-test"),
+      aud: "https://relay.example.test",
+      sub: "env-link-test",
+      jti: "link-proof-jti",
+      iat: Math.floor(now.epochMilliseconds / 1_000),
+      exp: Math.floor(expiresAt.epochMilliseconds / 1_000),
+      challenge,
       environmentId: "env-link-test" as RelayEnvironmentLinkProofPayload["environmentId"],
-      label: "Link Test Environment",
-      platform: { os: "darwin", arch: "arm64" },
-      serverVersion: "0.0.0-test",
-      capabilities: { repositoryIdentity: true },
-    },
-    environmentPublicKey: environmentKeyPair.publicKey.trim(),
-    endpoint: {
-      httpBaseUrl: "https://env.example.test/",
-      wsBaseUrl: "wss://env.example.test/",
-      providerKind: "manual",
-    },
-    origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
-    scopes: ["agent_activity_notifications", "managed_tunnels"],
-  } satisfies RelayEnvironmentLinkProofPayload;
-  return {
-    request: {
-      proof: signTestJwt(payload, RELAY_LINK_PROOF_TYP, environmentKeyPair.privateKey),
-      notificationsEnabled: true,
-      liveActivitiesEnabled: true,
-      managedTunnelsEnabled: false,
-    } satisfies RelayEnvironmentLinkRequest,
-    payload,
-  };
-});
+      descriptor: {
+        environmentId: "env-link-test" as RelayEnvironmentLinkProofPayload["environmentId"],
+        label: "Link Test Environment",
+        platform: { os: "darwin", arch: "arm64" },
+        serverVersion: "0.0.0-test",
+        capabilities: { repositoryIdentity: true },
+      },
+      environmentPublicKey: environmentKeyPair.publicKey.trim(),
+      endpoint: {
+        httpBaseUrl: "https://env.example.test/",
+        wsBaseUrl: "wss://env.example.test/",
+        providerKind: managedTunnelsEnabled ? "cloudflare_tunnel" : "manual",
+      },
+      origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+      scopes: ["agent_activity_notifications", "managed_tunnels"],
+    } satisfies RelayEnvironmentLinkProofPayload;
+    return {
+      request: {
+        proof: signTestJwt(payload, RELAY_LINK_PROOF_TYP, environmentKeyPair.privateKey),
+        notificationsEnabled: true,
+        liveActivitiesEnabled: true,
+        managedTunnelsEnabled,
+      } satisfies RelayEnvironmentLinkRequest,
+      payload,
+    };
+  });
 
 const makeManualPublicRequest = Effect.gen(function* () {
   const now = yield* DateTime.now;
@@ -152,6 +153,7 @@ const makeManualPublicRequest = Effect.gen(function* () {
 function testLayer(input?: {
   readonly upsert?: EnvironmentLinks.EnvironmentLinksShape["upsert"];
   readonly consume?: DpopProofs.DpopProofReplayShape["consume"];
+  readonly managedEndpointProvider?: ManagedEndpointProvider.ManagedEndpointProviderShape;
 }) {
   return EnvironmentLinker.layer.pipe(
     Layer.provideMerge(RelayTokens.layer),
@@ -171,24 +173,35 @@ function testLayer(input?: {
           listForUser: () => Effect.succeed([]),
           getForUser: () => Effect.succeed(null),
           revokeForUser: () => Effect.succeed(false),
+          renewForUser: () => Effect.succeed(null),
+          claimExpired: () => Effect.succeed([]),
+          acquireCleanupAttempts: () => Effect.succeed([]),
+          ownsCleanupAttempt: () => Effect.succeed(false),
+          releaseCleanupAttempt: () => Effect.void,
+          completeCleanupAttempt: () => Effect.succeed(false),
+          purgeRevokedBefore: () => Effect.succeed(0),
         }),
         Layer.succeed(EnvironmentCredentials.EnvironmentCredentials, {
           create: () => Effect.succeed("t3env_credential_secret"),
           authenticate: () => Effect.succeedNone,
           revokeForEnvironmentPublicKey: () => Effect.succeed(false),
         }),
-        Layer.succeed(ManagedEndpointProvider.ManagedEndpointProvider, {
-          deprovision: () => Effect.void,
-          provision: () =>
-            Effect.succeed({
-              endpoint: {
-                httpBaseUrl: "https://managed.example.test/",
-                wsBaseUrl: "wss://managed.example.test/ws",
-                providerKind: "cloudflare_tunnel",
-              },
-              runtime: { providerKind: "cloudflare_tunnel", connectorToken: "connector-token" },
-            }),
-        }),
+        Layer.succeed(
+          ManagedEndpointProvider.ManagedEndpointProvider,
+          input?.managedEndpointProvider ?? {
+            deprovision: () => Effect.void,
+            provision: () =>
+              Effect.succeed({
+                allocationId: "allocation-1",
+                endpoint: {
+                  httpBaseUrl: "https://managed.example.test/",
+                  wsBaseUrl: "wss://managed.example.test/ws",
+                  providerKind: "cloudflare_tunnel",
+                },
+                runtime: { providerKind: "cloudflare_tunnel", connectorToken: "connector-token" },
+              }),
+          },
+        ),
       ),
     ),
   );
@@ -198,7 +211,7 @@ describe("EnvironmentLinker", () => {
   it.effect("uses verified JWT claims when linking an environment", () => {
     let persistedEnvironmentId: string | null = null;
     return Effect.gen(function* () {
-      const { request, payload } = yield* makeRequest;
+      const { request, payload } = yield* makeRequest();
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
       const result = yield* linker.link({ userId: "user_123", request });
       expect(result.environmentId).toBe(payload.environmentId);
@@ -216,10 +229,115 @@ describe("EnvironmentLinker", () => {
     );
   });
 
+  it.effect("rolls back the exact managed allocation when cleanup claims the link", () => {
+    let currentAllocationId: string | null = "old-allocation";
+    const deprovisioned: string[] = [];
+    const managedEndpointProvider: ManagedEndpointProvider.ManagedEndpointProviderShape = {
+      provision: () =>
+        Effect.gen(function* () {
+          currentAllocationId = "replacement-allocation";
+          yield* managedEndpointProvider
+            .deprovision({
+              userId: "user_123",
+              environmentId: "env-link-test",
+              allocationId: "old-allocation",
+            })
+            .pipe(Effect.ignore);
+          return {
+            allocationId: "replacement-allocation",
+            endpoint: {
+              httpBaseUrl: "https://managed.example.test/",
+              wsBaseUrl: "wss://managed.example.test/ws",
+              providerKind: "cloudflare_tunnel" as const,
+            },
+            runtime: {
+              providerKind: "cloudflare_tunnel" as const,
+              connectorToken: "connector-token",
+            },
+          };
+        }),
+      deprovision: (input) =>
+        Effect.sync(() => {
+          if (input.allocationId !== undefined) {
+            deprovisioned.push(input.allocationId);
+          }
+          if (input.allocationId === currentAllocationId) {
+            currentAllocationId = null;
+          }
+        }),
+    };
+
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest(true);
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const result = yield* Effect.result(linker.link({ userId: "user_123", request }));
+      expect(Result.isFailure(result)).toBe(true);
+      expect(deprovisioned).toEqual(["old-allocation", "replacement-allocation"]);
+      expect(currentAllocationId).toBeNull();
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          managedEndpointProvider,
+          upsert: () =>
+            Effect.fail(
+              new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
+                cause: "cleanup claim blocks relink",
+              }),
+            ),
+        }),
+      ),
+    );
+  });
+
+  it.effect("reports both persistence and exact rollback failures", () => {
+    const persistenceError = new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
+      cause: "cleanup claim blocks relink",
+    });
+    const rollbackError = new ManagedEndpointProvider.ManagedEndpointDeprovisioningFailed({
+      cause: "provider unavailable",
+    });
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest(true);
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
+      expect(error).toBeInstanceOf(EnvironmentLinks.EnvironmentLinkUpsertPersistenceError);
+      if (error._tag === "EnvironmentLinkUpsertPersistenceError") {
+        expect(error.cause).toBeInstanceOf(AggregateError);
+        const causes = (error.cause as AggregateError).errors;
+        expect(causes).toEqual([persistenceError, rollbackError]);
+      }
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          upsert: () => Effect.fail(persistenceError),
+          managedEndpointProvider: {
+            provision: () =>
+              Effect.succeed({
+                allocationId: "replacement-allocation",
+                endpoint: {
+                  httpBaseUrl: "https://managed.example.test/",
+                  wsBaseUrl: "wss://managed.example.test/ws",
+                  providerKind: "cloudflare_tunnel",
+                },
+                runtime: {
+                  providerKind: "cloudflare_tunnel",
+                  connectorToken: "connector-token",
+                },
+              }),
+            deprovision: (input) =>
+              input.allocationId === "replacement-allocation"
+                ? Effect.fail(rollbackError)
+                : Effect.void,
+          },
+        }),
+      ),
+    );
+  });
+
   it.effect("rejects a tampered compact proof before persistence", () => {
     let persisted = false;
     return Effect.gen(function* () {
-      const { request } = yield* makeRequest;
+      const { request } = yield* makeRequest();
       const segments = request.proof.split(".");
       const signature = segments[2]!;
       segments[2] = `${signature.startsWith("A") ? "B" : "A"}${signature.slice(1)}`;
@@ -242,7 +360,7 @@ describe("EnvironmentLinker", () => {
 
   it.effect("rejects replayed JWT ids", () =>
     Effect.gen(function* () {
-      const { request } = yield* makeRequest;
+      const { request } = yield* makeRequest();
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
       const result = yield* Effect.result(linker.link({ userId: "user_123", request }));
       expect(Result.isFailure(result)).toBe(true);

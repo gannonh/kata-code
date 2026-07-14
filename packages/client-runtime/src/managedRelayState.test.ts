@@ -30,6 +30,7 @@ const environment = {
     providerKind: "cloudflare_tunnel",
   },
   linkedAt: "2026-06-01T00:00:00.000Z",
+  leaseExpiresAt: "2026-06-01T00:15:00.000Z",
 } satisfies RelayClientEnvironmentRecord;
 
 const device = {

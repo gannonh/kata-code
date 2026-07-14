@@ -115,9 +115,30 @@ export async function selectComposerModelForProvider(
 
 export async function sendAgentInstruction(page: Page, text: string): Promise<void> {
   const editor = page.getByTestId("composer-editor");
+  const sendButton = page.getByRole("button", { name: "Send message" });
+  const userMessages = page.locator('[data-message-role="user"]');
+  const initialMessageCount = await userMessages.count();
+  const deadline = Date.now() + E2E_TIMEOUTS.assertionMs;
+
   await editor.click();
   await editor.fill(text);
-  await page.getByRole("button", { name: "Send message" }).click();
+
+  // A newly-created web draft can render before its environment API and active
+  // thread are attached. The form handler ignores a submit during that window,
+  // so retry only while the draft remains unchanged and no user message exists.
+  while (Date.now() < deadline) {
+    if ((await userMessages.count()) > initialMessageCount) return;
+
+    const currentDraft = (await editor.innerText()).trim();
+    if (currentDraft === text && (await sendButton.isEnabled().catch(() => false))) {
+      await sendButton.click();
+    }
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(
+    `Composer did not submit the agent instruction within ${E2E_TIMEOUTS.assertionMs}ms. url=${page.url()} draft=${JSON.stringify((await editor.innerText()).trim())}`,
+  );
 }
 
 export async function readLatestAssistantMessage(page: Page): Promise<string> {

@@ -70,6 +70,7 @@ export type ManagedEndpointProviderError =
   | ManagedEndpointOriginNotAllowed;
 
 export interface ManagedEndpointProvisioningResult {
+  readonly allocationId: string;
   readonly endpoint: RelayManagedEndpoint;
   readonly runtime: RelayManagedEndpointRuntimeConfig;
 }
@@ -83,6 +84,7 @@ export interface ManagedEndpointProviderShape {
   readonly deprovision: (input: {
     readonly userId: string;
     readonly environmentId: string;
+    readonly allocationId?: string;
   }) => Effect.Effect<void, ManagedEndpointDeprovisioningFailed>;
 }
 
@@ -312,7 +314,10 @@ const make = Effect.gen(function* () {
       const allocation = yield* allocations
         .get(input)
         .pipe(Effect.mapError((cause) => new ManagedEndpointDeprovisioningFailed({ cause })));
-      if (allocation === null) {
+      if (
+        allocation === null ||
+        (input.allocationId !== undefined && allocation.allocationId !== input.allocationId)
+      ) {
         return;
       }
       if (allocation.dnsRecordId !== null) {
@@ -326,7 +331,7 @@ const make = Effect.gen(function* () {
         );
       }
       yield* allocations
-        .remove(input)
+        .remove({ ...input, allocationId: allocation.allocationId })
         .pipe(Effect.mapError((cause) => new ManagedEndpointDeprovisioningFailed({ cause })));
     }),
     provision: Effect.fn("relay.managed_endpoint_provider.provision")(function* (input) {
@@ -354,10 +359,14 @@ const make = Effect.gen(function* () {
           Effect.map(Encoding.encodeHex),
           Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })),
         );
+      const allocationId = yield* crypto.randomUUIDv4.pipe(
+        Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })),
+      );
       const allocation = yield* allocations
         .reserve({
           userId: input.userId,
           environmentId: input.environmentId,
+          allocationId,
           hostname: managedEndpointHostname(cf.namespace, cf.baseDomain, environmentHash),
           tunnelName: managedEndpointTunnelName(cf.namespace, environmentHash),
         })
@@ -384,6 +393,7 @@ const make = Effect.gen(function* () {
         .recordTunnel({
           userId: input.userId,
           environmentId: input.environmentId,
+          allocationId: allocation.allocationId,
           tunnelId: tunnel.id,
         })
         .pipe(Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })));
@@ -415,6 +425,7 @@ const make = Effect.gen(function* () {
         .recordDns({
           userId: input.userId,
           environmentId: input.environmentId,
+          allocationId: allocation.allocationId,
           dnsRecordId,
         })
         .pipe(Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })));
@@ -426,10 +437,12 @@ const make = Effect.gen(function* () {
         .markReady({
           userId: input.userId,
           environmentId: input.environmentId,
+          allocationId: allocation.allocationId,
         })
         .pipe(Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })));
 
       return {
+        allocationId: allocation.allocationId,
         endpoint: managedEndpointForHostname(hostname),
         runtime: {
           providerKind: "cloudflare_tunnel",

@@ -221,3 +221,23 @@ export function readVercelCredentials(): {
   if (!token || !teamId || !projectId) return null;
   return { token, teamId, projectId };
 }
+
+/**
+ * Read the GitHub source repository + branch the Vercel source-picker E2E
+ * selects. `E2E_VERCEL_SOURCE_REPOSITORY` is an `owner/name` the host `gh`
+ * session can access; `E2E_VERCEL_SOURCE_BRANCH` defaults to the repository
+ * default branch when omitted (the picker auto-selects it). Maintainer-local:
+ * callers SKIP the source flow when the repository is absent.
+ *
+ * Shell-exported values win over `.env` (see `loadRepoEnv`). If a stale
+ * `E2E_VERCEL_SOURCE_BRANCH=main` is exported in the terminal, it overrides
+ * `master` in `.env` — `unset E2E_VERCEL_SOURCE_BRANCH` before re-running.
+ */
+export function readVercelSourceSelection(): {
+  readonly repository: string;
+  readonly branch: string | undefined;
+} | null {
+  const repository = firstNonEmpty(process.env.E2E_VERCEL_SOURCE_REPOSITORY);
+  if (!repository) return null;
+  return { repository, branch: firstNonEmpty(process.env.E2E_VERCEL_SOURCE_BRANCH) };
+}

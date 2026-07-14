@@ -184,6 +184,7 @@ function makeAllocations(
   allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null = {
     userId: "user_123",
     environmentId: "env-connector-test",
+    allocationId: "allocation-1",
     hostname: "env.example.test",
     tunnelId: "tunnel-id",
     tunnelName: "tunnel-name",
@@ -220,10 +221,18 @@ function makeLinks(
           providerKind: "cloudflare_tunnel",
         },
         linkedAt: "2026-05-25T00:00:00.000Z",
+        leaseExpiresAt: "2026-05-25T00:15:00.000Z",
         environmentPublicKey: environmentKeyPair.publicKey,
         ...overrides,
       }),
     revokeForUser: () => Effect.succeed(false),
+    renewForUser: () => Effect.succeed(null),
+    claimExpired: () => Effect.succeed([]),
+    acquireCleanupAttempts: () => Effect.succeed([]),
+    ownsCleanupAttempt: () => Effect.succeed(false),
+    releaseCleanupAttempt: () => Effect.void,
+    completeCleanupAttempt: () => Effect.succeed(false),
+    purgeRevokedBefore: () => Effect.succeed(0),
   };
 }
 
@@ -463,6 +472,7 @@ describe("EnvironmentConnector", () => {
           allocations: makeAllocations({
             userId: "user_123",
             environmentId: "env-connector-test",
+            allocationId: "allocation-1",
             hostname: "env.example.test",
             tunnelId: "tunnel-id",
             tunnelName: "tunnel-name",
