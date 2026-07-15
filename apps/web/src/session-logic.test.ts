@@ -14,6 +14,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  isComposerTurnActive,
   deriveTimelineEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
@@ -36,8 +37,44 @@ describe("PROVIDER_OPTIONS", () => {
 });
 
 describe("derivePhase", () => {
-  it("keeps the composer interruptible while active work precedes its session projection", () => {
-    expect(derivePhase(null, true)).toBe("running");
+  it("projects only session transport status", () => {
+    expect(derivePhase(null)).toBe("disconnected");
+    expect(
+      derivePhase({
+        provider: ProviderDriverKind.make("codex"),
+        status: "running",
+        createdAt: "2026-02-23T00:00:00.000Z",
+        updatedAt: "2026-02-23T00:00:00.000Z",
+        orchestrationStatus: "running",
+      }),
+    ).toBe("running");
+    expect(
+      derivePhase({
+        provider: ProviderDriverKind.make("codex"),
+        status: "closed",
+        createdAt: "2026-02-23T00:00:00.000Z",
+        updatedAt: "2026-02-23T00:00:00.000Z",
+        orchestrationStatus: "ready",
+      }),
+    ).toBe("disconnected");
+  });
+});
+
+describe("isComposerTurnActive", () => {
+  it("keeps the composer interruptible while optimistic or inflight work precedes session projection", () => {
+    expect(
+      isComposerTurnActive({
+        sessionPhase: "disconnected",
+        isSendBusy: true,
+      }),
+    ).toBe(true);
+    expect(
+      isComposerTurnActive({
+        sessionPhase: "ready",
+        hasInflightTurn: true,
+      }),
+    ).toBe(true);
+    expect(isComposerTurnActive({ sessionPhase: "ready" })).toBe(false);
   });
 });
 

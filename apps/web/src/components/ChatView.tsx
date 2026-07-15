@@ -57,6 +57,7 @@ import {
   findLatestProposedPlan,
   deriveWorkLogEntries,
   hasActionableProposedPlan,
+  isComposerTurnActive,
   isLatestTurnSettled,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
@@ -437,6 +438,7 @@ function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
   activeLatestTurn: Thread["latestTurn"] | null;
   phase: SessionPhase;
+  hasInflightTurn: boolean;
   activePendingApproval: ApprovalRequestId | null;
   activePendingUserInput: ApprovalRequestId | null;
   threadError: string | null | undefined;
@@ -467,6 +469,7 @@ function useLocalDispatchState(input: {
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: input.phase,
+        hasInflightTurn: input.hasInflightTurn,
         latestTurn: input.activeLatestTurn,
         session: input.activeThread?.session ?? null,
         hasPendingApproval: input.activePendingApproval !== null,
@@ -478,6 +481,7 @@ function useLocalDispatchState(input: {
       input.activePendingApproval,
       input.activePendingUserInput,
       input.activeThread?.session,
+      input.hasInflightTurn,
       input.phase,
       input.threadError,
       localDispatch,
@@ -1823,10 +1827,8 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
-  // projectedPhase omits isSendBusy (derived from the local-dispatch hook);
-  // phase includes it so the composer stays interruptible before session projects.
   const hasInflightTurn = activeLatestTurn !== null && !latestTurnSettled;
-  const projectedPhase = derivePhase(activeThread?.session ?? null, hasInflightTurn);
+  const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
@@ -1909,13 +1911,18 @@ function ChatViewContent(props: ChatViewProps) {
   } = useLocalDispatchState({
     activeThread,
     activeLatestTurn,
-    phase: projectedPhase,
+    phase,
+    hasInflightTurn,
     activePendingApproval: activePendingApproval?.requestId ?? null,
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const phase = derivePhase(activeThread?.session ?? null, isSendBusy || hasInflightTurn);
-  const isWorking = phase === "running" || isConnecting || isRevertingCheckpoint;
+  const isComposerRunning = isComposerTurnActive({
+    sessionPhase: phase,
+    isSendBusy,
+    hasInflightTurn,
+  });
+  const isWorking = isComposerRunning || isConnecting || isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -3572,7 +3579,7 @@ function ChatViewContent(props: ChatViewProps) {
         );
         return;
       }
-      if (phase === "running" || isSendBusy || isConnecting) {
+      if (isComposerRunning || isConnecting) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
@@ -3610,10 +3617,9 @@ function ChatViewContent(props: ChatViewProps) {
       activeEnvironmentUnavailable,
       activeEnvironmentUnavailableLabel,
       environmentId,
+      isComposerRunning,
       isConnecting,
       isRevertingCheckpoint,
-      isSendBusy,
-      phase,
       setThreadError,
     ],
   );
@@ -4709,6 +4715,7 @@ function ChatViewContent(props: ChatViewProps) {
                     isLocalDraftThread={isLocalDraftThread}
                     isSandboxEnvironment={activeSavedEnvironmentRecord?.sandbox != null}
                     phase={phase}
+                    isComposerRunning={isComposerRunning}
                     isConnecting={isConnecting}
                     isSendBusy={isSendBusy}
                     isPreparingWorktree={isPreparingWorktree}
