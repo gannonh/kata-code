@@ -33,6 +33,14 @@ export async function waitForTcpPort(
   throw new Error(`Timed out waiting for dev stack port 127.0.0.1:${port}.`);
 }
 
+/**
+ * Cap each readiness probe so one hung request cannot consume the entire
+ * startup budget. A cold Vite dev server under load can accept the TCP
+ * connection and then stall the first response for longer than the whole
+ * dev-stack timeout; without a per-attempt cap the loop never retries.
+ */
+const WEB_DEV_PROBE_ATTEMPT_MS = 3_000;
+
 export async function waitForWebDevServer(
   webPort: number,
   timeoutMs = E2E_TIMEOUTS.devStackMs,
@@ -45,8 +53,11 @@ export async function waitForWebDevServer(
       throw signal.reason ?? new Error("waitForWebDevServer aborted");
     }
 
+    const attemptSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(WEB_DEV_PROBE_ATTEMPT_MS)])
+      : AbortSignal.timeout(WEB_DEV_PROBE_ATTEMPT_MS);
     try {
-      const response = await fetch(url, { redirect: "manual", signal });
+      const response = await fetch(url, { redirect: "manual", signal: attemptSignal });
       if (response.status > 0) {
         return;
       }

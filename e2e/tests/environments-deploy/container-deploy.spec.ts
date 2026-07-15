@@ -80,7 +80,7 @@ interface DockerExecResult {
 async function dockerEngineRequest(
   path: string,
   input: {
-    readonly method?: "GET" | "POST";
+    readonly method?: "GET" | "POST" | "DELETE";
     readonly body?: unknown;
     readonly timeoutMs?: number;
   } = {},
@@ -217,6 +217,40 @@ async function execInContainer(containerId: string, command: string): Promise<Do
 
 const REAL_IMAGE_E2E_TIMEOUT_MS = Math.max(E2E_TIMEOUTS.agentTestMs, 240_000);
 
+/** Instance ids owned by this spec. Containers are global while each run's
+ *  KATACODE_HOME is fresh, so a container left by an aborted run would be
+ *  adopted by the next provision with a mismatched bootstrap token. */
+const E2E_DOCKER_INSTANCE_IDS = [
+  "docker_e2e_phase2",
+  "docker_e2e_phase3a",
+  "docker_e2e_lifecycle",
+] as const;
+
+async function removeStaleSandboxContainers(): Promise<void> {
+  for (const instanceId of E2E_DOCKER_INSTANCE_IDS) {
+    const filters = encodeURIComponent(
+      JSON.stringify({ label: [`kata.sandbox.instance=${instanceId}`] }),
+    );
+    const response = await dockerEngineRequest(`/containers/json?all=true&filters=${filters}`);
+    const containers = parseDockerJson<ReadonlyArray<DockerContainerSummary>>(
+      response,
+      "stale container lookup",
+    );
+    for (const container of containers) {
+      const removal = await dockerEngineRequest(`/containers/${container.Id}?force=true`, {
+        method: "DELETE",
+        timeoutMs: 30_000,
+      });
+      // 404 = already gone (idempotent success).
+      if (removal.statusCode >= 300 && removal.statusCode !== 404) {
+        throw new Error(
+          `Could not remove stale sandbox container ${container.Id} for ${instanceId}: ${removal.statusCode}`,
+        );
+      }
+    }
+  }
+}
+
 test.describe(`Environments/deployments container target ${E2E_TAGS.environmentsDeploy}`, () => {
   test.describe.configure({ timeout: REAL_IMAGE_E2E_TIMEOUT_MS });
 
@@ -225,6 +259,11 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     // also reconciles Docker targets, which can briefly contend for the Engine API.
     await assertDockerDaemonReachable();
     await assertKatacodeImageBuilt();
+    // Remove containers left by aborted prior runs. Each E2E run gets a fresh
+    // KATACODE_HOME (no session store), but containers are global: provision
+    // would adopt a leftover container whose create-time bootstrap token no
+    // longer matches anything, failing Connect registration.
+    await removeStaleSandboxContainers();
   });
 
   test.beforeEach(async ({ authenticatedAppWindow }) => {
@@ -509,7 +548,9 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // the card shows the stopped state with a Start button (AC-L8).
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Stop" }).last().click();
-      await expect(card.getByRole("button", { name: "Start" })).toBeVisible({
+      // The stopped card shows Start in both the header row and the expanded
+      // actions section; target the expanded one like the Stop clicks above.
+      await expect(card.getByRole("button", { name: "Start" }).last()).toBeVisible({
         timeout: E2E_TIMEOUTS.assertionMs,
       });
       await expect
@@ -522,7 +563,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // Start the sandbox again: the same container resumes and the marker
       // file survives (AC-L5 filesystem persistence across stop/start).
       await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: "Start" }).click();
+      await card.getByRole("button", { name: "Start" }).last().click();
       await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
       await expect
         .poll(async () => (await findSandboxContainerState(instanceId))?.State, {

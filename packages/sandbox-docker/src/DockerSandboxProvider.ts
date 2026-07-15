@@ -557,9 +557,38 @@ export function makeDockerSandboxProvider(
         if (existing !== null) {
           yield* assertOwnedContainer(existing, req.instanceId);
           if (existing.State.Running) {
-            // Already running: return its current handle (re-reading the port
-            // binding in case the daemon restarted with a new mapping).
-            return handleFromInspect(existing, req.instanceId, containerPort);
+            // Already running: restart so the in-container server re-boots and
+            // re-seeds its one-time bootstrap grant. A long-running adopted
+            // container has already consumed its grant during a previous
+            // registration, so adopting it without a restart makes the
+            // follow-up Connect registration fail `invalid_credential`.
+            // Provision only runs when no session record exists, so nothing is
+            // using the container.
+            const restartRes = yield* engine(
+              `/containers/${existing.Id}/restart?t=10`,
+              { method: "POST" },
+              "provision-failed",
+              "restart failed",
+            );
+            if (restartRes.status >= 300) {
+              return yield* new SandboxProviderError({
+                reason: "provision-failed",
+                message: `restart failed: ${restartRes.status}`,
+              });
+            }
+            const restartedInfo = yield* inspectContainer(
+              name,
+              "provision-failed",
+              "provision restart re-inspect",
+            );
+            if (restartedInfo === null) {
+              return yield* new SandboxProviderError({
+                reason: "provision-failed",
+                message: "container vanished after restart",
+              });
+            }
+            yield* waitForReadyFor(readHostPort(restartedInfo, containerPort));
+            return handleFromInspect(restartedInfo, req.instanceId, containerPort);
           }
           // Stopped: start it and re-read the port binding (the published host
           // port is stable for a container's lifetime but re-read defensively).

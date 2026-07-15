@@ -84,6 +84,35 @@ export interface SandboxStartSessionRuntime {
   readonly persistSessionRecord: (input: PersistSandboxSessionInput) => Effect.Effect<void, never>;
 }
 
+/**
+ * Recover the bootstrap token the in-container Kata server actually booted
+ * with. Docker container env is fixed at create time: when a container is
+ * started again (lifecycle start, or provision adopting an existing named
+ * container), the restarted server re-seeds its ORIGINAL create-time grant,
+ * not the token freshly minted for this request. Registering with the minted
+ * token would fail `invalid_credential`, so read the effective token from the
+ * container env. For a freshly created container this returns the minted
+ * token unchanged.
+ */
+export const recoverDockerBootstrapToken = (
+  driver: SandboxProvider,
+  handle: SandboxHandle,
+): Effect.Effect<string, SandboxRpcError> =>
+  Effect.gen(function* () {
+    const recovered = yield* driver
+      .exec(handle, "printenv KATACODE_DESKTOP_BOOTSTRAP_TOKEN")
+      .pipe(Effect.mapError(mapDriverError));
+    const token = recovered.stdout.trim();
+    if (token.length === 0) {
+      return yield* new SandboxRpcError({
+        reason: "connect-failed",
+        message:
+          "Started container has no KATACODE_DESKTOP_BOOTSTRAP_TOKEN in its environment; delete the sandbox and create it again.",
+      });
+    }
+    return token;
+  });
+
 export const startSandboxSession = (
   runtime: SandboxStartSessionRuntime,
   instanceId: SandboxProviderInstanceId,
@@ -212,27 +241,12 @@ export const startSandboxSession = (
         const started = yield* inst.driver.lifecycle
           .start(handle, { config: resolvedConfig.config, env })
           .pipe(Effect.mapError(mapDriverError));
-        // Docker env is fixed at container create: the restarted in-container
-        // server re-seeds its ORIGINAL create-time bootstrap grant, not the
-        // fresh token minted above. Recover the effective token from the
-        // container env so the exchange matches what the server booted with.
         // (Vercel relaunches `serve` with the fresh env, so it keeps the
-        // fresh token.)
-        let effectiveBootstrapToken = bootstrapToken;
-        if ((inst.driver.kind as string) === (DockerSandboxProvider.kind as string)) {
-          const recovered = yield* inst.driver
-            .exec(started, "printenv KATACODE_DESKTOP_BOOTSTRAP_TOKEN")
-            .pipe(Effect.mapError(mapDriverError));
-          const token = recovered.stdout.trim();
-          if (token.length === 0) {
-            return yield* new SandboxRpcError({
-              reason: "connect-failed",
-              message:
-                "Started container has no KATACODE_DESKTOP_BOOTSTRAP_TOKEN in its environment; delete the sandbox and create it again.",
-            });
-          }
-          effectiveBootstrapToken = token;
-        }
+        // fresh token; Docker needs the create-time token recovered.)
+        const effectiveBootstrapToken =
+          (inst.driver.kind as string) === (DockerSandboxProvider.kind as string)
+            ? yield* recoverDockerBootstrapToken(inst.driver, started)
+            : bootstrapToken;
         // Re-run Connect registration + mint a fresh pairing token. `keep`:
         // a transient Connect failure must never destroy a stopped-started
         // sandbox's durable filesystem — the user retries Start.
@@ -462,13 +476,23 @@ export const startSandboxSession = (
         );
       }
 
+      // Docker provision may have ADOPTED an existing named container from a
+      // previous run instead of creating one; its server booted with that
+      // container's create-time bootstrap token, not the one minted above.
+      const provisionBootstrapToken =
+        (inst.driver.kind as string) === (DockerSandboxProvider.kind as string)
+          ? yield* recoverDockerBootstrapToken(inst.driver, handle).pipe(
+              Effect.catch(failProvision),
+            )
+          : bootstrapToken;
+
       const finalized = yield* runtime.registerAndFinalizeSession({
         sessionKey,
         instanceId,
         driver: inst.driver,
         handle,
         config: resolvedConfig,
-        bootstrapToken,
+        bootstrapToken: provisionBootstrapToken,
         connectAuthToken: options?.connectAuthToken,
       });
 
