@@ -114,6 +114,22 @@ Both match the kata-code repo command signature and dev port ranges, so a
 foreground `pnpm run dev` (and unrelated system listeners) are spared unless you
 pass `--all`.
 
+### Cleaning up remnant Kata Code Connect records
+
+`@environmentsDeploy` tests register sandbox endpoints with Kata Code Connect
+against the shared Google E2E user. Fixture teardown unlinks when it runs, but
+aborted runs leave relay records. Wipe them with the Connect CLI account that
+owns the remnants (usually the E2E Google user via `katacode connect login`):
+
+```bash
+pnpm run kill:connect                      # list
+pnpm run kill:connect -- --all --yes       # delete every record for the account
+pnpm run kill:connect -- --older-than-hours 1 --yes
+```
+
+Requires a built server CLI (`apps/server/dist/bin.mjs`) and an active
+`katacode connect login` session.
+
 ```bash
 # List tests
 vp run e2e --list

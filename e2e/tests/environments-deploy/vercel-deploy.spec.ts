@@ -4,7 +4,9 @@ import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
   authorizeConnectCli,
+  extractConnectEnvironmentId,
   listConnectEnvironmentIds,
+  registerConnectAccountSweepCleanup,
   registerConnectEnvironmentCleanup,
   withConnectBrowser,
 } from "../../src/flows/connect.ts";
@@ -120,6 +122,9 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     // App Clerk sign-in alone is not enough — mint the CLI OAuth credential into
     // the isolated home before Create & run hits the relay.
     await authorizeIsolatedConnect(runContext);
+    // Soft-sweep remnants from aborted prior runs (same shared E2E Connect
+    // account) without touching in-flight environments from concurrent work.
+    registerConnectAccountSweepCleanup(runContext, { olderThanHours: 1 });
 
     // Create & run: provisions the sandbox from the native Git source,
     // Connect-auto-registers the public endpoint, and surfaces the public URL.
@@ -137,7 +142,7 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     expect(sessionText, "session text did not expose a public URL").toMatch(
       /https:\/\/[a-z0-9-]+\.vercel\.run/i,
     );
-    const environmentId = sessionText?.match(/\(env ([^)]+)\)/u)?.[1];
+    const environmentId = extractConnectEnvironmentId(sessionText);
     expect(environmentId, "session text did not expose the Connect environment id").toBeTruthy();
     registerConnectEnvironmentCleanup(runContext, environmentId!);
 

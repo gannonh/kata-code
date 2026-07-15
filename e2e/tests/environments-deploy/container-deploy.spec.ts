@@ -7,6 +7,13 @@ import {
 import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
+  authorizeConnectCli,
+  extractConnectEnvironmentId,
+  registerConnectAccountSweepCleanup,
+  registerConnectEnvironmentCleanup,
+  withConnectBrowser,
+} from "../../src/flows/connect.ts";
+import {
   addContainerEnvironment,
   deploymentTargetCard,
   openConnectionsSettings,
@@ -14,6 +21,7 @@ import {
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
 import { deleteSandboxDeploymentTarget } from "../../src/flows/sandboxDeployment.ts";
 import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/workspace.ts";
+import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
 import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts";
 
 /**
@@ -24,6 +32,27 @@ import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts"
  * paired model provider and is recorded as a manual UAT per the spec's
  * two-client rule).
  */
+
+/**
+ * Mint Connect CLI auth into the isolated home and register teardown so aborted
+ * container runs cannot leave relay environment-link remnants for the shared
+ * E2E Clerk user. Container create uses the app Clerk JWT for registration;
+ * cleanup still needs the CLI OAuth token.
+ */
+async function registerConnectTeardownForSession(
+  runContext: E2ERunContext,
+  sessionText: string | null,
+): Promise<void> {
+  const environmentId = extractConnectEnvironmentId(sessionText);
+  if (!environmentId) {
+    throw new Error(
+      `session text did not expose the Connect environment id: ${sessionText ?? "(empty)"}`,
+    );
+  }
+  await withConnectBrowser((connectPage) => authorizeConnectCli(runContext, connectPage));
+  registerConnectEnvironmentCleanup(runContext, environmentId);
+  registerConnectAccountSweepCleanup(runContext, { olderThanHours: 1 });
+}
 
 /** Resolve the host port from a loopback httpBaseUrl like `http://localhost:32789`. */
 function parseHostPort(httpBaseUrl: string): number {
@@ -273,6 +302,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
 
   test("add sandbox environment, test connection + start session boot the real katacode image", async ({
     authenticatedAppWindow,
+    runContext,
   }, testInfo) => {
     const page = authenticatedAppWindow;
     await openConnectionsSettings(page);
@@ -308,6 +338,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     // Extract the published loopback URL and verify the in-container Kata
     // server answers over it — the loopback reachability half of AC-1.10.
     const sessionText = await sessionLine.textContent();
+    await registerConnectTeardownForSession(runContext, sessionText);
     const httpBaseUrlMatch = sessionText?.match(/http:\/\/localhost:\d+/);
     expect(
       httpBaseUrlMatch,
@@ -389,6 +420,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await card.getByRole("button", { name: "Create & run sandbox" }).click();
     const sessionLine = card.getByText(/Session ready:/);
     await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+    await registerConnectTeardownForSession(runContext, await sessionLine.textContent());
 
     // Assert secret redaction BEFORE capturing the screenshot so a regression
     // can't persist sensitive text into a CI artifact.
@@ -444,7 +476,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
   test(
     "started sandbox has /bin/sh as SHELL and provider CLIs on PATH (AC-3a.1/2/3)",
     { tag: [E2E_TAGS.sandbox] },
-    async ({ authenticatedAppWindow }, testInfo) => {
+    async ({ authenticatedAppWindow, runContext }, testInfo) => {
       const page = authenticatedAppWindow;
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
@@ -456,6 +488,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await card.getByRole("button", { name: "Create & run sandbox" }).click();
       const sessionLine = card.getByText(/Session ready:/);
       await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      await registerConnectTeardownForSession(runContext, await sessionLine.textContent());
       await page.screenshot({
         path: testInfo.outputPath("phase3a-session-ready.png"),
         fullPage: true,
@@ -506,7 +539,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
   test(
     "stop/start lifecycle preserves the container and its filesystem (AC-L5/L8)",
     { tag: [E2E_TAGS.sandbox] },
-    async ({ authenticatedAppWindow }, testInfo) => {
+    async ({ authenticatedAppWindow, runContext }, testInfo) => {
       const page = authenticatedAppWindow;
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
@@ -519,6 +552,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await card.getByRole("button", { name: "Create & run sandbox" }).click();
       const sessionLine = card.getByText(/Session ready:/);
       await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      await registerConnectTeardownForSession(runContext, await sessionLine.textContent());
 
       const instanceId = "docker_e2e_lifecycle";
       let containerId = "";

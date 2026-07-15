@@ -37,6 +37,7 @@
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist apps/*/dist-electron packages/*/dist .vite-plus apps/*/.vite-plus packages/*/.vite-plus",
     "kill:dev": "bash scripts/kill-dev-servers.sh",
     "kill:vercel-uat": "bash scripts/cleanup-vercel-sandboxes.sh --yes",
+    "kill:connect": "node scripts/cleanup-connect-environments.ts",
     "sync:repos": "node scripts/sync-reference-repos.ts",
     "generate:brand-rasters": "node scripts/generate-prod-brand-rasters.mjs",
     "e2e": "playwright test --config e2e/playwright.config.ts --project desktop-dev",
