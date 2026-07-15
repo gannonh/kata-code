@@ -564,6 +564,58 @@ export function groupThreadsByAttentionTier<T extends Pick<Thread, "id"> & Threa
   };
 }
 
+/** Flatten tier groups into display order: Waiting → Working → Blocked → Idle. */
+export function flattenAttentionTierThreads<T>(tiers: {
+  waiting: readonly T[];
+  working: readonly T[];
+  blocked: readonly T[];
+  idle: readonly T[];
+}): T[] {
+  return [...tiers.waiting, ...tiers.working, ...tiers.blocked, ...tiers.idle];
+}
+
+export function formatSidebarWaitLabel(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  if (totalSeconds < 60) {
+    return `${Math.max(1, totalSeconds)}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h`;
+}
+
+/** Working-card elapsed like the C prototype (`0:12`, `1:05`). */
+export function formatSidebarElapsedClock(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+export function projectColorClass(projectKey: string): string {
+  let hash = 0;
+  for (let index = 0; index < projectKey.length; index += 1) {
+    hash = (hash + projectKey.charCodeAt(index) * (index + 1)) % 5;
+  }
+  return `c${hash}`;
+}
+
+export function countWaitingOutsideProjectFilter(input: {
+  allThreads: readonly ThreadStatusInput[];
+  filteredThreads: readonly ThreadStatusInput[];
+}): number {
+  const filteredWaiting = input.filteredThreads.filter(
+    (thread) => resolveThreadTier({ thread }) === "waiting",
+  ).length;
+  const allWaiting = input.allThreads.filter(
+    (thread) => resolveThreadTier({ thread }) === "waiting",
+  ).length;
+  return Math.max(0, allWaiting - filteredWaiting);
+}
+
 export function resolveProjectStatusIndicator(
   statuses: ReadonlyArray<ThreadStatusPill | null>,
 ): ThreadStatusPill | null {

@@ -24,6 +24,10 @@ import {
   resolveThreadRowDensity,
   resolveThreadWaitDuration,
   groupThreadsByAttentionTier,
+  flattenAttentionTierThreads,
+  formatSidebarWaitLabel,
+  formatSidebarElapsedClock,
+  countWaitingOutsideProjectFilter,
 } from "./Sidebar.logic";
 import {
   EnvironmentId,
@@ -1018,6 +1022,60 @@ describe("groupThreadsByAttentionTier", () => {
       ThreadId.make("newer"),
       ThreadId.make("older"),
     ]);
+  });
+});
+
+describe("flattenAttentionTierThreads", () => {
+  it("orders Waiting then Working then Blocked then Idle", () => {
+    expect(
+      flattenAttentionTierThreads({
+        waiting: [{ id: "w" }],
+        working: [{ id: "g" }],
+        blocked: [{ id: "b" }],
+        idle: [{ id: "i" }],
+      }).map((thread) => thread.id),
+    ).toEqual(["w", "g", "b", "i"]);
+  });
+});
+
+describe("formatSidebarWaitLabel / formatSidebarElapsedClock", () => {
+  it("formats wait and elapsed labels for the C chrome", () => {
+    expect(formatSidebarWaitLabel(45_000)).toBe("45s");
+    expect(formatSidebarWaitLabel(12 * 60_000)).toBe("12m");
+    expect(formatSidebarElapsedClock(12_000)).toBe("0:12");
+    expect(formatSidebarElapsedClock(65_000)).toBe("1:05");
+  });
+});
+
+describe("countWaitingOutsideProjectFilter", () => {
+  const baseThread = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    latestTurn: null,
+    lastVisitedAt: undefined,
+    session: {
+      provider: ProviderDriverKind.make("codex"),
+      status: "ready" as const,
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:00:00.000Z",
+      orchestrationStatus: "ready" as const,
+    },
+  };
+
+  it("counts waiting threads hidden by the project filter", () => {
+    const waiting = {
+      ...baseThread,
+      hasPendingApprovals: true,
+    };
+    const idle = baseThread;
+    expect(
+      countWaitingOutsideProjectFilter({
+        allThreads: [waiting, waiting, idle],
+        filteredThreads: [waiting, idle],
+      }),
+    ).toBe(1);
   });
 });
 
