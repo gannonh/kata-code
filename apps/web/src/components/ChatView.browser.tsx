@@ -1615,6 +1615,22 @@ async function waitForNewThreadShortcutLabel(): Promise<void> {
   await expect.element(page.getByText(shortcutLabel)).toBeInTheDocument();
 }
 
+/** Open the new-session accordion and start via the first project row (single-env tap). */
+async function startNewThreadFromSidebarAccordion(): Promise<void> {
+  const newThreadButton = page.getByTestId("new-thread-button");
+  await expect.element(newThreadButton).toBeInTheDocument();
+  await newThreadButton.click();
+  await expect.element(page.getByTestId("sidebar-new-session-panel")).toBeInTheDocument();
+  const firstProjectHead = document.querySelector(
+    '[data-testid^="sidebar-new-session-project-head-"]',
+  ) as HTMLElement | null;
+  if (!firstProjectHead) {
+    throw new Error("Expected at least one project row in the new-session accordion.");
+  }
+  firstProjectHead.click();
+  await waitForLayout();
+}
+
 async function waitForCommandPaletteShortcutLabel(): Promise<void> {
   await waitForElement(
     () => document.querySelector('[data-testid="command-palette-trigger"] kbd'),
@@ -4847,10 +4863,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       // Wait for the sidebar to render with the project.
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
-
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       // The route should change to a new draft thread ID.
       const newThreadPath = await waitForURL(
@@ -4907,10 +4920,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
-
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -4971,10 +4981,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
-
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -5002,10 +5009,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
-
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const firstDraftPath = await waitForURL(
         mounted.router,
@@ -5018,7 +5022,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await materializePromotedDraftThreadViaDomainEvent(firstThreadId);
       expect(mounted.router.state.location.pathname).toBe(firstDraftPath);
 
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const secondDraftPath = await waitForURL(
         mounted.router,
@@ -5055,10 +5059,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
-
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -5110,10 +5111,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
-
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -5150,10 +5148,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
-
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -5192,10 +5187,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
-
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const threadPath = await waitForURL(
         mounted.router,
@@ -5226,7 +5218,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         ]),
       );
 
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       await waitForURL(
         mounted.router,
@@ -6628,10 +6620,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
       await waitForServerConfigToApply();
-      await newThreadButton.click();
+      await startNewThreadFromSidebarAccordion();
 
       const promotedThreadPath = await waitForURL(
         mounted.router,

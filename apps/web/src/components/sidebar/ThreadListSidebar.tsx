@@ -38,6 +38,7 @@ import {
 } from "../Sidebar.logic";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { SidebarProjectPicker } from "./SidebarProjectPicker";
+import { SidebarNewSessionPanel } from "./SidebarNewSessionPanel";
 import { ThreadItemV2 } from "./ThreadItemV2";
 import { useSidebarNowMs } from "./useSidebarNowMs";
 import "./sidebar-v2.css";
@@ -90,6 +91,7 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
   );
 
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [expandedIdleThreadKeys, setExpandedIdleThreadKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -534,37 +536,16 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
   }, []);
 
   const handleGlobalNewThread = useCallback(() => {
-    const targetProject =
-      (selectedProjectKey
-        ? sortedProjects.find((project) => project.projectKey === selectedProjectKey)
-        : null) ??
-      sortedProjects[0] ??
-      null;
-    if (!targetProject) {
+    if (sortedProjects.length === 0) {
       openAddProject();
       return;
     }
-    const member =
-      (primaryEnvironmentId
-        ? targetProject.memberProjects.find((entry) => entry.environmentId === primaryEnvironmentId)
-        : null) ?? targetProject.memberProjects[0];
-    if (!member) {
-      openAddProject();
-      return;
-    }
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    void handleNewThread(scopeProjectRef(member.environmentId, member.id));
-  }, [
-    handleNewThread,
-    isMobile,
-    openAddProject,
-    primaryEnvironmentId,
-    selectedProjectKey,
-    setOpenMobile,
-    sortedProjects,
-  ]);
+    setNewSessionOpen(true);
+  }, [openAddProject, sortedProjects.length]);
+
+  const handleCloseNewSession = useCallback(() => {
+    setNewSessionOpen(false);
+  }, []);
 
   const remoteLabelFor = useCallback(
     (thread: SidebarThreadSummary): string | null => {
@@ -705,6 +686,16 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
           </span>
         </button>
       </div>
+
+      <SidebarNewSessionPanel
+        open={newSessionOpen}
+        projects={sortedProjects}
+        threads={visibleThreads}
+        preselectedProjectKey={selectedProjectKey}
+        openAddProject={openAddProject}
+        handleNewThread={handleNewThread}
+        onClose={handleCloseNewSession}
+      />
     </div>
   );
 });
