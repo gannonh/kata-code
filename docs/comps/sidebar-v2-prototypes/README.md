@@ -23,8 +23,8 @@ cd docs/comps/sidebar-v2-prototypes
 
 ## Archive
 
-| File | What |
-|---|---|
+| File                    | What                                                      |
+| ----------------------- | --------------------------------------------------------- |
 | `project-identity.html` | A (picker) · first C · B (Projects+Agents) · 0 (baseline) |
-| `source-postplan.html` | Cached original five-concept demo |
-| `shot-*.png` | Browser captures from iteration |
+| `source-postplan.html`  | Cached original five-concept demo                         |
+| `shot-*.png`            | Browser captures from iteration                           |

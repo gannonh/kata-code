@@ -154,12 +154,12 @@ Archive only (non-normative):
 One scrollable list, **four tiers**, no project group headers. Tiers are
 state-driven; empty tiers are omitted.
 
-| Tier | Predicate (observable) | Density |
-| --- | --- | --- |
-| **Waiting** | User bottleneck: pending approval, pending input, or actionable proposed plan | Rich card; wait label; optional inline *actions deferred* |
-| **Working** | Running / connecting session | Rich card; status verb + elapsed timer |
-| **Blocked** | Failed / error session (`lastError` + no higher-priority state) | Rich card until visited; then slim with red dot |
-| **Idle** | Settled / done (incl. done-unseen may start rich then collapse, or sit under Idle as expanded-on-click — Build matches prototype: Idle collapsed by default) | Slim row; click expands detail in-place |
+| Tier        | Predicate (observable)                                                                                                                                       | Density                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| **Waiting** | User bottleneck: pending approval, pending input, or actionable proposed plan                                                                                | Rich card; wait label; optional inline _actions deferred_ |
+| **Working** | Running / connecting session                                                                                                                                 | Rich card; status verb + elapsed timer                    |
+| **Blocked** | Failed / error session (`lastError` + no higher-priority state)                                                                                              | Rich card until visited; then slim with red dot           |
+| **Idle**    | Settled / done (incl. done-unseen may start rich then collapse, or sit under Idle as expanded-on-click — Build matches prototype: Idle collapsed by default) | Slim row; click expands detail in-place                   |
 
 Within Waiting: sort by wait duration longest-first when a wait timestamp
 is available; otherwise stable by existing sort order.

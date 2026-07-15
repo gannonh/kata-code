@@ -1,735 +1,1493 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kata Code — Sidebar v2 · Project identity prototypes</title>
-<style>
-  :root {
-    --bg: #000;
-    --panel: #0c0c0e;
-    --panel-2: #111114;
-    --card: #141417;
-    --card-hover: #1a1a1e;
-    --border: #222226;
-    --border-soft: #1a1a1e;
-    --text: #fff;
-    --text-2: #a1a1aa;
-    --text-3: #6b6b74;
-    --text-4: #4b4b52;
-    --amber: #fbbf24;
-    --indigo: #818cf8;
-    --sky: #38bdf8;
-    --violet: #a78bfa;
-    --emerald: #34d399;
-    --red: #f87171;
-    --teal: #2dd4bf;
-    --fuchsia: #d946ef;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { overflow-x: clip; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    line-height: 1.55;
-    padding: 40px 28px 96px;
-  }
-  .page { max-width: 1480px; margin: 0 auto; }
-  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
-  .subtitle { color: var(--text-2); margin-top: 8px; max-width: 78ch; font-size: 14.5px; }
-  .subtitle a { color: var(--sky); }
-  .eyebrow {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--text-3); margin-bottom: 10px;
-  }
-  .eyebrow .pill {
-    background: rgba(56,189,248,0.12); color: var(--sky);
-    border: 1px solid rgba(56,189,248,0.25);
-    border-radius: 999px; padding: 2px 8px; letter-spacing: 0.04em;
-  }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kata Code — Sidebar v2 · Project identity prototypes</title>
+    <style>
+      :root {
+        --bg: #000;
+        --panel: #0c0c0e;
+        --panel-2: #111114;
+        --card: #141417;
+        --card-hover: #1a1a1e;
+        --border: #222226;
+        --border-soft: #1a1a1e;
+        --text: #fff;
+        --text-2: #a1a1aa;
+        --text-3: #6b6b74;
+        --text-4: #4b4b52;
+        --amber: #fbbf24;
+        --indigo: #818cf8;
+        --sky: #38bdf8;
+        --violet: #a78bfa;
+        --emerald: #34d399;
+        --red: #f87171;
+        --teal: #2dd4bf;
+        --fuchsia: #d946ef;
+        --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        overflow-x: clip;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.55;
+        padding: 40px 28px 96px;
+      }
+      .page {
+        max-width: 1480px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .subtitle {
+        color: var(--text-2);
+        margin-top: 8px;
+        max-width: 78ch;
+        font-size: 14.5px;
+      }
+      .subtitle a {
+        color: var(--sky);
+      }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-3);
+        margin-bottom: 10px;
+      }
+      .eyebrow .pill {
+        background: rgba(56, 189, 248, 0.12);
+        color: var(--sky);
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        border-radius: 999px;
+        padding: 2px 8px;
+        letter-spacing: 0.04em;
+      }
 
-  .compare {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 28px 36px;
-    margin-top: 36px;
-    align-items: start;
-    max-width: 900px;
-  }
-  @media (max-width: 900px) {
-    .compare { grid-template-columns: 1fr; max-width: 420px; margin-left: auto; margin-right: auto; }
-  }
-  .compare .frame { max-width: 400px; }
-  .compare-secondary {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 28px 36px;
-    margin-top: 48px;
-    align-items: start;
-    max-width: 900px;
-    opacity: 0.92;
-  }
-  @media (max-width: 900px) {
-    .compare-secondary { grid-template-columns: 1fr; max-width: 420px; margin-left: auto; margin-right: auto; }
-  }
-  .compare-secondary .frame { max-width: 400px; height: 640px; }
-  .section-kicker {
-    margin-top: 56px; margin-bottom: -28px;
-    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--text-4);
-  }
+      .compare {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 28px 36px;
+        margin-top: 36px;
+        align-items: start;
+        max-width: 900px;
+      }
+      @media (max-width: 900px) {
+        .compare {
+          grid-template-columns: 1fr;
+          max-width: 420px;
+          margin-left: auto;
+          margin-right: auto;
+        }
+      }
+      .compare .frame {
+        max-width: 400px;
+      }
+      .compare-secondary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 28px 36px;
+        margin-top: 48px;
+        align-items: start;
+        max-width: 900px;
+        opacity: 0.92;
+      }
+      @media (max-width: 900px) {
+        .compare-secondary {
+          grid-template-columns: 1fr;
+          max-width: 420px;
+          margin-left: auto;
+          margin-right: auto;
+        }
+      }
+      .compare-secondary .frame {
+        max-width: 400px;
+        height: 640px;
+      }
+      .section-kicker {
+        margin-top: 56px;
+        margin-bottom: -28px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-4);
+      }
 
-  .variant-label {
-    margin-bottom: 12px;
-  }
-  .variant-label h2 {
-    font-size: 15px; font-weight: 650; letter-spacing: -0.01em;
-    display: flex; align-items: baseline; gap: 8px;
-  }
-  .variant-label h2 .num { color: var(--text-3); font-weight: 500; }
-  .variant-label p { color: var(--text-3); font-size: 12.5px; margin-top: 4px; line-height: 1.45; }
+      .variant-label {
+        margin-bottom: 12px;
+      }
+      .variant-label h2 {
+        font-size: 15px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .variant-label h2 .num {
+        color: var(--text-3);
+        font-weight: 500;
+      }
+      .variant-label p {
+        color: var(--text-3);
+        font-size: 12.5px;
+        margin-top: 4px;
+        line-height: 1.45;
+      }
 
-  /* ---- sidebar frame chrome ---- */
-  .frame {
-    width: 100%;
-    max-width: 380px;
-    background: #0a0a0b;
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    overflow: hidden;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-    display: flex;
-    flex-direction: column;
-    height: 760px;
-  }
-  .frame-head {
-    display: flex; align-items: center; gap: 8px;
-    padding: 12px 12px 8px;
-    flex-shrink: 0;
-  }
-  .search {
-    flex: 1; display: flex; align-items: center; gap: 8px;
-    background: var(--panel-2); border: 1px solid var(--border-soft);
-    border-radius: 8px; padding: 7px 10px; color: var(--text-3); font-size: 12.5px;
-  }
-  .search input {
-    flex: 1; background: transparent; border: none; outline: none;
-    color: var(--text); font-size: 12.5px; font-family: inherit; min-width: 0;
-  }
-  .search input::placeholder { color: var(--text-3); }
-  .search .kbd {
-    margin-left: auto; font-family: var(--mono); font-size: 10px;
-    background: #1c1c20; border-radius: 4px; padding: 1px 5px; color: var(--text-3);
-  }
-  .new-btn {
-    width: 32px; height: 32px; border-radius: 8px; background: var(--panel-2);
-    border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: center;
-    color: var(--text-2); font-size: 16px; flex-shrink: 0; cursor: pointer;
-  }
-  .new-btn:hover { background: var(--card-hover); color: var(--text); }
-  .frame-body {
-    padding: 4px 8px 12px;
-    overflow-y: auto;
-    flex: 1;
-    min-height: 0;
-  }
-  .frame-body::-webkit-scrollbar { width: 4px; }
-  .frame-body::-webkit-scrollbar-thumb { background: #26262b; border-radius: 4px; }
-  .frame-foot {
-    border-top: 1px solid var(--border-soft);
-    padding: 8px 12px;
-    display: flex; align-items: center; gap: 8px;
-    flex-shrink: 0;
-  }
-  .foot-btn {
-    font-size: 11.5px; color: var(--text-3); background: transparent;
-    border: 1px dashed var(--border); border-radius: 8px; padding: 7px 10px;
-    cursor: pointer; flex: 1; text-align: left;
-  }
-  .foot-btn:hover { color: var(--text-2); border-color: var(--text-4); background: var(--panel-2); }
+      /* ---- sidebar frame chrome ---- */
+      .frame {
+        width: 100%;
+        max-width: 380px;
+        background: #0a0a0b;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+        display: flex;
+        flex-direction: column;
+        height: 760px;
+      }
+      .frame-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 12px 8px;
+        flex-shrink: 0;
+      }
+      .search {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--panel-2);
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        padding: 7px 10px;
+        color: var(--text-3);
+        font-size: 12.5px;
+      }
+      .search input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        outline: none;
+        color: var(--text);
+        font-size: 12.5px;
+        font-family: inherit;
+        min-width: 0;
+      }
+      .search input::placeholder {
+        color: var(--text-3);
+      }
+      .search .kbd {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 10px;
+        background: #1c1c20;
+        border-radius: 4px;
+        padding: 1px 5px;
+        color: var(--text-3);
+      }
+      .new-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: var(--panel-2);
+        border: 1px solid var(--border-soft);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-2);
+        font-size: 16px;
+        flex-shrink: 0;
+        cursor: pointer;
+      }
+      .new-btn:hover {
+        background: var(--card-hover);
+        color: var(--text);
+      }
+      .frame-body {
+        padding: 4px 8px 12px;
+        overflow-y: auto;
+        flex: 1;
+        min-height: 0;
+      }
+      .frame-body::-webkit-scrollbar {
+        width: 4px;
+      }
+      .frame-body::-webkit-scrollbar-thumb {
+        background: #26262b;
+        border-radius: 4px;
+      }
+      .frame-foot {
+        border-top: 1px solid var(--border-soft);
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .foot-btn {
+        font-size: 11.5px;
+        color: var(--text-3);
+        background: transparent;
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+        padding: 7px 10px;
+        cursor: pointer;
+        flex: 1;
+        text-align: left;
+      }
+      .foot-btn:hover {
+        color: var(--text-2);
+        border-color: var(--text-4);
+        background: var(--panel-2);
+      }
 
-  /* shared atoms */
-  .pchip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-3); font-weight: 500; }
-  .pchip .pdot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; }
-  .pdot.t3 { background: var(--fuchsia); }
-  .pdot.fh { background: var(--sky); }
-  .pdot.kata { background: var(--teal); }
-  .branch { font-family: var(--mono); font-size: 10px; color: var(--text-4); }
-  .time { font-size: 10.5px; color: var(--text-4); font-variant-numeric: tabular-nums; flex-shrink: 0; }
-  .pr-badge { font-family: var(--mono); font-size: 9.5px; font-weight: 600; border-radius: 4px; padding: 1px 5px; }
-  .pr-open { color: var(--emerald); background: rgba(52,211,153,0.12); }
-  .pr-merged { color: var(--violet); background: rgba(167,139,250,0.12); }
-  .diff { font-family: var(--mono); font-size: 10px; }
-  .diff .add { color: var(--emerald); }
-  .diff .del { color: var(--red); }
-  .model-tag { font-family: var(--mono); font-size: 9px; color: var(--text-4); border: 1px solid var(--border-soft); border-radius: 4px; padding: 0px 4px; }
-  .cloud { font-size: 10px; color: var(--sky); opacity: 0.8; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-  .pulse { animation: pulse 1.6s ease-in-out infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+      /* shared atoms */
+      .pchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 10.5px;
+        color: var(--text-3);
+        font-weight: 500;
+      }
+      .pchip .pdot {
+        width: 6px;
+        height: 6px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+      .pdot.t3 {
+        background: var(--fuchsia);
+      }
+      .pdot.fh {
+        background: var(--sky);
+      }
+      .pdot.kata {
+        background: var(--teal);
+      }
+      .branch {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--text-4);
+      }
+      .time {
+        font-size: 10.5px;
+        color: var(--text-4);
+        font-variant-numeric: tabular-nums;
+        flex-shrink: 0;
+      }
+      .pr-badge {
+        font-family: var(--mono);
+        font-size: 9.5px;
+        font-weight: 600;
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .pr-open {
+        color: var(--emerald);
+        background: rgba(52, 211, 153, 0.12);
+      }
+      .pr-merged {
+        color: var(--violet);
+        background: rgba(167, 139, 250, 0.12);
+      }
+      .diff {
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+      .diff .add {
+        color: var(--emerald);
+      }
+      .diff .del {
+        color: var(--red);
+      }
+      .model-tag {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--text-4);
+        border: 1px solid var(--border-soft);
+        border-radius: 4px;
+        padding: 0px 4px;
+      }
+      .cloud {
+        font-size: 10px;
+        color: var(--sky);
+        opacity: 0.8;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.35;
+        }
+      }
+      .pulse {
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
 
-  /* Needs-you header */
-  .sec {
-    display: flex; align-items: center; gap: 8px;
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
-    color: var(--text-3); padding: 12px 8px 6px;
-  }
-  .sec .count {
-    background: var(--panel-2); border-radius: 99px; padding: 0 7px;
-    font-size: 9.5px; color: var(--text-2);
-  }
-  .sec.hot { color: var(--amber); }
-  .sec.hot .count { background: rgba(251,191,36,0.12); color: var(--amber); }
-  .sec .line { flex: 1; height: 1px; background: var(--border-soft); }
+      /* Needs-you header */
+      .sec {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-3);
+        padding: 12px 8px 6px;
+      }
+      .sec .count {
+        background: var(--panel-2);
+        border-radius: 99px;
+        padding: 0 7px;
+        font-size: 9.5px;
+        color: var(--text-2);
+      }
+      .sec.hot {
+        color: var(--amber);
+      }
+      .sec.hot .count {
+        background: rgba(251, 191, 36, 0.12);
+        color: var(--amber);
+      }
+      .sec .line {
+        flex: 1;
+        height: 1px;
+        background: var(--border-soft);
+      }
 
-  /* Adaptive rich cards */
-  .d-live {
-    background: linear-gradient(180deg, #16161a, #121215);
-    border: 1px solid #2a2a30; border-radius: 12px;
-    padding: 12px 13px; margin: 6px 2px; cursor: pointer;
-    transition: border-color 0.12s, background 0.12s;
-  }
-  .d-live:hover { border-color: #34343c; }
-  .d-live.selected { border-color: #4a4a55; background: #1a1a22; }
-  .d-live.needs-approval { border-color: rgba(251,191,36,0.35); }
-  .d-live.needs-input { border-color: rgba(129,140,248,0.35); }
-  .d-live.needs-plan { border-color: rgba(167,139,250,0.3); }
-  .d-live.failed { border-color: rgba(248,113,113,0.35); }
-  .d-live-top { display: flex; align-items: center; gap: 8px; }
-  .d-title { font-size: 13.5px; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .d-elapsed { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); flex-shrink: 0; }
-  .d-act {
-    display: flex; align-items: center; gap: 7px;
-    font-size: 11.5px; color: var(--text-2); margin-top: 7px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .d-act code { font-family: var(--mono); font-size: 10.5px; color: var(--text-2); background: #1c1c21; padding: 1px 5px; border-radius: 4px; }
-  .d-spin {
-    width: 10px; height: 10px; flex-shrink: 0; border-radius: 99px;
-    border: 1.5px solid rgba(56,189,248,0.25); border-top-color: var(--sky);
-    animation: spin 0.9s linear infinite;
-  }
-  .state-dot { width: 8px; height: 8px; border-radius: 99px; flex-shrink: 0; }
-  .a-meta { display: flex; align-items: center; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
-  .a-meta .time { margin-left: auto; }
+      /* Adaptive rich cards */
+      .d-live {
+        background: linear-gradient(180deg, #16161a, #121215);
+        border: 1px solid #2a2a30;
+        border-radius: 12px;
+        padding: 12px 13px;
+        margin: 6px 2px;
+        cursor: pointer;
+        transition:
+          border-color 0.12s,
+          background 0.12s;
+      }
+      .d-live:hover {
+        border-color: #34343c;
+      }
+      .d-live.selected {
+        border-color: #4a4a55;
+        background: #1a1a22;
+      }
+      .d-live.needs-approval {
+        border-color: rgba(251, 191, 36, 0.35);
+      }
+      .d-live.needs-input {
+        border-color: rgba(129, 140, 248, 0.35);
+      }
+      .d-live.needs-plan {
+        border-color: rgba(167, 139, 250, 0.3);
+      }
+      .d-live.failed {
+        border-color: rgba(248, 113, 113, 0.35);
+      }
+      .d-live-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .d-title {
+        font-size: 13.5px;
+        font-weight: 600;
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .d-elapsed {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--text-3);
+        flex-shrink: 0;
+      }
+      .d-act {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 11.5px;
+        color: var(--text-2);
+        margin-top: 7px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .d-act code {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--text-2);
+        background: #1c1c21;
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+      .d-spin {
+        width: 10px;
+        height: 10px;
+        flex-shrink: 0;
+        border-radius: 99px;
+        border: 1.5px solid rgba(56, 189, 248, 0.25);
+        border-top-color: var(--sky);
+        animation: spin 0.9s linear infinite;
+      }
+      .state-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 99px;
+        flex-shrink: 0;
+      }
+      .a-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 9px;
+        flex-wrap: wrap;
+      }
+      .a-meta .time {
+        margin-left: auto;
+      }
 
-  /* Slim rows */
-  .d-slim {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 11px; margin: 1px 2px; border-radius: 7px; cursor: pointer;
-  }
-  .d-slim:hover { background: var(--card-hover); }
-  .d-slim.selected { background: #1a1a22; }
-  .d-slim .dot { width: 6px; height: 6px; border-radius: 99px; flex-shrink: 0; }
-  .d-slim .t { font-size: 12.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-  .d-slim.unread .t { color: var(--text); font-weight: 550; }
+      /* Slim rows */
+      .d-slim {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 11px;
+        margin: 1px 2px;
+        border-radius: 7px;
+        cursor: pointer;
+      }
+      .d-slim:hover {
+        background: var(--card-hover);
+      }
+      .d-slim.selected {
+        background: #1a1a22;
+      }
+      .d-slim .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 99px;
+        flex-shrink: 0;
+      }
+      .d-slim .t {
+        font-size: 12.5px;
+        color: var(--text-2);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+      }
+      .d-slim.unread .t {
+        color: var(--text);
+        font-weight: 550;
+      }
 
-  .empty {
-    color: var(--text-4); font-size: 12px; text-align: center; padding: 28px 16px;
-  }
+      .empty {
+        color: var(--text-4);
+        font-size: 12px;
+        text-align: center;
+        padding: 28px 16px;
+      }
 
-  /* ========== Variant A: Project picker ========== */
-  .picker-bar {
-    padding: 0 8px 8px;
-    position: relative;
-    flex-shrink: 0;
-  }
-  .picker-btn {
-    width: 100%;
-    display: flex; align-items: center; gap: 8px;
-    background: var(--panel-2); border: 1px solid var(--border-soft);
-    border-radius: 9px; padding: 8px 10px;
-    color: var(--text-2); font-size: 12.5px; cursor: pointer;
-    font-family: inherit; text-align: left;
-  }
-  .picker-btn:hover, .picker-btn.open { background: var(--card); border-color: var(--border); color: var(--text); }
-  .picker-btn .chev { margin-left: auto; color: var(--text-4); font-size: 10px; }
-  .picker-btn .clear {
-    margin-left: 4px; color: var(--text-3); font-size: 11px;
-    background: #1c1c20; border-radius: 4px; padding: 1px 6px;
-  }
-  .picker-btn .clear:hover { color: var(--text); }
-  .picker-menu {
-    position: absolute; left: 8px; right: 8px; top: calc(100% - 4px);
-    background: #121215; border: 1px solid var(--border);
-    border-radius: 10px; padding: 6px; z-index: 20;
-    box-shadow: 0 16px 40px rgba(0,0,0,0.55);
-    display: none;
-  }
-  .picker-menu.open { display: block; }
-  .picker-item {
-    display: flex; align-items: center; gap: 8px;
-    width: 100%; padding: 8px 10px; border: none; background: transparent;
-    color: var(--text-2); font-size: 12.5px; border-radius: 7px;
-    cursor: pointer; font-family: inherit; text-align: left;
-  }
-  .picker-item:hover { background: var(--card-hover); color: var(--text); }
-  .picker-item.active { background: rgba(56,189,248,0.08); color: var(--text); }
-  .picker-item .pc { margin-left: auto; font-size: 10.5px; color: var(--text-4); font-variant-numeric: tabular-nums; }
-  .filter-chip-row {
-    display: flex; gap: 6px; padding: 0 8px 6px; flex-wrap: wrap;
-  }
-  .filter-chip {
-    display: inline-flex; align-items: center; gap: 5px;
-    font-size: 10.5px; font-weight: 550; color: var(--text-3);
-    background: transparent; border: 1px solid var(--border-soft);
-    border-radius: 999px; padding: 3px 9px; cursor: pointer; font-family: inherit;
-  }
-  .filter-chip:hover { color: var(--text-2); border-color: var(--border); }
-  .filter-chip.active {
-    color: var(--text); border-color: #34343c; background: var(--card);
-  }
-  .filter-chip.active.all { border-color: rgba(56,189,248,0.35); background: rgba(56,189,248,0.08); }
-  .scope-hint {
-    font-size: 10.5px; color: var(--text-4); padding: 2px 10px 8px;
-  }
+      /* ========== Variant A: Project picker ========== */
+      .picker-bar {
+        padding: 0 8px 8px;
+        position: relative;
+        flex-shrink: 0;
+      }
+      .picker-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--panel-2);
+        border: 1px solid var(--border-soft);
+        border-radius: 9px;
+        padding: 8px 10px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        cursor: pointer;
+        font-family: inherit;
+        text-align: left;
+      }
+      .picker-btn:hover,
+      .picker-btn.open {
+        background: var(--card);
+        border-color: var(--border);
+        color: var(--text);
+      }
+      .picker-btn .chev {
+        margin-left: auto;
+        color: var(--text-4);
+        font-size: 10px;
+      }
+      .picker-btn .clear {
+        margin-left: 4px;
+        color: var(--text-3);
+        font-size: 11px;
+        background: #1c1c20;
+        border-radius: 4px;
+        padding: 1px 6px;
+      }
+      .picker-btn .clear:hover {
+        color: var(--text);
+      }
+      .picker-menu {
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        top: calc(100% - 4px);
+        background: #121215;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 6px;
+        z-index: 20;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+        display: none;
+      }
+      .picker-menu.open {
+        display: block;
+      }
+      .picker-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 8px 10px;
+        border: none;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12.5px;
+        border-radius: 7px;
+        cursor: pointer;
+        font-family: inherit;
+        text-align: left;
+      }
+      .picker-item:hover {
+        background: var(--card-hover);
+        color: var(--text);
+      }
+      .picker-item.active {
+        background: rgba(56, 189, 248, 0.08);
+        color: var(--text);
+      }
+      .picker-item .pc {
+        margin-left: auto;
+        font-size: 10.5px;
+        color: var(--text-4);
+        font-variant-numeric: tabular-nums;
+      }
+      .filter-chip-row {
+        display: flex;
+        gap: 6px;
+        padding: 0 8px 6px;
+        flex-wrap: wrap;
+      }
+      .filter-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 10.5px;
+        font-weight: 550;
+        color: var(--text-3);
+        background: transparent;
+        border: 1px solid var(--border-soft);
+        border-radius: 999px;
+        padding: 3px 9px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .filter-chip:hover {
+        color: var(--text-2);
+        border-color: var(--border);
+      }
+      .filter-chip.active {
+        color: var(--text);
+        border-color: #34343c;
+        background: var(--card);
+      }
+      .filter-chip.active.all {
+        border-color: rgba(56, 189, 248, 0.35);
+        background: rgba(56, 189, 248, 0.08);
+      }
+      .scope-hint {
+        font-size: 10.5px;
+        color: var(--text-4);
+        padding: 2px 10px 8px;
+      }
 
-  /* ========== Variant B: Projects + Agents ========== */
-  .mode-tabs {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
-    padding: 0 8px 8px; flex-shrink: 0;
-  }
-  .mode-tab {
-    font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
-    padding: 7px 8px; border-radius: 8px; border: 1px solid transparent;
-    background: transparent; color: var(--text-3); cursor: pointer; font-family: inherit;
-  }
-  .mode-tab:hover { color: var(--text-2); background: var(--panel-2); }
-  .mode-tab.active {
-    color: var(--text); background: var(--card);
-    border-color: var(--border-soft);
-  }
+      /* ========== Variant B: Projects + Agents ========== */
+      .mode-tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        padding: 0 8px 8px;
+        flex-shrink: 0;
+      }
+      .mode-tab {
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        padding: 7px 8px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--text-3);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .mode-tab:hover {
+        color: var(--text-2);
+        background: var(--panel-2);
+      }
+      .mode-tab.active {
+        color: var(--text);
+        background: var(--card);
+        border-color: var(--border-soft);
+      }
 
-  .proj-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 11px; margin: 2px 2px; border-radius: 10px;
-    cursor: pointer; border: 1px solid transparent;
-  }
-  .proj-row:hover { background: var(--card-hover); }
-  .proj-row.active {
-    background: #16161c; border-color: #2e2e36;
-  }
-  .proj-avatar {
-    width: 28px; height: 28px; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 700; flex-shrink: 0;
-  }
-  .proj-avatar.t3 { background: #18181b; border: 1px solid #2c2c31; color: #e4e4e7; }
-  .proj-avatar.fh { background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.25); color: var(--sky); }
-  .proj-avatar.kata { background: rgba(45,212,191,0.12); border: 1px solid rgba(45,212,191,0.25); color: var(--teal); }
-  .proj-main { flex: 1; min-width: 0; }
-  .proj-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .proj-meta { font-size: 10.5px; color: var(--text-4); margin-top: 1px; display: flex; gap: 8px; align-items: center; }
-  .proj-badge {
-    font-size: 9.5px; font-weight: 700; border-radius: 99px; padding: 1px 7px;
-  }
-  .proj-badge.hot { background: rgba(251,191,36,0.14); color: var(--amber); }
-  .proj-badge.run { background: rgba(56,189,248,0.12); color: var(--sky); }
-  .proj-badge.quiet { background: var(--panel-2); color: var(--text-4); }
+      .proj-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 11px;
+        margin: 2px 2px;
+        border-radius: 10px;
+        cursor: pointer;
+        border: 1px solid transparent;
+      }
+      .proj-row:hover {
+        background: var(--card-hover);
+      }
+      .proj-row.active {
+        background: #16161c;
+        border-color: #2e2e36;
+      }
+      .proj-avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+      .proj-avatar.t3 {
+        background: #18181b;
+        border: 1px solid #2c2c31;
+        color: #e4e4e7;
+      }
+      .proj-avatar.fh {
+        background: rgba(56, 189, 248, 0.12);
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        color: var(--sky);
+      }
+      .proj-avatar.kata {
+        background: rgba(45, 212, 191, 0.12);
+        border: 1px solid rgba(45, 212, 191, 0.25);
+        color: var(--teal);
+      }
+      .proj-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .proj-name {
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .proj-meta {
+        font-size: 10.5px;
+        color: var(--text-4);
+        margin-top: 1px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .proj-badge {
+        font-size: 9.5px;
+        font-weight: 700;
+        border-radius: 99px;
+        padding: 1px 7px;
+      }
+      .proj-badge.hot {
+        background: rgba(251, 191, 36, 0.14);
+        color: var(--amber);
+      }
+      .proj-badge.run {
+        background: rgba(56, 189, 248, 0.12);
+        color: var(--sky);
+      }
+      .proj-badge.quiet {
+        background: var(--panel-2);
+        color: var(--text-4);
+      }
 
-  .agents-context {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 10px 10px; border-bottom: 1px solid var(--border-soft);
-    margin: 0 2px 4px;
-  }
-  .agents-context .back {
-    background: transparent; border: none; color: var(--text-3);
-    font-size: 14px; cursor: pointer; padding: 4px 6px; border-radius: 6px;
-  }
-  .agents-context .back:hover { background: var(--panel-2); color: var(--text); }
-  .agents-context .label { font-size: 12.5px; font-weight: 600; flex: 1; min-width: 0; }
-  .agents-context .all {
-    font-size: 10.5px; color: var(--sky); background: transparent; border: none;
-    cursor: pointer; font-family: inherit;
-  }
+      .agents-context {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px 10px;
+        border-bottom: 1px solid var(--border-soft);
+        margin: 0 2px 4px;
+      }
+      .agents-context .back {
+        background: transparent;
+        border: none;
+        color: var(--text-3);
+        font-size: 14px;
+        cursor: pointer;
+        padding: 4px 6px;
+        border-radius: 6px;
+      }
+      .agents-context .back:hover {
+        background: var(--panel-2);
+        color: var(--text);
+      }
+      .agents-context .label {
+        font-size: 12.5px;
+        font-weight: 600;
+        flex: 1;
+        min-width: 0;
+      }
+      .agents-context .all {
+        font-size: 10.5px;
+        color: var(--sky);
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+      }
 
-  .split-layout {
-    display: flex; flex-direction: column; height: 100%;
-  }
-  .split-projects {
-    flex: 0 0 auto;
-    max-height: 38%;
-    overflow-y: auto;
-    border-bottom: 1px solid var(--border-soft);
-    padding-bottom: 6px;
-  }
-  .split-agents {
-    flex: 1; min-height: 0; overflow-y: auto; padding-top: 2px;
-  }
-  .split-projects::-webkit-scrollbar,
-  .split-agents::-webkit-scrollbar { width: 4px; }
-  .split-projects::-webkit-scrollbar-thumb,
-  .split-agents::-webkit-scrollbar-thumb { background: #26262b; border-radius: 4px; }
+      .split-layout {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .split-projects {
+        flex: 0 0 auto;
+        max-height: 38%;
+        overflow-y: auto;
+        border-bottom: 1px solid var(--border-soft);
+        padding-bottom: 6px;
+      }
+      .split-agents {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding-top: 2px;
+      }
+      .split-projects::-webkit-scrollbar,
+      .split-agents::-webkit-scrollbar {
+        width: 4px;
+      }
+      .split-projects::-webkit-scrollbar-thumb,
+      .split-agents::-webkit-scrollbar-thumb {
+        background: #26262b;
+        border-radius: 4px;
+      }
 
-  .notes-strip {
-    margin-top: 48px;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-  }
-  @media (max-width: 1000px) { .notes-strip { grid-template-columns: 1fr; } }
-  .note-card {
-    background: var(--panel); border: 1px solid var(--border-soft);
-    border-radius: 14px; padding: 18px 20px;
-  }
-  .note-card h3 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--text-3); font-weight: 600; margin-bottom: 10px;
-  }
-  .note-card ul { list-style: none; }
-  .note-card li {
-    font-size: 13px; color: var(--text-2); padding: 4px 0 4px 16px; position: relative;
-  }
-  .note-card li::before { content: "·"; position: absolute; left: 2px; color: var(--text-3); }
-  .note-card li b { color: var(--text); font-weight: 550; }
-  .note-card .pro::before { content: "+"; color: var(--emerald); }
-  .note-card .con::before { content: "−"; color: var(--red); }
+      .notes-strip {
+        margin-top: 48px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+      @media (max-width: 1000px) {
+        .notes-strip {
+          grid-template-columns: 1fr;
+        }
+      }
+      .note-card {
+        background: var(--panel);
+        border: 1px solid var(--border-soft);
+        border-radius: 14px;
+        padding: 18px 20px;
+      }
+      .note-card h3 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-3);
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      .note-card ul {
+        list-style: none;
+      }
+      .note-card li {
+        font-size: 13px;
+        color: var(--text-2);
+        padding: 4px 0 4px 16px;
+        position: relative;
+      }
+      .note-card li::before {
+        content: "·";
+        position: absolute;
+        left: 2px;
+        color: var(--text-3);
+      }
+      .note-card li b {
+        color: var(--text);
+        font-weight: 550;
+      }
+      .note-card .pro::before {
+        content: "+";
+        color: var(--emerald);
+      }
+      .note-card .con::before {
+        content: "−";
+        color: var(--red);
+      }
 
-  .toast {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
-    background: #1a1a20; border: 1px solid var(--border); color: var(--text-2);
-    font-size: 12.5px; padding: 10px 16px; border-radius: 10px;
-    opacity: 0; pointer-events: none; transition: all 0.2s; z-index: 50;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
-  }
-  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%) translateY(20px);
+        background: #1a1a20;
+        border: 1px solid var(--border);
+        color: var(--text-2);
+        font-size: 12.5px;
+        padding: 10px 16px;
+        border-radius: 10px;
+        opacity: 0;
+        pointer-events: none;
+        transition: all 0.2s;
+        z-index: 50;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
 
-  /* ========== Variant C: Attention tiers ========== */
-  .c-sec {
-    display: flex; align-items: center; gap: 8px;
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
-    color: var(--text-3); padding: 12px 8px 6px;
-  }
-  .c-sec .count { background: var(--panel-2); border-radius: 99px; padding: 0 7px; font-size: 9.5px; color: var(--text-2); }
-  .c-sec.waiting { color: var(--amber); }
-  .c-sec.waiting .count { background: rgba(251,191,36,0.12); color: var(--amber); }
-  .c-sec.working { color: var(--sky); }
-  .c-sec.working .count { background: rgba(56,189,248,0.12); color: var(--sky); }
-  .c-sec.blocked { color: var(--red); }
-  .c-sec.blocked .count { background: rgba(248,113,113,0.12); color: var(--red); }
-  .c-sec .line { flex: 1; height: 1px; background: var(--border-soft); }
+      /* ========== Variant C: Attention tiers ========== */
+      .c-sec {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-3);
+        padding: 12px 8px 6px;
+      }
+      .c-sec .count {
+        background: var(--panel-2);
+        border-radius: 99px;
+        padding: 0 7px;
+        font-size: 9.5px;
+        color: var(--text-2);
+      }
+      .c-sec.waiting {
+        color: var(--amber);
+      }
+      .c-sec.waiting .count {
+        background: rgba(251, 191, 36, 0.12);
+        color: var(--amber);
+      }
+      .c-sec.working {
+        color: var(--sky);
+      }
+      .c-sec.working .count {
+        background: rgba(56, 189, 248, 0.12);
+        color: var(--sky);
+      }
+      .c-sec.blocked {
+        color: var(--red);
+      }
+      .c-sec.blocked .count {
+        background: rgba(248, 113, 113, 0.12);
+        color: var(--red);
+      }
+      .c-sec .line {
+        flex: 1;
+        height: 1px;
+        background: var(--border-soft);
+      }
 
-  .c-card {
-    background: var(--card); border: 1px solid var(--border-soft); border-radius: 10px;
-    padding: 10px 12px; margin: 4px 2px; cursor: pointer;
-    transition: border-color 0.12s, background 0.12s;
-  }
-  .c-card:hover { background: var(--card-hover); }
-  .c-card.selected { border-color: #4a4a55; background: #1a1a22; }
-  .c-card.waiting { border-color: rgba(251,191,36,0.25); background: rgba(251,191,36,0.045); }
-  .c-card.waiting.input { border-color: rgba(129,140,248,0.3); background: rgba(129,140,248,0.05); }
-  .c-card.waiting.plan { border-color: rgba(167,139,250,0.28); background: rgba(167,139,250,0.05); }
-  .c-card.blocked { border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.05); }
-  .c-top { display: flex; align-items: center; gap: 8px; }
-  .c-title { font-size: 13px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-  .c-ask { font-size: 11px; color: var(--text-2); margin-top: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .c-ask b { font-weight: 600; }
-  .c-wait { font-size: 10px; font-weight: 600; flex-shrink: 0; }
-  .c-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-  .c-meta .time { margin-left: auto; }
-  .c-actions { display: flex; gap: 6px; margin-top: 8px; }
-  .c-btn {
-    font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 4px 10px;
-    border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2); cursor: pointer;
-    font-family: inherit;
-  }
-  .c-btn:hover { color: var(--text); border-color: var(--text-4); }
-  .c-btn.primary { background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.3); color: var(--amber); }
-  .c-btn.primary.violet { background: rgba(167,139,250,0.15); border-color: rgba(167,139,250,0.3); color: var(--violet); }
-  .c-btn.primary.indigo { background: rgba(129,140,248,0.15); border-color: rgba(129,140,248,0.3); color: var(--indigo); }
+      .c-card {
+        background: var(--card);
+        border: 1px solid var(--border-soft);
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin: 4px 2px;
+        cursor: pointer;
+        transition:
+          border-color 0.12s,
+          background 0.12s;
+      }
+      .c-card:hover {
+        background: var(--card-hover);
+      }
+      .c-card.selected {
+        border-color: #4a4a55;
+        background: #1a1a22;
+      }
+      .c-card.waiting {
+        border-color: rgba(251, 191, 36, 0.25);
+        background: rgba(251, 191, 36, 0.045);
+      }
+      .c-card.waiting.input {
+        border-color: rgba(129, 140, 248, 0.3);
+        background: rgba(129, 140, 248, 0.05);
+      }
+      .c-card.waiting.plan {
+        border-color: rgba(167, 139, 250, 0.28);
+        background: rgba(167, 139, 250, 0.05);
+      }
+      .c-card.blocked {
+        border-color: rgba(248, 113, 113, 0.35);
+        background: rgba(248, 113, 113, 0.05);
+      }
+      .c-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .c-title {
+        font-size: 13px;
+        font-weight: 550;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+      }
+      .c-ask {
+        font-size: 11px;
+        color: var(--text-2);
+        margin-top: 4px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .c-ask b {
+        font-weight: 600;
+      }
+      .c-wait {
+        font-size: 10px;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .c-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+        flex-wrap: wrap;
+      }
+      .c-meta .time {
+        margin-left: auto;
+      }
+      .c-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .c-btn {
+        font-size: 10.5px;
+        font-weight: 600;
+        border-radius: 6px;
+        padding: 4px 10px;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+        color: var(--text-2);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .c-btn:hover {
+        color: var(--text);
+        border-color: var(--text-4);
+      }
+      .c-btn.primary {
+        background: rgba(251, 191, 36, 0.15);
+        border-color: rgba(251, 191, 36, 0.3);
+        color: var(--amber);
+      }
+      .c-btn.primary.violet {
+        background: rgba(167, 139, 250, 0.15);
+        border-color: rgba(167, 139, 250, 0.3);
+        color: var(--violet);
+      }
+      .c-btn.primary.indigo {
+        background: rgba(129, 140, 248, 0.15);
+        border-color: rgba(129, 140, 248, 0.3);
+        color: var(--indigo);
+      }
 
-  .c-row {
-    display: flex; align-items: center; gap: 8px; padding: 7px 10px; margin: 1px 2px;
-    border-radius: 8px; cursor: pointer;
-  }
-  .c-row:hover { background: var(--card-hover); }
-  .c-row.selected { background: #1a1a22; }
-  .c-row.unread .c-title { color: var(--text); font-weight: 550; }
-  .c-row .dot { width: 7px; height: 7px; border-radius: 99px; flex-shrink: 0; }
-  .c-row .c-title { font-size: 12.5px; color: var(--text-2); font-weight: 500; }
-  .c-row .expand-hint {
-    font-size: 9.5px; color: var(--text-4); opacity: 0; transition: opacity 0.12s;
-  }
-  .c-row:hover .expand-hint { opacity: 1; }
+      .c-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        margin: 1px 2px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .c-row:hover {
+        background: var(--card-hover);
+      }
+      .c-row.selected {
+        background: #1a1a22;
+      }
+      .c-row.unread .c-title {
+        color: var(--text);
+        font-weight: 550;
+      }
+      .c-row .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 99px;
+        flex-shrink: 0;
+      }
+      .c-row .c-title {
+        font-size: 12.5px;
+        color: var(--text-2);
+        font-weight: 500;
+      }
+      .c-row .expand-hint {
+        font-size: 9.5px;
+        color: var(--text-4);
+        opacity: 0;
+        transition: opacity 0.12s;
+      }
+      .c-row:hover .expand-hint {
+        opacity: 1;
+      }
 
-  .c-progress { height: 2px; border-radius: 2px; margin-top: 8px; background: #1d1d22; overflow: hidden; position: relative; }
-  .c-progress .bar {
-    position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(56,189,248,0.7), transparent);
-    background-size: 200px 100%;
-    animation: shimmer 1.8s linear infinite;
-  }
-  @keyframes shimmer {
-    from { transform: translateX(-100%); }
-    to { transform: translateX(100%); }
-  }
+      .c-progress {
+        height: 2px;
+        border-radius: 2px;
+        margin-top: 8px;
+        background: #1d1d22;
+        overflow: hidden;
+        position: relative;
+      }
+      .c-progress .bar {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.7), transparent);
+        background-size: 200px 100%;
+        animation: shimmer 1.8s linear infinite;
+      }
+      @keyframes shimmer {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(100%);
+        }
+      }
 
-  .tier-legend {
-    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
-  }
-  .tier-legend span {
-    font-size: 10.5px; color: var(--text-3);
-    display: inline-flex; align-items: center; gap: 5px;
-  }
-  .tier-legend i {
-    width: 7px; height: 7px; border-radius: 99px; display: inline-block;
-  }
-</style>
-</head>
-<body>
-<div class="page">
-  <div class="eyebrow">Sidebar v2 exploration <span class="pill">archive</span></div>
-  <h1>Where does the project live?</h1>
-  <p class="subtitle">
-    Earlier A / B / 0 / first-C iterations kept for reference.
-    <b style="color:var(--text);font-weight:550">Current working bet</b> (C + new session + multi-env):
-    <a href="./c-attention-session.html">c-attention-session.html</a>.
-    Source look:
-    <a href="https://hsyscdqldmk5.postplan.dev/" target="_blank" rel="noopener">postplan concept demo</a>.
-  </p>
+      .tier-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .tier-legend span {
+        font-size: 10.5px;
+        color: var(--text-3);
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .tier-legend i {
+        width: 7px;
+        height: 7px;
+        border-radius: 99px;
+        display: inline-block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="eyebrow">Sidebar v2 exploration <span class="pill">archive</span></div>
+      <h1>Where does the project live?</h1>
+      <p class="subtitle">
+        Earlier A / B / 0 / first-C iterations kept for reference.
+        <b style="color: var(--text); font-weight: 550">Current working bet</b> (C + new session +
+        multi-env): <a href="./c-attention-session.html">c-attention-session.html</a>. Source look:
+        <a href="https://hsyscdqldmk5.postplan.dev/" target="_blank" rel="noopener"
+          >postplan concept demo</a
+        >.
+      </p>
 
-  <div class="section-kicker" style="margin-top:28px">Focus · iterate here</div>
-  <div class="compare">
-    <!-- ========== A Picker ========== -->
-    <div>
-      <div class="variant-label">
-        <h2><span class="num">A</span> Project picker filter</h2>
-        <p>Hybrid list + project dropdown. Chips removed — picker is enough.</p>
-      </div>
-      <div class="frame" id="frame-picker" data-variant="picker"></div>
-    </div>
+      <div class="section-kicker" style="margin-top: 28px">Focus · iterate here</div>
+      <div class="compare">
+        <!-- ========== A Picker ========== -->
+        <div>
+          <div class="variant-label">
+            <h2><span class="num">A</span> Project picker filter</h2>
+            <p>Hybrid list + project dropdown. Chips removed — picker is enough.</p>
+          </div>
+          <div class="frame" id="frame-picker" data-variant="picker"></div>
+        </div>
 
-    <!-- ========== C Attention + picker ========== -->
-    <div>
-      <div class="variant-label">
-        <h2><span class="num">C</span> Attention tiers + picker</h2>
-        <p>Waiting · Working · Blocked expanded; Idle collapsed until clicked. Same picker as A.</p>
-        <div class="tier-legend">
-          <span><i style="background:var(--amber)"></i>Waiting</span>
-          <span><i style="background:var(--sky)"></i>Working</span>
-          <span><i style="background:var(--red)"></i>Blocked</span>
-          <span><i style="border:1px solid var(--text-4);background:transparent"></i>Idle</span>
+        <!-- ========== C Attention + picker ========== -->
+        <div>
+          <div class="variant-label">
+            <h2><span class="num">C</span> Attention tiers + picker</h2>
+            <p>
+              Waiting · Working · Blocked expanded; Idle collapsed until clicked. Same picker as A.
+            </p>
+            <div class="tier-legend">
+              <span><i style="background: var(--amber)"></i>Waiting</span>
+              <span><i style="background: var(--sky)"></i>Working</span>
+              <span><i style="background: var(--red)"></i>Blocked</span>
+              <span
+                ><i style="border: 1px solid var(--text-4); background: transparent"></i>Idle</span
+              >
+            </div>
+          </div>
+          <div class="frame" id="frame-tiers" data-variant="tiers"></div>
         </div>
       </div>
-      <div class="frame" id="frame-tiers" data-variant="tiers"></div>
-    </div>
-  </div>
 
-  <div class="section-kicker">Still in the mix</div>
-  <div class="compare-secondary">
-    <!-- ========== B Sections ========== -->
-    <div>
-      <div class="variant-label">
-        <h2><span class="num">B</span> Projects + Agents</h2>
-        <p>Two modes: browse projects, or agents/threads (optionally scoped).</p>
+      <div class="section-kicker">Still in the mix</div>
+      <div class="compare-secondary">
+        <!-- ========== B Sections ========== -->
+        <div>
+          <div class="variant-label">
+            <h2><span class="num">B</span> Projects + Agents</h2>
+            <p>Two modes: browse projects, or agents/threads (optionally scoped).</p>
+          </div>
+          <div class="frame" id="frame-sections" data-variant="sections"></div>
+        </div>
+
+        <!-- ========== 0 Baseline ========== -->
+        <div>
+          <div class="variant-label">
+            <h2><span class="num">0</span> Baseline hybrid</h2>
+            <p>Approved ship shape — flat list, project as chip only. Reference.</p>
+          </div>
+          <div class="frame" id="frame-baseline" data-variant="baseline"></div>
+        </div>
       </div>
-      <div class="frame" id="frame-sections" data-variant="sections"></div>
-    </div>
 
-    <!-- ========== 0 Baseline ========== -->
-    <div>
-      <div class="variant-label">
-        <h2><span class="num">0</span> Baseline hybrid</h2>
-        <p>Approved ship shape — flat list, project as chip only. Reference.</p>
+      <div class="notes-strip" style="grid-template-columns: repeat(2, 1fr); max-width: 900px">
+        <div class="note-card">
+          <h3>A · Picker filter</h3>
+          <ul>
+            <li class="pro">One list mental model; project is optional scope.</li>
+            <li class="pro">Needs-you still surfaces across projects when filter = All.</li>
+            <li class="con">State labels still mix “needs you / recent” with adaptive density.</li>
+          </ul>
+        </div>
+        <div class="note-card">
+          <h3>C · Attention + picker</h3>
+          <ul>
+            <li class="pro">
+              <b>Waiting / Working / Blocked / Idle</b> — clearer than Needs you + Recent.
+            </li>
+            <li class="pro">Idle collapsed by default → density where attention is.</li>
+            <li class="pro">Picker without chips — less redundant chrome than A.</li>
+            <li class="con">Tier jumps on state change need animation care.</li>
+          </ul>
+        </div>
       </div>
-      <div class="frame" id="frame-baseline" data-variant="baseline"></div>
     </div>
-  </div>
 
-  <div class="notes-strip" style="grid-template-columns: repeat(2, 1fr); max-width: 900px;">
-    <div class="note-card">
-      <h3>A · Picker filter</h3>
-      <ul>
-        <li class="pro">One list mental model; project is optional scope.</li>
-        <li class="pro">Needs-you still surfaces across projects when filter = All.</li>
-        <li class="con">State labels still mix “needs you / recent” with adaptive density.</li>
-      </ul>
-    </div>
-    <div class="note-card">
-      <h3>C · Attention + picker</h3>
-      <ul>
-        <li class="pro"><b>Waiting / Working / Blocked / Idle</b> — clearer than Needs you + Recent.</li>
-        <li class="pro">Idle collapsed by default → density where attention is.</li>
-        <li class="pro">Picker without chips — less redundant chrome than A.</li>
-        <li class="con">Tier jumps on state change need animation care.</li>
-      </ul>
-    </div>
-  </div>
-</div>
+    <div class="toast" id="toast"></div>
 
-<div class="toast" id="toast"></div>
+    <script>
+      const PROJECTS = [
+        { id: "t3code", name: "t3code", short: "T3", color: "t3", path: "~/src/t3code" },
+        { id: "file-host", name: "file-host", short: "FH", color: "fh", path: "~/src/file-host" },
+        { id: "kata-code", name: "kata-code", short: "KC", color: "kata", path: "~/src/kata-code" },
+      ];
 
-<script>
-const PROJECTS = [
-  { id: "t3code", name: "t3code", short: "T3", color: "t3", path: "~/src/t3code" },
-  { id: "file-host", name: "file-host", short: "FH", color: "fh", path: "~/src/file-host" },
-  { id: "kata-code", name: "kata-code", short: "KC", color: "kata", path: "~/src/kata-code" },
-];
+      const THREADS = [
+        {
+          id: "1",
+          project: "t3code",
+          title: "Normalize open PR titles",
+          state: "approval",
+          activity: "Wants to run <code>gh pr edit 3831</code>",
+          branch: "fix-pr-titles",
+          waitMin: 2,
+          model: null,
+          time: null,
+          density: "rich",
+        },
+        {
+          id: "2",
+          project: "t3code",
+          title: "Sidebar v2 UX Redesign",
+          state: "working",
+          activity: "Write <code>sidebar-v2-concepts.html</code>",
+          branch: "sidebar-v2-concepts",
+          elapsedSec: 14 * 60 + 22,
+          model: "fable-5",
+          time: "now",
+          density: "rich",
+        },
+        {
+          id: "3",
+          project: "file-host",
+          title: "Fix image upload stalls",
+          state: "input",
+          activity: "“Which bucket should staging use?”",
+          branch: "main",
+          waitMin: 18,
+          model: null,
+          time: null,
+          density: "rich",
+        },
+        {
+          id: "4",
+          project: "t3code",
+          title: "Review default experience plan",
+          state: "plan",
+          activity: "Plan ready — 6 steps",
+          branch: "plan-ux-review",
+          waitMin: 9,
+          model: null,
+          time: "9m",
+          density: "rich",
+        },
+        {
+          id: "5",
+          project: "t3code",
+          title: "Disable pairing codes by default",
+          state: "done",
+          activity: null,
+          branch: "disable-pairing-codes",
+          diff: { add: 214, del: 38 },
+          time: "12m",
+          density: "slim",
+          unread: true,
+        },
+        {
+          id: "6",
+          project: "t3code",
+          title: "iOS Simulator Remote Setup",
+          state: "failed",
+          activity: "Simulator lookup timed out (120s)",
+          branch: "main",
+          model: "gpt-5.6-sol",
+          time: "34m",
+          density: "rich",
+        },
+        {
+          id: "7",
+          project: "t3code",
+          title: "Default new worktrees from origin main",
+          state: "idle",
+          activity: null,
+          branch: "main-from-origin",
+          diff: { add: 47, del: 12 },
+          time: "41m",
+          density: "slim",
+        },
+        {
+          id: "8",
+          project: "t3code",
+          title: "Fix performance bottlenecks",
+          state: "idle",
+          activity: null,
+          branch: "performance-fixes",
+          pr: { num: 3825, status: "merged" },
+          time: "1d",
+          density: "slim",
+        },
+        {
+          id: "9",
+          project: "file-host",
+          title: "CLI File Hosting Options",
+          state: "idle",
+          activity: null,
+          branch: "main",
+          time: "2d",
+          density: "slim",
+        },
+        {
+          id: "10",
+          project: "t3code",
+          title: "Stress test long thread rendering",
+          state: "idle",
+          activity: null,
+          branch: "stress-sidebar",
+          pr: { num: 3822, status: "open" },
+          time: "2d",
+          density: "slim",
+        },
+        {
+          id: "11",
+          project: "kata-code",
+          title: "Clerk billing seat limits",
+          state: "working",
+          activity: "Update <code>Billing entlements</code>",
+          branch: "billing-seats",
+          elapsedSec: 6 * 60 + 8,
+          model: "fable-5",
+          time: "now",
+          density: "rich",
+          remote: true,
+        },
+        {
+          id: "12",
+          project: "kata-code",
+          title: "Sidebar redesign worktree",
+          state: "idle",
+          activity: null,
+          branch: "sidebar-redesign",
+          time: "3h",
+          density: "slim",
+          unread: true,
+        },
+        {
+          id: "13",
+          project: "file-host",
+          title: "Signed URL expiry policy",
+          state: "plan",
+          activity: "Plan ready — 4 steps · CDN + bucket ACL",
+          branch: "url-expiry",
+          waitMin: 41,
+          time: "41m",
+          density: "rich",
+        },
+        {
+          id: "14",
+          project: "kata-code",
+          title: "Mobile Maestro auth harness",
+          state: "idle",
+          activity: null,
+          branch: "maestro-auth",
+          time: "2d",
+          density: "slim",
+        },
+      ];
 
-const THREADS = [
-  {
-    id: "1", project: "t3code", title: "Normalize open PR titles",
-    state: "approval", activity: 'Wants to run <code>gh pr edit 3831</code>',
-    branch: "fix-pr-titles", waitMin: 2, model: null, time: null, density: "rich",
-  },
-  {
-    id: "2", project: "t3code", title: "Sidebar v2 UX Redesign",
-    state: "working", activity: 'Write <code>sidebar-v2-concepts.html</code>',
-    branch: "sidebar-v2-concepts", elapsedSec: 14 * 60 + 22, model: "fable-5", time: "now", density: "rich",
-  },
-  {
-    id: "3", project: "file-host", title: "Fix image upload stalls",
-    state: "input", activity: "“Which bucket should staging use?”",
-    branch: "main", waitMin: 18, model: null, time: null, density: "rich",
-  },
-  {
-    id: "4", project: "t3code", title: "Review default experience plan",
-    state: "plan", activity: "Plan ready — 6 steps",
-    branch: "plan-ux-review", waitMin: 9, model: null, time: "9m", density: "rich",
-  },
-  {
-    id: "5", project: "t3code", title: "Disable pairing codes by default",
-    state: "done", activity: null, branch: "disable-pairing-codes",
-    diff: { add: 214, del: 38 }, time: "12m", density: "slim", unread: true,
-  },
-  {
-    id: "6", project: "t3code", title: "iOS Simulator Remote Setup",
-    state: "failed", activity: "Simulator lookup timed out (120s)",
-    branch: "main", model: "gpt-5.6-sol", time: "34m", density: "rich",
-  },
-  {
-    id: "7", project: "t3code", title: "Default new worktrees from origin main",
-    state: "idle", activity: null, branch: "main-from-origin",
-    diff: { add: 47, del: 12 }, time: "41m", density: "slim",
-  },
-  {
-    id: "8", project: "t3code", title: "Fix performance bottlenecks",
-    state: "idle", activity: null, branch: "performance-fixes",
-    pr: { num: 3825, status: "merged" }, time: "1d", density: "slim",
-  },
-  {
-    id: "9", project: "file-host", title: "CLI File Hosting Options",
-    state: "idle", activity: null, branch: "main",
-    time: "2d", density: "slim",
-  },
-  {
-    id: "10", project: "t3code", title: "Stress test long thread rendering",
-    state: "idle", activity: null, branch: "stress-sidebar",
-    pr: { num: 3822, status: "open" }, time: "2d", density: "slim",
-  },
-  {
-    id: "11", project: "kata-code", title: "Clerk billing seat limits",
-    state: "working", activity: "Update <code>Billing entlements</code>",
-    branch: "billing-seats", elapsedSec: 6 * 60 + 8, model: "fable-5", time: "now", density: "rich",
-    remote: true,
-  },
-  {
-    id: "12", project: "kata-code", title: "Sidebar redesign worktree",
-    state: "idle", activity: null, branch: "sidebar-redesign",
-    time: "3h", density: "slim", unread: true,
-  },
-  {
-    id: "13", project: "file-host", title: "Signed URL expiry policy",
-    state: "plan", activity: "Plan ready — 4 steps · CDN + bucket ACL",
-    branch: "url-expiry", waitMin: 41, time: "41m", density: "rich",
-  },
-  {
-    id: "14", project: "kata-code", title: "Mobile Maestro auth harness",
-    state: "idle", activity: null, branch: "maestro-auth",
-    time: "2d", density: "slim",
-  },
-];
+      const NEEDS_STATES = new Set(["approval", "input", "plan"]);
+      const RICH_STATES = new Set(["approval", "input", "plan", "working", "failed", "done"]);
 
-const NEEDS_STATES = new Set(["approval", "input", "plan"]);
-const RICH_STATES = new Set(["approval", "input", "plan", "working", "failed", "done"]);
+      function projectById(id) {
+        return PROJECTS.find((p) => p.id === id);
+      }
 
-function projectById(id) {
-  return PROJECTS.find((p) => p.id === id);
-}
+      function stateColor(state) {
+        return (
+          {
+            approval: "var(--amber)",
+            input: "var(--indigo)",
+            plan: "var(--violet)",
+            working: "var(--sky)",
+            failed: "var(--red)",
+            done: "var(--emerald)",
+            idle: "var(--text-4)",
+          }[state] || "var(--text-4)"
+        );
+      }
 
-function stateColor(state) {
-  return {
-    approval: "var(--amber)",
-    input: "var(--indigo)",
-    plan: "var(--violet)",
-    working: "var(--sky)",
-    failed: "var(--red)",
-    done: "var(--emerald)",
-    idle: "var(--text-4)",
-  }[state] || "var(--text-4)";
-}
+      function needsClass(state) {
+        return (
+          {
+            approval: "needs-approval",
+            input: "needs-input",
+            plan: "needs-plan",
+            failed: "failed",
+          }[state] || ""
+        );
+      }
 
-function needsClass(state) {
-  return {
-    approval: "needs-approval",
-    input: "needs-input",
-    plan: "needs-plan",
-    failed: "failed",
-  }[state] || "";
-}
+      function formatElapsed(sec) {
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${m}m ${String(s).padStart(2, "0")}s`;
+      }
 
-function formatElapsed(sec) {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}m ${String(s).padStart(2, "0")}s`;
-}
+      function toast(msg) {
+        const el = document.getElementById("toast");
+        el.textContent = msg;
+        el.classList.add("show");
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => el.classList.remove("show"), 1600);
+      }
 
-function toast(msg) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => el.classList.remove("show"), 1600);
-}
+      function metaRow(t) {
+        const p = projectById(t.project);
+        const parts = [`<span class="pchip"><span class="pdot ${p.color}"></span>${p.name}</span>`];
+        if (t.branch) parts.push(`<span class="branch">${t.branch}</span>`);
+        if (t.model) parts.push(`<span class="model-tag">${t.model}</span>`);
+        if (t.remote) parts.push(`<span class="cloud" title="Remote environment">☁</span>`);
+        let timeHtml = "";
+        if (NEEDS_STATES.has(t.state) && t.waitMin != null) {
+          timeHtml = `<span class="time" style="color:${stateColor(t.state)};font-weight:600">waiting ${t.waitMin}m</span>`;
+        } else if (t.time) {
+          timeHtml = `<span class="time">${t.time}</span>`;
+        }
+        return `<div class="a-meta">${parts.join("")}${timeHtml}</div>`;
+      }
 
-function metaRow(t) {
-  const p = projectById(t.project);
-  const parts = [
-    `<span class="pchip"><span class="pdot ${p.color}"></span>${p.name}</span>`,
-  ];
-  if (t.branch) parts.push(`<span class="branch">${t.branch}</span>`);
-  if (t.model) parts.push(`<span class="model-tag">${t.model}</span>`);
-  if (t.remote) parts.push(`<span class="cloud" title="Remote environment">☁</span>`);
-  let timeHtml = "";
-  if (NEEDS_STATES.has(t.state) && t.waitMin != null) {
-    timeHtml = `<span class="time" style="color:${stateColor(t.state)};font-weight:600">waiting ${t.waitMin}m</span>`;
-  } else if (t.time) {
-    timeHtml = `<span class="time">${t.time}</span>`;
-  }
-  return `<div class="a-meta">${parts.join("")}${timeHtml}</div>`;
-}
+      function richCard(t, selectedId) {
+        const color = stateColor(t.state);
+        let lead = "";
+        let elapsed = "";
+        if (t.state === "working") {
+          lead = `<span class="d-spin"></span>`;
+          elapsed = `<span class="d-elapsed" data-elapsed="${t.elapsedSec || 0}">${formatElapsed(t.elapsedSec || 0)}</span>`;
+        } else if (NEEDS_STATES.has(t.state)) {
+          lead = `<span class="state-dot" style="background:${color}"></span>`;
+          elapsed = `<span class="d-elapsed" style="color:${color}">⏳ ${t.waitMin}m</span>`;
+        } else if (t.state === "failed") {
+          lead = `<span class="state-dot" style="background:${color}"></span>`;
+          elapsed = `<span class="d-elapsed" style="color:${color}">failed</span>`;
+        } else if (t.state === "done") {
+          lead = `<span class="state-dot" style="background:${color}"></span>`;
+          elapsed = t.diff
+            ? `<span class="diff"><span class="add">+${t.diff.add}</span> <span class="del">−${t.diff.del}</span></span>`
+            : `<span class="d-elapsed">${t.time || ""}</span>`;
+        }
 
-function richCard(t, selectedId) {
-  const color = stateColor(t.state);
-  let lead = "";
-  let elapsed = "";
-  if (t.state === "working") {
-    lead = `<span class="d-spin"></span>`;
-    elapsed = `<span class="d-elapsed" data-elapsed="${t.elapsedSec || 0}">${formatElapsed(t.elapsedSec || 0)}</span>`;
-  } else if (NEEDS_STATES.has(t.state)) {
-    lead = `<span class="state-dot" style="background:${color}"></span>`;
-    elapsed = `<span class="d-elapsed" style="color:${color}">⏳ ${t.waitMin}m</span>`;
-  } else if (t.state === "failed") {
-    lead = `<span class="state-dot" style="background:${color}"></span>`;
-    elapsed = `<span class="d-elapsed" style="color:${color}">failed</span>`;
-  } else if (t.state === "done") {
-    lead = `<span class="state-dot" style="background:${color}"></span>`;
-    elapsed = t.diff
-      ? `<span class="diff"><span class="add">+${t.diff.add}</span> <span class="del">−${t.diff.del}</span></span>`
-      : `<span class="d-elapsed">${t.time || ""}</span>`;
-  }
+        const act =
+          t.state === "failed"
+            ? `<div class="d-act" style="color:var(--red)">${t.activity}</div>`
+            : t.activity
+              ? `<div class="d-act">${t.activity}</div>`
+              : "";
 
-  const act =
-    t.state === "failed"
-      ? `<div class="d-act" style="color:var(--red)">${t.activity}</div>`
-      : t.activity
-        ? `<div class="d-act">${t.activity}</div>`
-        : "";
-
-  return `
+        return `
     <div class="d-live ${needsClass(t.state)} ${selectedId === t.id ? "selected" : ""}" data-thread="${t.id}" role="button" tabindex="0">
       <div class="d-live-top">
         ${lead}
@@ -739,72 +1497,80 @@ function richCard(t, selectedId) {
       ${act}
       ${metaRow(t)}
     </div>`;
-}
+      }
 
-function slimRow(t, selectedId) {
-  const color = stateColor(t.state);
-  const dot =
-    t.state === "failed"
-      ? `background:${color}`
-      : t.unread
-        ? `background:${color}`
-        : "background:transparent;border:1px solid var(--text-4)";
-  let trailing = "";
-  if (t.diff) trailing += `<span class="diff"><span class="add">+${t.diff.add}</span> <span class="del">−${t.diff.del}</span></span>`;
-  if (t.pr) trailing += `<span class="pr-badge ${t.pr.status === "merged" ? "pr-merged" : "pr-open"}">#${t.pr.num}</span>`;
-  if (t.time) trailing += `<span class="time">${t.time}</span>`;
-  return `
+      function slimRow(t, selectedId) {
+        const color = stateColor(t.state);
+        const dot =
+          t.state === "failed"
+            ? `background:${color}`
+            : t.unread
+              ? `background:${color}`
+              : "background:transparent;border:1px solid var(--text-4)";
+        let trailing = "";
+        if (t.diff)
+          trailing += `<span class="diff"><span class="add">+${t.diff.add}</span> <span class="del">−${t.diff.del}</span></span>`;
+        if (t.pr)
+          trailing += `<span class="pr-badge ${t.pr.status === "merged" ? "pr-merged" : "pr-open"}">#${t.pr.num}</span>`;
+        if (t.time) trailing += `<span class="time">${t.time}</span>`;
+        return `
     <div class="d-slim ${t.unread ? "unread" : ""} ${selectedId === t.id ? "selected" : ""}" data-thread="${t.id}" role="button" tabindex="0">
       <span class="dot" style="${dot}"></span>
       <span class="t">${t.title}</span>
       ${trailing}
     </div>`;
-}
+      }
 
-function renderThread(t, selectedId) {
-  const isRich = t.density === "rich" || RICH_STATES.has(t.state) && t.state !== "idle";
-  // Done-unseen and failed-unseen stay rich; settled idle is slim
-  if (t.state === "idle") return slimRow(t, selectedId);
-  if (t.state === "done" && !t.unread) return slimRow(t, selectedId);
-  if (isRich || NEEDS_STATES.has(t.state) || t.state === "working" || t.state === "failed" || (t.state === "done" && t.unread)) {
-    return richCard(t, selectedId);
-  }
-  return slimRow(t, selectedId);
-}
+      function renderThread(t, selectedId) {
+        const isRich = t.density === "rich" || (RICH_STATES.has(t.state) && t.state !== "idle");
+        // Done-unseen and failed-unseen stay rich; settled idle is slim
+        if (t.state === "idle") return slimRow(t, selectedId);
+        if (t.state === "done" && !t.unread) return slimRow(t, selectedId);
+        if (
+          isRich ||
+          NEEDS_STATES.has(t.state) ||
+          t.state === "working" ||
+          t.state === "failed" ||
+          (t.state === "done" && t.unread)
+        ) {
+          return richCard(t, selectedId);
+        }
+        return slimRow(t, selectedId);
+      }
 
-function sortThreads(list) {
-  const needs = list
-    .filter((t) => NEEDS_STATES.has(t.state))
-    .sort((a, b) => (b.waitMin || 0) - (a.waitMin || 0));
-  const rest = list.filter((t) => !NEEDS_STATES.has(t.state));
-  // keep mock order as "recency"
-  return { needs, rest };
-}
+      function sortThreads(list) {
+        const needs = list
+          .filter((t) => NEEDS_STATES.has(t.state))
+          .sort((a, b) => (b.waitMin || 0) - (a.waitMin || 0));
+        const rest = list.filter((t) => !NEEDS_STATES.has(t.state));
+        // keep mock order as "recency"
+        return { needs, rest };
+      }
 
-function searchFilter(list, q) {
-  if (!q) return list;
-  const s = q.toLowerCase();
-  return list.filter(
-    (t) =>
-      t.title.toLowerCase().includes(s) ||
-      t.project.toLowerCase().includes(s) ||
-      (t.branch || "").toLowerCase().includes(s)
-  );
-}
+      function searchFilter(list, q) {
+        if (!q) return list;
+        const s = q.toLowerCase();
+        return list.filter(
+          (t) =>
+            t.title.toLowerCase().includes(s) ||
+            t.project.toLowerCase().includes(s) ||
+            (t.branch || "").toLowerCase().includes(s),
+        );
+      }
 
-function bindThreadClicks(root, state) {
-  root.querySelectorAll("[data-thread]").forEach((el) => {
-    el.addEventListener("click", () => {
-      state.selectedId = el.getAttribute("data-thread");
-      state.render();
-      const t = THREADS.find((x) => x.id === state.selectedId);
-      toast(`Selected · ${t.title}`);
-    });
-  });
-}
+      function bindThreadClicks(root, state) {
+        root.querySelectorAll("[data-thread]").forEach((el) => {
+          el.addEventListener("click", () => {
+            state.selectedId = el.getAttribute("data-thread");
+            state.render();
+            const t = THREADS.find((x) => x.id === state.selectedId);
+            toast(`Selected · ${t.title}`);
+          });
+        });
+      }
 
-function chromeHead(state, extra = "") {
-  return `
+      function chromeHead(state, extra = "") {
+        return `
     <div class="frame-head">
       <div class="search">
         <span>⌕</span>
@@ -814,60 +1580,62 @@ function chromeHead(state, extra = "") {
       <button class="new-btn" type="button" data-new title="New thread">+</button>
     </div>
     ${extra}`;
-}
+      }
 
-function chromeFoot() {
-  return `
+      function chromeFoot() {
+        return `
     <div class="frame-foot">
       <button class="foot-btn" type="button" data-add-project>+ Add project</button>
     </div>`;
-}
+      }
 
-/* ---------- Baseline ---------- */
-function createBaseline(el) {
-  const state = {
-    query: "",
-    selectedId: "2",
-    render() {
-      const filtered = searchFilter(THREADS, state.query);
-      const { needs, rest } = sortThreads(filtered);
-      const body = `
+      /* ---------- Baseline ---------- */
+      function createBaseline(el) {
+        const state = {
+          query: "",
+          selectedId: "2",
+          render() {
+            const filtered = searchFilter(THREADS, state.query);
+            const { needs, rest } = sortThreads(filtered);
+            const body = `
         ${needs.length ? `<div class="sec hot">Needs you <span class="count">${needs.length}</span><span class="line"></span></div>` : ""}
         ${needs.map((t) => renderThread(t, state.selectedId)).join("")}
         ${needs.length && rest.length ? `<div class="sec">Recent<span class="line"></span></div>` : ""}
         ${rest.map((t) => renderThread(t, state.selectedId)).join("")}
         ${!filtered.length ? `<div class="empty">No threads match</div>` : ""}
       `;
-      el.innerHTML = `${chromeHead(state)}<div class="frame-body">${body}</div>${chromeFoot()}`;
-      wireCommon(el, state);
-      bindThreadClicks(el, state);
-    },
-  };
-  state.render();
-  return state;
-}
+            el.innerHTML = `${chromeHead(state)}<div class="frame-body">${body}</div>${chromeFoot()}`;
+            wireCommon(el, state);
+            bindThreadClicks(el, state);
+          },
+        };
+        state.render();
+        return state;
+      }
 
-/* ---------- A: Project picker ---------- */
-function createPicker(el) {
-  const state = {
-    query: "",
-    selectedId: "2",
-    projectFilter: "all",
-    menuOpen: false,
-    render() {
-      const scoped =
-        state.projectFilter === "all"
-          ? THREADS
-          : THREADS.filter((t) => t.project === state.projectFilter);
-      const filtered = searchFilter(scoped, state.query);
-      const { needs, rest } = sortThreads(filtered);
-      const p = state.projectFilter === "all" ? null : projectById(state.projectFilter);
-      const otherNeeds =
-        state.projectFilter === "all"
-          ? 0
-          : THREADS.filter((t) => NEEDS_STATES.has(t.state) && t.project !== state.projectFilter).length;
+      /* ---------- A: Project picker ---------- */
+      function createPicker(el) {
+        const state = {
+          query: "",
+          selectedId: "2",
+          projectFilter: "all",
+          menuOpen: false,
+          render() {
+            const scoped =
+              state.projectFilter === "all"
+                ? THREADS
+                : THREADS.filter((t) => t.project === state.projectFilter);
+            const filtered = searchFilter(scoped, state.query);
+            const { needs, rest } = sortThreads(filtered);
+            const p = state.projectFilter === "all" ? null : projectById(state.projectFilter);
+            const otherNeeds =
+              state.projectFilter === "all"
+                ? 0
+                : THREADS.filter(
+                    (t) => NEEDS_STATES.has(t.state) && t.project !== state.projectFilter,
+                  ).length;
 
-      const pickerExtra = `
+            const pickerExtra = `
         <div class="picker-bar">
           <button class="picker-btn ${state.menuOpen ? "open" : ""}" type="button" data-picker-toggle>
             ${
@@ -884,7 +1652,9 @@ function createPicker(el) {
             </button>
             ${PROJECTS.map((proj) => {
               const count = THREADS.filter((t) => t.project === proj.id).length;
-              const needsN = THREADS.filter((t) => t.project === proj.id && NEEDS_STATES.has(t.state)).length;
+              const needsN = THREADS.filter(
+                (t) => t.project === proj.id && NEEDS_STATES.has(t.state),
+              ).length;
               return `<button class="picker-item ${state.projectFilter === proj.id ? "active" : ""}" type="button" data-pick="${proj.id}">
                 <span class="pchip"><span class="pdot ${proj.color}"></span>${proj.name}</span>
                 <span class="pc">${needsN ? needsN + " waiting · " : ""}${count}</span>
@@ -899,7 +1669,7 @@ function createPicker(el) {
         }
       `;
 
-      const body = `
+            const body = `
         ${needs.length ? `<div class="sec hot">Needs you <span class="count">${needs.length}</span><span class="line"></span></div>` : ""}
         ${needs.map((t) => renderThread(t, state.selectedId)).join("")}
         ${needs.length && rest.length ? `<div class="sec">Recent<span class="line"></span></div>` : ""}
@@ -907,67 +1677,67 @@ function createPicker(el) {
         ${!filtered.length ? `<div class="empty">No threads in this project</div>` : ""}
       `;
 
-      el.innerHTML = `${chromeHead(state, pickerExtra)}<div class="frame-body">${body}</div>${chromeFoot()}`;
-      wireCommon(el, state);
+            el.innerHTML = `${chromeHead(state, pickerExtra)}<div class="frame-body">${body}</div>${chromeFoot()}`;
+            wireCommon(el, state);
 
-      el.querySelector("[data-picker-toggle]")?.addEventListener("click", (e) => {
-        if (e.target.closest("[data-clear-filter]")) {
-          state.projectFilter = "all";
-          state.menuOpen = false;
-          state.render();
-          return;
-        }
-        state.menuOpen = !state.menuOpen;
+            el.querySelector("[data-picker-toggle]")?.addEventListener("click", (e) => {
+              if (e.target.closest("[data-clear-filter]")) {
+                state.projectFilter = "all";
+                state.menuOpen = false;
+                state.render();
+                return;
+              }
+              state.menuOpen = !state.menuOpen;
+              state.render();
+            });
+            el.querySelectorAll("[data-pick]").forEach((btn) => {
+              btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                state.projectFilter = btn.getAttribute("data-pick");
+                state.menuOpen = false;
+                state.render();
+              });
+            });
+            bindThreadClicks(el, state);
+          },
+        };
         state.render();
-      });
-      el.querySelectorAll("[data-pick]").forEach((btn) => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          state.projectFilter = btn.getAttribute("data-pick");
-          state.menuOpen = false;
-          state.render();
-        });
-      });
-      bindThreadClicks(el, state);
-    },
-  };
-  state.render();
-  return state;
-}
+        return state;
+      }
 
-/* ---------- B: Projects + Agents ---------- */
-function projectStats(id) {
-  const threads = THREADS.filter((t) => t.project === id);
-  const needs = threads.filter((t) => NEEDS_STATES.has(t.state)).length;
-  const running = threads.filter((t) => t.state === "working").length;
-  return { total: threads.length, needs, running };
-}
+      /* ---------- B: Projects + Agents ---------- */
+      function projectStats(id) {
+        const threads = THREADS.filter((t) => t.project === id);
+        const needs = threads.filter((t) => NEEDS_STATES.has(t.state)).length;
+        const running = threads.filter((t) => t.state === "working").length;
+        return { total: threads.length, needs, running };
+      }
 
-function createSections(el) {
-  const state = {
-    query: "",
-    selectedId: "2",
-    mode: "agents", // 'projects' | 'agents'
-    projectFilter: "all", // when in agents mode
-    layout: "tabs", // also support split via data attr — tabs is primary
-    render() {
-      const modeTabs = `
+      function createSections(el) {
+        const state = {
+          query: "",
+          selectedId: "2",
+          mode: "agents", // 'projects' | 'agents'
+          projectFilter: "all", // when in agents mode
+          layout: "tabs", // also support split via data attr — tabs is primary
+          render() {
+            const modeTabs = `
         <div class="mode-tabs">
           <button class="mode-tab ${state.mode === "projects" ? "active" : ""}" type="button" data-mode="projects">Projects</button>
           <button class="mode-tab ${state.mode === "agents" ? "active" : ""}" type="button" data-mode="agents">Agents</button>
         </div>`;
 
-      let body = "";
-      if (state.mode === "projects") {
-        body = PROJECTS.map((p) => {
-          const s = projectStats(p.id);
-          const badge =
-            s.needs > 0
-              ? `<span class="proj-badge hot">${s.needs} needs you</span>`
-              : s.running > 0
-                ? `<span class="proj-badge run">${s.running} running</span>`
-                : `<span class="proj-badge quiet">${s.total}</span>`;
-          return `
+            let body = "";
+            if (state.mode === "projects") {
+              body = PROJECTS.map((p) => {
+                const s = projectStats(p.id);
+                const badge =
+                  s.needs > 0
+                    ? `<span class="proj-badge hot">${s.needs} needs you</span>`
+                    : s.running > 0
+                      ? `<span class="proj-badge run">${s.running} running</span>`
+                      : `<span class="proj-badge quiet">${s.total}</span>`;
+                return `
             <div class="proj-row ${state.projectFilter === p.id ? "active" : ""}" data-open-project="${p.id}" role="button" tabindex="0">
               <div class="proj-avatar ${p.color}">${p.short}</div>
               <div class="proj-main">
@@ -976,18 +1746,18 @@ function createSections(el) {
               </div>
               ${badge}
             </div>`;
-        }).join("");
-        body += `<div style="height:8px"></div>`;
-      } else {
-        const scoped =
-          state.projectFilter === "all"
-            ? THREADS
-            : THREADS.filter((t) => t.project === state.projectFilter);
-        const filtered = searchFilter(scoped, state.query);
-        const { needs, rest } = sortThreads(filtered);
-        const p = state.projectFilter === "all" ? null : projectById(state.projectFilter);
+              }).join("");
+              body += `<div style="height:8px"></div>`;
+            } else {
+              const scoped =
+                state.projectFilter === "all"
+                  ? THREADS
+                  : THREADS.filter((t) => t.project === state.projectFilter);
+              const filtered = searchFilter(scoped, state.query);
+              const { needs, rest } = sortThreads(filtered);
+              const p = state.projectFilter === "all" ? null : projectById(state.projectFilter);
 
-        const context = `
+              const context = `
           <div class="agents-context">
             ${
               p
@@ -999,21 +1769,23 @@ function createSections(el) {
             }
           </div>`;
 
-        body =
-          context +
-          (needs.length
-            ? `<div class="sec hot">Needs you <span class="count">${needs.length}</span><span class="line"></span></div>`
-            : "") +
-          needs.map((t) => renderThread(t, state.selectedId)).join("") +
-          (needs.length && rest.length ? `<div class="sec">Recent<span class="line"></span></div>` : "") +
-          rest.map((t) => renderThread(t, state.selectedId)).join("") +
-          (!filtered.length ? `<div class="empty">No agents in this project</div>` : "");
-      }
+              body =
+                context +
+                (needs.length
+                  ? `<div class="sec hot">Needs you <span class="count">${needs.length}</span><span class="line"></span></div>`
+                  : "") +
+                needs.map((t) => renderThread(t, state.selectedId)).join("") +
+                (needs.length && rest.length
+                  ? `<div class="sec">Recent<span class="line"></span></div>`
+                  : "") +
+                rest.map((t) => renderThread(t, state.selectedId)).join("") +
+                (!filtered.length ? `<div class="empty">No agents in this project</div>` : "");
+            }
 
-      // Also render a compact split peek under tabs when in agents+all: show project strip
-      let splitPeek = "";
-      if (state.mode === "agents" && state.projectFilter === "all") {
-        splitPeek = `
+            // Also render a compact split peek under tabs when in agents+all: show project strip
+            let splitPeek = "";
+            if (state.mode === "agents" && state.projectFilter === "all") {
+              splitPeek = `
           <div class="filter-chip-row" style="padding-top:0">
             ${PROJECTS.map((proj) => {
               const s = projectStats(proj.id);
@@ -1023,88 +1795,88 @@ function createSections(el) {
               </button>`;
             }).join("")}
           </div>`;
+            }
+
+            el.innerHTML = `${chromeHead(state, modeTabs + splitPeek)}<div class="frame-body">${body}</div>${chromeFoot()}`;
+            wireCommon(el, state);
+
+            el.querySelectorAll("[data-mode]").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                state.mode = btn.getAttribute("data-mode");
+                if (state.mode === "projects") state.query = "";
+                state.render();
+              });
+            });
+            el.querySelectorAll("[data-open-project]").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                state.projectFilter = btn.getAttribute("data-open-project");
+                state.mode = "agents";
+                state.render();
+                toast(`Scoped to ${projectById(state.projectFilter).name}`);
+              });
+            });
+            el.querySelector("[data-back], [data-all]")?.addEventListener("click", () => {
+              state.projectFilter = "all";
+              state.render();
+            });
+            bindThreadClicks(el, state);
+          },
+        };
+        state.render();
+        return state;
       }
 
-      el.innerHTML = `${chromeHead(state, modeTabs + splitPeek)}<div class="frame-body">${body}</div>${chromeFoot()}`;
-      wireCommon(el, state);
+      /* ---------- C: Attention tiers + project picker ---------- */
+      const WAITING_STATES = new Set(["approval", "input", "plan"]);
+      const IDLE_STATES = new Set(["idle", "done"]);
 
-      el.querySelectorAll("[data-mode]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          state.mode = btn.getAttribute("data-mode");
-          if (state.mode === "projects") state.query = "";
-          state.render();
-        });
-      });
-      el.querySelectorAll("[data-open-project]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          state.projectFilter = btn.getAttribute("data-open-project");
-          state.mode = "agents";
-          state.render();
-          toast(`Scoped to ${projectById(state.projectFilter).name}`);
-        });
-      });
-      el.querySelector("[data-back], [data-all]")?.addEventListener("click", () => {
-        state.projectFilter = "all";
-        state.render();
-      });
-      bindThreadClicks(el, state);
-    },
-  };
-  state.render();
-  return state;
-}
+      function tierOf(t) {
+        if (WAITING_STATES.has(t.state)) return "waiting";
+        if (t.state === "working") return "working";
+        if (t.state === "failed") return "blocked";
+        return "idle";
+      }
 
-/* ---------- C: Attention tiers + project picker ---------- */
-const WAITING_STATES = new Set(["approval", "input", "plan"]);
-const IDLE_STATES = new Set(["idle", "done"]);
+      function sortTiers(list) {
+        const waiting = list
+          .filter((t) => tierOf(t) === "waiting")
+          .sort((a, b) => (b.waitMin || 0) - (a.waitMin || 0));
+        const working = list.filter((t) => tierOf(t) === "working");
+        const blocked = list.filter((t) => tierOf(t) === "blocked");
+        const idle = list.filter((t) => tierOf(t) === "idle");
+        return { waiting, working, blocked, idle };
+      }
 
-function tierOf(t) {
-  if (WAITING_STATES.has(t.state)) return "waiting";
-  if (t.state === "working") return "working";
-  if (t.state === "failed") return "blocked";
-  return "idle";
-}
+      function waitingAsk(t) {
+        if (t.state === "approval") {
+          return `<div class="c-ask"><b style="color:var(--amber)">Approve:</b> <span class="branch" style="font-size:10.5px;color:var(--text-2)">gh pr edit 3831 — title fix</span></div>`;
+        }
+        if (t.state === "input") {
+          return `<div class="c-ask"><b style="color:var(--indigo)">Asked:</b> ${t.activity || "Waiting on your answer"}</div>`;
+        }
+        if (t.state === "plan") {
+          return `<div class="c-ask"><b style="color:var(--violet)">Plan ready:</b> ${t.activity?.replace(/^Plan ready — /, "") || "Review plan"}</div>`;
+        }
+        return "";
+      }
 
-function sortTiers(list) {
-  const waiting = list
-    .filter((t) => tierOf(t) === "waiting")
-    .sort((a, b) => (b.waitMin || 0) - (a.waitMin || 0));
-  const working = list.filter((t) => tierOf(t) === "working");
-  const blocked = list.filter((t) => tierOf(t) === "blocked");
-  const idle = list.filter((t) => tierOf(t) === "idle");
-  return { waiting, working, blocked, idle };
-}
+      function waitingActions(t) {
+        if (t.state === "approval") {
+          return `<div class="c-actions"><button class="c-btn primary" type="button" data-action="approve">Approve</button><button class="c-btn" type="button" data-action="view">View</button></div>`;
+        }
+        if (t.state === "plan") {
+          return `<div class="c-actions"><button class="c-btn primary violet" type="button" data-action="review">Review plan</button></div>`;
+        }
+        if (t.state === "input") {
+          return `<div class="c-actions"><button class="c-btn primary indigo" type="button" data-action="answer">Answer</button></div>`;
+        }
+        return "";
+      }
 
-function waitingAsk(t) {
-  if (t.state === "approval") {
-    return `<div class="c-ask"><b style="color:var(--amber)">Approve:</b> <span class="branch" style="font-size:10.5px;color:var(--text-2)">gh pr edit 3831 — title fix</span></div>`;
-  }
-  if (t.state === "input") {
-    return `<div class="c-ask"><b style="color:var(--indigo)">Asked:</b> ${t.activity || "Waiting on your answer"}</div>`;
-  }
-  if (t.state === "plan") {
-    return `<div class="c-ask"><b style="color:var(--violet)">Plan ready:</b> ${t.activity?.replace(/^Plan ready — /, "") || "Review plan"}</div>`;
-  }
-  return "";
-}
-
-function waitingActions(t) {
-  if (t.state === "approval") {
-    return `<div class="c-actions"><button class="c-btn primary" type="button" data-action="approve">Approve</button><button class="c-btn" type="button" data-action="view">View</button></div>`;
-  }
-  if (t.state === "plan") {
-    return `<div class="c-actions"><button class="c-btn primary violet" type="button" data-action="review">Review plan</button></div>`;
-  }
-  if (t.state === "input") {
-    return `<div class="c-actions"><button class="c-btn primary indigo" type="button" data-action="answer">Answer</button></div>`;
-  }
-  return "";
-}
-
-function waitingCard(t, selectedId) {
-  const color = stateColor(t.state);
-  const kind = t.state === "input" ? "input" : t.state === "plan" ? "plan" : "";
-  return `
+      function waitingCard(t, selectedId) {
+        const color = stateColor(t.state);
+        const kind = t.state === "input" ? "input" : t.state === "plan" ? "plan" : "";
+        return `
     <div class="c-card waiting ${kind} ${selectedId === t.id ? "selected" : ""}" data-thread="${t.id}" role="button" tabindex="0">
       <div class="c-top">
         <span class="c-title">${t.title}</span>
@@ -1117,10 +1889,10 @@ function waitingCard(t, selectedId) {
         ${t.branch ? `<span class="branch">${t.branch}</span>` : ""}
       </div>
     </div>`;
-}
+      }
 
-function workingCard(t, selectedId) {
-  return `
+      function workingCard(t, selectedId) {
+        return `
     <div class="c-card ${selectedId === t.id ? "selected" : ""}" data-thread="${t.id}" role="button" tabindex="0">
       <div class="c-top">
         <span class="d-spin"></span>
@@ -1136,10 +1908,10 @@ function workingCard(t, selectedId) {
         ${t.remote ? `<span class="cloud">☁</span>` : ""}
       </div>
     </div>`;
-}
+      }
 
-function blockedCard(t, selectedId) {
-  return `
+      function blockedCard(t, selectedId) {
+        return `
     <div class="c-card blocked ${selectedId === t.id ? "selected" : ""}" data-thread="${t.id}" role="button" tabindex="0">
       <div class="c-top">
         <span class="state-dot" style="background:var(--red)"></span>
@@ -1154,36 +1926,38 @@ function blockedCard(t, selectedId) {
         ${t.time ? `<span class="time">${t.time}</span>` : ""}
       </div>
     </div>`;
-}
+      }
 
-function idleCollapsed(t, selectedId) {
-  const color = stateColor(t.state);
-  const dot =
-    t.state === "done" || t.unread
-      ? `background:${color}`
-      : "background:transparent;border:1px solid var(--text-4)";
-  let trailing = "";
-  if (t.diff) trailing += `<span class="diff"><span class="add">+${t.diff.add}</span> <span class="del">−${t.diff.del}</span></span>`;
-  if (t.pr) trailing += `<span class="pr-badge ${t.pr.status === "merged" ? "pr-merged" : "pr-open"}">#${t.pr.num}</span>`;
-  if (t.time) trailing += `<span class="time">${t.time}</span>`;
-  return `
+      function idleCollapsed(t, selectedId) {
+        const color = stateColor(t.state);
+        const dot =
+          t.state === "done" || t.unread
+            ? `background:${color}`
+            : "background:transparent;border:1px solid var(--text-4)";
+        let trailing = "";
+        if (t.diff)
+          trailing += `<span class="diff"><span class="add">+${t.diff.add}</span> <span class="del">−${t.diff.del}</span></span>`;
+        if (t.pr)
+          trailing += `<span class="pr-badge ${t.pr.status === "merged" ? "pr-merged" : "pr-open"}">#${t.pr.num}</span>`;
+        if (t.time) trailing += `<span class="time">${t.time}</span>`;
+        return `
     <div class="c-row ${t.unread ? "unread" : ""} ${selectedId === t.id ? "selected" : ""}" data-thread="${t.id}" data-idle-toggle="${t.id}" role="button" tabindex="0">
       <span class="dot" style="${dot}"></span>
       <span class="c-title">${t.title}</span>
       <span class="expand-hint">expand</span>
       ${trailing}
     </div>`;
-}
+      }
 
-function idleExpanded(t, selectedId) {
-  const p = projectById(t.project);
-  let statusLine = "Idle";
-  if (t.state === "done") {
-    statusLine = t.diff
-      ? `Done — <span class="add">+${t.diff.add}</span> <span class="del">−${t.diff.del}</span>`
-      : "Done";
-  }
-  return `
+      function idleExpanded(t, selectedId) {
+        const p = projectById(t.project);
+        let statusLine = "Idle";
+        if (t.state === "done") {
+          statusLine = t.diff
+            ? `Done — <span class="add">+${t.diff.add}</span> <span class="del">−${t.diff.del}</span>`
+            : "Done";
+        }
+        return `
     <div class="c-card selected" data-thread="${t.id}" data-idle-toggle="${t.id}" role="button" tabindex="0">
       <div class="c-top">
         <span class="c-title">${t.title}</span>
@@ -1199,11 +1973,11 @@ function idleExpanded(t, selectedId) {
         <button class="c-btn" type="button" data-idle-collapse="${t.id}">Collapse</button>
       </div>
     </div>`;
-}
+      }
 
-function renderPickerChrome(state, otherWaiting) {
-  const p = state.projectFilter === "all" ? null : projectById(state.projectFilter);
-  return `
+      function renderPickerChrome(state, otherWaiting) {
+        const p = state.projectFilter === "all" ? null : projectById(state.projectFilter);
+        return `
     <div class="picker-bar">
       <button class="picker-btn ${state.menuOpen ? "open" : ""}" type="button" data-picker-toggle>
         ${
@@ -1220,7 +1994,9 @@ function renderPickerChrome(state, otherWaiting) {
         </button>
         ${PROJECTS.map((proj) => {
           const count = THREADS.filter((t) => t.project === proj.id).length;
-          const waitingN = THREADS.filter((t) => t.project === proj.id && WAITING_STATES.has(t.state)).length;
+          const waitingN = THREADS.filter(
+            (t) => t.project === proj.id && WAITING_STATES.has(t.state),
+          ).length;
           return `<button class="picker-item ${state.projectFilter === proj.id ? "active" : ""}" type="button" data-pick="${proj.id}">
             <span class="pchip"><span class="pdot ${proj.color}"></span>${proj.name}</span>
             <span class="pc">${waitingN ? waitingN + " waiting · " : ""}${count}</span>
@@ -1233,162 +2009,175 @@ function renderPickerChrome(state, otherWaiting) {
         ? `<div class="scope-hint">${otherWaiting} waiting in other projects · switch to All</div>`
         : ""
     }`;
-}
-
-function wirePicker(el, state) {
-  el.querySelector("[data-picker-toggle]")?.addEventListener("click", (e) => {
-    if (e.target.closest("[data-clear-filter]")) {
-      state.projectFilter = "all";
-      state.menuOpen = false;
-      state.render();
-      return;
-    }
-    state.menuOpen = !state.menuOpen;
-    state.render();
-  });
-  el.querySelectorAll("[data-pick]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      state.projectFilter = btn.getAttribute("data-pick");
-      state.menuOpen = false;
-      state.render();
-    });
-  });
-}
-
-function createTiers(el) {
-  const state = {
-    query: "",
-    selectedId: "2",
-    projectFilter: "all",
-    menuOpen: false,
-    expandedIdle: new Set(), // idle rows expanded on click
-    render() {
-      const scoped =
-        state.projectFilter === "all"
-          ? THREADS
-          : THREADS.filter((t) => t.project === state.projectFilter);
-      const filtered = searchFilter(scoped, state.query);
-      const { waiting, working, blocked, idle } = sortTiers(filtered);
-      const otherWaiting =
-        state.projectFilter === "all"
-          ? 0
-          : THREADS.filter((t) => WAITING_STATES.has(t.state) && t.project !== state.projectFilter).length;
-
-      const pickerExtra = renderPickerChrome(state, otherWaiting);
-
-      const bodyParts = [];
-      if (waiting.length) {
-        bodyParts.push(`<div class="c-sec waiting">Waiting <span class="count">${waiting.length}</span><span class="line"></span></div>`);
-        bodyParts.push(waiting.map((t) => waitingCard(t, state.selectedId)).join(""));
       }
-      if (working.length) {
-        bodyParts.push(`<div class="c-sec working">Working <span class="count">${working.length}</span><span class="line"></span></div>`);
-        bodyParts.push(working.map((t) => workingCard(t, state.selectedId)).join(""));
+
+      function wirePicker(el, state) {
+        el.querySelector("[data-picker-toggle]")?.addEventListener("click", (e) => {
+          if (e.target.closest("[data-clear-filter]")) {
+            state.projectFilter = "all";
+            state.menuOpen = false;
+            state.render();
+            return;
+          }
+          state.menuOpen = !state.menuOpen;
+          state.render();
+        });
+        el.querySelectorAll("[data-pick]").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            state.projectFilter = btn.getAttribute("data-pick");
+            state.menuOpen = false;
+            state.render();
+          });
+        });
       }
-      if (blocked.length) {
-        bodyParts.push(`<div class="c-sec blocked">Blocked <span class="count">${blocked.length}</span><span class="line"></span></div>`);
-        bodyParts.push(blocked.map((t) => blockedCard(t, state.selectedId)).join(""));
+
+      function createTiers(el) {
+        const state = {
+          query: "",
+          selectedId: "2",
+          projectFilter: "all",
+          menuOpen: false,
+          expandedIdle: new Set(), // idle rows expanded on click
+          render() {
+            const scoped =
+              state.projectFilter === "all"
+                ? THREADS
+                : THREADS.filter((t) => t.project === state.projectFilter);
+            const filtered = searchFilter(scoped, state.query);
+            const { waiting, working, blocked, idle } = sortTiers(filtered);
+            const otherWaiting =
+              state.projectFilter === "all"
+                ? 0
+                : THREADS.filter(
+                    (t) => WAITING_STATES.has(t.state) && t.project !== state.projectFilter,
+                  ).length;
+
+            const pickerExtra = renderPickerChrome(state, otherWaiting);
+
+            const bodyParts = [];
+            if (waiting.length) {
+              bodyParts.push(
+                `<div class="c-sec waiting">Waiting <span class="count">${waiting.length}</span><span class="line"></span></div>`,
+              );
+              bodyParts.push(waiting.map((t) => waitingCard(t, state.selectedId)).join(""));
+            }
+            if (working.length) {
+              bodyParts.push(
+                `<div class="c-sec working">Working <span class="count">${working.length}</span><span class="line"></span></div>`,
+              );
+              bodyParts.push(working.map((t) => workingCard(t, state.selectedId)).join(""));
+            }
+            if (blocked.length) {
+              bodyParts.push(
+                `<div class="c-sec blocked">Blocked <span class="count">${blocked.length}</span><span class="line"></span></div>`,
+              );
+              bodyParts.push(blocked.map((t) => blockedCard(t, state.selectedId)).join(""));
+            }
+            if (idle.length) {
+              bodyParts.push(`<div class="c-sec">Idle<span class="line"></span></div>`);
+              bodyParts.push(
+                idle
+                  .map((t) =>
+                    state.expandedIdle.has(t.id)
+                      ? idleExpanded(t, state.selectedId)
+                      : idleCollapsed(t, state.selectedId),
+                  )
+                  .join(""),
+              );
+            }
+            if (!filtered.length)
+              bodyParts.push(`<div class="empty">No threads in this project</div>`);
+
+            el.innerHTML = `${chromeHead(state, pickerExtra)}<div class="frame-body">${bodyParts.join("")}</div>${chromeFoot()}`;
+            wireCommon(el, state);
+            wirePicker(el, state);
+
+            el.querySelectorAll("[data-thread]").forEach((node) => {
+              node.addEventListener("click", (e) => {
+                if (e.target.closest("[data-action], [data-idle-collapse]")) return;
+                const id = node.getAttribute("data-thread");
+                state.selectedId = id;
+                // Idle: click expands (or selects if already expanded)
+                if (node.hasAttribute("data-idle-toggle") && !state.expandedIdle.has(id)) {
+                  state.expandedIdle.add(id);
+                }
+                state.render();
+                const t = THREADS.find((x) => x.id === id);
+                toast(`${tierOf(t)} · ${t.title}`);
+              });
+            });
+            el.querySelectorAll("[data-idle-collapse]").forEach((btn) => {
+              btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                state.expandedIdle.delete(btn.getAttribute("data-idle-collapse"));
+                state.render();
+              });
+            });
+            el.querySelectorAll("[data-action]").forEach((btn) => {
+              btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                toast(`${btn.getAttribute("data-action")} · from sidebar`);
+              });
+            });
+          },
+        };
+        state.render();
+        return state;
       }
-      if (idle.length) {
-        bodyParts.push(`<div class="c-sec">Idle<span class="line"></span></div>`);
-        bodyParts.push(
-          idle
-            .map((t) =>
-              state.expandedIdle.has(t.id)
-                ? idleExpanded(t, state.selectedId)
-                : idleCollapsed(t, state.selectedId)
-            )
-            .join("")
+
+      function wireCommon(el, state) {
+        const input = el.querySelector("[data-search]");
+        if (input) {
+          input.addEventListener("input", () => {
+            state.query = input.value;
+            state.render();
+            // restore focus
+            const again = el.querySelector("[data-search]");
+            if (again) {
+              again.focus();
+              const len = again.value.length;
+              again.setSelectionRange(len, len);
+            }
+          });
+        }
+        el.querySelector("[data-new]")?.addEventListener("click", () =>
+          toast("New thread · project picker would open"),
+        );
+        el.querySelector("[data-add-project]")?.addEventListener("click", () =>
+          toast("Add project"),
         );
       }
-      if (!filtered.length) bodyParts.push(`<div class="empty">No threads in this project</div>`);
 
-      el.innerHTML = `${chromeHead(state, pickerExtra)}<div class="frame-body">${bodyParts.join("")}</div>${chromeFoot()}`;
-      wireCommon(el, state);
-      wirePicker(el, state);
+      // Live elapsed tickers
+      const states = [
+        createPicker(document.getElementById("frame-picker")),
+        createTiers(document.getElementById("frame-tiers")),
+        createSections(document.getElementById("frame-sections")),
+        createBaseline(document.getElementById("frame-baseline")),
+      ];
 
-      el.querySelectorAll("[data-thread]").forEach((node) => {
-        node.addEventListener("click", (e) => {
-          if (e.target.closest("[data-action], [data-idle-collapse]")) return;
-          const id = node.getAttribute("data-thread");
-          state.selectedId = id;
-          // Idle: click expands (or selects if already expanded)
-          if (node.hasAttribute("data-idle-toggle") && !state.expandedIdle.has(id)) {
-            state.expandedIdle.add(id);
+      setInterval(() => {
+        THREADS.forEach((t) => {
+          if (t.state === "working" && typeof t.elapsedSec === "number") t.elapsedSec += 1;
+        });
+        document.querySelectorAll("[data-elapsed]").forEach((el) => {
+          const n = Number(el.getAttribute("data-elapsed")) + 1;
+          el.setAttribute("data-elapsed", String(n));
+          el.textContent = formatElapsed(n);
+        });
+      }, 1000);
+
+      // Close picker menus on outside click (A + C)
+      document.addEventListener("click", (e) => {
+        if (e.target.closest("[data-picker-toggle], [data-picker-menu]")) return;
+        [states[0], states[1]].forEach((s) => {
+          if (s && s.menuOpen) {
+            s.menuOpen = false;
+            s.render();
           }
-          state.render();
-          const t = THREADS.find((x) => x.id === id);
-          toast(`${tierOf(t)} · ${t.title}`);
         });
       });
-      el.querySelectorAll("[data-idle-collapse]").forEach((btn) => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          state.expandedIdle.delete(btn.getAttribute("data-idle-collapse"));
-          state.render();
-        });
-      });
-      el.querySelectorAll("[data-action]").forEach((btn) => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          toast(`${btn.getAttribute("data-action")} · from sidebar`);
-        });
-      });
-    },
-  };
-  state.render();
-  return state;
-}
-
-function wireCommon(el, state) {
-  const input = el.querySelector("[data-search]");
-  if (input) {
-    input.addEventListener("input", () => {
-      state.query = input.value;
-      state.render();
-      // restore focus
-      const again = el.querySelector("[data-search]");
-      if (again) {
-        again.focus();
-        const len = again.value.length;
-        again.setSelectionRange(len, len);
-      }
-    });
-  }
-  el.querySelector("[data-new]")?.addEventListener("click", () => toast("New thread · project picker would open"));
-  el.querySelector("[data-add-project]")?.addEventListener("click", () => toast("Add project"));
-}
-
-// Live elapsed tickers
-const states = [
-  createPicker(document.getElementById("frame-picker")),
-  createTiers(document.getElementById("frame-tiers")),
-  createSections(document.getElementById("frame-sections")),
-  createBaseline(document.getElementById("frame-baseline")),
-];
-
-setInterval(() => {
-  THREADS.forEach((t) => {
-    if (t.state === "working" && typeof t.elapsedSec === "number") t.elapsedSec += 1;
-  });
-  document.querySelectorAll("[data-elapsed]").forEach((el) => {
-    const n = Number(el.getAttribute("data-elapsed")) + 1;
-    el.setAttribute("data-elapsed", String(n));
-    el.textContent = formatElapsed(n);
-  });
-}, 1000);
-
-// Close picker menus on outside click (A + C)
-document.addEventListener("click", (e) => {
-  if (e.target.closest("[data-picker-toggle], [data-picker-menu]")) return;
-  [states[0], states[1]].forEach((s) => {
-    if (s && s.menuOpen) {
-      s.menuOpen = false;
-      s.render();
-    }
-  });
-});
-</script>
-</body>
+    </script>
+  </body>
 </html>
