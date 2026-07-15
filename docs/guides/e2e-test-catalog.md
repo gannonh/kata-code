@@ -19,6 +19,7 @@ Specs under [`e2e/tests/`](../../e2e/tests/) use a project-aware fixture and can
 | Test                                                                                   | Tag         | Covers                                                                               |
 | -------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
 | [`smoke/app-launch.spec.ts`](../../e2e/tests/smoke/app-launch.spec.ts)                 | `@smoke`    | Launches either target past pairing and reaches the app shell                        |
+| [`smoke/sidebar-v2.spec.ts`](../../e2e/tests/smoke/sidebar-v2.spec.ts)                 | `@sidebar`  | Attention-tier sidebar chrome, no show-more, new-session accordion opens             |
 | [`agent/deterministic-chat.spec.ts`](../../e2e/tests/agent/deterministic-chat.spec.ts) | `@agent`    | Exact assistant reply from a real provider                                           |
 | [`agent/cursor-skills.spec.ts`](../../e2e/tests/agent/cursor-skills.spec.ts)           | `@cursor`   | Cursor filesystem skills in the Composer menu and path-qualified token insertion     |
 | [`agent/pi-smoke.spec.ts`](../../e2e/tests/agent/pi-smoke.spec.ts)                     | `@pi`       | Pi streaming, interrupt/stop, tool-call work row, runtime-mode warning (creds-gated) |

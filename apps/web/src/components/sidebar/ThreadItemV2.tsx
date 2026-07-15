@@ -10,7 +10,6 @@ import {
   projectColorClass,
   resolveThreadRowDensity,
   resolveThreadStatusPill,
-  resolveThreadTier,
   resolveThreadWaitDuration,
   type ThreadAttentionTier,
 } from "../Sidebar.logic";

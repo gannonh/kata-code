@@ -8,6 +8,7 @@ export const E2E_TAGS = {
   cursor: "@cursor",
   sandbox: "@sandbox",
   environmentsDeploy: "@environments-deploy",
+  sidebar: "@sidebar",
 } as const;
 
 export type E2ETag = (typeof E2E_TAGS)[keyof typeof E2E_TAGS];
