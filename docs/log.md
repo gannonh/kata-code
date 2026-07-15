@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-15 (Sidebar v2 attention tiers approved)
+
+Approved revised [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md): attention tiers + project picker + accordion new-session; pixel contract = `c-attention-session.html`. Hard frontend-only boundary (no environments/sandbox contract changes). Updated [specs roadmap](/specs/index.md) and [specs log](/specs/log.md). Build may proceed on Phases A–D.
+
 ## 2026-07-14 (Recorded web E2E isolation)
 
 Updated the [E2E test catalog](/guides/e2e-test-catalog.md) for the standard isolated `web-dev` fixture and removed documentation references to the retired dedicated web recording fixture.

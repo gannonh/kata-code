@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-15 (Sidebar v2 attention tiers approved)
+
+Revised and re-approved [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) after interactive prototypes (`docs/comps/sidebar-v2-prototypes/c-attention-session.html`). Ship shape: Waiting / Working / Blocked / Idle + project picker + accordion new-session. Hard boundary: frontend/sidebar chrome only; do not touch environments/sandbox/BYOC. Server shell enrichments optional follow-up. Atomic phases A–D with environments suites as regression gate. **Pixel contract:** `c-attention-session.html` is the normative frontend prototype / new design language (exact match; do not adapt into the old app chrome); AC 11 requires maintainer visual sign-off against C. Status **Approved**; Build may proceed.
+
 ## 2026-07-14 (Sidebar v2 hybrid design approved)
 
 Drafted and approved the [Sidebar v2 recency-first hybrid design](/specs/2026-07-14-sidebar-v2-hybrid-design.md). The spec replaces the project-grouped thread sidebar (web + desktop) with one recency-first list: adaptive row density (concept 4), a pinned needs-you section sorted by wait time (concept 3), and a rich-card meta row (concept 1), per the concept exploration captured in `docs/comps/SCR-20260714-ivzt-2.png`. Adds `latestActivity`, `latestTurnDiffStats`, and `blockedSince` to `OrchestrationThreadShell` (projection pipeline + migration for the pending-input timestamp), a Failed status state for `session.lastError`, and removes the per-project "show more" collapse. An adversarial subagent review returned Approve-after-fixes; all 12 findings were incorporated (relocated new-thread/add-project chrome, Failed lifetime, Vitest-browser vs E2E verification split, settings and dnd-kit cleanup scope). Four build phases: contracts/projection, logic, list UI, cleanup + `@sidebar` E2E.
