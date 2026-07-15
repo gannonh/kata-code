@@ -1919,10 +1919,9 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const isComposerRunning = isComposerTurnActive({
     sessionPhase: phase,
-    isSendBusy,
     hasInflightTurn,
   });
-  const isWorking = isComposerRunning || isConnecting || isRevertingCheckpoint;
+  const isWorking = isComposerRunning || isSendBusy || isConnecting || isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -3579,7 +3578,7 @@ function ChatViewContent(props: ChatViewProps) {
         );
         return;
       }
-      if (isComposerRunning || isConnecting) {
+      if (isComposerRunning || isSendBusy || isConnecting) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
@@ -3620,6 +3619,7 @@ function ChatViewContent(props: ChatViewProps) {
       isComposerRunning,
       isConnecting,
       isRevertingCheckpoint,
+      isSendBusy,
       setThreadError,
     ],
   );

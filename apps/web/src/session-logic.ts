@@ -1388,15 +1388,14 @@ export function derivePhase(session: ThreadSession | null): SessionPhase {
 }
 
 /**
- * Composer interruptibility / busy signal. Keeps optimistic send + inflight turns
- * out of {@link derivePhase} so session phase stays a pure projection.
+ * Composer interruptibility signal (Stop affordance). Covers projected session
+ * running and inflight turns only — optimistic local dispatch stays on the
+ * separate `isSendBusy` / Sending path so send-in-flight is not treated as a
+ * stoppable turn.
  */
 export function isComposerTurnActive(input: {
   readonly sessionPhase: SessionPhase;
-  readonly isSendBusy?: boolean;
   readonly hasInflightTurn?: boolean;
 }): boolean {
-  return (
-    input.sessionPhase === "running" || Boolean(input.isSendBusy) || Boolean(input.hasInflightTurn)
-  );
+  return input.sessionPhase === "running" || Boolean(input.hasInflightTurn);
 }

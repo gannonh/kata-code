@@ -61,11 +61,10 @@ describe("derivePhase", () => {
 });
 
 describe("isComposerTurnActive", () => {
-  it("keeps the composer interruptible while optimistic or inflight work precedes session projection", () => {
+  it("keeps the composer interruptible for projected running and inflight turns only", () => {
     expect(
       isComposerTurnActive({
-        sessionPhase: "disconnected",
-        isSendBusy: true,
+        sessionPhase: "running",
       }),
     ).toBe(true);
     expect(
@@ -75,6 +74,7 @@ describe("isComposerTurnActive", () => {
       }),
     ).toBe(true);
     expect(isComposerTurnActive({ sessionPhase: "ready" })).toBe(false);
+    expect(isComposerTurnActive({ sessionPhase: "disconnected" })).toBe(false);
   });
 });
 
