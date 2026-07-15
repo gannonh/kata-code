@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { appendFileSync, closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { appendProcessLog } from "./artifacts.ts";
 import type { E2ERunContext } from "./isolatedRun.ts";
@@ -91,32 +92,31 @@ function killProcessGroup(pid: number, signal: NodeJS.Signals): void {
 }
 
 export async function terminateChildProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) {
-    return;
-  }
+  if (child.exitCode !== null) return;
   const pid = child.pid;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
 
-  await new Promise<void>((resolve) => {
-    child.once("exit", () => resolve());
-    if (child.exitCode !== null) {
-      resolve();
-      return;
-    }
+  // Kill the whole group so Vite + esbuild descendants die with dev-runner.
+  if (pid !== undefined) {
+    killProcessGroup(pid, "SIGTERM");
+  } else {
+    child.kill("SIGTERM");
+  }
+  await Promise.race([exited, delay(5_000)]);
+  if (child.exitCode !== null) return;
 
-    // Kill the whole group so Vite + esbuild descendants die with dev-runner.
-    if (pid !== undefined) {
-      killProcessGroup(pid, "SIGTERM");
-    } else {
-      child.kill("SIGTERM");
+  if (pid !== undefined) {
+    killProcessGroup(pid, "SIGKILL");
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The group kill already reaped the direct child.
     }
-    setTimeout(() => {
-      if (child.exitCode === null) {
-        if (pid !== undefined) {
-          killProcessGroup(pid, "SIGKILL");
-        } else if (!child.killed) {
-          child.kill("SIGKILL");
-        }
-      }
-    }, 5_000).unref();
-  });
+  } else if (!child.killed) {
+    child.kill("SIGKILL");
+  }
+
+  // Teardown must remain bounded even if Node never observes the detached
+  // child's exit event after a forced process-group kill.
+  await Promise.race([exited, delay(1_000)]);
 }
