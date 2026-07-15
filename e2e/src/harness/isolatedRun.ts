@@ -34,6 +34,14 @@ export interface E2ERunContext {
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 const cleanupCallbacksByRunId = new Map<string, Array<() => Promise<void> | void>>();
+let nextPortOffset: number | undefined;
+
+export function resolvePortScanStart(
+  configuredStartOffset: number,
+  nextUnusedOffset: number | undefined,
+): number {
+  return Math.max(configuredStartOffset, nextUnusedOffset ?? configuredStartOffset);
+}
 
 /** Create a unique run id for an isolated E2E worker. */
 function createRunId(): string {
@@ -97,7 +105,11 @@ export async function createIsolatedRun(input: {
   readonly launchTarget: LaunchTarget;
 }): Promise<E2ERunContext> {
   const runId = createRunId();
-  const { offset: startOffset } = resolveStartOffsetFromEnv();
+  const { offset: configuredStartOffset } = resolveStartOffsetFromEnv();
+  // Avoid immediately reusing ports from the previous file-scoped stack. Vite
+  // descendants can still be draining after their root process exits, leaving
+  // a new listener on the same port able to accept connections without serving.
+  const startOffset = resolvePortScanStart(configuredStartOffset, nextPortOffset);
   // Claim ports by holding listening sockets so concurrent workers can't both
   // pick the same free port (TOCTOU). The claim is released right before the
   // dev stack binds the ports in startDevStack.
@@ -107,6 +119,7 @@ export async function createIsolatedRun(input: {
     webPort,
     release: releasePortClaim,
   } = await claimAvailablePortOffset(startOffset);
+  nextPortOffset = offset + 1;
   const katacodeHome = await mkdtemp(join(tmpdir(), `katacode-e2e-home-${runId}-`));
   const workspaceRoot = await mkdtemp(join(tmpdir(), `katacode-e2e-workspace-${runId}-`));
   // Per-worker Electron launcher cache so parallel workers don't clobber a

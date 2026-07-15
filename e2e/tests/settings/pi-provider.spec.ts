@@ -1,3 +1,6 @@
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+
 import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
@@ -14,6 +17,7 @@ test.describe(`Settings Pi provider ${E2E_TAGS.settings}`, () => {
 
   test("adds Pi as an enabled first-party provider instance", async ({
     authenticatedAppWindow,
+    runContext,
   }) => {
     const page = authenticatedAppWindow;
     await openProviderSettings(page);
@@ -36,6 +40,10 @@ test.describe(`Settings Pi provider ${E2E_TAGS.settings}`, () => {
     await expect(dialog.getByLabel("Instance ID")).toHaveValue("pi_e2e_pi");
 
     await dialog.getByRole("button", { name: "Next" }).click();
+    const emptyAgentDir = join(runContext.katacodeHome, "pi-settings-instance");
+    await mkdir(emptyAgentDir, { recursive: true });
+    await dialog.getByLabel("Agent directory").fill(emptyAgentDir);
+    await dialog.getByLabel("Agent directory").blur();
     await dialog.getByRole("button", { name: "Add instance" }).click();
 
     await expect(dialog).toBeHidden();

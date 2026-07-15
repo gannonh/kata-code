@@ -93,7 +93,10 @@ async function bootWebSession(project: AppProject, fileKey: string): Promise<E2E
     browserContext = await browser.newContext();
     const page = await browserContext.newPage();
     const readFatalErrors = attachFatalLaunchErrorTracking(page);
-    await page.goto(pairingUrl);
+    await page.goto(pairingUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: E2E_TIMEOUTS.pairingMs,
+    });
     // Keep the one-time token in the URL until the pairing page consumes it.
     // The generic shell wait reloads a visible pairing gate for Electron startup
     // recovery, which would discard the web token hash before submission.
