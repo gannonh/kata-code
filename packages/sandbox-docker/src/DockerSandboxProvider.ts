@@ -305,6 +305,21 @@ function waitForReady(
   });
 }
 
+export function isTransientRecursiveChownRace(result: {
+  readonly exitCode: number;
+  readonly stderr: string;
+}): boolean {
+  const errors = result.stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (
+    result.exitCode !== 0 &&
+    errors.length > 0 &&
+    errors.every((line) => line.includes("No such file or directory"))
+  );
+}
+
 export function makeDockerSandboxProvider(
   options: DockerSandboxProviderOptions = {},
 ): SandboxProvider {
@@ -355,9 +370,14 @@ export function makeDockerSandboxProvider(
           // Ensure all extracted files and intermediate directories are
           // katacode-owned — Docker creates parent dirs as root when directory
           // entries are absent from the tar (see ustarWriter).
-          const chown = yield* provider.exec(handle, `chown -R 100:101 '${destPath}'`, {
-            user: "root",
-          });
+          const chownCommand = `chown -R 100:101 '${destPath}'`;
+          let chown = yield* provider.exec(handle, chownCommand, { user: "root" });
+          // Credential tools create and remove lock files while the server is
+          // running. Retry the same ownership pass once when a lock disappears
+          // during recursive traversal; every surviving file is revisited.
+          if (isTransientRecursiveChownRace(chown)) {
+            chown = yield* provider.exec(handle, chownCommand, { user: "root" });
+          }
           if (chown.exitCode !== 0) {
             return yield* new SandboxProviderError({
               reason: "provision-failed",

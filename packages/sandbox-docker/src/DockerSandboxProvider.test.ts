@@ -11,6 +11,7 @@ import {
   makeDockerSandboxProvider,
   dockerContainerName,
   dockerConfigDecoder,
+  isTransientRecursiveChownRace,
   DOCKER_KIND,
   type DockerSandboxHandleState,
 } from "./DockerSandboxProvider.ts";
@@ -27,6 +28,22 @@ describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
     expect(dockerContainerName("docker_docker_test_01")).toBe(
       dockerContainerName("docker_docker_test_01"),
     );
+  });
+
+  it("retries recursive ownership only when files disappear during traversal", () => {
+    expect(
+      isTransientRecursiveChownRace({
+        exitCode: 1,
+        stderr: "chown: /home/katacode/.claude.json.lock: No such file or directory\n",
+      }),
+    ).toBe(true);
+    expect(
+      isTransientRecursiveChownRace({
+        exitCode: 1,
+        stderr: "chown: /home/katacode/auth.json: Operation not permitted\n",
+      }),
+    ).toBe(false);
+    expect(isTransientRecursiveChownRace({ exitCode: 0, stderr: "" })).toBe(false);
   });
 
   it("testConnection probe ids do not collide with durable container names", () => {
