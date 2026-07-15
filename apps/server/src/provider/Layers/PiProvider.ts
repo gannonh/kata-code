@@ -309,7 +309,8 @@ const probePiVersion = (
  * Discover the skills and prompt commands shown in Kata's Pi provider UI.
  * Provider health checks must not execute extensions, load themes, or scan
  * context files because those runtime-only resources can synchronously block
- * the server event loop and starve WebSocket heartbeats.
+ * the server event loop and starve WebSocket heartbeats. Project skill paths
+ * and the trust policy still apply so discovery matches the real agent cwd.
  */
 export const discoverPiResources = Effect.fn("discoverPiResources")(function* (
   input: PiResourceDiscoveryInput,

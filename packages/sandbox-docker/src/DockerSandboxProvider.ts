@@ -567,18 +567,14 @@ export function makeDockerSandboxProvider(
         const name = dockerContainerName(req.instanceId);
 
         // Idempotent adopt: a container with this name may already exist from a
-        // previous provision or a server restart. Running -> reuse it; stopped ->
-        // start it; missing -> create+start below. This makes provision safe to
-        // retry and lets the session store reclaim a container after a restart.
+        // previous provision or a server restart. Running → restart so the
+        // in-container server re-seeds its one-time bootstrap grant; stopped →
+        // start it; missing → create+start below. Restart is required because a
+        // long-running adopted container has already consumed its grant.
         const existing = yield* inspectContainer(name, "provision-failed", "provision adopt");
         if (existing !== null) {
           yield* assertOwnedContainer(existing, req.instanceId);
           if (existing.State.Running) {
-            // Already running: restart so the in-container server re-boots and
-            // re-seeds its one-time bootstrap grant. A long-running adopted
-            // container has already consumed its grant during a previous
-            // registration, so adopting it without a restart makes the
-            // follow-up Connect registration fail `invalid_credential`.
             // Provision only runs when no session record exists, so nothing is
             // using the container.
             const restartRes = yield* engine(
@@ -813,6 +809,25 @@ export function makeDockerSandboxProvider(
         wsBaseUrl: `ws://localhost:${state.hostPort}`,
       } satisfies SandboxReachability);
     },
+
+    /**
+     * Docker container env is fixed at create time. Lifecycle start / adopt
+     * restart re-seeds the ORIGINAL create-time bootstrap grant, not a freshly
+     * minted host token — read the effective token from the container env.
+     */
+    resolveBootstrapToken: (handle, _mintedToken) =>
+      Effect.gen(function* () {
+        const recovered = yield* provider.exec(handle, "printenv KATACODE_DESKTOP_BOOTSTRAP_TOKEN");
+        const token = recovered.stdout.trim();
+        if (token.length === 0) {
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message:
+              "Started container has no KATACODE_DESKTOP_BOOTSTRAP_TOKEN in its environment; delete the sandbox and create it again.",
+          });
+        }
+        return token;
+      }),
 
     dispose: (handle) =>
       Effect.gen(function* () {

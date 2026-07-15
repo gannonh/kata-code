@@ -6,7 +6,7 @@ import { SandboxProviderDriverKind } from "@kata-sh/code-sandbox-contracts/insta
 import { SandboxReachabilityKind } from "@kata-sh/code-sandbox-contracts/reachability";
 import type { SandboxHandle, SandboxProvider } from "@kata-sh/code-sandbox/driver";
 
-import { recoverDockerBootstrapToken } from "./sandboxStartSession.ts";
+import { resolveBootstrapToken } from "./sandboxStartSession.ts";
 
 const kind = SandboxProviderDriverKind.make("docker");
 
@@ -16,12 +16,12 @@ const handle: SandboxHandle = {
   handle: { containerId: "c1", containerName: "kata-sandbox-x", hostPort: 1, containerPort: 2 },
 };
 
-function driverWithEnvToken(stdout: string): SandboxProvider {
+function driverWithResolver(resolve: SandboxProvider["resolveBootstrapToken"]): SandboxProvider {
   return {
     kind,
     validate: () => Effect.void,
     provision: () => Effect.succeed(handle),
-    exec: () => Effect.succeed({ exitCode: 0, stdout, stderr: "" }),
+    exec: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
     reachability: () =>
       Effect.succeed({
         reachabilityKind: SandboxReachabilityKind.make("loopback"),
@@ -38,35 +38,26 @@ function driverWithEnvToken(stdout: string): SandboxProvider {
         supportsCopyInto: false,
         supportsLifecycle: true,
       }),
+    ...(resolve ? { resolveBootstrapToken: resolve } : {}),
   };
 }
 
-describe("recoverDockerBootstrapToken", () => {
-  // Docker container env is fixed at create time. Both the lifecycle-start
-  // path and the provision path that ADOPTS an existing named container must
-  // register with the token the in-container server actually booted with;
-  // registering with a freshly minted token fails `invalid_credential`.
-  vitIt.effect("returns the create-time token from the container environment", () =>
+describe("resolveBootstrapToken", () => {
+  vitIt.effect("keeps the minted token when the driver has no resolver", () =>
     Effect.gen(function* () {
-      const token = yield* recoverDockerBootstrapToken(
-        driverWithEnvToken("create-time-token\n"),
-        handle,
-      );
-      expect(token).toBe("create-time-token");
+      const token = yield* resolveBootstrapToken(driverWithResolver(undefined), handle, "minted");
+      expect(token).toBe("minted");
     }),
   );
 
-  vitIt.effect("fails loud when the container has no bootstrap token", () =>
+  vitIt.effect("uses the driver-resolved create-time token when present", () =>
     Effect.gen(function* () {
-      const result = yield* recoverDockerBootstrapToken(driverWithEnvToken(""), handle).pipe(
-        Effect.matchEffect({
-          onFailure: (error) => Effect.succeed(error),
-          onSuccess: () => Effect.succeed(null),
-        }),
+      const token = yield* resolveBootstrapToken(
+        driverWithResolver((_handle, _minted) => Effect.succeed("create-time-token")),
+        handle,
+        "minted",
       );
-      expect(result).not.toBeNull();
-      expect(result?.reason).toBe("connect-failed");
-      expect(result?.message).toContain("KATACODE_DESKTOP_BOOTSTRAP_TOKEN");
+      expect(token).toBe("create-time-token");
     }),
   );
 });

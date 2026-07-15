@@ -17,7 +17,6 @@ import {
   type SandboxHandle,
   type SandboxProvider,
 } from "@kata-sh/code-sandbox/driver";
-import { DockerSandboxProvider } from "@kata-sh/code-sandbox-docker";
 import { VERCEL_KIND, VERCEL_SOURCE_TOKEN_ENV } from "@kata-sh/code-sandbox-vercel";
 
 import type * as CliTokenManager from "../cloud/CliTokenManager.ts";
@@ -85,45 +84,16 @@ export interface SandboxStartSessionRuntime {
 }
 
 /**
- * Recover the bootstrap token the in-container Kata server actually booted
- * with. Docker container env is fixed at create time: when a container is
- * started again (lifecycle start, or provision adopting an existing named
- * container), the restarted server re-seeds its ORIGINAL create-time grant,
- * not the token freshly minted for this request. Registering with the minted
- * token would fail `invalid_credential`, so read the effective token from the
- * container env. For a freshly created container this returns the minted
- * token unchanged.
+ * Prefer the driver-resolved bootstrap token when present (Docker create-time
+ * env). Other drivers keep the freshly minted token.
  */
-export const recoverDockerBootstrapToken = (
-  driver: SandboxProvider,
-  handle: SandboxHandle,
-): Effect.Effect<string, SandboxRpcError> =>
-  Effect.gen(function* () {
-    const recovered = yield* driver
-      .exec(handle, "printenv KATACODE_DESKTOP_BOOTSTRAP_TOKEN")
-      .pipe(Effect.mapError(mapDriverError));
-    const token = recovered.stdout.trim();
-    if (token.length === 0) {
-      return yield* new SandboxRpcError({
-        reason: "connect-failed",
-        message:
-          "Started container has no KATACODE_DESKTOP_BOOTSTRAP_TOKEN in its environment; delete the sandbox and create it again.",
-      });
-    }
-    return token;
-  });
-
-const isDockerDriver = (driver: SandboxProvider): boolean =>
-  (driver.kind as string) === (DockerSandboxProvider.kind as string);
-
-/** Docker needs the create-time token; other drivers keep the minted token. */
-const resolveBootstrapTokenForDriver = (
+export const resolveBootstrapToken = (
   driver: SandboxProvider,
   handle: SandboxHandle,
   mintedToken: string,
 ): Effect.Effect<string, SandboxRpcError> =>
-  isDockerDriver(driver)
-    ? recoverDockerBootstrapToken(driver, handle)
+  driver.resolveBootstrapToken
+    ? driver.resolveBootstrapToken(handle, mintedToken).pipe(Effect.mapError(mapDriverError))
     : Effect.succeed(mintedToken);
 
 export const startSandboxSession = (
@@ -255,8 +225,8 @@ export const startSandboxSession = (
           .start(handle, { config: resolvedConfig.config, env })
           .pipe(Effect.mapError(mapDriverError));
         // (Vercel relaunches `serve` with the fresh env, so it keeps the
-        // fresh token; Docker needs the create-time token recovered.)
-        const effectiveBootstrapToken = yield* resolveBootstrapTokenForDriver(
+        // fresh token; drivers with resolveBootstrapToken recover create-time.)
+        const effectiveBootstrapToken = yield* resolveBootstrapToken(
           inst.driver,
           started,
           bootstrapToken,
@@ -490,10 +460,9 @@ export const startSandboxSession = (
         );
       }
 
-      // Docker provision may have ADOPTED an existing named container from a
-      // previous run instead of creating one; its server booted with that
-      // container's create-time bootstrap token, not the one minted above.
-      const provisionBootstrapToken = yield* resolveBootstrapTokenForDriver(
+      // Drivers that adopt existing runtimes (Docker) may need the create-time
+      // bootstrap token rather than the one minted above.
+      const provisionBootstrapToken = yield* resolveBootstrapToken(
         inst.driver,
         handle,
         bootstrapToken,

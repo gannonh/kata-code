@@ -46,6 +46,10 @@ describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
     expect(isTransientRecursiveChownRace({ exitCode: 0, stderr: "" })).toBe(false);
   });
 
+  it("exposes resolveBootstrapToken for create-time credential recovery", () => {
+    expect(typeof DockerSandboxProvider.resolveBootstrapToken).toBe("function");
+  });
+
   it("testConnection probe ids do not collide with durable container names", () => {
     const durable = "docker_docker_test_01";
     const probe = `${durable}__probe_abcd1234`;

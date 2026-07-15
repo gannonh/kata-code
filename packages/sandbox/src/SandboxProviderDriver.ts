@@ -212,6 +212,15 @@ export interface SandboxProvider {
   readonly copyInto?: SandboxCopyIntoCapability;
   /** Optional durable lifecycle capability (stop/start/status). Absent ⇒ `describe().supportsLifecycle === false`. */
   readonly lifecycle?: SandboxLifecycleCapability;
+  /**
+   * Optional: when sandbox env is fixed at create time (Docker), return the
+   * bootstrap token the in-sandbox server actually booted with. Absent ⇒
+   * callers keep the freshly minted token (Vercel relaunches with new env).
+   */
+  readonly resolveBootstrapToken?: (
+    handle: SandboxHandle,
+    mintedToken: string,
+  ) => Effect.Effect<string, SandboxProviderError>;
 }
 
 /**
