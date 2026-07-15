@@ -9,12 +9,20 @@ import { startDevStack } from "./devStack.ts";
 import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
+import { killPids, listDescendantPids } from "./processTree.ts";
 import { resolveReleaseExecutablePath } from "./releaseTarget.ts";
 import { buildElectronLaunchEnv, isRendererWindow, resolveRendererTarget } from "./launchEnv.ts";
 
 const ELECTRON_CLOSE_TIMEOUT_MS = 5_000;
 
 async function closeElectronApp(app: ElectronApplication): Promise<void> {
+  // Snapshot the tree before closing: Electron main spawns the embedded
+  // server as a child (apps/server bin via --bootstrap-fd). If main dies
+  // without cleanup the child orphans to PID 1 and keeps listening on the
+  // run's server port, poisoning any later run that reuses the offset.
+  const mainPid = app.process().pid;
+  const descendants = mainPid !== undefined ? listDescendantPids(mainPid) : [];
+
   let settled = false;
   const close = app
     .close()
@@ -24,13 +32,17 @@ async function closeElectronApp(app: ElectronApplication): Promise<void> {
     });
 
   await Promise.race([close, delay(ELECTRON_CLOSE_TIMEOUT_MS)]);
-  if (settled) return;
-
-  try {
-    app.process().kill("SIGKILL");
-  } catch {
-    // The process exited between the timeout check and the forced kill.
+  if (!settled) {
+    try {
+      app.process().kill("SIGKILL");
+    } catch {
+      // The process exited between the timeout check and the forced kill.
+    }
   }
+
+  // Reap survivors regardless of how main exited — a graceful close can still
+  // strand the embedded server child if main was killed before its cleanup.
+  killPids(descendants, "SIGKILL");
 }
 
 async function resolveDevElectronLaunchCommand(
@@ -52,6 +64,16 @@ async function resolveDevElectronLaunchCommand(
 }
 
 function attachElectronLogging(context: E2ERunContext, app: ElectronApplication): void {
+  // Main-process output carries embedded-server crash traces that the
+  // renderer console never sees; without it a mid-test backend death is
+  // undiagnosable from artifacts.
+  const main = app.process();
+  main.stdout?.on("data", (chunk: Buffer) => {
+    void appendProcessLog(context, "electron-main-stdout", chunk.toString("utf8"));
+  });
+  main.stderr?.on("data", (chunk: Buffer) => {
+    void appendProcessLog(context, "electron-main-stderr", chunk.toString("utf8"));
+  });
   app.on("window", (page) => {
     page.on("console", (message) => {
       void appendProcessLog(context, "renderer-console", `[${message.type()}] ${message.text()}\n`);

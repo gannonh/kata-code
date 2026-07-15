@@ -17,6 +17,7 @@
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
@@ -91,43 +92,58 @@ function commandFor(pid: number): string {
 }
 
 const selfPid = process.pid;
-const byCommand = pidsMatchingCommand();
-const byPort = pidsListeningInRanges();
 
-const targets = new Map<number, string>();
-for (const [pid, command] of byCommand) {
-  if (pid !== selfPid) targets.set(pid, command);
-}
-for (const pid of byPort) {
-  if (pid !== selfPid && !targets.has(pid)) {
-    targets.set(pid, commandFor(pid) || "(port listener)");
+function collectTargets(): Map<number, string> {
+  const targets = new Map<number, string>();
+  for (const [pid, command] of pidsMatchingCommand()) {
+    if (pid !== selfPid) targets.set(pid, command);
   }
-}
-
-if (targets.size === 0) {
-  Effect.runSync(Console.log("[e2e:clean] No leaked E2E dev stacks or Electron apps found."));
-  process.exit(0);
-}
-
-let killed = 0;
-for (const [pid, command] of targets) {
-  try {
-    // Try the process group first (negative PID) so detached descendants
-    // (esbuild workers, Vite children) are reaped alongside the leader. Fall
-    // back to the single PID for standalone processes that aren't group
-    // leaders.
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch {
-      process.kill(pid, "SIGKILL");
+  for (const pid of pidsListeningInRanges()) {
+    if (pid !== selfPid && !targets.has(pid)) {
+      targets.set(pid, commandFor(pid) || "(port listener)");
     }
-    killed += 1;
-    Effect.runSync(Console.log(`[e2e:clean] killed pid ${pid}: ${command.slice(0, 100)}`));
-  } catch (error) {
-    Effect.runSync(
-      Console.warn(`[e2e:clean] could not kill pid ${pid}: ${(error as Error).message}`),
-    );
   }
+  return targets;
 }
 
-Effect.runSync(Console.log(`[e2e:clean] Reaped ${killed} leaked process(es).`));
+const killedPids = new Set<number>();
+// A process-group kill is asynchronous, and orphaned Vite children can become
+// visible only after their dev-runner parent exits. Sweep until the managed
+// process set stays empty so the next E2E stack cannot race a draining listener.
+for (let attempt = 0; attempt < 50; attempt += 1) {
+  const targets = collectTargets();
+  if (targets.size === 0) break;
+
+  for (const [pid, command] of targets) {
+    try {
+      // Try the process group first (negative PID) so detached descendants
+      // (esbuild workers, Vite children) are reaped alongside the leader. Fall
+      // back to the single PID for standalone processes that aren't group
+      // leaders.
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        process.kill(pid, "SIGKILL");
+      }
+      if (!killedPids.has(pid)) {
+        killedPids.add(pid);
+        Effect.runSync(Console.log(`[e2e:clean] killed pid ${pid}: ${command.slice(0, 100)}`));
+      }
+    } catch {
+      // The process exited between discovery and the kill.
+    }
+  }
+  await delay(100);
+}
+
+const remaining = collectTargets();
+if (remaining.size > 0) {
+  Effect.runSync(
+    Console.warn(`[e2e:clean] ${remaining.size} managed process(es) still remain after 5s.`),
+  );
+  process.exitCode = 1;
+} else if (killedPids.size === 0) {
+  Effect.runSync(Console.log("[e2e:clean] No leaked E2E dev stacks or Electron apps found."));
+} else {
+  Effect.runSync(Console.log(`[e2e:clean] Reaped ${killedPids.size} leaked process(es).`));
+}

@@ -8,8 +8,8 @@ describe("E2E port allocation contract", () => {
     expect(resolvePortScanStart(1, undefined)).toBe(1);
     expect(resolvePortScanStart(1, 4)).toBe(4);
     expect(resolvePortScanStart(6, 4)).toBe(6);
-    expect(resolvePortScanStart(1, undefined, 2)).toBe(201);
-    expect(resolvePortScanStart(1, 150, 2)).toBe(201);
+    expect(resolvePortScanStart(1, undefined, 2)).toBe(41);
+    expect(resolvePortScanStart(1, 30, 2)).toBe(41);
   });
 
   it("uses the allocated offset for KATACODE_PORT_OFFSET, not the probe start offset", () => {

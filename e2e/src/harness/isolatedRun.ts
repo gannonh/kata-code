@@ -41,7 +41,7 @@ export function resolvePortScanStart(
   nextUnusedOffset: number | undefined,
   workerIndex = 0,
 ): number {
-  const workerStartOffset = configuredStartOffset + Math.max(0, workerIndex) * 100;
+  const workerStartOffset = configuredStartOffset + Math.max(0, workerIndex) * 20;
   return Math.max(workerStartOffset, nextUnusedOffset ?? workerStartOffset);
 }
 

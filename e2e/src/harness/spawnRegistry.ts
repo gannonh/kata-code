@@ -9,6 +9,8 @@
  * reap every tracked group so a leaked stack can't survive the harness process.
  */
 
+import { killPids, listDescendantPids } from "./processTree.ts";
+
 const trackedPids = new Set<number>();
 let handlersInstalled = false;
 
@@ -23,7 +25,12 @@ function killGroup(pid: number, signal: NodeJS.Signals): void {
 /** Synchronously SIGKILL every tracked process group. Safe to call on exit. */
 export function reapAllSpawnedStacks(): void {
   for (const pid of trackedPids) {
+    // Snapshot descendants before killing the leader: the dev stack spans
+    // multiple process groups (`vp run` re-groups the watched server), and
+    // survivors reparent to PID 1 once the leader dies.
+    const descendants = listDescendantPids(pid);
     killGroup(pid, "SIGKILL");
+    killPids(descendants, "SIGKILL");
   }
   trackedPids.clear();
 }
