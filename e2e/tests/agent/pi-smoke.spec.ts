@@ -15,11 +15,25 @@ import {
   configureDefaultPiProvider,
   formatPiSmokeSkipReason,
   readPiSmokeConfig,
+  stagePiAgentDirectory,
 } from "../../src/flows/piProvider.ts";
 import { createOrOpenProject, createSeededWorkspace } from "../../src/flows/workspace.ts";
 import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts";
 
 const piSmoke = readPiSmokeConfig();
+
+async function configureStagedPiProvider(
+  page: Parameters<typeof configureDefaultPiProvider>[0],
+  runContext: Parameters<typeof stagePiAgentDirectory>[0],
+): Promise<void> {
+  if (!piSmoke.ok) return;
+  const agentDir = await stagePiAgentDirectory(
+    runContext,
+    piSmoke.config.agentDir,
+    piSmoke.config.model,
+  );
+  await configureDefaultPiProvider(page, { ...piSmoke.config, agentDir });
+}
 
 test.describe(`Pi provider smoke ${E2E_TAGS.pi}`, () => {
   test.skip(!piSmoke.ok, piSmoke.ok ? undefined : formatPiSmokeSkipReason(piSmoke.missing));
@@ -37,7 +51,7 @@ test.describe(`Pi provider smoke ${E2E_TAGS.pi}`, () => {
   }) => {
     if (!piSmoke.ok) return;
 
-    await configureDefaultPiProvider(authenticatedAppWindow, piSmoke.config);
+    await configureStagedPiProvider(authenticatedAppWindow, runContext);
 
     const turn = buildDeterministicAgentTurn("pi", piSmoke.config.model);
     const seededPath = await createSeededWorkspace(runContext, "pi-agent-smoke");
@@ -54,7 +68,7 @@ test.describe(`Pi provider smoke ${E2E_TAGS.pi}`, () => {
   }) => {
     if (!piSmoke.ok) return;
 
-    await configureDefaultPiProvider(authenticatedAppWindow, piSmoke.config);
+    await configureStagedPiProvider(authenticatedAppWindow, runContext);
     const turn = buildDeterministicAgentTurn("pi", piSmoke.config.model);
     const seededPath = await createSeededWorkspace(runContext, "pi-interrupt");
     await writeRunManifest(runContext);
@@ -79,7 +93,7 @@ test.describe(`Pi provider smoke ${E2E_TAGS.pi}`, () => {
   }) => {
     if (!piSmoke.ok) return;
 
-    await configureDefaultPiProvider(authenticatedAppWindow, piSmoke.config);
+    await configureStagedPiProvider(authenticatedAppWindow, runContext);
     const seededPath = await createSeededWorkspace(runContext, "pi-tool-lifecycle");
     await writeRunManifest(runContext);
     await createOrOpenProject(authenticatedAppWindow, seededPath);
@@ -97,7 +111,7 @@ test.describe(`Pi provider smoke ${E2E_TAGS.pi}`, () => {
   }) => {
     if (!piSmoke.ok) return;
 
-    await configureDefaultPiProvider(authenticatedAppWindow, piSmoke.config);
+    await configureStagedPiProvider(authenticatedAppWindow, runContext);
     const seededPath = await createSeededWorkspace(runContext, "pi-runtime-mode");
     await writeRunManifest(runContext);
     await createOrOpenProject(authenticatedAppWindow, seededPath);

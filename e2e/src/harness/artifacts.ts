@@ -10,6 +10,10 @@ export function resolveE2eRoot(): string {
   return e2eRoot;
 }
 
+export function resolveRepoRoot(): string {
+  return join(e2eRoot, "..");
+}
+
 export function resolveAuthStatePath(): string {
   return join(e2eRoot, ".auth", "user.json");
 }

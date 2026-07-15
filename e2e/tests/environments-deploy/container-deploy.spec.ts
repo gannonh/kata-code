@@ -12,6 +12,7 @@ import {
   openConnectionsSettings,
 } from "../../src/flows/settings.ts";
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
+import { deleteSandboxDeploymentTarget } from "../../src/flows/sandboxDeployment.ts";
 import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/workspace.ts";
 import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts";
 
@@ -325,9 +326,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
     // Clean up the target via the trash button on the card row.
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-    await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+    await deleteSandboxDeploymentTarget(page, "E2E Smoke");
   });
 
   test("saved repo environment seeds, injects secrets, and launches setup processes", async ({
@@ -439,9 +438,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
     await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
     await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-    await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+    await deleteSandboxDeploymentTarget(page, "E2E Phase2");
   });
 
   test(
@@ -502,9 +499,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
       await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
-      await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-      await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await deleteSandboxDeploymentTarget(page, "E2E Phase3a");
     },
   );
 
@@ -583,9 +578,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
       await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
-      await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-      await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await deleteSandboxDeploymentTarget(page, "E2E Lifecycle");
     },
   );
 });

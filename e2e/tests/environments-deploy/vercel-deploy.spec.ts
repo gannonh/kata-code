@@ -14,6 +14,7 @@ import {
   selectVercelSource,
 } from "../../src/flows/settings.ts";
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
+import { deleteSandboxDeploymentTarget } from "../../src/flows/sandboxDeployment.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
 import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
 import {
@@ -158,16 +159,6 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
       })
       .toBe(false);
 
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-
-    // Removing the deployment target exposes its saved runtime as an orphan
-    // row with the same heading, so the card locator intentionally rebinds.
-    // Delete that saved runtime before asserting the named row is gone.
-    await expect(card.getByText(/Orphaned sandbox runtime/)).toBeVisible({
-      timeout: E2E_TIMEOUTS.assertionMs,
-    });
-    await card.getByRole("button", { name: "Delete", exact: true }).click();
-    await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+    await deleteSandboxDeploymentTarget(page, "E2E Vercel");
   });
 });

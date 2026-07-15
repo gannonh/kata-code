@@ -1,6 +1,9 @@
+import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, type Page } from "@playwright/test";
 
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
+import type { E2ERunContext } from "../harness/isolatedRun.ts";
 import { dismissBlockingToasts } from "./navigation.ts";
 import { openProviderSettings } from "./settings.ts";
 
@@ -14,6 +17,11 @@ const REQUIRED_PI_ENV = [
   "KATACODE_E2E_PI_AGENT_DIR",
   "KATACODE_E2E_PI_MODEL",
 ] as const;
+
+const PI_AGENT_AUTH_FILE = "auth.json";
+const PI_AGENT_MODELS_FILE = "models.json";
+const PI_AGENT_SETTINGS_FILE = "settings.json";
+const ANTHROPIC_OAUTH_PACKAGE = "npm:pi-anthropic-oauth";
 
 export function readPiSmokeConfig():
   | { readonly ok: true; readonly config: PiSmokeConfig }
@@ -36,6 +44,46 @@ export function readPiSmokeConfig():
 
 export function formatPiSmokeSkipReason(missing: ReadonlyArray<string>): string {
   return `Pi E2E smoke skipped. Missing or disabled: ${missing.join(", ")}.`;
+}
+
+/**
+ * Stages the Pi credentials needed for real-model authentication into this
+ * E2E run's isolated Kata Code home. Pi reloads only this small directory.
+ */
+export async function stagePiAgentDirectory(
+  runContext: Pick<E2ERunContext, "katacodeHome">,
+  sourceAgentDir: string,
+  model: string,
+): Promise<string> {
+  const stagedAgentDir = join(runContext.katacodeHome, "pi-agent");
+  const sourceAuthPath = join(sourceAgentDir, PI_AGENT_AUTH_FILE);
+
+  try {
+    await stat(sourceAuthPath);
+  } catch (error) {
+    throw new Error(`Pi E2E agent credentials missing required file: ${sourceAuthPath}`, {
+      cause: error,
+    });
+  }
+
+  await mkdir(stagedAgentDir, { recursive: true });
+  await copyFile(sourceAuthPath, join(stagedAgentDir, PI_AGENT_AUTH_FILE));
+
+  const sourceModelsPath = join(sourceAgentDir, PI_AGENT_MODELS_FILE);
+  try {
+    await copyFile(sourceModelsPath, join(stagedAgentDir, PI_AGENT_MODELS_FILE));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  if (model.startsWith("anthropic/")) {
+    await writeFile(
+      join(stagedAgentDir, PI_AGENT_SETTINGS_FILE),
+      `${JSON.stringify({ packages: [ANTHROPIC_OAUTH_PACKAGE] }, null, 2)}\n`,
+    );
+  }
+
+  return stagedAgentDir;
 }
 
 export async function configureDefaultPiProvider(page: Page, config: PiSmokeConfig): Promise<void> {

@@ -204,14 +204,14 @@ pnpm run dev:web
 # Open codegen recorder
 pnpm run e2e:codegen
 
-# Run only recorded web tests with the codegen config
+# Run only recorded web tests with the isolated web-dev fixture
 pnpm run e2e:recorded
 
 # Run all shared and recorded specs against web-dev
 pnpm run e2e:web
 ```
 
-Config: [`e2e/playwright.codegen.config.ts`](e2e/playwright.codegen.config.ts). Recorded tests go in [`e2e/tests/web/`](e2e/tests/web/). `KATACODE_WEB_URL` overrides the URL for codegen and recorded-only runs; shared `web-dev` specs always use their isolated allocated URL.
+Config: [`e2e/playwright.codegen.config.ts`](e2e/playwright.codegen.config.ts). Recorded tests go in [`e2e/tests/web/`](e2e/tests/web/). `KATACODE_WEB_URL` overrides the codegen URL; the `web-dev` test project uses an isolated allocated URL.
 
 ## Adopting this foundation in other repos
 

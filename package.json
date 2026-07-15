@@ -53,7 +53,7 @@
     "e2e:mobile:test": "vp run --filter @kata-sh/code-mobile-e2e test",
     "e2e:mobile:studio": "node mobile-e2e/src/cli/run.ts --studio",
     "e2e:codegen": "playwright codegen http://localhost:5733 --config e2e/playwright.codegen.config.ts",
-    "e2e:recorded": "playwright test --config e2e/playwright.codegen.config.ts",
+    "e2e:recorded": "playwright test --config e2e/playwright.config.ts e2e/tests/web/recorded.spec.ts --project web-dev --workers=1",
     "check:okf": "node scripts/check-okf.mjs",
     "worktree:setup": "bash scripts/worktree-setup.sh",
     "build:docker-image": "docker build -t katacode:local .",

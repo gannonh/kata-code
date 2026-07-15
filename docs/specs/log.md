@@ -145,7 +145,7 @@ Finalized `feat/deployments-phase-2` after the simplify (`37e7f5404`) and strict
 
 - Fixed Pi provider E2E test: updated radio locator from `name: "Pi", exact: true` to `name: "Pi Early Access"` to match the accessible name (badge included).
 - Added `web-dev` project to [Playwright config](../../e2e/playwright.config.ts) with per-project `testIgnore` so Electron projects don't pick up web tests.
-- Created [`webSetup.ts`](../../e2e/src/harness/webSetup.ts) fixture: starts dev server, captures `pairingUrl` from stdout, authenticates via pairing URL auto-submit.
+- Created an authenticated web fixture that starts the dev server, captures `pairingUrl` from stdout, and authenticates via pairing URL auto-submit.
 - Updated [E2E test catalog](/guides/e2e-test-catalog.md) web section with fixture usage, `web-dev` project commands, and `webPage` authenticated fixture example.
 
 ## 2026-06-26 (Pi provider — strict quality review fixes)
