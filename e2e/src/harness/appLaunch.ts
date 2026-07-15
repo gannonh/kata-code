@@ -95,7 +95,6 @@ async function resolveRendererWindow(
   rendererPort: number,
   rendererPortLabel: string,
   timeoutMs: number,
-  signal: AbortSignal,
 ): Promise<Page> {
   const deadline = Date.now() + timeoutMs;
 
@@ -118,11 +117,6 @@ async function resolveRendererWindow(
 
     const poll = async () => {
       while (Date.now() < deadline) {
-        if (signal.aborted) {
-          fail(signal.reason instanceof Error ? signal.reason : new Error("Renderer wait aborted"));
-          return;
-        }
-
         for (const page of electronApp.windows()) {
           const url = page.url();
           if (isRendererWindow(url, rendererPort)) {
@@ -132,7 +126,7 @@ async function resolveRendererWindow(
           }
         }
 
-        await delay(250, undefined, { signal });
+        await delay(250);
       }
 
       const windowUrls = electronApp.windows().map((page) => page.url());
@@ -195,7 +189,6 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
     rendererPort,
     rendererPortLabel,
     E2E_TIMEOUTS.electronWindowMs,
-    AbortSignal.timeout(E2E_TIMEOUTS.electronWindowMs),
   );
   logHarnessPhase("Electron renderer window is ready.");
 

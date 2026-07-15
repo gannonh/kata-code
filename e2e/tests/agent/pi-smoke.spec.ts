@@ -21,18 +21,20 @@ import { createOrOpenProject, createSeededWorkspace } from "../../src/flows/work
 import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts";
 
 const piSmoke = readPiSmokeConfig();
+const configuredPiPages = new WeakSet<Parameters<typeof configureDefaultPiProvider>[0]>();
 
 async function configureStagedPiProvider(
   page: Parameters<typeof configureDefaultPiProvider>[0],
   runContext: Parameters<typeof stagePiAgentDirectory>[0],
 ): Promise<void> {
-  if (!piSmoke.ok) return;
+  if (!piSmoke.ok || configuredPiPages.has(page)) return;
   const agentDir = await stagePiAgentDirectory(
     runContext,
     piSmoke.config.agentDir,
     piSmoke.config.model,
   );
   await configureDefaultPiProvider(page, { ...piSmoke.config, agentDir });
+  configuredPiPages.add(page);
 }
 
 test.describe(`Pi provider smoke ${E2E_TAGS.pi}`, () => {
