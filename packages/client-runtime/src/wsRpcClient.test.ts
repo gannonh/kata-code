@@ -18,6 +18,7 @@ vi.mock("./wsTransport.ts", () => ({
 
 import { createWsRpcClient } from "./wsRpcClient.ts";
 import type { WsTransport } from "./wsTransport.ts";
+import { WS_RPC_MISSED_PONGS_BEFORE_TIMEOUT } from "./wsRpcProtocol.ts";
 
 const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,
@@ -36,6 +37,11 @@ const baseRemoteStatus: VcsStatusRemoteResult = {
 };
 
 describe("createWsRpcClient", () => {
+  it("documents the patched Effect pinger miss threshold used by wsRpcProtocol", () => {
+    // Keep in sync with patches/effect@4.0.0-beta.78.patch makePinger.
+    expect(WS_RPC_MISSED_PONGS_BEFORE_TIMEOUT).toBe(3);
+  });
+
   it("runs beforeReconnect before awaiting transport.reconnect", async () => {
     const order: string[] = [];
     const transport = {

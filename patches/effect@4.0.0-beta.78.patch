@@ -267,7 +267,7 @@ index a3161eb..0cb81f3 100644
 +  }).pipe(Effect.andThen(hooks?.onPong ?? Effect.void));
    yield* Effect.suspend(() => {
 -    if (!recievedPong) return latch.open;
-+    if (!recievedPong && ++missedPongs >= 3) return latch.open;
++    if (!recievedPong && ++missedPongs >= 3 /* WS_RPC_MISSED_PONGS_BEFORE_TIMEOUT */) return latch.open;
      recievedPong = false;
 -    return writePing;
 +    return (hooks?.onPing ?? Effect.void).pipe(Effect.andThen(writePing));

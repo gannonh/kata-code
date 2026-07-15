@@ -12,6 +12,14 @@ import {
   type ReconnectBackoffConfig,
 } from "./reconnectBackoff.ts";
 
+/**
+ * Missed pong tolerance for Effect `makeProtocolSocket` (see
+ * `patches/effect@4.0.0-beta.78.patch`). Keep this in sync with the patched
+ * `makePinger` threshold — three missed 5s intervals ≈ 15–20s before the
+ * transport treats the socket as dead under event-loop stall.
+ */
+export const WS_RPC_MISSED_PONGS_BEFORE_TIMEOUT = 3;
+
 export interface WsProtocolLifecycleHandlers {
   readonly getConnectionLabel?: () => string | null;
   readonly getVersionMismatchHint?: () => string | null;
@@ -310,6 +318,15 @@ export function createWsRpcProtocolLayer(
     RpcClient.ConnectionHooks.of({
       onConnect: Effect.void,
       onDisconnect: Effect.void,
+      onPing: Effect.sync(() => {
+        lifecycle.onHeartbeatPing();
+      }),
+      onPong: Effect.sync(() => {
+        lifecycle.onHeartbeatPong();
+      }),
+      onPingTimeout: Effect.sync(() => {
+        lifecycle.onHeartbeatTimeout();
+      }),
     }),
   );
 
