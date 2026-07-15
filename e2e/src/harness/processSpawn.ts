@@ -1,11 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { appendFileSync, closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { appendProcessLog } from "./artifacts.ts";
 import type { E2ERunContext } from "./isolatedRun.ts";
-import { killPids, listDescendantPids } from "./processTree.ts";
+import { terminateChildProcessTree } from "./processTree.ts";
 import { trackSpawnedStack, untrackSpawnedStack } from "./spawnRegistry.ts";
 
 export interface LoggedChildProcess {
@@ -83,59 +82,6 @@ export function spawnWithArtifactLogs(
   return { process: child };
 }
 
-/** Signal an entire process group by negative PID, ignoring "no such process". */
-function killProcessGroup(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // Group already gone, or never created (spawn failed) — nothing to reap.
-  }
-}
-
-function signalChildTree(
-  child: ChildProcess,
-  pid: number | undefined,
-  descendants: readonly number[],
-  signal: NodeJS.Signals,
-): void {
-  if (pid !== undefined) {
-    killProcessGroup(pid, signal);
-    if (signal === "SIGKILL") {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // The group kill already reaped the direct child.
-      }
-    }
-  } else if (signal === "SIGTERM" || !child.killed) {
-    child.kill(signal);
-  }
-  killPids(descendants, signal);
-}
-
 export async function terminateChildProcess(child: ChildProcess): Promise<void> {
-  const pid = child.pid;
-  // Capture the tree before signaling: after the leader exits, surviving
-  // descendants reparent to PID 1 and can no longer be found.
-  const descendants = pid !== undefined ? listDescendantPids(pid) : [];
-  if (child.exitCode !== null) {
-    // The direct child already exited, but detached descendants can outlive
-    // it; reap the rest so nothing leaks.
-    signalChildTree(child, pid, descendants, "SIGKILL");
-    return;
-  }
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-
-  // Kill the whole group so Vite + esbuild descendants die with dev-runner.
-  signalChildTree(child, pid, descendants, "SIGTERM");
-  await Promise.race([exited, delay(5_000)]);
-
-  // Always escalate to SIGKILL: the direct child can exit on SIGTERM while
-  // descendants in other process groups (the watched server under `vp run`)
-  // survive it and leak as orphans that degrade subsequent stack boots.
-  signalChildTree(child, pid, descendants, "SIGKILL");
-
-  // Teardown must remain bounded even if Node never observes the detached
-  // child's exit event after a forced process-group kill.
-  await Promise.race([exited, delay(1_000)]);
+  await terminateChildProcessTree(child);
 }

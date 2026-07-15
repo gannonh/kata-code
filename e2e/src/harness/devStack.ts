@@ -9,7 +9,7 @@ import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
 import { spawnWithArtifactLogs, terminateChildProcess } from "./processSpawn.ts";
-import { waitForTcpPort } from "./readiness.ts";
+import { waitForWebDevServer } from "./readiness.ts";
 import { withTimeout } from "./withTimeout.ts";
 
 export interface DevStackHandle {
@@ -183,9 +183,9 @@ async function startDevStackInner(
     await terminateChildProcess(child);
   });
 
-  logHarnessPhase("Waiting for Vite dev server port...");
-  await waitForTcpPort(context.webPort, E2E_TIMEOUTS.devStackMs, signal);
-  logHarnessPhase("Vite dev server port is ready.");
+  logHarnessPhase("Waiting for Vite dev server HTTP...");
+  await waitForWebDevServer(context.webPort, E2E_TIMEOUTS.devStackMs, signal);
+  logHarnessPhase("Vite dev server is ready.");
 
   return { process: child };
 }

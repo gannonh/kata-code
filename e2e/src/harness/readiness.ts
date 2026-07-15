@@ -32,3 +32,33 @@ export async function waitForTcpPort(
 
   throw new Error(`Timed out waiting for dev stack port 127.0.0.1:${port}.`);
 }
+
+/** Authoritative Vite readiness: TCP accept alone is not enough (stale listeners). */
+export async function waitForWebDevServer(
+  webPort: number,
+  timeoutMs = E2E_TIMEOUTS.devStackMs,
+  signal?: AbortSignal,
+): Promise<void> {
+  const url = `http://127.0.0.1:${webPort}`;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (signal?.aborted) {
+      throw signal.reason ?? new Error("waitForWebDevServer aborted");
+    }
+
+    try {
+      const response = await fetch(url, { redirect: "manual", signal });
+      if (response.status > 0) {
+        return;
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+    }
+
+    await delay(500, undefined, signal ? { signal } : undefined);
+  }
+
+  throw new Error(`Timed out waiting for Vite dev server at ${url}.`);
+}

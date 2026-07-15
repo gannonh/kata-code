@@ -41,6 +41,10 @@ export function resolvePortScanStart(
   nextUnusedOffset: number | undefined,
   workerIndex = 0,
 ): number {
+  // Per-worker stride keeps parallel Playwright workers from contending on the
+  // same offset band. Monotonic nextUnusedOffset avoids immediate reuse after a
+  // prior run in the same worker once tree-kill + HTTP readiness have cleared
+  // the previous stack.
   const workerStartOffset = configuredStartOffset + Math.max(0, workerIndex) * 20;
   return Math.max(workerStartOffset, nextUnusedOffset ?? workerStartOffset);
 }
@@ -108,9 +112,8 @@ export async function createIsolatedRun(input: {
 }): Promise<E2ERunContext> {
   const runId = createRunId();
   const { offset: configuredStartOffset } = resolveStartOffsetFromEnv();
-  // Avoid immediately reusing ports from the previous file-scoped stack. Vite
-  // descendants can still be draining after their root process exits, leaving
-  // a new listener on the same port able to accept connections without serving.
+  // Prefer a fresh offset band after each prior run in this worker so a slow
+  // OS port release cannot collide with the next stack boot.
   const workerIndex = Number.parseInt(process.env.TEST_WORKER_INDEX ?? "0", 10);
   const startOffset = resolvePortScanStart(
     configuredStartOffset,

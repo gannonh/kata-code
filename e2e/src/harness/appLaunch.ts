@@ -9,7 +9,7 @@ import { startDevStack } from "./devStack.ts";
 import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
-import { killPids, listDescendantPids } from "./processTree.ts";
+import { signalProcessTree } from "./processTree.ts";
 import { resolveReleaseExecutablePath } from "./releaseTarget.ts";
 import { buildElectronLaunchEnv, isRendererWindow, resolveRendererTarget } from "./launchEnv.ts";
 
@@ -21,7 +21,6 @@ async function closeElectronApp(app: ElectronApplication): Promise<void> {
   // without cleanup the child orphans to PID 1 and keeps listening on the
   // run's server port, poisoning any later run that reuses the offset.
   const mainPid = app.process().pid;
-  const descendants = mainPid !== undefined ? listDescendantPids(mainPid) : [];
 
   let settled = false;
   const close = app
@@ -42,7 +41,11 @@ async function closeElectronApp(app: ElectronApplication): Promise<void> {
 
   // Reap survivors regardless of how main exited — a graceful close can still
   // strand the embedded server child if main was killed before its cleanup.
-  killPids(descendants, "SIGKILL");
+  // Re-snapshot after close so children spawned during the grace window are
+  // included (same policy as terminateProcessTree).
+  if (mainPid !== undefined) {
+    signalProcessTree(mainPid, "SIGKILL");
+  }
 }
 
 async function resolveDevElectronLaunchCommand(
