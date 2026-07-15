@@ -143,7 +143,7 @@ export function readDockerSocketPath(): string {
 export async function assertDockerDaemonReachable(): Promise<void> {
   const socketPath = readDockerSocketPath();
   await new Promise<void>((resolve, reject) => {
-    const req = request({ socketPath, path: "/_ping", method: "GET", timeout: 3_000 }, (res) => {
+    const req = request({ socketPath, path: "/_ping", method: "GET", timeout: 10_000 }, (res) => {
       res.resume();
       res.on("end", () =>
         res.statusCode === 200
@@ -176,7 +176,7 @@ export async function assertKatacodeImageBuilt(image = "katacode:local"): Promis
         socketPath,
         path: `/images/${encodeURIComponent(image)}/json`,
         method: "GET",
-        timeout: 3_000,
+        timeout: 10_000,
       },
       (res) => {
         res.resume();

@@ -39,8 +39,10 @@ let nextPortOffset: number | undefined;
 export function resolvePortScanStart(
   configuredStartOffset: number,
   nextUnusedOffset: number | undefined,
+  workerIndex = 0,
 ): number {
-  return Math.max(configuredStartOffset, nextUnusedOffset ?? configuredStartOffset);
+  const workerStartOffset = configuredStartOffset + Math.max(0, workerIndex) * 100;
+  return Math.max(workerStartOffset, nextUnusedOffset ?? workerStartOffset);
 }
 
 /** Create a unique run id for an isolated E2E worker. */
@@ -109,7 +111,12 @@ export async function createIsolatedRun(input: {
   // Avoid immediately reusing ports from the previous file-scoped stack. Vite
   // descendants can still be draining after their root process exits, leaving
   // a new listener on the same port able to accept connections without serving.
-  const startOffset = resolvePortScanStart(configuredStartOffset, nextPortOffset);
+  const workerIndex = Number.parseInt(process.env.TEST_WORKER_INDEX ?? "0", 10);
+  const startOffset = resolvePortScanStart(
+    configuredStartOffset,
+    nextPortOffset,
+    Number.isInteger(workerIndex) ? workerIndex : 0,
+  );
   // Claim ports by holding listening sockets so concurrent workers can't both
   // pick the same free port (TOCTOU). The claim is released right before the
   // dev stack binds the ports in startDevStack.
