@@ -18,7 +18,7 @@ Playwright end-to-end tests for the Kata Code web and Electron desktop apps. Sha
 
 ## Environment variables
 
-Set these in `.env.local` (gitignored; recommended) or export them in your shell. The E2E runner loads `.env` and `.env.local` from the repo root automatically.
+Set these in `.env` or `.env.local` (gitignored; recommended). The E2E runner loads both from the repo root automatically; file values win over ambient shell exports for the same key (`.env.local` overrides `.env`).
 
 ### Clerk (required for authenticated specs such as `@settings` and `@agent`)
 

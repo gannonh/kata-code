@@ -229,9 +229,9 @@ export function readVercelCredentials(): {
  * default branch when omitted (the picker auto-selects it). Maintainer-local:
  * callers SKIP the source flow when the repository is absent.
  *
- * Shell-exported values win over `.env` (see `loadRepoEnv`). If a stale
- * `E2E_VERCEL_SOURCE_BRANCH=main` is exported in the terminal, it overrides
- * `master` in `.env` — `unset E2E_VERCEL_SOURCE_BRANCH` before re-running.
+ * Repo `.env` / `.env.local` win over ambient shell exports for keys defined
+ * in those files (see `applyE2ERepoEnv`). Prefer editing `.env.local` over
+ * exporting one-off overrides in the terminal.
  */
 export function readVercelSourceSelection(): {
   readonly repository: string;
