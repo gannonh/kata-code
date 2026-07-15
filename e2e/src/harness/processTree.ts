@@ -28,8 +28,8 @@ export function listDescendantPids(rootPid: number): readonly number[] {
   }
   const descendants: number[] = [];
   const queue = [rootPid];
-  while (queue.length > 0) {
-    const next = queue.shift()!;
+  for (let index = 0; index < queue.length; index += 1) {
+    const next = queue[index]!;
     for (const childPid of childrenByParent.get(next) ?? []) {
       descendants.push(childPid);
       queue.push(childPid);

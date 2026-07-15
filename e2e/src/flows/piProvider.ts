@@ -23,6 +23,14 @@ const PI_AGENT_MODELS_FILE = "models.json";
 const PI_AGENT_SETTINGS_FILE = "settings.json";
 const ANTHROPIC_OAUTH_PACKAGE = "npm:pi-anthropic-oauth";
 
+async function copyOptionalFile(sourcePath: string, destinationPath: string): Promise<void> {
+  try {
+    await copyFile(sourcePath, destinationPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 export function readPiSmokeConfig():
   | { readonly ok: true; readonly config: PiSmokeConfig }
   | { readonly ok: false; readonly missing: ReadonlyArray<(typeof REQUIRED_PI_ENV)[number]> } {
@@ -68,13 +76,10 @@ export async function stagePiAgentDirectory(
 
   await mkdir(stagedAgentDir, { recursive: true });
   await copyFile(sourceAuthPath, join(stagedAgentDir, PI_AGENT_AUTH_FILE));
-
-  const sourceModelsPath = join(sourceAgentDir, PI_AGENT_MODELS_FILE);
-  try {
-    await copyFile(sourceModelsPath, join(stagedAgentDir, PI_AGENT_MODELS_FILE));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+  await copyOptionalFile(
+    join(sourceAgentDir, PI_AGENT_MODELS_FILE),
+    join(stagedAgentDir, PI_AGENT_MODELS_FILE),
+  );
 
   if (model.startsWith("anthropic/")) {
     await writeFile(

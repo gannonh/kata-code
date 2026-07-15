@@ -1823,10 +1823,10 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
-  const projectedPhase = derivePhase(
-    activeThread?.session ?? null,
-    activeLatestTurn !== null && !latestTurnSettled,
-  );
+  // projectedPhase omits isSendBusy (derived from the local-dispatch hook);
+  // phase includes it so the composer stays interruptible before session projects.
+  const hasInflightTurn = activeLatestTurn !== null && !latestTurnSettled;
+  const projectedPhase = derivePhase(activeThread?.session ?? null, hasInflightTurn);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
@@ -1914,10 +1914,7 @@ function ChatViewContent(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const phase = derivePhase(
-    activeThread?.session ?? null,
-    isSendBusy || (activeLatestTurn !== null && !latestTurnSettled),
-  );
+  const phase = derivePhase(activeThread?.session ?? null, isSendBusy || hasInflightTurn);
   const isWorking = phase === "running" || isConnecting || isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,

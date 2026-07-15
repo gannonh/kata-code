@@ -309,15 +309,12 @@ export function isTransientRecursiveChownRace(result: {
   readonly exitCode: number;
   readonly stderr: string;
 }): boolean {
+  if (result.exitCode === 0) return false;
   const errors = result.stderr
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  return (
-    result.exitCode !== 0 &&
-    errors.length > 0 &&
-    errors.every((line) => line.includes("No such file or directory"))
-  );
+  return errors.length > 0 && errors.every((line) => line.includes("No such file or directory"));
 }
 
 export function makeDockerSandboxProvider(

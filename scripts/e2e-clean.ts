@@ -107,6 +107,27 @@ function collectTargets(): Map<number, string> {
 }
 
 const killedPids = new Set<number>();
+
+function killTarget(pid: number, command: string): void {
+  try {
+    // Try the process group first (negative PID) so detached descendants
+    // (esbuild workers, Vite children) are reaped alongside the leader. Fall
+    // back to the single PID for standalone processes that aren't group
+    // leaders.
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      process.kill(pid, "SIGKILL");
+    }
+    if (!killedPids.has(pid)) {
+      killedPids.add(pid);
+      Effect.runSync(Console.log(`[e2e:clean] killed pid ${pid}: ${command.slice(0, 100)}`));
+    }
+  } catch {
+    // The process exited between discovery and the kill.
+  }
+}
+
 // A process-group kill is asynchronous, and orphaned Vite children can become
 // visible only after their dev-runner parent exits. Sweep until the managed
 // process set stays empty so the next E2E stack cannot race a draining listener.
@@ -115,23 +136,7 @@ for (let attempt = 0; attempt < 50; attempt += 1) {
   if (targets.size === 0) break;
 
   for (const [pid, command] of targets) {
-    try {
-      // Try the process group first (negative PID) so detached descendants
-      // (esbuild workers, Vite children) are reaped alongside the leader. Fall
-      // back to the single PID for standalone processes that aren't group
-      // leaders.
-      try {
-        process.kill(-pid, "SIGKILL");
-      } catch {
-        process.kill(pid, "SIGKILL");
-      }
-      if (!killedPids.has(pid)) {
-        killedPids.add(pid);
-        Effect.runSync(Console.log(`[e2e:clean] killed pid ${pid}: ${command.slice(0, 100)}`));
-      }
-    } catch {
-      // The process exited between discovery and the kill.
-    }
+    killTarget(pid, command);
   }
   await delay(100);
 }

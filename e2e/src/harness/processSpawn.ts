@@ -92,6 +92,27 @@ function killProcessGroup(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
+function signalChildTree(
+  child: ChildProcess,
+  pid: number | undefined,
+  descendants: readonly number[],
+  signal: NodeJS.Signals,
+): void {
+  if (pid !== undefined) {
+    killProcessGroup(pid, signal);
+    if (signal === "SIGKILL") {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // The group kill already reaped the direct child.
+      }
+    }
+  } else if (signal === "SIGTERM" || !child.killed) {
+    child.kill(signal);
+  }
+  killPids(descendants, signal);
+}
+
 export async function terminateChildProcess(child: ChildProcess): Promise<void> {
   const pid = child.pid;
   // Capture the tree before signaling: after the leader exits, surviving
@@ -100,35 +121,19 @@ export async function terminateChildProcess(child: ChildProcess): Promise<void> 
   if (child.exitCode !== null) {
     // The direct child already exited, but detached descendants can outlive
     // it; reap the rest so nothing leaks.
-    if (pid !== undefined) killProcessGroup(pid, "SIGKILL");
-    killPids(descendants, "SIGKILL");
+    signalChildTree(child, pid, descendants, "SIGKILL");
     return;
   }
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
 
   // Kill the whole group so Vite + esbuild descendants die with dev-runner.
-  if (pid !== undefined) {
-    killProcessGroup(pid, "SIGTERM");
-  } else {
-    child.kill("SIGTERM");
-  }
-  killPids(descendants, "SIGTERM");
+  signalChildTree(child, pid, descendants, "SIGTERM");
   await Promise.race([exited, delay(5_000)]);
 
   // Always escalate to SIGKILL: the direct child can exit on SIGTERM while
   // descendants in other process groups (the watched server under `vp run`)
   // survive it and leak as orphans that degrade subsequent stack boots.
-  if (pid !== undefined) {
-    killProcessGroup(pid, "SIGKILL");
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // The group kill already reaped the direct child.
-    }
-  } else if (!child.killed) {
-    child.kill("SIGKILL");
-  }
-  killPids(descendants, "SIGKILL");
+  signalChildTree(child, pid, descendants, "SIGKILL");
 
   // Teardown must remain bounded even if Node never observes the detached
   // child's exit event after a forced process-group kill.

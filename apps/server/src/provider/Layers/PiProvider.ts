@@ -89,12 +89,15 @@ export interface PiModelShape {
   readonly thinkingLevelMap?: Record<string, string | null>;
 }
 
-export interface PiDiscoveryInput {
+export interface PiResourceDiscoveryInput {
   readonly agentDir: string;
-  readonly binaryPath: string;
-  readonly customModels: ReadonlyArray<string>;
   readonly cwd: string;
   readonly projectTrustPolicy: "never" | "always";
+}
+
+export interface PiDiscoveryInput extends PiResourceDiscoveryInput {
+  readonly binaryPath: string;
+  readonly customModels: ReadonlyArray<string>;
   readonly environment?: NodeJS.ProcessEnv;
 }
 
@@ -105,12 +108,6 @@ export interface PiDiscoveryResult {
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
-}
-
-export interface PiResourceDiscoveryInput {
-  readonly agentDir: string;
-  readonly cwd: string;
-  readonly projectTrustPolicy: "never" | "always";
 }
 
 export class PiProviderDiscoveryError extends Schema.TaggedErrorClass<PiProviderDiscoveryError>()(

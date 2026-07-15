@@ -113,6 +113,19 @@ export const recoverDockerBootstrapToken = (
     return token;
   });
 
+const isDockerDriver = (driver: SandboxProvider): boolean =>
+  (driver.kind as string) === (DockerSandboxProvider.kind as string);
+
+/** Docker needs the create-time token; other drivers keep the minted token. */
+const resolveBootstrapTokenForDriver = (
+  driver: SandboxProvider,
+  handle: SandboxHandle,
+  mintedToken: string,
+): Effect.Effect<string, SandboxRpcError> =>
+  isDockerDriver(driver)
+    ? recoverDockerBootstrapToken(driver, handle)
+    : Effect.succeed(mintedToken);
+
 export const startSandboxSession = (
   runtime: SandboxStartSessionRuntime,
   instanceId: SandboxProviderInstanceId,
@@ -243,10 +256,11 @@ export const startSandboxSession = (
           .pipe(Effect.mapError(mapDriverError));
         // (Vercel relaunches `serve` with the fresh env, so it keeps the
         // fresh token; Docker needs the create-time token recovered.)
-        const effectiveBootstrapToken =
-          (inst.driver.kind as string) === (DockerSandboxProvider.kind as string)
-            ? yield* recoverDockerBootstrapToken(inst.driver, started)
-            : bootstrapToken;
+        const effectiveBootstrapToken = yield* resolveBootstrapTokenForDriver(
+          inst.driver,
+          started,
+          bootstrapToken,
+        );
         // Re-run Connect registration + mint a fresh pairing token. `keep`:
         // a transient Connect failure must never destroy a stopped-started
         // sandbox's durable filesystem — the user retries Start.
@@ -479,12 +493,11 @@ export const startSandboxSession = (
       // Docker provision may have ADOPTED an existing named container from a
       // previous run instead of creating one; its server booted with that
       // container's create-time bootstrap token, not the one minted above.
-      const provisionBootstrapToken =
-        (inst.driver.kind as string) === (DockerSandboxProvider.kind as string)
-          ? yield* recoverDockerBootstrapToken(inst.driver, handle).pipe(
-              Effect.catch(failProvision),
-            )
-          : bootstrapToken;
+      const provisionBootstrapToken = yield* resolveBootstrapTokenForDriver(
+        inst.driver,
+        handle,
+        bootstrapToken,
+      ).pipe(Effect.catch(failProvision));
 
       const finalized = yield* runtime.registerAndFinalizeSession({
         sessionKey,
