@@ -35,18 +35,20 @@ export interface ThreadStatusPill {
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
-    | "Plan Ready";
+    | "Plan Ready"
+    | "Failed";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
-  "Awaiting Input": 4,
-  Working: 3,
-  Connecting: 3,
-  "Plan Ready": 2,
+  "Pending Approval": 6,
+  "Awaiting Input": 5,
+  Working: 4,
+  Connecting: 4,
+  "Plan Ready": 3,
+  Failed: 2,
   Completed: 1,
 };
 
@@ -61,6 +63,8 @@ type ThreadStatusInput = Pick<
 > & {
   lastVisitedAt?: string | undefined;
 };
+
+export type { ThreadStatusInput };
 
 export interface ThreadJumpHintVisibilityController {
   sync: (shouldShow: boolean) => void;
@@ -384,6 +388,15 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
+  if (thread.session?.lastError) {
+    return {
+      label: "Failed",
+      colorClass: "text-red-600 dark:text-red-300/90",
+      dotClass: "bg-red-500 dark:bg-red-300/90",
+      pulse: false,
+    };
+  }
+
   if (hasUnseenCompletion(thread)) {
     return {
       label: "Completed",
@@ -394,6 +407,161 @@ export function resolveThreadStatusPill(input: {
   }
 
   return null;
+}
+
+export type ThreadAttentionTier = "waiting" | "working" | "blocked" | "idle";
+
+export function resolveThreadTier(input: { thread: ThreadStatusInput }): ThreadAttentionTier {
+  const pill = resolveThreadStatusPill(input);
+  switch (pill?.label) {
+    case "Pending Approval":
+    case "Awaiting Input":
+    case "Plan Ready":
+      return "waiting";
+    case "Working":
+    case "Connecting":
+      return "working";
+    case "Failed":
+      return "blocked";
+    default:
+      return "idle";
+  }
+}
+
+export type ThreadRowDensity = "rich" | "slim";
+
+export function resolveThreadRowDensity(input: { thread: ThreadStatusInput }): {
+  density: ThreadRowDensity;
+  showBlockedDot: boolean;
+} {
+  const tier = resolveThreadTier(input);
+
+  if (tier === "idle") {
+    return { density: "slim", showBlockedDot: false };
+  }
+
+  if (tier === "blocked") {
+    const blockedAt = toSortableTimestamp(input.thread.session?.updatedAt);
+    const lastVisitedAt = toSortableTimestamp(input.thread.lastVisitedAt);
+    const visitedSinceBlocked =
+      blockedAt !== null && lastVisitedAt !== null && lastVisitedAt >= blockedAt;
+
+    if (visitedSinceBlocked) {
+      return { density: "slim", showBlockedDot: true };
+    }
+
+    return { density: "rich", showBlockedDot: false };
+  }
+
+  return { density: "rich", showBlockedDot: false };
+}
+
+export function resolveThreadWaitDuration(input: {
+  thread: ThreadStatusInput;
+  nowMs?: number;
+  waitSince?: string | null | undefined;
+}): {
+  startedAt: string;
+  durationMs: number;
+  approximate: boolean;
+} | null {
+  if (resolveThreadTier(input) !== "waiting") {
+    return null;
+  }
+
+  const nowMs = input.nowMs ?? Date.now();
+  const explicitWaitSince = input.waitSince ?? null;
+  const explicitTimestamp = toSortableTimestamp(explicitWaitSince ?? undefined);
+  if (explicitWaitSince && explicitTimestamp !== null) {
+    return {
+      startedAt: explicitWaitSince,
+      durationMs: Math.max(0, nowMs - explicitTimestamp),
+      approximate: false,
+    };
+  }
+
+  const fallbackStartedAt = input.thread.latestTurn?.completedAt ?? null;
+  const fallbackTimestamp = toSortableTimestamp(fallbackStartedAt ?? undefined);
+  if (!fallbackStartedAt || fallbackTimestamp === null) {
+    return null;
+  }
+
+  return {
+    startedAt: fallbackStartedAt,
+    durationMs: Math.max(0, nowMs - fallbackTimestamp),
+    approximate: true,
+  };
+}
+
+export function groupThreadsByAttentionTier<T extends Pick<Thread, "id"> & ThreadSortInput>(input: {
+  threads: readonly T[];
+  getStatusInput: (thread: T) => ThreadStatusInput;
+  sortOrder: SidebarThreadSortOrder;
+  nowMs?: number;
+  getWaitSince?: (thread: T) => string | null | undefined;
+}): {
+  waiting: T[];
+  working: T[];
+  blocked: T[];
+  idle: T[];
+} {
+  const nowMs = input.nowMs ?? Date.now();
+  const waiting: T[] = [];
+  const working: T[] = [];
+  const blocked: T[] = [];
+  const idle: T[] = [];
+
+  for (const thread of input.threads) {
+    const statusInput = input.getStatusInput(thread);
+    switch (resolveThreadTier({ thread: statusInput })) {
+      case "waiting":
+        waiting.push(thread);
+        break;
+      case "working":
+        working.push(thread);
+        break;
+      case "blocked":
+        blocked.push(thread);
+        break;
+      case "idle":
+        idle.push(thread);
+        break;
+    }
+  }
+
+  const sortByConfiguredOrder = (threads: T[]) => sortThreads(threads, input.sortOrder);
+
+  const sortedWaiting = [...waiting].toSorted((left, right) => {
+    const leftWait = resolveThreadWaitDuration({
+      thread: input.getStatusInput(left),
+      nowMs,
+      waitSince: input.getWaitSince?.(left),
+    });
+    const rightWait = resolveThreadWaitDuration({
+      thread: input.getStatusInput(right),
+      nowMs,
+      waitSince: input.getWaitSince?.(right),
+    });
+    const leftDuration = leftWait?.durationMs ?? Number.NEGATIVE_INFINITY;
+    const rightDuration = rightWait?.durationMs ?? Number.NEGATIVE_INFINITY;
+    if (leftDuration !== rightDuration) {
+      return rightDuration - leftDuration;
+    }
+
+    const rightTimestamp = getThreadSortTimestamp(right, input.sortOrder);
+    const leftTimestamp = getThreadSortTimestamp(left, input.sortOrder);
+    if (rightTimestamp !== leftTimestamp) {
+      return rightTimestamp > leftTimestamp ? 1 : -1;
+    }
+    return right.id.localeCompare(left.id);
+  });
+
+  return {
+    waiting: sortedWaiting,
+    working: sortByConfiguredOrder(working),
+    blocked: sortByConfiguredOrder(blocked),
+    idle: sortByConfiguredOrder(idle),
+  };
 }
 
 export function resolveProjectStatusIndicator(
