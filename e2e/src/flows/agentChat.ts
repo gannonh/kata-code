@@ -266,10 +266,10 @@ export async function selectRuntimeMode(page: Page, label: RuntimeModeOption): P
  *  (AC 5). Resolves once the Send button is visible again. */
 export async function interruptAgentTurn(page: Page): Promise<void> {
   const stopButton = page.getByRole("button", { name: "Stop generation" });
-  await stopButton.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
+  await stopButton.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.agentReplyMs });
   await stopButton.click();
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible({
-    timeout: E2E_TIMEOUTS.assertionMs,
+    timeout: E2E_TIMEOUTS.agentReplyMs,
   });
 }
 

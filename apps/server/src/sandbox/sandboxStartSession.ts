@@ -17,7 +17,6 @@ import {
   type SandboxHandle,
   type SandboxProvider,
 } from "@kata-sh/code-sandbox/driver";
-import { DockerSandboxProvider } from "@kata-sh/code-sandbox-docker";
 import { VERCEL_KIND, VERCEL_SOURCE_TOKEN_ENV } from "@kata-sh/code-sandbox-vercel";
 
 import type * as CliTokenManager from "../cloud/CliTokenManager.ts";
@@ -83,6 +82,19 @@ export interface SandboxStartSessionRuntime {
   ) => Effect.Effect<void, never>;
   readonly persistSessionRecord: (input: PersistSandboxSessionInput) => Effect.Effect<void, never>;
 }
+
+/**
+ * Prefer the driver-resolved bootstrap token when present (Docker create-time
+ * env). Other drivers keep the freshly minted token.
+ */
+export const resolveBootstrapToken = (
+  driver: SandboxProvider,
+  handle: SandboxHandle,
+  mintedToken: string,
+): Effect.Effect<string, SandboxRpcError> =>
+  driver.resolveBootstrapToken
+    ? driver.resolveBootstrapToken(handle, mintedToken).pipe(Effect.mapError(mapDriverError))
+    : Effect.succeed(mintedToken);
 
 export const startSandboxSession = (
   runtime: SandboxStartSessionRuntime,
@@ -212,27 +224,13 @@ export const startSandboxSession = (
         const started = yield* inst.driver.lifecycle
           .start(handle, { config: resolvedConfig.config, env })
           .pipe(Effect.mapError(mapDriverError));
-        // Docker env is fixed at container create: the restarted in-container
-        // server re-seeds its ORIGINAL create-time bootstrap grant, not the
-        // fresh token minted above. Recover the effective token from the
-        // container env so the exchange matches what the server booted with.
         // (Vercel relaunches `serve` with the fresh env, so it keeps the
-        // fresh token.)
-        let effectiveBootstrapToken = bootstrapToken;
-        if ((inst.driver.kind as string) === (DockerSandboxProvider.kind as string)) {
-          const recovered = yield* inst.driver
-            .exec(started, "printenv KATACODE_DESKTOP_BOOTSTRAP_TOKEN")
-            .pipe(Effect.mapError(mapDriverError));
-          const token = recovered.stdout.trim();
-          if (token.length === 0) {
-            return yield* new SandboxRpcError({
-              reason: "connect-failed",
-              message:
-                "Started container has no KATACODE_DESKTOP_BOOTSTRAP_TOKEN in its environment; delete the sandbox and create it again.",
-            });
-          }
-          effectiveBootstrapToken = token;
-        }
+        // fresh token; drivers with resolveBootstrapToken recover create-time.)
+        const effectiveBootstrapToken = yield* resolveBootstrapToken(
+          inst.driver,
+          started,
+          bootstrapToken,
+        );
         // Re-run Connect registration + mint a fresh pairing token. `keep`:
         // a transient Connect failure must never destroy a stopped-started
         // sandbox's durable filesystem — the user retries Start.
@@ -462,13 +460,21 @@ export const startSandboxSession = (
         );
       }
 
+      // Drivers that adopt existing runtimes (Docker) may need the create-time
+      // bootstrap token rather than the one minted above.
+      const provisionBootstrapToken = yield* resolveBootstrapToken(
+        inst.driver,
+        handle,
+        bootstrapToken,
+      ).pipe(Effect.catch(failProvision));
+
       const finalized = yield* runtime.registerAndFinalizeSession({
         sessionKey,
         instanceId,
         driver: inst.driver,
         handle,
         config: resolvedConfig,
-        bootstrapToken,
+        bootstrapToken: provisionBootstrapToken,
         connectAuthToken: options?.connectAuthToken,
       });
 

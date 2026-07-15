@@ -4,7 +4,9 @@ import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
   authorizeConnectCli,
+  extractConnectEnvironmentId,
   listConnectEnvironmentIds,
+  registerConnectAccountSweepCleanup,
   registerConnectEnvironmentCleanup,
   withConnectBrowser,
 } from "../../src/flows/connect.ts";
@@ -14,8 +16,13 @@ import {
   selectVercelSource,
 } from "../../src/flows/settings.ts";
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
+import { deleteSandboxDeploymentTarget } from "../../src/flows/sandboxDeployment.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
 import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
+import {
+  inspectSmallVercelSource,
+  VERCEL_E2E_SOURCE_MAX_BYTES,
+} from "../../src/harness/vercelSourceAssets.ts";
 
 /**
  * Vercel Sandbox deployment target — credentialed, maintainer-local. SKIP when
@@ -61,12 +68,11 @@ async function fillVercelAuthTrio(
 }
 
 /**
- * Vercel cloud create/dispose is slow (~100s for Test connection's disposable
- * probe alone; Create & run with a Git clone is longer). `agentReplyMs` is
- * sized for LLM replies and is too short here.
+ * Vercel cloud create/dispose is slow because the sandbox cold-boots Kata and
+ * provider tooling. `agentReplyMs` is sized for LLM replies and is too short.
  */
 const VERCEL_CLOUD_STEP_MS = Math.max(E2E_TIMEOUTS.agentReplyMs, 150_000);
-/** Full lifecycle: Test connection + Create & run + stop/delete. */
+/** One billable sandbox lifecycle: Create & run + stop/delete. */
 const VERCEL_CLOUD_TEST_MS = Math.max(E2E_TIMEOUTS.agentTestMs, 480_000);
 
 test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDeploy}`, () => {
@@ -77,98 +83,88 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     "VERCEL_* credentials not set; credentialed Vercel checks are maintainer-local",
   );
 
-  test("add vercel target, enter trio, test connection, start + dispose (AC-3b.8/12)", async ({
-    appWindow,
-    runContext,
-  }, testInfo) => {
-    const creds = readVercelCredentials()!;
-    const source = readVercelSourceSelection();
-    test.skip(
-      source === null,
-      "E2E_VERCEL_SOURCE_REPOSITORY not set; a GitHub source is required to create a Vercel sandbox",
-    );
-    // Surface the resolved source so a stale shell export (which wins over
-    // `.env`) is obvious in the headed run log.
-    console.log(
-      `[e2e] Vercel source selection: repo=${source!.repository} branch=${source!.branch ?? "(repo default)"}`,
-    );
-    const page = appWindow;
-    await openConnectionsSettings(page);
-    await dismissBlockingToasts(page);
+  test(
+    "add vercel target, enter trio, start + dispose (AC-3b.8/12)",
+    { tag: [E2E_TAGS.environmentsDeploy] },
+    async ({ authenticatedAppWindow, runContext }, testInfo) => {
+      const creds = readVercelCredentials()!;
+      const source = readVercelSourceSelection();
+      test.skip(
+        source === null,
+        "E2E_VERCEL_SOURCE_REPOSITORY not set; a GitHub source is required to create a Vercel sandbox",
+      );
+      // Measure the exact selected branch before any Vercel provisioning. This
+      // blocks stale env configuration from cloning a large repository into a
+      // billable sandbox. The native Vercel source clone is already depth=1.
+      const sourceAssets = await inspectSmallVercelSource(source!);
+      console.log(
+        `[e2e] Vercel source selection: repo=${source!.repository} branch=${sourceAssets.branch} assets=${sourceAssets.bytes} bytes/${sourceAssets.files} files (limit ${VERCEL_E2E_SOURCE_MAX_BYTES} bytes)`,
+      );
+      const page = authenticatedAppWindow;
+      await openConnectionsSettings(page);
+      await dismissBlockingToasts(page);
 
-    const card = await addVercelEnvironment(page, "E2E Vercel");
-    await card.getByRole("button", { name: /Toggle .* details/ }).click();
+      const card = await addVercelEnvironment(page, "E2E Vercel");
+      await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
-    await fillVercelAuthTrio(card, creds);
+      await fillVercelAuthTrio(card, creds);
 
-    // Source is required before Create is enabled (AC-GS4). Select repo + branch.
-    await selectVercelSource(page, card, source!);
-    await expect(card.getByRole("button", { name: "Create & run sandbox" })).toBeEnabled({
-      timeout: E2E_TIMEOUTS.assertionMs,
-    });
-
-    // Test connection: validate -> provision -> dispose -> done. Test connection
-    // uses a disposable source-less probe, so it works regardless of source.
-    // validate is immediate; provision/dispose take ~100s on a live Vercel project.
-    await card.getByRole("button", { name: "Test connection" }).click();
-    const progress = card.locator("pre");
-    await expect(progress).toContainText("validate: ok", { timeout: E2E_TIMEOUTS.assertionMs });
-    await expect(progress).toContainText("provision: ok", { timeout: VERCEL_CLOUD_STEP_MS });
-    await expect(progress).toContainText("done: ok", { timeout: VERCEL_CLOUD_STEP_MS });
-
-    // Public Vercel registration uses the stored Connect CLI token (stored-first).
-    // App Clerk sign-in alone is not enough — mint the CLI OAuth credential into
-    // the isolated home before Create & run hits the relay.
-    await authorizeIsolatedConnect(runContext);
-
-    // Create & run: provisions the sandbox from the native Git source,
-    // Connect-auto-registers the public endpoint, and surfaces the public URL.
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Create & run sandbox" }).click();
-    const sessionLine = card.getByText(/Session ready:/);
-    await expect(sessionLine).toBeVisible({ timeout: VERCEL_CLOUD_STEP_MS });
-    await sessionLine.scrollIntoViewIfNeeded();
-    await page.screenshot({
-      path: testInfo.outputPath("vercel-session-ready.png"),
-      fullPage: true,
-    });
-
-    const sessionText = await sessionLine.textContent();
-    expect(sessionText, "session text did not expose a public URL").toMatch(
-      /https:\/\/[a-z0-9-]+\.vercel\.run/i,
-    );
-    const environmentId = sessionText?.match(/\(env ([^)]+)\)/u)?.[1];
-    expect(environmentId, "session text did not expose the Connect environment id").toBeTruthy();
-    registerConnectEnvironmentCleanup(runContext, environmentId!);
-
-    // Source controls lock once a sandbox exists (AC-GS11).
-    await expect(
-      card.getByText("Delete this sandbox to change its repository or branch."),
-    ).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
-
-    // Stop then delete the sandbox (durable lifecycle: AC-L8/L9). The session
-    // line disappears once the sandbox is deleted.
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Stop" }).last().click();
-    await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
-    await expect(sessionLine).toBeHidden({ timeout: VERCEL_CLOUD_STEP_MS });
-    await expect
-      .poll(async () => (await listConnectEnvironmentIds(runContext)).includes(environmentId!), {
+      // Source is required before Create is enabled (AC-GS4). Select repo + branch.
+      await selectVercelSource(page, card, source!);
+      await expect(card.getByRole("button", { name: "Create & run sandbox" })).toBeEnabled({
         timeout: E2E_TIMEOUTS.assertionMs,
-        message: "disposed sandbox remained in Kata Code Connect discovery",
-      })
-      .toBe(false);
+      });
 
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
+      // Do not run the Test connection probe here. It provisions and cold-boots a
+      // second disposable sandbox, doubling package ingress before this lifecycle.
 
-    // Removing the deployment target exposes its saved runtime as an orphan
-    // row with the same heading, so the card locator intentionally rebinds.
-    // Delete that saved runtime before asserting the named row is gone.
-    await expect(card.getByText(/Orphaned sandbox runtime/)).toBeVisible({
-      timeout: E2E_TIMEOUTS.assertionMs,
-    });
-    await card.getByRole("button", { name: "Delete", exact: true }).click();
-    await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
-  });
+      // Public Vercel registration uses the stored Connect CLI token (stored-first).
+      // App Clerk sign-in alone is not enough — mint the CLI OAuth credential into
+      // the isolated home before Create & run hits the relay.
+      await authorizeIsolatedConnect(runContext);
+      // Soft-sweep remnants from aborted prior runs (same shared E2E Connect
+      // account) without touching in-flight environments from concurrent work.
+      registerConnectAccountSweepCleanup(runContext, { olderThanHours: 1 });
+
+      // Create & run: provisions the sandbox from the native Git source,
+      // Connect-auto-registers the public endpoint, and surfaces the public URL.
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Create & run sandbox" }).click();
+      const sessionLine = card.getByText(/Session ready:/);
+      await expect(sessionLine).toBeVisible({ timeout: VERCEL_CLOUD_STEP_MS });
+      await sessionLine.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath("vercel-session-ready.png"),
+        fullPage: true,
+      });
+
+      const sessionText = await sessionLine.textContent();
+      expect(sessionText, "session text did not expose a public URL").toMatch(
+        /https:\/\/[a-z0-9-]+\.vercel\.run/i,
+      );
+      const environmentId = extractConnectEnvironmentId(sessionText);
+      expect(environmentId, "session text did not expose the Connect environment id").toBeTruthy();
+      registerConnectEnvironmentCleanup(runContext, environmentId!);
+
+      // Source controls lock once a sandbox exists (AC-GS11).
+      await expect(
+        card.getByText("Delete this sandbox to change its repository or branch."),
+      ).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
+
+      // Stop then delete the sandbox (durable lifecycle: AC-L8/L9). The session
+      // line disappears once the sandbox is deleted.
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Stop" }).last().click();
+      await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+      await expect(sessionLine).toBeHidden({ timeout: VERCEL_CLOUD_STEP_MS });
+      await expect
+        .poll(async () => (await listConnectEnvironmentIds(runContext)).includes(environmentId!), {
+          timeout: E2E_TIMEOUTS.assertionMs,
+          message: "disposed sandbox remained in Kata Code Connect discovery",
+        })
+        .toBe(false);
+
+      await deleteSandboxDeploymentTarget(page, "E2E Vercel");
+    },
+  );
 });

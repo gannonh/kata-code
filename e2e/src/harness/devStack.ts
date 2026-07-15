@@ -183,7 +183,7 @@ async function startDevStackInner(
     await terminateChildProcess(child);
   });
 
-  logHarnessPhase("Waiting for Vite dev server...");
+  logHarnessPhase("Waiting for Vite dev server HTTP...");
   await waitForWebDevServer(context.webPort, E2E_TIMEOUTS.devStackMs, signal);
   logHarnessPhase("Vite dev server is ready.");
 

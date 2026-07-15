@@ -33,6 +33,7 @@ export async function waitForTcpPort(
   throw new Error(`Timed out waiting for dev stack port 127.0.0.1:${port}.`);
 }
 
+/** Authoritative Vite readiness: TCP accept alone is not enough (stale listeners). */
 export async function waitForWebDevServer(
   webPort: number,
   timeoutMs = E2E_TIMEOUTS.devStackMs,

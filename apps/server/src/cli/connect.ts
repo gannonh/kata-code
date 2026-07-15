@@ -430,6 +430,10 @@ const cleanupOlderThanHoursFlag = Flag.integer("older-than-hours").pipe(
   Flag.withDescription("Remove records linked at least this many hours ago."),
   Flag.optional,
 );
+const cleanupAllFlag = Flag.boolean("all").pipe(
+  Flag.withDescription("Remove every Connect record for the signed-in account."),
+  Flag.withDefault(false),
+);
 const cleanupYesFlag = Flag.boolean("yes").pipe(
   Flag.withDescription("Confirm bulk cleanup without prompting."),
   Flag.withDefault(false),
@@ -439,6 +443,7 @@ const connectCleanupCommand = Command.make("cleanup", {
   ...projectLocationFlags,
   environment: cleanupEnvironmentFlag,
   olderThanHours: cleanupOlderThanHoursFlag,
+  all: cleanupAllFlag,
   yes: cleanupYesFlag,
   json: jsonFlag,
 }).pipe(
@@ -462,6 +467,8 @@ const connectCleanupCommand = Command.make("cleanup", {
           Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayListEnvironmentsResponse)),
           withRelayClientTracing,
         );
+        const wantsDelete =
+          flags.all || Option.isSome(flags.environment) || Option.isSome(flags.olderThanHours);
         const cutoff = Option.isSome(flags.olderThanHours)
           ? DateTime.formatIso(
               DateTime.subtract(yield* DateTime.now, { hours: flags.olderThanHours.value }),
@@ -473,7 +480,7 @@ const connectCleanupCommand = Command.make("cleanup", {
               record.environmentId === flags.environment.value) &&
             (cutoff === null || record.linkedAt <= cutoff),
         );
-        if (Option.isNone(flags.environment) && Option.isNone(flags.olderThanHours)) {
+        if (!wantsDelete) {
           yield* Console.log(
             flags.json
               ? yield* encodeJsonString(listed.environments)

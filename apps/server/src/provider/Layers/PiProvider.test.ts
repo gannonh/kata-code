@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 // @effect-diagnostics nodeBuiltinImport:off - Tests create temporary Pi skill directories.
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as Effect from "effect/Effect";
@@ -10,6 +10,7 @@ import { PiSettings, type ServerProviderModel } from "@kata-sh/code-contracts";
 
 import {
   checkPiProviderStatus,
+  discoverPiResources,
   PiProviderDiscoveryError,
   makePendingPiProvider,
   mapPiModels,
@@ -114,6 +115,41 @@ describe("PiProvider mappers", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it.effect("discovers skills and prompts without executing Pi extensions", () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(path.join(os.tmpdir(), "pi-provider-resources-"));
+      const agentDir = path.join(root, "agent");
+      try {
+        const skillDir = path.join(agentDir, "skills", "librarian");
+        const promptDir = path.join(agentDir, "prompts");
+        const extensionDir = path.join(agentDir, "extensions");
+        mkdirSync(skillDir, { recursive: true });
+        mkdirSync(promptDir, { recursive: true });
+        mkdirSync(extensionDir, { recursive: true });
+        writeFileSync(
+          path.join(skillDir, "SKILL.md"),
+          "---\nname: librarian\ndescription: Research libraries\n---\nUse source evidence.\n",
+        );
+        writeFileSync(path.join(promptDir, "deploy.md"), "Deploy the app.\n");
+        writeFileSync(
+          path.join(extensionDir, "blocking.ts"),
+          'throw new Error("Provider health discovery executed a Pi extension");\n',
+        );
+
+        const resources = yield* discoverPiResources({
+          agentDir,
+          cwd: root,
+          projectTrustPolicy: "always",
+        });
+
+        expect(resources.skills.map((skill) => skill.name)).toContain("librarian");
+        expect(resources.slashCommands.map((command) => command.name)).toContain("deploy");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }),
+  );
 
   it("maps pi skills and prompt templates into kata skills and slash commands", () => {
     const skills = mapPiSkills([

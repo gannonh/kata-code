@@ -87,9 +87,15 @@ async function openAddEnvironmentDialog(
  */
 export async function addContainerEnvironment(page: Page, label: string): Promise<Locator> {
   const dialog = await openAddEnvironmentDialog(page, "Docker container");
-  await dialog.getByLabel("Label").fill(label);
-  await dialog.getByLabel("Image").fill("katacode:local");
-  await dialog.getByLabel("Start command").fill("katacode serve --port 13773");
+  const labelInput = dialog.getByLabel("Label");
+  await labelInput.fill(label);
+  await labelInput.blur();
+  const imageInput = dialog.getByLabel("Image");
+  await imageInput.fill("katacode:local");
+  await imageInput.blur();
+  const commandInput = dialog.getByLabel("Start command");
+  await commandInput.fill("katacode serve --port 13773");
+  await commandInput.blur();
   await dialog.getByRole("button", { name: "Add environment", exact: true }).click();
   await expect(dialog).toBeHidden();
 
@@ -106,7 +112,9 @@ export async function addContainerEnvironment(page: Page, label: string): Promis
  */
 export async function addVercelEnvironment(page: Page, label: string): Promise<Locator> {
   const dialog = await openAddEnvironmentDialog(page, "Cloud Provider");
-  await dialog.getByLabel("Label").fill(label);
+  const labelInput = dialog.getByLabel("Label");
+  await labelInput.fill(label);
+  await labelInput.blur();
   await dialog.getByRole("button", { name: "Add environment", exact: true }).click();
   await expect(dialog).toBeHidden();
 

@@ -1379,9 +1379,23 @@ export function inferCheckpointTurnCountByTurnId(
   return result;
 }
 
+/** Pure session → UI phase projector. Optimistic local work does not belong here. */
 export function derivePhase(session: ThreadSession | null): SessionPhase {
   if (!session || session.status === "closed") return "disconnected";
   if (session.status === "connecting") return "connecting";
   if (session.status === "running") return "running";
   return "ready";
+}
+
+/**
+ * Composer interruptibility signal (Stop affordance). Covers projected session
+ * running and inflight turns only — optimistic local dispatch stays on the
+ * separate `isSendBusy` / Sending path so send-in-flight is not treated as a
+ * stoppable turn.
+ */
+export function isComposerTurnActive(input: {
+  readonly sessionPhase: SessionPhase;
+  readonly hasInflightTurn?: boolean;
+}): boolean {
+  return input.sessionPhase === "running" || Boolean(input.hasInflightTurn);
 }

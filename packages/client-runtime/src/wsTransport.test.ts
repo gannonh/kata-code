@@ -224,7 +224,10 @@ describe("WsTransport", () => {
   });
 
   it("tracks heartbeat freshness from websocket pongs", async () => {
-    const nowSpy = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    // Keep real time advancing for Effect fiber scheduling; only shift for age checks.
+    const realNow = performance.now.bind(performance);
+    let shiftMs = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => realNow() + shiftMs);
     const onHeartbeatPong = vi.fn();
     const transport = createTransport("ws://localhost:3020", { onHeartbeatPong });
 
@@ -245,14 +248,13 @@ describe("WsTransport", () => {
     expect(transport.isHeartbeatFresh()).toBe(true);
     expect(transport.isHeartbeatFresh(500)).toBe(true);
 
-    nowSpy.mockReturnValue(1_501);
+    shiftMs = 501;
     expect(transport.isHeartbeatFresh(500)).toBe(false);
 
     await transport.dispose();
   });
 
   it("clears heartbeat freshness when reconnecting", async () => {
-    vi.spyOn(performance, "now").mockReturnValue(1_000);
     const onHeartbeatPong = vi.fn();
     const transport = createTransport("ws://localhost:3020", { onHeartbeatPong });
 

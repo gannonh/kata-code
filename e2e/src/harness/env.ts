@@ -143,7 +143,7 @@ export function readDockerSocketPath(): string {
 export async function assertDockerDaemonReachable(): Promise<void> {
   const socketPath = readDockerSocketPath();
   await new Promise<void>((resolve, reject) => {
-    const req = request({ socketPath, path: "/_ping", method: "GET", timeout: 3_000 }, (res) => {
+    const req = request({ socketPath, path: "/_ping", method: "GET", timeout: 10_000 }, (res) => {
       res.resume();
       res.on("end", () =>
         res.statusCode === 200
@@ -176,7 +176,7 @@ export async function assertKatacodeImageBuilt(image = "katacode:local"): Promis
         socketPath,
         path: `/images/${encodeURIComponent(image)}/json`,
         method: "GET",
-        timeout: 3_000,
+        timeout: 10_000,
       },
       (res) => {
         res.resume();
@@ -229,9 +229,9 @@ export function readVercelCredentials(): {
  * default branch when omitted (the picker auto-selects it). Maintainer-local:
  * callers SKIP the source flow when the repository is absent.
  *
- * Shell-exported values win over `.env` (see `loadRepoEnv`). If a stale
- * `E2E_VERCEL_SOURCE_BRANCH=main` is exported in the terminal, it overrides
- * `master` in `.env` — `unset E2E_VERCEL_SOURCE_BRANCH` before re-running.
+ * Repo `.env` / `.env.local` win over ambient shell exports for keys defined
+ * in those files (see `applyE2ERepoEnv`). Prefer editing `.env.local` over
+ * exporting one-off overrides in the terminal.
  */
 export function readVercelSourceSelection(): {
   readonly repository: string;

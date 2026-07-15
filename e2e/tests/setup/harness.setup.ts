@@ -2,10 +2,9 @@ import { mkdir } from "node:fs/promises";
 import { test as setup } from "@playwright/test";
 import { clerkSetup } from "@clerk/testing/playwright";
 
-import { resolveE2eRoot } from "../../src/harness/artifacts.ts";
+import { resolveE2eRoot, resolveRepoRoot } from "../../src/harness/artifacts.ts";
 import { cleanupStaleDesktopDevApps } from "../../src/harness/cleanupStaleDesktopDev.ts";
 import { readClerkPrerequisites } from "../../src/harness/env.ts";
-import { resolveRepoRoot } from "../../src/harness/webSetup.ts";
 
 setup("prepare local E2E artifact paths", async () => {
   const root = resolveE2eRoot();

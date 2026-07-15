@@ -35,7 +35,7 @@ Credentialed `@pi` tests require `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AG
 
 ### Cursor E2E gates
 
-Credentialed `@cursor` tests require `KATACODE_E2E_ENABLE_CURSOR=1`, `KATACODE_E2E_CURSOR_MODEL`, and `KATACODE_E2E_CURSOR_API_KEY` (the flow authenticates the Cursor Agent CLI via API key, which skips interactive OAuth). Set `KATACODE_E2E_CURSOR_BINARY_PATH` when the Cursor `agent` binary is not available on `PATH`.
+Credentialed `@cursor` tests require `KATACODE_E2E_ENABLE_CURSOR=1`, `KATACODE_E2E_CURSOR_MODEL`, `KATACODE_E2E_CURSOR_API_KEY`, and an explicit `KATACODE_E2E_CURSOR_BINARY_PATH` (for example `cursor-agent`). The explicit binary avoids selecting another installed tool named `agent`; the flow authenticates the Cursor CLI via API key, which skips interactive OAuth.
 
 ### Setup (first run)
 
@@ -97,7 +97,7 @@ For locator discovery, editing flows, and authoring new tests, see [Mobile E2E a
 
 ## Web E2E — Playwright (browser)
 
-The `web-dev` project runs shared specs in Chromium against an isolated full dev stack. The project-aware fixture allocates a temporary home, ports, workspace and artifacts, captures the startup pairing URL, and supplies `appPage` or `authenticatedAppPage`. [`webSetup.ts`](../../e2e/src/harness/webSetup.ts) remains available to the browser-only recording template.
+The `web-dev` project runs shared and recorded specs in Chromium against an isolated full dev stack. The project-aware fixture allocates a temporary home, ports, workspace and artifacts, captures the startup pairing URL, and supplies `appPage` or `authenticatedAppPage`.
 
 Specs under [`e2e/tests/web/`](../../e2e/tests/web/). Template: [`recorded.spec.ts`](../../e2e/tests/web/recorded.spec.ts). Config: [`e2e/playwright.config.ts`](../../e2e/playwright.config.ts) (project `web-dev`), [`e2e/playwright.codegen.config.ts`](../../e2e/playwright.codegen.config.ts) (codegen).
 
@@ -115,22 +115,21 @@ pnpm run e2e:web
 pnpm run dev   # start the full dev stack
 npx playwright codegen --config e2e/playwright.codegen.config.ts
 
-# Run only browser-recorded tests with the codegen config
+# Run only browser-recorded tests with the isolated web-dev fixture
 pnpm run e2e:recorded
 ```
 
-`KATACODE_WEB_URL` overrides the URL for codegen and recorded-only runs (default `http://localhost:5733`). Shared `web-dev` specs use an isolated allocated URL.
+`KATACODE_WEB_URL` overrides the URL for codegen (default `http://localhost:5733`). The `web-dev` test project uses an isolated allocated URL.
 
 ### Writing web tests
 
-Shared tests use `test` from `testFixtures.ts` and the portable `appPage` or `authenticatedAppPage` fixtures. Codegen output kept under `tests/web/` uses the `webTest` fixture from [`webSetup.ts`](../../e2e/src/harness/webSetup.ts); `webPage` provides a paired page:
+Tests use `test` from `testFixtures.ts` and the portable `appPage` or `authenticatedAppPage` fixtures. Keep codegen output under `tests/web/` and use the authenticated fixture:
 
 ```ts
-import { webTest as test, expect } from "../../src/harness/webSetup.ts";
+import { expect, test } from "../../src/harness/testFixtures.ts";
 
-test("my web test", async ({ webPage }) => {
-  // webPage is already authenticated and on "/" with the app shell visible.
-  await expect(webPage.getByTestId("command-palette-trigger")).toBeVisible();
+test("my web test", async ({ authenticatedAppWindow }) => {
+  await expect(authenticatedAppWindow.getByTestId("command-palette-trigger")).toBeVisible();
 });
 ```
 

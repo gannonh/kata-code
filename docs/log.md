@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-14 (Recorded web E2E isolation)
+
+Updated the [E2E test catalog](/guides/e2e-test-catalog.md) for the standard isolated `web-dev` fixture and removed documentation references to the retired dedicated web recording fixture.
+
 ## 2026-07-13 (Environment connection recovery architecture approved)
 
 Approved the [environment connection recovery architecture](/specs/2026-07-13-environment-connection-recovery-architecture-design.md) for Build after incorporating the adversarial review. Updated the [specs roadmap](/specs/index.md) to Approved. Phase 1 remains gated by the Effect non-retry, server turn-continuity, and shared fault-proxy integration proofs.
@@ -58,7 +62,7 @@ Completed the Pi coding-agent provider Build on `feat/pi-phase2` (base `7bfe7d76
 
 ## 2026-06-26 (E2E web test authentication + Pi provider locator fix)
 
-Updated the [E2E test catalog](/guides/e2e-test-catalog.md) web section: the `web-dev` Playwright project now uses a [`webSetup.ts`](../../e2e/src/harness/webSetup.ts) fixture that starts the dev server, captures the `pairingUrl` from stdout, and authenticates via the pairing URL auto-submit flow. The template test verifies the authenticated app shell. Fixed the Pi provider settings E2E test radio locator to match the "Pi Early Access" accessible name. Updated [specs log](/specs/log.md) and [guides log](/guides/log.md).
+Updated the [E2E test catalog](/guides/e2e-test-catalog.md) web section: the `web-dev` Playwright project gained an authenticated browser fixture that starts the dev server, captures the `pairingUrl` from stdout, and authenticates via the pairing URL auto-submit flow. The template test verifies the authenticated app shell. Fixed the Pi provider settings E2E test radio locator to match the "Pi Early Access" accessible name. Updated [specs log](/specs/log.md) and [guides log](/guides/log.md).
 
 ## 2026-06-26 (Pi provider — strict quality review fixes + vertical slice doc sweep)
 

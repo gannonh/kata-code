@@ -305,6 +305,23 @@ function waitForReady(
   });
 }
 
+export function isTransientRecursiveChownRace(result: {
+  readonly exitCode: number;
+  readonly stderr: string;
+}): boolean {
+  if (result.exitCode === 0) return false;
+  const errors = result.stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return errors.length > 0 && errors.every((line) => line.includes("No such file or directory"));
+}
+
+/** Single-quote shell-escape so paths with spaces/quotes stay one argument. */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export function makeDockerSandboxProvider(
   options: DockerSandboxProviderOptions = {},
 ): SandboxProvider {
@@ -326,7 +343,8 @@ export function makeDockerSandboxProvider(
           const state = handle.handle as DockerSandboxHandleState;
           // Ensure the destination directory exists before uploading; the
           // `archive` PUT does not create intermediate directories.
-          const mkdir = yield* provider.exec(handle, `mkdir -p ${destPath}`);
+          const quotedDest = shellQuote(destPath);
+          const mkdir = yield* provider.exec(handle, `mkdir -p -- ${quotedDest}`);
           if (mkdir.exitCode !== 0) {
             return yield* new SandboxProviderError({
               reason: "provision-failed",
@@ -355,9 +373,14 @@ export function makeDockerSandboxProvider(
           // Ensure all extracted files and intermediate directories are
           // katacode-owned — Docker creates parent dirs as root when directory
           // entries are absent from the tar (see ustarWriter).
-          const chown = yield* provider.exec(handle, `chown -R 100:101 '${destPath}'`, {
-            user: "root",
-          });
+          const chownCommand = `chown -R 100:101 -- ${quotedDest}`;
+          let chown = yield* provider.exec(handle, chownCommand, { user: "root" });
+          // Credential tools create and remove lock files while the server is
+          // running. Retry the same ownership pass once when a lock disappears
+          // during recursive traversal; every surviving file is revisited.
+          if (isTransientRecursiveChownRace(chown)) {
+            chown = yield* provider.exec(handle, chownCommand, { user: "root" });
+          }
           if (chown.exitCode !== 0) {
             return yield* new SandboxProviderError({
               reason: "provision-failed",
@@ -550,16 +573,41 @@ export function makeDockerSandboxProvider(
         const name = dockerContainerName(req.instanceId);
 
         // Idempotent adopt: a container with this name may already exist from a
-        // previous provision or a server restart. Running -> reuse it; stopped ->
-        // start it; missing -> create+start below. This makes provision safe to
-        // retry and lets the session store reclaim a container after a restart.
+        // previous provision or a server restart. Running → restart so the
+        // in-container server re-seeds its one-time bootstrap grant; stopped →
+        // start it; missing → create+start below. Restart is required because a
+        // long-running adopted container has already consumed its grant.
         const existing = yield* inspectContainer(name, "provision-failed", "provision adopt");
         if (existing !== null) {
           yield* assertOwnedContainer(existing, req.instanceId);
           if (existing.State.Running) {
-            // Already running: return its current handle (re-reading the port
-            // binding in case the daemon restarted with a new mapping).
-            return handleFromInspect(existing, req.instanceId, containerPort);
+            // Provision only runs when no session record exists, so nothing is
+            // using the container.
+            const restartRes = yield* engine(
+              `/containers/${existing.Id}/restart?t=10`,
+              { method: "POST" },
+              "provision-failed",
+              "restart failed",
+            );
+            if (restartRes.status >= 300) {
+              return yield* new SandboxProviderError({
+                reason: "provision-failed",
+                message: `restart failed: ${restartRes.status}`,
+              });
+            }
+            const restartedInfo = yield* inspectContainer(
+              name,
+              "provision-failed",
+              "provision restart re-inspect",
+            );
+            if (restartedInfo === null) {
+              return yield* new SandboxProviderError({
+                reason: "provision-failed",
+                message: "container vanished after restart",
+              });
+            }
+            yield* waitForReadyFor(readHostPort(restartedInfo, containerPort));
+            return handleFromInspect(restartedInfo, req.instanceId, containerPort);
           }
           // Stopped: start it and re-read the port binding (the published host
           // port is stable for a container's lifetime but re-read defensively).
@@ -767,6 +815,25 @@ export function makeDockerSandboxProvider(
         wsBaseUrl: `ws://localhost:${state.hostPort}`,
       } satisfies SandboxReachability);
     },
+
+    /**
+     * Docker container env is fixed at create time. Lifecycle start / adopt
+     * restart re-seeds the ORIGINAL create-time bootstrap grant, not a freshly
+     * minted host token — read the effective token from the container env.
+     */
+    resolveBootstrapToken: (handle, _mintedToken) =>
+      Effect.gen(function* () {
+        const recovered = yield* provider.exec(handle, "printenv KATACODE_DESKTOP_BOOTSTRAP_TOKEN");
+        const token = recovered.stdout.trim();
+        if (token.length === 0) {
+          return yield* new SandboxProviderError({
+            reason: "provision-failed",
+            message:
+              "Started container has no KATACODE_DESKTOP_BOOTSTRAP_TOKEN in its environment; delete the sandbox and create it again.",
+          });
+        }
+        return token;
+      }),
 
     dispose: (handle) =>
       Effect.gen(function* () {

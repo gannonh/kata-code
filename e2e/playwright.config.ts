@@ -11,6 +11,8 @@ const e2eRoot = resolveE2eRoot();
 const webUrl = process.env["KATACODE_WEB_URL"] ?? "http://localhost:5733";
 
 const WEB_TEST_IGNORE = /web\/.*\.spec\.ts/;
+/** Billable Vercel lifecycle runs once on desktop-dev, never in cross-target duplicates. */
+const VERCEL_BILLABLE_TEST = /environments-deploy\/vercel-deploy\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./tests",
@@ -54,7 +56,7 @@ export default defineConfig({
     {
       name: "desktop-release",
       testMatch: /.*\.spec\.ts/,
-      testIgnore: WEB_TEST_IGNORE,
+      testIgnore: [WEB_TEST_IGNORE, VERCEL_BILLABLE_TEST],
       dependencies: ["setup"],
       metadata: {
         appTarget: "desktop",
@@ -64,6 +66,7 @@ export default defineConfig({
     {
       name: "web-dev",
       testMatch: /.*\.spec\.ts/,
+      testIgnore: VERCEL_BILLABLE_TEST,
       dependencies: ["setup"],
       metadata: {
         appTarget: "web",

@@ -7,13 +7,22 @@ import {
 import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
+  authorizeConnectCli,
+  extractConnectEnvironmentId,
+  registerConnectAccountSweepCleanup,
+  registerConnectEnvironmentCleanup,
+  withConnectBrowser,
+} from "../../src/flows/connect.ts";
+import {
   addContainerEnvironment,
   deploymentTargetCard,
   openConnectionsSettings,
 } from "../../src/flows/settings.ts";
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
+import { deleteSandboxDeploymentTarget } from "../../src/flows/sandboxDeployment.ts";
 import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/workspace.ts";
-import { expect, test } from "../../src/harness/testFixtures.ts";
+import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
+import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts";
 
 /**
  * Container sandbox environment — provisions the real `katacode:local` image
@@ -23,6 +32,30 @@ import { expect, test } from "../../src/harness/testFixtures.ts";
  * paired model provider and is recorded as a manual UAT per the spec's
  * two-client rule).
  */
+
+/**
+ * Authorize Connect CLI and register the account-level safety sweep before
+ * Create & run so an aborted create still has teardown registered. Environment
+ * id cleanup is registered later via {@link registerConnectEnvironmentTeardown}.
+ */
+async function authorizeConnectAndRegisterAccountSweep(runContext: E2ERunContext): Promise<void> {
+  await withConnectBrowser((connectPage) => authorizeConnectCli(runContext, connectPage));
+  registerConnectAccountSweepCleanup(runContext, { olderThanHours: 1 });
+}
+
+/** Register per-environment Connect cleanup once Session ready exposes the id. */
+function registerConnectEnvironmentTeardown(
+  runContext: E2ERunContext,
+  sessionText: string | null,
+): void {
+  const environmentId = extractConnectEnvironmentId(sessionText);
+  if (!environmentId) {
+    throw new Error(
+      `session text did not expose the Connect environment id: ${sessionText ?? "(empty)"}`,
+    );
+  }
+  registerConnectEnvironmentCleanup(runContext, environmentId);
+}
 
 /** Resolve the host port from a loopback httpBaseUrl like `http://localhost:32789`. */
 function parseHostPort(httpBaseUrl: string): number {
@@ -80,7 +113,7 @@ interface DockerExecResult {
 async function dockerEngineRequest(
   path: string,
   input: {
-    readonly method?: "GET" | "POST";
+    readonly method?: "GET" | "POST" | "DELETE";
     readonly body?: unknown;
     readonly timeoutMs?: number;
   } = {},
@@ -217,209 +250,258 @@ async function execInContainer(containerId: string, command: string): Promise<Do
 
 const REAL_IMAGE_E2E_TIMEOUT_MS = Math.max(E2E_TIMEOUTS.agentTestMs, 240_000);
 
+/** Instance ids owned by this spec. Containers are global while each run's
+ *  KATACODE_HOME is fresh, so a container left by an aborted run would be
+ *  adopted by the next provision with a mismatched bootstrap token. */
+const E2E_DOCKER_INSTANCE_IDS = [
+  "docker_e2e_phase2",
+  "docker_e2e_phase3a",
+  "docker_e2e_lifecycle",
+] as const;
+
+async function removeStaleSandboxContainers(): Promise<void> {
+  for (const instanceId of E2E_DOCKER_INSTANCE_IDS) {
+    const filters = encodeURIComponent(
+      JSON.stringify({ label: [`kata.sandbox.instance=${instanceId}`] }),
+    );
+    const response = await dockerEngineRequest(`/containers/json?all=true&filters=${filters}`);
+    const containers = parseDockerJson<ReadonlyArray<DockerContainerSummary>>(
+      response,
+      "stale container lookup",
+    );
+    for (const container of containers) {
+      const removal = await dockerEngineRequest(`/containers/${container.Id}?force=true`, {
+        method: "DELETE",
+        timeoutMs: 30_000,
+      });
+      // 404 = already gone (idempotent success).
+      if (removal.statusCode >= 300 && removal.statusCode !== 404) {
+        throw new Error(
+          `Could not remove stale sandbox container ${container.Id} for ${instanceId}: ${removal.statusCode}`,
+        );
+      }
+    }
+  }
+}
+
 test.describe(`Environments/deployments container target ${E2E_TAGS.environmentsDeploy}`, () => {
   test.describe.configure({ timeout: REAL_IMAGE_E2E_TIMEOUT_MS });
 
-  test("add sandbox environment, test connection + start session boot the real katacode image", async ({
-    appWindow,
-  }, testInfo) => {
-    // Fail loud if Docker or the katacode image isn't available — the flow
-    // provisions the real Kata server, so either is a hard prerequisite.
+  test.beforeAll(async () => {
+    // Check the shared prerequisites before launching Electron. The running app
+    // also reconciles Docker targets, which can briefly contend for the Engine API.
     await assertDockerDaemonReachable();
     await assertKatacodeImageBuilt();
-
-    const page = appWindow;
-    await openConnectionsSettings(page);
-    await dismissBlockingToasts(page);
-
-    const card = await addContainerEnvironment(page, "E2E Smoke");
-    await expect(card.getByText("available")).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
-
-    // Expand the card to reach the config + Test connection controls.
-    await card.getByRole("button", { name: /Toggle .* details/ }).click();
-
-    // Test connection: validate -> provision -> dispose -> done, all ok. The
-    // provision step boots the real katacode image and waits for /healthz, so
-    // `provision: ok` proves the in-container server reached readiness.
-    await card.getByRole("button", { name: "Test connection" }).click();
-    const progress = card.locator("pre");
-    await expect(progress).toContainText("validate: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
-    await expect(progress).toContainText("provision: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
-    await expect(progress).toContainText("dispose: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
-    await expect(progress).toContainText("done: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
-
-    // Start session (AC-1.10): provision the real katacode image, auto-register
-    // with Connect using the signed-in app user's Clerk relay token, and surface
-    // the loopback endpoint + environmentId. The primary action is state-driven:
-    // no sandbox -> "Create & run sandbox" (AC-L11).
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Create & run sandbox" }).click();
-    const sessionLine = card.getByText(/Session ready:/);
-    await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
-    await sessionLine.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: testInfo.outputPath("session-ready.png"), fullPage: true });
-
-    // Extract the published loopback URL and verify the in-container Kata
-    // server answers over it — the loopback reachability half of AC-1.10.
-    const sessionText = await sessionLine.textContent();
-    const httpBaseUrlMatch = sessionText?.match(/http:\/\/localhost:\d+/);
-    expect(
-      httpBaseUrlMatch,
-      `session text did not expose a loopback URL: ${sessionText}`,
-    ).not.toBeNull();
-    const hostPort = parseHostPort(httpBaseUrlMatch![0]);
-    const healthStatus = await probeContainerHealth(hostPort);
-    expect(healthStatus).toBe(200);
-
-    // Stop the running sandbox, then delete it. The durable lifecycle exposes
-    // Stop (running) then Delete sandbox (stopped) instead of the old Dispose
-    // (AC-L8/L9). The session line disappears once the sandbox is deleted.
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Stop" }).last().click();
-    await card.getByRole("button", { name: "Delete sandbox" }).click();
-    await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
-
-    // Clean up the target via the trash button on the card row.
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-    await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+    // Remove containers left by aborted prior runs. Each E2E run gets a fresh
+    // KATACODE_HOME (no session store), but containers are global: provision
+    // would adopt a leftover container whose create-time bootstrap token no
+    // longer matches anything, failing Connect registration.
+    await removeStaleSandboxContainers();
   });
 
-  test("saved repo environment seeds, injects secrets, and launches setup processes", async ({
-    appWindow,
-    runContext,
-  }, testInfo) => {
-    await assertDockerDaemonReachable();
-    await assertKatacodeImageBuilt();
-
-    const page = appWindow;
-    const secret = `phase2-secret-${Date.now()}`;
-    const workspacePath = await createSeededGitWorkspace(runContext, {
-      name: "phase2-env",
-      remoteUrl: "https://github.com/kata-sh/e2e-phase2.git",
-      files: {
-        "package.json": '{"name":"e2e-phase2-env","scripts":{"test":"echo ok"}}',
-        "e2e-seed.txt": "seed ok\n",
-        ".kata/environment.json": JSON.stringify(
-          {
-            install:
-              'sh -c \'test -f /workspace/e2e-seed.txt && printf install-from-repo > /tmp/kata-phase2-install.txt && printf "%s" "$KATA_E2E_SECRET" > /tmp/kata-phase2-secret.txt\'',
-            start: "sh -c 'sleep 300'",
-            terminals: [{ name: "worker", command: "sh -c 'sleep 301'" }],
-          },
-          null,
-          2,
-        ),
-      },
-    });
-
-    await openConnectionsSettings(page);
-    await dismissBlockingToasts(page);
-
-    await addContainerEnvironment(page, "E2E Phase2");
-
-    await createOrOpenProject(page, workspacePath);
-    await openConnectionsSettings(page);
-    await dismissBlockingToasts(page);
-
-    const card = deploymentTargetCard(page, "E2E Phase2");
-    await expect(card).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
-    await card.getByRole("button", { name: /Toggle .* details/ }).click();
-
-    const editor = card.getByTestId("saved-environment-editor");
-    await expect(editor).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
-    await expect(editor.getByText("kata-sh/e2e-phase2")).toBeVisible({
-      timeout: E2E_TIMEOUTS.authMs,
-    });
-    await editor.getByRole("combobox", { name: "Saved environment" }).click();
-    await page.getByRole("option", { name: /github\.com\/kata-sh\/e2e-phase2/ }).click();
-
-    await editor.getByRole("button", { name: "Add", exact: true }).click();
-    await editor.getByLabel("Environment variable name 1").fill("KATA_E2E_SECRET");
-    const secretInput = editor.getByLabel("Environment variable value 1");
-    await secretInput.click();
-    await page.keyboard.insertText(secret);
-    await expect(secretInput).toHaveValue(secret);
-    await secretInput.press("Enter");
-    // Wait for the env-var value to be committed (saved state visible) before proceeding.
-    await expect(editor.getByLabel("Environment variable value 1")).toHaveValue(secret);
-
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Create & run sandbox" }).click();
-    const sessionLine = card.getByText(/Session ready:/);
-    await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
-
-    // Assert secret redaction BEFORE capturing the screenshot so a regression
-    // can't persist sensitive text into a CI artifact.
-    const progress = card.locator("pre");
-    await expect(progress).not.toContainText(secret);
-
-    await page.screenshot({
-      path: testInfo.outputPath("phase2-session-ready.png"),
-      fullPage: true,
-    });
-
-    let containerId = "";
-    await expect
-      .poll(
-        async () => {
-          containerId = (await findSandboxContainerId("docker_e2e_phase2")) ?? "";
-          return containerId;
-        },
-        { timeout: E2E_TIMEOUTS.agentReplyMs },
-      )
-      .not.toBe("");
-
-    const installMarker = await execInContainer(containerId, "cat /tmp/kata-phase2-install.txt");
-    expect(installMarker.exitCode).toBe(0);
-    expect(installMarker.stdout).toBe("install-from-repo");
-
-    const injectedSecret = await execInContainer(containerId, "cat /tmp/kata-phase2-secret.txt");
-    expect(injectedSecret.exitCode).toBe(0);
-    expect(injectedSecret.stdout).toBe(secret);
-
-    const processList = await execInContainer(
-      containerId,
-      "ps -eo args | grep -E 'sleep 300|sleep 301' | grep -v grep",
-    );
-    expect(processList.exitCode).toBe(0);
-    expect(processList.stdout).toContain("sleep 300");
-    expect(processList.stdout).toContain("sleep 301");
-
-    const workspaceSecretSearch = await execInContainer(
-      containerId,
-      `grep -R ${JSON.stringify(secret)} /workspace`,
-    );
-    expect(workspaceSecretSearch.exitCode).not.toBe(0);
-
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: "Stop" }).last().click();
-    await card.getByRole("button", { name: "Delete sandbox" }).click();
-    await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
-
-    await dismissBlockingToasts(page);
-    await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-    await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+  test.beforeEach(async ({ authenticatedAppWindow }) => {
+    await resetAppToHome(authenticatedAppWindow);
   });
 
   test(
-    "started sandbox has /bin/sh as SHELL and provider CLIs on PATH (AC-3a.1/2/3)",
-    { tag: [E2E_TAGS.sandbox] },
-    async ({ appWindow }, testInfo) => {
-      await assertDockerDaemonReachable();
-      await assertKatacodeImageBuilt();
+    "add sandbox environment, test connection + start session boot the real katacode image",
+    { tag: [E2E_TAGS.environmentsDeploy, E2E_TAGS.sandbox] },
+    async ({ authenticatedAppWindow, runContext }, testInfo) => {
+      const page = authenticatedAppWindow;
+      await openConnectionsSettings(page);
+      await dismissBlockingToasts(page);
 
-      const page = appWindow;
+      const card = await addContainerEnvironment(page, "E2E Smoke");
+      await expect(card.getByText("available")).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
+
+      // Expand the card to reach the config + Test connection controls.
+      await card.getByRole("button", { name: /Toggle .* details/ }).click();
+
+      // Test connection: validate -> provision -> dispose -> done, all ok. The
+      // provision step boots the real katacode image and waits for /healthz, so
+      // `provision: ok` proves the in-container server reached readiness.
+      await card.getByRole("button", { name: "Test connection" }).click();
+      const progress = card.locator("pre");
+      await expect(progress).toContainText("validate: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
+      await expect(progress).toContainText("provision: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
+      await expect(progress).toContainText("dispose: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
+      await expect(progress).toContainText("done: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
+
+      // Authorize Connect + account sweep before Create & run so aborted creates
+      // still have teardown registered (mirrors vercel-deploy ordering).
+      await authorizeConnectAndRegisterAccountSweep(runContext);
+
+      // Start session (AC-1.10): provision the real katacode image, auto-register
+      // with Connect using the signed-in app user's Clerk relay token, and surface
+      // the loopback endpoint + environmentId. The primary action is state-driven:
+      // no sandbox -> "Create & run sandbox" (AC-L11).
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Create & run sandbox" }).click();
+      const sessionLine = card.getByText(/Session ready:/);
+      await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      await sessionLine.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath("session-ready.png"), fullPage: true });
+
+      // Extract the published loopback URL and verify the in-container Kata
+      // server answers over it — the loopback reachability half of AC-1.10.
+      const sessionText = await sessionLine.textContent();
+      registerConnectEnvironmentTeardown(runContext, sessionText);
+      const httpBaseUrlMatch = sessionText?.match(/http:\/\/localhost:\d+/);
+      expect(
+        httpBaseUrlMatch,
+        `session text did not expose a loopback URL: ${sessionText}`,
+      ).not.toBeNull();
+      const hostPort = parseHostPort(httpBaseUrlMatch![0]);
+      const healthStatus = await probeContainerHealth(hostPort);
+      expect(healthStatus).toBe(200);
+
+      // Stop the running sandbox, then delete it. The durable lifecycle exposes
+      // Stop (running) then Delete sandbox (stopped) instead of the old Dispose
+      // (AC-L8/L9). The session line disappears once the sandbox is deleted.
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Stop" }).last().click();
+      await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
+
+      // Clean up the target via the trash button on the card row.
+      await deleteSandboxDeploymentTarget(page, "E2E Smoke");
+    },
+  );
+
+  test(
+    "saved repo environment seeds, injects secrets, and launches setup processes",
+    { tag: [E2E_TAGS.environmentsDeploy, E2E_TAGS.sandbox] },
+    async ({ authenticatedAppWindow, runContext }, testInfo) => {
+      const page = authenticatedAppWindow;
+      const secret = `**************${Date.now()}`;
+      const workspacePath = await createSeededGitWorkspace(runContext, {
+        name: "phase2-env",
+        remoteUrl: "https://github.com/kata-sh/e2e-phase2.git",
+        files: {
+          "package.json": '{"name":"e2e-phase2-env","scripts":{"test":"echo ok"}}',
+          "e2e-seed.txt": "seed ok\n",
+          ".kata/environment.json": JSON.stringify(
+            {
+              install:
+                'sh -c \'test -f /workspace/e2e-seed.txt && printf install-from-repo > /tmp/kata-phase2-install.txt && printf "%s" "$KATA_E2E_SECRET" > /tmp/kata-phase2-secret.txt\'',
+              start: "sh -c 'sleep 300'",
+              terminals: [{ name: "worker", command: "sh -c 'sleep 301'" }],
+            },
+            null,
+            2,
+          ),
+        },
+      });
+
+      await openConnectionsSettings(page);
+      await dismissBlockingToasts(page);
+
+      await addContainerEnvironment(page, "E2E Phase2");
+
+      await createOrOpenProject(page, workspacePath);
+      await openConnectionsSettings(page);
+      await dismissBlockingToasts(page);
+
+      const card = deploymentTargetCard(page, "E2E Phase2");
+      await expect(card).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
+      await card.getByRole("button", { name: /Toggle .* details/ }).click();
+
+      const editor = card.getByTestId("saved-environment-editor");
+      await expect(editor).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
+      await expect(editor.getByText("kata-sh/e2e-phase2")).toBeVisible({
+        timeout: E2E_TIMEOUTS.authMs,
+      });
+      await editor.getByRole("combobox", { name: "Saved environment" }).click();
+      await page.getByRole("option", { name: /github\.com\/kata-sh\/e2e-phase2/ }).click();
+
+      await editor.getByRole("button", { name: "Add", exact: true }).click();
+      await editor.getByLabel("Environment variable name 1").fill("KATA_E2E_SECRET");
+      const secretInput = editor.getByLabel("Environment variable value 1");
+      await secretInput.click();
+      await page.keyboard.insertText(secret);
+      await expect(secretInput).toHaveValue(secret);
+      await secretInput.press("Enter");
+      // Wait for the env-var value to be committed (saved state visible) before proceeding.
+      await expect(editor.getByLabel("Environment variable value 1")).toHaveValue(secret);
+
+      await authorizeConnectAndRegisterAccountSweep(runContext);
+
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Create & run sandbox" }).click();
+      const sessionLine = card.getByText(/Session ready:/);
+      await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      registerConnectEnvironmentTeardown(runContext, await sessionLine.textContent());
+
+      // Assert secret redaction BEFORE capturing the screenshot so a regression
+      // can't persist sensitive text into a CI artifact.
+      const progress = card.locator("pre");
+      await expect(progress).not.toContainText(secret);
+
+      await page.screenshot({
+        path: testInfo.outputPath("phase2-session-ready.png"),
+        fullPage: true,
+      });
+
+      let containerId = "";
+      await expect
+        .poll(
+          async () => {
+            containerId = (await findSandboxContainerId("docker_e2e_phase2")) ?? "";
+            return containerId;
+          },
+          { timeout: E2E_TIMEOUTS.agentReplyMs },
+        )
+        .not.toBe("");
+
+      const installMarker = await execInContainer(containerId, "cat /tmp/kata-phase2-install.txt");
+      expect(installMarker.exitCode).toBe(0);
+      expect(installMarker.stdout).toBe("install-from-repo");
+
+      const injectedSecret = await execInContainer(containerId, "cat /tmp/kata-phase2-secret.txt");
+      expect(injectedSecret.exitCode).toBe(0);
+      expect(injectedSecret.stdout).toBe(secret);
+
+      const processList = await execInContainer(
+        containerId,
+        "ps -eo args | grep -E 'sleep 300|sleep 301' | grep -v grep",
+      );
+      expect(processList.exitCode).toBe(0);
+      expect(processList.stdout).toContain("sleep 300");
+      expect(processList.stdout).toContain("sleep 301");
+
+      const workspaceSecretSearch = await execInContainer(
+        containerId,
+        `grep -R ${JSON.stringify(secret)} /workspace`,
+      );
+      expect(workspaceSecretSearch.exitCode).not.toBe(0);
+
+      await dismissBlockingToasts(page);
+      await card.getByRole("button", { name: "Stop" }).last().click();
+      await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
+
+      await deleteSandboxDeploymentTarget(page, "E2E Phase2");
+    },
+  );
+
+  test(
+    "started sandbox has /bin/sh as SHELL and provider CLIs on PATH (AC-3a.1/2/3)",
+    { tag: [E2E_TAGS.environmentsDeploy, E2E_TAGS.sandbox] },
+    async ({ authenticatedAppWindow, runContext }, testInfo) => {
+      const page = authenticatedAppWindow;
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
 
       const card = await addContainerEnvironment(page, "E2E Phase3a");
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
+      await authorizeConnectAndRegisterAccountSweep(runContext);
+
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Create & run sandbox" }).click();
       const sessionLine = card.getByText(/Session ready:/);
       await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      registerConnectEnvironmentTeardown(runContext, await sessionLine.textContent());
       await page.screenshot({
         path: testInfo.outputPath("phase3a-session-ready.png"),
         fullPage: true,
@@ -460,34 +542,32 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
 
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Stop" }).last().click();
-      await card.getByRole("button", { name: "Delete sandbox" }).click();
-      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
-      await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-      await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await deleteSandboxDeploymentTarget(page, "E2E Phase3a");
     },
   );
 
   test(
     "stop/start lifecycle preserves the container and its filesystem (AC-L5/L8)",
-    { tag: [E2E_TAGS.sandbox] },
-    async ({ appWindow }, testInfo) => {
-      await assertDockerDaemonReachable();
-      await assertKatacodeImageBuilt();
-
-      const page = appWindow;
+    { tag: [E2E_TAGS.environmentsDeploy, E2E_TAGS.sandbox] },
+    async ({ authenticatedAppWindow, runContext }, testInfo) => {
+      const page = authenticatedAppWindow;
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
 
       const card = await addContainerEnvironment(page, "E2E Lifecycle");
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
+      await authorizeConnectAndRegisterAccountSweep(runContext);
+
       // Create & run the sandbox.
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Create & run sandbox" }).click();
       const sessionLine = card.getByText(/Session ready:/);
       await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      registerConnectEnvironmentTeardown(runContext, await sessionLine.textContent());
 
       const instanceId = "docker_e2e_lifecycle";
       let containerId = "";
@@ -512,7 +592,9 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // the card shows the stopped state with a Start button (AC-L8).
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Stop" }).last().click();
-      await expect(card.getByRole("button", { name: "Start" })).toBeVisible({
+      // The stopped card shows Start in both the header row and the expanded
+      // actions section; target the expanded one like the Stop clicks above.
+      await expect(card.getByRole("button", { name: "Start" }).last()).toBeVisible({
         timeout: E2E_TIMEOUTS.assertionMs,
       });
       await expect
@@ -525,7 +607,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // Start the sandbox again: the same container resumes and the marker
       // file survives (AC-L5 filesystem persistence across stop/start).
       await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: "Start" }).click();
+      await card.getByRole("button", { name: "Start" }).last().click();
       await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
       await expect
         .poll(async () => (await findSandboxContainerState(instanceId))?.State, {
@@ -542,12 +624,10 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // Stop then delete the sandbox and remove the target.
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Stop" }).last().click();
-      await card.getByRole("button", { name: "Delete sandbox" }).click();
-      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await card.getByRole("button", { name: "Delete sandbox", exact: true }).click();
+      await expect(sessionLine).toBeHidden({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
-      await dismissBlockingToasts(page);
-      await card.getByRole("button", { name: /Delete sandbox environment/ }).click();
-      await expect(card).toBeHidden({ timeout: E2E_TIMEOUTS.assertionMs });
+      await deleteSandboxDeploymentTarget(page, "E2E Lifecycle");
     },
   );
 });

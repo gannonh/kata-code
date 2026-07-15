@@ -34,6 +34,20 @@ export interface E2ERunContext {
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 const cleanupCallbacksByRunId = new Map<string, Array<() => Promise<void> | void>>();
+let nextPortOffset: number | undefined;
+
+export function resolvePortScanStart(
+  configuredStartOffset: number,
+  nextUnusedOffset: number | undefined,
+  workerIndex = 0,
+): number {
+  // Per-worker stride keeps parallel Playwright workers from contending on the
+  // same offset band. Monotonic nextUnusedOffset avoids immediate reuse after a
+  // prior run in the same worker once tree-kill + HTTP readiness have cleared
+  // the previous stack.
+  const workerStartOffset = configuredStartOffset + Math.max(0, workerIndex) * 20;
+  return Math.max(workerStartOffset, nextUnusedOffset ?? workerStartOffset);
+}
 
 /** Create a unique run id for an isolated E2E worker. */
 function createRunId(): string {
@@ -97,7 +111,15 @@ export async function createIsolatedRun(input: {
   readonly launchTarget: LaunchTarget;
 }): Promise<E2ERunContext> {
   const runId = createRunId();
-  const { offset: startOffset } = resolveStartOffsetFromEnv();
+  const { offset: configuredStartOffset } = resolveStartOffsetFromEnv();
+  // Prefer a fresh offset band after each prior run in this worker so a slow
+  // OS port release cannot collide with the next stack boot.
+  const workerIndex = Number.parseInt(process.env.TEST_WORKER_INDEX ?? "0", 10);
+  const startOffset = resolvePortScanStart(
+    configuredStartOffset,
+    nextPortOffset,
+    Number.isInteger(workerIndex) ? workerIndex : 0,
+  );
   // Claim ports by holding listening sockets so concurrent workers can't both
   // pick the same free port (TOCTOU). The claim is released right before the
   // dev stack binds the ports in startDevStack.
@@ -107,6 +129,7 @@ export async function createIsolatedRun(input: {
     webPort,
     release: releasePortClaim,
   } = await claimAvailablePortOffset(startOffset);
+  nextPortOffset = offset + 1;
   const katacodeHome = await mkdtemp(join(tmpdir(), `katacode-e2e-home-${runId}-`));
   const workspaceRoot = await mkdtemp(join(tmpdir(), `katacode-e2e-workspace-${runId}-`));
   // Per-worker Electron launcher cache so parallel workers don't clobber a
@@ -130,9 +153,10 @@ export async function createIsolatedRun(input: {
 
   cleanupCallbacks.push(async () => {
     await releasePortClaimIdempotent();
-    await rm(katacodeHome, { recursive: true, force: true });
-    await rm(workspaceRoot, { recursive: true, force: true });
-    await rm(electronRuntimeDir, { recursive: true, force: true });
+    const removeOptions = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
+    await rm(katacodeHome, removeOptions);
+    await rm(workspaceRoot, removeOptions);
+    await rm(electronRuntimeDir, removeOptions);
   });
   cleanupCallbacksByRunId.set(runId, cleanupCallbacks);
 

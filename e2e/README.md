@@ -18,7 +18,7 @@ Playwright end-to-end tests for the Kata Code web and Electron desktop apps. Sha
 
 ## Environment variables
 
-Set these in `.env.local` (gitignored; recommended) or export them in your shell. The E2E runner loads `.env` and `.env.local` from the repo root automatically.
+Set these in `.env` or `.env.local` (gitignored; recommended). The E2E runner loads both from the repo root automatically; file values win over ambient shell exports for the same key (`.env.local` overrides `.env`).
 
 ### Clerk (required for authenticated specs such as `@settings` and `@agent`)
 
@@ -42,12 +42,24 @@ Canonical `KATACODE_CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` are al
 
 ### Cursor skill tests (`@cursor`)
 
-| Variable                          | Purpose                                                                        |
-| --------------------------------- | ------------------------------------------------------------------------------ |
-| `KATACODE_E2E_ENABLE_CURSOR`      | Set to `1` to opt in to Cursor-specific E2E tests                              |
-| `KATACODE_E2E_CURSOR_MODEL`       | Cursor model id to add/select in the Composer model picker                     |
-| `KATACODE_E2E_CURSOR_API_KEY`     | Cursor API key forwarded to `CURSOR_API_KEY` for headless Cursor auth in E2E   |
-| `KATACODE_E2E_CURSOR_BINARY_PATH` | Optional path to the Cursor `agent` binary when it is not available as `agent` |
+| Variable                          | Purpose                                                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `KATACODE_E2E_ENABLE_CURSOR`      | Set to `1` to opt in to Cursor-specific E2E tests                                                                        |
+| `KATACODE_E2E_CURSOR_MODEL`       | Cursor model id to add/select in the Composer model picker                                                               |
+| `KATACODE_E2E_CURSOR_API_KEY`     | Cursor API key forwarded to `CURSOR_API_KEY` for headless Cursor auth in E2E                                             |
+| `KATACODE_E2E_CURSOR_BINARY_PATH` | Required Cursor CLI executable path or command, for example `cursor-agent`; explicit to avoid another tool named `agent` |
+
+### Vercel deployment tests (`@environments-deploy`)
+
+| Variable                       | Purpose                                                          |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `E2E_VERCEL_TOKEN`             | Vercel Sandbox access token                                      |
+| `E2E_VERCEL_TEAM_ID`           | Vercel team that owns the test project                           |
+| `E2E_VERCEL_PROJECT_ID`        | Vercel project used by the sandbox test                          |
+| `E2E_VERCEL_SOURCE_REPOSITORY` | Dedicated minimal GitHub fixture repository in `owner/name` form |
+| `E2E_VERCEL_SOURCE_BRANCH`     | Optional fixture branch; defaults to the repository default      |
+
+Before provisioning, the test reads the selected branch's recursive Git tree through `gh` and fails if its checked-out blobs exceed 256 KiB. Vercel receives a depth-one native clone. Keep package caches, generated files, binaries, and large lockfiles out of the fixture repository. The lifecycle runs only under `desktop-dev`, so cross-platform and release selections do not duplicate billable provisioning. It creates one sandbox and does not run the disposable **Test connection** provision first because that would duplicate the cold-bootstrap package ingress.
 
 ### Release target (`desktop-release` project)
 
@@ -101,6 +113,22 @@ pnpm run kill-dev-ports -- --all   # also kill the default foreground dev server
 Both match the kata-code repo command signature and dev port ranges, so a
 foreground `pnpm run dev` (and unrelated system listeners) are spared unless you
 pass `--all`.
+
+### Cleaning up remnant Kata Code Connect records
+
+`@environmentsDeploy` tests register sandbox endpoints with Kata Code Connect
+against the shared Google E2E user. Fixture teardown unlinks when it runs, but
+aborted runs leave relay records. Wipe them with the Connect CLI account that
+owns the remnants (usually the E2E Google user via `katacode connect login`):
+
+```bash
+pnpm run kill:connect                      # list
+pnpm run kill:connect -- --all --yes       # delete every record for the account
+pnpm run kill:connect -- --older-than-hours 1 --yes
+```
+
+Requires a built server CLI (`apps/server/dist/bin.mjs`) and an active
+`katacode connect login` session.
 
 ```bash
 # List tests
@@ -192,14 +220,14 @@ pnpm run dev:web
 # Open codegen recorder
 pnpm run e2e:codegen
 
-# Run only recorded web tests with the codegen config
+# Run only recorded web tests with the isolated web-dev fixture
 pnpm run e2e:recorded
 
 # Run all shared and recorded specs against web-dev
 pnpm run e2e:web
 ```
 
-Config: [`e2e/playwright.codegen.config.ts`](e2e/playwright.codegen.config.ts). Recorded tests go in [`e2e/tests/web/`](e2e/tests/web/). `KATACODE_WEB_URL` overrides the URL for codegen and recorded-only runs; shared `web-dev` specs always use their isolated allocated URL.
+Config: [`e2e/playwright.codegen.config.ts`](e2e/playwright.codegen.config.ts). Recorded tests go in [`e2e/tests/web/`](e2e/tests/web/). `KATACODE_WEB_URL` overrides the codegen URL; the `web-dev` test project uses an isolated allocated URL.
 
 ## Adopting this foundation in other repos
 

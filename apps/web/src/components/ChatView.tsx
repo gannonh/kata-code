@@ -57,6 +57,7 @@ import {
   findLatestProposedPlan,
   deriveWorkLogEntries,
   hasActionableProposedPlan,
+  isComposerTurnActive,
   isLatestTurnSettled,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
@@ -437,6 +438,7 @@ function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
   activeLatestTurn: Thread["latestTurn"] | null;
   phase: SessionPhase;
+  hasInflightTurn: boolean;
   activePendingApproval: ApprovalRequestId | null;
   activePendingUserInput: ApprovalRequestId | null;
   threadError: string | null | undefined;
@@ -467,6 +469,7 @@ function useLocalDispatchState(input: {
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: input.phase,
+        hasInflightTurn: input.hasInflightTurn,
         latestTurn: input.activeLatestTurn,
         session: input.activeThread?.session ?? null,
         hasPendingApproval: input.activePendingApproval !== null,
@@ -478,6 +481,7 @@ function useLocalDispatchState(input: {
       input.activePendingApproval,
       input.activePendingUserInput,
       input.activeThread?.session,
+      input.hasInflightTurn,
       input.phase,
       input.threadError,
       localDispatch,
@@ -1823,6 +1827,7 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
+  const hasInflightTurn = activeLatestTurn !== null && !latestTurnSettled;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
@@ -1907,11 +1912,16 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread,
     activeLatestTurn,
     phase,
+    hasInflightTurn,
     activePendingApproval: activePendingApproval?.requestId ?? null,
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const isComposerRunning = isComposerTurnActive({
+    sessionPhase: phase,
+    hasInflightTurn,
+  });
+  const isWorking = isComposerRunning || isSendBusy || isConnecting || isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -3568,7 +3578,7 @@ function ChatViewContent(props: ChatViewProps) {
         );
         return;
       }
-      if (phase === "running" || isSendBusy || isConnecting) {
+      if (isComposerRunning || isSendBusy || isConnecting) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
@@ -3606,10 +3616,10 @@ function ChatViewContent(props: ChatViewProps) {
       activeEnvironmentUnavailable,
       activeEnvironmentUnavailableLabel,
       environmentId,
+      isComposerRunning,
       isConnecting,
       isRevertingCheckpoint,
       isSendBusy,
-      phase,
       setThreadError,
     ],
   );
@@ -4705,6 +4715,7 @@ function ChatViewContent(props: ChatViewProps) {
                     isLocalDraftThread={isLocalDraftThread}
                     isSandboxEnvironment={activeSavedEnvironmentRecord?.sandbox != null}
                     phase={phase}
+                    isComposerRunning={isComposerRunning}
                     isConnecting={isConnecting}
                     isSendBusy={isSendBusy}
                     isPreparingWorktree={isPreparingWorktree}

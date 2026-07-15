@@ -9,8 +9,48 @@ import { startDevStack } from "./devStack.ts";
 import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
+import { killPids, listDescendantPids, signalProcessTree } from "./processTree.ts";
 import { resolveReleaseExecutablePath } from "./releaseTarget.ts";
 import { buildElectronLaunchEnv, isRendererWindow, resolveRendererTarget } from "./launchEnv.ts";
+
+const ELECTRON_CLOSE_TIMEOUT_MS = 5_000;
+
+async function closeElectronApp(app: ElectronApplication): Promise<void> {
+  // Snapshot the tree before closing: Electron main spawns the embedded
+  // server as a child (apps/server bin via --bootstrap-fd). If main dies
+  // without cleanup the child orphans to PID 1 and keeps listening on the
+  // run's server port, poisoning any later run that reuses the offset.
+  // Capture descendants now — once main exits they reparent and disappear
+  // from a post-close `signalProcessTree(mainPid)` walk.
+  const mainPid = app.process().pid;
+  const descendants =
+    mainPid !== undefined ? listDescendantPids(mainPid) : ([] as readonly number[]);
+
+  let settled = false;
+  const close = app
+    .close()
+    .catch(() => undefined)
+    .finally(() => {
+      settled = true;
+    });
+
+  await Promise.race([close, delay(ELECTRON_CLOSE_TIMEOUT_MS)]);
+  if (!settled) {
+    try {
+      app.process().kill("SIGKILL");
+    } catch {
+      // The process exited between the timeout check and the forced kill.
+    }
+  }
+
+  // Reap the pre-close snapshot first so orphans that reparented to PID 1
+  // during graceful close are still killed. Then re-walk mainPid for any
+  // children spawned during the grace window (same policy as terminateProcessTree).
+  killPids(descendants, "SIGKILL");
+  if (mainPid !== undefined) {
+    signalProcessTree(mainPid, "SIGKILL");
+  }
+}
 
 async function resolveDevElectronLaunchCommand(
   args: string[],
@@ -31,6 +71,16 @@ async function resolveDevElectronLaunchCommand(
 }
 
 function attachElectronLogging(context: E2ERunContext, app: ElectronApplication): void {
+  // Main-process output carries embedded-server crash traces that the
+  // renderer console never sees; without it a mid-test backend death is
+  // undiagnosable from artifacts.
+  const main = app.process();
+  main.stdout?.on("data", (chunk: Buffer) => {
+    void appendProcessLog(context, "electron-main-stdout", chunk.toString("utf8"));
+  });
+  main.stderr?.on("data", (chunk: Buffer) => {
+    void appendProcessLog(context, "electron-main-stderr", chunk.toString("utf8"));
+  });
   app.on("window", (page) => {
     page.on("console", (message) => {
       void appendProcessLog(context, "renderer-console", `[${message.type()}] ${message.text()}\n`);
@@ -74,7 +124,6 @@ async function resolveRendererWindow(
   rendererPort: number,
   rendererPortLabel: string,
   timeoutMs: number,
-  signal: AbortSignal,
 ): Promise<Page> {
   const deadline = Date.now() + timeoutMs;
 
@@ -97,11 +146,6 @@ async function resolveRendererWindow(
 
     const poll = async () => {
       while (Date.now() < deadline) {
-        if (signal.aborted) {
-          fail(signal.reason instanceof Error ? signal.reason : new Error("Renderer wait aborted"));
-          return;
-        }
-
         for (const page of electronApp.windows()) {
           const url = page.url();
           if (isRendererWindow(url, rendererPort)) {
@@ -111,7 +155,7 @@ async function resolveRendererWindow(
           }
         }
 
-        await delay(250, undefined, { signal });
+        await delay(250);
       }
 
       const windowUrls = electronApp.windows().map((page) => page.url());
@@ -165,9 +209,7 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
       env,
     });
   }
-  registerCleanup(context, async () => {
-    await electronApp.close();
-  });
+  registerCleanup(context, () => closeElectronApp(electronApp));
 
   attachElectronLogging(context, electronApp);
   logHarnessPhase("Waiting for the Electron renderer window...");
@@ -176,7 +218,6 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
     rendererPort,
     rendererPortLabel,
     E2E_TIMEOUTS.electronWindowMs,
-    AbortSignal.timeout(E2E_TIMEOUTS.electronWindowMs),
   );
   logHarnessPhase("Electron renderer window is ready.");
 

@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-07-14 (Recorded web E2E isolation)
+
+Updated the [E2E test catalog](/guides/e2e-test-catalog.md) so recorded web specs use the standard isolated `web-dev` fixture and authenticated app page.
+
 ## 2026-07-10 (Vercel worktree base ref)
 
 Updated [Repository environment configuration](/user/repository-environment-config.md) to document that Kata attaches Vercel's selected source revision to a local branch, providing New worktree with its base ref.
@@ -18,7 +22,7 @@ Added [Repository environment configuration](/user/repository-environment-config
 
 ## 2026-06-26 (E2E test catalog — web test authentication update)
 
-- Updated the web section of [E2E test catalog](/guides/e2e-test-catalog.md): replaced the "Web codegen" stub with a full "Web E2E" section documenting the `web-dev` Playwright project, the [`webSetup.ts`](../../e2e/src/harness/webSetup.ts) fixture (dev server startup, pairing URL capture, authenticated `webPage` fixture), run commands for both main and codegen configs, and a code example for writing new web tests.
+- Updated the web section of [E2E test catalog](/guides/e2e-test-catalog.md): replaced the "Web codegen" stub with a full "Web E2E" section documenting the `web-dev` Playwright project, authenticated browser fixture, run commands for both main and codegen configs, and a code example for writing new web tests.
 
 ## 2026-06-25 (mobile E2E Maestro Studio authoring guide)
 

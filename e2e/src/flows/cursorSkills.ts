@@ -38,6 +38,7 @@ const REQUIRED_CURSOR_ENV = [
   "KATACODE_E2E_ENABLE_CURSOR",
   "KATACODE_E2E_CURSOR_MODEL",
   "KATACODE_E2E_CURSOR_API_KEY",
+  "KATACODE_E2E_CURSOR_BINARY_PATH",
 ] as const;
 
 /** Read Cursor E2E gate env vars and return config or the missing variable names. */
@@ -52,12 +53,11 @@ export function readCursorSkillsConfig():
 
   if (missing.length > 0) return { ok: false, missing };
 
-  const binaryPath = process.env.KATACODE_E2E_CURSOR_BINARY_PATH?.trim();
   return {
     ok: true,
     config: {
       model: process.env.KATACODE_E2E_CURSOR_MODEL!.trim(),
-      ...(binaryPath ? { binaryPath } : {}),
+      binaryPath: process.env.KATACODE_E2E_CURSOR_BINARY_PATH!.trim(),
     },
   };
 }

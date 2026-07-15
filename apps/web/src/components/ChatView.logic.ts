@@ -404,6 +404,8 @@ export function createLocalDispatchSnapshot(
 export function hasServerAcknowledgedLocalDispatch(input: {
   localDispatch: LocalDispatchSnapshot | null;
   phase: SessionPhase;
+  /** True when the latest turn is projected but not yet settled (session may still be ready). */
+  hasInflightTurn?: boolean;
   latestTurn: Thread["latestTurn"] | null;
   session: Thread["session"] | null;
   hasPendingApproval: boolean;
@@ -425,7 +427,8 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.latestTurnStartedAt !== (latestTurn?.startedAt ?? null) ||
     input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null);
 
-  if (input.phase === "running") {
+  const serverRunning = input.phase === "running" || Boolean(input.hasInflightTurn);
+  if (serverRunning) {
     if (!latestTurnChanged) {
       return false;
     }
