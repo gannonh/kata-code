@@ -317,6 +317,11 @@ export function isTransientRecursiveChownRace(result: {
   return errors.length > 0 && errors.every((line) => line.includes("No such file or directory"));
 }
 
+/** Single-quote shell-escape so paths with spaces/quotes stay one argument. */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export function makeDockerSandboxProvider(
   options: DockerSandboxProviderOptions = {},
 ): SandboxProvider {
@@ -338,7 +343,8 @@ export function makeDockerSandboxProvider(
           const state = handle.handle as DockerSandboxHandleState;
           // Ensure the destination directory exists before uploading; the
           // `archive` PUT does not create intermediate directories.
-          const mkdir = yield* provider.exec(handle, `mkdir -p ${destPath}`);
+          const quotedDest = shellQuote(destPath);
+          const mkdir = yield* provider.exec(handle, `mkdir -p -- ${quotedDest}`);
           if (mkdir.exitCode !== 0) {
             return yield* new SandboxProviderError({
               reason: "provision-failed",
@@ -367,7 +373,7 @@ export function makeDockerSandboxProvider(
           // Ensure all extracted files and intermediate directories are
           // katacode-owned — Docker creates parent dirs as root when directory
           // entries are absent from the tar (see ustarWriter).
-          const chownCommand = `chown -R 100:101 '${destPath}'`;
+          const chownCommand = `chown -R 100:101 -- ${quotedDest}`;
           let chown = yield* provider.exec(handle, chownCommand, { user: "root" });
           // Credential tools create and remove lock files while the server is
           // running. Retry the same ownership pass once when a lock disappears

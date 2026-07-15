@@ -11,12 +11,17 @@
  * The standard fixture starts an isolated server, authenticates the page, and
  * exposes the ready app shell through `authenticatedAppWindow`.
  */
+import { E2E_TAGS } from "../../src/config/tags.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
 
-test.describe("Web app - recorded tests", () => {
-  test("app loads and shows the authenticated shell", async ({ authenticatedAppWindow }) => {
-    await expect(authenticatedAppWindow.getByTestId("command-palette-trigger")).toBeVisible();
-  });
+test.describe(`Web app - recorded tests ${E2E_TAGS.auth}`, () => {
+  test(
+    "app loads and shows the authenticated shell",
+    { tag: [E2E_TAGS.auth] },
+    async ({ authenticatedAppWindow }) => {
+      await expect(authenticatedAppWindow.getByTestId("command-palette-trigger")).toBeVisible();
+    },
+  );
 
   // Paste codegen-recorded tests below and use `authenticatedAppWindow`.
 });

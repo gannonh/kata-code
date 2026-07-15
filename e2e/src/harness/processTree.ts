@@ -117,8 +117,8 @@ export async function terminateChildProcessTree(
     return;
   }
 
-  if (child.exitCode !== null) {
-    // Direct child already exited; still reap detached descendants.
+  if (child.exitCode !== null || child.signalCode !== null) {
+    // Direct child already exited (code or signal); still reap detached descendants.
     signalProcessTree(pid, "SIGKILL");
     return;
   }

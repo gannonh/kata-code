@@ -12,6 +12,7 @@ import {
   dockerContainerName,
   dockerConfigDecoder,
   isTransientRecursiveChownRace,
+  shellQuote,
   DOCKER_KIND,
   type DockerSandboxHandleState,
 } from "./DockerSandboxProvider.ts";
@@ -44,6 +45,11 @@ describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
       }),
     ).toBe(false);
     expect(isTransientRecursiveChownRace({ exitCode: 0, stderr: "" })).toBe(false);
+  });
+
+  it("shellQuote single-quotes paths and escapes embedded quotes", () => {
+    expect(shellQuote("/workspace")).toBe("'/workspace'");
+    expect(shellQuote("/tmp/o'reilly")).toBe("'/tmp/o'\\''reilly'");
   });
 
   it("exposes resolveBootstrapToken for create-time credential recovery", () => {
