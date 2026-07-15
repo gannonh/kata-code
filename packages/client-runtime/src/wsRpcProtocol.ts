@@ -241,16 +241,6 @@ export function createWsRpcProtocolLayer(
         },
         { once: true },
       );
-      socket.addEventListener("message", (event) => {
-        try {
-          const message = JSON.parse(String(event.data)) as { readonly _tag?: string };
-          if (message._tag === "Pong") {
-            lifecycle.onHeartbeatPong();
-          }
-        } catch {
-          // Ignore malformed messages here; the Effect RPC parser still owns protocol errors.
-        }
-      });
       socket.addEventListener(
         "close",
         (event) => {
