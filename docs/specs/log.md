@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-15 (Sidebar v2 attention tiers implemented)
+
+Implemented [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) Phases A–D on existing APIs: tier/Failed helpers, attention-tier list + project picker with `sidebar-v2.css` pixel contract, new-session accordion, dead grouped-tree cleanup, `@sidebar` smoke E2E. Status **Implemented**; Verify still needs AC 11 visual sign-off against `c-attention-session.html` and headed `@sidebar` / environments regression.
+
 ## 2026-07-15 (Sidebar v2 attention tiers approved)
 
 Revised and re-approved [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) after interactive prototypes (`docs/comps/sidebar-v2-prototypes/c-attention-session.html`). Ship shape: Waiting / Working / Blocked / Idle + project picker + accordion new-session. Hard boundary: frontend/sidebar chrome only; do not touch environments/sandbox/BYOC. Server shell enrichments optional follow-up. Atomic phases A–D with environments suites as regression gate. **Pixel contract:** `c-attention-session.html` is the normative frontend prototype / new design language (exact match; do not adapt into the old app chrome); AC 11 requires maintainer visual sign-off against C. Status **Approved**; Build may proceed.

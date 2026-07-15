@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-15 (Sidebar v2 attention tiers implemented)
+
+Implemented [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) (Phases A–D). Roadmap → **Implemented**; Verify pending for visual AC 11 and `@sidebar` E2E.
+
 ## 2026-07-15 (Sidebar v2 attention tiers approved)
 
 Approved revised [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md): attention tiers + project picker + accordion new-session; pixel contract = `c-attention-session.html`. Hard frontend-only boundary (no environments/sandbox contract changes). Updated [specs roadmap](/specs/index.md) and [specs log](/specs/log.md). Build may proceed on Phases A–D.

@@ -2,10 +2,11 @@
 type: Spec
 title: "Sidebar v2: attention tiers + project picker"
 description: "Replace the project-grouped thread sidebar with attention-tiered list (Waiting / Working / Blocked / Idle), optional project filter, and accordion new-session chrome — frontend-only on existing APIs."
-status: Approved
+status: Implemented
 approved_at: 2026-07-15T23:25:53Z
 revised_at: 2026-07-15T23:17:00Z
 prior_approved_at: 2026-07-14T17:10:14Z
+implemented_at: 2026-07-15T23:58:37Z
 tags: [web, sidebar, ux, orchestration]
 timestamp: 2026-07-14T00:00:00Z
 ---
@@ -14,9 +15,10 @@ timestamp: 2026-07-14T00:00:00Z
 
 ## Status
 
-**Approved** (2026-07-15 revision of the 2026-07-14 hybrid). Direction locked
-by interactive prototypes (`c-attention-session.html` pixel contract);
-frontend-only hard boundary; Build may proceed on Phases A–D.
+**Implemented** (2026-07-15). Phases A–D landed on `sidebar-redesign`:
+attention tiers + project picker + accordion new-session on existing APIs,
+pixel-contract CSS from `c-attention-session.html`. Verify (AC 11 visual
+sign-off + `@sidebar` E2E headed) still required before merge.
 
 ## Goal
 
