@@ -1,4 +1,4 @@
-import { ArchiveIcon } from "lucide-react";
+import { ArchiveIcon, PinIcon } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
 import type { ScopedThreadRef } from "@kata-sh/code-contracts";
 import { scopedThreadKey, scopeThreadRef } from "@kata-sh/code-client-runtime";
@@ -15,6 +15,7 @@ import {
 } from "../Sidebar.logic";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
+import { useUiStateStore } from "../../uiStateStore";
 import { ThreadRowTrailingStatus } from "../ThreadStatusIndicators";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -147,6 +148,7 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
+  const setThreadPinned = useUiStateStore((state) => state.setThreadPinned);
   const statusInput = useMemo(
     () => ({
       ...thread,
@@ -381,12 +383,6 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
       {relativeTime}
     </div>
   );
-  const settledProjectRow = (
-    <div className="sb-meta sb-project-row">
-      {projectIdentity}
-      {branch}
-    </div>
-  );
   const settledEnvironmentRow = (
     <div className="sb-meta sb-environment-row">
       {environmentBadge}
@@ -394,6 +390,8 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
     </div>
   );
 
+  const usesStructuredActiveRows =
+    section === "active" && (subState === "settled" || subState === "working");
   const chip =
     section === "active" ? (
       <span
@@ -401,7 +399,6 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
         data-testid={`thread-chip-${thread.id}`}
       >
         {subStateChipLabel(subState, pill?.label)}
-        {pinned ? " · Pin" : ""}
       </span>
     ) : null;
 
@@ -478,12 +475,30 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
       onMouseLeave={clearConfirmingArchive}
     >
       <div className="sb-top">
-        {subState === "working" ? <span className="sb-spin" aria-hidden /> : null}
+        {!usesStructuredActiveRows && subState === "working" ? (
+          <span className="sb-spin" aria-hidden />
+        ) : null}
         {subState === "blocked" ? (
           <span className="sb-dot blocked" style={{ width: 8, height: 8 }} aria-hidden />
         ) : null}
         {titleNode}
-        {chip}
+        {pinned ? (
+          <button
+            type="button"
+            className="sb-pin-icon"
+            data-thread-selection-safe
+            aria-label="Unpin thread"
+            title="Unpin"
+            onPointerDown={stopPropagationOnPointerDown}
+            onClick={(event) => {
+              event.stopPropagation();
+              setThreadPinned(threadKey, false);
+            }}
+          >
+            <PinIcon aria-hidden />
+          </button>
+        ) : null}
+        {!usesStructuredActiveRows ? chip : null}
         {subState === "waiting" && wait ? (
           <span
             className="sb-wait"
@@ -500,7 +515,7 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
             {formatSidebarWaitLabel(wait.durationMs)}
           </span>
         ) : null}
-        {subState === "working" && workingElapsedMs != null ? (
+        {!usesStructuredActiveRows && subState === "working" && workingElapsedMs != null ? (
           <span className="sb-elapsed">{formatSidebarElapsedClock(workingElapsedMs)}</span>
         ) : null}
         {subState === "blocked" ? (
@@ -508,11 +523,24 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
             blocked
           </span>
         ) : null}
-        <ThreadRowTrailingStatus thread={thread} />
+        {!usesStructuredActiveRows ? <ThreadRowTrailingStatus thread={thread} /> : null}
       </div>
-      {section === "active" && (subState === "settled" || subState === "working")
-        ? settledProjectRow
-        : null}
+      {usesStructuredActiveRows ? (
+        <div className="sb-meta sb-project-row">
+          {projectIdentity}
+          {branch}
+          <span className="sb-status-slot">
+            <span className="sb-active-status">
+              {chip}
+              {subState === "working" && workingElapsedMs != null ? (
+                <span className="sb-elapsed">{formatSidebarElapsedClock(workingElapsedMs)}</span>
+              ) : null}
+              <ThreadRowTrailingStatus thread={thread} />
+            </span>
+            {archiveControl}
+          </span>
+        </div>
+      ) : null}
       {subState === "waiting" ? <div className="sb-ask">{waitingAskLine(pill?.label)}</div> : null}
       {subState === "blocked" ? (
         <div className="sb-ask" style={{ color: "var(--sb-red)" }}>
@@ -524,10 +552,8 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
           <div className="sb-bar" />
         </div>
       ) : null}
-      {section === "active" && (subState === "settled" || subState === "working")
-        ? settledEnvironmentRow
-        : metaRow}
-      {archiveControl}
+      {usesStructuredActiveRows ? settledEnvironmentRow : metaRow}
+      {!usesStructuredActiveRows ? archiveControl : null}
     </div>
   );
 });

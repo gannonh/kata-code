@@ -298,22 +298,50 @@
   border-color: var(--sb-border-soft);
 }
 
-.sidebar-v2 .sb-card.settled .sb-chip.settled,
-.sidebar-v2 .sb-card.settled .thread-row-trailing-status {
+.sidebar-v2 .sb-project-row {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.sidebar-v2 .sb-project-row .sb-pchip {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-v2 .sb-project-row .sb-branch,
+.sidebar-v2 .sb-project-row .sb-status-slot {
+  flex-shrink: 0;
+}
+
+.sidebar-v2 .sb-status-slot {
+  display: grid;
+  align-items: center;
+  justify-items: end;
+  margin-left: auto;
+}
+
+.sidebar-v2 .sb-status-slot > * {
+  grid-area: 1 / 1;
+}
+
+.sidebar-v2 .sb-active-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   transition: opacity 0.12s;
 }
 
-.sidebar-v2 .sb-card.settled:hover .sb-chip.settled,
-.sidebar-v2 .sb-card.settled:hover .thread-row-trailing-status,
-.sidebar-v2 .sb-card.settled:focus-within .sb-chip.settled,
-.sidebar-v2 .sb-card.settled:focus-within .thread-row-trailing-status {
-  opacity: 0;
+.sidebar-v2 .sb-status-slot .sb-archive {
+  position: static;
+  transform: none;
 }
 
-.sidebar-v2 .sb-card.settled .sb-archive {
-  top: 8px;
-  right: 8px;
-  transform: none;
+.sidebar-v2 .sb-card:hover .sb-status-slot .sb-active-status,
+.sidebar-v2 .sb-card:focus-within .sb-status-slot .sb-active-status {
+  opacity: 0;
 }
 
 /* Expanded Idle cards are always exactly two rows: title, then metadata. */
@@ -541,6 +569,42 @@
   text-overflow: ellipsis;
   flex: 1;
   min-width: 0;
+  padding-right: 10px;
+}
+
+.sidebar-v2 .sb-pin-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--sb-text-3);
+  cursor: pointer;
+  opacity: 0.75;
+  transition:
+    color 0.12s,
+    opacity 0.12s;
+}
+
+.sidebar-v2 .sb-pin-icon:hover,
+.sidebar-v2 .sb-pin-icon:focus-visible {
+  color: var(--sb-text);
+  opacity: 1;
+}
+
+.sidebar-v2 .sb-pin-icon:focus-visible {
+  outline: 1px solid var(--sb-sky);
+  outline-offset: 1px;
+}
+
+.sidebar-v2 .sb-pin-icon svg {
+  width: 12px;
+  height: 12px;
 }
 
 .sidebar-v2 .sb-ask {
@@ -708,6 +772,21 @@
 .sidebar-v2 .sb-row:focus-within .sb-archive {
   opacity: 1;
   pointer-events: auto;
+}
+
+.sidebar-v2 .sb-card:hover .sb-archive,
+.sidebar-v2 .sb-row:hover .sb-archive,
+.sidebar-v2 .sb-card:focus-within .sb-archive,
+.sidebar-v2 .sb-row:focus-within .sb-archive {
+  background: rgba(26, 26, 30, 0.86);
+  backdrop-filter: blur(4px);
+}
+
+.sidebar-v2 .sb-card.selected:hover .sb-archive,
+.sidebar-v2 .sb-row.selected:hover .sb-archive,
+.sidebar-v2 .sb-card.selected:focus-within .sb-archive,
+.sidebar-v2 .sb-row.selected:focus-within .sb-archive {
+  background: rgba(26, 26, 34, 0.86);
 }
 
 .sidebar-v2 .sb-archive:hover {
