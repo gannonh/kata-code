@@ -58,6 +58,24 @@ const scopedPackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
     isCommandPath: isNativeTestCommandPath("/.scoped-package-tool/bin/scoped-package-tool"),
   },
 });
+const codexLikeUpdate = makePackageManagedProviderMaintenanceResolver({
+  provider: driver("codex"),
+  npmPackageName: "@openai/codex",
+  homebrewFormula: "codex",
+  nativeUpdate: {
+    executable: "codex",
+    args: ["update"],
+    lockKey: "codex-native",
+    isCommandPath: (commandPath) => {
+      const normalized = normalizeCommandPath(commandPath);
+      return (
+        normalized.endsWith("/.local/bin/codex") ||
+        normalized.endsWith("/.local/bin/codex.exe") ||
+        normalized.includes("/.codex/packages/standalone/")
+      );
+    },
+  },
+});
 const staticToolUpdate = makeStaticProviderMaintenanceResolver(
   makeProviderMaintenanceCapabilities({
     provider: driver("staticTool"),
@@ -501,6 +519,69 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     }),
   );
 
+  it.effect(
+    "switches Codex-like binaries to native updates when resolved through the standalone installer",
+    () =>
+      Effect.gen(function* () {
+        const tempDir = yield* makeTempDir("t3-codex-standalone-capabilities");
+        const localBinDir = path.join(tempDir, ".local", "bin");
+        const standaloneBinDir = path.join(
+          tempDir,
+          ".codex",
+          "packages",
+          "standalone",
+          "releases",
+          "0.144.4-aarch64-apple-darwin",
+          "bin",
+        );
+        mkdirSync(localBinDir, { recursive: true });
+        mkdirSync(standaloneBinDir, { recursive: true });
+        const standaloneCodexPath = path.join(standaloneBinDir, "codex");
+        const localCodexPath = path.join(localBinDir, "codex");
+        writeFileSync(standaloneCodexPath, "#!/bin/sh\n");
+        chmodSync(standaloneCodexPath, 0o755);
+        symlinkSync(standaloneCodexPath, localCodexPath);
+
+        const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(codexLikeUpdate, {
+          binaryPath: "codex",
+          env: {
+            PATH: localBinDir,
+          },
+        }).pipe(Effect.provideService(HostProcessPlatform, "darwin"));
+
+        expect(capabilities).toEqual({
+          provider: driver("codex"),
+          packageName: "@openai/codex",
+          update: {
+            command: "codex update",
+            executable: "codex",
+            args: ["update"],
+            lockKey: "codex-native",
+          },
+        });
+      }),
+  );
+
+  it("keeps Homebrew updates for Codex-like binaries installed through Homebrew", () => {
+    expect(
+      codexLikeUpdate.resolve({
+        binaryPath: "/opt/homebrew/bin/codex",
+        env: {
+          PATH: "",
+        },
+      }),
+    ).toEqual({
+      provider: driver("codex"),
+      packageName: "@openai/codex",
+      update: {
+        command: "brew upgrade codex",
+        executable: "brew",
+        args: ["upgrade", "codex"],
+        lockKey: "homebrew",
+      },
+    });
+  });
+
   it("disables one-click updates for explicit custom binary paths it cannot safely map", () => {
     expect(
       packageToolUpdate.resolve({
@@ -516,4 +597,33 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
       update: null,
     });
   });
+
+  it.effect(
+    "disables one-click updates when a bare command name resolves to an unrecognized installer path",
+    () =>
+      Effect.gen(function* () {
+        const tempDir = yield* makeTempDir("t3-unrecognized-path-capabilities");
+        const standaloneBinDir = path.join(tempDir, ".example", "packages", "standalone", "bin");
+        mkdirSync(standaloneBinDir, { recursive: true });
+        const packageToolPath = path.join(standaloneBinDir, "package-tool");
+        writeFileSync(packageToolPath, "#!/bin/sh\n");
+        chmodSync(packageToolPath, 0o755);
+
+        const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(
+          packageToolUpdate,
+          {
+            binaryPath: "package-tool",
+            env: {
+              PATH: standaloneBinDir,
+            },
+          },
+        ).pipe(Effect.provideService(HostProcessPlatform, "darwin"));
+
+        expect(capabilities).toEqual({
+          provider: driver("packageTool"),
+          packageName: "@example/package-tool",
+          update: null,
+        });
+      }),
+  );
 });
