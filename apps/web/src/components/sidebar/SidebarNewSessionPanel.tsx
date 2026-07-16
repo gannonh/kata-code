@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { scopeProjectRef } from "@kata-sh/code-client-runtime";
 import type { EnvironmentId } from "@kata-sh/code-contracts";
+import { ChevronRightIcon, CloudIcon, MonitorIcon } from "lucide-react";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import {
   useSavedEnvironmentRegistryStore,
@@ -29,10 +30,9 @@ function resolveEnvKind(input: {
   return "remote";
 }
 
-function envKindGlyph(kind: EnvKind): string {
-  if (kind === "sandbox") return "▣";
-  if (kind === "remote") return "☁";
-  return "⌂";
+function EnvironmentKindIcon({ kind }: { kind: EnvKind }) {
+  const Icon = kind === "local" ? MonitorIcon : CloudIcon;
+  return <Icon aria-hidden />;
 }
 
 function envKindLabel(kind: EnvKind): string {
@@ -206,89 +206,120 @@ export const SidebarNewSessionPanel = memo(function SidebarNewSessionPanel(
                       <span className="sb-acc-start">Start</span>
                     ) : (
                       <>
-                        {members.slice(0, 3).map((member) => {
-                          const sandbox = registryById[member.environmentId]?.sandbox;
-                          const kind = resolveEnvKind({
-                            environmentId: member.environmentId,
-                            primaryEnvironmentId,
-                            sandbox,
-                          });
-                          return (
-                            <span
-                              key={`${member.environmentId}:${member.id}`}
-                              className={`sb-env-badge ${kind}`}
-                              style={{ padding: "0 4px" }}
-                            >
-                              <span className="sb-glyph">{envKindGlyph(kind)}</span>
-                            </span>
-                          );
-                        })}
-                        <span className="sb-acc-chev">›</span>
+                        {!isOpen
+                          ? members.slice(0, 3).map((member) => {
+                              const sandbox = registryById[member.environmentId]?.sandbox;
+                              const kind = resolveEnvKind({
+                                environmentId: member.environmentId,
+                                primaryEnvironmentId,
+                                sandbox,
+                              });
+                              return (
+                                <span
+                                  key={`${member.environmentId}:${member.id}`}
+                                  className={`sb-env-badge sb-env-preview ${kind}`}
+                                >
+                                  <EnvironmentKindIcon kind={kind} />
+                                </span>
+                              );
+                            })
+                          : null}
+                        <span className="sb-acc-chev" aria-hidden>
+                          <ChevronRightIcon />
+                        </span>
                       </>
                     )}
                   </div>
                 </button>
 
                 {!single ? (
-                  <div className="sb-acc-body">
-                    {members.map((member) => {
-                      const sandbox = registryById[member.environmentId]?.sandbox;
-                      const kind = resolveEnvKind({
-                        environmentId: member.environmentId,
-                        primaryEnvironmentId,
-                        sandbox,
-                      });
-                      const connectionState =
-                        runtimeById[member.environmentId]?.connectionState ?? "connected";
-                      const offline =
-                        member.environmentId !== primaryEnvironmentId &&
-                        connectionState !== "connected" &&
-                        connectionState !== "connecting";
-                      const statusLabel =
-                        connectionState === "connected"
-                          ? "ready"
-                          : connectionState === "connecting"
-                            ? "connecting"
-                            : connectionState === "error"
-                              ? "error"
-                              : "offline";
-                      const label =
-                        member.environmentLabel ??
-                        registryById[member.environmentId]?.label ??
-                        runtimeById[member.environmentId]?.descriptor?.label ??
-                        envKindLabel(kind);
-                      return (
+                  <div className="sb-acc-panel" aria-hidden={!isOpen}>
+                    <div className="sb-acc-body">
+                      <div className="sb-acc-rail">
+                        {members.map((member) => {
+                          const sandbox = registryById[member.environmentId]?.sandbox;
+                          const kind = resolveEnvKind({
+                            environmentId: member.environmentId,
+                            primaryEnvironmentId,
+                            sandbox,
+                          });
+                          const connectionState =
+                            runtimeById[member.environmentId]?.connectionState ?? "connected";
+                          const offline =
+                            member.environmentId !== primaryEnvironmentId &&
+                            connectionState !== "connected" &&
+                            connectionState !== "connecting";
+                          const statusLabel =
+                            connectionState === "connected"
+                              ? "connected"
+                              : connectionState === "connecting"
+                                ? "connecting"
+                                : connectionState === "error"
+                                  ? "error"
+                                  : "offline";
+                          const kindLabel = envKindLabel(kind);
+                          const customLabel =
+                            member.environmentLabel ??
+                            registryById[member.environmentId]?.label ??
+                            runtimeById[member.environmentId]?.descriptor?.label ??
+                            null;
+                          const showCustomLabel =
+                            customLabel !== null &&
+                            customLabel.trim().length > 0 &&
+                            customLabel.trim().toLowerCase() !== kindLabel.toLowerCase();
+                          return (
+                            <button
+                              key={`${member.environmentId}:${member.id}`}
+                              type="button"
+                              className={`sb-acc-env${offline ? " offline" : ""}`}
+                              data-testid={`sidebar-new-session-env-${member.environmentId}-${member.id}`}
+                              disabled={offline}
+                              tabIndex={isOpen ? 0 : -1}
+                              onClick={() => {
+                                if (offline) return;
+                                void startInMember(member.environmentId, member.id);
+                              }}
+                            >
+                              <span className={`sb-env-symbol ${kind}`}>
+                                <EnvironmentKindIcon kind={kind} />
+                              </span>
+                              <div className="sb-acc-env-main">
+                                <div className="sb-acc-env-label">
+                                  {showCustomLabel ? customLabel : kindLabel}
+                                </div>
+                                <div className="sb-acc-env-desc">
+                                  {showCustomLabel ? (
+                                    <>
+                                      <span className={`sb-env-kind-label ${kind}`}>
+                                        {kindLabel}
+                                      </span>
+                                      <span aria-hidden>·</span>
+                                    </>
+                                  ) : null}
+                                  <span className="sb-env-path">{member.cwd}</span>
+                                </div>
+                              </div>
+                              <span
+                                className={`sb-env-status ${statusLabel}`}
+                                role="img"
+                                aria-label={statusLabel}
+                                title={statusLabel}
+                              />
+                              <span className="sb-acc-env-go">Start →</span>
+                            </button>
+                          );
+                        })}
                         <button
-                          key={`${member.environmentId}:${member.id}`}
                           type="button"
-                          className={`sb-acc-env${offline ? " offline" : ""}`}
-                          data-testid={`sidebar-new-session-env-${member.environmentId}-${member.id}`}
-                          disabled={offline}
-                          onClick={() => {
-                            if (offline) return;
-                            void startInMember(member.environmentId, member.id);
-                          }}
+                          className="sb-acc-connect"
+                          data-testid={`sidebar-new-session-connect-${project.projectKey}`}
+                          tabIndex={isOpen ? 0 : -1}
+                          onClick={handleConnectEnvironment}
                         >
-                          <div className={`sb-env-icon ${kind}`}>{envKindGlyph(kind)}</div>
-                          <div className="sb-acc-env-main">
-                            <div className="sb-acc-env-name">
-                              {label}
-                              <span className={`sb-env-status ${statusLabel}`}>{statusLabel}</span>
-                            </div>
-                            <div className="sb-acc-env-desc">{member.cwd}</div>
-                          </div>
-                          <span className="sb-acc-env-go">Start →</span>
+                          + Connect environment
                         </button>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      className="sb-acc-connect"
-                      data-testid={`sidebar-new-session-connect-${project.projectKey}`}
-                      onClick={handleConnectEnvironment}
-                    >
-                      + Connect environment
-                    </button>
+                      </div>
+                    </div>
                   </div>
                 ) : null}
               </div>
