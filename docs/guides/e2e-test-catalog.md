@@ -28,6 +28,8 @@ Specs under [`e2e/tests/`](../../e2e/tests/) use a project-aware fixture and can
 
 Harness and flows (shared building blocks, not tests): [`e2e/src/harness/`](../../e2e/src/harness/), [`e2e/src/flows/`](../../e2e/src/flows/).
 
+Sidebar v2 populated-state UAT uses Vitest browser fixtures (not E2E seeds): see [Sidebar v2 UAT — playground-first](/guides/sidebar-v2-uat-playground.md) and `apps/web/src/components/sidebar/SidebarV2.browser.tsx`.
+
 Each spec file shares one Electron session (one dev stack, one Clerk sign-in) across its tests; see [session model](../../e2e/README.md#session-model) in the operator README. Stop `pnpm run dev` / `dev:desktop` before E2E; use `pnpm run e2e:clean` if a run leaves leaked dev servers.
 
 ### Pi E2E gates

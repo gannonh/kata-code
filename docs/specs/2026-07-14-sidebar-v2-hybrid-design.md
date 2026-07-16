@@ -18,7 +18,12 @@ timestamp: 2026-07-14T00:00:00Z
 **Implemented** (2026-07-15). Phases A–D landed on `sidebar-redesign`:
 attention tiers + project picker + accordion new-session on existing APIs,
 pixel-contract CSS from `c-attention-session.html`. Verify (AC 11 visual
-sign-off + `@sidebar` E2E headed) still required before merge.
+sign-off + populated-state fixtures) still required before merge.
+
+**UAT path:** playground-first — see
+[Sidebar v2 UAT guide](/guides/sidebar-v2-uat-playground.md). Fixture catalog
+drives maintainer review and Vitest browser proof; live `@agent` E2E only for
+timer/transition cases fixtures cannot force.
 
 ## Goal
 

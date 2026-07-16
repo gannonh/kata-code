@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-16 (Sidebar v2 UAT — playground-first)
+
+Documented Verify/UAT path for [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md): fixture catalog → Vitest browser playground → live `@sidebar`/`@agent` only where fixtures cannot prove (timer/transitions). Guide: [sidebar-v2-uat-playground](/guides/sidebar-v2-uat-playground.md). Product UI remains Implemented; proof gaps are tests/UAT, not missing features.
+
 ## 2026-07-15 (Sidebar v2 attention tiers implemented)
 
 Implemented [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) Phases A–D on existing APIs: tier/Failed helpers, attention-tier list + project picker with `sidebar-v2.css` pixel contract, new-session accordion, dead grouped-tree cleanup, `@sidebar` smoke E2E. Status **Implemented**; Verify still needs AC 11 visual sign-off against `c-attention-session.html` and headed `@sidebar` / environments regression.

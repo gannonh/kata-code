@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-16 (Sidebar v2 UAT playground-first)
+
+Added [Sidebar v2 UAT guide](/guides/sidebar-v2-uat-playground.md); linked from [specs roadmap](/specs/index.md) / [Sidebar v2 spec](/specs/2026-07-14-sidebar-v2-hybrid-design.md). Verify proceeds via seeded Vitest browser playground before live agent E2E.
+
 ## 2026-07-15 (Sidebar v2 attention tiers implemented)
 
 Implemented [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) (Phases A–D). Roadmap → **Implemented**; Verify pending for visual AC 11 and `@sidebar` E2E.
