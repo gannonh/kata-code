@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-16 (Sidebar v2 Active / Idle approved)
+
+Approved [Active / Idle + dwell / Sleep / Pin](/specs/2026-07-16-sidebar-v2-active-idle-design.md): two sections, sub-state chips, 60m default dwell (General settings toggle), Sleep/Pin always available as manual Active↔Idle controls. Supersedes four-tier list structure in [parent sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md). Build next.
+
 ## 2026-07-16 (Sidebar v2 UAT — playground-first)
 
 Documented Verify/UAT path for [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md): fixture catalog → `/playground/sidebar` → Vitest browser assertions → live `@sidebar`/`@agent` only where fixtures cannot prove (timer/transitions). Guide: [sidebar-v2-uat-playground](/guides/sidebar-v2-uat-playground.md). Product UI remains Implemented; proof gaps are tests/UAT, not missing features.

@@ -25,6 +25,11 @@ sign-off + populated-state fixtures) still required before merge.
 drives maintainer review and Vitest browser proof; live `@agent` E2E only for
 timer/transition cases fixtures cannot force.
 
+**List-structure supersession (2026-07-16):** four vertical tiers are replaced
+by Active / Idle + sub-state chips, dwell idle timer, and Sleep/Pin — see
+[Active / Idle design](/specs/2026-07-16-sidebar-v2-active-idle-design.md)
+(**Approved**; Build next).
+
 ## Goal
 
 Replace the current project-grouped thread sidebar in `apps/web` with:

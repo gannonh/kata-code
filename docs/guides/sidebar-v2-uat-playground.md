@@ -8,8 +8,10 @@ timestamp: 2026-07-16T16:10:00Z
 
 # Sidebar v2 UAT — playground-first
 
-Companion to [Sidebar v2 attention tiers](/specs/2026-07-14-sidebar-v2-hybrid-design.md).
-Pixel reference remains [`c-attention-session.html`](../comps/sidebar-v2-prototypes/c-attention-session.html);
+Companion to [Sidebar v2 attention tiers](/specs/2026-07-14-sidebar-v2-hybrid-design.md)
+and the approved follow-on [Active / Idle + dwell / Sleep / Pin](/specs/2026-07-16-sidebar-v2-active-idle-design.md).
+Pixel reference remains [`c-attention-session.html`](../comps/sidebar-v2-prototypes/c-attention-session.html)
+(card language; section model becomes Active/Idle).
 **UAT and automated proof start from seeded fixtures**, not hand-built demo repos.
 
 ## Principle

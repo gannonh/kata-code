@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-16 (Sidebar v2 Active / Idle)
+
+Approved [Active / Idle design](/specs/2026-07-16-sidebar-v2-active-idle-design.md) (dwell + Sleep/Pin); supersedes four-tier list sections from [sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md).
+
 ## 2026-07-16 (Sidebar v2 UAT playground-first)
 
 Added [Sidebar v2 UAT guide](/guides/sidebar-v2-uat-playground.md); linked from [specs roadmap](/specs/index.md) / [Sidebar v2 spec](/specs/2026-07-14-sidebar-v2-hybrid-design.md). Verify proceeds via `/playground/sidebar` fixture route + Vitest browser assertions before live agent E2E.
