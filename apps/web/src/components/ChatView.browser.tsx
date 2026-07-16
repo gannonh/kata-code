@@ -4699,17 +4699,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
           document.querySelector<HTMLButtonElement>(`[data-testid="thread-archive-${THREAD_ID}"]`),
         "Unable to find archive button.",
       );
-      const archiveAction = archiveButton.parentElement;
-      expect(
-        archiveAction,
-        "Archive button should render inside a visibility wrapper.",
-      ).not.toBeNull();
-      expect(getComputedStyle(archiveAction!).opacity).toBe("0");
+      // Sidebar v2 fades the archive control itself on row hover.
+      expect(getComputedStyle(archiveButton).opacity).toBe("0");
 
       await threadRow.hover();
       await vi.waitFor(
         () => {
-          expect(getComputedStyle(archiveAction!).opacity).toBe("1");
+          expect(getComputedStyle(archiveButton).opacity).toBe("1");
         },
         { timeout: 4_000, interval: 16 },
       );
@@ -4717,7 +4713,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await page.getByTestId("composer-editor").hover();
       await vi.waitFor(
         () => {
-          expect(getComputedStyle(archiveAction!).opacity).toBe("0");
+          expect(getComputedStyle(archiveButton).opacity).toBe("0");
         },
         { timeout: 4_000, interval: 16 },
       );
@@ -4981,6 +4977,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
+      await waitForServerConfigToApply();
       await startNewThreadFromSidebarAccordion();
 
       const newThreadPath = await waitForURL(

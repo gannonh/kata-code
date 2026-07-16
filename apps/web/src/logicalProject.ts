@@ -150,17 +150,45 @@ export function deriveLogicalProjectKeyFromRef(
   return project ? deriveLogicalProjectKey(project, options) : scopedProjectKey(projectRef);
 }
 
-export function deriveProjectGroupLabel(input: {
-  representative: Pick<Project, "name" | "repositoryIdentity">;
-  members: ReadonlyArray<Pick<Project, "name" | "repositoryIdentity">>;
+/** Prefer short repo/folder name over `owner/repo` for sidebar chrome. */
+export function shortProjectDisplayName(input: {
+  name?: string | null;
+  cwd?: string | null;
+  repositoryIdentity?: {
+    name?: string | null;
+    displayName?: string | null;
+  } | null;
 }): string {
-  const sharedDisplayNames = uniqueNonEmptyValues(
-    input.members.map((member) => member.repositoryIdentity?.displayName),
-  );
-  if (sharedDisplayNames.length === 1) {
-    return sharedDisplayNames[0]!;
+  const repoName = input.repositoryIdentity?.name?.trim();
+  if (repoName) return repoName;
+
+  const stripOwnerPrefix = (value: string): string => {
+    const slash = value.lastIndexOf("/");
+    if (slash >= 0 && slash < value.length - 1) {
+      return value.slice(slash + 1);
+    }
+    return value;
+  };
+
+  const identityDisplay = input.repositoryIdentity?.displayName?.trim();
+  if (identityDisplay) return stripOwnerPrefix(identityDisplay);
+
+  const name = input.name?.trim();
+  if (name) return stripOwnerPrefix(name);
+
+  const cwd = input.cwd?.replace(/\/+$/, "").trim();
+  if (cwd) {
+    const base = cwd.slice(cwd.lastIndexOf("/") + 1);
+    if (base) return base;
   }
 
+  return "Project";
+}
+
+export function deriveProjectGroupLabel(input: {
+  representative: Pick<Project, "name" | "cwd" | "repositoryIdentity">;
+  members: ReadonlyArray<Pick<Project, "name" | "cwd" | "repositoryIdentity">>;
+}): string {
   const sharedRepositoryNames = uniqueNonEmptyValues(
     input.members.map((member) => member.repositoryIdentity?.name),
   );
@@ -168,5 +196,12 @@ export function deriveProjectGroupLabel(input: {
     return sharedRepositoryNames[0]!;
   }
 
-  return input.representative.name;
+  const sharedShortLabels = uniqueNonEmptyValues(
+    input.members.map((member) => shortProjectDisplayName(member)),
+  );
+  if (sharedShortLabels.length === 1) {
+    return sharedShortLabels[0]!;
+  }
+
+  return shortProjectDisplayName(input.representative);
 }

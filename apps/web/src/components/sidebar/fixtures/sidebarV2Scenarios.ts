@@ -28,7 +28,8 @@ export type SidebarV2ScenarioId =
   | "idle-expand"
   | "picker-scope"
   | "meta-remote"
-  | "scroll-30";
+  | "scroll-30"
+  | "dwell-settled";
 
 export const SIDEBAR_V2_SCENARIO_IDS = [
   "mixed-tiers",
@@ -39,6 +40,7 @@ export const SIDEBAR_V2_SCENARIO_IDS = [
   "picker-scope",
   "meta-remote",
   "scroll-30",
+  "dwell-settled",
 ] as const satisfies readonly SidebarV2ScenarioId[];
 
 export type SidebarV2ShellFlags = Pick<
@@ -244,6 +246,7 @@ const THREAD_BLOCKED = "thread-blocked-failed" as ThreadId;
 const THREAD_IDLE = "thread-idle" as ThreadId;
 const THREAD_IDLE_B = "thread-idle-beta" as ThreadId;
 const THREAD_REMOTE = "thread-remote-meta" as ThreadId;
+const THREAD_SETTLED_DWELL = "thread-settled-dwell" as ThreadId;
 
 function alphaBetaProjects() {
   return [
@@ -297,6 +300,13 @@ function mixedThreads(): {
       updatedAt: isoMinutesAgo(12),
     }),
     makeThread({
+      id: THREAD_SETTLED_DWELL,
+      projectId: SIDEBAR_V2_PROJECT_ALPHA,
+      title: "Just finished turn",
+      latestTurn: completedTurn(15),
+      updatedAt: isoMinutesAgo(15),
+    }),
+    makeThread({
       id: THREAD_IDLE,
       projectId: SIDEBAR_V2_PROJECT_ALPHA,
       title: "Yesterday’s review notes",
@@ -311,6 +321,7 @@ function mixedThreads(): {
       [THREAD_INPUT, { ...emptyFlags(), hasPendingUserInput: true }],
       [THREAD_WORKING, emptyFlags()],
       [THREAD_BLOCKED, emptyFlags()],
+      [THREAD_SETTLED_DWELL, emptyFlags()],
       [THREAD_IDLE, emptyFlags()],
     ]),
   };
@@ -322,7 +333,7 @@ export function buildSidebarV2Scenario(id: SidebarV2ScenarioId): SidebarV2Scenar
       const { threads, shellFlagsByThreadId } = mixedThreads();
       return {
         id,
-        label: "Mixed tiers",
+        label: "Active / Idle mix",
         snapshot: snapshotOf(alphaBetaProjects().slice(0, 1), threads),
         shellFlagsByThreadId,
         bootstrapThreadId: THREAD_WORKING,
@@ -495,6 +506,33 @@ export function buildSidebarV2Scenario(id: SidebarV2ScenarioId): SidebarV2Scenar
         snapshot: snapshotOf(alphaBetaProjects().slice(0, 1), threads),
         shellFlagsByThreadId: flags(threads.map((thread) => [thread.id, emptyFlags()] as const)),
         bootstrapThreadId: threads[0]!.id,
+        bootstrapProjectId: SIDEBAR_V2_PROJECT_ALPHA,
+      };
+    }
+    case "dwell-settled": {
+      const recent = makeThread({
+        id: THREAD_SETTLED_DWELL,
+        projectId: SIDEBAR_V2_PROJECT_ALPHA,
+        title: "Settled within dwell",
+        latestTurn: completedTurn(20),
+        updatedAt: isoMinutesAgo(20),
+      });
+      const pastDwell = makeThread({
+        id: THREAD_IDLE,
+        projectId: SIDEBAR_V2_PROJECT_ALPHA,
+        title: "Settled past dwell",
+        latestTurn: completedTurn(90),
+        updatedAt: isoMinutesAgo(90),
+      });
+      return {
+        id,
+        label: "Dwell boundary",
+        snapshot: snapshotOf(alphaBetaProjects().slice(0, 1), [recent, pastDwell]),
+        shellFlagsByThreadId: flags([
+          [THREAD_SETTLED_DWELL, emptyFlags()],
+          [THREAD_IDLE, emptyFlags()],
+        ]),
+        bootstrapThreadId: THREAD_SETTLED_DWELL,
         bootstrapProjectId: SIDEBAR_V2_PROJECT_ALPHA,
       };
     }

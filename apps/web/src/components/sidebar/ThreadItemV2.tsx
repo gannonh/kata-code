@@ -7,15 +7,16 @@ import {
   formatSidebarElapsedClock,
   formatSidebarWaitLabel,
   hasUnseenCompletion,
-  projectColorClass,
   resolveThreadRowDensity,
   resolveThreadStatusPill,
   resolveThreadWaitDuration,
-  type ThreadAttentionTier,
+  type ThreadSection,
+  type ThreadSubState,
 } from "../Sidebar.logic";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
 import { ThreadRowTrailingStatus } from "../ThreadStatusIndicators";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface ThreadItemV2ProjectMeta {
   projectKey: string;
@@ -27,7 +28,9 @@ export interface ThreadItemV2Props {
   project: ThreadItemV2ProjectMeta | null;
   lastVisitedAt: string | null | undefined;
   isActive: boolean;
-  tier: ThreadAttentionTier;
+  section: ThreadSection;
+  subState: ThreadSubState;
+  pinned?: boolean;
   nowMs: number;
   idleExpanded: boolean;
   remoteEnvLabel: string | null;
@@ -94,13 +97,29 @@ function waitingAskLine(pillLabel: string | undefined): React.ReactNode {
   return "Needs your attention";
 }
 
+function subStateChipLabel(subState: ThreadSubState, pillLabel: string | undefined): string {
+  if (subState === "settled") return "Done";
+  if (subState === "working" && pillLabel === "Connecting") return "Connecting";
+  if (subState === "working") return "Working";
+  if (subState === "waiting") {
+    if (pillLabel === "Pending Approval") return "Waiting";
+    if (pillLabel === "Awaiting Input") return "Input";
+    if (pillLabel === "Plan Ready") return "Plan";
+    return "Waiting";
+  }
+  if (subState === "blocked") return "Blocked";
+  return subState;
+}
+
 export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props) {
   const {
     thread,
     project,
     lastVisitedAt,
     isActive,
-    tier,
+    section,
+    subState,
+    pinned = false,
     nowMs,
     idleExpanded,
     remoteEnvLabel,
@@ -136,12 +155,10 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
     [lastVisitedAt, thread],
   );
   const pill = resolveThreadStatusPill({ thread: statusInput });
-  const density = resolveThreadRowDensity({ thread: statusInput });
+  const density = resolveThreadRowDensity({ thread: statusInput, section });
   const wait = resolveThreadWaitDuration({ thread: statusInput, nowMs });
   const unread = hasUnseenCompletion(statusInput);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey;
-  const isThreadRunning =
-    thread.session?.status === "running" && thread.session.activeTurnId != null;
   const isRenaming = renamingThreadKey === threadKey;
   const selected = isActive || isSelected;
 
@@ -151,9 +168,11 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
 
   const handleRowClick = useCallback(
     (event: React.MouseEvent) => {
-      if (tier === "idle" && density.density === "slim" && !idleExpanded) {
-        event.preventDefault();
+      if (section === "idle" && density.density === "slim") {
         onToggleIdleExpand(threadKey);
+        if (!isActive) {
+          handleThreadClick(event, threadRef, orderedThreadKeys);
+        }
         return;
       }
       handleThreadClick(event, threadRef, orderedThreadKeys);
@@ -161,12 +180,12 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
     [
       density.density,
       handleThreadClick,
-      idleExpanded,
+      isActive,
       onToggleIdleExpand,
       orderedThreadKeys,
+      section,
       threadKey,
       threadRef,
-      tier,
     ],
   );
 
@@ -174,20 +193,23 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
     (event: React.KeyboardEvent) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
-      if (tier === "idle" && density.density === "slim" && !idleExpanded) {
+      if (section === "idle" && density.density === "slim") {
         onToggleIdleExpand(threadKey);
+        if (!isActive) {
+          navigateToThread(threadRef);
+        }
         return;
       }
       navigateToThread(threadRef);
     },
     [
       density.density,
-      idleExpanded,
+      isActive,
       navigateToThread,
       onToggleIdleExpand,
+      section,
       threadKey,
       threadRef,
-      tier,
     ],
   );
 
@@ -267,109 +289,125 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
     [renamingInputRef],
   );
 
-  const handleRenameInputChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      setRenamingTitle(event.target.value);
-    },
-    [setRenamingTitle],
-  );
-
-  const handleRenameInputKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
-      event.stopPropagation();
-      if (event.key === "Enter") {
-        event.preventDefault();
-        renamingCommittedRef.current = true;
-        void commitRename(threadRef, renamingTitle, thread.title);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        renamingCommittedRef.current = true;
-        cancelRename();
+  const archiveControl = isConfirmingArchive ? (
+    <button
+      type="button"
+      ref={handleConfirmArchiveRef}
+      className="sb-archive confirming"
+      data-testid={`thread-archive-confirm-${thread.id}`}
+      onPointerDown={stopPropagationOnPointerDown}
+      onClick={handleConfirmArchiveClick}
+      onBlur={clearConfirmingArchive}
+      aria-label="Confirm archive thread"
+    >
+      Archive?
+    </button>
+  ) : (
+    <button
+      type="button"
+      className="sb-archive"
+      data-testid={`thread-archive-${thread.id}`}
+      onPointerDown={stopPropagationOnPointerDown}
+      onClick={
+        appSettingsConfirmThreadArchive
+          ? handleStartArchiveConfirmation
+          : handleArchiveImmediateClick
       }
-    },
-    [cancelRename, commitRename, renamingCommittedRef, renamingTitle, thread.title, threadRef],
+      aria-label="Archive thread"
+    >
+      <ArchiveIcon className="size-3.5" aria-hidden />
+    </button>
   );
-
-  const handleRenameInputBlur = useCallback(() => {
-    if (!renamingCommittedRef.current) {
-      void commitRename(threadRef, renamingTitle, thread.title);
-    }
-  }, [commitRename, renamingCommittedRef, renamingTitle, thread.title, threadRef]);
-
-  const handleRenameInputClick = useCallback((event: React.MouseEvent<HTMLInputElement>) => {
-    event.stopPropagation();
-  }, []);
-
-  const archiveControl =
-    isConfirmingArchive && !isThreadRunning ? (
-      <button
-        ref={handleConfirmArchiveRef}
-        type="button"
-        data-thread-selection-safe
-        data-testid={`thread-archive-confirm-${thread.id}`}
-        aria-label={`Confirm archive ${thread.title}`}
-        className="sb-archive-confirm"
-        onPointerDown={stopPropagationOnPointerDown}
-        onClick={handleConfirmArchiveClick}
-      >
-        Confirm
-      </button>
-    ) : !isThreadRunning ? (
-      <button
-        type="button"
-        data-thread-selection-safe
-        data-testid={`thread-archive-${thread.id}`}
-        aria-label={`Archive ${thread.title}`}
-        className="sb-archive"
-        onPointerDown={stopPropagationOnPointerDown}
-        onClick={
-          appSettingsConfirmThreadArchive
-            ? handleStartArchiveConfirmation
-            : handleArchiveImmediateClick
-        }
-      >
-        <ArchiveIcon className="size-3.5" />
-      </button>
-    ) : null;
 
   const titleNode = isRenaming ? (
     <input
       ref={handleRenameInputRef}
-      className="sb-title min-w-0 flex-1 bg-transparent outline-none border border-[var(--sb-sky)] rounded px-0.5"
+      className="sb-rename"
       value={renamingTitle}
-      onChange={handleRenameInputChange}
-      onKeyDown={handleRenameInputKeyDown}
-      onBlur={handleRenameInputBlur}
-      onClick={handleRenameInputClick}
-      data-testid={`thread-title-${thread.id}`}
+      aria-label="Rename thread"
+      data-testid={`thread-rename-${thread.id}`}
+      onChange={(event) => setRenamingTitle(event.target.value)}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          renamingCommittedRef.current = true;
+          void commitRename(threadRef, renamingTitle, thread.title);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          cancelRename();
+        }
+      }}
+      onBlur={() => {
+        if (renamingCommittedRef.current) {
+          renamingCommittedRef.current = false;
+          return;
+        }
+        void commitRename(threadRef, renamingTitle, thread.title);
+      }}
     />
   ) : (
-    <span className="sb-title" data-testid={`thread-title-${thread.id}`}>
-      {thread.title}
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="sb-title" data-testid={`thread-title-${thread.id}`}>
+            {thread.title}
+          </span>
+        }
+      />
+      <TooltipPopup side="right" sideOffset={6}>
+        {thread.title}
+      </TooltipPopup>
+    </Tooltip>
   );
 
+  const projectIdentity = project ? <span className="sb-pchip">{project.displayName}</span> : null;
+  const branch = thread.branch ? <span className="sb-branch">{thread.branch}</span> : null;
+  const environmentBadge = (
+    <span className={`sb-env-badge ${remoteEnvLabel ? "remote" : "local"}`}>
+      {remoteEnvLabel ?? "Local"}
+    </span>
+  );
+  const relativeTime = (
+    <span className="sb-time">
+      {formatRelativeTimeLabel(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)}
+    </span>
+  );
   const metaRow = (
     <div className="sb-meta">
-      {project ? (
-        <span className="sb-pchip">
-          <span className={`sb-pdot ${projectColorClass(project.projectKey)}`} />
-          {project.displayName}
-        </span>
-      ) : null}
-      {thread.branch ? <span className="sb-branch">{thread.branch}</span> : null}
-      {remoteEnvLabel ? <span className="sb-env-badge remote">{remoteEnvLabel}</span> : null}
-      <span className="sb-time">
-        {formatRelativeTimeLabel(
-          thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
-        )}
-      </span>
+      {projectIdentity}
+      {branch}
+      {environmentBadge}
+      {relativeTime}
+    </div>
+  );
+  const settledProjectRow = (
+    <div className="sb-meta sb-project-row">
+      {projectIdentity}
+      {branch}
+    </div>
+  );
+  const settledEnvironmentRow = (
+    <div className="sb-meta sb-environment-row">
+      {environmentBadge}
+      {relativeTime}
     </div>
   );
 
+  const chip =
+    section === "active" ? (
+      <span
+        className={`sb-chip ${subState}${pill?.label === "Connecting" ? " connecting" : ""}`}
+        data-testid={`thread-chip-${thread.id}`}
+      >
+        {subStateChipLabel(subState, pill?.label)}
+        {pinned ? " · Pin" : ""}
+      </span>
+    ) : null;
+
   const showRich =
     density.density === "rich" ||
-    (tier === "idle" && idleExpanded) ||
+    (section === "idle" && idleExpanded) ||
     (density.showBlockedDot && idleExpanded);
 
   if (!showRich) {
@@ -379,7 +417,8 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
         tabIndex={0}
         data-thread-item
         data-testid={`thread-row-${thread.id}`}
-        data-tier={tier}
+        data-section={section}
+        data-sub-state={subState}
         data-density="slim"
         className={`sb-row${selected ? " selected" : ""}${unread || density.showBlockedDot ? " unread" : ""}`}
         onClick={handleRowClick}
@@ -387,19 +426,21 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
         onContextMenu={handleRowContextMenu}
         onMouseLeave={clearConfirmingArchive}
       >
-        <span
-          className={`sb-dot${density.showBlockedDot ? " blocked" : ""}`}
-          style={
-            density.showBlockedDot
-              ? undefined
-              : unread
-                ? { background: "var(--sb-emerald)" }
-                : undefined
-          }
-        />
+        {section !== "idle" ? (
+          <span
+            className={`sb-dot${density.showBlockedDot ? " blocked" : ""}`}
+            style={
+              density.showBlockedDot
+                ? undefined
+                : unread
+                  ? { background: "var(--sb-emerald)" }
+                  : undefined
+            }
+          />
+        ) : null}
         {titleNode}
+        {chip}
         <ThreadRowTrailingStatus thread={thread} />
-        {tier === "idle" ? <span className="sb-expand-hint">expand</span> : null}
         {archiveControl}
       </div>
     );
@@ -408,8 +449,10 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
   const kind = waitingKind(pill?.label);
   const cardClass = [
     "sb-card",
-    tier === "waiting" ? `waiting ${kind}`.trim() : "",
-    tier === "blocked" ? "blocked" : "",
+    subState === "waiting" ? `waiting ${kind}`.trim() : "",
+    subState === "blocked" ? "blocked" : "",
+    subState === "settled" && section === "active" ? "settled" : "",
+    section === "idle" ? "idle-expanded" : "",
     selected ? "selected" : "",
   ]
     .filter(Boolean)
@@ -425,7 +468,8 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
       tabIndex={0}
       data-thread-item
       data-testid={`thread-row-${thread.id}`}
-      data-tier={tier}
+      data-section={section}
+      data-sub-state={subState}
       data-density="rich"
       className={cardClass}
       onClick={handleRowClick}
@@ -434,12 +478,13 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
       onMouseLeave={clearConfirmingArchive}
     >
       <div className="sb-top">
-        {tier === "working" ? <span className="sb-spin" aria-hidden /> : null}
-        {tier === "blocked" ? (
+        {subState === "working" ? <span className="sb-spin" aria-hidden /> : null}
+        {subState === "blocked" ? (
           <span className="sb-dot blocked" style={{ width: 8, height: 8 }} aria-hidden />
         ) : null}
         {titleNode}
-        {tier === "waiting" && wait ? (
+        {chip}
+        {subState === "waiting" && wait ? (
           <span
             className="sb-wait"
             style={{
@@ -455,43 +500,33 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
             {formatSidebarWaitLabel(wait.durationMs)}
           </span>
         ) : null}
-        {tier === "working" && workingElapsedMs != null ? (
+        {subState === "working" && workingElapsedMs != null ? (
           <span className="sb-elapsed">{formatSidebarElapsedClock(workingElapsedMs)}</span>
         ) : null}
-        {tier === "blocked" ? (
+        {subState === "blocked" ? (
           <span className="sb-wait" style={{ color: "var(--sb-red)" }}>
             blocked
           </span>
         ) : null}
-        {tier === "idle" ? (
-          <span className="sb-wait" style={{ color: "var(--sb-text-3)" }}>
-            idle
-          </span>
-        ) : null}
         <ThreadRowTrailingStatus thread={thread} />
       </div>
-      {tier === "waiting" ? <div className="sb-ask">{waitingAskLine(pill?.label)}</div> : null}
-      {tier === "working" ? (
-        <div className="sb-ask" style={{ color: "var(--sb-text-3)" }}>
-          {pill?.label === "Connecting" ? "Connecting…" : "Working…"}
-        </div>
-      ) : null}
-      {tier === "blocked" ? (
+      {section === "active" && (subState === "settled" || subState === "working")
+        ? settledProjectRow
+        : null}
+      {subState === "waiting" ? <div className="sb-ask">{waitingAskLine(pill?.label)}</div> : null}
+      {subState === "blocked" ? (
         <div className="sb-ask" style={{ color: "var(--sb-red)" }}>
           {thread.session?.lastError ?? "Session error"}
         </div>
       ) : null}
-      {tier === "idle" ? (
-        <div className="sb-ask" style={{ color: "var(--sb-text-3)" }}>
-          Idle
-        </div>
-      ) : null}
-      {tier === "working" ? (
+      {subState === "working" ? (
         <div className="sb-progress">
           <div className="sb-bar" />
         </div>
       ) : null}
-      {metaRow}
+      {section === "active" && (subState === "settled" || subState === "working")
+        ? settledEnvironmentRow
+        : metaRow}
       {archiveControl}
     </div>
   );

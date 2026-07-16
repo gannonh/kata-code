@@ -9,7 +9,6 @@ import {
   type ServerConfig,
   type ServerLifecycleWelcomePayload,
   ServerConfig as ServerConfigSchema,
-  ServerSettings,
   WS_METHODS,
 } from "@kata-sh/code-contracts";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
@@ -47,6 +46,11 @@ import {
   type SidebarV2ScenarioId,
   toSidebarV2ShellSnapshot,
 } from "./fixtures/sidebarV2Scenarios";
+
+vi.mock("./useSidebarNowMs", () => ({
+  // Keep in sync with SIDEBAR_V2_FIXTURE_NOW_MS in fixtures/sidebarV2Scenarios.ts
+  useSidebarNowMs: () => Date.parse("2026-07-16T12:00:00.000Z"),
+}));
 
 vi.mock("../../lib/vcsStatusState", () => {
   const status = {
@@ -92,7 +96,6 @@ interface TestFixture {
 let fixture: TestFixture;
 const rpcHarness = new BrowserWsRpcHarness();
 const encodeServerConfig = Schema.encodeSync(ServerConfigSchema);
-const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
 function createBaseServerConfig(): ServerConfig {
@@ -381,7 +384,7 @@ async function mountApp(scenarioId: SidebarV2ScenarioId): Promise<{
   };
 }
 
-function tierSection(label: string): Element | null {
+function listSection(label: string): Element | null {
   return (
     (Array.from(document.querySelectorAll(".sb-sec")).find((node) =>
       (node.textContent ?? "").includes(label),
@@ -465,6 +468,8 @@ describe("Sidebar v2 fixtures + playground", () => {
     useUiStateStore.setState((state) => ({
       ...state,
       threadLastVisitedAtById: {},
+      threadPinnedById: {},
+      threadSleptById: {},
     }));
   });
 
@@ -478,30 +483,41 @@ describe("Sidebar v2 fixtures + playground", () => {
     ]);
   });
 
-  it("mixed-tiers shows Waiting / Working / Blocked / Idle sections", async () => {
+  it("mixed-tiers shows Active / Idle sections with sub-state chips", async () => {
     const mounted = await mountApp("mixed-tiers");
     try {
-      expect(tierSection("Waiting")).toBeTruthy();
-      expect(tierSection("Working")).toBeTruthy();
-      expect(tierSection("Blocked")).toBeTruthy();
-      expect(tierSection("Idle")).toBeTruthy();
-      expect(document.querySelector('[data-tier="waiting"]')).toBeTruthy();
-      expect(document.querySelector('[data-tier="working"]')).toBeTruthy();
-      expect(document.querySelector('[data-tier="blocked"]')).toBeTruthy();
-      expect(document.querySelector('[data-tier="idle"]')).toBeTruthy();
+      expect(listSection("Active")).toBeTruthy();
+      expect(listSection("Idle")).toBeTruthy();
+      expect(
+        document.querySelector('[data-section="active"][data-sub-state="waiting"]'),
+      ).toBeTruthy();
+      expect(
+        document.querySelector('[data-section="active"][data-sub-state="working"]'),
+      ).toBeTruthy();
+      expect(
+        document.querySelector('[data-section="active"][data-sub-state="blocked"]'),
+      ).toBeTruthy();
+      expect(
+        document.querySelector('[data-section="active"][data-sub-state="settled"]'),
+      ).toBeTruthy();
+      expect(document.querySelector('[data-section="idle"]')).toBeTruthy();
+      expect(document.querySelector('[data-testid^="thread-chip-"]')).toBeTruthy();
       expect(document.body.textContent?.toLowerCase() ?? "").not.toContain("show more");
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("waiting-only lists approval, input, and plan-ready rows", async () => {
+  it("waiting-only lists approval, input, and plan-ready rows under Active", async () => {
     const mounted = await mountApp("waiting-only");
     try {
-      expect(tierSection("Waiting")).toBeTruthy();
-      expect(document.querySelectorAll('[data-tier="waiting"]').length).toBeGreaterThanOrEqual(3);
+      expect(listSection("Active")).toBeTruthy();
+      expect(listSection("Idle")).toBeNull();
+      expect(
+        document.querySelectorAll('[data-section="active"][data-sub-state="waiting"]').length,
+      ).toBeGreaterThanOrEqual(3);
       expect(document.body.textContent ?? "").toMatch(
-        /Pending Approval|Awaiting Input|Plan Ready/i,
+        /Pending Approval|Awaiting Input|Plan Ready|Approve|Asked|Plan ready/i,
       );
     } finally {
       await mounted.cleanup();
@@ -519,14 +535,66 @@ describe("Sidebar v2 fixtures + playground", () => {
     }
   });
 
+  it("dwell-settled keeps recent settled Active and past-dwell Idle", async () => {
+    const mounted = await mountApp("dwell-settled");
+    try {
+      expect(listSection("Active")).toBeTruthy();
+      expect(listSection("Idle")).toBeTruthy();
+      expect(
+        document.querySelector(
+          '[data-testid="thread-row-thread-settled-dwell"][data-section="active"]',
+        ),
+      ).toBeTruthy();
+      expect(
+        document.querySelector('[data-testid="thread-row-thread-idle"][data-section="idle"]'),
+      ).toBeTruthy();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("idle-expand expands a slim idle row in place", async () => {
     const mounted = await mountApp("idle-expand");
     try {
-      const slim = document.querySelector<HTMLElement>('[data-tier="idle"][data-density="slim"]');
+      const slim = document.querySelector<HTMLElement>(
+        '[data-section="idle"][data-density="slim"]',
+      );
       expect(slim).toBeTruthy();
       slim!.click();
       await vi.waitFor(() => {
-        expect(document.querySelector('[data-tier="idle"][data-density="slim"]')).toBeNull();
+        expect(document.querySelector('[data-section="idle"][data-density="slim"]')).toBeNull();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("pin keeps a past-dwell thread in Active", async () => {
+    const mounted = await mountApp("dwell-settled");
+    try {
+      const idleKey = `${SIDEBAR_V2_LOCAL_ENV_ID}:thread-idle`;
+      useUiStateStore.getState().setThreadPinned(idleKey, true);
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-testid="thread-row-thread-idle"][data-section="active"]'),
+        ).toBeTruthy();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("sleep moves a within-dwell settled thread to Idle", async () => {
+    const mounted = await mountApp("dwell-settled");
+    try {
+      const settledKey = `${SIDEBAR_V2_LOCAL_ENV_ID}:thread-settled-dwell`;
+      useUiStateStore.getState().setThreadSlept(settledKey, true);
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector(
+            '[data-testid="thread-row-thread-settled-dwell"][data-section="idle"]',
+          ),
+        ).toBeTruthy();
       });
     } finally {
       await mounted.cleanup();

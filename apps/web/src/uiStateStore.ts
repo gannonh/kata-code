@@ -31,6 +31,10 @@ export interface UiProjectState {
 export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
   threadChangedFilesExpandedById: Record<string, Record<string, boolean>>;
+  /** Scoped thread keys forced into Active (Pin). */
+  threadPinnedById: Record<string, true>;
+  /** Scoped thread keys forced into Idle (Sleep). */
+  threadSleptById: Record<string, true>;
 }
 
 export interface UiEndpointState {
@@ -57,6 +61,8 @@ const initialState: UiState = {
   projectOrder: [],
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
+  threadPinnedById: {},
+  threadSleptById: {},
   defaultAdvertisedEndpointKey: null,
 };
 
@@ -427,12 +433,20 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
       retainedThreadIds.has(threadId),
     ),
   );
+  const nextThreadPinnedById = Object.fromEntries(
+    Object.entries(state.threadPinnedById).filter(([threadId]) => retainedThreadIds.has(threadId)),
+  );
+  const nextThreadSleptById = Object.fromEntries(
+    Object.entries(state.threadSleptById).filter(([threadId]) => retainedThreadIds.has(threadId)),
+  );
   if (
     recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById) &&
     nestedBooleanRecordsEqual(
       state.threadChangedFilesExpandedById,
       nextThreadChangedFilesExpandedById,
-    )
+    ) &&
+    recordsEqual(state.threadPinnedById, nextThreadPinnedById) &&
+    recordsEqual(state.threadSleptById, nextThreadSleptById)
   ) {
     return state;
   }
@@ -440,6 +454,8 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
     threadChangedFilesExpandedById: nextThreadChangedFilesExpandedById,
+    threadPinnedById: nextThreadPinnedById,
+    threadSleptById: nextThreadSleptById,
   };
 }
 
@@ -492,17 +508,83 @@ export function markThreadUnread(
 export function clearThreadUi(state: UiState, threadId: string): UiState {
   const hasVisitedState = threadId in state.threadLastVisitedAtById;
   const hasChangedFilesState = threadId in state.threadChangedFilesExpandedById;
-  if (!hasVisitedState && !hasChangedFilesState) {
+  const hasPinned = threadId in state.threadPinnedById;
+  const hasSlept = threadId in state.threadSleptById;
+  if (!hasVisitedState && !hasChangedFilesState && !hasPinned && !hasSlept) {
     return state;
   }
   const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };
   const nextThreadChangedFilesExpandedById = { ...state.threadChangedFilesExpandedById };
+  const nextThreadPinnedById = { ...state.threadPinnedById };
+  const nextThreadSleptById = { ...state.threadSleptById };
   delete nextThreadLastVisitedAtById[threadId];
   delete nextThreadChangedFilesExpandedById[threadId];
+  delete nextThreadPinnedById[threadId];
+  delete nextThreadSleptById[threadId];
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
     threadChangedFilesExpandedById: nextThreadChangedFilesExpandedById,
+    threadPinnedById: nextThreadPinnedById,
+    threadSleptById: nextThreadSleptById,
+  };
+}
+
+export function setThreadPinned(state: UiState, threadId: string, pinned: boolean): UiState {
+  const isPinned = state.threadPinnedById[threadId] === true;
+  if (pinned === isPinned) {
+    if (pinned && state.threadSleptById[threadId] === true) {
+      const nextSlept = { ...state.threadSleptById };
+      delete nextSlept[threadId];
+      return { ...state, threadSleptById: nextSlept };
+    }
+    return state;
+  }
+  const nextPinned = { ...state.threadPinnedById };
+  const nextSlept = { ...state.threadSleptById };
+  if (pinned) {
+    nextPinned[threadId] = true;
+    delete nextSlept[threadId];
+  } else {
+    delete nextPinned[threadId];
+  }
+  return {
+    ...state,
+    threadPinnedById: nextPinned,
+    threadSleptById: nextSlept,
+  };
+}
+
+export function setThreadSlept(state: UiState, threadId: string, slept: boolean): UiState {
+  if (slept && state.threadPinnedById[threadId] === true) {
+    return state;
+  }
+  const isSlept = state.threadSleptById[threadId] === true;
+  if (slept === isSlept) {
+    return state;
+  }
+  const nextSlept = { ...state.threadSleptById };
+  if (slept) {
+    nextSlept[threadId] = true;
+  } else {
+    delete nextSlept[threadId];
+  }
+  return {
+    ...state,
+    threadSleptById: nextSlept,
+  };
+}
+
+/** Clear Sleep when shell attention returns (waiting/working/blocked). */
+export function clearThreadSleep(state: UiState, threadId: string): UiState {
+  if (state.threadSleptById[threadId] !== true) {
+    return state;
+  }
+  const nextSlept = { ...state.threadSleptById };
+  delete nextSlept[threadId];
+  return {
+    ...state,
+    threadSleptById: nextSlept,
   };
 }
 
@@ -639,6 +721,9 @@ interface UiStateStore extends UiState {
   markThreadVisited: (threadId: string, visitedAt?: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   clearThreadUi: (threadId: string) => void;
+  setThreadPinned: (threadId: string, pinned: boolean) => void;
+  setThreadSlept: (threadId: string, slept: boolean) => void;
+  clearThreadSleep: (threadId: string) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   toggleProject: (projectId: string) => void;
@@ -658,6 +743,9 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   markThreadUnread: (threadId, latestTurnCompletedAt) =>
     set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
   clearThreadUi: (threadId) => set((state) => clearThreadUi(state, threadId)),
+  setThreadPinned: (threadId, pinned) => set((state) => setThreadPinned(state, threadId, pinned)),
+  setThreadSlept: (threadId, slept) => set((state) => setThreadSlept(state, threadId, slept)),
+  clearThreadSleep: (threadId) => set((state) => clearThreadSleep(state, threadId)),
   setThreadChangedFilesExpanded: (threadId, turnId, expanded) =>
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>

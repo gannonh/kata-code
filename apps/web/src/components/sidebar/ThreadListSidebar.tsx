@@ -33,9 +33,9 @@ import { useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   countWaitingOutsideProjectFilter,
-  flattenAttentionTierThreads,
-  groupThreadsByAttentionTier,
-  resolveThreadTier,
+  flattenSectionThreads,
+  groupThreadsBySection,
+  resolveThreadSubState,
 } from "../Sidebar.logic";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { SidebarProjectPicker } from "./SidebarProjectPicker";
@@ -44,10 +44,8 @@ import { ThreadItemV2 } from "./ThreadItemV2";
 import { useSidebarNowMs } from "./useSidebarNowMs";
 import "./sidebar-v2.css";
 
-const TIER_SECTIONS = [
-  { key: "waiting" as const, label: "Waiting" },
-  { key: "working" as const, label: "Working" },
-  { key: "blocked" as const, label: "Blocked" },
+const LIST_SECTIONS = [
+  { key: "active" as const, label: "Active" },
   { key: "idle" as const, label: "Idle" },
 ];
 
@@ -84,6 +82,8 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
   const threadSortOrder = useSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   );
+  const idleTimerEnabled = useSettings<boolean>((settings) => settings.sidebarIdleTimerEnabled);
+  const idleTimerMinutes = useSettings<number>((settings) => settings.sidebarIdleTimerMinutes);
   const appSettingsConfirmThreadDelete = useSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
   );
@@ -104,6 +104,11 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
   const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
+  const setThreadPinned = useUiStateStore((state) => state.setThreadPinned);
+  const setThreadSlept = useUiStateStore((state) => state.setThreadSlept);
+  const clearThreadSleep = useUiStateStore((state) => state.clearThreadSleep);
+  const threadPinnedById = useUiStateStore((state) => state.threadPinnedById);
+  const threadSleptById = useUiStateStore((state) => state.threadSleptById);
   const toggleThreadSelection = useThreadSelectionStore((state) => state.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((state) => state.rangeSelectTo);
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -213,24 +218,52 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
     [threadLastVisitedAtById],
   );
 
-  const tiers = useMemo(
+  const sections = useMemo(
     () =>
-      groupThreadsByAttentionTier({
+      groupThreadsBySection({
         threads: filteredThreads,
         getStatusInput: statusInputFor,
         sortOrder: threadSortOrder,
         nowMs,
+        idleTimerEnabled,
+        idleTimerMinutes,
+        isPinned: (thread) =>
+          threadPinnedById[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))] ===
+          true,
+        isSlept: (thread) =>
+          threadSleptById[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))] ===
+          true,
       }),
-    [filteredThreads, nowMs, statusInputFor, threadSortOrder],
+    [
+      filteredThreads,
+      idleTimerEnabled,
+      idleTimerMinutes,
+      nowMs,
+      statusInputFor,
+      threadPinnedById,
+      threadSleptById,
+      threadSortOrder,
+    ],
   );
 
   const orderedThreadKeys = useMemo(
     () =>
-      flattenAttentionTierThreads(tiers).map((thread) =>
+      flattenSectionThreads(sections).map((thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       ),
-    [tiers],
+    [sections],
   );
+
+  // Clear Sleep when attention sub-state returns.
+  useEffect(() => {
+    for (const thread of filteredThreads) {
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      if (threadSleptById[threadKey] !== true) continue;
+      if (resolveThreadSubState({ thread: statusInputFor(thread) }) !== "settled") {
+        clearThreadSleep(threadKey);
+      }
+    }
+  }, [clearThreadSleep, filteredThreads, statusInputFor, threadSleptById]);
 
   const sidebarThreadByKey = useMemo(
     () =>
@@ -460,10 +493,18 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
         (entry) => entry.environmentId === thread.environmentId && entry.id === thread.projectId,
       );
       const threadWorkspacePath = thread.worktreePath ?? member?.cwd ?? project?.cwd ?? null;
+      const pinned = threadPinnedById[threadKey] === true;
+      const slept = threadSleptById[threadKey] === true;
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
+          pinned ? { id: "unpin", label: "Unpin" } : { id: "pin", label: "Pin" },
+          pinned
+            ? { id: "sleep", label: "Sleep", disabled: true }
+            : slept
+              ? { id: "wake", label: "Wake" }
+              : { id: "sleep", label: "Sleep" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
           { id: "delete", label: "Delete", destructive: true, icon: "trash" },
@@ -480,6 +521,22 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
 
       if (clicked === "mark-unread") {
         markThreadUnread(threadKey, thread.latestTurn?.completedAt);
+        return;
+      }
+      if (clicked === "pin") {
+        setThreadPinned(threadKey, true);
+        return;
+      }
+      if (clicked === "unpin") {
+        setThreadPinned(threadKey, false);
+        return;
+      }
+      if (clicked === "sleep") {
+        setThreadSlept(threadKey, true);
+        return;
+      }
+      if (clicked === "wake") {
+        setThreadSlept(threadKey, false);
         return;
       }
       if (clicked === "copy-path") {
@@ -521,19 +578,17 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
       deleteThread,
       markThreadUnread,
       projectByMemberScopedKey,
+      setThreadPinned,
+      setThreadSlept,
+      threadPinnedById,
+      threadSleptById,
     ],
   );
 
   const handleToggleIdleExpand = useCallback((threadKey: string) => {
-    setExpandedIdleThreadKeys((current) => {
-      const next = new Set(current);
-      if (next.has(threadKey)) {
-        next.delete(threadKey);
-      } else {
-        next.add(threadKey);
-      }
-      return next;
-    });
+    setExpandedIdleThreadKeys((current) =>
+      current.has(threadKey) ? new Set() : new Set([threadKey]),
+    );
   }, []);
 
   const handleGlobalNewThread = useCallback(() => {
@@ -579,6 +634,14 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
             <kbd className="sb-kbd">{commandPaletteShortcutLabel}</kbd>
           ) : null}
         </CommandDialogTrigger>
+      </div>
+
+      <div className="sb-picker-row">
+        <SidebarProjectPicker
+          projects={pickerProjects}
+          selectedProjectKey={selectedProjectKey}
+          onSelect={setSelectedProjectKey}
+        />
         <Tooltip>
           <TooltipTrigger
             render={
@@ -600,12 +663,6 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
           </TooltipPopup>
         </Tooltip>
       </div>
-
-      <SidebarProjectPicker
-        projects={pickerProjects}
-        selectedProjectKey={selectedProjectKey}
-        onSelect={setSelectedProjectKey}
-      />
       {waitingOutsideFilter > 0 ? (
         <div className="sb-scope-hint" data-testid="sidebar-waiting-scope-hint">
           {waitingOutsideFilter} waiting in other projects
@@ -618,11 +675,11 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
             {sortedProjects.length === 0 ? "No projects yet" : "No threads yet"}
           </div>
         ) : (
-          TIER_SECTIONS.map((section) => {
-            const threads = tiers[section.key];
+          LIST_SECTIONS.map((section) => {
+            const threads = sections[section.key];
             if (threads.length === 0) return null;
             return (
-              <section key={section.key} data-testid={`sidebar-tier-${section.key}`}>
+              <section key={section.key} data-testid={`sidebar-section-${section.key}`}>
                 <div className={`sb-sec ${section.key}`}>
                   {section.label}
                   <span className="sb-count">{threads.length}</span>
@@ -637,6 +694,8 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
                       scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
                     ) ?? null;
                   const lastVisitedAt = threadLastVisitedAtById[threadKey];
+                  const statusInput = statusInputFor(thread);
+                  const subState = resolveThreadSubState({ thread: statusInput });
                   return (
                     <ThreadItemV2
                       key={threadKey}
@@ -651,7 +710,9 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
                       }
                       lastVisitedAt={lastVisitedAt}
                       isActive={activeRouteThreadKey === threadKey}
-                      tier={resolveThreadTier({ thread: statusInputFor(thread) })}
+                      section={section.key}
+                      subState={subState}
+                      pinned={threadPinnedById[threadKey] === true}
                       nowMs={nowMs}
                       idleExpanded={expandedIdleThreadKeys.has(threadKey)}
                       remoteEnvLabel={remoteLabelFor(thread)}

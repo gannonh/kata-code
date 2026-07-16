@@ -8,8 +8,10 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../../environments/runtime";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
+import { useSettings } from "~/hooks/useSettings";
+import type { DraftThreadEnvMode } from "../../composerDraftStore";
 import { useSidebar } from "../ui/sidebar";
-import { projectColorClass, resolveThreadTier } from "../Sidebar.logic";
+import { projectColorClass, projectInitials, resolveThreadTier } from "../Sidebar.logic";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import type { SidebarThreadSummary } from "../../types";
 
@@ -39,16 +41,6 @@ function envKindLabel(kind: EnvKind): string {
   return "Local";
 }
 
-function projectShortLabel(displayName: string): string {
-  const trimmed = displayName.trim();
-  if (trimmed.length === 0) return "?";
-  const parts = trimmed.split(/[\s/_-]+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return `${parts[0]!.slice(0, 1)}${parts[1]!.slice(0, 1)}`.toUpperCase();
-  }
-  return trimmed.slice(0, 2).toUpperCase();
-}
-
 export interface SidebarNewSessionPanelProps {
   open: boolean;
   projects: readonly SidebarProjectSnapshot[];
@@ -73,6 +65,9 @@ export const SidebarNewSessionPanel = memo(function SidebarNewSessionPanel(
   } = props;
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
+  const defaultThreadEnvMode = useSettings<DraftThreadEnvMode>(
+    (settings) => settings.defaultThreadEnvMode,
+  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const registryById = useSavedEnvironmentRegistryStore((state) => state.byId);
   const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
@@ -110,9 +105,11 @@ export const SidebarNewSessionPanel = memo(function SidebarNewSessionPanel(
         setOpenMobile(false);
       }
       onClose();
-      await handleNewThread(scopeProjectRef(environmentId, projectId));
+      await handleNewThread(scopeProjectRef(environmentId, projectId), {
+        envMode: defaultThreadEnvMode,
+      });
     },
-    [handleNewThread, isMobile, onClose, setOpenMobile],
+    [defaultThreadEnvMode, handleNewThread, isMobile, onClose, setOpenMobile],
   );
 
   const handleProjectHeadClick = useCallback(
@@ -189,7 +186,7 @@ export const SidebarNewSessionPanel = memo(function SidebarNewSessionPanel(
                   }}
                 >
                   <div className={`sb-proj-avatar ${projectColorClass(project.projectKey)}`}>
-                    {projectShortLabel(project.displayName)}
+                    {projectInitials(project.displayName)}
                   </div>
                   <div className="sb-acc-main">
                     <div className="sb-acc-name">

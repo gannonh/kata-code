@@ -60,6 +60,7 @@ type ThreadStatusInput = Pick<
   | "interactionMode"
   | "latestTurn"
   | "session"
+  | "updatedAt"
 > & {
   lastVisitedAt?: string | undefined;
 };
@@ -411,6 +412,11 @@ export function resolveThreadStatusPill(input: {
 
 export type ThreadAttentionTier = "waiting" | "working" | "blocked" | "idle";
 
+/** Shell attention sub-state (chip). `idle` from resolveThreadTier maps to settled. */
+export type ThreadSubState = "waiting" | "working" | "blocked" | "settled";
+
+export type ThreadSection = "active" | "idle";
+
 export function resolveThreadTier(input: { thread: ThreadStatusInput }): ThreadAttentionTier {
   const pill = resolveThreadStatusPill(input);
   switch (pill?.label) {
@@ -428,19 +434,81 @@ export function resolveThreadTier(input: { thread: ThreadStatusInput }): ThreadA
   }
 }
 
+export function resolveThreadSubState(input: { thread: ThreadStatusInput }): ThreadSubState {
+  const tier = resolveThreadTier(input);
+  return tier === "idle" ? "settled" : tier;
+}
+
+/** Latest settled-activity timestamp for dwell (ms). Null if unknown. */
+export function resolveSettledActivityAtMs(thread: ThreadStatusInput): number | null {
+  const candidates = [
+    toSortableTimestamp(thread.latestTurn?.completedAt ?? undefined),
+    toSortableTimestamp(thread.session?.updatedAt),
+    toSortableTimestamp(thread.updatedAt),
+  ].filter((value): value is number => value !== null);
+  if (candidates.length === 0) return null;
+  return Math.max(...candidates);
+}
+
+export function resolveThreadSection(input: {
+  thread: ThreadStatusInput;
+  nowMs?: number;
+  idleTimerEnabled: boolean;
+  idleTimerMinutes: number;
+  pinned?: boolean;
+  slept?: boolean;
+}): ThreadSection {
+  if (input.pinned) {
+    return "active";
+  }
+
+  const subState = resolveThreadSubState({ thread: input.thread });
+  if (subState !== "settled") {
+    // Attention always Active; Sleep override is cleared when attention returns.
+    return "active";
+  }
+
+  if (input.slept) {
+    return "idle";
+  }
+
+  if (!input.idleTimerEnabled) {
+    return "active";
+  }
+
+  const minutes = Number.isFinite(input.idleTimerMinutes)
+    ? Math.max(1, input.idleTimerMinutes)
+    : 60;
+  const activityAt = resolveSettledActivityAtMs(input.thread);
+  if (activityAt === null) {
+    return "active";
+  }
+
+  const nowMs = input.nowMs ?? Date.now();
+  if (nowMs - activityAt >= minutes * 60_000) {
+    return "idle";
+  }
+  return "active";
+}
+
 export type ThreadRowDensity = "rich" | "slim";
 
-export function resolveThreadRowDensity(input: { thread: ThreadStatusInput }): {
+export function resolveThreadRowDensity(input: {
+  thread: ThreadStatusInput;
+  section?: ThreadSection;
+}): {
   density: ThreadRowDensity;
   showBlockedDot: boolean;
 } {
-  const tier = resolveThreadTier(input);
+  const section =
+    input.section ?? (resolveThreadTier({ thread: input.thread }) === "idle" ? "idle" : "active");
+  const subState = resolveThreadSubState({ thread: input.thread });
 
-  if (tier === "idle") {
+  if (section === "idle") {
     return { density: "slim", showBlockedDot: false };
   }
 
-  if (tier === "blocked") {
+  if (subState === "blocked") {
     const blockedAt = toSortableTimestamp(input.thread.session?.updatedAt);
     const lastVisitedAt = toSortableTimestamp(input.thread.lastVisitedAt);
     const visitedSinceBlocked =
@@ -574,6 +642,100 @@ export function flattenAttentionTierThreads<T>(tiers: {
   return [...tiers.waiting, ...tiers.working, ...tiers.blocked, ...tiers.idle];
 }
 
+const ACTIVE_SUBSTATE_SORT_ORDER: Record<ThreadSubState, number> = {
+  waiting: 0,
+  blocked: 1,
+  working: 2,
+  settled: 3,
+};
+
+export function groupThreadsBySection<T extends Pick<Thread, "id"> & ThreadSortInput>(input: {
+  threads: readonly T[];
+  getStatusInput: (thread: T) => ThreadStatusInput;
+  sortOrder: SidebarThreadSortOrder;
+  nowMs?: number;
+  idleTimerEnabled: boolean;
+  idleTimerMinutes: number;
+  isPinned?: (thread: T) => boolean;
+  isSlept?: (thread: T) => boolean;
+  getWaitSince?: (thread: T) => string | null | undefined;
+}): {
+  active: T[];
+  idle: T[];
+} {
+  const nowMs = input.nowMs ?? Date.now();
+  const active: T[] = [];
+  const idle: T[] = [];
+
+  for (const thread of input.threads) {
+    const statusInput = input.getStatusInput(thread);
+    const section = resolveThreadSection({
+      thread: statusInput,
+      nowMs,
+      idleTimerEnabled: input.idleTimerEnabled,
+      idleTimerMinutes: input.idleTimerMinutes,
+      pinned: input.isPinned?.(thread) ?? false,
+      slept: input.isSlept?.(thread) ?? false,
+    });
+    if (section === "active") {
+      active.push(thread);
+    } else {
+      idle.push(thread);
+    }
+  }
+
+  const sortByConfiguredOrder = (threads: T[]) => sortThreads(threads, input.sortOrder);
+
+  const sortedActive = [...active].toSorted((left, right) => {
+    const leftStatus = input.getStatusInput(left);
+    const rightStatus = input.getStatusInput(right);
+    const leftSub = resolveThreadSubState({ thread: leftStatus });
+    const rightSub = resolveThreadSubState({ thread: rightStatus });
+    const leftOrder = ACTIVE_SUBSTATE_SORT_ORDER[leftSub];
+    const rightOrder = ACTIVE_SUBSTATE_SORT_ORDER[rightSub];
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+
+    if (leftSub === "waiting" && rightSub === "waiting") {
+      const leftWait = resolveThreadWaitDuration({
+        thread: leftStatus,
+        nowMs,
+        waitSince: input.getWaitSince?.(left),
+      });
+      const rightWait = resolveThreadWaitDuration({
+        thread: rightStatus,
+        nowMs,
+        waitSince: input.getWaitSince?.(right),
+      });
+      const leftDuration = leftWait?.durationMs ?? Number.NEGATIVE_INFINITY;
+      const rightDuration = rightWait?.durationMs ?? Number.NEGATIVE_INFINITY;
+      if (leftDuration !== rightDuration) {
+        return rightDuration - leftDuration;
+      }
+    }
+
+    const rightTimestamp = getThreadSortTimestamp(right, input.sortOrder);
+    const leftTimestamp = getThreadSortTimestamp(left, input.sortOrder);
+    if (rightTimestamp !== leftTimestamp) {
+      return rightTimestamp > leftTimestamp ? 1 : -1;
+    }
+    return right.id.localeCompare(left.id);
+  });
+
+  return {
+    active: sortedActive,
+    idle: sortByConfiguredOrder(idle),
+  };
+}
+
+export function flattenSectionThreads<T>(sections: {
+  active: readonly T[];
+  idle: readonly T[];
+}): T[] {
+  return [...sections.active, ...sections.idle];
+}
+
 export function formatSidebarWaitLabel(durationMs: number): string {
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
   if (totalSeconds < 60) {
@@ -601,6 +763,17 @@ export function projectColorClass(projectKey: string): string {
     hash = (hash + projectKey.charCodeAt(index) * (index + 1)) % 5;
   }
   return `c${hash}`;
+}
+
+/** Two-letter initials for project identity avatars (same rules as new-session panel). */
+export function projectInitials(displayName: string): string {
+  const trimmed = displayName.trim();
+  if (trimmed.length === 0) return "?";
+  const parts = trimmed.split(/[\s/_-]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0]!.slice(0, 1)}${parts[1]!.slice(0, 1)}`.toUpperCase();
+  }
+  return trimmed.slice(0, 2).toUpperCase();
 }
 
 export function countWaitingOutsideProjectFilter(input: {

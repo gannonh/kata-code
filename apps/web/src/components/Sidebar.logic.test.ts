@@ -20,13 +20,18 @@ import {
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
   resolveThreadTier,
+  resolveThreadSubState,
+  resolveThreadSection,
   resolveThreadRowDensity,
   resolveThreadWaitDuration,
   groupThreadsByAttentionTier,
+  groupThreadsBySection,
   flattenAttentionTierThreads,
+  flattenSectionThreads,
   formatSidebarWaitLabel,
   formatSidebarElapsedClock,
   countWaitingOutsideProjectFilter,
+  projectInitials,
 } from "./Sidebar.logic";
 import {
   EnvironmentId,
@@ -35,6 +40,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@kata-sh/code-contracts";
+import { shortProjectDisplayName } from "../logicalProject";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -731,6 +737,210 @@ describe("resolveThreadTier", () => {
         },
       }),
     ).toBe("idle");
+  });
+});
+
+describe("resolveThreadSection", () => {
+  const nowMs = Date.parse("2026-07-16T12:00:00.000Z");
+  const settled = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    latestTurn: makeLatestTurn({
+      completedAt: "2026-07-16T11:30:00.000Z",
+    }),
+    lastVisitedAt: undefined,
+    updatedAt: "2026-07-16T11:30:00.000Z",
+    session: {
+      provider: ProviderDriverKind.make("codex"),
+      status: "ready" as const,
+      createdAt: "2026-07-16T10:00:00.000Z",
+      updatedAt: "2026-07-16T11:30:00.000Z",
+      orchestrationStatus: "ready" as const,
+    },
+  };
+
+  it("keeps attention sub-states in Active regardless of dwell", () => {
+    expect(
+      resolveThreadSection({
+        thread: { ...settled, hasPendingApprovals: true },
+        nowMs,
+        idleTimerEnabled: true,
+        idleTimerMinutes: 60,
+      }),
+    ).toBe("active");
+  });
+
+  it("keeps recently settled threads Active within dwell", () => {
+    expect(
+      resolveThreadSection({
+        thread: settled,
+        nowMs,
+        idleTimerEnabled: true,
+        idleTimerMinutes: 60,
+      }),
+    ).toBe("active");
+  });
+
+  it("moves settled threads to Idle after dwell minutes", () => {
+    expect(
+      resolveThreadSection({
+        thread: {
+          ...settled,
+          latestTurn: makeLatestTurn({
+            completedAt: "2026-07-16T10:00:00.000Z",
+          }),
+          updatedAt: "2026-07-16T10:00:00.000Z",
+          session: {
+            ...settled.session,
+            updatedAt: "2026-07-16T10:00:00.000Z",
+          },
+        },
+        nowMs,
+        idleTimerEnabled: true,
+        idleTimerMinutes: 60,
+      }),
+    ).toBe("idle");
+  });
+
+  it("never auto-idles when timer is disabled", () => {
+    expect(
+      resolveThreadSection({
+        thread: {
+          ...settled,
+          latestTurn: makeLatestTurn({
+            completedAt: "2026-07-01T00:00:00.000Z",
+          }),
+          updatedAt: "2026-07-01T00:00:00.000Z",
+          session: {
+            ...settled.session,
+            updatedAt: "2026-07-01T00:00:00.000Z",
+          },
+        },
+        nowMs,
+        idleTimerEnabled: false,
+        idleTimerMinutes: 60,
+      }),
+    ).toBe("active");
+  });
+
+  it("Sleep forces Idle; Pin keeps Active", () => {
+    expect(
+      resolveThreadSection({
+        thread: settled,
+        nowMs,
+        idleTimerEnabled: false,
+        idleTimerMinutes: 60,
+        slept: true,
+      }),
+    ).toBe("idle");
+    expect(
+      resolveThreadSection({
+        thread: settled,
+        nowMs,
+        idleTimerEnabled: true,
+        idleTimerMinutes: 60,
+        slept: true,
+        pinned: true,
+      }),
+    ).toBe("active");
+  });
+
+  it("maps resolveThreadSubState settled from idle tier", () => {
+    expect(resolveThreadSubState({ thread: settled })).toBe("settled");
+    expect(
+      resolveThreadSubState({
+        thread: { ...settled, hasPendingApprovals: true },
+      }),
+    ).toBe("waiting");
+  });
+});
+
+describe("groupThreadsBySection", () => {
+  it("splits Active and Idle and flattens Active first", () => {
+    const nowMs = Date.parse("2026-07-16T12:00:00.000Z");
+    const working = {
+      id: ThreadId.make("t-working"),
+      title: "Working",
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:55:00.000Z",
+      projectId: ProjectId.make("p1"),
+      environmentId: EnvironmentId.make("e1"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      branch: null,
+      worktreePath: null,
+      archivedAt: null,
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: "default" as const,
+      latestTurn: null,
+      session: {
+        provider: ProviderDriverKind.make("codex"),
+        status: "running" as const,
+        createdAt: "2026-07-16T11:00:00.000Z",
+        updatedAt: "2026-07-16T11:55:00.000Z",
+        orchestrationStatus: "running" as const,
+        activeTurnId: "turn-1",
+      },
+    };
+    const oldIdle = {
+      ...working,
+      id: ThreadId.make("t-idle"),
+      title: "Old",
+      updatedAt: "2026-07-16T10:00:00.000Z",
+      session: {
+        ...working.session,
+        status: "ready" as const,
+        orchestrationStatus: "ready" as const,
+        activeTurnId: undefined,
+        updatedAt: "2026-07-16T10:00:00.000Z",
+      },
+      latestTurn: makeLatestTurn({ completedAt: "2026-07-16T10:00:00.000Z" }),
+    };
+
+    const grouped = groupThreadsBySection({
+      threads: [oldIdle, working] as never,
+      getStatusInput: (thread) => thread as never,
+      sortOrder: "updated_at",
+      nowMs,
+      idleTimerEnabled: true,
+      idleTimerMinutes: 60,
+    });
+
+    expect(grouped.active.map((t) => t.id)).toEqual([working.id]);
+    expect(grouped.idle.map((t) => t.id)).toEqual([oldIdle.id]);
+    expect(flattenSectionThreads(grouped).map((t) => t.id)).toEqual([working.id, oldIdle.id]);
+  });
+});
+
+describe("shortProjectDisplayName / projectInitials", () => {
+  it("prefers short repo name over owner/repo", () => {
+    expect(
+      shortProjectDisplayName({
+        name: "gannonh/kata-code",
+        repositoryIdentity: {
+          name: "kata-code",
+          displayName: "gannonh/kata-code",
+        },
+      }),
+    ).toBe("kata-code");
+    expect(
+      shortProjectDisplayName({
+        name: "gannonh/kata-code",
+        repositoryIdentity: { displayName: "gannonh/kata-code" },
+      }),
+    ).toBe("kata-code");
+    expect(shortProjectDisplayName({ name: "uat-phase3b", cwd: "/tmp/uat-phase3b" })).toBe(
+      "uat-phase3b",
+    );
+  });
+
+  it("builds two-letter initials from short display names", () => {
+    expect(projectInitials("kata-code")).toBe("KC");
+    expect(projectInitials("uat-phase3b")).toBe("UP");
+    expect(projectInitials("docs")).toBe("DO");
   });
 });
 

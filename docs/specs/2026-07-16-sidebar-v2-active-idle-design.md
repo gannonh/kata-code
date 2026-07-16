@@ -2,10 +2,11 @@
 type: Spec
 title: "Sidebar v2: Active / Idle sections + dwell, Sleep, Pin"
 description: "Replace four vertical attention tiers with Active/Idle sections, sub-state chips, configurable dwell idle timer, and Sleep/Pin context-menu controls — frontend-only follow-on to sidebar v2."
-status: Approved
+status: Implemented
 approved_at: 2026-07-16T17:29:00Z
+implemented_at: 2026-07-16T17:50:00Z
 tags: [web, sidebar, ux, orchestration]
-timestamp: 2026-07-16T17:29:00Z
+timestamp: 2026-07-16T17:50:00Z
 supersedes_list_structure: /specs/2026-07-14-sidebar-v2-hybrid-design.md
 ---
 
@@ -13,7 +14,7 @@ supersedes_list_structure: /specs/2026-07-14-sidebar-v2-hybrid-design.md
 
 ## Status
 
-**Approved** (2026-07-16). Maintainer-aligned follow-on to
+**Implemented** (2026-07-16). Maintainer-aligned follow-on to
 [Sidebar v2 attention tiers](/specs/2026-07-14-sidebar-v2-hybrid-design.md).
 This spec **supersedes the four-tier list structure** (Waiting / Working /
 Blocked / Idle as separate vertical sections). Picker, accordion new-session,

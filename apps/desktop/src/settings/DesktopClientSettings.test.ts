@@ -27,6 +27,8 @@ const clientSettings: ClientSettings = {
   sidebarProjectSortOrder: "manual",
   sidebarThreadSortOrder: "created_at",
   sidebarThreadPreviewCount: 6,
+  sidebarIdleTimerEnabled: true,
+  sidebarIdleTimerMinutes: 60,
   timestampFormat: "24-hour",
 };
 

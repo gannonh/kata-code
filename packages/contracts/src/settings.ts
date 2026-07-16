@@ -94,6 +94,10 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarThreadPreviewCount: SidebarThreadPreviewCount.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT)),
   ),
+  /** When false, settled threads stay Active unless Sleep (manual). */
+  sidebarIdleTimerEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Dwell minutes before a settled thread auto-moves to Idle (default 60). */
+  sidebarIdleTimerMinutes: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(60))),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
@@ -628,6 +632,8 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
+  sidebarIdleTimerEnabled: Schema.optionalKey(Schema.Boolean),
+  sidebarIdleTimerMinutes: Schema.optionalKey(Schema.Number),
   timestampFormat: Schema.optionalKey(TimestampFormat),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
