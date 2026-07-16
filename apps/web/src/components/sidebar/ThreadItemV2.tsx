@@ -15,6 +15,7 @@ import {
 } from "../Sidebar.logic";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
+import { ThreadRowTrailingStatus } from "../ThreadStatusIndicators";
 
 export interface ThreadItemV2ProjectMeta {
   projectKey: string;
@@ -397,6 +398,7 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
           }
         />
         {titleNode}
+        <ThreadRowTrailingStatus thread={thread} />
         {tier === "idle" ? <span className="sb-expand-hint">expand</span> : null}
         {archiveControl}
       </div>
@@ -466,6 +468,7 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
             idle
           </span>
         ) : null}
+        <ThreadRowTrailingStatus thread={thread} />
       </div>
       {tier === "waiting" ? <div className="sb-ask">{waitingAskLine(pill?.label)}</div> : null}
       {tier === "working" ? (

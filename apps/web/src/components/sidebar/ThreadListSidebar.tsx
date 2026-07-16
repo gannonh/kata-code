@@ -30,6 +30,7 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { CommandDialogTrigger } from "../ui/command";
 import { useSidebar } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   countWaitingOutsideProjectFilter,
   flattenAttentionTierThreads,
@@ -575,20 +576,29 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
           <SearchIcon className="size-3.5 shrink-0" />
           <span className="min-w-0 flex-1 truncate">Search</span>
           {commandPaletteShortcutLabel ? (
-            <span className="sb-kbd">{commandPaletteShortcutLabel}</span>
+            <kbd className="sb-kbd">{commandPaletteShortcutLabel}</kbd>
           ) : null}
         </CommandDialogTrigger>
-        <button
-          type="button"
-          className="sb-new-btn"
-          aria-label={
-            newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"
-          }
-          data-testid="new-thread-button"
-          onClick={handleGlobalNewThread}
-        >
-          <PlusIcon className="size-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className="sb-new-btn"
+                aria-label={
+                  newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"
+                }
+                data-testid="new-thread-button"
+                onClick={handleGlobalNewThread}
+              />
+            }
+          >
+            <PlusIcon className="size-4" />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom" sideOffset={2}>
+            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+          </TooltipPopup>
+        </Tooltip>
       </div>
 
       <div className="px-2">
