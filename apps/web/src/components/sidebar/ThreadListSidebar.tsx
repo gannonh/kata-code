@@ -567,7 +567,7 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
 
   return (
     <div className="sidebar-v2 flex min-h-0 flex-1 flex-col" data-testid="sidebar-v2-list">
-      <div className="sb-frame-head px-2">
+      <div className="sb-frame-head">
         <CommandDialogTrigger
           render={
             <button type="button" className="sb-search" data-testid="command-palette-trigger" />
@@ -601,20 +601,18 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
         </Tooltip>
       </div>
 
-      <div className="px-2">
-        <SidebarProjectPicker
-          projects={pickerProjects}
-          selectedProjectKey={selectedProjectKey}
-          onSelect={setSelectedProjectKey}
-        />
-        {waitingOutsideFilter > 0 ? (
-          <div className="sb-scope-hint" data-testid="sidebar-waiting-scope-hint">
-            {waitingOutsideFilter} waiting in other projects
-          </div>
-        ) : null}
-      </div>
+      <SidebarProjectPicker
+        projects={pickerProjects}
+        selectedProjectKey={selectedProjectKey}
+        onSelect={setSelectedProjectKey}
+      />
+      {waitingOutsideFilter > 0 ? (
+        <div className="sb-scope-hint" data-testid="sidebar-waiting-scope-hint">
+          {waitingOutsideFilter} waiting in other projects
+        </div>
+      ) : null}
 
-      <div className="sb-list-scroll px-1" data-testid="sidebar-thread-list">
+      <div className="sb-list-scroll" data-testid="sidebar-thread-list">
         {!hasAnyThreads ? (
           <div className="sb-empty">
             {sortedProjects.length === 0 ? "No projects yet" : "No threads yet"}

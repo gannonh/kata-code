@@ -25,10 +25,12 @@
 }
 
 .sidebar-v2 .sb-frame-head {
+  --sb-chrome-size: 36px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0 8px;
+  gap: 4px;
+  /* Match picker / card content width (8px inset). */
+  padding: 4px 8px 8px;
   flex-shrink: 0;
 }
 
@@ -37,10 +39,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  box-sizing: border-box;
+  height: var(--sb-chrome-size);
   background: var(--sb-panel-2);
   border: 1px solid var(--sb-border-soft);
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 0 10px;
   color: var(--sb-text-3);
   font-size: 12.5px;
   min-width: 0;
@@ -65,8 +69,9 @@
 }
 
 .sidebar-v2 .sb-new-btn {
-  width: 32px;
-  height: 32px;
+  box-sizing: border-box;
+  width: var(--sb-chrome-size);
+  height: var(--sb-chrome-size);
   border-radius: 8px;
   background: var(--sb-panel-2);
   border: 1px solid var(--sb-border-soft);
@@ -93,7 +98,7 @@
 }
 
 .sidebar-v2 .sb-picker-bar {
-  padding: 0 0 8px;
+  padding: 0 8px 8px;
   position: relative;
   flex-shrink: 0;
 }
@@ -138,8 +143,8 @@
 
 .sidebar-v2 .sb-picker-menu {
   position: absolute;
-  left: 0;
-  right: 0;
+  left: 8px;
+  right: 8px;
   top: calc(100% - 4px);
   background: #121215;
   border: 1px solid var(--sb-border);
@@ -190,7 +195,7 @@
 .sidebar-v2 .sb-scope-hint {
   font-size: 10.5px;
   color: var(--sb-text-4);
-  padding: 2px 2px 8px;
+  padding: 2px 10px 8px;
 }
 
 .sidebar-v2 .sb-sec {
@@ -325,13 +330,14 @@
   border: 1px solid var(--sb-border-soft);
   border-radius: 10px;
   padding: 10px 12px;
-  margin: 4px 2px;
+  margin: 4px 0;
   cursor: pointer;
   transition:
     border-color 0.12s,
     background 0.12s;
   text-align: left;
-  width: calc(100% - 4px);
+  width: 100%;
+  box-sizing: border-box;
   color: inherit;
   font-family: inherit;
   display: block;
@@ -458,14 +464,15 @@
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  margin: 1px 2px;
+  margin: 1px 0;
   border-radius: 8px;
   cursor: pointer;
   border: none;
   background: transparent;
   color: inherit;
   font-family: inherit;
-  width: calc(100% - 4px);
+  width: 100%;
+  box-sizing: border-box;
   text-align: left;
   position: relative;
 }
@@ -600,7 +607,8 @@
   overflow-y: auto;
   flex: 1;
   min-height: 0;
-  padding: 0 2px 8px;
+  /* Same 8px content inset as picker / search. */
+  padding: 0 8px 8px;
 }
 
 .sidebar-v2 .sb-list-scroll::-webkit-scrollbar {
