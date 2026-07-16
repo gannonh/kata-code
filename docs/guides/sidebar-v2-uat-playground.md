@@ -1,9 +1,9 @@
 ---
 type: Guide
 title: "Sidebar v2 UAT — playground-first"
-description: "Maintainer UAT and proof plan for attention-tier sidebar: fixture catalog → Vitest browser playground → live @sidebar/@agent E2E."
+description: "Maintainer UAT and proof plan for attention-tier sidebar: fixture catalog → dev fixture route → Vitest browser assertions → live @sidebar/@agent E2E."
 tags: [web, sidebar, ux, testing, uat, e2e]
-timestamp: 2026-07-16T15:24:00Z
+timestamp: 2026-07-16T16:10:00Z
 ---
 
 # Sidebar v2 UAT — playground-first
@@ -16,7 +16,7 @@ Pixel reference remains [`c-attention-session.html`](../comps/sidebar-v2-prototy
 
 One fixture catalog drives:
 
-1. Maintainer UAT (real React sidebar, controlled states)
+1. Maintainer UAT (dev fixture route — normal browser window)
 2. Vitest browser assertions (AC 2–6, 8)
 3. Later live `@sidebar` / `@agent` E2E (only what fixtures cannot prove)
 
@@ -29,7 +29,7 @@ Do not build a separate “demo farm” and then rebuild the same seeds for test
 | Product UI (tiers, picker, Idle expand, accordion, Failed→Blocked, timers) | **Built** on `sidebar-redesign` |
 | Unit logic (`Sidebar.logic.ts`)                                            | **Proven**                      |
 | `@sidebar` smoke (chrome + accordion)                                      | **Proven**                      |
-| Populated-state browser fixtures / AC 11 visual sign-off                   | **This plan**                   |
+| Populated-state fixtures + AC 11 visual sign-off                           | **This plan**                   |
 | Live Working timer + tier transitions                                      | Phase 3 (cheap agent)           |
 | Environments deploy regression                                             | Separate gate before merge      |
 
@@ -54,36 +54,42 @@ Shared seeds under `apps/web/src/components/sidebar/fixtures/`:
 
 Shell snapshot flags (`hasPendingApprovals`, `hasPendingUserInput`, `hasActionableProposedPlan`, session `running` / `lastError`) must be set explicitly — browser harnesses that hardcode those flags to `false` will not exercise tiers.
 
-### Phase 1 — Vitest browser playground (start here)
+### Phase 1 — Dev fixture route (maintainer UAT)
 
-File: `apps/web/src/components/sidebar/SidebarV2.browser.tsx`
+**Route (DEV only):** [`/playground/sidebar`](http://localhost:5733/playground/sidebar)
 
-- Mounts the real app shell (same MSW/WS pattern as other `*.browser.tsx` suites)
-- Scenario switcher pushes a new shell snapshot so you can walk states without re-seeding disk repos
-- Automated `it`s assert tier headers / row contracts for each scenario
-
-**Maintainer UAT**
-
-```bash
-# Headed UI — click scenarios, compare to C in another window
-vp run --filter @kata-sh/code-web test --project browser --ui src/components/sidebar/SidebarV2.browser.tsx
-
-# Optional long-lived interactive mount (see test name in file)
-SIDEBAR_V2_PLAYGROUND=1 vp run --filter @kata-sh/code-web test --project browser -t "interactive playground"
-```
-
-Pixel reference:
+- Page: `apps/web/src/components/sidebar/SidebarV2PlaygroundPage.tsx`
+- Seeds the real Zustand shell via `syncServerShellSnapshot` from `sidebarV2Scenarios.ts`
+- Forces **dark** mode; full-size browser window (your Chrome/Safari — not Vitest)
+- Scenario switcher (top-right) walks all fixture ids
 
 ```bash
+# Terminal 1 — normal web + server (default port 5733)
+pnpm run dev
+
+# Then open in your browser:
+open http://localhost:5733/playground/sidebar
+
+# Pixel reference in another tab:
 docs/comps/sidebar-v2-prototypes/serve.sh
 # → http://127.0.0.1:8765/c-attention-session.html
 ```
 
+Production builds redirect `/playground/sidebar` → `/`. Root auth/WS bootstrap is skipped for `/playground/*` in DEV.
+
+**Do not use Vitest `--ui` or headed browser tests for fit-and-finish.** Those surfaces are the test runner (scaled iframe / dashboard chrome), not the product.
+
 **Exit:** AC 11 visual sign-off on **populated** states (not empty chrome).
 
-### Phase 2 — Promote fixtures → CI proof
+### Phase 2 — Vitest browser assertions (CI)
 
-Same scenarios stay as Vitest browser tests (no duplicate seeds). Extend `@sidebar` E2E only where a real project open + accordion path adds coverage beyond the browser harness.
+File: `apps/web/src/components/sidebar/SidebarV2.browser.tsx`
+
+Same fixture catalog; headless Chromium asserts tier headers / row contracts. Not for interactive UAT.
+
+```bash
+vp run --filter @kata-sh/code-web test:browser -- src/components/sidebar/SidebarV2.browser.tsx
+```
 
 **Exit:** AC 2–6, 8 fixture-covered; AC 1 / no show-more already partly covered by smoke.
 
@@ -107,11 +113,26 @@ Keep Forced Failed, plan-ready, 30+ scroll, multi-project Waiting hint on **fixt
 
 Fit-and-finish from Phase 1 notes → re-run fixture suite + live slices → environments regression → mark spec **Verified** → PR.
 
+## Framework roles (not a migration)
+
+| Surface                          | Purpose                                    |
+| -------------------------------- | ------------------------------------------ |
+| `/playground/sidebar` (DEV)      | Maintainer UAT, fit-and-finish             |
+| Vitest browser (`*.browser.tsx`) | Component assertions in real Chromium (CI) |
+| Playwright `e2e/`                | Full-stack web/Electron E2E                |
+| C prototype HTML                 | Pixel / motion reference                   |
+
+Storybook is unnecessary here: the sidebar is store/router/WS-wired; a fixture route reuses the same catalog without a second harness.
+
 ## Commands cheat sheet
 
 ```bash
-# Fixture / playground browser suite
-vp run --filter @kata-sh/code-web test --project browser -t "Sidebar v2"
+# Interactive UAT (your browser, full window, dark)
+pnpm run dev
+open http://localhost:5733/playground/sidebar
+
+# Automated fixture assertions (headless)
+vp run --filter @kata-sh/code-web test:browser -- src/components/sidebar/SidebarV2.browser.tsx
 
 # Existing smoke
 vp run e2e --project desktop-dev --grep @sidebar

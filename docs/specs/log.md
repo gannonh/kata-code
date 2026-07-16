@@ -2,7 +2,7 @@
 
 ## 2026-07-16 (Sidebar v2 UAT — playground-first)
 
-Documented Verify/UAT path for [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md): fixture catalog → Vitest browser playground → live `@sidebar`/`@agent` only where fixtures cannot prove (timer/transitions). Guide: [sidebar-v2-uat-playground](/guides/sidebar-v2-uat-playground.md). Product UI remains Implemented; proof gaps are tests/UAT, not missing features.
+Documented Verify/UAT path for [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md): fixture catalog → `/playground/sidebar` → Vitest browser assertions → live `@sidebar`/`@agent` only where fixtures cannot prove (timer/transitions). Guide: [sidebar-v2-uat-playground](/guides/sidebar-v2-uat-playground.md). Product UI remains Implemented; proof gaps are tests/UAT, not missing features.
 
 ## 2026-07-15 (Sidebar v2 attention tiers implemented)
 
