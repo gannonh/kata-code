@@ -64,10 +64,25 @@ import {
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 
+function isDevPlaygroundPath(pathname: string): boolean {
+  return import.meta.env.DEV && pathname.startsWith("/playground/");
+}
+
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
   beforeLoad: async ({ location }) => {
+    // Fixture UAT routes must not touch the real server / auth bootstrap.
+    // `hosted-static` is an existing gate status; RootRouteView still renders a bare
+    // <Outlet /> for `/playground/*` so the app shell/WS never mounts.
+    if (isDevPlaygroundPath(location.pathname)) {
+      return {
+        authGateState: {
+          status: "hosted-static",
+        } as const,
+      };
+    }
+
     if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
       return {
         authGateState: {
@@ -114,7 +129,7 @@ function RootRouteView() {
     };
   }, [pathname]);
 
-  if (pathname === "/pair") {
+  if (pathname === "/pair" || isDevPlaygroundPath(pathname)) {
     return <Outlet />;
   }
 

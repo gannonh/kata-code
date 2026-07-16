@@ -94,7 +94,6 @@ const rpcHarness = new BrowserWsRpcHarness();
 const encodeServerConfig = Schema.encodeSync(ServerConfigSchema);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
-const PLAYGROUND_ENABLED = process.env.SIDEBAR_V2_PLAYGROUND === "1";
 
 function createBaseServerConfig(): ServerConfig {
   return {
@@ -567,22 +566,4 @@ describe("Sidebar v2 fixtures + playground", () => {
       await mounted.cleanup();
     }
   });
-
-  it.skipIf(!PLAYGROUND_ENABLED)(
-    "interactive playground stays mounted for maintainer UAT",
-    async () => {
-      const mounted = await mountApp("mixed-tiers");
-      try {
-        await waitForElement(
-          () => document.querySelector('[data-testid="sidebar-v2-scenario-switcher"]'),
-          "Scenario switcher should be visible",
-        );
-        // Keep the session alive so --ui / headed runs can click scenarios.
-        await new Promise((resolve) => setTimeout(resolve, 30 * 60_000));
-      } finally {
-        await mounted.cleanup();
-      }
-    },
-    31 * 60_000,
-  );
 });

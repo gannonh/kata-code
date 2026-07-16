@@ -20,6 +20,7 @@ import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as PlaygroundSidebarRouteImport } from './routes/playground.sidebar'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -77,6 +78,11 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   path: '/archived',
   getParentRoute: () => SettingsRoute,
 } as any)
+const PlaygroundSidebarRoute = PlaygroundSidebarRouteImport.update({
+  id: '/playground/sidebar',
+  path: '/playground/sidebar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/playground/sidebar': typeof PlaygroundSidebarRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/playground/sidebar': typeof PlaygroundSidebarRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -122,6 +130,7 @@ export interface FileRoutesById {
   '/_chat': typeof ChatRouteWithChildren
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/playground/sidebar': typeof PlaygroundSidebarRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -139,6 +148,7 @@ export interface FileRouteTypes {
     | '/'
     | '/pair'
     | '/settings'
+    | '/playground/sidebar'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -152,6 +162,7 @@ export interface FileRouteTypes {
   to:
     | '/pair'
     | '/settings'
+    | '/playground/sidebar'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -167,6 +178,7 @@ export interface FileRouteTypes {
     | '/_chat'
     | '/pair'
     | '/settings'
+    | '/playground/sidebar'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -183,6 +195,7 @@ export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   PairRoute: typeof PairRoute
   SettingsRoute: typeof SettingsRouteWithChildren
+  PlaygroundSidebarRoute: typeof PlaygroundSidebarRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -264,6 +277,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/playground/sidebar': {
+      id: '/playground/sidebar'
+      path: '/playground/sidebar'
+      fullPath: '/playground/sidebar'
+      preLoaderRoute: typeof PlaygroundSidebarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -323,6 +343,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   PairRoute: PairRoute,
   SettingsRoute: SettingsRouteWithChildren,
+  PlaygroundSidebarRoute: PlaygroundSidebarRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
