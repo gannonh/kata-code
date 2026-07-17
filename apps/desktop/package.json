@@ -1,6 +1,6 @@
 {
   "name": "@kata-sh/code-desktop",
-  "version": "0.0.32",
+  "version": "0.0.33",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.cjs",
