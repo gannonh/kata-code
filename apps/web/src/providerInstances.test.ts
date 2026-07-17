@@ -6,6 +6,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import {
   deriveProviderInstanceEntries,
+  deriveSandboxComingSoonInstanceIds,
   resolveSelectableProviderInstance,
   resolveProviderDriverKindForInstanceSelection,
 } from "./providerInstances";
@@ -132,5 +133,30 @@ describe("resolveProviderDriverKindForInstanceSelection", () => {
         ProviderInstanceId.make("removed_instance"),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("deriveSandboxComingSoonInstanceIds", () => {
+  it("dims opencode, cursor, and pi instances but not codex or claude", () => {
+    const entries = deriveProviderInstanceEntries([
+      provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
+      provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "claudeAgent" }),
+      provider({ provider: ProviderDriverKind.make("opencode"), instanceId: "opencode" }),
+      provider({ provider: ProviderDriverKind.make("cursor"), instanceId: "cursor" }),
+      provider({ provider: ProviderDriverKind.make("pi"), instanceId: "pi" }),
+      provider({ provider: ProviderDriverKind.make("pi"), instanceId: "pi_custom" }),
+    ]);
+
+    const dimmed = deriveSandboxComingSoonInstanceIds(entries);
+
+    expect([...dimmed].sort()).toEqual(["cursor", "opencode", "pi", "pi_custom"]);
+  });
+
+  it("returns an empty set when no dimmed-kind instances are configured", () => {
+    const entries = deriveProviderInstanceEntries([
+      provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
+    ]);
+
+    expect(deriveSandboxComingSoonInstanceIds(entries).size).toBe(0);
   });
 });

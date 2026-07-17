@@ -257,3 +257,27 @@ export function resolveProviderDriverKindForInstanceSelection(
   }
   return undefined;
 }
+
+/**
+ * Provider driver kinds dimmed with a "Coming soon to sandboxes" tooltip when
+ * the active thread is on a sandbox environment. These providers are not yet
+ * validated end-to-end in sandboxes.
+ */
+const SANDBOX_COMING_SOON_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
+  ProviderDriverKind.make("opencode"),
+  ProviderDriverKind.make("cursor"),
+  ProviderDriverKind.make("pi"),
+]);
+
+/** Instance ids to dim in the model picker for sandbox environments. */
+export function deriveSandboxComingSoonInstanceIds(
+  entries: ReadonlyArray<ProviderInstanceEntry>,
+): ReadonlySet<ProviderInstanceId> {
+  const dimmed = new Set<ProviderInstanceId>();
+  for (const entry of entries) {
+    if (SANDBOX_COMING_SOON_KINDS.has(entry.driverKind)) {
+      dimmed.add(entry.instanceId);
+    }
+  }
+  return dimmed;
+}

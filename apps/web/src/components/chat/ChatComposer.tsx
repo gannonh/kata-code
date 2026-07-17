@@ -102,6 +102,7 @@ import { proposedPlanTitle } from "../../proposedPlan";
 import { getProviderDisplayName, getProviderInteractionModeToggle } from "../../providerModels";
 import {
   deriveProviderInstanceEntries,
+  deriveSandboxComingSoonInstanceIds,
   resolveProviderDriverKindForInstanceSelection,
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
@@ -662,20 +663,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => sortProviderInstanceEntries(deriveProviderInstanceEntries(providerStatuses)),
     [providerStatuses],
   );
-  // In sandbox environments, dim OpenCode, Cursor, and Pi with a "Coming Soon"
-  // tooltip — these providers aren't fully supported in sandboxes yet.
+  // In sandbox environments, dim providers that aren't validated end-to-end
+  // in sandboxes yet with a "Coming Soon" tooltip.
   const comingSoonInstanceIds = useMemo<ReadonlySet<ProviderInstanceId> | undefined>(() => {
     if (!props.isSandboxEnvironment) return undefined;
-    const sandboxUnsupportedKinds = new Set([
-      ProviderDriverKind.make("opencode"),
-      ProviderDriverKind.make("cursor"),
-      ProviderDriverKind.make("pi"),
-    ]);
-    return new Set(
-      providerInstanceEntries
-        .filter((entry) => sandboxUnsupportedKinds.has(entry.driverKind))
-        .map((entry) => entry.instanceId),
-    );
+    return deriveSandboxComingSoonInstanceIds(providerInstanceEntries);
   }, [props.isSandboxEnvironment, providerInstanceEntries]);
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider =
