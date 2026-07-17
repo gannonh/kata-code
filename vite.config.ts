@@ -8,10 +8,9 @@ export default defineConfig({
   test: {
     environment: "node",
     // Keep Playwright e2e / Maestro mobile-e2e out of Vitest discovery.
-    // Root `vp test run --coverage` (package.json `test:coverage`) uses this
-    // config; without these excludes, Vitest loads `e2e/**/*.spec.ts` and
-    // dies on Playwright `test.afterAll` hooks. CI soft-fails coverage so
-    // that failure does not turn the Test job red.
+    // Root `vp test run --coverage` (package.json `test`) uses this config;
+    // without these excludes, Vitest loads `e2e/**/*.spec.ts` and dies on
+    // Playwright `test.afterAll` hooks.
     exclude: [
       "**/.repos/**",
       "**/node_modules/**",
@@ -25,11 +24,13 @@ export default defineConfig({
     ],
     hookTimeout: 60_000,
     testTimeout: 60_000,
-    // Soft floor while coverage expands; raise once suites stabilize.
+    // Floors sit just under measured monorepo totals so CI fails only on regressions.
+    // Raise toward 75/75/70/65 after suites stabilize.
     coverage: {
       provider: "v8",
-      // `text` prints per-file table; `text-summary` is the short totals block.
-      reporter: ["text", "text-summary", "json-summary"],
+      // Summary only in default runs (CI logs); use `vp test run --coverage --reporter=verbose`
+      // or inspect ./coverage for detail.
+      reporter: ["text-summary", "json-summary"],
       reportsDirectory: "./coverage",
       exclude: [
         "**/.repos/**",
@@ -43,10 +44,11 @@ export default defineConfig({
         "scripts/**",
       ],
       thresholds: {
-        lines: 1,
-        functions: 1,
-        branches: 1,
-        statements: 1,
+        // Floors just under measured monorepo totals; raise after suites stabilize.
+        lines: 65,
+        statements: 65,
+        functions: 60,
+        branches: 50,
       },
     },
   },

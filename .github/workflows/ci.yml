@@ -47,7 +47,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Root monorepo suite + v8 coverage is slower than package-recursive unit tests alone.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -65,13 +66,10 @@ jobs:
       - name: Pull Docker image for sandbox integration tests
         run: docker pull alpine:3.20
 
+      # Single run: unit suite + coverage gate (see root vite.config.ts thresholds).
+      # Do not re-run `test:coverage` after this — that double-ran the suite and hit timeouts.
       - name: Test
         run: vp run test
-
-      # Soft floor (1%) via root vite coverage thresholds; raise after baselines settle.
-      - name: Test coverage (report + low floor)
-        continue-on-error: true
-        run: vp run test:coverage
 
   test_browser:
     name: Test Browser

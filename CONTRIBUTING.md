@@ -15,9 +15,9 @@ Kata Code is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code), main
 vp i
 vp check
 vp run typecheck
-vp test   # or targeted package tests for touched areas
+vp run test          # unit suite + coverage gate (lines/statements 65, functions 60, branches 50)
 vp run knip          # unused/dead code report (soft-fail in CI)
-# optional: vp run test:coverage  # coverage with low floor thresholds
+# targeted package tests without coverage: vp run test:unit --filter <pkg>
 ```
 
 For desktop changes, also run:
