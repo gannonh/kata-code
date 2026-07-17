@@ -193,6 +193,7 @@ export const ThreadItemV2 = memo(function ThreadItemV2(props: ThreadItemV2Props)
 
   const handleRowKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      if (event.target !== event.currentTarget) return;
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       if (section === "idle" && density.density === "slim") {

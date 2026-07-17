@@ -2206,7 +2206,7 @@
         });
 
         el.querySelectorAll("[data-thread]").forEach((node) => {
-          node.addEventListener("click", (e) => {
+          const activate = (e) => {
             if (e.target.closest("[data-action], [data-idle-collapse], [data-new-in-project]"))
               return;
             const id = node.getAttribute("data-thread");
@@ -2217,6 +2217,13 @@
             state.render();
             const t = THREADS.find((x) => x.id === id);
             toast(`${tierOf(t)} · ${t.title}`);
+          };
+          node.addEventListener("click", activate);
+          node.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              activate(e);
+            }
           });
         });
         el.querySelectorAll("[data-idle-collapse]").forEach((btn) => {

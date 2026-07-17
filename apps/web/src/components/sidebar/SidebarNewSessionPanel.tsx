@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { scopeProjectRef } from "@kata-sh/code-client-runtime";
 import type { EnvironmentId } from "@kata-sh/code-contracts";
@@ -8,11 +8,16 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../../environments/runtime";
-import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
+import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { useSettings } from "~/hooks/useSettings";
 import type { DraftThreadEnvMode } from "../../composerDraftStore";
 import { useSidebar } from "../ui/sidebar";
-import { projectColorClass, projectInitials, resolveThreadTier } from "../Sidebar.logic";
+import {
+  projectColorClass,
+  projectInitials,
+  resolveSidebarNewThreadSeedContext,
+  resolveThreadTier,
+} from "../Sidebar.logic";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import type { SidebarThreadSummary } from "../../types";
 
@@ -47,7 +52,7 @@ export interface SidebarNewSessionPanelProps {
   threads: readonly SidebarThreadSummary[];
   preselectedProjectKey: string | null;
   openAddProject: () => void;
-  handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
+  handleNewThread: ReturnType<typeof useHandleNewThread>["handleNewThread"];
   onClose: () => void;
 }
 
@@ -68,17 +73,61 @@ export const SidebarNewSessionPanel = memo(function SidebarNewSessionPanel(
   const defaultThreadEnvMode = useSettings<DraftThreadEnvMode>(
     (settings) => settings.defaultThreadEnvMode,
   );
+  const { activeDraftThread, activeThread } = useHandleNewThread();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const registryById = useSavedEnvironmentRegistryStore((state) => state.byId);
   const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
 
   const [openProjectKey, setOpenProjectKey] = useState<string | null>(preselectedProjectKey);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (open) {
       setOpenProjectKey(preselectedProjectKey);
     }
   }, [open, preselectedProjectKey]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const closeButton = panelRef.current?.querySelector<HTMLElement>(
+      "[data-testid='sidebar-new-session-close']",
+    );
+    closeButton?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !panelRef.current) return;
+      const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      previouslyFocusedRef.current?.focus();
+      previouslyFocusedRef.current = null;
+    };
+  }, [onClose, open]);
 
   const waitingCountByProject = useMemo(() => {
     const counts = new Map<string, number>();
@@ -99,29 +148,66 @@ export const SidebarNewSessionPanel = memo(function SidebarNewSessionPanel(
     return counts;
   }, [projects, threads]);
 
+  const isMemberOffline = useCallback(
+    (environmentId: EnvironmentId) => {
+      if (environmentId === primaryEnvironmentId) return false;
+      const connectionState = runtimeById[environmentId]?.connectionState ?? "connected";
+      return connectionState !== "connected" && connectionState !== "connecting";
+    },
+    [primaryEnvironmentId, runtimeById],
+  );
+
   const startInMember = useCallback(
     async (environmentId: EnvironmentId, projectId: SidebarProjectSnapshot["id"]) => {
+      if (isMemberOffline(environmentId)) return;
       if (isMobile) {
         setOpenMobile(false);
       }
       onClose();
-      await handleNewThread(scopeProjectRef(environmentId, projectId), {
-        envMode: defaultThreadEnvMode,
+      const seed = resolveSidebarNewThreadSeedContext({
+        projectId,
+        defaultEnvMode: defaultThreadEnvMode,
+        activeThread: activeThread
+          ? {
+              projectId: activeThread.projectId,
+              branch: activeThread.branch,
+              worktreePath: activeThread.worktreePath,
+            }
+          : null,
+        activeDraftThread: activeDraftThread
+          ? {
+              projectId: activeDraftThread.projectId,
+              branch: activeDraftThread.branch,
+              worktreePath: activeDraftThread.worktreePath,
+              envMode: activeDraftThread.envMode,
+            }
+          : null,
       });
+      await handleNewThread(scopeProjectRef(environmentId, projectId), seed);
     },
-    [defaultThreadEnvMode, handleNewThread, isMobile, onClose, setOpenMobile],
+    [
+      activeDraftThread,
+      activeThread,
+      defaultThreadEnvMode,
+      handleNewThread,
+      isMemberOffline,
+      isMobile,
+      onClose,
+      setOpenMobile,
+    ],
   );
 
   const handleProjectHeadClick = useCallback(
     (project: SidebarProjectSnapshot) => {
       if (project.memberProjects.length === 1) {
         const member = project.memberProjects[0]!;
+        if (isMemberOffline(member.environmentId)) return;
         void startInMember(member.environmentId, member.id);
         return;
       }
       setOpenProjectKey((current) => (current === project.projectKey ? null : project.projectKey));
     },
-    [startInMember],
+    [isMemberOffline, startInMember],
   );
 
   const handleNewProject = useCallback(() => {
@@ -138,9 +224,11 @@ export const SidebarNewSessionPanel = memo(function SidebarNewSessionPanel(
 
   return (
     <div
+      ref={panelRef}
       className="sb-sheet"
       data-testid="sidebar-new-session-panel"
       role="dialog"
+      aria-modal="true"
       aria-label="New session"
     >
       <div className="sb-sheet-head">
@@ -170,17 +258,20 @@ export const SidebarNewSessionPanel = memo(function SidebarNewSessionPanel(
             const isOpen = openProjectKey === project.projectKey;
             const waitingN = waitingCountByProject.get(project.projectKey) ?? 0;
             const pathLabel = project.cwd ?? project.displayName;
+            const singleOffline =
+              single && members[0] ? isMemberOffline(members[0].environmentId) : false;
 
             return (
               <div
                 key={project.projectKey}
-                className={`sb-acc${isOpen ? " open" : ""}${single ? " single" : ""}`}
+                className={`sb-acc${isOpen ? " open" : ""}${single ? " single" : ""}${singleOffline ? " offline" : ""}`}
                 data-testid={`sidebar-new-session-project-${project.projectKey}`}
               >
                 <button
                   type="button"
                   className="sb-acc-head"
                   data-testid={`sidebar-new-session-project-head-${project.projectKey}`}
+                  disabled={singleOffline}
                   onClick={() => {
                     handleProjectHeadClick(project);
                   }}

@@ -218,9 +218,9 @@ export default function Sidebar() {
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const keybindings = useServerKeybindings();
   const openAddProjectCommandPalette = useCommandPaletteStore((store) => store.openAddProject);
-  const [attentionOrderedThreadKeys, setAttentionOrderedThreadKeys] = useState<readonly string[]>(
-    [],
-  );
+  const [attentionOrderedThreadKeys, setAttentionOrderedThreadKeys] = useState<
+    readonly string[] | null
+  >(null);
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
@@ -388,7 +388,7 @@ export default function Sidebar() {
     );
   }, [sidebarThreadSortOrder, threadLastVisitedAtById, visibleThreads]);
   const visibleSidebarThreadKeys =
-    attentionOrderedThreadKeys.length > 0
+    attentionOrderedThreadKeys !== null
       ? attentionOrderedThreadKeys
       : fallbackAttentionOrderedThreadKeys;
   const threadJumpCommandByKey = useMemo(() => {

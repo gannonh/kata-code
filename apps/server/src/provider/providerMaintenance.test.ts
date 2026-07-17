@@ -68,11 +68,7 @@ const codexLikeUpdate = makePackageManagedProviderMaintenanceResolver({
     lockKey: "codex-native",
     isCommandPath: (commandPath) => {
       const normalized = normalizeCommandPath(commandPath);
-      return (
-        normalized.endsWith("/.local/bin/codex") ||
-        normalized.endsWith("/.local/bin/codex.exe") ||
-        normalized.includes("/.codex/packages/standalone/")
-      );
+      return normalized.includes("/.codex/packages/standalone/");
     },
   },
 });

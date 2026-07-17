@@ -548,7 +548,11 @@ export function resolveThreadWaitDuration(input: {
     };
   }
 
-  const fallbackStartedAt = input.thread.latestTurn?.completedAt ?? null;
+  const fallbackStartedAt =
+    input.thread.latestTurn?.completedAt ??
+    input.thread.latestTurn?.startedAt ??
+    input.thread.latestTurn?.requestedAt ??
+    null;
   const fallbackTimestamp = toSortableTimestamp(fallbackStartedAt ?? undefined);
   if (!fallbackStartedAt || fallbackTimestamp === null) {
     return null;

@@ -21,6 +21,8 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
+  threadPinnedById?: Record<string, true>;
+  threadSleptById?: Record<string, true>;
 }
 
 export interface UiProjectState {
@@ -109,6 +111,8 @@ function readPersistedState(): UiState {
       threadChangedFilesExpandedById: sanitizePersistedThreadChangedFilesExpanded(
         parsed.threadChangedFilesExpandedById,
       ),
+      threadPinnedById: sanitizePersistedThreadFlagMap(parsed.threadPinnedById),
+      threadSleptById: sanitizePersistedThreadFlagMap(parsed.threadSleptById),
     };
   } catch {
     return initialState;
@@ -140,6 +144,22 @@ function sanitizePersistedThreadChangedFilesExpanded(
     }
   }
 
+  return nextState;
+}
+
+function sanitizePersistedThreadFlagMap(
+  value: PersistedUiState["threadPinnedById"] | PersistedUiState["threadSleptById"],
+): Record<string, true> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const nextState: Record<string, true> = {};
+  for (const [threadId, flagged] of Object.entries(value)) {
+    if (threadId && flagged === true) {
+      nextState[threadId] = true;
+    }
+  }
   return nextState;
 }
 
@@ -193,6 +213,12 @@ export function persistState(state: UiState): void {
         return Object.keys(nextTurns).length > 0 ? [[threadId, nextTurns]] : [];
       }),
     );
+    const threadPinnedById = Object.fromEntries(
+      Object.entries(state.threadPinnedById).filter(([, pinned]) => pinned === true),
+    );
+    const threadSleptById = Object.fromEntries(
+      Object.entries(state.threadSleptById).filter(([, slept]) => slept === true),
+    );
     window.localStorage.setItem(
       PERSISTED_STATE_KEY,
       JSON.stringify({
@@ -201,6 +227,8 @@ export function persistState(state: UiState): void {
         projectOrderCwds,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         threadChangedFilesExpandedById,
+        threadPinnedById,
+        threadSleptById,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {

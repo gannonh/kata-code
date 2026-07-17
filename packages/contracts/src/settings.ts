@@ -43,6 +43,16 @@ export const SidebarThreadPreviewCount = Schema.Int.check(
 );
 export type SidebarThreadPreviewCount = typeof SidebarThreadPreviewCount.Type;
 export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6;
+export const MIN_SIDEBAR_IDLE_TIMER_MINUTES = 1;
+export const MAX_SIDEBAR_IDLE_TIMER_MINUTES = 1440;
+export const SidebarIdleTimerMinutes = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_SIDEBAR_IDLE_TIMER_MINUTES,
+    maximum: MAX_SIDEBAR_IDLE_TIMER_MINUTES,
+  }),
+);
+export type SidebarIdleTimerMinutes = typeof SidebarIdleTimerMinutes.Type;
+export const DEFAULT_SIDEBAR_IDLE_TIMER_MINUTES: SidebarIdleTimerMinutes = 60;
 
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -97,7 +107,9 @@ export const ClientSettingsSchema = Schema.Struct({
   /** When false, settled threads stay Active unless Sleep (manual). */
   sidebarIdleTimerEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** Dwell minutes before a settled thread auto-moves to Idle (default 60). */
-  sidebarIdleTimerMinutes: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(60))),
+  sidebarIdleTimerMinutes: SidebarIdleTimerMinutes.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_IDLE_TIMER_MINUTES)),
+  ),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
@@ -633,7 +645,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
   sidebarIdleTimerEnabled: Schema.optionalKey(Schema.Boolean),
-  sidebarIdleTimerMinutes: Schema.optionalKey(Schema.Number),
+  sidebarIdleTimerMinutes: Schema.optionalKey(SidebarIdleTimerMinutes),
   timestampFormat: Schema.optionalKey(TimestampFormat),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

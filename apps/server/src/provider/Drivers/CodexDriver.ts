@@ -60,11 +60,7 @@ const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 
 function isCodexNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
-  return (
-    normalized.endsWith("/.local/bin/codex") ||
-    normalized.endsWith("/.local/bin/codex.exe") ||
-    normalized.includes("/.codex/packages/standalone/")
-  );
+  return normalized.includes("/.codex/packages/standalone/");
 }
 
 const UPDATE = makePackageManagedProviderMaintenanceResolver({

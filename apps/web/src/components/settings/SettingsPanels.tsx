@@ -827,7 +827,9 @@ export function GeneralSettingsPanel() {
               onCommit={(next) => {
                 const parsed = Number.parseInt(next.trim(), 10);
                 if (!Number.isFinite(parsed) || parsed < 1) return;
-                updateSettings({ sidebarIdleTimerMinutes: Math.min(parsed, 24 * 60) });
+                updateSettings({
+                  sidebarIdleTimerMinutes: Math.min(Math.max(parsed, 1), 24 * 60),
+                });
               }}
               inputMode="numeric"
               spellCheck={false}

@@ -900,8 +900,8 @@
     <p class="subtitle">
       A rethink of the T3 Code thread sidebar: recency-first, project demoted to metadata, every
       thread a multi-line chunk with room for real context, and active work never hidden behind
-      “show more”. All mock data below is pulled from your actual local threads (state.sqlite) so
-      the concepts read true.
+      “show more”. All mock data below is synthetic fixture content so the concepts read true
+      without embedding live workspace metadata.
     </p>
 
     <h2>What the data can already tell us</h2>
@@ -1972,9 +1972,8 @@
 
     <p class="footer-note">
       <b>Data provenance:</b> thread titles, branches, models, statuses, diff stats, and message
-      snippets are from your live <code>~/.t3/userdata/state.sqlite</code> (Jul 13). States not
-      currently present in your data (approval, input, plan-ready, failed) are mocked onto real
-      threads so every state renders in every concept.
+      snippets are synthetic fixtures for design exploration. States such as approval, input,
+      plan-ready, and failed are included so every state renders in every concept.
     </p>
   </body>
 </html>

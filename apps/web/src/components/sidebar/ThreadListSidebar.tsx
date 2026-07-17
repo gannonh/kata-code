@@ -389,14 +389,35 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
       }
 
       const deletedThreadKeys = new Set(threadKeys);
+      let failed = 0;
       for (const threadKey of threadKeys) {
         const thread = sidebarThreadByKeyRef.current.get(threadKey);
         if (!thread) continue;
-        await deleteThread(scopeThreadRef(thread.environmentId, thread.id), {
-          deletedThreadKeys,
-        });
+        try {
+          await deleteThread(scopeThreadRef(thread.environmentId, thread.id), {
+            deletedThreadKeys,
+          });
+        } catch (error) {
+          failed += 1;
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to delete thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
       }
       removeFromSelection(threadKeys);
+      if (failed > 0 && failed < threadKeys.length) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Some deletes failed",
+            description: `${failed} of ${threadKeys.length} thread${threadKeys.length === 1 ? "" : "s"} could not be deleted.`,
+          }),
+        );
+      }
     },
     [
       appSettingsConfirmThreadDelete,
@@ -569,7 +590,17 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
           return;
         }
       }
-      await deleteThread(threadRef);
+      try {
+        await deleteThread(threadRef);
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to delete thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
     },
     [
       appSettingsConfirmThreadDelete,

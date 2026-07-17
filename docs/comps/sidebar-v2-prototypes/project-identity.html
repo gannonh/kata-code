@@ -1560,11 +1560,18 @@
 
       function bindThreadClicks(root, state) {
         root.querySelectorAll("[data-thread]").forEach((el) => {
-          el.addEventListener("click", () => {
+          const activate = () => {
             state.selectedId = el.getAttribute("data-thread");
             state.render();
             const t = THREADS.find((x) => x.id === state.selectedId);
             toast(`Selected · ${t.title}`);
+          };
+          el.addEventListener("click", activate);
+          el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              activate();
+            }
           });
         });
       }
@@ -1808,11 +1815,18 @@
               });
             });
             el.querySelectorAll("[data-open-project]").forEach((btn) => {
-              btn.addEventListener("click", () => {
+              const openProject = () => {
                 state.projectFilter = btn.getAttribute("data-open-project");
                 state.mode = "agents";
                 state.render();
                 toast(`Scoped to ${projectById(state.projectFilter).name}`);
+              };
+              btn.addEventListener("click", openProject);
+              btn.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openProject();
+                }
               });
             });
             el.querySelector("[data-back], [data-all]")?.addEventListener("click", () => {
@@ -2094,7 +2108,7 @@
             wirePicker(el, state);
 
             el.querySelectorAll("[data-thread]").forEach((node) => {
-              node.addEventListener("click", (e) => {
+              const activate = (e) => {
                 if (e.target.closest("[data-action], [data-idle-collapse]")) return;
                 const id = node.getAttribute("data-thread");
                 state.selectedId = id;
@@ -2105,6 +2119,13 @@
                 state.render();
                 const t = THREADS.find((x) => x.id === id);
                 toast(`${tierOf(t)} · ${t.title}`);
+              };
+              node.addEventListener("click", activate);
+              node.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  activate(e);
+                }
               });
             });
             el.querySelectorAll("[data-idle-collapse]").forEach((btn) => {

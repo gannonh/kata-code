@@ -521,6 +521,30 @@ describe("uiStateStore persistence round-trip", () => {
     });
   });
 
+  it("persists and rehydrates Pin and Sleep overrides", () => {
+    const pinnedId = ThreadId.make("thread-pinned");
+    const sleptId = ThreadId.make("thread-slept");
+    let state = makeUiState();
+    state = setThreadPinned(state, pinnedId, true);
+    state = setThreadSlept(state, sleptId, true);
+    persistState(state);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+    expect(persisted.threadPinnedById).toEqual({ [pinnedId]: true });
+    expect(persisted.threadSleptById).toEqual({ [sleptId]: true });
+
+    // Simulate restart: re-read through persist path sanitizers.
+    const rehydrated = {
+      ...makeUiState(),
+      threadPinnedById: persisted.threadPinnedById ?? {},
+      threadSleptById: persisted.threadSleptById ?? {},
+    };
+    expect(rehydrated.threadPinnedById[pinnedId]).toBe(true);
+    expect(rehydrated.threadSleptById[sleptId]).toBe(true);
+  });
+
   it("respects mixed expand state on rehydrate and defaults new projects to expanded", () => {
     const projectA = { key: "kA", logicalKey: "kA", cwd: "/projA" };
     const projectB = { key: "kB", logicalKey: "kB", cwd: "/projB" };

@@ -59,8 +59,10 @@ function makeLatestTurn(overrides?: {
     state: "completed",
     assistantMessageId: null,
     requestedAt: "2026-03-09T10:00:00.000Z",
-    startedAt: overrides?.startedAt ?? "2026-03-09T10:00:00.000Z",
-    completedAt: overrides?.completedAt ?? "2026-03-09T10:05:00.000Z",
+    startedAt:
+      overrides && "startedAt" in overrides ? overrides.startedAt! : "2026-03-09T10:00:00.000Z",
+    completedAt:
+      overrides && "completedAt" in overrides ? overrides.completedAt! : "2026-03-09T10:05:00.000Z",
   };
 }
 
@@ -1060,6 +1062,22 @@ describe("resolveThreadWaitDuration", () => {
     ).toEqual({
       startedAt: "2026-03-09T10:05:00.000Z",
       durationMs: 15 * 60 * 1000,
+      approximate: true,
+    });
+  });
+
+  it("falls back to latestTurn.startedAt when completedAt is missing", () => {
+    expect(
+      resolveThreadWaitDuration({
+        thread: {
+          ...baseThread,
+          latestTurn: makeLatestTurn({ completedAt: null, startedAt: "2026-03-09T10:08:00.000Z" }),
+        },
+        nowMs,
+      }),
+    ).toEqual({
+      startedAt: "2026-03-09T10:08:00.000Z",
+      durationMs: 12 * 60 * 1000,
       approximate: true,
     });
   });

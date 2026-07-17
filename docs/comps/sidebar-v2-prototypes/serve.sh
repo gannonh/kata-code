@@ -12,14 +12,30 @@ stop_existing() {
   if [[ -f "$PIDFILE" ]]; then
     old_pid="$(cat "$PIDFILE" 2>/dev/null || true)"
     if [[ -n "${old_pid:-}" ]] && kill -0 "$old_pid" 2>/dev/null; then
-      kill "$old_pid" 2>/dev/null || true
-      sleep 0.2
+      # Only kill our previous server if the command line looks like this script's
+      # python http.server for the selected port.
+      if command -v ps >/dev/null 2>&1; then
+        cmdline="$(ps -p "$old_pid" -o args= 2>/dev/null || true)"
+        if [[ "$cmdline" == *"http.server $PORT"* ]] || [[ "$cmdline" == *"http.server"*"$PORT"* ]]; then
+          kill "$old_pid" 2>/dev/null || true
+          sleep 0.2
+        else
+          echo "Refusing to kill pid $old_pid (not this prototype server): $cmdline" >&2
+          echo "Port $PORT may be occupied by another process." >&2
+          exit 1
+        fi
+      else
+        kill "$old_pid" 2>/dev/null || true
+        sleep 0.2
+      fi
     fi
     rm -f "$PIDFILE"
   fi
-  # Also clear anything else bound to the port
   if command -v lsof >/dev/null 2>&1; then
-    lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | xargs -r kill 2>/dev/null || true
+    if lsof -tiTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "Port $PORT is already in use. Stop the other listener or choose another port." >&2
+      exit 1
+    fi
   fi
 }
 
