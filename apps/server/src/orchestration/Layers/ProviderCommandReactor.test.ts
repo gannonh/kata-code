@@ -2064,12 +2064,12 @@ describe("ProviderCommandReactor", () => {
         threadId: ThreadId.make("thread-1"),
         session: {
           threadId: ThreadId.make("thread-1"),
-          status: "ready",
+          status: "error",
           providerName: "codex",
           providerInstanceId: ProviderInstanceId.make("codex_work"),
           runtimeMode: "approval-required",
           activeTurnId: null,
-          lastError: null,
+          lastError: "turn failed",
           updatedAt: now,
         },
         createdAt: now,
@@ -2093,5 +2093,7 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
     expect(thread?.session?.activeTurnId).toBeNull();
+    // Explicit stop retains lastError so Failed chrome can remain until a healthy ready.
+    expect(thread?.session?.lastError).toBe("turn failed");
   });
 });
