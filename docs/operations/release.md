@@ -8,7 +8,7 @@ timestamp: 2026-06-17T15:00:00Z
 
 # Release runbook
 
-Merging to `main` runs CI only — **not** a release. Releases are triggered explicitly.
+Merging to `main` runs CI only. Stable releases are triggered manually. Scheduled nightlies run every three hours when `main` has changed since the latest nightly.
 
 **Prerequisite:** [Release setup](./release-setup.md) completed (secrets present). If a dry run fails on signing, fix setup first.
 
@@ -86,12 +86,6 @@ gh workflow run release.yml -R gannonh/kata-code \
   -f version=0.0.28
 ```
 
-Alternative — tag a specific commit (version comes from the tag name):
-
-```bash
-git tag v0.0.28 && git push origin v0.0.28
-```
-
 ### Verify stable
 
 ```bash
@@ -109,7 +103,7 @@ gh release view v0.0.28 -R gannonh/kata-code
 
 ## 5. Nightly release
 
-Release current `main` HEAD (version computed automatically — step 3):
+The scheduled workflow releases current `main` when it has changed since the latest nightly. To trigger the same flow manually:
 
 ```bash
 gh workflow run release.yml -R gannonh/kata-code \

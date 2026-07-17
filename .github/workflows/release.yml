@@ -1,10 +1,6 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-      - "!v*-nightly.*"
   schedule:
     # Automatic nightly every 3 hours (UTC). Only proceeds when main has
     # changed since the last nightly tag (see check_changes job below).

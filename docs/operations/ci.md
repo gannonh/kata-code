@@ -64,7 +64,7 @@ Require these **CI** job names before merging PRs (allowlist — there is no per
 | Release Smoke                 | CI       |
 | Mobile Native Static Analysis | CI       |
 
-Do **not** require PR label automation (`Label PR size`, `Label PR 2`, etc.) or **Release** workflow jobs — `release.yml` runs on tags and `workflow_dispatch`, not on pull requests.
+Do **not** require PR label automation (`Label PR size`, `Label PR 2`, etc.) or **Release** workflow jobs — `release.yml` runs on its nightly schedule and manual `workflow_dispatch`, not on pull requests.
 
 ## Disabled workflows (remaining Phase 2)
 
