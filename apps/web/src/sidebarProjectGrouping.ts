@@ -4,6 +4,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
   deriveProjectGroupLabel,
+  shortProjectDisplayName,
   type ProjectGroupingSettings,
 } from "./logicalProject";
 import type { Project } from "./types";
@@ -104,7 +105,7 @@ export function buildSidebarProjectSnapshots(input: {
               representative,
               members,
             })
-          : representative.name,
+          : shortProjectDisplayName(representative),
       groupedProjectCount: members.length,
       environmentPresence:
         hasLocal && hasRemote ? "mixed" : hasRemote ? "remote-only" : "local-only",

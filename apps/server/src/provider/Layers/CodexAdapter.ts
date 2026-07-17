@@ -411,6 +411,10 @@ function asRuntimeRequestId(requestId: string): RuntimeRequestId {
   return RuntimeRequestId.make(requestId);
 }
 
+function asOptionalRuntimeRequestId(value: unknown): RuntimeRequestId | undefined {
+  return typeof value === "string" && value.length > 0 ? asRuntimeRequestId(value) : undefined;
+}
+
 function eventRawSource(event: ProviderEvent): NonNullable<ProviderRuntimeEvent["raw"]>["source"] {
   return event.kind === "request" ? "codex.app-server.request" : "codex.app-server.notification";
 }
@@ -516,9 +520,17 @@ function mapToRuntimeEvents(
       if (!questions) {
         return [];
       }
+      // Prefer the JSON-RPC / runtime requestId; fall back to itemId so shell
+      // pending-user-input counts never drop Ask prompts that omit requestId.
+      const base = runtimeEventBase(event, canonicalThreadId);
+      const requestId =
+        base.requestId ??
+        asOptionalRuntimeRequestId(payload?.itemId) ??
+        asOptionalRuntimeRequestId(event.itemId);
       return [
         {
-          ...runtimeEventBase(event, canonicalThreadId),
+          ...base,
+          ...(requestId ? { requestId } : {}),
           type: "user-input.requested",
           payload: {
             questions,

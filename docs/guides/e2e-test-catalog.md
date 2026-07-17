@@ -19,6 +19,7 @@ Specs under [`e2e/tests/`](../../e2e/tests/) use a project-aware fixture and can
 | Test                                                                                   | Tag         | Covers                                                                               |
 | -------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
 | [`smoke/app-launch.spec.ts`](../../e2e/tests/smoke/app-launch.spec.ts)                 | `@smoke`    | Launches either target past pairing and reaches the app shell                        |
+| [`smoke/sidebar-v2.spec.ts`](../../e2e/tests/smoke/sidebar-v2.spec.ts)                 | `@sidebar`  | Attention-tier sidebar chrome, no show-more, new-session accordion opens             |
 | [`agent/deterministic-chat.spec.ts`](../../e2e/tests/agent/deterministic-chat.spec.ts) | `@agent`    | Exact assistant reply from a real provider                                           |
 | [`agent/cursor-skills.spec.ts`](../../e2e/tests/agent/cursor-skills.spec.ts)           | `@cursor`   | Cursor filesystem skills in the Composer menu and path-qualified token insertion     |
 | [`agent/pi-smoke.spec.ts`](../../e2e/tests/agent/pi-smoke.spec.ts)                     | `@pi`       | Pi streaming, interrupt/stop, tool-call work row, runtime-mode warning (creds-gated) |
@@ -26,6 +27,8 @@ Specs under [`e2e/tests/`](../../e2e/tests/) use a project-aware fixture and can
 | [`settings/pi-provider.spec.ts`](../../e2e/tests/settings/pi-provider.spec.ts)         | `@settings` | Pi first in providers, add Pi instance, Pi rail in model picker                      |
 
 Harness and flows (shared building blocks, not tests): [`e2e/src/harness/`](../../e2e/src/harness/), [`e2e/src/flows/`](../../e2e/src/flows/).
+
+Sidebar v2 populated-state UAT uses the DEV fixture route `/playground/sidebar` (same seeds as Vitest browser assertions; not E2E seeds): see [Sidebar v2 UAT — playground-first](/guides/sidebar-v2-uat-playground.md).
 
 Each spec file shares one Electron session (one dev stack, one Clerk sign-in) across its tests; see [session model](../../e2e/README.md#session-model) in the operator README. Stop `pnpm run dev` / `dev:desktop` before E2E; use `pnpm run e2e:clean` if a run leaves leaked dev servers.
 

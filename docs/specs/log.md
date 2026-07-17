@@ -1,5 +1,37 @@
 # Specs log
 
+## 2026-07-17 (Sidebar v2 shell attention-state detection verified)
+
+Verified [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): maintainer UAT passed live Waiting via approval, Claude `AskUserQuestion`, Codex Plan-mode `request_user_input`, and Blocked via provider startup failure plus successful recovery. Live Waiting E2E remains deferred ([#39](https://github.com/gannonh/kata-code/issues/39)); smoke `@sidebar` remains the live gate.
+
+## 2026-07-16 (Sidebar v2 shell attention-state detection implemented)
+
+Implemented [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md) Phases A–B4: inventory appendix; prune pending approvals on revert; user-input shell open/clear + Codex `itemId` fallback; plan-ready shell flag tests; `lastError` clear-on-success + stop retention. Client SM unchanged. Live Waiting E2E deferred ([#39](https://github.com/gannonh/kata-code/issues/39)). Status **Implemented**; Verify next (AC10 maintainer UAT).
+
+## 2026-07-16 (Sidebar v2 shell attention-state detection approved)
+
+Approved [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): keep client `Sidebar.logic` pure; audit/fix projection + ingestion writers. Locked: non-stale stickiness; revert prune; lastError clear/retain; live Waiting E2E optional. Later implemented same day.
+
+## 2026-07-16 (Sidebar v2 shell attention-state detection drafted)
+
+Drafted [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): keep client `Sidebar.logic` pure; audit/fix projection + ingestion writers. Adversarial review Approve-after-fixes incorporated. Later approved same day.
+
+## 2026-07-16 (Sidebar v2 Active / Idle approved)
+
+Approved [Active / Idle + dwell / Sleep / Pin](/specs/2026-07-16-sidebar-v2-active-idle-design.md): two sections, sub-state chips, 60m default dwell (General settings toggle), Sleep/Pin always available as manual Active↔Idle controls. Supersedes four-tier list structure in [parent sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md). Build next.
+
+## 2026-07-16 (Sidebar v2 UAT — playground-first)
+
+Documented Verify/UAT path for [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md): fixture catalog → `/playground/sidebar` → Vitest browser assertions → live `@sidebar`/`@agent` only where fixtures cannot prove (timer/transitions). Guide: [sidebar-v2-uat-playground](/guides/sidebar-v2-uat-playground.md). Product UI remains Implemented; proof gaps are tests/UAT, not missing features.
+
+## 2026-07-15 (Sidebar v2 attention tiers implemented)
+
+Implemented [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) Phases A–D on existing APIs: tier/Failed helpers, attention-tier list + project picker with `sidebar-v2.css` pixel contract, new-session accordion, dead grouped-tree cleanup, `@sidebar` smoke E2E. Status **Implemented**; Verify still needs AC 11 visual sign-off against `c-attention-session.html` and headed `@sidebar` / environments regression.
+
+## 2026-07-15 (Sidebar v2 attention tiers approved)
+
+Revised and re-approved [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) after interactive prototypes (`docs/comps/sidebar-v2-prototypes/c-attention-session.html`). Ship shape: Waiting / Working / Blocked / Idle + project picker + accordion new-session. Hard boundary: frontend/sidebar chrome only; do not touch environments/sandbox/BYOC. Server shell enrichments optional follow-up. Atomic phases A–D with environments suites as regression gate. **Pixel contract:** `c-attention-session.html` is the normative frontend prototype / new design language (exact match; do not adapt into the old app chrome); AC 11 requires maintainer visual sign-off against C. Status **Approved**; Build may proceed.
+
 ## 2026-07-14 (Sidebar v2 hybrid design approved)
 
 Drafted and approved the [Sidebar v2 recency-first hybrid design](/specs/2026-07-14-sidebar-v2-hybrid-design.md). The spec replaces the project-grouped thread sidebar (web + desktop) with one recency-first list: adaptive row density (concept 4), a pinned needs-you section sorted by wait time (concept 3), and a rich-card meta row (concept 1), per the concept exploration captured in `docs/comps/SCR-20260714-ivzt-2.png`. Adds `latestActivity`, `latestTurnDiffStats`, and `blockedSince` to `OrchestrationThreadShell` (projection pipeline + migration for the pending-input timestamp), a Failed status state for `session.lastError`, and removes the per-project "show more" collapse. An adversarial subagent review returned Approve-after-fixes; all 12 findings were incorporated (relocated new-thread/add-project chrome, Failed lifetime, Vitest-browser vs E2E verification split, settings and dnd-kit cleanup scope). Four build phases: contracts/projection, logic, list UI, cleanup + `@sidebar` E2E.

@@ -7,15 +7,50 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Keep Playwright e2e / Maestro mobile-e2e out of Vitest discovery.
+    // Root `vp test run --coverage` (package.json `test`) uses this config;
+    // without these excludes, Vitest loads `e2e/**/*.spec.ts` and dies on
+    // Playwright `test.afterAll` hooks.
     exclude: [
       "**/.repos/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/dist-electron/**",
       "**/.{idea,git,cache,output,temp}/**",
+      "e2e/**",
+      "mobile-e2e/**",
+      "**/playwright-report/**",
+      "**/test-results/**",
     ],
     hookTimeout: 60_000,
     testTimeout: 60_000,
+    // Floors sit just under measured monorepo totals so CI fails only on regressions.
+    // Raise toward 75/75/70/65 after suites stabilize.
+    coverage: {
+      provider: "v8",
+      // Summary only in default runs (CI logs); use `vp test run --coverage --reporter=verbose`
+      // or inspect ./coverage for detail.
+      reporter: ["text-summary", "json-summary"],
+      reportsDirectory: "./coverage",
+      exclude: [
+        "**/.repos/**",
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/dist-electron/**",
+        "**/*.{test,spec,browser}.{ts,tsx}",
+        "**/integration/**",
+        "e2e/**",
+        "mobile-e2e/**",
+        "scripts/**",
+      ],
+      thresholds: {
+        // Floors just under measured monorepo totals; raise after suites stabilize.
+        lines: 65,
+        statements: 65,
+        functions: 60,
+        branches: 50,
+      },
+    },
   },
   fmt: {
     ignorePatterns: [
@@ -76,6 +111,8 @@ export default defineConfig({
       "oxc/no-map-spread": "off",
       "react-in-jsx-scope": "off",
       "react-hooks/exhaustive-deps": "off",
+      // Partial naming enforcement (oxlint lacks full @typescript-eslint/naming-convention).
+      "react/jsx-pascal-case": "error",
       "eslint/no-shadow": "off",
       "eslint/no-await-in-loop": "off",
       "eslint/no-underscore-dangle": "off",

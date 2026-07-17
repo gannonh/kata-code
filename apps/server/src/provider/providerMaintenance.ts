@@ -306,6 +306,12 @@ export function resolvePackageManagedProviderMaintenance(
     if (commandPaths.some(isHomebrewCommandPath)) {
       return makeHomebrewProviderMaintenanceCapabilities(definition);
     }
+
+    // Resolved to a real path that no known installer owns — do not guess npm.
+    return makeManualOnlyProviderMaintenanceCapabilities({
+      provider: definition.provider,
+      packageName: definition.npmPackageName,
+    });
   }
 
   if (!hasPathSeparator(binaryPath)) {

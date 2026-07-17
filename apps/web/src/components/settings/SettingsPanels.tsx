@@ -427,6 +427,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
         ? ["Delete confirmation"]
         : []),
+      ...(settings.sidebarIdleTimerEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarIdleTimerEnabled
+        ? ["Sidebar idle timer"]
+        : []),
+      ...(settings.sidebarIdleTimerMinutes !== DEFAULT_UNIFIED_SETTINGS.sidebarIdleTimerMinutes
+        ? ["Sidebar idle timer duration"]
+        : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
     ],
     [
@@ -440,6 +446,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
+      settings.sidebarIdleTimerEnabled,
+      settings.sidebarIdleTimerMinutes,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       theme,
@@ -469,6 +477,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
+      sidebarIdleTimerEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarIdleTimerEnabled,
+      sidebarIdleTimerMinutes: DEFAULT_UNIFIED_SETTINGS.sidebarIdleTimerMinutes,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
     });
     onRestored?.();
@@ -763,6 +773,68 @@ export function GeneralSettingsPanel() {
               placeholder="~/"
               spellCheck={false}
               aria-label="Add project base directory"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Sidebar idle timer"
+          description="Move settled sessions to Idle after a period of inactivity. Sleep and Pin still work when this is off."
+          resetAction={
+            settings.sidebarIdleTimerEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarIdleTimerEnabled ? (
+              <SettingResetButton
+                label="sidebar idle timer"
+                onClick={() =>
+                  updateSettings({
+                    sidebarIdleTimerEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarIdleTimerEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarIdleTimerEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarIdleTimerEnabled: Boolean(checked) })
+              }
+              aria-label="Enable sidebar idle timer"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Sidebar idle after"
+          description="Minutes of settled inactivity before a session moves to Idle (when the timer is enabled)."
+          resetAction={
+            settings.sidebarIdleTimerMinutes !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarIdleTimerMinutes ? (
+              <SettingResetButton
+                label="sidebar idle duration"
+                onClick={() =>
+                  updateSettings({
+                    sidebarIdleTimerMinutes: DEFAULT_UNIFIED_SETTINGS.sidebarIdleTimerMinutes,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              className="w-full sm:w-28"
+              value={String(settings.sidebarIdleTimerMinutes)}
+              onCommit={(next) => {
+                const parsed = Number.parseInt(next.trim(), 10);
+                if (!Number.isFinite(parsed) || parsed < 1) return;
+                updateSettings({
+                  sidebarIdleTimerMinutes: Math.min(Math.max(parsed, 1), 24 * 60),
+                });
+              }}
+              inputMode="numeric"
+              spellCheck={false}
+              aria-label="Sidebar idle timer minutes"
+              disabled={!settings.sidebarIdleTimerEnabled}
             />
           }
         />

@@ -7,7 +7,6 @@ import {
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
-  getVisibleThreadsForProject,
   getProjectSortTimestamp,
   hasUnseenCompletion,
   isContextMenuPointerDown,
@@ -20,6 +19,19 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
+  resolveThreadTier,
+  resolveThreadSubState,
+  resolveThreadSection,
+  resolveThreadRowDensity,
+  resolveThreadWaitDuration,
+  groupThreadsByAttentionTier,
+  groupThreadsBySection,
+  flattenAttentionTierThreads,
+  flattenSectionThreads,
+  formatSidebarWaitLabel,
+  formatSidebarElapsedClock,
+  countWaitingOutsideProjectFilter,
+  projectInitials,
 } from "./Sidebar.logic";
 import {
   EnvironmentId,
@@ -28,6 +40,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@kata-sh/code-contracts";
+import { shortProjectDisplayName } from "../logicalProject";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -46,8 +59,10 @@ function makeLatestTurn(overrides?: {
     state: "completed",
     assistantMessageId: null,
     requestedAt: "2026-03-09T10:00:00.000Z",
-    startedAt: overrides?.startedAt ?? "2026-03-09T10:00:00.000Z",
-    completedAt: overrides?.completedAt ?? "2026-03-09T10:05:00.000Z",
+    startedAt:
+      overrides && "startedAt" in overrides ? overrides.startedAt! : "2026-03-09T10:00:00.000Z",
+    completedAt:
+      overrides && "completedAt" in overrides ? overrides.completedAt! : "2026-03-09T10:05:00.000Z",
   };
 }
 
@@ -573,6 +588,722 @@ describe("resolveThreadStatusPill", () => {
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
   });
+
+  it("shows failed when the session has a lastError and no higher-priority state", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            status: "error",
+            orchestrationStatus: "error",
+            lastError: "Provider crashed",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Failed", pulse: false });
+  });
+
+  it("keeps plan ready above failed when both could apply", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+            lastError: "stale error still present",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Plan Ready", pulse: false });
+  });
+
+  it("keeps failed above completed-unseen", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+            lastError: "turn failed",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Failed", pulse: false });
+  });
+});
+
+describe("resolveThreadTier", () => {
+  const baseThread = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    latestTurn: null,
+    lastVisitedAt: undefined,
+    session: {
+      provider: ProviderDriverKind.make("codex"),
+      status: "ready" as const,
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:00:00.000Z",
+      orchestrationStatus: "ready" as const,
+    },
+  };
+
+  it("maps pending approval, awaiting input, and plan ready into waiting", () => {
+    expect(
+      resolveThreadTier({
+        thread: { ...baseThread, hasPendingApprovals: true },
+      }),
+    ).toBe("waiting");
+    expect(
+      resolveThreadTier({
+        thread: { ...baseThread, hasPendingUserInput: true },
+      }),
+    ).toBe("waiting");
+    expect(
+      resolveThreadTier({
+        thread: {
+          ...baseThread,
+          interactionMode: "plan",
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn(),
+        },
+      }),
+    ).toBe("waiting");
+  });
+
+  it("maps running and connecting into working", () => {
+    expect(
+      resolveThreadTier({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "running",
+            orchestrationStatus: "running",
+          },
+        },
+      }),
+    ).toBe("working");
+    expect(
+      resolveThreadTier({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "connecting",
+            orchestrationStatus: "starting",
+          },
+        },
+      }),
+    ).toBe("working");
+  });
+
+  it("maps failed sessions into blocked", () => {
+    expect(
+      resolveThreadTier({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "error",
+            orchestrationStatus: "error",
+            lastError: "Provider crashed",
+          },
+        },
+      }),
+    ).toBe("blocked");
+  });
+
+  it("maps settled and completed-unseen threads into idle", () => {
+    expect(resolveThreadTier({ thread: baseThread })).toBe("idle");
+    expect(
+      resolveThreadTier({
+        thread: {
+          ...baseThread,
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+        },
+      }),
+    ).toBe("idle");
+  });
+});
+
+describe("resolveThreadSection", () => {
+  const nowMs = Date.parse("2026-07-16T12:00:00.000Z");
+  const settled = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    latestTurn: makeLatestTurn({
+      completedAt: "2026-07-16T11:30:00.000Z",
+    }),
+    lastVisitedAt: undefined,
+    updatedAt: "2026-07-16T11:30:00.000Z",
+    session: {
+      provider: ProviderDriverKind.make("codex"),
+      status: "ready" as const,
+      createdAt: "2026-07-16T10:00:00.000Z",
+      updatedAt: "2026-07-16T11:30:00.000Z",
+      orchestrationStatus: "ready" as const,
+    },
+  };
+
+  it("keeps attention sub-states in Active regardless of dwell", () => {
+    expect(
+      resolveThreadSection({
+        thread: { ...settled, hasPendingApprovals: true },
+        nowMs,
+        idleTimerEnabled: true,
+        idleTimerMinutes: 60,
+      }),
+    ).toBe("active");
+  });
+
+  it("keeps recently settled threads Active within dwell", () => {
+    expect(
+      resolveThreadSection({
+        thread: settled,
+        nowMs,
+        idleTimerEnabled: true,
+        idleTimerMinutes: 60,
+      }),
+    ).toBe("active");
+  });
+
+  it("moves settled threads to Idle after dwell minutes", () => {
+    expect(
+      resolveThreadSection({
+        thread: {
+          ...settled,
+          latestTurn: makeLatestTurn({
+            completedAt: "2026-07-16T10:00:00.000Z",
+          }),
+          updatedAt: "2026-07-16T10:00:00.000Z",
+          session: {
+            ...settled.session,
+            updatedAt: "2026-07-16T10:00:00.000Z",
+          },
+        },
+        nowMs,
+        idleTimerEnabled: true,
+        idleTimerMinutes: 60,
+      }),
+    ).toBe("idle");
+  });
+
+  it("never auto-idles when timer is disabled", () => {
+    expect(
+      resolveThreadSection({
+        thread: {
+          ...settled,
+          latestTurn: makeLatestTurn({
+            completedAt: "2026-07-01T00:00:00.000Z",
+          }),
+          updatedAt: "2026-07-01T00:00:00.000Z",
+          session: {
+            ...settled.session,
+            updatedAt: "2026-07-01T00:00:00.000Z",
+          },
+        },
+        nowMs,
+        idleTimerEnabled: false,
+        idleTimerMinutes: 60,
+      }),
+    ).toBe("active");
+  });
+
+  it("Sleep forces Idle; Pin keeps Active", () => {
+    expect(
+      resolveThreadSection({
+        thread: settled,
+        nowMs,
+        idleTimerEnabled: false,
+        idleTimerMinutes: 60,
+        slept: true,
+      }),
+    ).toBe("idle");
+    expect(
+      resolveThreadSection({
+        thread: settled,
+        nowMs,
+        idleTimerEnabled: true,
+        idleTimerMinutes: 60,
+        slept: true,
+        pinned: true,
+      }),
+    ).toBe("active");
+  });
+
+  it("maps resolveThreadSubState settled from idle tier", () => {
+    expect(resolveThreadSubState({ thread: settled })).toBe("settled");
+    expect(
+      resolveThreadSubState({
+        thread: { ...settled, hasPendingApprovals: true },
+      }),
+    ).toBe("waiting");
+  });
+});
+
+describe("groupThreadsBySection", () => {
+  it("splits Active and Idle and flattens Active first", () => {
+    const nowMs = Date.parse("2026-07-16T12:00:00.000Z");
+    const working = {
+      id: ThreadId.make("t-working"),
+      title: "Working",
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:55:00.000Z",
+      projectId: ProjectId.make("p1"),
+      environmentId: EnvironmentId.make("e1"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      branch: null,
+      worktreePath: null,
+      archivedAt: null,
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: "default" as const,
+      latestTurn: null,
+      session: {
+        provider: ProviderDriverKind.make("codex"),
+        status: "running" as const,
+        createdAt: "2026-07-16T11:00:00.000Z",
+        updatedAt: "2026-07-16T11:55:00.000Z",
+        orchestrationStatus: "running" as const,
+        activeTurnId: "turn-1",
+      },
+    };
+    const oldIdle = {
+      ...working,
+      id: ThreadId.make("t-idle"),
+      title: "Old",
+      updatedAt: "2026-07-16T10:00:00.000Z",
+      session: {
+        ...working.session,
+        status: "ready" as const,
+        orchestrationStatus: "ready" as const,
+        activeTurnId: undefined,
+        updatedAt: "2026-07-16T10:00:00.000Z",
+      },
+      latestTurn: makeLatestTurn({ completedAt: "2026-07-16T10:00:00.000Z" }),
+    };
+
+    const grouped = groupThreadsBySection({
+      threads: [oldIdle, working] as never,
+      getStatusInput: (thread) => thread as never,
+      sortOrder: "updated_at",
+      nowMs,
+      idleTimerEnabled: true,
+      idleTimerMinutes: 60,
+    });
+
+    expect(grouped.active.map((t) => t.id)).toEqual([working.id]);
+    expect(grouped.idle.map((t) => t.id)).toEqual([oldIdle.id]);
+    expect(flattenSectionThreads(grouped).map((t) => t.id)).toEqual([working.id, oldIdle.id]);
+  });
+});
+
+describe("shortProjectDisplayName / projectInitials", () => {
+  it("prefers short repo name over owner/repo", () => {
+    expect(
+      shortProjectDisplayName({
+        name: "gannonh/kata-code",
+        repositoryIdentity: {
+          name: "kata-code",
+          displayName: "gannonh/kata-code",
+        },
+      }),
+    ).toBe("kata-code");
+    expect(
+      shortProjectDisplayName({
+        name: "gannonh/kata-code",
+        repositoryIdentity: { displayName: "gannonh/kata-code" },
+      }),
+    ).toBe("kata-code");
+    expect(shortProjectDisplayName({ name: "uat-phase3b", cwd: "/tmp/uat-phase3b" })).toBe(
+      "uat-phase3b",
+    );
+  });
+
+  it("builds two-letter initials from short display names", () => {
+    expect(projectInitials("kata-code")).toBe("KC");
+    expect(projectInitials("uat-phase3b")).toBe("UP");
+    expect(projectInitials("docs")).toBe("DO");
+  });
+});
+
+describe("resolveThreadRowDensity", () => {
+  const baseThread = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    latestTurn: null,
+    lastVisitedAt: undefined,
+    session: {
+      provider: ProviderDriverKind.make("codex"),
+      status: "ready" as const,
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:00:00.000Z",
+      orchestrationStatus: "ready" as const,
+    },
+  };
+
+  it("uses rich density for waiting and working threads", () => {
+    expect(
+      resolveThreadRowDensity({
+        thread: { ...baseThread, hasPendingApprovals: true },
+      }),
+    ).toEqual({ density: "rich", showBlockedDot: false });
+    expect(
+      resolveThreadRowDensity({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "running",
+            orchestrationStatus: "running",
+          },
+        },
+      }),
+    ).toEqual({ density: "rich", showBlockedDot: false });
+  });
+
+  it("uses slim density for idle threads by default", () => {
+    expect(resolveThreadRowDensity({ thread: baseThread })).toEqual({
+      density: "slim",
+      showBlockedDot: false,
+    });
+  });
+
+  it("keeps blocked threads rich until visited, then slim with a red dot", () => {
+    const blockedSession = {
+      ...baseThread.session,
+      status: "error" as const,
+      orchestrationStatus: "error" as const,
+      lastError: "Provider crashed",
+      updatedAt: "2026-03-09T10:10:00.000Z",
+    };
+
+    expect(
+      resolveThreadRowDensity({
+        thread: {
+          ...baseThread,
+          session: blockedSession,
+        },
+      }),
+    ).toEqual({ density: "rich", showBlockedDot: false });
+
+    expect(
+      resolveThreadRowDensity({
+        thread: {
+          ...baseThread,
+          lastVisitedAt: "2026-03-09T10:11:00.000Z",
+          session: blockedSession,
+        },
+      }),
+    ).toEqual({ density: "slim", showBlockedDot: true });
+  });
+});
+
+describe("resolveThreadWaitDuration", () => {
+  const nowMs = Date.parse("2026-03-09T10:20:00.000Z");
+
+  const baseThread = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: true,
+    interactionMode: "default" as const,
+    latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:05:00.000Z" }),
+    lastVisitedAt: undefined,
+    session: {
+      provider: ProviderDriverKind.make("codex"),
+      status: "ready" as const,
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:00:00.000Z",
+      orchestrationStatus: "ready" as const,
+    },
+  };
+
+  it("prefers an explicit wait timestamp when available", () => {
+    expect(
+      resolveThreadWaitDuration({
+        thread: baseThread,
+        waitSince: "2026-03-09T10:12:00.000Z",
+        nowMs,
+      }),
+    ).toEqual({
+      startedAt: "2026-03-09T10:12:00.000Z",
+      durationMs: 8 * 60 * 1000,
+      approximate: false,
+    });
+  });
+
+  it("falls back to latestTurn.completedAt for pending input and marks it approximate", () => {
+    expect(
+      resolveThreadWaitDuration({
+        thread: baseThread,
+        nowMs,
+      }),
+    ).toEqual({
+      startedAt: "2026-03-09T10:05:00.000Z",
+      durationMs: 15 * 60 * 1000,
+      approximate: true,
+    });
+  });
+
+  it("falls back to latestTurn.startedAt when completedAt is missing", () => {
+    expect(
+      resolveThreadWaitDuration({
+        thread: {
+          ...baseThread,
+          latestTurn: makeLatestTurn({ completedAt: null, startedAt: "2026-03-09T10:08:00.000Z" }),
+        },
+        nowMs,
+      }),
+    ).toEqual({
+      startedAt: "2026-03-09T10:08:00.000Z",
+      durationMs: 12 * 60 * 1000,
+      approximate: true,
+    });
+  });
+
+  it("returns null for non-waiting threads", () => {
+    expect(
+      resolveThreadWaitDuration({
+        thread: {
+          ...baseThread,
+          hasPendingUserInput: false,
+          session: {
+            ...baseThread.session,
+            status: "running",
+            orchestrationStatus: "running",
+          },
+        },
+        nowMs,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("groupThreadsByAttentionTier", () => {
+  const nowMs = Date.parse("2026-03-09T10:20:00.000Z");
+
+  type GroupableThread = Thread & {
+    hasActionableProposedPlan: boolean;
+    hasPendingApprovals: boolean;
+    hasPendingUserInput: boolean;
+    lastVisitedAt?: string;
+  };
+
+  function makeGroupableThread(
+    overrides: Partial<GroupableThread> & Pick<GroupableThread, "id">,
+  ): GroupableThread {
+    return {
+      ...makeThread(overrides),
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      ...overrides,
+    };
+  }
+
+  function statusInputFromThread(thread: GroupableThread) {
+    return {
+      hasActionableProposedPlan: thread.hasActionableProposedPlan,
+      hasPendingApprovals: thread.hasPendingApprovals,
+      hasPendingUserInput: thread.hasPendingUserInput,
+      interactionMode: thread.interactionMode,
+      latestTurn: thread.latestTurn,
+      lastVisitedAt: thread.lastVisitedAt,
+      session: thread.session,
+    };
+  }
+
+  it("partitions threads into waiting, working, blocked, and idle tiers", () => {
+    const waiting = makeGroupableThread({
+      id: ThreadId.make("waiting"),
+      hasPendingUserInput: true,
+      latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:05:00.000Z" }),
+      session: {
+        provider: ProviderDriverKind.make("codex"),
+        status: "ready",
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:00:00.000Z",
+        orchestrationStatus: "ready",
+      },
+    });
+    const working = makeGroupableThread({
+      id: ThreadId.make("working"),
+      session: {
+        provider: ProviderDriverKind.make("codex"),
+        status: "running",
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:00:00.000Z",
+        orchestrationStatus: "running",
+      },
+    });
+    const blocked = makeGroupableThread({
+      id: ThreadId.make("blocked"),
+      session: {
+        provider: ProviderDriverKind.make("codex"),
+        status: "error",
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:00:00.000Z",
+        orchestrationStatus: "error",
+        lastError: "boom",
+      },
+    });
+    const idle = makeGroupableThread({ id: ThreadId.make("idle") });
+
+    const grouped = groupThreadsByAttentionTier({
+      threads: [idle, blocked, working, waiting],
+      getStatusInput: statusInputFromThread,
+      sortOrder: "updated_at",
+      nowMs,
+    });
+
+    expect(grouped.waiting.map((thread) => thread.id)).toEqual([ThreadId.make("waiting")]);
+    expect(grouped.working.map((thread) => thread.id)).toEqual([ThreadId.make("working")]);
+    expect(grouped.blocked.map((thread) => thread.id)).toEqual([ThreadId.make("blocked")]);
+    expect(grouped.idle.map((thread) => thread.id)).toEqual([ThreadId.make("idle")]);
+  });
+
+  it("sorts waiting by longest wait first when a wait timestamp is available", () => {
+    const shortWait = makeGroupableThread({
+      id: ThreadId.make("short-wait"),
+      createdAt: "2026-03-09T10:01:00.000Z",
+      updatedAt: "2026-03-09T10:01:00.000Z",
+      hasPendingUserInput: true,
+      latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:10:00.000Z" }),
+      session: {
+        provider: ProviderDriverKind.make("codex"),
+        status: "ready",
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:00:00.000Z",
+        orchestrationStatus: "ready",
+      },
+    });
+    const longWait = makeGroupableThread({
+      id: ThreadId.make("long-wait"),
+      createdAt: "2026-03-09T10:02:00.000Z",
+      updatedAt: "2026-03-09T10:02:00.000Z",
+      hasPendingUserInput: true,
+      latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:01:00.000Z" }),
+      session: {
+        provider: ProviderDriverKind.make("codex"),
+        status: "ready",
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:00:00.000Z",
+        orchestrationStatus: "ready",
+      },
+    });
+
+    const grouped = groupThreadsByAttentionTier({
+      threads: [shortWait, longWait],
+      getStatusInput: statusInputFromThread,
+      sortOrder: "updated_at",
+      nowMs,
+    });
+
+    expect(grouped.waiting.map((thread) => thread.id)).toEqual([
+      ThreadId.make("long-wait"),
+      ThreadId.make("short-wait"),
+    ]);
+  });
+
+  it("sorts idle threads with the configured sidebar thread sort order", () => {
+    const older = makeGroupableThread({
+      id: ThreadId.make("older"),
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:00:00.000Z",
+    });
+    const newer = makeGroupableThread({
+      id: ThreadId.make("newer"),
+      createdAt: "2026-03-09T10:10:00.000Z",
+      updatedAt: "2026-03-09T10:10:00.000Z",
+    });
+
+    const grouped = groupThreadsByAttentionTier({
+      threads: [older, newer],
+      getStatusInput: statusInputFromThread,
+      sortOrder: "created_at",
+      nowMs,
+    });
+
+    expect(grouped.idle.map((thread) => thread.id)).toEqual([
+      ThreadId.make("newer"),
+      ThreadId.make("older"),
+    ]);
+  });
+});
+
+describe("flattenAttentionTierThreads", () => {
+  it("orders Waiting then Working then Blocked then Idle", () => {
+    expect(
+      flattenAttentionTierThreads({
+        waiting: [{ id: "w" }],
+        working: [{ id: "g" }],
+        blocked: [{ id: "b" }],
+        idle: [{ id: "i" }],
+      }).map((thread) => thread.id),
+    ).toEqual(["w", "g", "b", "i"]);
+  });
+});
+
+describe("formatSidebarWaitLabel / formatSidebarElapsedClock", () => {
+  it("formats wait and elapsed labels for the C chrome", () => {
+    expect(formatSidebarWaitLabel(45_000)).toBe("45s");
+    expect(formatSidebarWaitLabel(12 * 60_000)).toBe("12m");
+    expect(formatSidebarElapsedClock(12_000)).toBe("0:12");
+    expect(formatSidebarElapsedClock(65_000)).toBe("1:05");
+  });
+});
+
+describe("countWaitingOutsideProjectFilter", () => {
+  const baseThread = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    latestTurn: null,
+    lastVisitedAt: undefined,
+    session: {
+      provider: ProviderDriverKind.make("codex"),
+      status: "ready" as const,
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:00:00.000Z",
+      orchestrationStatus: "ready" as const,
+    },
+  };
+
+  it("counts waiting threads hidden by the project filter", () => {
+    const waiting = {
+      ...baseThread,
+      hasPendingApprovals: true,
+    };
+    const idle = baseThread;
+    expect(
+      countWaitingOutsideProjectFilter({
+        allThreads: [waiting, waiting, idle],
+        filteredThreads: [waiting, idle],
+      }),
+    ).toBe(1);
+  });
 });
 
 describe("resolveThreadRowClassName", () => {
@@ -647,56 +1378,47 @@ describe("resolveProjectStatusIndicator", () => {
       ]),
     ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
   });
-});
 
-describe("getVisibleThreadsForProject", () => {
-  it("includes the active thread even when it falls below the folded preview", () => {
-    const threads = Array.from({ length: 8 }, (_, index) =>
-      makeThread({
-        id: ThreadId.make(`thread-${index + 1}`),
-        title: `Thread ${index + 1}`,
-      }),
-    );
+  it("ranks failed below plan ready and above completed", () => {
+    expect(
+      resolveProjectStatusIndicator([
+        {
+          label: "Completed",
+          colorClass: "text-emerald-600",
+          dotClass: "bg-emerald-500",
+          pulse: false,
+        },
+        {
+          label: "Failed",
+          colorClass: "text-red-600",
+          dotClass: "bg-red-500",
+          pulse: false,
+        },
+        {
+          label: "Plan Ready",
+          colorClass: "text-violet-600",
+          dotClass: "bg-violet-500",
+          pulse: false,
+        },
+      ]),
+    ).toMatchObject({ label: "Plan Ready" });
 
-    const result = getVisibleThreadsForProject({
-      threads,
-      activeThreadId: ThreadId.make("thread-8"),
-      isThreadListExpanded: false,
-      previewLimit: 6,
-    });
-
-    expect(result.hasHiddenThreads).toBe(true);
-    expect(result.visibleThreads.map((thread) => thread.id)).toEqual([
-      ThreadId.make("thread-1"),
-      ThreadId.make("thread-2"),
-      ThreadId.make("thread-3"),
-      ThreadId.make("thread-4"),
-      ThreadId.make("thread-5"),
-      ThreadId.make("thread-6"),
-      ThreadId.make("thread-8"),
-    ]);
-    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual([ThreadId.make("thread-7")]);
-  });
-
-  it("returns all threads when the list is expanded", () => {
-    const threads = Array.from({ length: 8 }, (_, index) =>
-      makeThread({
-        id: ThreadId.make(`thread-${index + 1}`),
-      }),
-    );
-
-    const result = getVisibleThreadsForProject({
-      threads,
-      activeThreadId: ThreadId.make("thread-8"),
-      isThreadListExpanded: true,
-      previewLimit: 6,
-    });
-
-    expect(result.hasHiddenThreads).toBe(true);
-    expect(result.visibleThreads.map((thread) => thread.id)).toEqual(
-      threads.map((thread) => thread.id),
-    );
-    expect(result.hiddenThreads).toEqual([]);
+    expect(
+      resolveProjectStatusIndicator([
+        {
+          label: "Completed",
+          colorClass: "text-emerald-600",
+          dotClass: "bg-emerald-500",
+          pulse: false,
+        },
+        {
+          label: "Failed",
+          colorClass: "text-red-600",
+          dotClass: "bg-red-500",
+          pulse: false,
+        },
+      ]),
+    ).toMatchObject({ label: "Failed" });
   });
 });
 

@@ -108,6 +108,18 @@ This repository maintains an [OKF](https://github.com/GoogleCloudPlatform/knowle
 - **Expand on request.** Add rationale, tradeoffs, or links only when the user asks why, or when ambiguity would cause a wrong action.
 - **One path by default.** Prefer a single recommended sequence over multiple options with long comparisons.
 
+## Naming conventions
+
+TypeScript / JavaScript sources follow these conventions (enforced by review and docs; oxlint has no full `@typescript-eslint/naming-convention` equivalent yet):
+
+- **Files:** `camelCase` for modules and hooks (`useThreadStore.ts`); `PascalCase` for React components and classes (`ChatView.tsx`, `DesktopBackendManager.ts`); `kebab-case` for scripts and config assets when platform tooling expects it.
+- **Variables / functions:** `camelCase` (`loadRepoEnv`, `wsUrl`).
+- **Types / interfaces / classes / enums / React components:** `PascalCase` (`ServerConfig`, `ThreadId`).
+- **Constants / env-style keys:** `UPPER_SNAKE_CASE` for true constants and channel names (`PICK_FOLDER_CHANNEL`); product env vars use `KATACODE_*`.
+- **Booleans:** prefer `is` / `has` / `should` / `can` prefixes (`isConnected`, `hasLocalChanges`).
+- **Tests:** colocate as `*.test.ts(x)` or `*.browser.tsx`; match the unit under test name when practical.
+- **Packages:** npm scope `@kata-sh/code-*`; avoid reintroducing `@t3tools/*`.
+
 ## Core Priorities
 
 1. Performance first.

@@ -21,6 +21,7 @@ Setup, user workflows, providers, cloud, and integrations.
 | Document                                                                                  | Summary                                                                              |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | [E2E test catalog](/guides/e2e-test-catalog.md)                                           | Single index of all desktop + mobile E2E tests, with tags and run commands           |
+| [Sidebar v2 UAT — playground-first](/guides/sidebar-v2-uat-playground.md)                 | Fixture catalog → `/playground/sidebar` UAT → Vitest assertions → live E2E           |
 | [Mobile E2E authoring (Maestro Studio)](/guides/e2e-mobile-authoring-maestro-studio.md)   | Canonical guide for locator discovery, editing flows, and creating new Maestro tests |
 | [e2e/README](../../e2e/README.md)                                                         | Local Playwright Electron E2E commands, env vars, and artifact paths                 |
 | [E2E foundation design](/specs/2026-06-21-e2e-testing-foundation-design.md)               | Spec, acceptance criteria, implementation notes, and verification evidence           |

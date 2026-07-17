@@ -13,6 +13,8 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
   setThreadChangedFilesExpanded,
+  setThreadPinned,
+  setThreadSlept,
   syncProjects,
   syncThreads,
   type UiState,
@@ -24,6 +26,8 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectOrder: [],
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
+    threadPinnedById: {},
+    threadSleptById: {},
     defaultAdvertisedEndpointKey: null,
     ...overrides,
   };
@@ -64,6 +68,19 @@ describe("uiStateStore pure functions", () => {
     const next = markThreadUnread(initialState, threadId, latestTurnCompletedAt);
 
     expect(next.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:29:59.999Z");
+  });
+
+  it("setThreadPinned clears Sleep and setThreadSlept no-ops while pinned", () => {
+    const threadId = ThreadId.make("thread-1");
+    const slept = setThreadSlept(makeUiState(), threadId, true);
+    expect(slept.threadSleptById[threadId]).toBe(true);
+
+    const pinned = setThreadPinned(slept, threadId, true);
+    expect(pinned.threadPinnedById[threadId]).toBe(true);
+    expect(pinned.threadSleptById[threadId]).toBeUndefined();
+
+    const sleepWhilePinned = setThreadSlept(pinned, threadId, true);
+    expect(sleepWhilePinned).toBe(pinned);
   });
 
   it("markThreadUnread does not change a thread without a completed turn", () => {
@@ -502,6 +519,30 @@ describe("uiStateStore persistence round-trip", () => {
       [projectA.key]: false,
       [projectB.key]: false,
     });
+  });
+
+  it("persists and rehydrates Pin and Sleep overrides", () => {
+    const pinnedId = ThreadId.make("thread-pinned");
+    const sleptId = ThreadId.make("thread-slept");
+    let state = makeUiState();
+    state = setThreadPinned(state, pinnedId, true);
+    state = setThreadSlept(state, sleptId, true);
+    persistState(state);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+    expect(persisted.threadPinnedById).toEqual({ [pinnedId]: true });
+    expect(persisted.threadSleptById).toEqual({ [sleptId]: true });
+
+    // Simulate restart: re-read through persist path sanitizers.
+    const rehydrated = {
+      ...makeUiState(),
+      threadPinnedById: persisted.threadPinnedById ?? {},
+      threadSleptById: persisted.threadSleptById ?? {},
+    };
+    expect(rehydrated.threadPinnedById[pinnedId]).toBe(true);
+    expect(rehydrated.threadSleptById[sleptId]).toBe(true);
   });
 
   it("respects mixed expand state on rehydrate and defaults new projects to expanded", () => {

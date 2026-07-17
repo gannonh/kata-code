@@ -20,8 +20,12 @@
     "tc": "vp run -r --concurrency-limit 2 typecheck",
     "lint": "vp lint --report-unused-disable-directives",
     "lint:mobile": "node scripts/mobile-native-static-check.ts",
-    "test": "vp run -r test",
+    "test": "vp test run --coverage --exclude e2e/** --exclude mobile-e2e/**",
+    "test:unit": "vp run -r test",
+    "test:coverage": "vp run test",
     "test:desktop-smoke": "vp run --filter @kata-sh/code-desktop smoke-test",
+    "knip": "knip --no-exit-code",
+    "knip:strict": "knip",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
     "build:contracts": "vp run --filter @kata-sh/code-contracts build",
@@ -68,7 +72,9 @@
     "@playwright/test": "1.60.0",
     "@types/node": "catalog:",
     "@typescript/native-preview": "catalog:",
+    "@vitest/coverage-v8": "4.1.8",
     "husky": "^9.1.7",
+    "knip": "5.88.1",
     "vite-plus": "catalog:"
   },
   "engines": {

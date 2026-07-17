@@ -1,5 +1,21 @@
 # OKF bundle log
 
+## 2026-07-16 (Sidebar v2 Active / Idle)
+
+Approved [Active / Idle design](/specs/2026-07-16-sidebar-v2-active-idle-design.md) (dwell + Sleep/Pin); supersedes four-tier list sections from [sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md).
+
+## 2026-07-16 (Sidebar v2 UAT playground-first)
+
+Added [Sidebar v2 UAT guide](/guides/sidebar-v2-uat-playground.md); linked from [specs roadmap](/specs/index.md) / [Sidebar v2 spec](/specs/2026-07-14-sidebar-v2-hybrid-design.md). Verify proceeds via `/playground/sidebar` fixture route + Vitest browser assertions before live agent E2E.
+
+## 2026-07-15 (Sidebar v2 attention tiers implemented)
+
+Implemented [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md) (Phases A–D). Roadmap → **Implemented**; Verify pending for visual AC 11 and `@sidebar` E2E.
+
+## 2026-07-15 (Sidebar v2 attention tiers approved)
+
+Approved revised [Sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md): attention tiers + project picker + accordion new-session; pixel contract = `c-attention-session.html`. Hard frontend-only boundary (no environments/sandbox contract changes). Updated [specs roadmap](/specs/index.md) and [specs log](/specs/log.md). Build may proceed on Phases A–D.
+
 ## 2026-07-14 (Recorded web E2E isolation)
 
 Updated the [E2E test catalog](/guides/e2e-test-catalog.md) for the standard isolated `web-dev` fixture and removed documentation references to the retired dedicated web recording fixture.

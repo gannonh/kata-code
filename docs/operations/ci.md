@@ -10,22 +10,47 @@ timestamp: 2026-06-16T22:45:00Z
 
 ## Active workflows
 
-| Workflow     | Path                                                                   | Jobs (summary)                                                                |
-| ------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| CI           | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)           | Check (`vp check`, typecheck), Test, Test Browser, Mobile lint, Release Smoke |
-| Release      | [`.github/workflows/release.yml`](../../.github/workflows/release.yml) | Preflight, desktop builds, GitHub Release, hosted web deploy, CLI npm publish |
-| PR size      | `pr-size.yml`                                                          | Size labels                                                                   |
-| PR vouch     | `pr-vouch.yml`                                                         | Vouch labels                                                                  |
-| Issue labels | `issue-labels.yml`                                                     | Template sync                                                                 |
+| Workflow     | Path                                                                   | Jobs (summary)                                                                                              |
+| ------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| CI           | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)           | Check (`vp check`, typecheck, knip report), Test (coverage-gated), Test Browser, Mobile lint, Release Smoke |
+| CodeQL       | [`.github/workflows/codeql.yml`](../../.github/workflows/codeql.yml)   | JavaScript/TypeScript security-extended analysis (uploads GitHub code-scanning alerts)                      |
+| Release      | [`.github/workflows/release.yml`](../../.github/workflows/release.yml) | Preflight, desktop builds, GitHub Release, hosted web deploy, CLI npm publish                               |
+| Dependabot   | [`.github/dependabot.yml`](../../.github/dependabot.yml)               | Weekly npm + GitHub Actions updates with cooldown (min package age)                                         |
+| PR size      | `pr-size.yml`                                                          | Size labels                                                                                                 |
+| PR vouch     | `pr-vouch.yml`                                                         | Vouch labels                                                                                                |
+| Issue labels | `issue-labels.yml`                                                     | Template sync                                                                                               |
 
 CI runs on every pull request and push to `main`. Local parity before push:
 
 ```bash
 vp check
 vp run typecheck
-vp run test
+vp run test            # unit suite + coverage gate (matches CI Test job)
+vp run knip            # unused/dead code report (soft-fail in CI Check job)
 vp run release:smoke   # matches CI Release Smoke job; required for release work
 ```
+
+### Coverage thresholds
+
+Root `vite.config.ts` enforces minimum coverage on `vp run test` / `vp run test:coverage`:
+
+| Metric     | Floor |
+| ---------- | ----- |
+| Lines      | 65%   |
+| Statements | 65%   |
+| Functions  | 60%   |
+| Branches   | 50%   |
+
+CI **Test** runs `vp run test` (coverage-enabled) and fails if any floor is missed. Use `vp run test:unit` for package-filtered runs without the coverage gate.
+
+### Dependency update policy (minimum package age)
+
+Dependabot opens version-update PRs only after a release has been on the registry for a cooldown window (see [`.github/dependabot.yml`](../../.github/dependabot.yml)):
+
+- Default / minor / patch: **3 days**
+- Major: **7 days**
+
+This is the repository minimum-release-age policy for automated dependency bumps. Security advisories may still surface outside that window via GitHub security alerts.
 
 ## Branch protection (`main`)
 

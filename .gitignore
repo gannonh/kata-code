@@ -21,6 +21,8 @@ apps/web/.playwright
 apps/web/playwright-report
 apps/web/src/components/__screenshots__
 .vitest-*
+coverage/
+coverage-summary.json
 __screenshots__/
 .tanstack
 squashfs-root/

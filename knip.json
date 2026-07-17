@@ -1,0 +1,50 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.{ts,mjs,cjs,js}", "oxlint-plugin-kata-code/**/*.{ts,js}"],
+      "project": ["scripts/**/*.{ts,mjs,cjs,js}", "oxlint-plugin-kata-code/**/*.{ts,js}"]
+    },
+    "apps/server": {
+      "entry": ["src/**/*.ts", "scripts/**/*.{ts,mjs,cjs,js}", "integration/**/*.ts"],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mjs,cjs,js}", "integration/**/*.{ts,tsx}"]
+    },
+    "apps/web": {
+      "entry": ["src/**/*.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "apps/desktop": {
+      "entry": ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mjs,cjs,js}"],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mjs,cjs,js}"]
+    },
+    "apps/mobile": {
+      "entry": ["app.config.ts", "src/**/*.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}", "app.config.ts"]
+    },
+    "apps/marketing": {
+      "entry": ["src/**/*.{ts,tsx,astro,md,mdx}", "astro.config.*"],
+      "project": ["src/**/*.{ts,tsx,astro,md,mdx}", "astro.config.*"]
+    },
+    "packages/*": {
+      "entry": ["src/**/*.ts"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "e2e": {
+      "entry": ["playwright.config.ts", "src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "playwright.config.ts"]
+    },
+    "mobile-e2e": {
+      "entry": ["src/**/*.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    }
+  },
+  "ignore": [
+    "apps/mobile/android/**",
+    "apps/mobile/ios/**",
+    "apps/web/public/**",
+    "**/routeTree.gen.ts",
+    "uat-evidence/**"
+  ],
+  "ignoreBinaries": ["vp", "pnpm", "docker", "brew", "playwright", "maestro"],
+  "ignoreWorkspaces": ["infra/**"]
+}

@@ -231,7 +231,7 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
   }
 
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5">
+    <span className="thread-row-trailing-status inline-flex shrink-0 items-center gap-1.5">
       {terminalStatus ? (
         <Tooltip>
           <TooltipTrigger

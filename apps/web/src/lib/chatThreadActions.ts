@@ -49,14 +49,42 @@ export function resolveThreadActionProjectRef(
   return context.defaultProjectRef;
 }
 
-function buildContextualThreadOptions(context: ChatThreadActionContext): NewThreadOptions {
+function buildContextualThreadOptions(
+  context: ChatThreadActionContext,
+  projectRef: ScopedProjectRef,
+): NewThreadOptions {
+  // Only inherit branch/worktree when the active thread/draft is in the same project.
+  // Cross-project starts should use the default env mode without foreign workspace context.
+  const activeThread =
+    context.activeThread?.projectId === projectRef.projectId &&
+    context.activeThread.environmentId === projectRef.environmentId
+      ? context.activeThread
+      : null;
+  const activeDraftThread =
+    context.activeDraftThread?.projectId === projectRef.projectId &&
+    context.activeDraftThread.environmentId === projectRef.environmentId
+      ? context.activeDraftThread
+      : null;
+
+  if (context.defaultThreadEnvMode === "worktree") {
+    return { envMode: "worktree" };
+  }
+  if (activeDraftThread) {
+    return {
+      branch: activeDraftThread.branch,
+      worktreePath: activeDraftThread.worktreePath,
+      envMode: activeDraftThread.envMode,
+    };
+  }
+  if (activeThread) {
+    return {
+      branch: activeThread.branch,
+      worktreePath: activeThread.worktreePath,
+      envMode: activeThread.worktreePath ? "worktree" : "local",
+    };
+  }
   return {
-    branch: context.activeThread?.branch ?? context.activeDraftThread?.branch ?? null,
-    worktreePath:
-      context.activeThread?.worktreePath ?? context.activeDraftThread?.worktreePath ?? null,
-    envMode:
-      context.activeDraftThread?.envMode ??
-      (context.activeThread?.worktreePath ? "worktree" : "local"),
+    envMode: context.defaultThreadEnvMode,
   };
 }
 
@@ -70,7 +98,7 @@ export async function startNewThreadInProjectFromContext(
   context: ChatThreadActionContext,
   projectRef: ScopedProjectRef,
 ): Promise<void> {
-  await context.handleNewThread(projectRef, buildContextualThreadOptions(context));
+  await context.handleNewThread(projectRef, buildContextualThreadOptions(context, projectRef));
 }
 
 export async function startNewThreadFromContext(

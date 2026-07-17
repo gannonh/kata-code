@@ -1,416 +1,356 @@
 ---
 type: Spec
-title: "Sidebar v2: recency-first hybrid thread list"
-description: "Replace the project-grouped thread sidebar with a recency-first list combining adaptive row density, a pinned needs-you section, and a rich meta row."
-status: Approved
-approved_at: 2026-07-14T17:10:14Z
-tags: [web, sidebar, ux, orchestration, contracts]
+title: "Sidebar v2: attention tiers + project picker"
+description: "Replace the project-grouped thread sidebar with attention-tiered list (Waiting / Working / Blocked / Idle), optional project filter, and accordion new-session chrome — frontend-only on existing APIs."
+status: Implemented
+approved_at: 2026-07-15T23:25:53Z
+revised_at: 2026-07-15T23:17:00Z
+prior_approved_at: 2026-07-14T17:10:14Z
+implemented_at: 2026-07-15T23:58:37Z
+tags: [web, sidebar, ux, orchestration]
 timestamp: 2026-07-14T00:00:00Z
 ---
 
-# Sidebar v2: recency-first hybrid thread list
+# Sidebar v2: attention tiers + project picker
 
 ## Status
 
-Approved
+**Implemented** (2026-07-15). Phases A–D landed on `sidebar-redesign`:
+attention tiers + project picker + accordion new-session on existing APIs,
+pixel-contract CSS from `c-attention-session.html`. Verify (AC 11 visual
+sign-off + populated-state fixtures) still required before merge.
+
+**UAT path:** playground-first — see
+[Sidebar v2 UAT guide](/guides/sidebar-v2-uat-playground.md). Fixture catalog
+drives maintainer review and Vitest browser proof; live `@agent` E2E only for
+timer/transition cases fixtures cannot force.
+
+**List-structure supersession (2026-07-16):** four vertical tiers are replaced
+by Active / Idle + sub-state chips, dwell idle timer, and Sleep/Pin — see
+[Active / Idle design](/specs/2026-07-16-sidebar-v2-active-idle-design.md)
+(**Approved**; Build next).
 
 ## Goal
 
-Replace the current project-grouped thread sidebar in `apps/web` with a single
-recency-first thread list that combines three concepts from the Sidebar v2
-exploration:
+Replace the current project-grouped thread sidebar in `apps/web` with:
 
-1. **Adaptive density** (concept 4): live and blocked threads render as rich
-   cards; settled threads collapse to slim one-line rows.
-2. **Needs-you pinning** (concept 3): threads blocked on the user are pinned
-   above the recency list, sorted by how long they have been waiting.
-3. **Meta row** (concept 1): rich cards carry a project chip, branch, model,
-   and time so project identity survives the removal of group headers.
+1. **Attention tiers** — threads sorted into Waiting / Working / Blocked /
+   Idle (Idle collapsed by default until clicked).
+2. **Project picker filter** — optional scope by logical project/repo; no
+   filter chips under the picker.
+3. **Accordion new session** — global `+` opens a project accordion; click a
+   connected environment to start via **existing** new-thread /
+   environment-selection APIs (no new env contracts).
+4. **Meta row** — project chip · branch · model (when available) · time ·
+   existing remote/env badge.
 
-The new sidebar also fixes two gaps in the current implementation: failed
-sessions (`session.lastError`) are invisible today, and active work can be
-hidden behind the per-project "show more" collapse.
+Also: surface Failed sessions (`session.lastError`); remove per-project
+"show more" so actionable work cannot hide behind collapse.
 
-## Reference mocks
+Visual source of truth: the interactive frontend prototype
+[`c-attention-session.html`](../comps/sidebar-v2-prototypes/c-attention-session.html)
+— implement that look exactly; it defines the new sidebar design language.
 
-- Normative visual reference (committed): [`docs/comps/SCR-20260714-ivzt-2.png`](../comps/SCR-20260714-ivzt-2.png)
-  — full-page capture of the concept exploration.
-- Interactive concept demo (supplementary, may rot):
-  <https://hsyscdqldmk5.postplan.dev/>.
+## Hard scope boundary (non-negotiable)
 
-The exploration's "hybrid" note is the shipped scope: concept 4's adaptive
-density + concept 3's needs-you pinning + concept 1's meta row.
+This ship is a **sidebar presentation + chrome** change on web/desktop.
+
+**In scope:** `apps/web` sidebar UI and pure helpers (`Sidebar.tsx`,
+`Sidebar.logic.ts`, thin extracted list/card components, related Vitest
+browser + `@sidebar` E2E). Wire new-session UI to existing
+`resolveSidebarNewThreadSeedContext` / project / environment selection
+paths already used today.
+
+**Out of scope (do not touch):**
+
+- Kata environments / sandbox / deploy services, drivers, Settings
+  environments UI, relay linking, or BYOC contracts.
+- New multi-env data model or environment create/connect/auth flows.
+- Broad `packages/contracts` redesign. Optional **additive** shell fields
+  only if an acceptance criterion is blocked without them (see
+  [Optional shell enrichments](#optional-shell-enrichments)); default is
+  **no server work**.
+
+If Build discovers a need that would change environments behavior, **stop
+and amend this spec** — do not expand the PR.
+
+## Normative frontend prototype (pixel contract)
+
+**`c-attention-session.html` is not a mood board.** It is the shipped visual
+and interaction contract for the sidebar. Build must match it **exactly**
+(tokens, density, typography, tier chrome, picker, accordion new-session,
+row anatomy), with only minor polish allowed (a11y focus rings, motion
+timing, edge-case empty states).
+
+**What NOT to do (failed-attempt lesson):** treat the prototype as a general
+reference and “adapt it” into the current app design language. The prototype
+**is** the new sidebar design language. Do not restyle cards, rails, chips,
+or chrome to match pre-v2 Sidebar patterns, Tailwind defaults elsewhere in
+the app, or older Figma comps.
+
+Working prototype (normative):
+
+- [`docs/comps/sidebar-v2-prototypes/c-attention-session.html`](../comps/sidebar-v2-prototypes/c-attention-session.html)
+- Serve: `docs/comps/sidebar-v2-prototypes/serve.sh` →
+  `http://127.0.0.1:8765/c-attention-session.html`
+- Captures that define look: `shot-accordion-fixed.png`,
+  `shot-c-multi-env.png`, `shot-variant-c.png` in the same folder.
+
+Port CSS variables and structure from the prototype into the web sidebar
+(shared tokens / scoped stylesheet), rather than inventing a parallel look.
+
+Archive only (non-normative):
+
+- [`docs/comps/sidebar-v2-prototypes/project-identity.html`](../comps/sidebar-v2-prototypes/project-identity.html)
+  (A / B / 0 / first C)
+- Earlier exploration (history): <https://hsyscdqldmk5.postplan.dev/>,
+  [`docs/comps/SCR-20260714-ivzt-2.png`](../comps/SCR-20260714-ivzt-2.png)
 
 ## Verified current state
 
-- `apps/web/src/components/Sidebar.tsx` (3,514 lines) renders a
-  project-grouped tree. `getVisibleThreadsForProject` in `Sidebar.logic.ts`
-  implements a `previewLimit` + "show more" collapse per project.
-- `SidebarThreadSummary` (`apps/web/src/types.ts`) is populated from the
-  server's `OrchestrationThreadShell` stream (`packages/contracts/src/orchestration.ts`,
-  projected in `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts`).
-  It already carries: `session` (including `lastError` and `status`),
-  `latestTurn` (`requestedAt`/`startedAt`/`completedAt`), `branch`,
-  `worktreePath`, `latestUserMessageAt`, `hasPendingApprovals`,
-  `hasPendingUserInput`, `hasActionableProposedPlan`, `interactionMode`.
-- `OrchestrationThreadShell` carries `modelSelection`, but the web
-  `SidebarThreadSummary` drops it (`mapThreadShell` in `apps/web/src/store.ts`).
-- Unread state is client-side: `threadLastVisitedAtById` in
-  `apps/web/src/uiStateStore.ts`; `hasUnseenCompletion` in `Sidebar.logic.ts`.
-- `resolveThreadStatusPill` (`Sidebar.logic.ts`) implements the status
-  priority: Pending Approval > Awaiting Input > Working/Connecting > Plan
-  Ready > Completed-unseen. It has no Failed state.
-- Live activities (`OrchestrationThreadActivity`) and per-turn diff stats
-  (`OrchestrationCheckpointSummary.files` with `additions`/`deletions`) exist
-  only on the full `OrchestrationThread`, not on the shell used by the
-  sidebar.
-- PR state comes from client-side `useVcsStatus` polling
-  (`ThreadStatusIndicators.tsx`), keyed by thread branch and cwd.
-- Sidebar settings in `packages/contracts/src/settings.ts`:
-  `sidebarThreadSortOrder` (`updated_at` | `created_at`),
-  `sidebarProjectSortOrder` (incl. `manual` with dnd-kit reordering in
-  `Sidebar.tsx`), `sidebarThreadPreviewCount` (feeds only the "show more"
-  collapse; has Settings-panel UI), and `sidebarProjectGroupingMode` (logical
-  project grouping via `logicalProject.ts`, also used outside the sidebar).
-- Sidebar chrome hosted on group headers today: per-project new-thread button
-  (`data-testid="new-thread-button"`, also hardcoded in
-  `ChatView.browser.tsx` tests), `ProjectSortMenu`, and the add-project
-  trigger (`data-testid="sidebar-add-project-trigger"`).
-- Pending-state provenance on the server: `projection_pending_approvals` rows
-  carry `created_at`; pending user input is only a derived count
-  (`pending_user_input_count`, computed in `ProjectionPipeline.ts`) with no
-  stored timestamp for the oldest pending request.
-- E2E harness (`e2e/`) has no thread-state fixture system; agent tests drive
-  real providers. No existing E2E test targets the sidebar. Web component
-  tests with fixture stores exist as Vitest browser tests
-  (`*.browser.tsx`).
-- Sidebar rows are prewarmed into the thread-detail cache
-  (`SIDEBAR_THREAD_PREWARM_LIMIT = 10`, `getSidebarThreadIdsToPrewarm`).
+- `apps/web/src/components/Sidebar.tsx` renders a project-grouped tree.
+  `getVisibleThreadsForProject` in `Sidebar.logic.ts` implements
+  `previewLimit` + "show more" per project.
+- `SidebarThreadSummary` is populated from `OrchestrationThreadShell`
+  (`packages/contracts/src/orchestration.ts`, projected in
+  `ProjectionSnapshotQuery.ts`). It already carries: `session` (incl.
+  `lastError`, `status`), `latestTurn`, `branch`, `worktreePath`,
+  `latestUserMessageAt`, `hasPendingApprovals`, `hasPendingUserInput`,
+  `hasActionableProposedPlan`, `interactionMode`, and environment /
+  remote-related fields used by today's cloud badge.
+- `modelSelection` exists on the shell but is dropped by `mapThreadShell`
+  today — optional enrichment only.
+- Unread / unseen completion: `threadLastVisitedAtById` +
+  `hasUnseenCompletion`.
+- `resolveThreadStatusPill` has no Failed state today.
+- Live activities and per-turn diff stats exist on full threads, not
+  necessarily on the shell — optional enrichment only; Build may use
+  coarser status verbs without them.
+- Sidebar chrome on group headers today: per-project new-thread
+  (`data-testid="new-thread-button"`), `ProjectSortMenu`, add-project
+  (`data-testid="sidebar-add-project-trigger"`).
+- No existing E2E targets the sidebar; Vitest browser fixtures exist.
 
 ## Constraints
 
-- Web + desktop only. `apps/web` renders in both; mobile (`apps/mobile`) is
-  untouched.
-- Replace outright: the project-grouped layout, project group headers, and the
-  per-project "show more" collapse are removed, along with their supporting
-  logic once nothing references it. No layout setting toggle.
-- The existing `sidebarThreadSortOrder` setting keeps working and drives the
-  recency zone sort. Grouped-sidebar-only settings are retired: remove the
-  `sidebarThreadPreviewCount` Settings-panel UI and the `ProjectSortMenu`;
-  keep the schema fields (backward decode) but stop reading them in the
-  sidebar. Manual project reordering and the dnd-kit apparatus in
-  `Sidebar.tsx` are removed with the headers. `sidebarProjectGroupingMode`
-  and `logicalProject.ts` stay: logical projects still label the project
-  chip and back the new-thread project picker.
-- Keep `packages/contracts` schema-only. Shell schema additions must be
-  backward-decodable (optional or defaulted fields) so older clients and
-  stored snapshots do not fail decoding.
-- Preserve existing sidebar behaviors: thread selection and multi-select,
-  context menus, keyboard traversal (`resolveAdjacentThreadId`), new-thread
-  flows (`resolveSidebarNewThreadSeedContext`), project creation, archive,
-  search/⌘K, thread prewarming, and remote-environment affordances.
-- Performance first: the sidebar re-renders on every shell-stream event. New
-  fields must flow through the existing equality gates
-  (`sidebarThreadSummariesEqual` in `apps/web/src/store.ts`) so unchanged rows
-  do not re-render. Live elapsed timers must tick locally (one shared
-  interval), not via store updates.
+- Web + desktop only (`apps/web`); mobile untouched.
+- Replace-outright layout: remove project group headers and "show more".
+  No layout toggle.
+- Keep `sidebarThreadSortOrder` for Idle / within-tier ordering where
+  applicable. Retire grouped-only Settings UI (`sidebarThreadPreviewCount`
+  panel, `ProjectSortMenu`, dnd-kit project reorder in sidebar). Keep
+  schema fields for backward decode. Keep `sidebarProjectGroupingMode` /
+  `logicalProject.ts` for chips + picker.
+- Preserve: selection, multi-select, context menus, keyboard traversal,
+  archive, search/⌘K, prewarming, and **existing** remote-environment
+  affordances (display only; do not reimplement env lifecycle).
+- Performance: respect `sidebarThreadSummariesEqual`; local 1s ticker for
+  elapsed timers (no store writes per tick).
+- Atomic PRs: each phase leaves `vp check` and `vp run typecheck` green;
+  run environments-related smoke / existing suites as regression gate
+  before merge (do not "fix" environments inside this work).
 
 ## Out of scope
 
-- Inline Approve / Review actions in the sidebar (concept 3's inline
-  approvals). The demo flags this as an unresolved safety question; defer.
-- Message snippets as context lines (concept 2) and the Ops Grid treatment
-  (concept 5).
-- Mobile sidebar changes.
-- Server-side PR state in the shell stream (stays client-polled).
-- Archive affordance redesign (current context-menu archive stays as is).
+- Inline Approve / Review on Waiting cards (safety unresolved).
+- Message-snippet Inbox treatment; Ops Grid.
+- Mobile sidebar.
+- Server-side PR state in the shell stream.
+- Archive affordance redesign.
+- Environments / sandbox / deploy architecture (see hard boundary).
 
 ## Design
 
-### List structure
+### List structure — attention tiers
 
-One scrollable list, two zones, no project group headers:
+One scrollable list, **four tiers**, no project group headers. Tiers are
+state-driven; empty tiers are omitted.
 
-**Needs-you zone (pinned).** Threads where the user is the bottleneck:
-`hasPendingApprovals`, `hasPendingUserInput`, or plan-ready (same predicate as
-today's Plan Ready pill). Sorted by wait duration, longest first. Wait
-duration is measured from the timestamp of the blocking event (see "Wait time"
-below). Rows here always render as rich cards and show `waiting Xm` in place
-of relative message age. The zone has a slim `NEEDS YOU · n` header and is
-omitted entirely when empty.
+| Tier        | Predicate (observable)                                                                                                                                       | Density                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| **Waiting** | User bottleneck: pending approval, pending input, or actionable proposed plan                                                                                | Rich card; wait label; optional inline _actions deferred_ |
+| **Working** | Running / connecting session                                                                                                                                 | Rich card; status verb + elapsed timer                    |
+| **Blocked** | Failed / error session (`lastError` + no higher-priority state)                                                                                              | Rich card until visited; then slim with red dot           |
+| **Idle**    | Settled / done (incl. done-unseen may start rich then collapse, or sit under Idle as expanded-on-click — Build matches prototype: Idle collapsed by default) | Slim row; click expands detail in-place                   |
 
-**Recency zone.** All other non-archived threads in one flat list sorted by
-the existing `sidebarThreadSortOrder`. Row density adapts to state:
+Within Waiting: sort by wait duration longest-first when a wait timestamp
+is available; otherwise stable by existing sort order.
 
-- **Rich card** for Working, Connecting, Failed, and Done-unseen threads:
-  - Line 1: title.
-  - Line 2: status verb + context. Working: latest activity summary + live
-    elapsed timer (`Working — Write sidebar.tsx · 14m 22s`). Failed: first
-    line of `session.lastError`, red treatment. Done-unseen: diff stats
-    (`+214 −38 · 12 files`) when available.
-  - Line 3 (meta row): project chip · branch (worktree-aware) · model ·
-    relative time · cloud badge for remote-environment threads.
-- **Slim row** for settled threads: title · status dot · compact trailing
-  meta (diff stats or PR chip when available · relative time). One line,
-  comparable height to today's rows.
+**No "show more".** Scroll (virtualize only if 200+ threads jank).
 
-Done-unseen cards revert to slim rows once visited (`lastVisitedAt` advances
-past `latestTurn.completedAt`), reusing `hasUnseenCompletion`.
+### Project picker filter
 
-**No "show more".** Every non-archived thread is reachable by scrolling.
-Virtualize the list if profiling during Build shows jank with large thread
-counts (200+); otherwise plain overflow scroll is acceptable.
+Below search / beside chrome: dropdown "All projects" | logical projects.
+Filtering scopes the tier list to that project's threads. When scoped,
+show a quiet hint if Waiting items exist in other projects ("N waiting in
+other projects · switch to All"). No chip row under the picker.
 
-### Sidebar chrome in the flat layout
+### Meta row
 
-Group headers currently host three affordances; each gets a new home:
+Rich cards: project chip · branch (worktree-aware) · model when present ·
+time / waiting label · **existing** env/remote badge (Local implied by
+absence, or reuse today's cloud badge — do not invent new env types in
+contracts).
 
-- **New thread.** One global `+` button in the sidebar header (keeps
-  `data-testid="new-thread-button"`). It seeds from the active thread's
-  project via `resolveSidebarNewThreadSeedContext`; when no thread is active
-  it opens a project picker listing logical projects. Thread-row context
-  menus gain "New thread in this project" for explicit targeting.
-  `ChatView.browser.tsx` tests that reach the button through the project
-  header structure are updated to the new location.
-- **Add project.** Moves to the sidebar footer (keeps
-  `data-testid="sidebar-add-project-trigger"`). Project management
-  (rename, remove) stays reachable via a projects section in Settings or the
-  new-thread project picker's context menu; exact placement is a Build-time
-  call, but the affordance must exist (criterion 9).
-- **Project sort menu.** Removed with grouping; no replacement.
+### New session accordion
+
+Global `+` (`data-testid="new-thread-button"`) opens an inline panel:
+
+- List logical projects as accordion rows.
+- Single-env project: tap row (or Start) → create via existing seed path.
+- Multi-env project: expand → list **already connected** environments from
+  existing client state → tap env starts session (no confirm step).
+- "+ New project" / footer add-project (`sidebar-add-project-trigger`)
+  stays; opens existing add-project flow (do not reimplement Settings
+  environments).
+- Context menu: "New thread in this project" / "New in this env" when an
+  env is known on the row — immediate start, no sheet.
+
+Must not introduce new environment provisioning APIs.
 
 ### Status model
 
-Extend the existing `ThreadStatusPill` vocabulary with `Failed`: a session
-whose `status` is `"error"` or `"closed"` with a non-empty `lastError`, and no
-higher-priority state. Priority order becomes: Pending Approval > Awaiting
-Input > Working/Connecting > Plan Ready > Failed > Completed-unseen > none.
-Exact predicate is settled in Build against `session-logic.ts`; the observable
-requirement is acceptance criterion 5.
-
-**Failed lifetime.** Failed follows the same seen/unseen rule as Done:
-Failed-unseen renders as a rich card (red treatment + error text); once
-visited (`lastVisitedAt` advances past the error time) it collapses to a slim
-row with a red dot. A newer turn starting on the thread clears the Failed
-treatment regardless of visit state. Build must verify whether
-`session.lastError` is cleared on a successful subsequent turn and gate the
-predicate on turn recency if it is not.
-
-**Slim-row dot.** Slim rows show a trailing dot only when it encodes
-something: red for failed-seen. Otherwise no dot; diff stats, PR chip, and
-relative time are the only trailing meta.
+Extend pills with Failed. Priority: Pending Approval > Awaiting Input >
+Working/Connecting > Plan Ready > Failed > Completed-unseen > none.
+Map pills into tiers: approval/input/plan → Waiting; working/connecting →
+Working; failed → Blocked; else → Idle.
 
 ### Wait time
 
-Blocked threads show how long the user has been the bottleneck, as
-`waiting Xm` (minutes under an hour, then `waiting 3h`, `waiting 2d`):
+Prefer real wait timestamps when already available (e.g. pending approval
+`created_at`). If pending-input lacks a timestamp, **approved fallback**:
+anchor on `latestTurn.completedAt` (tooltip notes approximation). Do **not**
+block the UI ship on a projection migration.
 
-- Pending approval: elapsed since the oldest `projection_pending_approvals`
-  row's `created_at` (already stored).
-- Pending input: pending user input is currently a derived count in
-  `ProjectionPipeline.ts` with no stored timestamp. Phase 1 adds an
-  oldest-pending-input timestamp to the shell summary projection
-  (`ProjectionPipeline` change + schema migration alongside
-  `023_ProjectionThreadShellSummary`). If that projection proves
-  disproportionate during Build, the approved fallback is anchoring on
-  `latestTurn.completedAt` with the approximation noted in the row tooltip.
-- Plan ready: elapsed since `latestTurn.completedAt`.
+### Optional shell enrichments
 
-Both feed one shell field, `blockedSince: IsoDateTime | null`. Needs-you
-threads with null `blockedSince` sort after those with timestamps.
+Only if AC cannot be met with current summaries:
 
-### Contract and server changes
+- Surface `modelSelection` into `SidebarThreadSummary`.
+- Optional `latestActivity` / `latestTurnDiffStats` / `blockedSince` as
+  optional schema fields + projection — separate, additive PR after UI
+  is green, never bundled with environments changes.
 
-Extend `OrchestrationThreadShell` (and mirror into web `SidebarThreadSummary`
-via `mapThreadShell`):
-
-- `latestActivity: { tone, summary, createdAt } | null` — most recent
-  activity for the latest turn; powers the rich-card "what is it doing" line.
-- `latestTurnDiffStats: { additions, deletions, fileCount } | null` —
-  aggregated from the latest checkpoint's files.
-- `blockedSince: IsoDateTime | null` — oldest pending approval/input
-  timestamp; null when not blocked.
-- Surface the existing `modelSelection` field into `SidebarThreadSummary`.
-
-All three new fields are optional/defaulted in the schema. Server-side work
-spans `ProjectionSnapshotQuery.ts` (shell snapshot, archived shell snapshot
-where applicable, and the `thread-upserted` event path), the
-`ProjectionPipeline.ts` pending-input timestamp derivation, and one schema
-migration for the projected column. Update `sidebarThreadSummariesEqual` and
-the relay/server tests that construct shell fixtures.
-
-Streaming churn: activity summaries update at most per activity event (not
-per token). If Build finds activity events too chatty, debounce upserts of
-`latestActivity` server-side; the acceptance bar is criterion 3, not update
-frequency.
+Default Build path: **UI first with existing fields**.
 
 ### Component architecture
 
-New component tree replacing the grouped rendering inside the existing
-sidebar chrome (search, new-thread button, footer, context-menu plumbing stay):
+Replace grouped rendering inside existing sidebar chrome:
 
-- `ThreadListSidebar` — zones, sorting, virtualization decision, prewarm
-  wiring (`getSidebarThreadIdsToPrewarm` now takes the flat visible list).
-- `ThreadCardRich` — three-line card (needs-you + active/failed/done-unseen).
-- `ThreadRowSlim` — one-line settled row.
-- `Sidebar.logic.ts` additions (pure, unit-tested): `resolveThreadTier`
-  (needs-you vs recency), `resolveThreadRowDensity` (rich vs slim),
-  `resolveWaitDuration`, `Failed` pill support in `resolveThreadStatusPill`.
-- One shared 1s ticker hook for elapsed timers so N cards do not create N
-  intervals; timer text renders locally without store writes. Timers anchor
-  on `latestTurn.startedAt`.
+- `ThreadListSidebar` — tiers, filter, scroll/virtualization, prewarm.
+- `ThreadCardRich` / `ThreadRowSlim` (Idle expand).
+- `SidebarProjectPicker` — filter only.
+- `SidebarNewSessionPanel` — accordion; calls existing create/seed helpers.
+- `Sidebar.logic.ts`: `resolveThreadTier`, density helpers, Failed pill,
+  wait duration (pure + unit tests).
+- Shared 1s ticker hook for elapsed text.
 
-Dead code removal: project group headers, expand/collapse state,
-`getVisibleThreadsForProject`, `sortProjectsForSidebar`,
-`resolveProjectStatusIndicator`, and `sidebarProjectGrouping.ts` usages that
-serve only the grouped sidebar. Remove in the final phase once nothing
-references them. `Sidebar.tsx` should shrink substantially; splitting
-retained chrome into focused modules is in scope where it falls out
-naturally, broader refactors are not.
-
-Row height changes animate (150–200ms height transition) so density flips do
-not feel jumpy; exact treatment is a Build-time call, and the demo flags this
-as the main risk of concept 4.
+Dead code removal (final phase): group headers, show-more,
+`getVisibleThreadsForProject`, sidebar-only dnd-kit / ProjectSortMenu.
 
 ### Data flow
 
 ```mermaid
 flowchart LR
-  PQ[ProjectionSnapshotQuery\nshell snapshot + thread-upserted] --> WS[shell stream]
-  WS --> Store[store.ts mapThreadShell\nSidebarThreadSummary]
-  Store --> Logic[Sidebar.logic.ts\ntier / density / pill / wait]
-  UI[uiStateStore\nlastVisitedAt] --> Logic
-  VCS[useVcsStatus\nPR state] --> Rows
-  Logic --> Rows[ThreadCardRich / ThreadRowSlim]
+  Shell[Existing shell stream] --> Store[mapThreadShell]
+  Store --> Logic[Sidebar.logic tiers + filter]
+  UI[uiStateStore lastVisitedAt] --> Logic
+  Env[Existing env/project client state] --> NewSession[SidebarNewSessionPanel]
+  Logic --> List[ThreadListSidebar]
+  NewSession --> ExistingAPIs[Existing new-thread seed paths]
 ```
 
-## Implementation phases
+## Implementation phases (atomic)
 
-Each phase leaves `vp check` and `vp run typecheck` green and is separately
-committable.
+Each phase is separately committable; environments suites must stay green.
 
-**Phase 1 — Contracts + projection.** Add `latestActivity`,
-`latestTurnDiffStats`, `blockedSince` to `OrchestrationThreadShell`; project
-them in `ProjectionSnapshotQuery.ts`; add the oldest-pending-input timestamp
-to `ProjectionPipeline.ts` plus its migration; update server fixtures/tests.
-Mirror fields plus `modelSelection` into `SidebarThreadSummary`,
-`mapThreadShell`, and `sidebarThreadSummariesEqual`. Criteria: 3 (data), 4
-(data), 2 (data).
+**Phase A — Logic + fixtures (no UI swap).** Tier/density/Failed helpers +
+unit tests. Criteria: 2–5 (logic).
 
-**Phase 2 — Logic layer.** `resolveThreadTier`, `resolveThreadRowDensity`,
-`resolveWaitDuration`, Failed pill, unit tests in `Sidebar.logic.test.ts`.
-Criteria: 2, 3, 4, 5 (logic-level).
+**Phase B — Flat list UI + picker.** Replace grouped tree with tiers +
+project filter; relocate chrome; preserve selection/menus/keyboard.
+Vitest browser state matrix. Criteria: 1–8, 10 (partial).
 
-**Phase 3 — New list UI.** `ThreadListSidebar`, `ThreadCardRich`,
-`ThreadRowSlim`, shared ticker, height animation, relocated chrome (global
-new-thread button + picker, footer add-project). Wire into `Sidebar.tsx`
-replacing the grouped tree; preserve selection, context menus, keyboard
-traversal, new-thread seeding, prewarming. State-matrix rendering (approval,
-input, plan-ready, working, failed, done-unseen, settled, remote) is covered
-by Vitest browser tests with fixture stores, following the
-`ChatView.browser.tsx` pattern. Criteria: 1–9.
+**Phase C — New-session accordion.** Wire `+` panel to existing APIs;
+update `ChatView.browser.tsx` locators. Criteria: 9.
 
-**Phase 4 — Cleanup + E2E.** Delete grouped-sidebar dead code, dnd-kit
-reordering, `ProjectSortMenu`, and the thread-preview-count Settings UI. Add
-a `@sidebar` tag to `E2E_TAGS` (`e2e/src/config/tags.ts`) and author E2E
-smoke tests for flows the real harness can drive deterministically: list
-renders flat with no group headers, no "show more", scroll reachability with
-many threads, selection/traversal, new-thread flow, and a live working card
-during a deterministic agent turn. Manual validation via `playwright-cli`
-per AGENTS.md covers the remaining states. Criteria: 7, 9, 10.
+**Phase D — Cleanup + `@sidebar` E2E.** Delete dead grouped code; add
+`@sidebar` smoke (flat list, no show-more, filter, new-thread, scroll).
+Regression: existing environments-related tests untouched and green.
+Criteria: 7, 9, 10.
+
+Optional later (separate PR, only if needed): shell enrichments.
 
 ## Acceptance criteria
 
-1. The sidebar renders one recency-sorted thread list with no project group
-   headers; project identity appears as a chip on rich cards. Verified by
-   E2E assertion that no group-header elements render with two or more
-   projects present.
-2. Threads with pending approvals, pending user input, or an actionable
-   proposed plan render in a pinned "Needs you" section above all other
-   threads, ordered by wait duration (longest first, null `blockedSince`
-   last), each showing a `waiting Xm` label. Verified by Vitest browser
-   tests with fixture threads in each blocking state.
-3. Threads with a running or connecting session render as rich cards showing
-   a status verb, the latest activity summary from the shell stream, and an
-   elapsed timer anchored on `latestTurn.startedAt` that updates at least
-   every 5 seconds without a page reload. Verified by E2E during a
-   deterministic agent turn.
-4. Settled threads render as one-line rows showing title and trailing meta
-   (diff stats when `latestTurnDiffStats` is present, or PR chip when VCS
-   status reports one, plus relative time; red dot only for failed-seen).
-   Verified by Vitest browser tests with checkpoint fixture data.
-5. A thread whose session ended with a non-empty `lastError` and no
-   higher-priority state shows a Failed treatment (red indicator + error
-   text); once visited it collapses to a slim row with a red dot. Verified
-   by Vitest browser tests with an error-state fixture.
-6. A thread whose latest turn completed after `lastVisitedAt` renders as a
-   rich Done card until visited, then collapses to a slim row. Verified by
-   E2E: complete a turn, assert card, open thread, navigate away, assert
-   slim row.
-7. No "show more" affordance exists anywhere in the sidebar; with more
-   threads than fit on screen, every non-archived thread is reachable by
-   scrolling. Verified by E2E with 30+ threads created through the API.
-8. Rich cards display a meta row with project chip, branch, model label, and
-   relative time; threads on a remote environment additionally show the
-   cloud badge. Verified by Vitest browser tests including a
-   remote-environment fixture.
-9. Existing behaviors still work: clicking selects and opens a thread,
-   multi-select and context-menu actions (archive, delete), keyboard
-   previous/next traversal, new-thread creation with seeded branch/worktree
-   context (global button and per-row context menu), project creation via
-   the relocated add-project trigger, and search/⌘K. Verified by updated
-   Vitest browser suites plus E2E assertions for traversal and new-thread in
-   the flat list.
-10. `vp check`, `vp run typecheck`, and `vp run test` pass; sidebar E2E
-    tests pass via `vp run e2e --project desktop-dev --grep @sidebar` after
-    the tag is added to `E2E_TAGS`.
+1. Sidebar shows one flat list with **no** project group headers; project
+   identity is a chip / picker scope. E2E: ≥2 projects, no group headers.
+2. Waiting tier lists approval / input / plan-ready threads above others
+   when present; shows a wait label when a timestamp or fallback is
+   available. Vitest browser fixtures.
+3. Working tier shows rich cards with status verb and an elapsed timer
+   updating ≥ every 5s without reload (anchor `latestTurn.startedAt` when
+   present). E2E during a deterministic agent turn and/or browser fixture.
+4. Idle threads default to slim rows; click expands in-place; no
+   show-more. Vitest browser.
+5. Failed sessions show Blocked treatment (red + error text); after visit,
+   slim red dot. Vitest browser.
+6. Project picker scopes the list; "All projects" restores full list;
+   scoped Waiting hint when others wait. Vitest browser.
+7. Every non-archived thread reachable by scrolling (30+ threads via API).
+   E2E.
+8. Rich meta row shows project chip · branch · time; remote threads keep
+   today's cloud/env badge behavior. Vitest browser with remote fixture.
+9. Selection, multi-select, context menus, keyboard traversal, search/⌘K,
+   add-project, and new-thread (global `+` accordion + seeded context)
+   work without changing environments lifecycle. Updated browser suites +
+   E2E new-thread; **environments E2E / smoke remain green**.
+10. `vp check`, `vp run typecheck`, and `vp run test` pass;
+    `vp run e2e --project desktop-dev --grep @sidebar` after tag add.
+11. **Visual match to C.** Side-by-side with
+    `c-attention-session.html` (same viewport width), the implemented
+    sidebar matches the prototype’s design language: dark panel tokens,
+    tier headers, rich/slim row structure, picker, and new-session
+    accordion. Maintainer sign-off against prototype screenshots; no
+    “adapted to old Sidebar” restyle. Verified by manual
+    `playwright-cli` / screenshot comparison in Verify.
 
 ## Risks and mitigations
 
-- **Density-flip jumpiness.** Row heights change as states change. Mitigate
-  with a short height animation and by keeping density transitions rare
-  (unseen→seen, working→settled).
-- **Shell-stream churn from `latestActivity`.** Every activity event now
-  touches the sidebar summary. Equality gates already exist; if event volume
-  is high, debounce server-side. Profile during Phase 3.
-- **Regression surface in Sidebar.tsx.** The file mixes list rendering with
-  selection, context menus, and drag interactions. Mitigate by phasing:
-  logic first with unit tests, UI swap second, deletion last; existing E2E
-  suites run at each phase.
-- **Pending-input timestamp requires pipeline + migration work.** The
-  derivation in `ProjectionPipeline.ts` has nontrivial stale-request
-  resolution; the approved fallback (anchor on `latestTurn.completedAt`,
-  tooltip notes the approximation) bounds the cost if the projection grows
-  disproportionate.
-- **E2E cannot force every thread state deterministically.** The harness
-  drives real providers; approval/input/failed states are covered by Vitest
-  browser fixtures instead, with E2E reserved for flows the deterministic
-  agent can produce. This split is reflected per-criterion above.
-- **Browser tests hardcode grouped-sidebar structure.** `ChatView.browser.tsx`
-  reaches `new-thread-button` through the project header; those tests are
-  updated in Phase 3, not deleted.
-- **Virtualization unknown.** Decide during Phase 3 with a 200-thread
-  fixture; plain scroll is acceptable if frame times stay clean.
+- **Prior failed attempt.** Environments broke when sidebar work sprawled,
+  and the UI drifted from design comps. Mitigate with hard boundary above,
+  Phase A→D atomic commits, environments regression gate before merge, and
+  the **pixel contract**: implement from `c-attention-session.html`, do not
+  reinterpret into the old app chrome.
+- **Density / tier jumps.** Short height animation; keep Idle collapsed.
+- **Accordion over-fetch.** Only read existing connected env lists; never
+  invent provisioning in the sidebar PR.
+- **Insufficient shell fields.** Ship coarser copy first; optional
+  enrichment PR later.
+- **Browser tests hardcode group headers.** Update in Phase B/C, do not
+  delete coverage.
+- **E2E cannot force every state.** Fixtures for Waiting/Blocked; E2E for
+  deterministic flows.
 
 ## Explicitly deferred work
 
-File as issues via the deferred-work template when Build starts:
+File via deferred-work template when Build starts if not already filed:
 
-- Inline Approve / Review actions on needs-you cards (safety story required).
-- Mobile adoption of the recency-first list.
-- Message-snippet context lines (concept 2) as an optional density mode.
-- Server-side PR state in the shell stream.
+- Inline Approve / Review on Waiting cards.
+- Mobile adoption.
+- Message-snippet density mode.
+- Server-side PR in shell stream.
+- Projection enrichments (`latestActivity`, `blockedSince`, etc.) if
+  deferred after UI ship.
 
 ## Build handoff
 
-- Scope: phases 1–4 above; web + desktop; replace-outright rollout.
-- Non-goals: out-of-scope list above.
-- Verification: acceptance criteria 1–10; `kata-code-e2e-testing` skill for
-  E2E authoring; tag sidebar tests `@sidebar`.
-- Fixtures: the full state matrix (approval, input, plan-ready, working,
-  failed, done-unseen, settled, remote) is exercised in Vitest browser tests
-  with fixture stores; E2E covers deterministic flows only (see Phase 4).
-- Build-time decisions (bounded, non-blocking): virtualization (200-thread
-  profile), height-animation treatment, exact placement of project
-  management affordances, and the pending-input timestamp fallback if the
-  pipeline change proves disproportionate.
+- Scope: Phases A–D; web + desktop; frontend-only; replace-outright.
+- Non-goals: hard boundary + out-of-scope lists.
+- Verification: criteria 1–11; `kata-code-e2e-testing` for `@sidebar`;
+  environments suites as regression, not rewrite targets.
+- **Normative UI / new design language:**
+  `c-attention-session.html` (exact match; not adapted to old Sidebar).
+- Stop condition: any change that would edit sandbox/env services or
+  BYOC contracts → halt and re-spec. Visual drift from C → halt and fix
+  before merge.

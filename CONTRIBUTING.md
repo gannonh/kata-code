@@ -15,7 +15,9 @@ Kata Code is a hard fork of [T3 Code](https://github.com/pingdotgg/t3code), main
 vp i
 vp check
 vp run typecheck
-vp test   # or targeted package tests for touched areas
+vp run test          # unit suite + coverage gate (lines/statements 65, functions 60, branches 50)
+vp run knip          # unused/dead code report (soft-fail in CI)
+# targeted package tests without coverage: vp run test:unit --filter <pkg>
 ```
 
 For desktop changes, also run:
@@ -23,6 +25,10 @@ For desktop changes, also run:
 ```bash
 vp run --filter @kata-sh/code-desktop ensure:electron
 ```
+
+## Naming conventions
+
+Follow the conventions in [AGENTS.md](./AGENTS.md#naming-conventions): `camelCase` for values/functions, `PascalCase` for types/components, `UPPER_SNAKE_CASE` for constants, and product env prefix `KATACODE_*`.
 
 ## What we welcome
 

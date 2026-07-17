@@ -125,6 +125,11 @@ const CODEX_EXCLUDES: ReadonlyArray<ExcludePattern> = [
   { name: "generated_images" },
   { name: "memories" },
   { name: "plugins" },
+  // Host-installed Codex CLI binaries (`~/.codex/packages/standalone/...`).
+  // These are multi-hundred-MB darwin binaries; packing them into the static
+  // seed blows past Vercel Sandbox `writeFiles` body limits ("Request Entity
+  // Too Large") and is useless inside a Linux microVM that installs its own CLI.
+  { name: "packages" },
   { name: "vendor_imports" },
   { name: "chrome-native-hosts-v2.json" },
   { name: "chrome-native-hosts.json" },
@@ -167,12 +172,21 @@ const PI_EXCLUDES: ReadonlyArray<ExcludePattern> = [
   { name: "run-history.jsonl" },
   { name: "pi-debug.log" },
   { name: "cache" },
+  // Host-local pi install trees / package caches — not useful in the sandbox VM.
   { name: "npm" },
   { name: "node_modules" },
   { name: "mcp-oauth" },
   { name: "bin" },
   { name: "git" },
   { name: "intercom" },
+  { name: "mcp-cache.json" },
+  { name: "mcp-npx-cache.json" },
+  { name: "mcp-onboarding.json" },
+  { name: "cursor-sdk.json" },
+  { name: "cursor-sdk-context-windows.json" },
+  { name: "cursor-sdk-model-list.json" },
+  { name: "cursor-model-cache.json" },
+  { name: "models-store.json" },
   { name: ".DS_Store" },
 ];
 

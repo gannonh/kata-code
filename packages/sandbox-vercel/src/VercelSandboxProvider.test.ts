@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import { it as vitIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Duration from "effect/Duration";
+import * as TestClock from "effect/testing/TestClock";
 
 import type { SandboxProvider } from "@kata-sh/code-sandbox/driver";
 
@@ -52,6 +55,7 @@ function fakeSdk(
     domain: string;
     snapshotStatus: string;
     runExitCode: number;
+    runStdout: string;
     runStderr: string;
     writeFilesOk: boolean;
   }> = {},
@@ -92,7 +96,7 @@ function fakeSdk(
       });
       return {
         exitCode: overrides.runExitCode ?? 0,
-        stdout: async () => "",
+        stdout: async () => overrides.runStdout ?? "",
         stderr: async () => overrides.runStderr ?? "",
       };
     },
@@ -275,6 +279,43 @@ describe("VercelSandboxProvider", () => {
       expect(hstate.domainBase).toMatch(/^https:\/\//);
       expect(hstate.persistent).toBe(true);
     }),
+  );
+
+  vitIt.effect(
+    "readiness timeout attaches the in-sandbox serve log tail and still deletes the sandbox",
+    () =>
+      Effect.gen(function* () {
+        // A serve process that crashes after detached launch (e.g. the CLI's
+        // pi dependency resolving to a build without `AuthStorage`) is
+        // invisible unless the readiness error carries the serve log tail.
+        const { sdk, state } = fakeSdk({
+          runStdout:
+            "SyntaxError: The requested module '@earendil-works/pi-coding-agent' does not provide an export named 'AuthStorage'",
+        });
+        const provider = makeVercelSandboxProvider(sdk, {
+          healthzProbe: () => Effect.succeed(false),
+          healthzMaxAttempts: 3,
+          healthzIntervalMs: 1,
+        });
+        const fiber = yield* either(
+          provider.provision({
+            instanceId: "inst_1",
+            config: configWithAuth(),
+            image: "",
+            env: [],
+          }),
+        ).pipe(Effect.forkChild);
+        yield* TestClock.adjust(Duration.millis(10));
+        const result = yield* Fiber.join(fiber);
+        expect(result._tag).toBe("Left");
+        if (result._tag !== "Left") return;
+        const error = result.left;
+        expect(error.reason).toBe("timeout");
+        expect(error.message).toContain("sandbox never became ready");
+        expect(error.message).toContain("katacode serve log tail");
+        expect(error.message).toContain("AuthStorage");
+        expect(state.deleted).toEqual([INST_1_NAME]);
+      }),
   );
 
   vitIt.effect(
