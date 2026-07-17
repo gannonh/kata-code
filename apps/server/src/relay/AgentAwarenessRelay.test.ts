@@ -546,10 +546,11 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const originalFetch = globalThis.fetch;
-        const context = yield* Effect.context<never>();
-        const runFork = Effect.runForkWith(context);
         const events = yield* Queue.unbounded<OrchestrationEvent>();
-        const fetchSeen = yield* Deferred.make<URL>();
+        let resolveFetchSeen: ((url: URL) => void) | undefined;
+        const fetchSeen = new Promise<URL>((resolve) => {
+          resolveFetchSeen = resolve;
+        });
         const userSpans: Array<string> = [];
         const productSpans: Array<string> = [];
         const collectingTracer = (spans: Array<string>) =>
@@ -631,7 +632,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
 
         globalThis.fetch = ((input: Parameters<typeof fetch>[0]) => {
           const url = new URL(input instanceof Request ? input.url : input.toString());
-          runFork(Deferred.succeed(fetchSeen, url));
+          resolveFetchSeen?.(url);
           return Promise.resolve(Response.json({ ok: true, deliveries: [] }));
         }) as unknown as typeof fetch;
         yield* Effect.addFinalizer(() =>
@@ -688,7 +689,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
             occurredAt: now,
           } as unknown as OrchestrationEvent);
 
-          const url = yield* Deferred.await(fetchSeen).pipe(Effect.timeout("2 seconds"));
+          const url = yield* Effect.promise(() => fetchSeen).pipe(Effect.timeout("2 seconds"));
           expect(url.origin).toBe("https://transport.example.test");
           expect(productSpans).toContain("makePublishProof");
           expect(userSpans).not.toContain("makePublishProof");
