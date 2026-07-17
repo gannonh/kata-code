@@ -65,6 +65,7 @@ import {
   buildKillServeCommand,
   buildServeCommand,
   SANDBOX_HOME,
+  SERVE_LOG_PATH,
 } from "./bootstrap.ts";
 
 export const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
@@ -322,9 +323,51 @@ function buildServeEnv(req: {
 
 // ── Healthz polling ───────────────────────────────────────────────────
 
+/** Best-effort tail of the in-sandbox serve log. Never fails: diagnostics must
+ *  not mask the original readiness error or block cleanup. */
+function readServeLogTail(sb: VercelSandboxInstance): Effect.Effect<string, never> {
+  return Effect.promise(async () => {
+    try {
+      const result = await sb.runCommand({
+        cmd: "sh",
+        args: ["-c", `tail -c 4096 '${SERVE_LOG_PATH}' 2>/dev/null || true`],
+      });
+      return (await result.stdout()).trim();
+    } catch {
+      return "";
+    }
+  });
+}
+
+/**
+ * Re-fail a readiness error with the in-sandbox serve log tail attached. A
+ * serve process that crashes after detached launch (e.g. a broken CLI publish)
+ * is otherwise invisible: provision cleanup deletes the VM and the log with it.
+ */
+function failWithServeLogContext(
+  sb: VercelSandboxInstance,
+  error: SandboxProviderError,
+): Effect.Effect<never, SandboxProviderError> {
+  return Effect.flatMap(readServeLogTail(sb), (tail) =>
+    Effect.fail(
+      new SandboxProviderError({
+        reason: error.reason,
+        message:
+          tail.length > 0
+            ? `${error.message} — katacode serve log tail: ${tail.slice(-1500)}`
+            : error.message,
+        cause: error,
+      }),
+    ),
+  );
+}
+
 /** Optional override for the public-healthz probe (tests inject a synchronous 200). */
 export interface VercelSandboxProviderOptions {
   readonly healthzProbe?: (httpBaseUrl: string) => Effect.Effect<boolean, SandboxProviderError>;
+  /** Test-only: shrink the readiness poll budget (defaults: 240 attempts, 500ms). */
+  readonly healthzMaxAttempts?: number;
+  readonly healthzIntervalMs?: number;
 }
 
 /**
@@ -367,12 +410,13 @@ function defaultHealthzProbe(httpBaseUrl: string): Effect.Effect<boolean, Sandbo
 function waitForReady(
   httpBaseUrl: string,
   probe: (url: string) => Effect.Effect<boolean, SandboxProviderError>,
+  budget: { readonly maxAttempts: number; readonly intervalMs: number },
 ): Effect.Effect<void, SandboxProviderError> {
   return Effect.gen(function* () {
-    for (let i = 0; i < HEALTHZ_MAX_ATTEMPTS; i++) {
+    for (let i = 0; i < budget.maxAttempts; i++) {
       const ok = yield* probe(httpBaseUrl);
       if (ok) return;
-      yield* Effect.sleep(`${HEALTHZ_INTERVAL_MS} millis`);
+      yield* Effect.sleep(`${budget.intervalMs} millis`);
     }
     return yield* new SandboxProviderError({
       reason: "timeout",
@@ -392,7 +436,12 @@ export function makeVercelSandboxProvider(
   options: VercelSandboxProviderOptions = {},
 ): SandboxProvider {
   const healthzProbe = options.healthzProbe ?? defaultHealthzProbe;
-  const waitForReadyFor = (httpBaseUrl: string) => waitForReady(httpBaseUrl, healthzProbe);
+  const readinessBudget = {
+    maxAttempts: options.healthzMaxAttempts ?? HEALTHZ_MAX_ATTEMPTS,
+    intervalMs: options.healthzIntervalMs ?? HEALTHZ_INTERVAL_MS,
+  };
+  const waitForReadyFor = (httpBaseUrl: string) =>
+    waitForReady(httpBaseUrl, healthzProbe, readinessBudget);
 
   const lifecycle: SandboxLifecycleCapability = {
     stop: (handle) =>
@@ -480,7 +529,9 @@ export function makeVercelSandboxProvider(
           () => sb.runCommand({ cmd: "sh", args: ["-c", serveCmd], detached: true }),
           "exec-failed",
         );
-        yield* waitForReadyFor(`https://${new URL(sb.domain(state.port)).host}`);
+        yield* waitForReadyFor(`https://${new URL(sb.domain(state.port)).host}`).pipe(
+          Effect.catch((error: SandboxProviderError) => failWithServeLogContext(sb, error)),
+        );
         const domainBase = sb.domain(state.port);
         return {
           driverKind: VERCEL_KIND,
@@ -739,9 +790,13 @@ export function makeVercelSandboxProvider(
         // Poll the public healthz endpoint.
         yield* waitForReadyFor(`https://${new URL(domainBase).host}`).pipe(
           Effect.catch((error: SandboxProviderError) =>
-            trySdk("provision.healthz.cleanup", () => sb.delete(), "dispose-failed").pipe(
-              Effect.ignore,
-              Effect.andThen(Effect.fail(error)),
+            failWithServeLogContext(sb, error).pipe(
+              Effect.catch((enriched: SandboxProviderError) =>
+                trySdk("provision.healthz.cleanup", () => sb.delete(), "dispose-failed").pipe(
+                  Effect.ignore,
+                  Effect.andThen(Effect.fail(enriched)),
+                ),
+              ),
             ),
           ),
         );

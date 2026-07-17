@@ -89,3 +89,33 @@ describe("buildCredentialSeedArchives stored credentials", () => {
     }),
   );
 });
+
+describe("credentialSeed host install trees", () => {
+  vitIt.effect("excludes ~/.codex/packages standalone binaries from the static archive", () =>
+    Effect.gen(function* () {
+      // Host Codex installs multi-hundred-MB darwin binaries under
+      // packages/standalone. Packing those into writeFiles trips Vercel
+      // Sandbox's body limit ("Request Entity Too Large").
+      const tmpHome = yield* Effect.promise(() =>
+        fs.promises.mkdtemp(path.join(os.tmpdir(), "kata-seed-")),
+      );
+      const packagesBin = path.join(tmpHome, ".codex", "packages", "standalone", "current", "bin");
+      yield* Effect.promise(() => fs.promises.mkdir(packagesBin, { recursive: true }));
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(path.join(packagesBin, "codex"), "HOST_CODEX_BINARY"),
+      );
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(path.join(tmpHome, ".codex", "config.toml"), 'model = "gpt-5"\n'),
+      );
+
+      const archives = yield* buildCredentialSeedArchives({ hostHome: tmpHome });
+      yield* Effect.promise(() => fs.promises.rm(tmpHome, { recursive: true, force: true }));
+
+      expect(archives.static).not.toBeNull();
+      const tarText = Buffer.from(archives.static as Uint8Array).toString("latin1");
+      expect(tarText).toContain(".codex/config.toml");
+      expect(tarText).not.toContain("HOST_CODEX_BINARY");
+      expect(tarText).not.toContain("packages/standalone");
+    }),
+  );
+});

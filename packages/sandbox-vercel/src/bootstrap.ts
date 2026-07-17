@@ -17,6 +17,17 @@ export const SANDBOX_HOME = "/home/katacode";
 export const KATA_CLI_PACKAGE = "@kata-sh/code-cli";
 
 /**
+ * Known-good pi SDK build pinned in sandbox installs. The published kata CLI
+ * declares `@earendil-works/pi-*: ^0.80.0`; pi 0.80.8 (2026-07-16) removed the
+ * root `AuthStorage` export, so a fresh `npm install -g` resolves a pi that
+ * crashes `katacode serve` at module load and the sandbox never becomes ready.
+ * Pinning the whole trio in one install command makes npm dedupe the CLI's
+ * `^0.80.0` ranges to this build. Remove once a CLI built against the new pi
+ * API is published.
+ */
+export const PI_SDK_PIN = "0.80.2";
+
+/**
  * Provider CLIs installed at bootstrap. Mirrors the Dockerfile install list so
  * a runtime-booted sandbox matches the provider-ready Phase 3a image.
  */
@@ -26,7 +37,16 @@ export const PROVIDER_CLI_PACKAGES: ReadonlyArray<string> = [
   "@anthropic-ai/claude-code",
   "opencode-ai",
   "@xai-official/grok",
-  "@earendil-works/pi-coding-agent",
+  // Pinned (see PI_SDK_PIN): an unpinned spec in the same install command
+  // would defeat the dedupe pin the kata CLI depends on.
+  `@earendil-works/pi-coding-agent@${PI_SDK_PIN}`,
+];
+
+/** Transitive kata CLI dependencies pinned to the same pi build so npm
+ *  dedupes the CLI's `^0.80.0` ranges instead of resolving latest. */
+export const KATA_CLI_DEPENDENCY_PINS: ReadonlyArray<string> = [
+  `@earendil-works/pi-ai@${PI_SDK_PIN}`,
+  `@earendil-works/pi-agent-core@${PI_SDK_PIN}`,
 ];
 
 /** Install GitHub CLI from its official RPM repository on Amazon Linux 2023.
@@ -73,7 +93,7 @@ export function buildBootstrapScript(): string {
     `echo "[kata:bootstrap] installing GitHub CLI"`,
     buildGitHubCliInstallScript(),
     `echo "[kata:bootstrap] installing CLIs"`,
-    `npm install -g ${packagesSpec}`,
+    `npm install -g ${packagesSpec} ${KATA_CLI_DEPENDENCY_PINS.join(" ")}`,
     `echo "[kata:bootstrap] done"`,
   ].join(" && ");
 }
@@ -112,10 +132,13 @@ export function buildReplaceServeCommand(input: {
   return `${buildKillServeCommand(input.port)}; ${buildServeCommand(input)}`;
 }
 
+/** Serve stdout/stderr log inside the sandbox; tailed on readiness-timeout errors. */
+export const SERVE_LOG_PATH = "/tmp/katacode-serve.log";
+
 /**
  * Build the detached `katacode serve` launch command. Env is inlined at launch
  * (not baked at create) so resume can restart with a fresh bootstrap token.
- * Output is redirected to `/tmp/katacode-serve.log` for diagnostics.
+ * Output is redirected to SERVE_LOG_PATH for diagnostics.
  */
 export function buildServeCommand(input: {
   readonly port: number;
@@ -125,5 +148,5 @@ export function buildServeCommand(input: {
     `HOME=${SANDBOX_HOME}`,
     ...input.env.map(([k, v]) => `${k}=${shellSingleQuote(v)}`),
   ].join(" ");
-  return `nohup env ${envPrefix} katacode serve --port ${input.port} > /tmp/katacode-serve.log 2>&1 &`;
+  return `nohup env ${envPrefix} katacode serve --port ${input.port} > ${SERVE_LOG_PATH} 2>&1 &`;
 }

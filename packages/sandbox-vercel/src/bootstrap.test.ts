@@ -6,6 +6,9 @@ import {
   buildKillServeCommand,
   buildReplaceServeCommand,
   buildServeCommand,
+  KATA_CLI_DEPENDENCY_PINS,
+  PI_SDK_PIN,
+  PROVIDER_CLI_PACKAGES,
 } from "./bootstrap.ts";
 
 describe("GitHub CLI bootstrap", () => {
@@ -22,6 +25,25 @@ describe("GitHub CLI bootstrap", () => {
 
   it("includes the verified GitHub CLI installation in the full bootstrap", () => {
     expect(buildBootstrapScript()).toContain(buildGitHubCliInstallScript());
+  });
+
+  it("pins the pi SDK trio so npm dedupes the kata CLI's ^0.80.0 ranges to the known-good build", () => {
+    // pi >= 0.80.8 removed the root `AuthStorage` export; a fresh global
+    // install resolving it crashes `katacode serve` at module load and the
+    // sandbox never becomes ready. The pin only works when every pi spec in
+    // the single install command carries it.
+    expect(PI_SDK_PIN).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(PROVIDER_CLI_PACKAGES).toContain(`@earendil-works/pi-coding-agent@${PI_SDK_PIN}`);
+    expect(PROVIDER_CLI_PACKAGES).not.toContain("@earendil-works/pi-coding-agent");
+    expect(KATA_CLI_DEPENDENCY_PINS).toEqual([
+      `@earendil-works/pi-ai@${PI_SDK_PIN}`,
+      `@earendil-works/pi-agent-core@${PI_SDK_PIN}`,
+    ]);
+    const script = buildBootstrapScript();
+    expect(script).toContain(`npm install -g `);
+    expect(script).toContain(`@earendil-works/pi-coding-agent@${PI_SDK_PIN}`);
+    expect(script).toContain(`@earendil-works/pi-ai@${PI_SDK_PIN}`);
+    expect(script).toContain(`@earendil-works/pi-agent-core@${PI_SDK_PIN}`);
   });
 });
 
