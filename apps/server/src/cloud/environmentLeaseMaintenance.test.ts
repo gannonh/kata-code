@@ -49,6 +49,7 @@ it.effect("starts lease renewal when startup reconciliation fails", () =>
     Effect.gen(function* () {
       let reconcileCalls = 0;
       let renewalCalls = 0;
+      let settledCalls = 0;
 
       yield* startEnvironmentLeaseMaintenance({
         startupReconcile: Effect.sync(() => {
@@ -57,12 +58,16 @@ it.effect("starts lease renewal when startup reconciliation fails", () =>
         renewLeases: Effect.sync(() => {
           renewalCalls += 1;
         }),
+        onStartupSettled: Effect.sync(() => {
+          settledCalls += 1;
+        }),
         renewalInterval: Duration.minutes(5),
       });
       yield* Effect.yieldNow;
 
       expect(reconcileCalls).toBe(1);
       expect(renewalCalls).toBe(1);
+      expect(settledCalls).toBe(1);
     }),
   ),
 );

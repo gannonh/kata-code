@@ -79,6 +79,7 @@ import {
   reconcileDesiredCloudLink,
   renewDesiredCloudLinkLease,
 } from "./cloud/http.ts";
+import * as ConnectStartupGate from "./cloud/connectStartupGate.ts";
 import {
   reconcileEnvironmentLeaseOnStartup,
   startEnvironmentLeaseMaintenance,
@@ -457,11 +458,17 @@ export const makeServerLayer = Layer.unwrap(
       : Layer.empty;
     const cloudDesiredLinkReconcileLayer = Layer.effectDiscard(
       Effect.gen(function* () {
-        if (!hasCloudPublicConfig) return;
+        if (!hasCloudPublicConfig) {
+          yield* ConnectStartupGate.completeConnectStartupGate;
+          return;
+        }
         const primaryLinkDesired = yield* CloudCliState.readCliDesiredCloudLink;
         const server = yield* HttpServer.HttpServer;
         const address = server.address;
-        if (typeof address === "string" || !("port" in address)) return;
+        if (typeof address === "string" || !("port" in address)) {
+          yield* ConnectStartupGate.completeConnectStartupGate;
+          return;
+        }
         const renewLeases = Effect.all(
           [
             primaryLinkDesired ? renewDesiredCloudLinkLease() : Effect.succeed(false),
@@ -490,6 +497,7 @@ export const makeServerLayer = Layer.unwrap(
         yield* startEnvironmentLeaseMaintenance({
           startupReconcile: startupReconcile.pipe(Effect.asVoid),
           renewLeases,
+          onStartupSettled: ConnectStartupGate.completeConnectStartupGate,
         });
       }),
     );

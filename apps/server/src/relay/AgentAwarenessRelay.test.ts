@@ -16,11 +16,13 @@ import type {
   RelayAgentActivityPublishProofPayload,
   RelayAgentActivityState,
 } from "@kata-sh/code-contracts/relay";
+import { RelayAuthInvalidError } from "@kata-sh/code-contracts/relay";
 import { CommandId, ProviderInstanceId } from "@kata-sh/code-contracts";
 import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
 import { RelayClientTracer } from "@kata-sh/code-shared/relayTracing";
 import { RELAY_ACTIVITY_PUBLISH_TYP, verifyRelayJwt } from "@kata-sh/code-shared/relayJwt";
-import { describe, expect, it } from "@effect/vitest";
+import { beforeEach, describe, expect, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,6 +32,10 @@ import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import {
+  completeConnectStartupGate,
+  resetConnectStartupGateForTests,
+} from "../cloud/connectStartupGate.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import {
   OrchestrationEngineService,
@@ -98,6 +104,25 @@ function makeMemorySecretStore() {
 }
 
 describe.sequential("signRelayAgentActivityPublishProof", () => {
+  beforeEach(() => {
+    resetConnectStartupGateForTests();
+    Effect.runSync(completeConnectStartupGate);
+  });
+
+  it("detects Connect credential auth rejections in publish causes", () => {
+    const authCause = Cause.fail(
+      new RelayAuthInvalidError({
+        code: "auth_invalid",
+        reason: "not_authorized",
+        traceId: "trace-1",
+      }),
+    );
+    expect(AgentAwarenessRelay.isAgentActivityAuthRejection(authCause)).toBe(true);
+    expect(AgentAwarenessRelay.isAgentActivityAuthRejection(Cause.fail(new Error("network")))).toBe(
+      false,
+    );
+  });
+
   it("derives the thread id from the aggregate id for thread events without payload thread ids", () => {
     const threadId = "thread-aggregate-1" as ThreadId;
     const now = "2026-05-25T00:00:00.000Z";

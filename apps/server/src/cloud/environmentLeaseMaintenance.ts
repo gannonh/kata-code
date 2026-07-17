@@ -23,8 +23,11 @@ export function startEnvironmentLeaseMaintenance<EStartup, RStartup, ERenew, RRe
   readonly startupReconcile: Effect.Effect<void, EStartup, RStartup>;
   readonly renewLeases: Effect.Effect<void, ERenew, RRenew>;
   readonly renewalInterval?: Duration.Input;
+  /** Always runs after startup reconcile settles (success or failure). */
+  readonly onStartupSettled?: Effect.Effect<void>;
 }): Effect.Effect<void, never, RStartup | RRenew | Scope.Scope> {
   return Effect.gen(function* () {
+    const onStartupSettled = input.onStartupSettled ?? Effect.void;
     yield* Effect.forkScoped(
       input.startupReconcile.pipe(
         Effect.catch((cause) =>
@@ -32,6 +35,7 @@ export function startEnvironmentLeaseMaintenance<EStartup, RStartup, ERenew, RRe
             cause,
           }),
         ),
+        Effect.ensuring(onStartupSettled),
       ),
     );
     yield* Effect.forkScoped(

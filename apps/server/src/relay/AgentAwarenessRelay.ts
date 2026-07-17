@@ -1,5 +1,6 @@
 import {
   RelayApi,
+  RelayAuthInvalidError,
   type RelayAgentActivityPublishProofPayload,
   type RelayAgentActivityState,
 } from "@kata-sh/code-contracts/relay";
@@ -27,6 +28,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/unstable/http";
@@ -35,6 +37,7 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { waitForConnectStartupGate } from "../cloud/connectStartupGate.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environmentKeys.ts";
 import {
   PUBLISH_AGENT_ACTIVITY_SECRET,
@@ -45,6 +48,17 @@ import {
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+
+const isRelayAuthInvalidError = Schema.is(RelayAuthInvalidError);
+
+/** True when a publish failure is a revoked/expired Connect credential. */
+export function isAgentActivityAuthRejection(cause: Cause.Cause<unknown>): boolean {
+  const failed = Cause.findErrorOption(cause);
+  if (Option.isSome(failed) && isRelayAuthInvalidError(failed.value)) {
+    return true;
+  }
+  return isRelayAuthInvalidError(Cause.squash(cause));
+}
 
 export interface AgentAwarenessRelayShape {
   readonly publishThread: (threadId: ThreadId) => Effect.Effect<void>;
@@ -265,6 +279,7 @@ const make = Effect.gen(function* () {
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   const activeSnapshotPublishedRef = yield* Ref.make(false);
   const publishedStateByThreadRef = yield* Ref.make(new Map<ThreadId, string>());
+  const publishSuspendedRef = yield* Ref.make(false);
 
   const readSecretString = (name: string) =>
     secrets.get(name).pipe(Effect.map((bytes) => (bytes ? new TextDecoder().decode(bytes) : null)));
@@ -293,7 +308,23 @@ const make = Effect.gen(function* () {
       transformClient: relayEnvironmentClient(relayConfig.environmentCredential),
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
+  const waitForConnectStartup = waitForConnectStartupGate.pipe(
+    Effect.tap(() =>
+      Effect.logDebug("agent activity publishing unlocked after Connect startup settle"),
+    ),
+  );
+
   const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
+    yield* waitForConnectStartup;
+    if (yield* Ref.get(publishSuspendedRef)) {
+      yield* Effect.logDebug(
+        "agent activity publish skipped; publishing suspended after auth rejection",
+        {
+          threadId,
+        },
+      );
+      return;
+    }
     const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
       Effect.orElseSucceed(() => false),
     );
@@ -405,6 +436,19 @@ const make = Effect.gen(function* () {
   const publishThread: AgentAwarenessRelayShape["publishThread"] = (threadId) =>
     publishThreadUnsafe(threadId).pipe(
       Effect.catchCause((cause) => {
+        if (isAgentActivityAuthRejection(cause)) {
+          return Ref.set(publishSuspendedRef, true).pipe(
+            Effect.andThen(
+              Effect.logError(
+                "agent activity publishing suspended: Connect credential rejected. Relink Kata Code Connect, then restart the server.",
+                {
+                  threadId,
+                  cause: Cause.pretty(cause),
+                },
+              ),
+            ),
+          );
+        }
         return Effect.logWarning("agent activity publish failed", {
           threadId,
           cause: Cause.pretty(cause),
@@ -415,6 +459,13 @@ const make = Effect.gen(function* () {
     );
 
   const publishActiveThreadsUnsafe = Effect.gen(function* () {
+    yield* waitForConnectStartup;
+    if (yield* Ref.get(publishSuspendedRef)) {
+      yield* Effect.logDebug(
+        "agent activity snapshot skipped; publishing suspended after auth rejection",
+      );
+      return true;
+    }
     const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
       Effect.orElseSucceed(() => false),
     );
