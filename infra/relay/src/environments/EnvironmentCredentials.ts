@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { and, eq, exists, gt, isNull, ne, notExists } from "drizzle-orm";
+import { QueryBuilder } from "drizzle-orm/pg-core";
 
 import { RelayDb } from "../db.ts";
 import { relayEnvironmentCredentials, relayEnvironmentLinks } from "../persistence/schema.ts";
@@ -136,8 +137,11 @@ const make = Effect.gen(function* () {
             and(
               eq(relayEnvironmentCredentials.credentialHash, credentialHash),
               isNull(relayEnvironmentCredentials.revokedAt),
+              // Subqueries must be built with a standalone QueryBuilder: the runtime
+              // db is alchemy's op-recording proxy, and passing a proxied builder to
+              // exists() makes drizzle's SQL serializer recurse forever.
               exists(
-                db
+                new QueryBuilder()
                   .select({ userId: relayEnvironmentLinks.userId })
                   .from(relayEnvironmentLinks)
                   .where(
@@ -191,7 +195,7 @@ const make = Effect.gen(function* () {
               eq(relayEnvironmentCredentials.environmentPublicKey, input.environmentPublicKey),
               isNull(relayEnvironmentCredentials.revokedAt),
               notExists(
-                db
+                new QueryBuilder()
                   .select({ userId: relayEnvironmentLinks.userId })
                   .from(relayEnvironmentLinks)
                   .where(

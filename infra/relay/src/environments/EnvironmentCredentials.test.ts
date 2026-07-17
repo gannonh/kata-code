@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { PgDialect, QueryBuilder } from "drizzle-orm/pg-core";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
 import { RelayDb, type RelayDatabase } from "../db.ts";
 import { relayEnvironmentCredentials } from "../persistence/schema.ts";
@@ -93,6 +94,72 @@ describe("EnvironmentCredentials", () => {
       );
     },
   );
+
+  it.effect("authenticates through a lease-gated exists subquery built off the runtime db", () => {
+    // Regression: the production RelayDb is alchemy's op-recording proxyChain.
+    // Building the exists() subquery from that proxy made drizzle's SQL
+    // serializer recurse forever ("Maximum call stack size exceeded"), which
+    // 500'd every environment-authenticated request. Subqueries must come from
+    // a standalone QueryBuilder, so the runtime db must be touched exactly once
+    // (the outer select) and the captured condition must serialize cleanly.
+    const whereConditions: Array<unknown> = [];
+    let runtimeSelectCalls = 0;
+    const fakeDb = {
+      select: (fields: unknown) => {
+        runtimeSelectCalls += 1;
+        expect(fields).toBeDefined();
+        return {
+          from: (table: unknown) => {
+            expect(table).toBe(relayEnvironmentCredentials);
+            return {
+              where: (condition: unknown) => {
+                whereConditions.push(condition);
+                return {
+                  limit: () =>
+                    Effect.succeed([
+                      {
+                        credentialId: "credential-1",
+                        environmentId: "env_test",
+                        environmentPublicKey: "environment-public-key",
+                      },
+                    ]),
+                };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as RelayDatabase;
+
+    return Effect.gen(function* () {
+      const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
+      const principal = yield* credentials.authenticate("t3env_credential_secret");
+
+      expect(Option.isSome(principal)).toBe(true);
+      expect(runtimeSelectCalls).toBe(1);
+      expect(whereConditions).toHaveLength(1);
+
+      const query = new PgDialect().sqlToQuery(whereConditions[0] as never);
+      expect(query.sql).toContain('"relay_environment_credentials"."credential_hash" = $1');
+      expect(query.sql).toContain('"relay_environment_credentials"."revoked_at" is null');
+      expect(query.sql).toContain("exists");
+      expect(query.sql).toContain(
+        '"relay_environment_links"."environment_id" = "relay_environment_credentials"."environment_id"',
+      );
+      expect(query.sql).toContain(
+        '"relay_environment_links"."environment_public_key" = "relay_environment_credentials"."environment_public_key"',
+      );
+      expect(query.sql).toContain('"relay_environment_links"."revoked_at" is null');
+      expect(query.sql).toContain('"relay_environment_links"."lease_expires_at" > $2');
+    }).pipe(
+      Effect.provide(
+        EnvironmentCredentials.layer.pipe(
+          Layer.provide(NodeCryptoLayer.layer),
+          Layer.provide(Layer.succeed(RelayDb, fakeDb)),
+        ),
+      ),
+    );
+  });
 
   it.effect("reports whether credential cleanup is complete when no row is updated", () => {
     const makeCredentials = (credentialRemains: boolean) => {
