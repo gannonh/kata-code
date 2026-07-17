@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-17 (Sidebar v2 shell attention-state detection verified)
+
+Verified [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): maintainer UAT passed live Waiting via approval, Claude `AskUserQuestion`, Codex Plan-mode `request_user_input`, and Blocked via provider startup failure plus successful recovery. Live Waiting E2E remains deferred ([#39](https://github.com/gannonh/kata-code/issues/39)); smoke `@sidebar` remains the live gate.
+
 ## 2026-07-16 (Sidebar v2 shell attention-state detection implemented)
 
 Implemented [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md) Phases A–B4: inventory appendix; prune pending approvals on revert; user-input shell open/clear + Codex `itemId` fallback; plan-ready shell flag tests; `lastError` clear-on-success + stop retention. Client SM unchanged. Live Waiting E2E deferred ([#39](https://github.com/gannonh/kata-code/issues/39)). Status **Implemented**; Verify next (AC10 maintainer UAT).
