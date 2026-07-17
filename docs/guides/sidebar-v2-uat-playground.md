@@ -58,7 +58,8 @@ Shell snapshot flags (`hasPendingApprovals`, `hasPendingUserInput`, `hasActionab
 
 ### Phase 1 — Dev fixture route (maintainer UAT)
 
-**Route (DEV only):** [`/playground/sidebar`](http://localhost:5733/playground/sidebar)
+**Route (DEV only):** [`/playground/sidebar`](http://localhost:5733/playground/sidebar)  
+Index of experiments: [`/playground`](http://localhost:5733/playground)
 
 - Page: `apps/web/src/components/sidebar/SidebarV2PlaygroundPage.tsx`
 - Seeds the real Zustand shell via `syncServerShellSnapshot` from `sidebarV2Scenarios.ts`
@@ -70,6 +71,7 @@ Shell snapshot flags (`hasPendingApprovals`, `hasPendingUserInput`, `hasActionab
 pnpm run dev
 
 # Then open in your browser:
+open http://localhost:5733/playground
 open http://localhost:5733/playground/sidebar
 
 # Pixel reference in another tab:

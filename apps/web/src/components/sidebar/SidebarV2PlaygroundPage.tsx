@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { Link } from "@tanstack/react-router";
 
 import type { ExecutionEnvironmentDescriptor } from "@kata-sh/code-contracts";
 import { scopedThreadKey, scopeThreadRef } from "@kata-sh/code-client-runtime";
@@ -192,6 +193,12 @@ export function SidebarV2PlaygroundPage() {
                 <SidebarRail />
               </Sidebar>
               <main className="flex min-w-0 flex-1 flex-col items-start justify-center gap-2 p-8 text-muted-foreground">
+                <Link
+                  to="/playground"
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  ← Playground
+                </Link>
                 <p className="text-sm font-medium text-foreground">Sidebar v2 fixture playground</p>
                 <p className="max-w-md text-sm">
                   Scenario <code className="text-foreground">{scenarioId}</code> — use the switcher
