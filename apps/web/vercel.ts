@@ -34,7 +34,7 @@ export const config: VercelConfig = {
     deploymentEnabled: false,
   },
   installCommand:
-    "npm install -g vite-plus && vp install --filter '@kata-sh/code-scripts...' --filter '@kata-sh/code-web...'",
+    "npm install -g vite-plus && vp install --ignore-scripts --filter '@kata-sh/code-scripts...' --filter '@kata-sh/code-web...'",
   routes: [
     {
       src: HOSTED_WEB_CHANNEL_PATH,

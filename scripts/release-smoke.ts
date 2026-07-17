@@ -199,6 +199,13 @@ function assertMissing(path: string, message: string): void {
 const tempRoot = mkdtempSync(join(tmpdir(), "t3-release-smoke-"));
 
 try {
+  const vercelConfig = readFileSync(resolve(repoRoot, "apps/web/vercel.ts"), "utf8");
+  assertContains(
+    vercelConfig,
+    "vp install --ignore-scripts",
+    "Hosted web installs must skip lifecycle scripts so Vercel's repeated install does not rerun effect-tsgo patch.",
+  );
+
   copyWorkspaceManifestFixture(tempRoot);
 
   execFileSync(
