@@ -38,7 +38,8 @@ Reduce jarring vertical reshuffles when sessions leave Working:
    **even when the idle timer is disabled**.
 
 Out of scope for this ship: improving live detection of Waiting/Blocked
-shell flags (separate follow-up after Active/Idle UX is verified).
+shell flags — follow-up:
+[shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md).
 
 ## Hard scope boundary
 
@@ -139,7 +140,8 @@ open http://localhost:5733/playground/sidebar
 
 ### Non-goals
 
-- Live Waiting/Blocked shell-flag improvements.
+- Live Waiting/Blocked shell-flag improvements (tracked in
+  [state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md)).
 - Inline Approve/Review.
 - Changing archive/delete semantics.
 - Server schema for pin/sleep.

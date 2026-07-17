@@ -1,5 +1,13 @@
 # Specs log
 
+## 2026-07-16 (Sidebar v2 shell attention-state detection approved)
+
+Approved [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): keep client `Sidebar.logic` pure; audit/fix projection + ingestion writers (approvals, user-input, plan-ready, session `lastError`) so live Active chips match chat pending derive. Locked: non-stale respond failures keep pending; revert must prune pending approvals; lastError clear on healthy ready / retain on stop; live Waiting E2E optional. Status **Approved**; Build next (A → B1–B4).
+
+## 2026-07-16 (Sidebar v2 shell attention-state detection drafted)
+
+Drafted [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): keep client `Sidebar.logic` pure; audit/fix projection + ingestion writers. Adversarial review Approve-after-fixes incorporated. Later approved same day.
+
 ## 2026-07-16 (Sidebar v2 Active / Idle approved)
 
 Approved [Active / Idle + dwell / Sleep / Pin](/specs/2026-07-16-sidebar-v2-active-idle-design.md): two sections, sub-state chips, 60m default dwell (General settings toggle), Sleep/Pin always available as manual Active↔Idle controls. Supersedes four-tier list structure in [parent sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md). Build next.
