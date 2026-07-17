@@ -16,6 +16,8 @@ vp i
 vp check
 vp run typecheck
 vp test   # or targeted package tests for touched areas
+vp run knip          # unused/dead code report (soft-fail in CI)
+# optional: vp run test:coverage  # coverage with low floor thresholds
 ```
 
 For desktop changes, also run:
@@ -23,6 +25,10 @@ For desktop changes, also run:
 ```bash
 vp run --filter @kata-sh/code-desktop ensure:electron
 ```
+
+## Naming conventions
+
+Follow the conventions in [AGENTS.md](./AGENTS.md#naming-conventions): `camelCase` for values/functions, `PascalCase` for types/components, `UPPER_SNAKE_CASE` for constants, and product env prefix `KATACODE_*`.
 
 ## What we welcome
 

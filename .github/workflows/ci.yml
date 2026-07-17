@@ -39,6 +39,11 @@ jobs:
           test -f apps/desktop/dist-electron/preload.cjs
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
 
+      # Soft-fail: report unused/dead code without blocking PRs while baselines settle.
+      - name: Knip (report only)
+        continue-on-error: true
+        run: vp run knip:strict
+
   test:
     name: Test
     runs-on: ubuntu-24.04
@@ -62,6 +67,11 @@ jobs:
 
       - name: Test
         run: vp run test
+
+      # Soft floor (1%) via root vite coverage thresholds; raise after baselines settle.
+      - name: Test coverage (report + low floor)
+        continue-on-error: true
+        run: vp run test:coverage
 
   test_browser:
     name: Test Browser

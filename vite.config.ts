@@ -16,6 +16,28 @@ export default defineConfig({
     ],
     hookTimeout: 60_000,
     testTimeout: 60_000,
+    // Soft floor while coverage expands; raise once suites stabilize.
+    coverage: {
+      provider: "v8",
+      reporter: ["text-summary", "json-summary"],
+      exclude: [
+        "**/.repos/**",
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/dist-electron/**",
+        "**/*.{test,spec,browser}.{ts,tsx}",
+        "**/integration/**",
+        "e2e/**",
+        "mobile-e2e/**",
+        "scripts/**",
+      ],
+      thresholds: {
+        lines: 1,
+        functions: 1,
+        branches: 1,
+        statements: 1,
+      },
+    },
   },
   fmt: {
     ignorePatterns: [
@@ -76,6 +98,8 @@ export default defineConfig({
       "oxc/no-map-spread": "off",
       "react-in-jsx-scope": "off",
       "react-hooks/exhaustive-deps": "off",
+      // Partial naming enforcement (oxlint lacks full @typescript-eslint/naming-convention).
+      "react/jsx-pascal-case": "error",
       "eslint/no-shadow": "off",
       "eslint/no-await-in-loop": "off",
       "eslint/no-underscore-dangle": "off",
