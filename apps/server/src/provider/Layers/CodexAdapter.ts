@@ -516,9 +516,20 @@ function mapToRuntimeEvents(
       if (!questions) {
         return [];
       }
+      // Prefer the JSON-RPC / runtime requestId; fall back to itemId so shell
+      // pending-user-input counts never drop Ask prompts that omit requestId.
+      const base = runtimeEventBase(event, canonicalThreadId);
+      const fallbackRequestId =
+        base.requestId ??
+        (typeof payload?.itemId === "string" && payload.itemId.length > 0
+          ? asRuntimeRequestId(payload.itemId)
+          : event.itemId
+            ? asRuntimeRequestId(event.itemId)
+            : undefined);
       return [
         {
-          ...runtimeEventBase(event, canonicalThreadId),
+          ...base,
+          ...(fallbackRequestId ? { requestId: fallbackRequestId } : {}),
           type: "user-input.requested",
           payload: {
             questions,

@@ -292,22 +292,22 @@ vp run e2e --project desktop-dev --grep '@sidebar|@agent'
 
 Built during Build Phase A from projection/ingestion/adapters audit.
 
-| Provider | Signal             | Status | Notes                                                                                                        |
-| -------- | ------------------ | ------ | ------------------------------------------------------------------------------------------------------------ |
-| Codex    | Pending approval   | bug    | Works via `request.opened`, but checkpoint revert does not prune orphan `projection_pending_approvals` rows. |
-| Codex    | Pending user input | bug    | Ask only increments shell when `payload.requestId` is present; missing ids are skipped.                      |
-| Codex    | Plan ready         | OK     | Proposed-plan upsert → shell flag; clears on `implementedAt`.                                                |
-| Codex    | Working            | OK     | `starting` / `running` via `thread.session-set`.                                                             |
-| Codex    | Blocked            | OK     | Failed turn/session sets `lastError`; healthy `ready` clears in ingestion.                                   |
-| Claude   | Pending approval   | bug    | Same revert orphan as Codex.                                                                                 |
-| Claude   | Pending user input | OK     | `AskUserQuestion` always synthesizes `requestId`.                                                            |
-| Claude   | Plan ready         | OK     | `ExitPlanMode` → proposed-plan path.                                                                         |
-| Claude   | Working            | OK     | Shared session-set path.                                                                                     |
-| Claude   | Blocked            | OK     | Shared `lastError` / clear-on-ready path.                                                                    |
-| Pi       | Pending approval   | N/A    | No enforceable approval gate (`respondToRequest` stub).                                                      |
-| Pi       | Pending user input | OK     | Extension bridge always assigns `requestId`.                                                                 |
-| Pi       | Plan ready         | N/A    | No `turn.proposed.*` path.                                                                                   |
-| Pi       | Working            | OK     | `turn.started` → `running` (no separate `starting`).                                                         |
-| Pi       | Blocked            | OK     | Shared `lastError` / clear-on-ready path.                                                                    |
+| Provider | Signal             | Status | Notes                                                                                                          |
+| -------- | ------------------ | ------ | -------------------------------------------------------------------------------------------------------------- |
+| Codex    | Pending approval   | bug    | Works via `request.opened`, but checkpoint revert does not prune orphan `projection_pending_approvals` rows.   |
+| Codex    | Pending user input | OK     | Runtime mints UUID `requestId`; adapter falls back to `itemId` if omitted; shell open/clear projection-tested. |
+| Codex    | Plan ready         | OK     | Proposed-plan upsert → shell flag; clears on `implementedAt`.                                                  |
+| Codex    | Working            | OK     | `starting` / `running` via `thread.session-set`.                                                               |
+| Codex    | Blocked            | OK     | Failed turn/session sets `lastError`; healthy `ready` clears in ingestion.                                     |
+| Claude   | Pending approval   | bug    | Same revert orphan as Codex.                                                                                   |
+| Claude   | Pending user input | OK     | `AskUserQuestion` always synthesizes `requestId`.                                                              |
+| Claude   | Plan ready         | OK     | `ExitPlanMode` → proposed-plan path.                                                                           |
+| Claude   | Working            | OK     | Shared session-set path.                                                                                       |
+| Claude   | Blocked            | OK     | Shared `lastError` / clear-on-ready path.                                                                      |
+| Pi       | Pending approval   | N/A    | No enforceable approval gate (`respondToRequest` stub).                                                        |
+| Pi       | Pending user input | OK     | Extension bridge always assigns `requestId`.                                                                   |
+| Pi       | Plan ready         | N/A    | No `turn.proposed.*` path.                                                                                     |
+| Pi       | Working            | OK     | `turn.started` → `running` (no separate `starting`).                                                           |
+| Pi       | Blocked            | OK     | Shared `lastError` / clear-on-ready path.                                                                      |
 
 Cross-cutting: refresh hooks exist; gaps are data/logic. Non-stale respond failures keeping pending flags is intentional (locked). Client Plan Ready still requires plan mode + settled turn.

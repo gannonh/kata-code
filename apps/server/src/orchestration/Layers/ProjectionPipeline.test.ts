@@ -2013,6 +2013,152 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("sets and clears pending user input on projected shell summaries", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-user-input-shell-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-user-input-shell"),
+        occurredAt: "2026-02-26T13:10:00.000Z",
+        commandId: CommandId.make("cmd-user-input-shell-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-user-input-shell-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-user-input-shell"),
+          title: "Project User Input Shell",
+          workspaceRoot: "/tmp/project-user-input-shell",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-02-26T13:10:00.000Z",
+          updatedAt: "2026-02-26T13:10:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-user-input-shell-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-user-input-shell"),
+        occurredAt: "2026-02-26T13:10:01.000Z",
+        commandId: CommandId.make("cmd-user-input-shell-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-user-input-shell-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-user-input-shell"),
+          projectId: ProjectId.make("project-user-input-shell"),
+          title: "Thread User Input Shell",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T13:10:01.000Z",
+          updatedAt: "2026-02-26T13:10:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-user-input-shell-3"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-user-input-shell"),
+        occurredAt: "2026-02-26T13:10:02.000Z",
+        commandId: CommandId.make("cmd-user-input-shell-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-user-input-shell-3"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-user-input-shell"),
+          activity: {
+            id: EventId.make("activity-user-input-shell-requested"),
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "User input requested",
+            payload: {
+              requestId: "user-input-request-shell-1",
+              questions: [
+                {
+                  id: "sandbox_mode",
+                  header: "Sandbox",
+                  question: "Which mode should be used?",
+                  options: [
+                    {
+                      label: "workspace-write",
+                      description: "Allow workspace writes only",
+                    },
+                  ],
+                },
+              ],
+            },
+            turnId: null,
+            createdAt: "2026-02-26T13:10:02.000Z",
+          },
+        },
+      });
+
+      const openRows = yield* sql<{
+        readonly pendingUserInputCount: number;
+      }>`
+        SELECT pending_user_input_count AS "pendingUserInputCount"
+        FROM projection_threads
+        WHERE thread_id = 'thread-user-input-shell'
+      `;
+      assert.deepEqual(openRows, [{ pendingUserInputCount: 1 }]);
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-user-input-shell-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-user-input-shell"),
+        occurredAt: "2026-02-26T13:10:03.000Z",
+        commandId: CommandId.make("cmd-user-input-shell-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-user-input-shell-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-user-input-shell"),
+          activity: {
+            id: EventId.make("activity-user-input-shell-resolved"),
+            tone: "info",
+            kind: "user-input.resolved",
+            summary: "User input submitted",
+            payload: {
+              requestId: "user-input-request-shell-1",
+              answers: {
+                sandbox_mode: "workspace-write",
+              },
+            },
+            turnId: null,
+            createdAt: "2026-02-26T13:10:03.000Z",
+          },
+        },
+      });
+
+      const clearedRows = yield* sql<{
+        readonly pendingUserInputCount: number;
+      }>`
+        SELECT pending_user_input_count AS "pendingUserInputCount"
+        FROM projection_threads
+        WHERE thread_id = 'thread-user-input-shell'
+      `;
+      assert.deepEqual(clearedRows, [{ pendingUserInputCount: 0 }]);
+    }),
+  );
+
   it.effect("ignores non-stale provider approval response failures", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;

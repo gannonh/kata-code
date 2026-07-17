@@ -1023,6 +1023,50 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }),
   );
 
+  it.effect("falls back to itemId for requestUserInput when top-level requestId is missing", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-user-input-fallback"),
+        kind: "request",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/tool/requestUserInput",
+        itemId: ProviderItemId.make("item-user-input-fallback"),
+        payload: {
+          itemId: "item-user-input-fallback",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          questions: [
+            {
+              id: "sandbox_mode",
+              header: "Sandbox",
+              question: "Which mode should be used?",
+              options: [
+                {
+                  label: "workspace-write",
+                  description: "Allow workspace writes only",
+                },
+              ],
+            },
+          ],
+        },
+      } satisfies ProviderEvent);
+
+      const event = yield* Fiber.join(firstEventFiber);
+      assert.equal(Option.isSome(event), true);
+      if (Option.isSome(event)) {
+        assert.equal(event.value.type, "user-input.requested");
+        if (event.value.type === "user-input.requested") {
+          assert.equal(event.value.requestId, "item-user-input-fallback");
+        }
+      }
+    }),
+  );
+
   it.effect("unwraps Codex token usage payloads for context window events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
