@@ -21,7 +21,7 @@
     "lint": "vp lint --report-unused-disable-directives",
     "lint:mobile": "node scripts/mobile-native-static-check.ts",
     "test": "vp run -r test",
-    "test:coverage": "vp test run --coverage",
+    "test:coverage": "vp test run --coverage --exclude e2e/** --exclude mobile-e2e/**",
     "test:desktop-smoke": "vp run --filter @kata-sh/code-desktop smoke-test",
     "knip": "knip --no-exit-code",
     "knip:strict": "knip",

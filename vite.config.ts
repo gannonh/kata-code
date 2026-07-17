@@ -7,19 +7,30 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Keep Playwright e2e / Maestro mobile-e2e out of Vitest discovery.
+    // Root `vp test run --coverage` (package.json `test:coverage`) uses this
+    // config; without these excludes, Vitest loads `e2e/**/*.spec.ts` and
+    // dies on Playwright `test.afterAll` hooks. CI soft-fails coverage so
+    // that failure does not turn the Test job red.
     exclude: [
       "**/.repos/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/dist-electron/**",
       "**/.{idea,git,cache,output,temp}/**",
+      "e2e/**",
+      "mobile-e2e/**",
+      "**/playwright-report/**",
+      "**/test-results/**",
     ],
     hookTimeout: 60_000,
     testTimeout: 60_000,
     // Soft floor while coverage expands; raise once suites stabilize.
     coverage: {
       provider: "v8",
-      reporter: ["text-summary", "json-summary"],
+      // `text` prints per-file table; `text-summary` is the short totals block.
+      reporter: ["text", "text-summary", "json-summary"],
+      reportsDirectory: "./coverage",
       exclude: [
         "**/.repos/**",
         "**/node_modules/**",
