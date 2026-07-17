@@ -2193,6 +2193,180 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("prunes turn-scoped pending approvals from projected shell summaries on revert", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-revert-approval-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-revert-approval"),
+        occurredAt: "2026-02-26T13:00:00.000Z",
+        commandId: CommandId.make("cmd-revert-approval-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-approval-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-revert-approval"),
+          title: "Project Revert Approval",
+          workspaceRoot: "/tmp/project-revert-approval",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-02-26T13:00:00.000Z",
+          updatedAt: "2026-02-26T13:00:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-revert-approval-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-revert-approval"),
+        occurredAt: "2026-02-26T13:00:01.000Z",
+        commandId: CommandId.make("cmd-revert-approval-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-approval-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-revert-approval"),
+          projectId: ProjectId.make("project-revert-approval"),
+          title: "Thread Revert Approval",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T13:00:01.000Z",
+          updatedAt: "2026-02-26T13:00:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.make("evt-revert-approval-3"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-revert-approval"),
+        occurredAt: "2026-02-26T13:00:02.000Z",
+        commandId: CommandId.make("cmd-revert-approval-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-approval-3"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-revert-approval"),
+          turnId: TurnId.make("turn-keep"),
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("refs/t3/checkpoints/thread-revert-approval/turn/1"),
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.make("assistant-keep-approval"),
+          completedAt: "2026-02-26T13:00:02.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.make("evt-revert-approval-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-revert-approval"),
+        occurredAt: "2026-02-26T13:00:03.000Z",
+        commandId: CommandId.make("cmd-revert-approval-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-approval-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-revert-approval"),
+          turnId: TurnId.make("turn-drop"),
+          checkpointTurnCount: 2,
+          checkpointRef: CheckpointRef.make("refs/t3/checkpoints/thread-revert-approval/turn/2"),
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.make("assistant-drop-approval"),
+          completedAt: "2026-02-26T13:00:03.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-revert-approval-5"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-revert-approval"),
+        occurredAt: "2026-02-26T13:00:04.000Z",
+        commandId: CommandId.make("cmd-revert-approval-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-approval-5"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-revert-approval"),
+          activity: {
+            id: EventId.make("activity-revert-approval-requested"),
+            tone: "approval",
+            kind: "approval.requested",
+            summary: "Command approval requested",
+            payload: {
+              requestId: "approval-request-revert-drop",
+              requestKind: "command",
+            },
+            turnId: TurnId.make("turn-drop"),
+            createdAt: "2026-02-26T13:00:04.000Z",
+          },
+        },
+      });
+
+      const beforeRevert = yield* sql<{
+        readonly pendingApprovalCount: number;
+      }>`
+          SELECT pending_approval_count AS "pendingApprovalCount"
+          FROM projection_threads
+          WHERE thread_id = 'thread-revert-approval'
+        `;
+      assert.deepEqual(beforeRevert, [{ pendingApprovalCount: 1 }]);
+
+      yield* appendAndProject({
+        type: "thread.reverted",
+        eventId: EventId.make("evt-revert-approval-6"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-revert-approval"),
+        occurredAt: "2026-02-26T13:00:05.000Z",
+        commandId: CommandId.make("cmd-revert-approval-6"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-approval-6"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-revert-approval"),
+          turnCount: 1,
+        },
+      });
+
+      const approvalRows = yield* sql<{
+        readonly requestId: string;
+      }>`
+          SELECT request_id AS "requestId"
+          FROM projection_pending_approvals
+          WHERE thread_id = 'thread-revert-approval'
+        `;
+      assert.deepEqual(approvalRows, []);
+
+      const afterRevert = yield* sql<{
+        readonly pendingApprovalCount: number;
+      }>`
+          SELECT pending_approval_count AS "pendingApprovalCount"
+          FROM projection_threads
+          WHERE thread_id = 'thread-revert-approval'
+        `;
+      assert.deepEqual(afterRevert, [{ pendingApprovalCount: 0 }]);
+    }),
+  );
+
   it.effect("does not fallback-retain messages whose turnId is removed by revert", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;

@@ -1454,6 +1454,38 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.reverted": {
+          // Turns projector runs before pending-approvals, so remaining turns
+          // are the retained checkpoint set. Drop approval rows scoped to
+          // discarded turns so shell pendingApprovalCount cannot stick true.
+          const [existingRows, retainedTurns] = yield* Effect.all([
+            projectionPendingApprovalRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            }),
+            projectionTurnRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            }),
+          ]);
+          if (existingRows.length === 0) {
+            return;
+          }
+          const retainedTurnIds = new Set(
+            retainedTurns.flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
+          );
+          const discardedRows = existingRows.filter(
+            (row) => row.turnId !== null && !retainedTurnIds.has(row.turnId),
+          );
+          yield* Effect.forEach(
+            discardedRows,
+            (row) =>
+              projectionPendingApprovalRepository.deleteByRequestId({
+                requestId: row.requestId,
+              }),
+            { concurrency: 1 },
+          ).pipe(Effect.asVoid);
+          return;
+        }
+
         default:
           return;
       }
