@@ -864,7 +864,8 @@
 .sidebar-v2 .sb-sheet {
   position: absolute;
   inset: 0;
-  background: var(--background);
+  /* Match AppSidebarLayout sidebar shell (`bg-card`). */
+  background: var(--card);
   display: flex;
   flex-direction: column;
   z-index: 30;
