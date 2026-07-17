@@ -2,10 +2,11 @@
 type: Spec
 title: "Sidebar v2: shell attention-state detection"
 description: "Make live Waiting / Working / Blocked sub-states trustworthy by auditing and fixing OrchestrationThreadShell projection writers — keep the client state machine pure."
-status: Approved
+status: Implemented
 approved_at: 2026-07-16T23:45:00Z
+implemented_at: 2026-07-17T00:30:00Z
 tags: [web, sidebar, orchestration, projection, ux]
-timestamp: 2026-07-16T23:45:00Z
+timestamp: 2026-07-17T00:30:00Z
 related:
   - /specs/2026-07-14-sidebar-v2-hybrid-design.md
   - /specs/2026-07-16-sidebar-v2-active-idle-design.md
@@ -16,14 +17,13 @@ related:
 
 ## Status
 
-**Approved** (2026-07-16). Follow-on to
-[Active / Idle](/specs/2026-07-16-sidebar-v2-active-idle-design.md), which
-deferred “live Waiting/Blocked shell-flag improvements.” This spec closes that
-gap by making shell projection inputs trustworthy. Sidebar chrome and the
-client state machine stay presentation-only.
-
-Adversarial review Approve-after-fixes incorporated. Maintainer approved;
-Build may proceed (Phases A → B1–B4 → C → optional D).
+**Implemented** (2026-07-16). Follow-on to
+[Active / Idle](/specs/2026-07-16-sidebar-v2-active-idle-design.md). Shell
+projection writers and tests land for approvals (revert prune), user-input
+open/clear (+ Codex `itemId` fallback), plan-ready shell flag, and
+`lastError` clear/retain. Client `Sidebar.logic` unchanged. Live Waiting E2E
+deferred ([#39](https://github.com/gannonh/kata-code/issues/39)). Maintainer
+UAT (AC10) remains for Verify.
 
 ## Goal
 

@@ -30,6 +30,16 @@ Each entry should include:
 
 ## Deferred / review queue
 
+### Live Waiting chip E2E for sidebar state detection
+
+- **Status:** deferred
+- **Tracking issue:** [#39](https://github.com/gannonh/kata-code/issues/39)
+- **Area:** sidebar, orchestration, e2e
+- **Source:** [Shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md) (Phase D, AC10)
+- **Rationale:** Live approval/Ask prompts are not deterministically forceable in current `@agent` harness; projection tests gate ship. Avoid flaky real-LLM CI for Waiting chips.
+- **Revisit trigger:** When a deterministic provider fixture or scripted adapter can open approval/Ask prompts in desktop-dev E2E.
+- **Notes:** Maintainer UAT against real projects remains the interim evidence path.
+
 ### Vercel source-selection and worktree Electron E2E
 
 - **Status:** accepted

@@ -1,8 +1,12 @@
 # Specs log
 
+## 2026-07-16 (Sidebar v2 shell attention-state detection implemented)
+
+Implemented [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md) Phases A–B4: inventory appendix; prune pending approvals on revert; user-input shell open/clear + Codex `itemId` fallback; plan-ready shell flag tests; `lastError` clear-on-success + stop retention. Client SM unchanged. Live Waiting E2E deferred ([#39](https://github.com/gannonh/kata-code/issues/39)). Status **Implemented**; Verify next (AC10 maintainer UAT).
+
 ## 2026-07-16 (Sidebar v2 shell attention-state detection approved)
 
-Approved [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): keep client `Sidebar.logic` pure; audit/fix projection + ingestion writers (approvals, user-input, plan-ready, session `lastError`) so live Active chips match chat pending derive. Locked: non-stale respond failures keep pending; revert must prune pending approvals; lastError clear on healthy ready / retain on stop; live Waiting E2E optional. Status **Approved**; Build next (A → B1–B4).
+Approved [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): keep client `Sidebar.logic` pure; audit/fix projection + ingestion writers. Locked: non-stale stickiness; revert prune; lastError clear/retain; live Waiting E2E optional. Later implemented same day.
 
 ## 2026-07-16 (Sidebar v2 shell attention-state detection drafted)
 
