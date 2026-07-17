@@ -5,9 +5,44 @@ import * as Effect from "effect/Effect";
 import * as TestClock from "effect/testing/TestClock";
 import { expect } from "vite-plus/test";
 
-import { startEnvironmentLeaseMaintenance } from "./environmentLeaseMaintenance.ts";
+import {
+  reconcileEnvironmentLeaseOnStartup,
+  startEnvironmentLeaseMaintenance,
+} from "./environmentLeaseMaintenance.ts";
 
 class LeaseMaintenanceTestError extends Data.TaggedError("LeaseMaintenanceTestError") {}
+
+it.effect("keeps a live startup lease without rotating its environment credential", () =>
+  Effect.gen(function* () {
+    let reconcileCalls = 0;
+
+    const result = yield* reconcileEnvironmentLeaseOnStartup({
+      renewLease: Effect.succeed(true),
+      reconcileLink: Effect.sync(() => {
+        reconcileCalls += 1;
+      }),
+    });
+
+    expect(result).toBe("renewed");
+    expect(reconcileCalls).toBe(0);
+  }),
+);
+
+it.effect("reconciles an absent or expired startup lease", () =>
+  Effect.gen(function* () {
+    let reconcileCalls = 0;
+
+    const result = yield* reconcileEnvironmentLeaseOnStartup({
+      renewLease: Effect.succeed(false),
+      reconcileLink: Effect.sync(() => {
+        reconcileCalls += 1;
+      }),
+    });
+
+    expect(result).toBe("reconciled");
+    expect(reconcileCalls).toBe(1);
+  }),
+);
 
 it.effect("starts lease renewal when startup reconciliation fails", () =>
   Effect.scoped(

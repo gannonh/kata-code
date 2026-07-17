@@ -3,6 +3,22 @@ import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 
+/** Renews an existing live link before considering a full reconciliation.
+ * Reconciliation rotates the environment credential, so running it on every
+ * startup can invalidate agent-activity requests already using that credential. */
+export function reconcileEnvironmentLeaseOnStartup<ERenew, RRenew, EReconcile, RReconcile>(input: {
+  readonly renewLease: Effect.Effect<boolean, ERenew, RRenew>;
+  readonly reconcileLink: Effect.Effect<void, EReconcile, RReconcile>;
+}): Effect.Effect<"renewed" | "reconciled", ERenew | EReconcile, RRenew | RReconcile> {
+  return input.renewLease.pipe(
+    Effect.flatMap((isRenewed) =>
+      isRenewed
+        ? Effect.succeed("renewed" as const)
+        : input.reconcileLink.pipe(Effect.as("reconciled" as const)),
+    ),
+  );
+}
+
 export function startEnvironmentLeaseMaintenance<EStartup, RStartup, ERenew, RRenew>(input: {
   readonly startupReconcile: Effect.Effect<void, EStartup, RStartup>;
   readonly renewLeases: Effect.Effect<void, ERenew, RRenew>;

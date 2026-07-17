@@ -79,7 +79,10 @@ import {
   reconcileDesiredCloudLink,
   renewDesiredCloudLinkLease,
 } from "./cloud/http.ts";
-import { startEnvironmentLeaseMaintenance } from "./cloud/environmentLeaseMaintenance.ts";
+import {
+  reconcileEnvironmentLeaseOnStartup,
+  startEnvironmentLeaseMaintenance,
+} from "./cloud/environmentLeaseMaintenance.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
@@ -468,10 +471,19 @@ export const makeServerLayer = Layer.unwrap(
         ).pipe(Effect.asVoid);
         const startupReconcile = primaryLinkDesired
           ? Effect.sleep("250 millis").pipe(
-              Effect.andThen(reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`)),
+              Effect.andThen(
+                reconcileEnvironmentLeaseOnStartup({
+                  renewLease: renewDesiredCloudLinkLease(),
+                  reconcileLink: reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`),
+                }),
+              ),
               Effect.retry({ times: 4 }),
-              Effect.tap(() =>
-                Effect.logInfo("Kata Code Connect desired link reconciled on startup"),
+              Effect.tap((result) =>
+                Effect.logInfo(
+                  result === "renewed"
+                    ? "Kata Code Connect desired link lease renewed on startup"
+                    : "Kata Code Connect desired link reconciled on startup",
+                ),
               ),
             )
           : Effect.void;
