@@ -2,14 +2,21 @@
 type: Spec
 title: Shared sandbox GitHub source picker and Docker remote seed
 description: Generalize the Vercel GitHub repo/branch picker for all sandbox drivers and replace Docker local-worktree archive seeding with an in-container gh/git clone of the selected source.
-status: Draft
+status: Approved
+approved_at: 2026-07-18T00:00:00Z
 ---
 
 # Shared sandbox GitHub source picker and Docker remote seed
 
 ## Status
 
-Draft
+Approved
+
+## Build handoff
+
+Implement the locked decisions and acceptance criteria in this design. Base worktree is the isolated Herdr pane on `pi-sandbox-support`. Do not reopen Pi sandbox support. Follow TDD; commit each logical unit; run `vp check`, `vp run typecheck`, `vp run test`, `vp run release:smoke`, and focused `@environments-deploy` desktop-dev coverage before marking Implemented.
+
+Blocking open questions: None
 
 ## Goal
 

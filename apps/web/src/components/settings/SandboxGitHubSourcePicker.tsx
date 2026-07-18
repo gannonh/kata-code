@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SandboxGitHubRepository } from "@kata-sh/code-contracts";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
-import { createRequestGeneration } from "./VercelSourcePicker.logic";
+import { createRequestGeneration } from "./SandboxGitHubSourcePicker.logic";
 import { Button } from "../ui/button";
 import {
   Combobox,
@@ -18,7 +18,7 @@ import {
   ComboboxTrigger,
 } from "../ui/combobox";
 
-interface VercelSourcePickerProps {
+interface SandboxGitHubSourcePickerProps {
   readonly idPrefix: string;
   readonly repository: string | undefined;
   readonly branch: string | undefined;
@@ -31,20 +31,20 @@ interface VercelSourcePickerProps {
 type LoadState = "idle" | "loading" | "error";
 
 /**
- * GitHub repository + branch source pickers for a Vercel sandbox target. Both
+ * GitHub repository + branch source pickers for sandbox deployment targets (Docker and Vercel). Both
  * are keyboard-accessible searchable comboboxes backed by the host `gh`
  * session (no token reaches the browser). The repository picker initializes the
  * branch to the repository's default branch. Source controls lock once a
  * sandbox exists.
  */
-export function VercelSourcePicker({
+export function SandboxGitHubSourcePicker({
   idPrefix,
   repository,
   branch,
   locked,
   onRepositoryChange,
   onBranchChange,
-}: VercelSourcePickerProps) {
+}: SandboxGitHubSourcePickerProps) {
   const [repoOpen, setRepoOpen] = useState(false);
   const [repoQuery, setRepoQuery] = useState("");
   const [repos, setRepos] = useState<ReadonlyArray<SandboxGitHubRepository>>([]);

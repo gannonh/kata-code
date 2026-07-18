@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { createRequestGeneration } from "./VercelSourcePicker.logic";
+import { createRequestGeneration } from "./SandboxGitHubSourcePicker.logic";
 
 describe("createRequestGeneration", () => {
   it("accepts only the latest request generation", () => {

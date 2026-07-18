@@ -3,11 +3,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildGitHubHttpsUrl,
   deriveGitHubRepositoryKey,
+  resolveSandboxGitHubSource,
   resolveVercelSource,
   sourceFingerprint,
-} from "./vercelGitHubSource.ts";
+} from "./sandboxGitHubSource.ts";
 
-describe("vercelGitHubSource", () => {
+describe("sandboxGitHubSource", () => {
   it("derives the canonical repository key from owner/name", () => {
     expect(deriveGitHubRepositoryKey("Octocat/Hello-World")).toBe("github.com/octocat/hello-world");
   });
@@ -18,8 +19,8 @@ describe("vercelGitHubSource", () => {
     );
   });
 
-  it("resolves a configured Vercel source", () => {
-    const resolved = resolveVercelSource({
+  it("resolves a configured sandbox GitHub source for Docker and Vercel configs", () => {
+    const resolved = resolveSandboxGitHubSource({
       source: { repository: "octocat/Hello-World", branch: "main" },
     });
     expect(resolved).toEqual({
@@ -28,12 +29,15 @@ describe("vercelGitHubSource", () => {
       repositoryKey: "github.com/octocat/hello-world",
       httpsUrl: "https://github.com/octocat/Hello-World.git",
     });
+    // Alias retained for Vercel call sites.
+    expect(resolveVercelSource({ source: { repository: "octocat/Hello-World", branch: "main" } }))
+      .toEqual(resolved);
   });
 
   it("returns null when no source is configured", () => {
-    expect(resolveVercelSource({})).toBeNull();
-    expect(resolveVercelSource(null)).toBeNull();
-    expect(resolveVercelSource({ source: { repository: "octocat/Hello-World" } })).toBeNull();
+    expect(resolveSandboxGitHubSource({})).toBeNull();
+    expect(resolveSandboxGitHubSource(null)).toBeNull();
+    expect(resolveSandboxGitHubSource({ source: { repository: "octocat/Hello-World" } })).toBeNull();
   });
 
   it("computes a stable fingerprint that changes with repository or branch", () => {
