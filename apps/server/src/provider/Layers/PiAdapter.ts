@@ -117,9 +117,11 @@ export interface PiAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   /** Override SDK session creation for tests. */
   readonly createSession?: typeof createAgentSession;
-  /** Override the model list used for selection (tests); re-read on each
-   *  startSession. Defaults to a fresh `modelRegistry.getAvailable()` so
-   *  sandbox credential seed after serve boot is visible. */
+  /** Override auth/model registry creation for tests. Production recreates
+   *  both registries on every startSession so late-seeded sandbox auth is
+   *  visible despite the Pi SDK registries caching their initial state. */
+  readonly createRegistries?: typeof createPiRegistries;
+  /** Override the model list used for selection (tests). */
   readonly availableModels?: ReadonlyArray<PiModelShape>;
   /** Observe published runtime events without subscribing to the stream (tests). */
   readonly onEvent?: (event: ProviderRuntimeEvent) => void;
@@ -220,7 +222,7 @@ export function makePiAdapter(
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const agentDir = resolvePiAgentDir(piSettings.agentDir);
-    const { authStorage, modelRegistry } = createPiRegistries(agentDir);
+    const registryFactory = options?.createRegistries ?? createPiRegistries;
 
     const stampSync = () => ({
       eventId: EventId.make(randomUUID()),
@@ -532,17 +534,6 @@ export function makePiAdapter(
       return [];
     };
 
-    /**
-     * Resolve authenticated models at call time. Sandbox credential seed runs
-     * after `katacode serve` is already listening, so a boot-time snapshot of
-     * `getAvailable()` is empty while later discovery (fresh registries) shows
-     * models in the UI. Re-reading on each startSession picks up late-seeded
-     * auth. Tests may inject a mutable `availableModels` array for the same
-     * late-availability shape.
-     */
-    const listAvailableModels = (): ReadonlyArray<PiModelShape> =>
-      (options?.availableModels ?? modelRegistry.getAvailable()) as ReadonlyArray<PiModelShape>;
-
     const resolveModel = (
       modelSelection: ProviderSessionStartInput["modelSelection"],
       availableModels: ReadonlyArray<PiModelShape>,
@@ -694,7 +685,13 @@ export function makePiAdapter(
         }
 
         const cwd = input.cwd?.trim() || process.cwd();
-        const availableModels = listAvailableModels();
+        // Docker provision starts `katacode serve` before credential seed
+        // copyInto completes. Pi's AuthStorage and ModelRegistry cache their
+        // initial empty state, so both must be recreated after seed rather
+        // than only re-calling getAvailable() on boot-time instances.
+        const { authStorage, modelRegistry } = registryFactory(agentDir);
+        const availableModels = (options?.availableModels ??
+          modelRegistry.getAvailable()) as ReadonlyArray<PiModelShape>;
         const model = resolveModel(input.modelSelection, availableModels);
         if (!model) {
           const slug = input.modelSelection?.model?.trim();

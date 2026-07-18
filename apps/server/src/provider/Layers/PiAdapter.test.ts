@@ -204,40 +204,37 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
-  it.effect("re-reads available models on startSession after late credential seed", () =>
+  it.effect("recreates registries on startSession after late credential seed", () =>
     Effect.gen(function* () {
-      // Sandbox seed copyInto runs after serve is already up; the adapter must
-      // not keep a boot-time empty getAvailable() snapshot.
-      const lateModels: PiModelShape[] = [];
-      const { session } = makeFakeSession();
-      const adapter = yield* makePiAdapter(decodePiSettings({}), {
-        instanceId: ProviderInstanceId.make("pi"),
-        availableModels: lateModels,
-        createSession: (() => Promise.resolve({ session })) as never,
-      });
-
-      const early = yield* adapter
-        .startSession({
-          threadId: ThreadId.make("pi-thread-late-seed"),
-          runtimeMode: "full-access",
-          modelSelection: {
-            instanceId: ProviderInstanceId.make("pi"),
-            model: "openai-codex/gpt-5.4-mini",
-          },
-        })
-        .pipe(Effect.flip);
-      expect(early._tag).toBe("ProviderAdapterValidationError");
-      if (early._tag !== "ProviderAdapterValidationError") {
-        throw new Error("Unexpected error type");
-      }
-      expect(early.issue).toContain("openai-codex/gpt-5.4-mini");
-      expect(early.issue).toContain("0 authenticated model");
-
-      lateModels.push({
+      // Sandbox seed copyInto runs after serve is already up. AuthStorage and
+      // ModelRegistry cache their boot-time empty state, so startSession must
+      // recreate both registries after credentials have been seeded.
+      const selectedModel: PiModelShape = {
         id: "gpt-5.4-mini",
         name: "GPT-5.4 Mini",
         provider: "openai-codex",
         reasoning: false,
+      };
+      const refreshedAuthStorage = {};
+      const refreshedModelRegistry = { getAvailable: () => [selectedModel] };
+      let registryCreations = 0;
+      let sessionAuthStorage: unknown;
+      let sessionModelRegistry: unknown;
+      const { session } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        createRegistries: () => {
+          registryCreations += 1;
+          return {
+            authStorage: refreshedAuthStorage as never,
+            modelRegistry: refreshedModelRegistry as never,
+          };
+        },
+        createSession: ((args: { authStorage: unknown; modelRegistry: unknown }) => {
+          sessionAuthStorage = args.authStorage;
+          sessionModelRegistry = args.modelRegistry;
+          return Promise.resolve({ session });
+        }) as never,
       });
 
       const started = yield* adapter.startSession({
@@ -248,8 +245,12 @@ describe("makePiAdapter (vertical slice)", () => {
           model: "openai-codex/gpt-5.4-mini",
         },
       });
+
       expect(started.status).toBe("ready");
       expect(started.model).toBe("openai-codex/gpt-5.4-mini");
+      expect(registryCreations).toBe(1);
+      expect(sessionAuthStorage).toBe(refreshedAuthStorage);
+      expect(sessionModelRegistry).toBe(refreshedModelRegistry);
     }),
   );
 
