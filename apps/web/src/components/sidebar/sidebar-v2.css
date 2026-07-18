@@ -298,22 +298,29 @@
   border-color: var(--sb-border-soft);
 }
 
-.sidebar-v2 .sb-project-row {
+.sidebar-v2 .sb-meta.sb-project-row {
   flex-wrap: nowrap;
   min-width: 0;
 }
 
-.sidebar-v2 .sb-project-row .sb-pchip {
-  flex: 1 1 auto;
+.sidebar-v2 .sb-project-row .sb-pchip,
+.sidebar-v2 .sb-project-row .sb-branch {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sidebar-v2 .sb-project-row .sb-branch,
+.sidebar-v2 .sb-project-row .sb-pchip {
+  flex: 0 1 auto;
+}
+
+.sidebar-v2 .sb-project-row .sb-branch {
+  flex: 1 1 auto;
+}
+
 .sidebar-v2 .sb-project-row .sb-status-slot {
-  flex-shrink: 0;
+  flex: 0 0 auto;
 }
 
 .sidebar-v2 .sb-status-slot {
