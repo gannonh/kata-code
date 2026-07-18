@@ -174,7 +174,11 @@ import { ChatHeader } from "./chat/ChatHeader";
 import { PanelLayoutControls } from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
-import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
+import {
+  resolveEffectiveEnvMode,
+  resolveEnvironmentIconKind,
+  resolveEnvironmentOptionLabel,
+} from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
@@ -1523,6 +1527,7 @@ function ChatViewContent(props: ChatViewProps) {
       projectId: ProjectId;
       label: string;
       isPrimary: boolean;
+      iconKind: ReturnType<typeof resolveEnvironmentIconKind>;
     }> = [];
     for (const p of memberProjects) {
       if (seen.has(p.environmentId)) continue;
@@ -1541,6 +1546,10 @@ function ChatViewContent(props: ChatViewProps) {
         projectId: p.id,
         label,
         isPrimary,
+        iconKind: resolveEnvironmentIconKind({
+          isPrimary,
+          sandboxProviderKind: savedRecord?.sandbox?.providerKind,
+        }),
       });
     }
     // Sort: primary first, then alphabetical

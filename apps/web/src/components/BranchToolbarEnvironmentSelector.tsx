@@ -1,8 +1,8 @@
 import type { EnvironmentId } from "@kata-sh/code-contracts";
-import { CloudIcon, MonitorIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import type { EnvironmentOption } from "./BranchToolbar.logic";
+import { BranchToolbarEnvironmentIcon } from "./BranchToolbarEnvironmentIcon";
 import {
   Select,
   SelectGroup,
@@ -17,7 +17,7 @@ interface BranchToolbarEnvironmentSelectorProps {
   envLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
-  onEnvironmentChange: (environmentId: EnvironmentId) => void;
+  onEnvironmentChange?: (environmentId: EnvironmentId) => void;
 }
 
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
@@ -39,14 +39,16 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     [availableEnvironments],
   );
 
-  if (envLocked) {
+  const canSwitchEnvironment =
+    !envLocked && availableEnvironments.length > 1 && onEnvironmentChange !== undefined;
+
+  if (!canSwitchEnvironment) {
     return (
       <span className="inline-flex items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs">
-        {activeEnvironment?.isPrimary ? (
-          <MonitorIcon className="size-3" />
-        ) : (
-          <CloudIcon className="size-3" />
-        )}
+        <BranchToolbarEnvironmentIcon
+          kind={activeEnvironment?.iconKind ?? "cloud"}
+          className="size-3"
+        />
         {activeEnvironment?.label ?? "Run on"}
       </span>
     );
@@ -56,15 +58,14 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     <Select
       modal={false}
       value={environmentId}
-      onValueChange={(value) => onEnvironmentChange(value as EnvironmentId)}
+      onValueChange={(value) => onEnvironmentChange?.(value as EnvironmentId)}
       items={environmentItems}
     >
       <SelectTrigger variant="ghost" size="xs" className="font-medium" aria-label="Run on">
-        {activeEnvironment?.isPrimary ? (
-          <MonitorIcon className="size-3" />
-        ) : (
-          <CloudIcon className="size-3" />
-        )}
+        <BranchToolbarEnvironmentIcon
+          kind={activeEnvironment?.iconKind ?? "cloud"}
+          className="size-3"
+        />
         <SelectValue />
       </SelectTrigger>
       <SelectPopup>
@@ -73,11 +74,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           {availableEnvironments.map((env) => (
             <SelectItem key={env.environmentId} value={env.environmentId}>
               <span className="inline-flex items-center gap-1.5">
-                {env.isPrimary ? (
-                  <MonitorIcon className="size-3" />
-                ) : (
-                  <CloudIcon className="size-3" />
-                )}
+                <BranchToolbarEnvironmentIcon kind={env.iconKind} className="size-3" />
                 {env.label}
               </span>
             </SelectItem>

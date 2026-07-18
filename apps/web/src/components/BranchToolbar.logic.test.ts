@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
+  resolveEnvironmentIconKind,
   resolveEnvironmentOptionLabel,
   resolveBranchSelectionTarget,
   resolveCurrentWorkspaceLabel,
@@ -12,6 +13,7 @@ import {
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
   shouldIncludeBranchPickerItem,
+  shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
@@ -81,6 +83,39 @@ describe("resolveBranchToolbarValue", () => {
         currentGitBranch: "main",
       }),
     ).toBe("main");
+  });
+});
+
+describe("shouldShowEnvironmentIndicator", () => {
+  it("keeps the environment affordance visible for a single environment", () => {
+    expect(shouldShowEnvironmentIndicator(1)).toBe(true);
+  });
+
+  it("hides the affordance when no environment context exists", () => {
+    expect(shouldShowEnvironmentIndicator(0)).toBe(false);
+  });
+});
+
+describe("resolveEnvironmentIconKind", () => {
+  it("uses the device icon for the primary environment", () => {
+    expect(resolveEnvironmentIconKind({ isPrimary: true, sandboxProviderKind: "docker" })).toBe(
+      "device",
+    );
+  });
+
+  it("uses the container icon for Docker sandboxes", () => {
+    expect(resolveEnvironmentIconKind({ isPrimary: false, sandboxProviderKind: "docker" })).toBe(
+      "container",
+    );
+  });
+
+  it("uses the cloud icon for Vercel and other remote environments", () => {
+    expect(resolveEnvironmentIconKind({ isPrimary: false, sandboxProviderKind: "vercel" })).toBe(
+      "cloud",
+    );
+    expect(resolveEnvironmentIconKind({ isPrimary: false, sandboxProviderKind: null })).toBe(
+      "cloud",
+    );
   });
 });
 

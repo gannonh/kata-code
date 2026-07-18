@@ -5,11 +5,14 @@ export {
   deriveLocalBranchNameFromRemoteRef,
 } from "@kata-sh/code-shared/git";
 
+export type EnvironmentIconKind = "device" | "container" | "cloud";
+
 export interface EnvironmentOption {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   label: string;
   isPrimary: boolean;
+  iconKind: EnvironmentIconKind;
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);
@@ -20,6 +23,18 @@ const GENERIC_LOCAL_ENVIRONMENT_LABELS = new Set(["local", "local environment"])
 function normalizeDisplayLabel(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+export function shouldShowEnvironmentIndicator(environmentCount: number): boolean {
+  return environmentCount > 0;
+}
+
+export function resolveEnvironmentIconKind(input: {
+  isPrimary: boolean;
+  sandboxProviderKind: string | null | undefined;
+}): EnvironmentIconKind {
+  if (input.isPrimary) return "device";
+  return input.sandboxProviderKind === "docker" ? "container" : "cloud";
 }
 
 export function resolveEnvironmentOptionLabel(input: {
