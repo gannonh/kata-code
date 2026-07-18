@@ -6,7 +6,6 @@ import {
   authorizeConnectCli,
   extractConnectEnvironmentId,
   listConnectEnvironmentIds,
-  registerConnectAccountSweepCleanup,
   registerConnectEnvironmentCleanup,
   withConnectBrowser,
 } from "../../src/flows/connect.ts";
@@ -122,10 +121,6 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
       // App Clerk sign-in alone is not enough — mint the CLI OAuth credential into
       // the isolated home before Create & run hits the relay.
       await authorizeIsolatedConnect(runContext);
-      // Soft-sweep remnants from aborted prior runs (same shared E2E Connect
-      // account) without touching in-flight environments from concurrent work.
-      registerConnectAccountSweepCleanup(runContext, { olderThanHours: 1 });
-
       // Create & run: provisions the sandbox from the native Git source,
       // Connect-auto-registers the public endpoint, and surfaces the public URL.
       await dismissBlockingToasts(page);

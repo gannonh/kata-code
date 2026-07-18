@@ -9,7 +9,6 @@ import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
   authorizeConnectCli,
   extractConnectEnvironmentId,
-  registerConnectAccountSweepCleanup,
   registerConnectEnvironmentCleanup,
   withConnectBrowser,
 } from "../../src/flows/connect.ts";
@@ -33,14 +32,9 @@ import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts"
  * two-client rule).
  */
 
-/**
- * Authorize Connect CLI and register the account-level safety sweep before
- * Create & run so an aborted create still has teardown registered. Environment
- * id cleanup is registered later via {@link registerConnectEnvironmentTeardown}.
- */
-async function authorizeConnectAndRegisterAccountSweep(runContext: E2ERunContext): Promise<void> {
+/** Authorize Connect CLI before creating a sandbox environment. */
+async function authorizeConnect(runContext: E2ERunContext): Promise<void> {
   await withConnectBrowser((connectPage) => authorizeConnectCli(runContext, connectPage));
-  registerConnectAccountSweepCleanup(runContext, { olderThanHours: 1 });
 }
 
 /** Register per-environment Connect cleanup once Session ready exposes the id. */
@@ -327,9 +321,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await expect(progress).toContainText("dispose: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
       await expect(progress).toContainText("done: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
 
-      // Authorize Connect + account sweep before Create & run so aborted creates
-      // still have teardown registered (mirrors vercel-deploy ordering).
-      await authorizeConnectAndRegisterAccountSweep(runContext);
+      await authorizeConnect(runContext);
 
       // Start session (AC-1.10): provision the real katacode image, auto-register
       // with Connect using the signed-in app user's Clerk relay token, and surface
@@ -424,7 +416,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // Wait for the env-var value to be committed (saved state visible) before proceeding.
       await expect(editor.getByLabel("Environment variable value 1")).toHaveValue(secret);
 
-      await authorizeConnectAndRegisterAccountSweep(runContext);
+      await authorizeConnect(runContext);
 
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Create & run sandbox" }).click();
@@ -495,7 +487,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       const card = await addContainerEnvironment(page, "E2E Phase3a");
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
-      await authorizeConnectAndRegisterAccountSweep(runContext);
+      await authorizeConnect(runContext);
 
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Create & run sandbox" }).click();
@@ -560,7 +552,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       const card = await addContainerEnvironment(page, "E2E Lifecycle");
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
-      await authorizeConnectAndRegisterAccountSweep(runContext);
+      await authorizeConnect(runContext);
 
       // Create & run the sandbox.
       await dismissBlockingToasts(page);
