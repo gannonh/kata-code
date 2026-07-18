@@ -137,7 +137,7 @@ describe("resolveProviderDriverKindForInstanceSelection", () => {
 });
 
 describe("deriveSandboxComingSoonInstanceIds", () => {
-  it("dims opencode, cursor, and pi instances but not codex or claude", () => {
+  it("dims opencode and cursor instances but not codex, claude, or pi", () => {
     const entries = deriveProviderInstanceEntries([
       provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
       provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "claudeAgent" }),
@@ -149,7 +149,7 @@ describe("deriveSandboxComingSoonInstanceIds", () => {
 
     const dimmed = deriveSandboxComingSoonInstanceIds(entries);
 
-    expect([...dimmed].sort()).toEqual(["cursor", "opencode", "pi", "pi_custom"]);
+    expect([...dimmed].sort()).toEqual(["cursor", "opencode"]);
   });
 
   it("returns an empty set when no dimmed-kind instances are configured", () => {

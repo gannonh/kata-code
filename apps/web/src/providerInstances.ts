@@ -266,7 +266,6 @@ export function resolveProviderDriverKindForInstanceSelection(
 const SANDBOX_COMING_SOON_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
   ProviderDriverKind.make("opencode"),
   ProviderDriverKind.make("cursor"),
-  ProviderDriverKind.make("pi"),
 ]);
 
 /** Instance ids to dim in the model picker for sandbox environments. */
