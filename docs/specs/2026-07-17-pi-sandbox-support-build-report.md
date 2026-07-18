@@ -38,17 +38,17 @@ Maintainer-attested manual UAT against a freshly rebuilt `katacode:local` contai
 
 Maintainer-attested local + Docker evidence for the Pi `ModelRuntime` migration and exact `0.80.10` alignment. Spec: [Pi runtime update strategy](./2026-07-18-pi-runtime-update-strategy-design.md).
 
-| #   | Check                                  | Result  | Evidence                                                                     |
-| --- | -------------------------------------- | ------- | ---------------------------------------------------------------------------- |
-| 1   | `vp run verify:pi-update`              | PASS    | Exit code 0                                                                  |
-| 2   | Focused Pi unit/integration tests      | PASS    | 77/77                                                                        |
-| 3   | Credentialed desktop `@pi` E2E         | PASS    | 8/8 in 59.0s; includes built-in `openai-codex/gpt-5.6-sol`                   |
-| 4   | Docker image baseline                  | PASS    | `verify:docker-image`                                                        |
-| 5   | Docker Pi runtime probe                | PASS    | `cliVersion=0.80.10`, `sdkVersion=0.80.10`, model `openai-codex/gpt-5.6-sol` |
-| 6   | Full unit suite                        | PASS    | 505 passed / 2 skipped files; 4083 passed / 11 skipped tests                 |
-| 7   | Release smoke                          | PASS    | `vp run release:smoke`                                                       |
-| 8   | Vercel sandbox                         | Pending | Post-nightly                                                                 |
-| 9   | Degraded path — no host Pi credentials | Pending | Post-nightly                                                                 |
+| #   | Check                                  | Result | Evidence                                                                                               |
+| --- | -------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| 1   | `vp run verify:pi-update`              | PASS   | Exit code 0                                                                                            |
+| 2   | Focused Pi unit/integration tests      | PASS   | 77/77                                                                                                  |
+| 3   | Credentialed desktop `@pi` E2E         | PASS   | 8/8 in 59.0s; includes built-in `openai-codex/gpt-5.6-sol`                                             |
+| 4   | Docker image baseline                  | PASS   | `verify:docker-image`                                                                                  |
+| 5   | Docker Pi runtime probe                | PASS   | `cliVersion=0.80.10`, `sdkVersion=0.80.10`, model `openai-codex/gpt-5.6-sol`                           |
+| 6   | Full unit suite                        | PASS   | 505 passed / 2 skipped files; 4083 passed / 11 skipped tests                                           |
+| 7   | Release smoke                          | PASS   | `vp run release:smoke`                                                                                 |
+| 8   | Vercel sandbox                         | PASS   | Maintainer manual UAT against nightly `.272` sandbox; streaming, `/workspace` tools, interrupt, resume |
+| 9   | Degraded path — no host Pi credentials | PASS   | Docker no-credential probe; see below                                                                  |
 
 ### Machine evidence
 
@@ -58,8 +58,26 @@ Maintainer-attested local + Docker evidence for the Pi `ModelRuntime` migration 
 
 ## Vercel sandbox validation
 
-Pending post-nightly.
+Maintainer-attested manual UAT (2026-07-18) against a Vercel sandbox running the published nightly `@kata-sh/code-cli@0.0.35-nightly.20260718.272` (Pi SDK `0.80.10`).
+
+| #   | Check                              | Result | Evidence              |
+| --- | ---------------------------------- | ------ | --------------------- |
+| 1   | Pi selectable in picker            | PASS   | Maintainer manual UAT |
+| 2   | Authenticated + model discovery    | PASS   | Maintainer manual UAT |
+| 3   | Turn streams to completion         | PASS   | Maintainer manual UAT |
+| 4   | Tool calls execute in `/workspace` | PASS   | Maintainer manual UAT |
+| 5   | Interrupt/stop mid-turn            | PASS   | Maintainer manual UAT |
+| 6   | Thread resume + follow-up          | PASS   | Maintainer manual UAT |
 
 ## Degraded path — no host Pi credentials
 
-Pending post-nightly.
+Validated 2026-07-18 (AC-4).
+
+- **Real Docker probe, no credentials:** `docker run --rm --user katacode katacode:local` importing the bundled SDK with no `auth.json` — `ModelRuntime 0.80.10` returned `authenticatedModels: 0` in 954 ms. No hang, no crash.
+- **Provider snapshot:** no authenticated models maps to `status: "error"`, `auth: "unauthenticated"`, message "Pi has no authenticated models. Configure Pi auth or an API key and try again." Covered by `PiProvider.test.ts` ("reports unauthenticated when installed with no authenticated models").
+- **Session start:** fails with a clear `ProviderAdapterValidationError` naming the missing auth instead of hanging or silently falling back (`PiAdapter.startSession`).
+- **Other providers unaffected:** `verify:docker-image` baseline passes (codex, agent, grok, claude, opencode, pi, git on PATH).
+
+## Un-gate (2026-07-18)
+
+Removed `ProviderDriverKind.make("pi")` from `SANDBOX_COMING_SOON_KINDS` in `apps/web/src/providerInstances.ts` (commit `21ea08908`). Pi is now selectable in the composer for sandbox environments; OpenCode and Cursor remain dimmed. `providerInstances.test.ts` updated accordingly (8/8).
