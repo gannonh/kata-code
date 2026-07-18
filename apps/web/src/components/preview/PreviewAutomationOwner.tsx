@@ -87,23 +87,42 @@ const currentStatus = async (
   };
 };
 
-const serializeError = (error: unknown): NonNullable<PreviewAutomationResponse["error"]> => {
-  if (error instanceof Error) {
+const unwrapAutomationError = (error: unknown): unknown => {
+  if (!(error instanceof Error)) return error;
+  const cause = "cause" in error ? (error as { cause?: unknown }).cause : undefined;
+  if (!(cause instanceof Error)) return error;
+  // Desktop IPC should already flatten PreviewManagerError, but keep this path
+  // for direct throws and older desktops.
+  if (
+    error.name === "PreviewManagerError" ||
+    error.message.startsWith("Desktop preview operation failed:") ||
+    cause.name.startsWith("PreviewAutomation")
+  ) {
+    return cause;
+  }
+  return error;
+};
+
+export const serializePreviewAutomationError = (
+  error: unknown,
+): NonNullable<PreviewAutomationResponse["error"]> => {
+  const unwrapped = unwrapAutomationError(error);
+  if (unwrapped instanceof Error) {
     const detail =
-      "detail" in error && (error as { detail?: unknown }).detail !== undefined
-        ? (error as { detail?: unknown }).detail
+      "detail" in unwrapped && (unwrapped as { detail?: unknown }).detail !== undefined
+        ? (unwrapped as { detail?: unknown }).detail
         : undefined;
     return {
-      _tag: error.name.startsWith("PreviewAutomation")
-        ? error.name
+      _tag: unwrapped.name.startsWith("PreviewAutomation")
+        ? unwrapped.name
         : "PreviewAutomationExecutionError",
-      message: error.message,
+      message: unwrapped.message,
       ...(detail === undefined ? {} : { detail }),
     };
   }
   return {
     _tag: "PreviewAutomationExecutionError",
-    message: String(error),
+    message: String(unwrapped),
   };
 };
 
@@ -250,7 +269,7 @@ export function PreviewAutomationOwner(props: {
             api.preview.automation.respond({
               requestId: request.requestId,
               ok: false,
-              error: serializeError(error),
+              error: serializePreviewAutomationError(error),
             }),
         );
       },
