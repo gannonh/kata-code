@@ -14,6 +14,7 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { createModelCapabilities } from "@kata-sh/code-shared/model";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 
@@ -141,7 +142,7 @@ const discoverGrokModelsViaAcp = (
       environment,
       childProcessSpawner,
       cwd: process.cwd(),
-      clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
+      clientInfo: { name: `${MCP_SERVER_NAME}-provider-probe`, version: "0.0.0" },
     });
     const started = yield* acp.start();
     return buildGrokDiscoveredModelsFromSessionModelState(started.sessionSetupResult.models);

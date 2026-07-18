@@ -22,6 +22,7 @@ import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
+import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { getModelSelectionStringOptionValue } from "@kata-sh/code-shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -1058,7 +1059,7 @@ export function makeOpenCodeAdapter(
               if (mcpSession && !server.external) {
                 yield* runOpenCodeSdk("mcp.add", () =>
                   client.mcp.add({
-                    name: "t3-code",
+                    name: MCP_SERVER_NAME,
                     config: {
                       type: "remote",
                       url: mcpSession.endpoint,

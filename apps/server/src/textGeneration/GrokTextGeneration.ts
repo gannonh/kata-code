@@ -6,6 +6,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 
 import { type GrokSettings, type ModelSelection } from "@kata-sh/code-contracts";
+import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import { extractJsonObject } from "@kata-sh/code-shared/schemaJson";
 
@@ -87,7 +88,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
         environment,
         childProcessSpawner: commandSpawner,
         cwd,
-        clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
+        clientInfo: { name: `${MCP_SERVER_NAME}-git-text`, version: "0.0.0" },
       });
 
       yield* runtime.handleSessionUpdate((notification) => {

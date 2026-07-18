@@ -20,6 +20,7 @@ import {
   type SDKUserMessage,
   type ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { parseCliArgs } from "@kata-sh/code-shared/cliArgs";
 import {
   ApprovalRequestId,
@@ -3475,7 +3476,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(mcpSession
           ? {
               mcpServers: {
-                "t3-code": {
+                [MCP_SERVER_NAME]: {
                   type: "http",
                   url: mcpSession.endpoint,
                   headers: {

@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { type CursorSettings, type ModelSelection } from "@kata-sh/code-contracts";
+import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import { extractJsonObject } from "@kata-sh/code-shared/schemaJson";
 
@@ -88,7 +89,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
         environment: resolvedEnvironment,
         childProcessSpawner: commandSpawner,
         cwd,
-        clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
+        clientInfo: { name: `${MCP_SERVER_NAME}-git-text`, version: "0.0.0" },
       });
 
       yield* runtime.handleSessionUpdate((notification) => {

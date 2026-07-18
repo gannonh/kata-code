@@ -14,6 +14,15 @@ export const DEFAULT_HOME_DIR_NAME = ".katacode" as const;
 /** Environment variable prefix for runtime configuration (`KATACODE_*`). */
 export const ENV_PREFIX = "KATACODE_" as const;
 
+/**
+ * MCP server name registered with every provider adapter. Providers render it
+ * next to tool calls (e.g. `kata · preview_navigate` in Codex).
+ */
+export const MCP_SERVER_NAME = "kata" as const;
+
+/** Env var carrying the MCP bearer token inside provider child processes. */
+export const MCP_BEARER_TOKEN_ENV_VAR = "KATACODE_MCP_BEARER_TOKEN" as const;
+
 /** Git branch namespace for product-generated refs (worktrees, PR branches). */
 export const WORKTREE_BRANCH_PREFIX = "katacode" as const;
 
