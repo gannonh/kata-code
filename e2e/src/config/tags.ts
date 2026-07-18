@@ -5,6 +5,7 @@ export const E2E_TAGS = {
   settings: "@settings",
   agent: "@agent",
   pi: "@pi",
+  piUpdate: "@pi-update",
   cursor: "@cursor",
   sandbox: "@sandbox",
   environmentsDeploy: "@environments-deploy",

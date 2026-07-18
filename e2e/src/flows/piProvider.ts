@@ -91,7 +91,15 @@ export async function stagePiAgentDirectory(
   return stagedAgentDir;
 }
 
-export async function configureDefaultPiProvider(page: Page, config: PiSmokeConfig): Promise<void> {
+export interface ConfigurePiProviderOptions {
+  readonly registerCustomModel?: boolean;
+}
+
+export async function configureDefaultPiProvider(
+  page: Page,
+  config: PiSmokeConfig,
+  options: ConfigurePiProviderOptions = {},
+): Promise<void> {
   await openProviderSettings(page);
 
   const toggleDetails = page.getByLabel("Toggle Pi details");
@@ -104,11 +112,13 @@ export async function configureDefaultPiProvider(page: Page, config: PiSmokeConf
     await agentDir.press("Enter");
   }
 
-  const customModelInput = page.locator("#provider-instance-pi-custom-model");
-  await customModelInput.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
-  if ((await piCard.getByText(config.model, { exact: true }).count()) === 0) {
-    await customModelInput.fill(config.model);
-    await customModelInput.press("Enter");
+  if (options.registerCustomModel !== false) {
+    const customModelInput = page.locator("#provider-instance-pi-custom-model");
+    await customModelInput.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
+    if ((await piCard.getByText(config.model, { exact: true }).count()) === 0) {
+      await customModelInput.fill(config.model);
+      await customModelInput.press("Enter");
+    }
   }
 
   await dismissBlockingToasts(page);
