@@ -76,9 +76,14 @@ describe("makePiTextGeneration", () => {
   it.effect("generates a thread title from a fixture-backed Pi session", () =>
     Effect.gen(function* () {
       const { session } = makeFakeTextSession(TITLE_JSON);
+      const modelRuntime = { getAvailable: () => Promise.resolve(SAMPLE_MODELS) };
+      let receivedModelRuntime: unknown;
       const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
-        createSession: (() => Promise.resolve({ session })) as never,
-        availableModels: SAMPLE_MODELS,
+        createModelRuntime: async () => modelRuntime,
+        createSession: ((args: { modelRuntime: unknown }) => {
+          receivedModelRuntime = args.modelRuntime;
+          return Promise.resolve({ session });
+        }) as never,
       });
 
       const result = yield* textGeneration.generateThreadTitle({
@@ -88,6 +93,7 @@ describe("makePiTextGeneration", () => {
       });
 
       expect(result.title).toBe("Fix login bug");
+      expect(receivedModelRuntime).toBe(modelRuntime);
     }),
   );
 

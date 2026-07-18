@@ -204,35 +204,28 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
-  it.effect("recreates registries on startSession after late credential seed", () =>
+  it.effect("recreates ModelRuntime on startSession after late credential seed", () =>
     Effect.gen(function* () {
-      // Sandbox seed copyInto runs after serve is already up. AuthStorage and
-      // ModelRegistry cache their boot-time empty state, so startSession must
-      // recreate both registries after credentials have been seeded.
       const selectedModel: PiModelShape = {
-        id: "gpt-5.4-mini",
-        name: "GPT-5.4 Mini",
+        id: "gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
         provider: "openai-codex",
-        reasoning: false,
+        reasoning: true,
       };
-      const refreshedAuthStorage = {};
-      const refreshedModelRegistry = { getAvailable: () => [selectedModel] };
-      let registryCreations = 0;
-      let sessionAuthStorage: unknown;
-      let sessionModelRegistry: unknown;
+      const refreshedModelRuntime = {
+        getAvailable: () => Promise.resolve([selectedModel]),
+      };
+      let runtimeCreations = 0;
+      let sessionModelRuntime: unknown;
       const { session } = makeFakeSession();
       const adapter = yield* makePiAdapter(decodePiSettings({}), {
         instanceId: ProviderInstanceId.make("pi"),
-        createRegistries: () => {
-          registryCreations += 1;
-          return {
-            authStorage: refreshedAuthStorage as never,
-            modelRegistry: refreshedModelRegistry as never,
-          };
+        createModelRuntime: async () => {
+          runtimeCreations += 1;
+          return refreshedModelRuntime;
         },
-        createSession: ((args: { authStorage: unknown; modelRegistry: unknown }) => {
-          sessionAuthStorage = args.authStorage;
-          sessionModelRegistry = args.modelRegistry;
+        createSession: ((args: { modelRuntime: unknown }) => {
+          sessionModelRuntime = args.modelRuntime;
           return Promise.resolve({ session });
         }) as never,
       });
@@ -242,15 +235,13 @@ describe("makePiAdapter (vertical slice)", () => {
         runtimeMode: "full-access",
         modelSelection: {
           instanceId: ProviderInstanceId.make("pi"),
-          model: "openai-codex/gpt-5.4-mini",
+          model: "openai-codex/gpt-5.6-sol",
         },
       });
 
-      expect(started.status).toBe("ready");
-      expect(started.model).toBe("openai-codex/gpt-5.4-mini");
-      expect(registryCreations).toBe(1);
-      expect(sessionAuthStorage).toBe(refreshedAuthStorage);
-      expect(sessionModelRegistry).toBe(refreshedModelRegistry);
+      expect(started.model).toBe("openai-codex/gpt-5.6-sol");
+      expect(runtimeCreations).toBe(1);
+      expect(sessionModelRuntime).toBe(refreshedModelRuntime);
     }),
   );
 

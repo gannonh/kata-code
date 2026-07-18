@@ -21,7 +21,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import {
-  createPiRegistries,
+  createPiModelRuntime,
+  type PiModelRuntimeFactory,
   type PiModelShape,
   piModelSlug,
   resolvePiAgentDir,
@@ -72,6 +73,8 @@ export interface PiTextGenerationOptions {
   readonly environment?: NodeJS.ProcessEnv;
   /** Override SDK session creation for tests. */
   readonly createSession?: typeof createAgentSession;
+  /** Override model runtime creation for tests. */
+  readonly createModelRuntime?: PiModelRuntimeFactory;
   /** Override the model list used for selection (tests). */
   readonly availableModels?: ReadonlyArray<PiModelShape>;
 }
@@ -103,9 +106,10 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
   options?: PiTextGenerationOptions,
 ): Effect.fn.Return<TextGenerationShape, never, never> {
   const agentDir = resolvePiAgentDir(piSettings.agentDir);
-  const { authStorage, modelRegistry } = createPiRegistries(agentDir);
+  const runtimeFactory = options?.createModelRuntime ?? createPiModelRuntime;
+  const modelRuntime = yield* Effect.promise(() => runtimeFactory(agentDir));
   const availableModels = (options?.availableModels ??
-    modelRegistry.getAvailable()) as ReadonlyArray<PiModelShape>;
+    (yield* Effect.promise(() => modelRuntime.getAvailable()))) as ReadonlyArray<PiModelShape>;
 
   const resolveModel = (selection: ModelSelection): PiModelShape | undefined => {
     const slug = selection.model;
@@ -156,8 +160,7 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
             ...(agentDir ? { agentDir } : {}),
             model: model as never,
             ...(thinkingLevel ? { thinkingLevel: thinkingLevel as never } : {}),
-            authStorage,
-            modelRegistry,
+            modelRuntime: modelRuntime as never,
             sessionManager: SessionManager.inMemory(process.cwd()),
             // Text generation is a one-shot structured query: no tools, so the
             // model returns JSON text directly.

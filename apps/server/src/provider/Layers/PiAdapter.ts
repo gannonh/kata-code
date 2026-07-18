@@ -70,8 +70,9 @@ import {
   trimToUndefined,
 } from "./piExtensionUi.ts";
 import {
+  type PiModelRuntimeFactory,
   type PiModelShape,
-  createPiRegistries,
+  createPiModelRuntime,
   piModelSlug,
   resolvePiAgentDir,
   resolvePiProjectSkillPaths,
@@ -117,10 +118,8 @@ export interface PiAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   /** Override SDK session creation for tests. */
   readonly createSession?: typeof createAgentSession;
-  /** Override auth/model registry creation for tests. Production recreates
-   *  both registries on every startSession so late-seeded sandbox auth is
-   *  visible despite the Pi SDK registries caching their initial state. */
-  readonly createRegistries?: typeof createPiRegistries;
+  /** Override model runtime creation for tests. */
+  readonly createModelRuntime?: PiModelRuntimeFactory;
   /** Override the model list used for selection (tests). */
   readonly availableModels?: ReadonlyArray<PiModelShape>;
   /** Observe published runtime events without subscribing to the stream (tests). */
@@ -222,7 +221,6 @@ export function makePiAdapter(
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const agentDir = resolvePiAgentDir(piSettings.agentDir);
-    const registryFactory = options?.createRegistries ?? createPiRegistries;
 
     const stampSync = () => ({
       eventId: EventId.make(randomUUID()),
@@ -686,12 +684,36 @@ export function makePiAdapter(
 
         const cwd = input.cwd?.trim() || process.cwd();
         // Docker provision starts `katacode serve` before credential seed
-        // copyInto completes. Pi's AuthStorage and ModelRegistry cache their
-        // initial empty state, so both must be recreated after seed rather
-        // than only re-calling getAvailable() on boot-time instances.
-        const { authStorage, modelRegistry } = registryFactory(agentDir);
-        const availableModels = (options?.availableModels ??
-          modelRegistry.getAvailable()) as ReadonlyArray<PiModelShape>;
+        // copyInto completes. Create a fresh runtime for every session so it
+        // reads credentials after the seed is available.
+        const runtimeFactory = options?.createModelRuntime ?? createPiModelRuntime;
+        const modelRuntime = yield* Effect.tryPromise({
+          try: () => runtimeFactory(agentDir),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "startSession",
+              detail: `Failed to initialize Pi model runtime: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }.`,
+              cause,
+            }),
+        });
+        const discoveredModels = options?.availableModels
+          ? options.availableModels
+          : yield* Effect.tryPromise({
+              try: () => modelRuntime.getAvailable(),
+              catch: (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "startSession",
+                  detail: `Failed to discover authenticated Pi models: ${
+                    cause instanceof Error ? cause.message : String(cause)
+                  }.`,
+                  cause,
+                }),
+            });
+        const availableModels = discoveredModels as ReadonlyArray<PiModelShape>;
         const model = resolveModel(input.modelSelection, availableModels);
         if (!model) {
           const slug = input.modelSelection?.model?.trim();
@@ -762,8 +784,7 @@ export function makePiAdapter(
               ...(agentDir ? { agentDir } : {}),
               model: model as never,
               ...(thinkingLevel ? { thinkingLevel: thinkingLevel as never } : {}),
-              authStorage,
-              modelRegistry,
+              modelRuntime: modelRuntime as never,
               resourceLoader,
               sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],

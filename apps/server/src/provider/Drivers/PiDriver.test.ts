@@ -10,7 +10,11 @@ import {
 } from "@kata-sh/code-contracts";
 
 import { makePiAdapter, type PiSdkSession } from "../Layers/PiAdapter.ts";
-import { createPiRegistries, type PiModelShape, resolvePiAgentDir } from "../Layers/PiProvider.ts";
+import {
+  createPiModelRuntime,
+  type PiModelShape,
+  resolvePiAgentDir,
+} from "../Layers/PiProvider.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
 
@@ -50,18 +54,16 @@ function makeFakeSession(): { session: PiSdkSession; emit: (e: PiSdkSessionEvent
 }
 
 describe("Pi provider instance isolation (AC 13)", () => {
-  it("creates distinct auth storage and model registries per agentDir", () => {
-    const a = createPiRegistries(resolvePiAgentDir("/tmp/pi-agent-a"));
-    const b = createPiRegistries(resolvePiAgentDir("/tmp/pi-agent-b"));
+  it("creates distinct model runtimes per agentDir", async () => {
+    const a = await createPiModelRuntime(resolvePiAgentDir("/tmp/pi-agent-a"));
+    const b = await createPiModelRuntime(resolvePiAgentDir("/tmp/pi-agent-b"));
 
-    // Distinct auth storage instances back distinct files per agent dir.
-    expect(a.authStorage).not.toBe(b.authStorage);
-    expect(a.modelRegistry).not.toBe(b.modelRegistry);
+    expect(a).not.toBe(b);
 
     // The default (empty agentDir) path is the SDK default and differs from
     // an explicit dir, so a custom instance never shares state with default.
-    const def = createPiRegistries(resolvePiAgentDir(""));
-    expect(def.authStorage).not.toBe(a.authStorage);
+    const def = await createPiModelRuntime(resolvePiAgentDir(""));
+    expect(def).not.toBe(a);
   });
 
   it.effect("keeps event streams isolated between two Pi adapter instances", () =>
