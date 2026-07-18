@@ -9,17 +9,26 @@ describe("Pi Docker runtime verification", () => {
   it("uses an ephemeral unprivileged container without host mounts", () => {
     const command = makePiDockerRuntimeCommand("provider/model", "1.2.3");
 
-    expect(command.executable).toBe("docker");
-    expect(command.args.slice(0, 7)).toEqual([
-      "run",
-      "--rm",
-      "--interactive",
-      "--user",
-      "katacode",
-      "--env",
-      "KATACODE_E2E_PI_MODEL=provider/model",
-    ]);
-    expect(command.args).toContain("EXPECTED_PI_VERSION=1.2.3");
+    expect(command).toEqual({
+      executable: "docker",
+      args: [
+        "run",
+        "--rm",
+        "--interactive",
+        "--user",
+        "katacode",
+        "--env",
+        "KATACODE_E2E_PI_MODEL=provider/model",
+        "--env",
+        "EXPECTED_PI_VERSION=1.2.3",
+        "--entrypoint",
+        "node",
+        "katacode:local",
+        "--input-type=module",
+        "-e",
+        PI_DOCKER_RUNTIME_PROBE,
+      ],
+    });
     expect(command.args).not.toContain("--mount");
     expect(command.args).not.toContain("--volume");
     expect(command.args).not.toContain("-v");

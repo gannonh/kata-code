@@ -17,16 +17,36 @@ describe("Pi update verification", () => {
   });
 
   it("runs focused, static, E2E, and Docker gates in order", () => {
-    const commands = makePiUpdateCommands();
-    expect(commands.map((command) => command.label)).toEqual([
-      "focused Pi tests",
-      "repository check",
-      "repository typecheck",
-      "desktop build",
-      "credentialed Pi E2E",
-      "Docker image build",
-      "Docker image baseline",
-      "Docker Pi runtime",
+    expect(makePiUpdateCommands()).toEqual([
+      {
+        label: "focused Pi tests",
+        executable: "vp",
+        args: [
+          "test",
+          "apps/server/src/provider/Layers/PiProvider.test.ts",
+          "apps/server/src/provider/Layers/PiAdapter.test.ts",
+          "apps/server/src/textGeneration/PiTextGeneration.test.ts",
+          "packages/sandbox-vercel/src/bootstrap.test.ts",
+          "scripts/piRuntimeVersion.test.ts",
+          "scripts/piUpdateVerification.test.ts",
+          "scripts/verifyPiDockerRuntime.test.ts",
+        ],
+      },
+      { label: "repository check", executable: "vp", args: ["check"] },
+      { label: "repository typecheck", executable: "vp", args: ["run", "typecheck"] },
+      { label: "desktop build", executable: "vp", args: ["run", "build:desktop"] },
+      {
+        label: "credentialed Pi E2E",
+        executable: "vp",
+        args: ["run", "e2e:desktop", "--grep", "@pi"],
+      },
+      { label: "Docker image build", executable: "vp", args: ["run", "build:docker-image"] },
+      { label: "Docker image baseline", executable: "vp", args: ["run", "verify:docker-image"] },
+      {
+        label: "Docker Pi runtime",
+        executable: "node",
+        args: ["scripts/verifyPiDockerRuntime.ts"],
+      },
     ]);
   });
 
