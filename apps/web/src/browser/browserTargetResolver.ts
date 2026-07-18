@@ -48,17 +48,21 @@ export function resolveBrowserNavigationTarget(
   const path = target.path?.startsWith("/") ? target.path : `/${target.path ?? ""}`;
   const requestedUrl = `${protocol}://localhost:${target.port}${path}`;
   const normalizedEnvironmentHost = environmentUrl.hostname.replace(/^\[|\]$/g, "");
-  const resolvedHost = normalizedEnvironmentHost.includes(":")
-    ? `[${normalizedEnvironmentHost}]`
-    : normalizedEnvironmentHost;
+  const isLoopbackEnvironment =
+    normalizedEnvironmentHost === "localhost" || normalizedEnvironmentHost === "127.0.0.1";
+  // Resolve loopback environments via `localhost` rather than the literal
+  // environment host: a dev server may bind only one stack (e.g. vite on ::1),
+  // and `localhost` lets Chromium reach whichever one is listening.
+  const resolvedHost = isLoopbackEnvironment
+    ? "localhost"
+    : normalizedEnvironmentHost.includes(":")
+      ? `[${normalizedEnvironmentHost}]`
+      : normalizedEnvironmentHost;
   const resolved = new URL(path, `${protocol}://${resolvedHost}:${target.port}`);
   return {
     requestedUrl,
     resolvedUrl: resolved.toString(),
-    resolutionKind:
-      normalizedEnvironmentHost === "localhost" || normalizedEnvironmentHost === "127.0.0.1"
-        ? "direct"
-        : "direct-private-network",
+    resolutionKind: isLoopbackEnvironment ? "direct" : "direct-private-network",
     environmentId,
   };
 }
