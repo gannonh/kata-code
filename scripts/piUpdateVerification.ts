@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - imperative maintainer verification command.
 import { spawnSync } from "node:child_process";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +8,8 @@ export const PI_UPDATE_REQUIRED_ENV = [
   "KATACODE_E2E_PI_AGENT_DIR",
   "KATACODE_E2E_PI_MODEL",
 ] as const;
+
+export const PI_UPDATE_VERIFICATION_ENV = "KATACODE_E2E_PI_UPDATE_VERIFICATION";
 
 export interface PiUpdateCommand {
   readonly label: string;
@@ -61,6 +63,8 @@ export function makePiUpdateCommands(): ReadonlyArray<PiUpdateCommand> {
         "apps/server/src/textGeneration/PiTextGeneration.test.ts",
         "packages/sandbox-vercel/src/bootstrap.test.ts",
         "scripts/piRuntimeVersion.test.ts",
+        "scripts/piUpdateVerification.test.ts",
+        "scripts/verifyPiDockerRuntime.test.ts",
       ],
     },
     { label: "repository check", executable: "vp", args: ["check"] },
@@ -84,11 +88,15 @@ export function makePiUpdateCommands(): ReadonlyArray<PiUpdateCommand> {
 function checkReadableFile(path: string): void {
   try {
     accessSync(path, constants.R_OK);
+    if (!statSync(path).isFile()) {
+      throw new Error("path is not a regular file");
+    }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Pi update verification requires readable auth.json at ${path}: ${detail}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Pi update verification requires readable regular auth.json at ${path}: ${detail}`,
+      { cause: error },
+    );
   }
 }
 
@@ -104,14 +112,20 @@ export function runPiUpdateVerification(
   env: NodeJS.ProcessEnv,
   dependencies: PiUpdateVerificationDependencies = {},
 ): void {
-  const { agentDir } = readPiUpdatePrerequisites(env);
+  const { agentDir, model } = readPiUpdatePrerequisites(env);
   const authPath = resolve(agentDir, "auth.json");
   const checkAuthFile = dependencies.checkAuthFile ?? checkReadableFile;
   const runCommand = dependencies.runCommand ?? spawnCommand;
 
   checkAuthFile(authPath);
 
-  const commandEnv = { ...env, KATACODE_E2E_ENABLE_PI: "1" };
+  const commandEnv = {
+    ...env,
+    KATACODE_E2E_ENABLE_PI: "1",
+    KATACODE_E2E_PI_AGENT_DIR: agentDir,
+    KATACODE_E2E_PI_MODEL: model,
+    [PI_UPDATE_VERIFICATION_ENV]: "1",
+  };
   for (const command of makePiUpdateCommands()) {
     process.stdout.write(`Pi update verification: ${command.label}\n`);
     const result = runCommand(command.executable, command.args, {

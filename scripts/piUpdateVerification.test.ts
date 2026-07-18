@@ -1,6 +1,11 @@
+// @effect-diagnostics nodeBuiltinImport:off - verification tests exercise filesystem prerequisites.
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   PI_UPDATE_REQUIRED_ENV,
+  PI_UPDATE_VERIFICATION_ENV,
   makePiUpdateCommands,
   readPiUpdatePrerequisites,
   runPiUpdateVerification,
@@ -44,7 +49,28 @@ describe("Pi update verification", () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 
-  it("forces the Pi E2E gate and stops on the first command failure", () => {
+  it("requires auth.json to be a regular file before running any command", () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "katacode-pi-auth-directory-"));
+    mkdirSync(join(agentDir, "auth.json"));
+    const runCommand = vi.fn();
+
+    try {
+      expect(() =>
+        runPiUpdateVerification(
+          {
+            KATACODE_E2E_PI_AGENT_DIR: agentDir,
+            KATACODE_E2E_PI_MODEL: "provider/model",
+          },
+          { runCommand },
+        ),
+      ).toThrow("requires readable regular auth.json");
+      expect(runCommand).not.toHaveBeenCalled();
+    } finally {
+      rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("forces all Pi E2E values and stops on the first command failure", () => {
     const runCommand = vi
       .fn()
       .mockReturnValueOnce({ status: 0 })
@@ -53,8 +79,10 @@ describe("Pi update verification", () => {
     expect(() =>
       runPiUpdateVerification(
         {
-          KATACODE_E2E_PI_AGENT_DIR: "/agent",
-          KATACODE_E2E_PI_MODEL: "provider/model",
+          KATACODE_E2E_ENABLE_PI: "0",
+          KATACODE_E2E_PI_AGENT_DIR: " /agent ",
+          KATACODE_E2E_PI_MODEL: " provider/model ",
+          [PI_UPDATE_VERIFICATION_ENV]: "0",
         },
         { checkAuthFile: vi.fn(), runCommand },
       ),
@@ -65,7 +93,12 @@ describe("Pi update verification", () => {
       expect.any(Array),
       expect.objectContaining({
         stdio: "inherit",
-        env: expect.objectContaining({ KATACODE_E2E_ENABLE_PI: "1" }),
+        env: expect.objectContaining({
+          KATACODE_E2E_ENABLE_PI: "1",
+          KATACODE_E2E_PI_AGENT_DIR: "/agent",
+          KATACODE_E2E_PI_MODEL: "provider/model",
+          [PI_UPDATE_VERIFICATION_ENV]: "1",
+        }),
       }),
     );
   });
