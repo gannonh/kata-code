@@ -40,14 +40,16 @@ const handlers = {
     }),
   preview_navigate: (input) => invoke<PreviewAutomationStatus>("navigate", input, input.timeoutMs),
   preview_snapshot: () => invoke<PreviewAutomationSnapshot>("snapshot", {}),
-  preview_click: (input) => invoke<void>("click", input, input.timeoutMs).pipe(Effect.as(null)),
-  preview_type: (input) => invoke<void>("type", input, input.timeoutMs).pipe(Effect.as(null)),
-  preview_press: (input) => invoke<void>("press", input).pipe(Effect.as(null)),
-  preview_scroll: (input) => invoke<void>("scroll", input).pipe(Effect.as(null)),
+  preview_click: (input) =>
+    invoke<void>("click", input, input.timeoutMs).pipe(Effect.as({ ok: true })),
+  preview_type: (input) =>
+    invoke<void>("type", input, input.timeoutMs).pipe(Effect.as({ ok: true })),
+  preview_press: (input) => invoke<void>("press", input).pipe(Effect.as({ ok: true })),
+  preview_scroll: (input) => invoke<void>("scroll", input).pipe(Effect.as({ ok: true })),
   preview_evaluate: (input) =>
-    invoke<unknown>("evaluate", input).pipe(Effect.map((result) => result ?? null)),
+    invoke<unknown>("evaluate", input).pipe(Effect.map((result) => ({ result: result ?? null }))),
   preview_wait_for: (input) =>
-    invoke<void>("waitFor", input, input.timeoutMs).pipe(Effect.as(null)),
+    invoke<void>("waitFor", input, input.timeoutMs).pipe(Effect.as({ ok: true })),
   preview_recording_start: () => invoke<PreviewAutomationRecordingStatus>("recordingStart", {}),
   preview_recording_stop: () => invoke<PreviewAutomationRecordingArtifact>("recordingStop", {}),
 } satisfies Parameters<typeof PreviewToolkit.toLayer>[0];

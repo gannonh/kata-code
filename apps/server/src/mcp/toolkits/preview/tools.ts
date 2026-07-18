@@ -1,7 +1,9 @@
 import {
+  PreviewAutomationAck,
   PreviewAutomationClickInput,
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
+  PreviewAutomationEvaluateResult,
   PreviewAutomationNavigateInput,
   PreviewAutomationOpenInput,
   PreviewAutomationPressInput,
@@ -13,7 +15,6 @@ import {
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
 } from "@kata-sh/code-contracts";
-import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -84,7 +85,7 @@ export const PreviewClickTool = browserTool(
     description:
       "Click exactly one page target. Prefer locator with a Playwright selector such as role=button[name='Send']; selector accepts legacy CSS; x and y are viewport CSS pixels and must be supplied together. Call preview_snapshot first when the target is unknown.",
     parameters: PreviewAutomationClickInput,
-    success: Schema.Null,
+    success: PreviewAutomationAck,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Click preview page"),
@@ -95,7 +96,7 @@ export const PreviewTypeTool = browserTool(
     description:
       "Insert literal text into one input. Prefer locator with a Playwright role/text selector; selector accepts legacy CSS. If neither is supplied, types into the currently focused element. Set clear=true to replace existing text.",
     parameters: PreviewAutomationTypeInput,
-    success: Schema.Null,
+    success: PreviewAutomationAck,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Type into preview page"),
@@ -106,7 +107,7 @@ export const PreviewPressTool = browserTool(
     description:
       "Press one keyboard key in the active page, for example {key:'Enter'}, {key:'Escape'}, or {key:'a',modifiers:['Meta']}. This targets the page's current focus.",
     parameters: PreviewAutomationPressInput,
-    success: Schema.Null,
+    success: PreviewAutomationAck,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Press key in preview page"),
@@ -117,7 +118,7 @@ export const PreviewScrollTool = safeBrowserTool(
     description:
       "Scroll by CSS pixels. Positive deltaY scrolls down and positive deltaX scrolls right. Without locator/selector it scrolls the viewport; otherwise it scrolls that container. At least one delta is required.",
     parameters: PreviewAutomationScrollInput,
-    success: Schema.Null,
+    success: PreviewAutomationAck,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Scroll preview page"),
@@ -128,7 +129,7 @@ export const PreviewEvaluateTool = browserTool(
     description:
       "Evaluate a JavaScript expression in the page's main frame and return a serializable result up to 64 KB. Prefer preview_snapshot and semantic click/type/wait tools; use this for inspection or interactions those tools cannot express. The expression may mutate page state.",
     parameters: PreviewAutomationEvaluateInput,
-    success: Schema.Unknown,
+    success: PreviewAutomationEvaluateResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Evaluate JavaScript in preview"),
@@ -139,7 +140,7 @@ export const PreviewWaitForTool = readonlyBrowserTool(
     description:
       "Wait until all supplied conditions match: a Playwright locator, legacy CSS selector, visible-text substring, and/or URL substring. Provide at least one condition. Defaults to 15 seconds, maximum 60 seconds.",
     parameters: PreviewAutomationWaitForInput,
-    success: Schema.Null,
+    success: PreviewAutomationAck,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Wait for preview page condition"),

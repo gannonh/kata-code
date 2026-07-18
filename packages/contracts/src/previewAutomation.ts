@@ -292,6 +292,22 @@ export const PreviewAutomationEvaluateInput = Schema.Struct({
 });
 export type PreviewAutomationEvaluateInput = typeof PreviewAutomationEvaluateInput.Type;
 
+/**
+ * Acknowledgement returned by action tools with no payload. MCP requires
+ * structured tool results to be JSON objects, so void actions return this
+ * instead of null (strict clients reject `structuredContent: null`).
+ */
+export const PreviewAutomationAck = Schema.Struct({
+  ok: Schema.Boolean,
+});
+export type PreviewAutomationAck = typeof PreviewAutomationAck.Type;
+
+/** Object-wrapped evaluate result; see `PreviewAutomationAck`. */
+export const PreviewAutomationEvaluateResult = Schema.Struct({
+  result: Schema.Unknown,
+});
+export type PreviewAutomationEvaluateResult = typeof PreviewAutomationEvaluateResult.Type;
+
 export const PreviewAutomationWaitForInput = Schema.Struct({
   selector: Schema.optional(LegacySelector).annotate({
     description: "Legacy CSS selector that must match an element. Prefer locator.",

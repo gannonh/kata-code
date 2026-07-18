@@ -77,7 +77,7 @@ it.effect("registers annotated tools and preserves authenticated request context
                     height: 5,
                   },
                 }
-              : request.operation === "press"
+              : request.operation === "press" || request.operation === "evaluate"
                 ? undefined
                 : {
                     available: true,
@@ -158,8 +158,19 @@ it.effect("registers annotated tools and preserves authenticated request context
           Effect.provideService(McpSchema.McpServerClient, client),
         );
       expect(press.isError).toBe(false);
-      expect(press.structuredContent).toBeNull();
-      expect(press.content).toEqual([{ type: "text", text: "null" }]);
+      // Strict MCP clients reject a null structuredContent; action tools ack
+      // with an object instead.
+      expect(press.structuredContent).toEqual({ ok: true });
+      expect(press.content).toEqual([{ type: "text", text: '{"ok":true}' }]);
+
+      const evaluate = yield* server
+        .callTool({ name: "preview_evaluate", arguments: { expression: "undefined" } })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        );
+      expect(evaluate.isError).toBe(false);
+      expect(evaluate.structuredContent).toEqual({ result: null });
     }),
   ).pipe(Effect.provide(TestLayer)),
 );
