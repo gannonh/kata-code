@@ -56,9 +56,9 @@ Each entry should include:
 - **Tracking issue:** [#31](https://github.com/gannonh/kata-code/issues/31)
 - **Area:** sandbox, vercel, web, testing
 - **Source:** [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md) (AC-GS3, AC-GS13)
-- **Rationale:** `VercelSourcePicker` shipped with logic-level and static-markup coverage. Interactive combobox behavior and discovery RPC wiring need a component-test harness that mocks the sandbox client.
+- **Rationale:** `SandboxGitHubSourcePicker` (renamed from `VercelSourcePicker`) shipped with logic-level and static-markup coverage. Interactive combobox behavior and discovery RPC wiring need a component-test harness that mocks the sandbox client.
 - **Revisit trigger:** Next settings component-test pass, or when the picker changes.
-- **Notes:** Assert discovery RPCs fire on open, branch initializes from the repo default, loading/empty/error status renders, Load more paginates, and locked disables both triggers.
+- **Notes:** Assert discovery RPCs fire on open, branch initializes from the repo default, loading/empty/error status renders, Load more paginates, and locked disables both triggers. Docker and Vercel both render this picker.
 
 ### Vercel sandbox orchestration tests (GitHub source path)
 
@@ -72,13 +72,13 @@ Each entry should include:
 
 ### Docker GitHub remote-source seeding
 
-- **Status:** deferred
+- **Status:** closed
 - **Tracking issue:** [#29](https://github.com/gannonh/kata-code/issues/29)
 - **Area:** sandbox, docker, source-control
-- **Source:** [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md)
-- **Rationale:** The approved source-selection work targets Vercel native Git source. Docker retains its established local-worktree archive seed path so the feature does not introduce two provisioning redesigns together.
-- **Revisit trigger:** When a separately approved Docker source-selection and provisioning design is scheduled.
-- **Notes:** Define Docker repository/branch UX, local-versus-remote seed behavior, GitHub credential handling, lifecycle semantics, migration path, automated coverage, and maintainer validation without regressing local Docker deployment.
+- **Source:** [Shared sandbox GitHub source picker and Docker remote seed](/specs/2026-07-17-shared-sandbox-github-source-design.md) · [Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md)
+- **Rationale:** Accepted and implemented by the shared sandbox GitHub source design. Docker Create now requires a selected GitHub repository/branch, seeds host `gh` credentials, shallow-clones into `/workspace`, and locks source via fingerprint parity with Vercel.
+- **Revisit trigger:** None.
+- **Notes:** Closed 2026-07-18. Local-worktree archive seeding on the Docker create path is removed.
 
 ### Pi provider full adapter parity
 

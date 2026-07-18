@@ -30,14 +30,17 @@ describe("sandboxGitHubSource", () => {
       httpsUrl: "https://github.com/octocat/Hello-World.git",
     });
     // Alias retained for Vercel call sites.
-    expect(resolveVercelSource({ source: { repository: "octocat/Hello-World", branch: "main" } }))
-      .toEqual(resolved);
+    expect(
+      resolveVercelSource({ source: { repository: "octocat/Hello-World", branch: "main" } }),
+    ).toEqual(resolved);
   });
 
   it("returns null when no source is configured", () => {
     expect(resolveSandboxGitHubSource({})).toBeNull();
     expect(resolveSandboxGitHubSource(null)).toBeNull();
-    expect(resolveSandboxGitHubSource({ source: { repository: "octocat/Hello-World" } })).toBeNull();
+    expect(
+      resolveSandboxGitHubSource({ source: { repository: "octocat/Hello-World" } }),
+    ).toBeNull();
   });
 
   it("computes a stable fingerprint that changes with repository or branch", () => {

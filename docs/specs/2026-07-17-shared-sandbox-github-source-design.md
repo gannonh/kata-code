@@ -2,7 +2,7 @@
 type: Spec
 title: Shared sandbox GitHub source picker and Docker remote seed
 description: Generalize the Vercel GitHub repo/branch picker for all sandbox drivers and replace Docker local-worktree archive seeding with an in-container gh/git clone of the selected source.
-status: Approved
+status: Implemented
 approved_at: 2026-07-18T00:00:00Z
 ---
 
@@ -10,7 +10,7 @@ approved_at: 2026-07-18T00:00:00Z
 
 ## Status
 
-Approved
+Implemented
 
 ## Build handoff
 
@@ -24,9 +24,9 @@ Every sandbox deployment target uses one shared GitHub repository + branch picke
 
 ## Background
 
-Vercel sandboxes already persist a GitHub `source: { repository, branch }` and pick it through `VercelSourcePicker` (`apps/web/src/components/settings/VercelSourcePicker.tsx`), backed by host `gh` discovery RPCs and native Vercel Git clone ([Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md)).
+Vercel sandboxes already persist a GitHub `source: { repository, branch }` and pick it through `SandboxGitHubSourcePicker` (`apps/web/src/components/settings/SandboxGitHubSourcePicker.tsx`), backed by host `gh` discovery RPCs and native Vercel Git clone ([Vercel GitHub repository and branch seeding](/specs/2026-07-10-vercel-github-source-seeding-design.md)).
 
-Docker targets still use `SavedEnvironmentEditor`'s local-project "Saved environment" dropdown and seed via host `repoSeedArchive` + `copyInto`. That UX divergence is what this spec closes. Docker remote-source follow-up was previously deferred as [#29](https://github.com/gannonh/kata-code/issues/29); this spec accepts that work.
+Docker targets previously used `SavedEnvironmentEditor`'s local-project "Saved environment" dropdown and host `repoSeedArchive` + `copyInto`. That path is replaced by the shared picker + in-container clone. Deferred [#29](https://github.com/gannonh/kata-code/issues/29) is closed by this implementation.
 
 ## Locked decisions
 
@@ -115,3 +115,24 @@ No silent fallback to local-project archive seeding.
 - [Phase 3b Vercel Sandbox driver](/specs/2026-07-04-kata-environments-deployments-phase-3b-design.md)
 - [Deferred Docker remote source #29](https://github.com/gannonh/kata-code/issues/29)
 - [Pi sandbox support](/specs/2026-07-17-pi-sandbox-support-design.md) (parallel track; not blocked by this spec)
+
+## Build completion report
+
+**Branch:** `pi-sandbox-support` · **Base:** `a2554a668` · **Head:** (see git log)
+
+### Commits
+
+1. `feat(sandbox): extract shared GitHub source helpers and Docker clone` — rename `vercelGitHubSource` → `sandboxGitHubSource`; add `dockerRemoteSetup` shallow-clone helpers; design approved.
+2. `feat(sandbox): clone Docker GitHub source into /workspace` — Docker config `source`, provision path clone after credential + GitHub auth seed, fingerprint store/reject, `github-cli` in image.
+3. `feat(web): wire SandboxGitHubSourcePicker for Docker and Vercel` — shared picker, create gating, locked source, fixed-key saved env for Docker.
+4. `test(e2e): drive Docker deploy via GitHub source picker` — container-deploy selects GitHub source and asserts `/workspace` is a remote clone.
+
+### Acceptance status
+
+- **AC-1–AC-4:** implemented (shared picker, required source + `/workspace` clone, lock/fingerprint, canonical `repositoryKey` saved env).
+- **AC-5:** unit/card tests updated; `@environments-deploy` container-deploy updated for GitHub picker (requires host-gh-accessible `E2E_SANDBOX_SOURCE_REPOSITORY` or aliases).
+- **AC-6:** `vp check` / `vp run typecheck` required before closeout.
+
+### Deferred work
+
+- Closed [#29](https://github.com/gannonh/kata-code/issues/29) Docker remote-source seeding.
