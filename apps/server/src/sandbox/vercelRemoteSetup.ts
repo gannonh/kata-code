@@ -99,6 +99,9 @@ export function seedGitHubAuth(input: {
   readonly handle: SandboxHandle;
   readonly token: string;
   readonly nonce: string;
+  /** Working directory for the auth exec. Defaults to the Vercel clone root;
+   *  Docker passes `/workspace` (or `/`) because `/vercel/sandbox` does not exist. */
+  readonly cwd?: string;
 }): Effect.Effect<void, VercelRemoteSetupError | SandboxProviderError> {
   return Effect.gen(function* () {
     const copyIntoCap = input.driver.copyInto;
@@ -179,7 +182,7 @@ export function seedGitHubAuth(input: {
         Effect.gen(function* () {
           const command = buildGitHubAuthSeedCommand(tokenFilePath);
           const result = yield* input.driver.exec(input.handle, command, {
-            cwd: VERCEL_WORKSPACE,
+            cwd: input.cwd ?? VERCEL_WORKSPACE,
           });
           if (result.exitCode !== 0) {
             const stderr = redactSecrets(result.stderr, [input.token]);

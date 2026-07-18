@@ -86,8 +86,10 @@ ARG TARGETARCH
 # a PTY around interactive provider CLI logins (`claude setup-token`,
 # `codex login`, etc.). Without it the sign-in flow hangs at "Starting
 # sign-in…" forever.
+# github-cli (`gh`) is required so credential seed can run `gh auth login` /
+# `gh auth setup-git` before the Docker remote shallow-clone into /workspace.
 RUN set -eux; \
-    apk add --no-cache libstdc++ ca-certificates curl git bash util-linux-misc; \
+    apk add --no-cache libstdc++ ca-certificates curl git bash util-linux-misc github-cli; \
     case "${TARGETARCH}" in \
       amd64) \
         cloudflared_url="https://github.com/cloudflare/cloudflared/releases/download/2026.5.2/cloudflared-linux-amd64"; \

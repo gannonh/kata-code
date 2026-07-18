@@ -36,6 +36,14 @@ export const DockerSandboxConfig = makeProviderSettingsSchema({
   extraEnv: Schema.optionalKey(
     Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
   ),
+  /** GitHub source selection owned by the Docker card picker (hidden from the
+   *  generic settings form). Optional only for legacy targets; Create requires it. */
+  source: Schema.optionalKey(
+    Schema.Struct({
+      repository: TrimmedNonEmptyString,
+      branch: TrimmedNonEmptyString,
+    }).pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+  ),
 });
 
 export type DockerSandboxConfig = typeof DockerSandboxConfig.Type;
