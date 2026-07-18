@@ -117,7 +117,9 @@ export interface PiAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   /** Override SDK session creation for tests. */
   readonly createSession?: typeof createAgentSession;
-  /** Override the model list used for selection (tests); defaults to the registry. */
+  /** Override the model list used for selection (tests); re-read on each
+   *  startSession. Defaults to a fresh `modelRegistry.getAvailable()` so
+   *  sandbox credential seed after serve boot is visible. */
   readonly availableModels?: ReadonlyArray<PiModelShape>;
   /** Observe published runtime events without subscribing to the stream (tests). */
   readonly onEvent?: (event: ProviderRuntimeEvent) => void;
@@ -530,11 +532,20 @@ export function makePiAdapter(
       return [];
     };
 
-    const availableModels = (options?.availableModels ??
-      modelRegistry.getAvailable()) as ReadonlyArray<PiModelShape>;
+    /**
+     * Resolve authenticated models at call time. Sandbox credential seed runs
+     * after `katacode serve` is already listening, so a boot-time snapshot of
+     * `getAvailable()` is empty while later discovery (fresh registries) shows
+     * models in the UI. Re-reading on each startSession picks up late-seeded
+     * auth. Tests may inject a mutable `availableModels` array for the same
+     * late-availability shape.
+     */
+    const listAvailableModels = (): ReadonlyArray<PiModelShape> =>
+      (options?.availableModels ?? modelRegistry.getAvailable()) as ReadonlyArray<PiModelShape>;
 
     const resolveModel = (
       modelSelection: ProviderSessionStartInput["modelSelection"],
+      availableModels: ReadonlyArray<PiModelShape>,
     ): PiModelShape | undefined => {
       const slug = modelSelection?.model;
       if (slug) {
@@ -683,13 +694,18 @@ export function makePiAdapter(
         }
 
         const cwd = input.cwd?.trim() || process.cwd();
-        const model = resolveModel(input.modelSelection);
+        const availableModels = listAvailableModels();
+        const model = resolveModel(input.modelSelection, availableModels);
         if (!model) {
+          const slug = input.modelSelection?.model?.trim();
+          const issue =
+            slug && slug.length > 0
+              ? `Pi could not use model '${slug}' for this session (${String(availableModels.length)} authenticated model(s) available). Configure Pi auth or select a runtime-discovered model.`
+              : "Pi has no authenticated model available for this session. Configure Pi auth or select a runtime-discovered model.";
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "startSession",
-            issue:
-              "Pi has no authenticated model available for this session. Configure Pi auth or select a runtime-discovered model.",
+            issue,
           });
         }
         const thinkingLevel = resolvePiThinkingLevelForSession(model, input.modelSelection);

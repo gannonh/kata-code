@@ -204,6 +204,55 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
+  it.effect("re-reads available models on startSession after late credential seed", () =>
+    Effect.gen(function* () {
+      // Sandbox seed copyInto runs after serve is already up; the adapter must
+      // not keep a boot-time empty getAvailable() snapshot.
+      const lateModels: PiModelShape[] = [];
+      const { session } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: lateModels,
+        createSession: (() => Promise.resolve({ session })) as never,
+      });
+
+      const early = yield* adapter
+        .startSession({
+          threadId: ThreadId.make("pi-thread-late-seed"),
+          runtimeMode: "full-access",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("pi"),
+            model: "openai-codex/gpt-5.4-mini",
+          },
+        })
+        .pipe(Effect.flip);
+      expect(early._tag).toBe("ProviderAdapterValidationError");
+      if (early._tag !== "ProviderAdapterValidationError") {
+        throw new Error("Unexpected error type");
+      }
+      expect(early.issue).toContain("openai-codex/gpt-5.4-mini");
+      expect(early.issue).toContain("0 authenticated model");
+
+      lateModels.push({
+        id: "gpt-5.4-mini",
+        name: "GPT-5.4 Mini",
+        provider: "openai-codex",
+        reasoning: false,
+      });
+
+      const started = yield* adapter.startSession({
+        threadId: ThreadId.make("pi-thread-late-seed"),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("pi"),
+          model: "openai-codex/gpt-5.4-mini",
+        },
+      });
+      expect(started.status).toBe("ready");
+      expect(started.model).toBe("openai-codex/gpt-5.4-mini");
+    }),
+  );
+
   it.effect("streams a successful turn as a canonical event sequence", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();
