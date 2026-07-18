@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   PI_UPDATE_REQUIRED_ENV,
   PI_UPDATE_VERIFICATION_ENV,
+  assertDockerAvailable,
   makePiUpdateCommands,
   readPiUpdatePrerequisites,
   runPiUpdateVerification,
@@ -55,6 +56,7 @@ describe("Pi update verification", () => {
     const checkAuthFile = vi.fn(() => {
       throw new Error("missing auth");
     });
+    const checkDocker = vi.fn();
 
     expect(() =>
       runPiUpdateVerification(
@@ -62,11 +64,58 @@ describe("Pi update verification", () => {
           KATACODE_E2E_PI_AGENT_DIR: "/agent",
           KATACODE_E2E_PI_MODEL: "provider/model",
         },
-        { checkAuthFile, runCommand },
+        { checkAuthFile, checkDocker, runCommand },
       ),
     ).toThrow("missing auth");
     expect(checkAuthFile).toHaveBeenCalledWith("/agent/auth.json");
+    expect(checkDocker).not.toHaveBeenCalled();
     expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it("fails fast when Docker is unavailable before running any command", () => {
+    const runCommand = vi.fn();
+    const checkDocker = vi.fn(() => {
+      throw new Error("Pi update verification requires Docker: docker info exited with code 1");
+    });
+
+    expect(() =>
+      runPiUpdateVerification(
+        {
+          KATACODE_E2E_PI_AGENT_DIR: "/agent",
+          KATACODE_E2E_PI_MODEL: "provider/model",
+        },
+        { checkAuthFile: vi.fn(), checkDocker, runCommand },
+      ),
+    ).toThrow("Pi update verification requires Docker");
+    expect(checkDocker).toHaveBeenCalledOnce();
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it("default Docker check distinguishes start error, signal, and nonzero exit", () => {
+    const startError = new Error("ENOENT");
+    expect(() =>
+      assertDockerAvailable({
+        runDockerInfo: () => ({ status: null, error: startError }),
+      }),
+    ).toThrow("Pi update verification requires Docker: failed to start: ENOENT");
+
+    expect(() =>
+      assertDockerAvailable({
+        runDockerInfo: () => ({ status: null, signal: "SIGTERM" }),
+      }),
+    ).toThrow("Pi update verification requires Docker: docker info terminated by signal SIGTERM");
+
+    expect(() =>
+      assertDockerAvailable({
+        runDockerInfo: () => ({ status: 1 }),
+      }),
+    ).toThrow("Pi update verification requires Docker: docker info exited with code 1");
+
+    expect(() =>
+      assertDockerAvailable({
+        runDockerInfo: () => ({ status: 0 }),
+      }),
+    ).not.toThrow();
   });
 
   it("requires auth.json to be a regular file before running any command", () => {
@@ -81,7 +130,7 @@ describe("Pi update verification", () => {
             KATACODE_E2E_PI_AGENT_DIR: agentDir,
             KATACODE_E2E_PI_MODEL: "provider/model",
           },
-          { runCommand },
+          { checkDocker: vi.fn(), runCommand },
         ),
       ).toThrow("requires readable regular auth.json");
       expect(runCommand).not.toHaveBeenCalled();
@@ -104,7 +153,7 @@ describe("Pi update verification", () => {
           KATACODE_E2E_PI_MODEL: " provider/model ",
           [PI_UPDATE_VERIFICATION_ENV]: "0",
         },
-        { checkAuthFile: vi.fn(), runCommand },
+        { checkAuthFile: vi.fn(), checkDocker: vi.fn(), runCommand },
       ),
     ).toThrow("repository check failed with exit code 2");
     expect(runCommand).toHaveBeenCalledTimes(2);

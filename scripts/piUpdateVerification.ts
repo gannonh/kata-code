@@ -28,8 +28,19 @@ interface CommandOptions {
   readonly stdio: "inherit";
 }
 
+interface DockerInfoResult {
+  readonly status: number | null;
+  readonly signal?: NodeJS.Signals | null;
+  readonly error?: Error;
+}
+
+interface AssertDockerAvailableDependencies {
+  readonly runDockerInfo?: () => DockerInfoResult;
+}
+
 interface PiUpdateVerificationDependencies {
   readonly checkAuthFile?: (path: string) => void;
+  readonly checkDocker?: () => void;
   readonly runCommand?: (
     executable: string,
     args: ReadonlyArray<string>,
@@ -100,6 +111,31 @@ function checkReadableFile(path: string): void {
   }
 }
 
+function spawnDockerInfo(): DockerInfoResult {
+  return spawnSync("docker", ["info"], { stdio: "ignore" });
+}
+
+export function assertDockerAvailable(dependencies: AssertDockerAvailableDependencies = {}): void {
+  const runDockerInfo = dependencies.runDockerInfo ?? spawnDockerInfo;
+  const result = runDockerInfo();
+  if (result.error) {
+    throw new Error(
+      `Pi update verification requires Docker: failed to start: ${result.error.message}`,
+      { cause: result.error },
+    );
+  }
+  if (result.status === null) {
+    throw new Error(
+      `Pi update verification requires Docker: docker info terminated by signal ${result.signal ?? "unknown"}`,
+    );
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `Pi update verification requires Docker: docker info exited with code ${result.status}`,
+    );
+  }
+}
+
 function spawnCommand(
   executable: string,
   args: ReadonlyArray<string>,
@@ -115,9 +151,11 @@ export function runPiUpdateVerification(
   const { agentDir, model } = readPiUpdatePrerequisites(env);
   const authPath = resolve(agentDir, "auth.json");
   const checkAuthFile = dependencies.checkAuthFile ?? checkReadableFile;
+  const checkDocker = dependencies.checkDocker ?? assertDockerAvailable;
   const runCommand = dependencies.runCommand ?? spawnCommand;
 
   checkAuthFile(authPath);
+  checkDocker();
 
   const commandEnv = {
     ...env,

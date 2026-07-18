@@ -34,10 +34,32 @@ Maintainer-attested manual UAT against a freshly rebuilt `katacode:local` contai
 2. **Pi SDK registries cache their initial auth state.** Re-calling `getAvailable()` on the boot-time registry was insufficient. `AuthStorage` and `ModelRegistry` now recreate on every `startSession`, and those fresh instances are passed to `createAgentSession` (`55396d05d`).
 3. A regression test reproduces late credential seed and verifies session creation receives the refreshed registries. `apps/server/src/provider/Layers/PiAdapter.test.ts`: 37/37 passing. `vp check` and `vp run typecheck` pass.
 
+## ModelRuntime 0.80.10 pre-release validation (2026-07-18)
+
+Maintainer-attested local + Docker evidence for the Pi `ModelRuntime` migration and exact `0.80.10` alignment. Spec: [Pi runtime update strategy](./2026-07-18-pi-runtime-update-strategy-design.md).
+
+| #   | Check                                  | Result  | Evidence                                                                     |
+| --- | -------------------------------------- | ------- | ---------------------------------------------------------------------------- |
+| 1   | `vp run verify:pi-update`              | PASS    | Exit code 0                                                                  |
+| 2   | Focused Pi unit/integration tests      | PASS    | 77/77                                                                        |
+| 3   | Credentialed desktop `@pi` E2E         | PASS    | 8/8 in 59.0s; includes built-in `openai-codex/gpt-5.6-sol`                   |
+| 4   | Docker image baseline                  | PASS    | `verify:docker-image`                                                        |
+| 5   | Docker Pi runtime probe                | PASS    | `cliVersion=0.80.10`, `sdkVersion=0.80.10`, model `openai-codex/gpt-5.6-sol` |
+| 6   | Full unit suite                        | PASS    | 505 passed / 2 skipped files; 4083 passed / 11 skipped tests                 |
+| 7   | Release smoke                          | PASS    | `vp run release:smoke`                                                       |
+| 8   | Vercel sandbox                         | Pending | Post-nightly                                                                 |
+| 9   | Degraded path — no host Pi credentials | Pending | Post-nightly                                                                 |
+
+### Machine evidence
+
+- Pi SDK / CLI pin: `0.80.10` (server deps, Vercel `PI_SDK_PIN`, Docker `ARG PI_SDK_VERSION`).
+- Docker probe selected model: `openai-codex/gpt-5.6-sol`.
+- Catalog E2E uses built-in discovery (`includeModels: false`); no custom model registration required.
+
 ## Vercel sandbox validation
 
-Pending.
+Pending post-nightly.
 
 ## Degraded path — no host Pi credentials
 
-Pending.
+Pending post-nightly.
