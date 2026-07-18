@@ -28,10 +28,9 @@ describe("GitHub CLI bootstrap", () => {
   });
 
   it("pins the pi SDK trio so npm dedupes the kata CLI's ^0.80.0 ranges to the known-good build", () => {
-    // pi >= 0.80.8 removed the root `AuthStorage` export; a fresh global
-    // install resolving it crashes `katacode serve` at module load and the
-    // sandbox never becomes ready. The pin only works when every pi spec in
-    // the single install command carries it.
+    // The published Kata CLI and sandbox Pi binary must use the same tested
+    // ModelRuntime API. Every Pi spec in the install command carries the pin
+    // to keep the runtime packages in lockstep.
     expect(PI_SDK_PIN).toMatch(/^\d+\.\d+\.\d+$/);
     expect(PROVIDER_CLI_PACKAGES).toContain(`@earendil-works/pi-coding-agent@${PI_SDK_PIN}`);
     expect(PROVIDER_CLI_PACKAGES).not.toContain("@earendil-works/pi-coding-agent");

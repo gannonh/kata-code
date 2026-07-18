@@ -140,7 +140,15 @@ RUN printf '#!/bin/sh\nexec node /app/apps/server/dist/bin.mjs "$@"\n' > /usr/lo
 # installer, not npm: it downloads the platform binary and symlinks `agent` +
 # `cursor-agent` into ~/.local/bin, so it is installed as the katacode user
 # below.
-RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai @xai-official/grok @earendil-works/pi-coding-agent
+ARG PI_SDK_VERSION=0.80.10
+RUN npm install -g \
+    @openai/codex \
+    @anthropic-ai/claude-code \
+    opencode-ai \
+    @xai-official/grok \
+    @earendil-works/pi-coding-agent@${PI_SDK_VERSION} \
+    @earendil-works/pi-ai@${PI_SDK_VERSION} \
+    @earendil-works/pi-agent-core@${PI_SDK_VERSION}
 
 # Run the server and cloudflared as an unprivileged user instead of root.
 # A writable HOME is required for the Node server's config/cache dirs and for
