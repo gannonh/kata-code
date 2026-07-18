@@ -125,12 +125,12 @@ export async function addVercelEnvironment(page: Page, label: string): Promise<L
 }
 
 /**
- * Select a GitHub repository and branch in the expanded Vercel card's source
- * picker. Both are searchable comboboxes backed by the host `gh` session. When
- * `branch` is omitted the repository's default branch (auto-selected on repo
- * choice) is kept.
+ * Select a GitHub repository and branch in the expanded sandbox card's source
+ * picker (Docker and Vercel). Both are searchable comboboxes backed by the host
+ * `gh` session. When `branch` is omitted the repository's default branch
+ * (auto-selected on repo choice) is kept.
  */
-export async function selectVercelSource(
+export async function selectSandboxGitHubSource(
   page: Page,
   card: Locator,
   input: { readonly repository: string; readonly branch?: string | undefined },
@@ -170,6 +170,9 @@ export async function selectVercelSource(
   await branchOption.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
   await branchOption.click();
 }
+
+/** @deprecated Prefer `selectSandboxGitHubSource`. */
+export const selectVercelSource = selectSandboxGitHubSource;
 
 export async function setTheme(page: Page, theme: ThemePreference): Promise<void> {
   await dismissBlockingToasts(page);

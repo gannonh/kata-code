@@ -223,21 +223,40 @@ export function readVercelCredentials(): {
 }
 
 /**
- * Read the GitHub source repository + branch the Vercel source-picker E2E
- * selects. `E2E_VERCEL_SOURCE_REPOSITORY` is an `owner/name` the host `gh`
- * session can access; `E2E_VERCEL_SOURCE_BRANCH` defaults to the repository
- * default branch when omitted (the picker auto-selects it). Maintainer-local:
- * callers SKIP the source flow when the repository is absent.
+ * Read the GitHub source repository + branch sandbox source-picker E2E selects
+ * (Docker and Vercel). Preference order:
+ * `E2E_SANDBOX_SOURCE_REPOSITORY` → `E2E_DOCKER_SOURCE_REPOSITORY` →
+ * `E2E_VERCEL_SOURCE_REPOSITORY`. Branch env vars follow the same prefix order.
+ * When omitted, the picker auto-selects the repository default branch.
  *
  * Repo `.env` / `.env.local` win over ambient shell exports for keys defined
  * in those files (see `applyE2ERepoEnv`). Prefer editing `.env.local` over
  * exporting one-off overrides in the terminal.
  */
+export function readSandboxGitHubSourceSelection(): {
+  readonly repository: string;
+  readonly branch: string | undefined;
+} | null {
+  const repository = firstNonEmpty(
+    process.env.E2E_SANDBOX_SOURCE_REPOSITORY,
+    process.env.E2E_DOCKER_SOURCE_REPOSITORY,
+    process.env.E2E_VERCEL_SOURCE_REPOSITORY,
+  );
+  if (!repository) return null;
+  return {
+    repository,
+    branch: firstNonEmpty(
+      process.env.E2E_SANDBOX_SOURCE_BRANCH,
+      process.env.E2E_DOCKER_SOURCE_BRANCH,
+      process.env.E2E_VERCEL_SOURCE_BRANCH,
+    ),
+  };
+}
+
+/** @deprecated Prefer `readSandboxGitHubSourceSelection`. */
 export function readVercelSourceSelection(): {
   readonly repository: string;
   readonly branch: string | undefined;
 } | null {
-  const repository = firstNonEmpty(process.env.E2E_VERCEL_SOURCE_REPOSITORY);
-  if (!repository) return null;
-  return { repository, branch: firstNonEmpty(process.env.E2E_VERCEL_SOURCE_BRANCH) };
+  return readSandboxGitHubSourceSelection();
 }
