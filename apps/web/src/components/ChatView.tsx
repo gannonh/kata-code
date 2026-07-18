@@ -175,6 +175,7 @@ import { PanelLayoutControls } from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
+  resolveBranchToolbarProjectLabel,
   resolveEffectiveEnvMode,
   resolveEnvironmentIconKind,
   resolveEnvironmentOptionLabel,
@@ -1538,7 +1539,10 @@ function ChatViewContent(props: ChatViewProps) {
       const label = resolveEnvironmentOptionLabel({
         isPrimary,
         environmentId: p.environmentId,
-        projectName: p.name,
+        projectName: resolveBranchToolbarProjectLabel({
+          projectName: p.name,
+          repositoryName: p.repositoryIdentity?.name,
+        }),
         runtimeLabel: runtimeState?.descriptor?.label ?? null,
         savedLabel: savedRecord?.label ?? null,
       });

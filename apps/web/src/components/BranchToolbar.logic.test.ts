@@ -6,6 +6,7 @@ import {
   resolveEnvironmentIconKind,
   resolveEnvironmentOptionLabel,
   resolveBranchSelectionTarget,
+  resolveBranchToolbarProjectLabel,
   resolveCurrentWorkspaceLabel,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
@@ -83,6 +84,23 @@ describe("resolveBranchToolbarValue", () => {
         currentGitBranch: "main",
       }),
     ).toBe("main");
+  });
+});
+
+describe("resolveBranchToolbarProjectLabel", () => {
+  it("uses repository identity instead of a generic sandbox checkout directory", () => {
+    expect(
+      resolveBranchToolbarProjectLabel({
+        projectName: "sandbox",
+        repositoryName: "project-overview",
+      }),
+    ).toBe("project-overview");
+  });
+
+  it("falls back to the project name when repository identity is unavailable", () => {
+    expect(
+      resolveBranchToolbarProjectLabel({ projectName: "kata-code", repositoryName: null }),
+    ).toBe("kata-code");
   });
 });
 

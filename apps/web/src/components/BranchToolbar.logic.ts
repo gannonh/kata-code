@@ -25,6 +25,13 @@ function normalizeDisplayLabel(value: string | null | undefined): string | null 
   return trimmed && trimmed.length > 0 ? trimmed : null;
 }
 
+export function resolveBranchToolbarProjectLabel(input: {
+  projectName: string;
+  repositoryName: string | null | undefined;
+}): string {
+  return normalizeDisplayLabel(input.repositoryName) ?? input.projectName;
+}
+
 export function shouldShowEnvironmentIndicator(environmentCount: number): boolean {
   return environmentCount > 0;
 }
