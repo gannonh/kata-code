@@ -16,7 +16,7 @@ test.describe(`Branch toolbar environment ${E2E_TAGS.smoke}`, () => {
 
     const environment = authenticatedAppWindow.getByTestId("branch-toolbar-environment");
     await expect(environment).toBeVisible();
-    await expect(environment).toContainText("This device");
+    await expect(environment).toContainText("branch-toolbar-environment");
     await expect(environment.locator(".lucide-monitor")).toBeVisible();
     await expect(environment).not.toHaveAttribute("role", "combobox");
 

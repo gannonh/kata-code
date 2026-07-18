@@ -120,6 +120,25 @@ describe("resolveEnvironmentIconKind", () => {
 });
 
 describe("resolveEnvironmentOptionLabel", () => {
+  it("uses the project name for the branch toolbar context", () => {
+    expect(
+      resolveEnvironmentOptionLabel({
+        isPrimary: true,
+        environmentId: localEnvironmentId,
+        projectName: "kata-code",
+        runtimeLabel: "Julius's Mac mini",
+      }),
+    ).toBe("kata-code");
+    expect(
+      resolveEnvironmentOptionLabel({
+        isPrimary: false,
+        environmentId: remoteEnvironmentId,
+        projectName: "kata-code",
+        savedLabel: "vercel-test",
+      }),
+    ).toBe("kata-code");
+  });
+
   it("prefers the primary environment's machine label", () => {
     expect(
       resolveEnvironmentOptionLabel({

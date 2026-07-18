@@ -80,14 +80,15 @@ describe("BranchToolbarEnvironmentSelector", () => {
       option({
         environmentId: EnvironmentId.make("environment-local"),
         projectId: ProjectId.make("project-local"),
-        label: "This device",
+        label: "kata-code",
         isPrimary: true,
         iconKind: "device",
       }),
-      option(),
+      option({ label: "kata-code" }),
     ]);
     try {
       expect(mounted.host.querySelector('[role="combobox"]')).not.toBeNull();
+      expect(mounted.host.textContent).toContain("kata-code");
       expect(mounted.host.querySelector(".lucide-monitor")).not.toBeNull();
     } finally {
       await mounted.cleanup();

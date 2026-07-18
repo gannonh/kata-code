@@ -1538,6 +1538,7 @@ function ChatViewContent(props: ChatViewProps) {
       const label = resolveEnvironmentOptionLabel({
         isPrimary,
         environmentId: p.environmentId,
+        projectName: p.name,
         runtimeLabel: runtimeState?.descriptor?.label ?? null,
         savedLabel: savedRecord?.label ?? null,
       });

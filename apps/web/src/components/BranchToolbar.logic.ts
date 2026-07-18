@@ -40,9 +40,13 @@ export function resolveEnvironmentIconKind(input: {
 export function resolveEnvironmentOptionLabel(input: {
   isPrimary: boolean;
   environmentId: EnvironmentId;
+  projectName?: string | null;
   runtimeLabel?: string | null;
   savedLabel?: string | null;
 }): string {
+  const projectName = normalizeDisplayLabel(input.projectName);
+  if (projectName) return projectName;
+
   const runtimeLabel = normalizeDisplayLabel(input.runtimeLabel);
   const savedLabel = normalizeDisplayLabel(input.savedLabel);
 
