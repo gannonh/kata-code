@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 // @effect-diagnostics nodeBuiltinImport:off - Tests create temporary Pi skill directories.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -33,6 +34,17 @@ const sampleModel = (): PiModelShape => ({
   reasoning: true,
   thinkingLevelMap: { xhigh: "max" },
 });
+
+it.effect("includes the GPT-5.6 Sol migration target in the Pi catalog", () =>
+  Effect.promise(async () => {
+    const runtime = await ModelRuntime.create({ allowModelNetwork: false });
+    expect(runtime.getModel("openai-codex", "gpt-5.6-sol")).toMatchObject({
+      provider: "openai-codex",
+      id: "gpt-5.6-sol",
+      reasoning: true,
+    });
+  }),
+);
 
 describe("PiProvider mappers", () => {
   it("qualifies pi model slugs as provider/model", () => {
