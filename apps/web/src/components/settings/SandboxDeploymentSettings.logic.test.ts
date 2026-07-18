@@ -16,9 +16,10 @@ import {
   sandboxInstanceIdForLabel,
   shouldSeedRepositoryForStart,
   slugifySandboxLabel,
-  readVercelSource,
-  setVercelSource,
-  vercelSourceRepositoryKey,
+  readSandboxGitHubSource,
+  setSandboxGitHubSource,
+  sandboxGitHubSourceRepositoryKey,
+  canCreateGitHubSourcedSandbox,
   canCreateVercelSandbox,
 } from "./SandboxDeploymentSettings.logic";
 
@@ -78,40 +79,58 @@ describe("resolveSandboxListUiState", () => {
   });
 });
 
-describe("vercel source selection logic", () => {
+describe("sandbox GitHub source selection logic", () => {
   it("reads a complete source and rejects an incomplete one", () => {
     expect(
-      readVercelSource({ source: { repository: "octocat/Hello-World", branch: "main" } }),
+      readSandboxGitHubSource({ source: { repository: "octocat/Hello-World", branch: "main" } }),
     ).toEqual({ repository: "octocat/Hello-World", branch: "main" });
-    expect(readVercelSource({ source: { repository: "octocat/Hello-World" } })).toBeNull();
-    expect(readVercelSource({})).toBeNull();
-    expect(readVercelSource(null)).toBeNull();
+    expect(readSandboxGitHubSource({ source: { repository: "octocat/Hello-World" } })).toBeNull();
+    expect(readSandboxGitHubSource({})).toBeNull();
+    expect(readSandboxGitHubSource(null)).toBeNull();
   });
 
   it("sets the repository and resets the branch when the repository changes", () => {
-    const withRepo = setVercelSource({ runtime: "node24" }, { repository: "octocat/Hello-World" });
+    const withRepo = setSandboxGitHubSource(
+      { runtime: "node24" },
+      { repository: "octocat/Hello-World" },
+    );
     expect(withRepo?.source).toEqual({ repository: "octocat/Hello-World" });
     expect(withRepo?.runtime).toBe("node24");
-    const withBranch = setVercelSource(withRepo, { branch: "main" });
+    const withBranch = setSandboxGitHubSource(withRepo, { branch: "main" });
     expect(withBranch?.source).toEqual({ repository: "octocat/Hello-World", branch: "main" });
     // Changing the repository clears the previously selected branch.
-    const changed = setVercelSource(withBranch, { repository: "octocat/Spoon-Knife" });
+    const changed = setSandboxGitHubSource(withBranch, { repository: "octocat/Spoon-Knife" });
     expect(changed?.source).toEqual({ repository: "octocat/Spoon-Knife" });
   });
 
   it("clears the source when the repository is emptied", () => {
-    const withSource = setVercelSource({}, { repository: "octocat/Hello-World", branch: "main" });
-    expect(setVercelSource(withSource, { repository: "" })?.source).toBeUndefined();
+    const withSource = setSandboxGitHubSource(
+      {},
+      { repository: "octocat/Hello-World", branch: "main" },
+    );
+    expect(setSandboxGitHubSource(withSource, { repository: "" })?.source).toBeUndefined();
   });
 
   it("derives the canonical repository key like the server", () => {
-    expect(vercelSourceRepositoryKey("Octocat/Hello-World")).toBe("github.com/octocat/hello-world");
-    expect(vercelSourceRepositoryKey("octocat/Hello-World.git")).toBe(
+    expect(sandboxGitHubSourceRepositoryKey("Octocat/Hello-World")).toBe(
+      "github.com/octocat/hello-world",
+    );
+    expect(sandboxGitHubSourceRepositoryKey("octocat/Hello-World.git")).toBe(
       "github.com/octocat/hello-world",
     );
   });
 
-  it("requires a complete source before a Vercel sandbox can be created", () => {
+  it("requires a complete source before a GitHub-sourced sandbox can be created", () => {
+    expect(canCreateGitHubSourcedSandbox({ requiresGitHubSource: true, config: {} })).toBe(false);
+    expect(
+      canCreateGitHubSourcedSandbox({
+        requiresGitHubSource: true,
+        config: { source: { repository: "octocat/Hello-World", branch: "main" } },
+      }),
+    ).toBe(true);
+    // Drivers that do not require GitHub source are unaffected.
+    expect(canCreateGitHubSourcedSandbox({ requiresGitHubSource: false, config: {} })).toBe(true);
+    // Deprecated Vercel helper remains compatible.
     expect(canCreateVercelSandbox({ isVercel: true, config: {} })).toBe(false);
     expect(
       canCreateVercelSandbox({
@@ -119,8 +138,6 @@ describe("vercel source selection logic", () => {
         config: { source: { repository: "octocat/Hello-World", branch: "main" } },
       }),
     ).toBe(true);
-    // Non-Vercel drivers are unaffected.
-    expect(canCreateVercelSandbox({ isVercel: false, config: {} })).toBe(true);
   });
 });
 

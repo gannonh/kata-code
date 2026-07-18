@@ -22,16 +22,17 @@ import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
 import { ProviderSignInDialog } from "./ProviderSignInDialog";
 import { DockerConfigFields, VercelConfigFields } from "./SandboxDriverConfigFields";
 import {
-  canCreateVercelSandbox,
-  readVercelSource,
-  setVercelSource,
+  canCreateGitHubSourcedSandbox,
+  readSandboxGitHubSource,
+  setSandboxGitHubSource,
   type SandboxListUiState,
-  vercelSourceRepositoryKey,
+  sandboxGitHubSourceRepositoryKey,
 } from "./SandboxDeploymentSettings.logic";
 import { SavedEnvironmentEditor } from "./SavedEnvironmentEditor";
-import { VercelSourcePicker } from "./VercelSourcePicker";
+import { SandboxGitHubSourcePicker } from "./SandboxGitHubSourcePicker";
 
 const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
+const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
 const VERCEL_REQUIRED_ENV_NAMES = ["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID"] as const;
 type BusyOp = "test" | "start" | "dispose" | "renew" | "stop";
 
@@ -98,6 +99,8 @@ export function DeploymentTargetCard({
   onRetryPairing,
 }: DeploymentTargetCardProps) {
   const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
+  const isDocker = (instance.driver as string) === (DOCKER_KIND as string);
+  const usesGitHubSource = isVercel || isDocker;
   const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
   const supportsRenewTimeout =
     summary?.kind === "available" ? summary.supportsRenewTimeout : undefined;
@@ -141,15 +144,15 @@ export function DeploymentTargetCard({
     );
   };
 
-  // Vercel source selection (GitHub repository + branch). The source is locked
-  // once a sandbox exists; creation requires a complete source.
-  const vercelSource = isVercel ? readVercelSource(instance.config) : null;
-  const sourceLocked = isVercel && sessionStatus !== undefined;
-  const vercelSourceKey = vercelSource
-    ? vercelSourceRepositoryKey(vercelSource.repository)
+  // GitHub source selection (repository + branch) for Docker and Vercel. The
+  // source is locked once a sandbox exists; creation requires a complete source.
+  const githubSource = usesGitHubSource ? readSandboxGitHubSource(instance.config) : null;
+  const sourceLocked = usesGitHubSource && sessionStatus !== undefined;
+  const githubSourceKey = githubSource
+    ? sandboxGitHubSourceRepositoryKey(githubSource.repository)
     : undefined;
-  const createDisabledForSource = !canCreateVercelSandbox({
-    isVercel,
+  const createDisabledForSource = !canCreateGitHubSourcedSandbox({
+    requiresGitHubSource: usesGitHubSource,
     config: instance.config,
   });
   const actionsBlocked = listUiState !== "ready" || instanceBusy !== undefined;
@@ -157,18 +160,18 @@ export function DeploymentTargetCard({
 
   const setSource = (next: { repository?: string; branch?: string }) => {
     const { config: _omit, ...rest } = instance;
-    const nextConfig = setVercelSource(instance.config, next);
+    const nextConfig = setSandboxGitHubSource(instance.config, next);
     const nextInstance =
       nextConfig !== undefined
         ? ({ ...rest, config: nextConfig } as SandboxProviderInstanceConfig)
         : (rest as SandboxProviderInstanceConfig);
     // Keep the settings envelope repositoryKey aligned with the source so saved
     // per-repo settings key consistently with the server derivation.
-    const source = nextConfig ? readVercelSource(nextConfig) : null;
+    const source = nextConfig ? readSandboxGitHubSource(nextConfig) : null;
     const withKey = source
       ? ({
           ...nextInstance,
-          repositoryKey: vercelSourceRepositoryKey(source.repository),
+          repositoryKey: sandboxGitHubSourceRepositoryKey(source.repository),
         } as SandboxProviderInstanceConfig)
       : (() => {
           const { repositoryKey: _dropKey, ...withoutKey } = nextInstance;
@@ -313,12 +316,12 @@ export function DeploymentTargetCard({
             </div>
 
             <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-              {isVercel ? (
+              {usesGitHubSource ? (
                 <div className="grid gap-4">
-                  <VercelSourcePicker
+                  <SandboxGitHubSourcePicker
                     idPrefix={`sandbox-instance-${instanceId}`}
-                    repository={vercelSource?.repository}
-                    branch={vercelSource?.branch}
+                    repository={githubSource?.repository}
+                    branch={githubSource?.branch}
                     locked={sourceLocked}
                     onRepositoryChange={({ repository, defaultBranch }) =>
                       setSource({
@@ -328,7 +331,7 @@ export function DeploymentTargetCard({
                     }
                     onBranchChange={(branch) => setSource({ branch })}
                   />
-                  {vercelSource && vercelSourceKey ? (
+                  {githubSource && githubSourceKey ? (
                     <>
                       <p className="text-xs text-muted-foreground">
                         Kata reads <code>.kata/environment.json</code> from the selected branch when
@@ -341,7 +344,7 @@ export function DeploymentTargetCard({
                         selectedRepositoryKey={undefined}
                         onSelectedRepositoryKeyChange={() => {}}
                         onChange={onSavedEnvironmentChange}
-                        fixedRepositoryKey={vercelSourceKey}
+                        fixedRepositoryKey={githubSourceKey}
                       />
                     </>
                   ) : (

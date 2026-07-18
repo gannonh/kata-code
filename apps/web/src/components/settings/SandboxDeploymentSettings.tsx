@@ -4,7 +4,6 @@ import { useAuth } from "@clerk/react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EnvironmentId,
-  SandboxProviderDriverKind,
   type SavedSandboxEnvironmentMap,
   type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
@@ -28,15 +27,10 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt";
 import { DeploymentTargetCard } from "./SandboxDeploymentTargetCard";
-import {
-  shouldSeedRepositoryForStart,
-  resolveSandboxListUiState,
-} from "./SandboxDeploymentSettings.logic";
+import { resolveSandboxListUiState } from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
 
 export { DeploymentTargetCard };
-
-const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
 /** Per-instance busy state for the long-running RPCs. */
 type BusyOp = "test" | "start" | "dispose" | "renew" | "stop";
@@ -325,15 +319,8 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
-        // Vercel clones its GitHub source server-side from config; never attach
-        // a local project repository for it.
-        const isVercelInstance = (instance?.driver as string) === (VERCEL_KIND as string);
-        const shouldSeedRepository =
-          !isVercelInstance && shouldSeedRepositoryForStart(summaryById[instanceId]);
-        const project = shouldSeedRepository ? resolveSelectedProject(instanceId) : undefined;
-        const startedRepositoryKey = shouldSeedRepository
-          ? (project?.repositoryIdentity?.canonicalKey as string | undefined)
-          : undefined;
+        // Docker and Vercel clone their GitHub source server-side from config;
+        // never attach a local project repository for create.
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
           return;
@@ -353,14 +340,6 @@ export function SandboxDeploymentSettings({
           const result = await getPrimaryEnvironmentConnection().client.sandbox.startSession({
             instanceId: instanceId as never,
             ...(connectAuthToken ? { connectAuthToken } : {}),
-            ...(project?.repositoryIdentity
-              ? {
-                  repository: {
-                    repoRoot: project.cwd,
-                    repositoryIdentity: project.repositoryIdentity,
-                  },
-                }
-              : {}),
           });
           setActiveSession((prev) => ({
             ...prev,
@@ -407,10 +386,6 @@ export function SandboxDeploymentSettings({
           refreshManagedRelayEnvironments();
           await refreshList();
 
-          if (startedRepositoryKey && instance) {
-            updateInstance(instanceId, { ...instance, repositoryKey: startedRepositoryKey });
-          }
-
           if (savedForProjectPicker) {
             toastManager.add({
               type: "success",
@@ -434,17 +409,7 @@ export function SandboxDeploymentSettings({
           await refreshList();
         }
       }),
-    [
-      getToken,
-      instanceMap,
-      isSignedIn,
-      openAuthPrompt,
-      refreshList,
-      resolveSelectedProject,
-      selectedRepositoryKeyByInstance,
-      summaryById,
-      withBusy,
-    ],
+    [getToken, instanceMap, isSignedIn, openAuthPrompt, refreshList, withBusy],
   );
 
   const handleDispose = useCallback(
