@@ -31,6 +31,7 @@ test.describe(`Pi catalog migration ${E2E_TAGS.piUpdate}`, () => {
       runContext,
       piSmoke.config.agentDir,
       piSmoke.config.model,
+      { includeModels: false },
     );
     await configureDefaultPiProvider(
       authenticatedAppWindow,

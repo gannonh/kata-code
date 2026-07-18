@@ -35,7 +35,7 @@ Each spec file shares one Electron session (one dev stack, one Clerk sign-in) ac
 
 ### Pi E2E gates
 
-Credentialed `@pi` and `@pi-update` tests require `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and `KATACODE_E2E_PI_MODEL`. Set the model to an authenticated built-in model introduced by the migration target when running `@pi-update`. The gate leaves custom-model registration disabled, so selection proves the installed Pi catalog discovered the model. Manual walkthrough evidence lives in [`e2e/verify-evidence/`](../../e2e/verify-evidence/README.md).
+Credentialed `@pi` and `@pi-update` tests require `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and `KATACODE_E2E_PI_MODEL`. Set the model to an authenticated built-in model introduced by the migration target when running `@pi-update`. The gate omits the source `models.json` and leaves custom-model registration disabled, so selection proves the installed Pi catalog discovered the model. Manual walkthrough evidence lives in [`e2e/verify-evidence/`](../../e2e/verify-evidence/README.md).
 
 ### Cursor E2E gates
 
@@ -52,6 +52,7 @@ pnpm exec playwright install
 ### Commands
 
 ```bash
+vp run test:e2e-unit                               # run E2E harness and flow unit tests
 vp run e2e --list                                  # list desktop tests
 vp run e2e:desktop                                 # run shared specs on Electron
 vp run e2e:web                                     # run shared specs + recording template on Chromium

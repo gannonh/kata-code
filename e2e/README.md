@@ -44,8 +44,9 @@ Canonical `KATACODE_CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` are al
 
 Set `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and
 `KATACODE_E2E_PI_MODEL` to an authenticated built-in model introduced by the
-migration target. `@pi-update` does not register the model as custom, so model
-selection proves the installed Pi catalog discovered it.
+migration target. `@pi-update` omits the source `models.json` and does not
+register the model as custom, so model selection proves the installed Pi catalog
+discovered it.
 
 ### Cursor skill tests (`@cursor`)
 
@@ -138,6 +139,9 @@ Requires a built server CLI (`apps/server/dist/bin.mjs`) and an active
 `katacode connect login` session.
 
 ```bash
+# Run E2E harness and flow unit tests
+vp run test:e2e-unit
+
 # List tests
 vp run e2e --list
 

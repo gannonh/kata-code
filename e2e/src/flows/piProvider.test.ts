@@ -45,6 +45,22 @@ describe("stagePiAgentDirectory", () => {
     await expect(readdir(stagedAgentDir)).resolves.toEqual(["auth.json", "models.json"]);
   });
 
+  it("omits source models when catalog discovery must supply the model", async () => {
+    const sourceAgentDir = await createTemporaryDirectory("katacode-pi-source-");
+    const katacodeHome = await createTemporaryDirectory("katacode-pi-home-");
+    await writeFile(join(sourceAgentDir, "auth.json"), "auth");
+    await writeFile(join(sourceAgentDir, "models.json"), '{"models":["custom/model"]}\n');
+
+    const stagedAgentDir = await stagePiAgentDirectory(
+      { katacodeHome },
+      sourceAgentDir,
+      "openai/gpt-5",
+      { includeModels: false },
+    );
+
+    await expect(readdir(stagedAgentDir)).resolves.toEqual(["auth.json"]);
+  });
+
   it("writes the Anthropic OAuth package settings without copying source settings", async () => {
     const sourceAgentDir = await createTemporaryDirectory("katacode-pi-source-");
     const katacodeHome = await createTemporaryDirectory("katacode-pi-home-");
