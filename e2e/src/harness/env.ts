@@ -252,11 +252,3 @@ export function readSandboxGitHubSourceSelection(): {
     ),
   };
 }
-
-/** @deprecated Prefer `readSandboxGitHubSourceSelection`. */
-export function readVercelSourceSelection(): {
-  readonly repository: string;
-  readonly branch: string | undefined;
-} | null {
-  return readSandboxGitHubSourceSelection();
-}

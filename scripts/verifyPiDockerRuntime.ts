@@ -4,8 +4,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// @ts-ignore TS6307 - The verification command intentionally consumes the shared Pi pin.
-import { PI_SDK_PIN } from "../packages/sandbox-vercel/src/bootstrap.ts";
+import { PI_SDK_PIN } from "@kata-sh/code-sandbox-contracts/piSdkPin";
 import { readPiUpdatePrerequisites } from "./piUpdateVerification.ts";
 
 const IMAGE = "katacode:local";

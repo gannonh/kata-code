@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import {
   type AgentSessionEvent,
   createAgentSession,
+  type CreateAgentSessionOptions,
   DefaultResourceLoader,
   SessionManager,
   type Skill,
@@ -71,10 +72,11 @@ import {
 } from "./piExtensionUi.ts";
 import {
   type PiModelRuntimeFactory,
+  type PiModelRuntimeShape,
   type PiModelShape,
   createPiModelRuntime,
-  piModelSlug,
   resolvePiAgentDir,
+  resolvePiModelSelection,
   resolvePiProjectSkillPaths,
   resolvePiThinkingLevelForSession,
 } from "./PiProvider.ts";
@@ -113,11 +115,23 @@ const PI_TUI_ONLY_CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   addAutocompleteProvider: "to add terminal input autocomplete",
 };
 
+/** Session-create options with structural model/runtime shapes for tests. */
+type PiCreateAgentSessionOptions = Omit<
+  CreateAgentSessionOptions,
+  "model" | "modelRuntime" | "thinkingLevel"
+> & {
+  readonly model?: PiModelShape;
+  readonly modelRuntime?: PiModelRuntimeShape;
+  readonly thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
+};
+
 export interface PiAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly instanceId?: ProviderInstanceId;
   /** Override SDK session creation for tests. */
-  readonly createSession?: typeof createAgentSession;
+  readonly createSession?: (
+    options?: PiCreateAgentSessionOptions,
+  ) => ReturnType<typeof createAgentSession>;
   /** Override model runtime creation for tests. */
   readonly createModelRuntime?: PiModelRuntimeFactory;
   /** Override the model list used for selection (tests). */
@@ -532,19 +546,6 @@ export function makePiAdapter(
       return [];
     };
 
-    const resolveModel = (
-      modelSelection: ProviderSessionStartInput["modelSelection"],
-      availableModels: ReadonlyArray<PiModelShape>,
-    ): PiModelShape | undefined => {
-      const slug = modelSelection?.model;
-      if (slug) {
-        const slash = slug.indexOf("/");
-        if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
-        return availableModels.find((model) => model.id === slug);
-      }
-      return availableModels[0];
-    };
-
     const settleTurn = (
       threadId: ThreadId,
       turnId: TurnId,
@@ -715,7 +716,7 @@ export function makePiAdapter(
                 }),
             });
         const availableModels = discoveredModels as ReadonlyArray<PiModelShape>;
-        const model = resolveModel(input.modelSelection, availableModels);
+        const model = resolvePiModelSelection(input.modelSelection?.model, availableModels);
         if (!model) {
           const slug = input.modelSelection?.model?.trim();
           const issue =
@@ -754,7 +755,10 @@ export function makePiAdapter(
 
         const created = yield* Effect.tryPromise({
           try: async () => {
-            const factory = options?.createSession ?? createAgentSession;
+            const factory =
+              options?.createSession ??
+              ((sessionOptions?: PiCreateAgentSessionOptions) =>
+                createAgentSession(sessionOptions as CreateAgentSessionOptions));
             // Build the resource loader ourselves so project trust follows
             // `piSettings.projectTrustPolicy` for Pi prompts/extensions. Project
             // skill directories are supplied as explicit additional skill paths
@@ -783,9 +787,9 @@ export function makePiAdapter(
             const createdSession = await factory({
               cwd,
               ...(agentDir ? { agentDir } : {}),
-              model: model as never,
-              ...(thinkingLevel ? { thinkingLevel: thinkingLevel as never } : {}),
-              modelRuntime: modelRuntime as never,
+              model,
+              ...(thinkingLevel ? { thinkingLevel } : {}),
+              modelRuntime,
               resourceLoader,
               sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],

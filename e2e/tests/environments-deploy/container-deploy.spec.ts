@@ -8,6 +8,7 @@ import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
   authorizeConnectCli,
+  cleanupConnectEnvironments,
   extractConnectEnvironmentId,
   registerConnectEnvironmentCleanup,
   withConnectBrowser,
@@ -33,9 +34,10 @@ import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts"
  * two-client rule).
  */
 
-/** Authorize Connect CLI before creating a sandbox environment. */
+/** Authorize Connect CLI and clear leftover envs before creating a sandbox. */
 async function authorizeConnect(runContext: E2ERunContext): Promise<void> {
   await withConnectBrowser((connectPage) => authorizeConnectCli(runContext, connectPage));
+  await cleanupConnectEnvironments(runContext);
 }
 
 /** Register per-environment Connect cleanup once Session ready exposes the id. */

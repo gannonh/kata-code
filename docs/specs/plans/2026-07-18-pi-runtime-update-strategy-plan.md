@@ -867,7 +867,7 @@ Expected: PASS. If an unrelated timing test fails once, rerun that exact test to
 
 - [ ] **Step 3: Review the migration before release**
 
-Use the requesting-code-review skill against the branch diff. Resolve every correctness issue, rerun affected focused tests, and commit fixes atomically.
+Review the branch diff for correctness (architecture smell-checks in `.agents/skills/improve-codebase-architecture/` when useful). Resolve every correctness issue, rerun affected focused tests, and commit fixes atomically.
 
 - [ ] **Step 4: Push and publish a new nightly**
 

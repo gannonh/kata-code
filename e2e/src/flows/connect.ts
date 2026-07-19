@@ -86,6 +86,24 @@ export async function listConnectEnvironmentIds(
 }
 
 /**
+ * Remove leftover Connect environments for the isolated home before Create & run.
+ * Call after Connect CLI auth so the cleanup token is available; leftovers from a
+ * prior aborted deploy run otherwise block provisioning.
+ */
+export async function cleanupConnectEnvironments(runContext: E2ERunContext): Promise<void> {
+  const ids = await listConnectEnvironmentIds(runContext);
+  if (ids.length === 0) return;
+  logHarnessPhase(`Cleaning ${ids.length} leftover Connect environment(s) before Create & run...`);
+  await runConnectCleanupCli(runContext, [
+    "cleanup",
+    "--all",
+    "--yes",
+    "--base-dir",
+    runContext.katacodeHome,
+  ]);
+}
+
+/**
  * E2E flow helpers for Kata Code Connect (the headless CLI OAuth path). The
  * `katacode connect login` CLI command runs a browser PKCE OAuth flow against
  * Clerk's `/oauth/authorize` endpoint (a dedicated CLI OAuth client, distinct

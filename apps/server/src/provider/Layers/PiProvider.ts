@@ -136,6 +136,24 @@ export function piModelSlug(model: Pick<PiModelShape, "provider" | "id">): strin
 }
 
 /**
+ * Resolve a model selection slug against runtime-discovered models.
+ *
+ * - No slug → first available model
+ * - Slug with `/` after the first character → match `piModelSlug(model)`
+ * - Otherwise → match `model.id` (slashless id)
+ */
+export function resolvePiModelSelection(
+  modelSlug: string | undefined,
+  availableModels: ReadonlyArray<PiModelShape>,
+): PiModelShape | undefined {
+  const slug = modelSlug?.trim();
+  if (!slug) return availableModels[0];
+  const slash = slug.indexOf("/");
+  if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
+  return availableModels.find((model) => model.id === slug);
+}
+
+/**
  * A thinking level is supported when the model's `thinkingLevelMap` does not
  * explicitly disable it. Missing keys fall back to the provider default
  * (supported); an explicit `null` marks the level unsupported. `"off"` is

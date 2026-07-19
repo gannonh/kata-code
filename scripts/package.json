@@ -9,6 +9,7 @@
   "dependencies": {
     "@effect/platform-node": "catalog:",
     "@kata-sh/code-contracts": "workspace:*",
+    "@kata-sh/code-sandbox-contracts": "workspace:*",
     "@kata-sh/code-shared": "workspace:*",
     "effect": "catalog:",
     "yaml": "catalog:"

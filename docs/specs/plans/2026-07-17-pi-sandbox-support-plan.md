@@ -326,7 +326,7 @@ This task only runs if Tasks 2–4 recorded defects. If all matrix rows passed, 
 
 - [x] **Step 1: Triage each defect**
 
-For each defect, use the systematic-debugging skill (`.agents/skills/systematic-debugging/SKILL.md`): reproduce, locate root cause, then fix. Decision rules:
+For each defect, use systematic debugging (reproduce, locate root cause, then fix — see `.agents/skills/plan-build-verify/SKILL.md` for the Verify loop). Decision rules:
 
 - Root cause is host-side (credential seeding, bootstrap script, Docker image): fix it here, TDD-style — failing unit test in the co-located `*.test.ts` first, then minimal fix, then pass.
 - Root cause is inside the in-sandbox serve (Pi adapter/driver code running in the container): STOP and report to the user — the fix needs a nightly CLI publish to reach sandboxes (see Global Constraints).

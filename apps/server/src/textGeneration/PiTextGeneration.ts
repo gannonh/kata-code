@@ -12,7 +12,11 @@
  *
  * @module textGeneration/PiTextGeneration
  */
-import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentSession,
+  type CreateAgentSessionOptions,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { PiSettings, TextGenerationError, type ModelSelection } from "@kata-sh/code-contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import * as Duration from "effect/Duration";
@@ -23,9 +27,10 @@ import * as Schema from "effect/Schema";
 import {
   createPiModelRuntime,
   type PiModelRuntimeFactory,
+  type PiModelRuntimeShape,
   type PiModelShape,
-  piModelSlug,
   resolvePiAgentDir,
+  resolvePiModelSelection,
 } from "../provider/Layers/PiProvider.ts";
 import type {
   BranchNameGenerationInput,
@@ -69,10 +74,22 @@ export interface PiTextSdkSession {
   subscribe(listener: (event: unknown) => void): () => void;
 }
 
+/** Session-create options with structural model/runtime shapes for tests. */
+type PiCreateAgentSessionOptions = Omit<
+  CreateAgentSessionOptions,
+  "model" | "modelRuntime" | "thinkingLevel"
+> & {
+  readonly model?: PiModelShape;
+  readonly modelRuntime?: PiModelRuntimeShape;
+  readonly thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
+};
+
 export interface PiTextGenerationOptions {
   readonly environment?: NodeJS.ProcessEnv;
   /** Override SDK session creation for tests. */
-  readonly createSession?: typeof createAgentSession;
+  readonly createSession?: (
+    options?: PiCreateAgentSessionOptions,
+  ) => ReturnType<typeof createAgentSession>;
   /** Override model runtime creation for tests. */
   readonly createModelRuntime?: PiModelRuntimeFactory;
   /** Override the model list used for selection (tests). */
@@ -107,17 +124,6 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function (
 ): Effect.Effect<TextGenerationShape> {
   const agentDir = resolvePiAgentDir(piSettings.agentDir);
   const runtimeFactory = options?.createModelRuntime ?? createPiModelRuntime;
-
-  const resolveModel = (
-    selection: ModelSelection,
-    availableModels: ReadonlyArray<PiModelShape>,
-  ): PiModelShape | undefined => {
-    const slug = selection.model;
-    if (!slug) return availableModels[0];
-    const slash = slug.indexOf("/");
-    if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
-    return availableModels.find((model) => model.id === slug);
-  };
 
   const fail = (
     operation: TextGenerationOp,
@@ -168,7 +174,7 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function (
                 cause,
               ),
           })) as ReadonlyArray<PiModelShape>);
-      const model = resolveModel(modelSelection, availableModels);
+      const model = resolvePiModelSelection(modelSelection.model, availableModels);
       if (!model) {
         const slug = modelSelection.model?.trim();
         const detail =
@@ -181,13 +187,22 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function (
 
       const created = yield* Effect.tryPromise({
         try: async () => {
-          const factory = options?.createSession ?? createAgentSession;
+          const factory =
+            options?.createSession ??
+            ((sessionOptions?: PiCreateAgentSessionOptions) =>
+              createAgentSession(sessionOptions as CreateAgentSessionOptions));
           return factory({
             cwd: process.cwd(),
             ...(agentDir ? { agentDir } : {}),
-            model: model as never,
-            ...(thinkingLevel ? { thinkingLevel: thinkingLevel as never } : {}),
-            modelRuntime: modelRuntime as never,
+            model,
+            ...(thinkingLevel
+              ? {
+                  thinkingLevel: thinkingLevel as NonNullable<
+                    CreateAgentSessionOptions["thinkingLevel"]
+                  >,
+                }
+              : {}),
+            modelRuntime,
             sessionManager: SessionManager.inMemory(process.cwd()),
             // Text generation is a one-shot structured query: no tools, so the
             // model returns JSON text directly.
