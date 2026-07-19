@@ -14,6 +14,7 @@ import {
   resolveSandboxLifecycleState,
   resolveSandboxListUiState,
   sandboxInstanceIdForLabel,
+  shouldSeedProjectRepositoryForStart,
   shouldSeedRepositoryForStart,
   slugifySandboxLabel,
   readSandboxGitHubSource,
@@ -212,6 +213,24 @@ describe("sandbox deployment settings logic", () => {
     expect(readVercelVcpus({ vcpus: 4 })).toBe(4);
     expect(formatVercelVcpusLabel(2)).toBe("2 vCPU / 4 GB RAM — recommended");
     expect(formatVercelVcpusLabel(4)).toBe("4 vCPU / 8 GB RAM");
+  });
+
+  it("preserves local repository seeding for other sandbox drivers", () => {
+    expect(shouldSeedProjectRepositoryForStart({ driver: "custom", summary: undefined })).toBe(
+      true,
+    );
+    expect(
+      shouldSeedProjectRepositoryForStart({ driver: DOCKER_SANDBOX_KIND, summary: undefined }),
+    ).toBe(false);
+    expect(
+      shouldSeedProjectRepositoryForStart({ driver: VERCEL_SANDBOX_KIND, summary: undefined }),
+    ).toBe(false);
+    expect(
+      shouldSeedProjectRepositoryForStart({
+        driver: "custom",
+        summary: { kind: "available", runningSession: { status: "stopped" } } as never,
+      }),
+    ).toBe(false);
   });
 
   it("only seeds a repository for the create path, not lifecycle Start", () => {

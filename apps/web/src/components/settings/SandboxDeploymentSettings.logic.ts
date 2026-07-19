@@ -108,6 +108,17 @@ export function shouldSeedRepositoryForStart(summary: SandboxInstanceSummary | u
   return summary.runningSession === undefined;
 }
 
+/** Preserve project archive seeding for create paths owned by sandbox drivers
+ * other than Docker and Vercel, which clone their configured GitHub source. */
+export function shouldSeedProjectRepositoryForStart(input: {
+  readonly driver: string;
+  readonly summary: SandboxInstanceSummary | undefined;
+}): boolean {
+  const isGitHubSourceDriver =
+    input.driver === DOCKER_SANDBOX_KIND || input.driver === VERCEL_SANDBOX_KIND;
+  return !isGitHubSourceDriver && shouldSeedRepositoryForStart(input.summary);
+}
+
 /** A GitHub source selection persisted on a sandbox instance config. */
 export interface SandboxGitHubSourceSelection {
   readonly repository: string;

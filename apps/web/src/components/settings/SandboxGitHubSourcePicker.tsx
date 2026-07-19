@@ -1,7 +1,7 @@
 "use client";
 
 import { GitBranchIcon, GithubIcon, SearchIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SandboxGitHubRepository } from "@kata-sh/code-contracts";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
@@ -60,8 +60,8 @@ export function SandboxGitHubSourcePicker({
   const [branchError, setBranchError] = useState<string | null>(null);
   const [branchPage, setBranchPage] = useState(0);
   const [branchHasMore, setBranchHasMore] = useState(false);
-  const repositoryRequests = useRef(createRequestGeneration()).current;
-  const branchRequests = useRef(createRequestGeneration()).current;
+  const [repositoryRequests] = useState(createRequestGeneration);
+  const [branchRequests] = useState(createRequestGeneration);
 
   const loadRepositories = useCallback(
     async (page: number) => {

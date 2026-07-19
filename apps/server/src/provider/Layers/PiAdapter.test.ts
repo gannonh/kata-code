@@ -245,6 +245,39 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
+  it.effect("selects a requested slashless model id instead of the default", () =>
+    Effect.gen(function* () {
+      const requestedModel: PiModelShape = {
+        id: "gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
+        provider: "openai-codex",
+        reasoning: true,
+      };
+      const { session } = makeFakeSession();
+      let receivedModel: unknown;
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL, requestedModel],
+        createSession: ((args: { model: unknown }) => {
+          receivedModel = args.model;
+          return Promise.resolve({ session });
+        }) as never,
+      });
+
+      const started = yield* adapter.startSession({
+        threadId: ThreadId.make("pi-thread-slashless-model"),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("pi"),
+          model: requestedModel.id,
+        },
+      });
+
+      expect(receivedModel).toBe(requestedModel);
+      expect(started.model).toBe("openai-codex/gpt-5.6-sol");
+    }),
+  );
+
   it.effect("streams a successful turn as a canonical event sequence", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();

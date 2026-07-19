@@ -66,6 +66,20 @@ describe("dockerRemoteSetup", () => {
     expect(command).toContain("export HOME=/home/katacode");
   });
 
+  it("creates the workspace before clearing and copying the clone", () => {
+    const command = buildDockerShallowCloneCommand({
+      httpsUrl: "https://github.com/octocat/Hello-World.git",
+      branch: "main",
+    });
+
+    const createWorkspace = command.indexOf("mkdir -p '/workspace'");
+    const clearWorkspace = command.indexOf("find '/workspace'");
+    const copyClone = command.indexOf("cp -a \"$tmp/repo\"/. '/workspace'/");
+    expect(createWorkspace).toBeGreaterThan(-1);
+    expect(createWorkspace).toBeLessThan(clearWorkspace);
+    expect(clearWorkspace).toBeLessThan(copyClone);
+  });
+
   vitIt.effect("clone surfaces concrete stderr and fails loud", () =>
     Effect.gen(function* () {
       const driver = execDriver((command) =>

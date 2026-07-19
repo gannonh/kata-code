@@ -101,17 +101,17 @@ function modelSelectionStringOption(
   return typeof option?.value === "string" ? option.value : undefined;
 }
 
-export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* (
+export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function (
   piSettings: PiSettings,
   options?: PiTextGenerationOptions,
-): Effect.fn.Return<TextGenerationShape, never, never> {
+): Effect.Effect<TextGenerationShape> {
   const agentDir = resolvePiAgentDir(piSettings.agentDir);
   const runtimeFactory = options?.createModelRuntime ?? createPiModelRuntime;
-  const modelRuntime = yield* Effect.promise(() => runtimeFactory(agentDir));
-  const availableModels = (options?.availableModels ??
-    (yield* Effect.promise(() => modelRuntime.getAvailable()))) as ReadonlyArray<PiModelShape>;
 
-  const resolveModel = (selection: ModelSelection): PiModelShape | undefined => {
+  const resolveModel = (
+    selection: ModelSelection,
+    availableModels: ReadonlyArray<PiModelShape>,
+  ): PiModelShape | undefined => {
     const slug = selection.model;
     if (!slug) return availableModels[0];
     const slash = slug.indexOf("/");
@@ -141,7 +141,34 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
     modelSelection: ModelSelection;
   }) =>
     Effect.gen(function* () {
-      const model = resolveModel(modelSelection);
+      // Docker starts the server before credential seeding completes. Create
+      // and query the runtime per operation so auth reflects the current agent
+      // directory when text generation begins.
+      const modelRuntime = yield* Effect.tryPromise({
+        try: () => runtimeFactory(agentDir),
+        catch: (cause) =>
+          fail(
+            operation,
+            `Failed to initialize Pi model runtime: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }.`,
+            cause,
+          ),
+      });
+      const availableModels = options?.availableModels
+        ? options.availableModels
+        : ((yield* Effect.tryPromise({
+            try: () => modelRuntime.getAvailable(),
+            catch: (cause) =>
+              fail(
+                operation,
+                `Failed to discover authenticated Pi models: ${
+                  cause instanceof Error ? cause.message : String(cause)
+                }.`,
+                cause,
+              ),
+          })) as ReadonlyArray<PiModelShape>);
+      const model = resolveModel(modelSelection, availableModels);
       if (!model) {
         return yield* Effect.fail(
           fail(
@@ -304,10 +331,10 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
     return { title: sanitizePrTitle(generated.title), body: generated.body.trim() };
   });
 
-  return {
+  return Effect.succeed({
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-  } satisfies TextGenerationShape;
+  } satisfies TextGenerationShape);
 });

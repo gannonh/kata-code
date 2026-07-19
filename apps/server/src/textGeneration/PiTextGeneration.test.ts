@@ -97,6 +97,46 @@ describe("makePiTextGeneration", () => {
     }),
   );
 
+  it.effect("recreates model discovery after late sandbox credential seeding", () =>
+    Effect.gen(function* () {
+      let isCredentialSeeded = false;
+      let runtimeCreations = 0;
+      const receivedModelRuntimes: unknown[] = [];
+      const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
+        createModelRuntime: async () => {
+          runtimeCreations += 1;
+          return {
+            getAvailable: () => Promise.resolve(isCredentialSeeded ? SAMPLE_MODELS : []),
+          };
+        },
+        createSession: ((args: { modelRuntime: unknown }) => {
+          receivedModelRuntimes.push(args.modelRuntime);
+          return Promise.resolve({ session: makeFakeTextSession(TITLE_JSON).session });
+        }) as never,
+      });
+
+      expect(runtimeCreations).toBe(0);
+      isCredentialSeeded = true;
+
+      const first = yield* textGeneration.generateThreadTitle({
+        cwd: "/tmp",
+        message: "credentials are now available",
+        modelSelection: MODEL_SELECTION,
+      });
+      const second = yield* textGeneration.generateThreadTitle({
+        cwd: "/tmp",
+        message: "discover the current credentials again",
+        modelSelection: MODEL_SELECTION,
+      });
+
+      expect(first.title).toBe("Fix login bug");
+      expect(second.title).toBe("Fix login bug");
+      expect(runtimeCreations).toBe(2);
+      expect(receivedModelRuntimes).toHaveLength(2);
+      expect(receivedModelRuntimes[0]).not.toBe(receivedModelRuntimes[1]);
+    }),
+  );
+
   it.effect("generates a branch name and sanitizes the fragment", () =>
     Effect.gen(function* () {
       const { session } = makeFakeTextSession(BRANCH_JSON);

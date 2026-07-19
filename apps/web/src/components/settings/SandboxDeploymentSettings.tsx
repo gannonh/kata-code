@@ -27,7 +27,10 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt";
 import { DeploymentTargetCard } from "./SandboxDeploymentTargetCard";
-import { resolveSandboxListUiState } from "./SandboxDeploymentSettings.logic";
+import {
+  resolveSandboxListUiState,
+  shouldSeedProjectRepositoryForStart,
+} from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
 
 export { DeploymentTargetCard };
@@ -319,8 +322,14 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
-        // Docker and Vercel clone their GitHub source server-side from config;
-        // never attach a local project repository for create.
+        const shouldSeedRepository = shouldSeedProjectRepositoryForStart({
+          driver: (instance?.driver as string) ?? "",
+          summary: summaryById[instanceId],
+        });
+        const project = shouldSeedRepository ? resolveSelectedProject(instanceId) : undefined;
+        const startedRepositoryKey = shouldSeedRepository
+          ? (project?.repositoryIdentity?.canonicalKey as string | undefined)
+          : undefined;
         if (hasCloudPublicConfig() && !isSignedIn) {
           openAuthPrompt();
           return;
@@ -340,6 +349,14 @@ export function SandboxDeploymentSettings({
           const result = await getPrimaryEnvironmentConnection().client.sandbox.startSession({
             instanceId: instanceId as never,
             ...(connectAuthToken ? { connectAuthToken } : {}),
+            ...(project?.repositoryIdentity
+              ? {
+                  repository: {
+                    repoRoot: project.cwd,
+                    repositoryIdentity: project.repositoryIdentity,
+                  },
+                }
+              : {}),
           });
           setActiveSession((prev) => ({
             ...prev,
@@ -386,6 +403,10 @@ export function SandboxDeploymentSettings({
           refreshManagedRelayEnvironments();
           await refreshList();
 
+          if (startedRepositoryKey && instance) {
+            updateInstance(instanceId, { ...instance, repositoryKey: startedRepositoryKey });
+          }
+
           if (savedForProjectPicker) {
             toastManager.add({
               type: "success",
@@ -409,7 +430,16 @@ export function SandboxDeploymentSettings({
           await refreshList();
         }
       }),
-    [getToken, instanceMap, isSignedIn, openAuthPrompt, refreshList, withBusy],
+    [
+      getToken,
+      instanceMap,
+      isSignedIn,
+      openAuthPrompt,
+      refreshList,
+      resolveSelectedProject,
+      summaryById,
+      withBusy,
+    ],
   );
 
   const handleDispose = useCallback(

@@ -53,6 +53,8 @@ export function buildDockerShallowCloneCommand(input: {
     `tmp=$(mktemp -d /tmp/kata-docker-clone-XXXXXX)`,
     `trap 'rm -rf "$tmp"' EXIT`,
     `git clone --depth 1 --single-branch --branch ${quotedBranch} ${quotedUrl} "$tmp/repo"`,
+    // Custom images may omit the standard workspace directory.
+    `mkdir -p ${quotedWorkspace}`,
     // Clear any residual contents (should be empty on fresh provision).
     `find ${quotedWorkspace} -mindepth 1 -maxdepth 1 -exec rm -rf {} +`,
     `cp -a "$tmp/repo"/. ${quotedWorkspace}/`,

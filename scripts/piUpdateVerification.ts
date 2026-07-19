@@ -71,6 +71,7 @@ export function makePiUpdateCommands(): ReadonlyArray<PiUpdateCommand> {
         "test",
         "apps/server/src/provider/Layers/PiProvider.test.ts",
         "apps/server/src/provider/Layers/PiAdapter.test.ts",
+        "apps/server/src/provider/Drivers/PiDriver.test.ts",
         "apps/server/src/textGeneration/PiTextGeneration.test.ts",
         "packages/sandbox-vercel/src/bootstrap.test.ts",
         "scripts/piRuntimeVersion.test.ts",
