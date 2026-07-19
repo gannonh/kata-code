@@ -192,6 +192,7 @@ describe("SandboxService regression guards", () => {
             supportsRenewTimeout: false,
             supportsCopyInto: false,
             supportsLifecycle: true,
+            supportsProjectSource: false,
           }),
       };
       // Live cache can still hold a handle after stopSession; store status wins.

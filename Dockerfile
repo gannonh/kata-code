@@ -86,8 +86,10 @@ ARG TARGETARCH
 # a PTY around interactive provider CLI logins (`claude setup-token`,
 # `codex login`, etc.). Without it the sign-in flow hangs at "Starting
 # sign-in…" forever.
+# github-cli (`gh`) is required so credential seed can run `gh auth login` /
+# `gh auth setup-git` before the Docker remote shallow-clone into /workspace.
 RUN set -eux; \
-    apk add --no-cache libstdc++ ca-certificates curl git bash util-linux-misc; \
+    apk add --no-cache libstdc++ ca-certificates curl git bash util-linux-misc github-cli; \
     case "${TARGETARCH}" in \
       amd64) \
         cloudflared_url="https://github.com/cloudflare/cloudflared/releases/download/2026.5.2/cloudflared-linux-amd64"; \
@@ -140,7 +142,15 @@ RUN printf '#!/bin/sh\nexec node /app/apps/server/dist/bin.mjs "$@"\n' > /usr/lo
 # installer, not npm: it downloads the platform binary and symlinks `agent` +
 # `cursor-agent` into ~/.local/bin, so it is installed as the katacode user
 # below.
-RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai @xai-official/grok @earendil-works/pi-coding-agent
+ARG PI_SDK_VERSION=0.80.10
+RUN npm install -g \
+    @openai/codex \
+    @anthropic-ai/claude-code \
+    opencode-ai \
+    @xai-official/grok \
+    @earendil-works/pi-coding-agent@${PI_SDK_VERSION} \
+    @earendil-works/pi-ai@${PI_SDK_VERSION} \
+    @earendil-works/pi-agent-core@${PI_SDK_VERSION}
 
 # Run the server and cloudflared as an unprivileged user instead of root.
 # A writable HOME is required for the Node server's config/cache dirs and for

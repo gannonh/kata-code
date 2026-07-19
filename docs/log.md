@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-18 (Shared sandbox GitHub source)
+
+Implemented [shared sandbox GitHub source picker](/specs/2026-07-17-shared-sandbox-github-source-design.md): Docker and Vercel share `SandboxGitHubSourcePicker`; Docker remote clone into `/workspace`; closed deferred [#29](https://github.com/gannonh/kata-code/issues/29).
+
 ## 2026-07-16 (Sidebar v2 Active / Idle)
 
 Approved [Active / Idle design](/specs/2026-07-16-sidebar-v2-active-idle-design.md) (dwell + Sleep/Pin); supersedes four-tier list sections from [sidebar v2](/specs/2026-07-14-sidebar-v2-hybrid-design.md).

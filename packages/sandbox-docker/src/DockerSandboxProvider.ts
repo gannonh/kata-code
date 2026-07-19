@@ -48,6 +48,9 @@ import { DockerSandboxConfig, DEFAULT_DOCKER_CONFIG } from "./config.ts";
 
 export const DOCKER_KIND = SandboxProviderDriverKind.make("docker");
 
+/** Docker sandbox workspace root (seeded by in-container GitHub clone). */
+export const DOCKER_WORKSPACE = "/workspace";
+
 // Hoist compiled schema functions to module scope (kata-code/no-inline-schema-compile).
 const decodeDockerSandboxConfig = Schema.decodeUnknownSync(DockerSandboxConfig);
 
@@ -869,8 +872,17 @@ export function makeDockerSandboxProvider(
         supportsRenewTimeout: false,
         supportsCopyInto: true,
         supportsLifecycle: true,
+        supportsProjectSource: true,
         baseImages: [DEFAULT_DOCKER_CONFIG.image],
       } satisfies SandboxProviderDescriptor),
+
+    projectSource: {
+      workspacePath: DOCKER_WORKSPACE,
+      // Custom images may omit /workspace until the clone command creates it.
+      authSeedCwd: "/",
+      strategy: "exec-clone",
+      supportsDockerfileBuild: true,
+    },
   };
   return provider;
 }

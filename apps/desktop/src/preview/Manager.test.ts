@@ -420,4 +420,101 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+
+  effectIt.effect("treats an aborted navigation as superseded, not failed", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const loadURL = vi.fn(async () => {
+          const error = new Error("ERR_ABORTED (-3) loading 'https://example.com/'") as Error & {
+            errno: number;
+            code: string;
+          };
+          error.errno = -3;
+          error.code = "ERR_ABORTED";
+          throw error;
+        });
+        fromId.mockReturnValue({
+          id: 42,
+          isDestroyed: () => false,
+          getType: () => "webview",
+          getURL: () => "about:blank",
+          getTitle: () => "",
+          isLoading: () => false,
+          getZoomFactor: () => 1,
+          setZoomFactor: vi.fn(),
+          on: vi.fn(),
+          off: vi.fn(),
+          ipc: { on: vi.fn(), off: vi.fn() },
+          send: webviewSend,
+          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setWindowOpenHandler: vi.fn(),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand: vi.fn(async () => undefined),
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+          loadURL,
+        } as never);
+
+        yield* manager.createTab("tab_1");
+        yield* manager.registerWebview("tab_1", 42);
+        yield* manager.navigate("tab_1", "https://example.com/");
+
+        expect(loadURL).toHaveBeenCalledWith("https://example.com/");
+      }),
+    ),
+  );
+
+  effectIt.effect("still fails navigate for real connection errors", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const loadURL = vi.fn(async () => {
+          const error = new Error(
+            "ERR_CONNECTION_REFUSED (-102) loading 'https://example.com/'",
+          ) as Error & { errno: number; code: string };
+          error.errno = -102;
+          error.code = "ERR_CONNECTION_REFUSED";
+          throw error;
+        });
+        fromId.mockReturnValue({
+          id: 42,
+          isDestroyed: () => false,
+          getType: () => "webview",
+          getURL: () => "about:blank",
+          getTitle: () => "",
+          isLoading: () => false,
+          getZoomFactor: () => 1,
+          setZoomFactor: vi.fn(),
+          on: vi.fn(),
+          off: vi.fn(),
+          ipc: { on: vi.fn(), off: vi.fn() },
+          send: webviewSend,
+          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setWindowOpenHandler: vi.fn(),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand: vi.fn(async () => undefined),
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+          loadURL,
+        } as never);
+
+        yield* manager.createTab("tab_1");
+        yield* manager.registerWebview("tab_1", 42);
+        const exit = yield* Effect.exit(manager.navigate("tab_1", "https://example.com/"));
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isSuccess(exit)) return;
+        const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
+        expect(error).toMatchObject({
+          _tag: "PreviewManagerError",
+          operation: "navigate.loadURL",
+        });
+      }),
+    ),
+  );
 });

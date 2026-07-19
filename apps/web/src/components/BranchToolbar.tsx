@@ -1,13 +1,6 @@
 import { scopeProjectRef, scopeThreadRef } from "@kata-sh/code-client-runtime";
 import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
-import {
-  ChevronDownIcon,
-  CloudIcon,
-  FolderGit2Icon,
-  FolderGitIcon,
-  FolderIcon,
-  MonitorIcon,
-} from "lucide-react";
+import { ChevronDownIcon, FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
@@ -21,8 +14,10 @@ import {
   resolveEnvModeLabel,
   resolveEffectiveEnvMode,
   resolveLockedWorkspaceLabel,
+  shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
+import { BranchToolbarEnvironmentIcon } from "./BranchToolbarEnvironmentIcon";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { Button } from "./ui/button";
@@ -58,7 +53,7 @@ interface MobileRunContextSelectorProps {
   envModeLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[] | undefined;
-  showEnvironmentPicker: boolean;
+  canSwitchEnvironment: boolean;
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
@@ -70,7 +65,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   envModeLocked,
   environmentId,
   availableEnvironments,
-  showEnvironmentPicker,
+  canSwitchEnvironment,
   onEnvironmentChange,
   effectiveEnvMode,
   activeWorktreePath,
@@ -92,12 +87,15 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
       ? resolveEnvModeLabel("worktree")
       : resolveCurrentWorkspaceLabel(activeWorktreePath);
   const isLocked = envLocked || envModeLocked;
-  const EnvironmentIcon = activeEnvironment?.isPrimary ? MonitorIcon : CloudIcon;
-  const icon = showEnvironmentPicker ? (
+  const hasEnvironmentContext = activeEnvironment !== null;
+  const icon = hasEnvironmentContext ? (
     // Button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
     // out of whatever gap we set. mx-0! cancels that so gap-0.5 reads as 2px.
     <span className="inline-flex shrink-0 items-center gap-0.5">
-      <EnvironmentIcon className="size-3 shrink-0 mx-0!" />
+      <BranchToolbarEnvironmentIcon
+        kind={activeEnvironment.iconKind}
+        className="size-3 shrink-0 mx-0!"
+      />
       <WorkspaceIcon className="size-3 shrink-0 mx-0!" />
     </span>
   ) : (
@@ -106,15 +104,16 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   const triggerContent = (
     <>
       {icon}
-      <span className="min-w-0 truncate">
-        {showEnvironmentPicker ? (activeEnvironment?.label ?? "Run on") : workspaceLabel}
-      </span>
+      <span className="min-w-0 truncate">{activeEnvironment?.label ?? workspaceLabel}</span>
     </>
   );
 
   if (isLocked) {
     return (
-      <span className="inline-flex min-w-0 max-w-[48%] flex-1 items-center justify-start gap-1 rounded-md border border-transparent px-[calc(--spacing(2)-1px)] text-sm font-medium text-muted-foreground/70 md:hidden">
+      <span
+        className="inline-flex min-w-0 max-w-[48%] flex-1 items-center justify-start gap-1 rounded-md border border-transparent px-[calc(--spacing(2)-1px)] text-sm font-medium text-muted-foreground/70 md:hidden"
+        data-mobile-run-context-label="true"
+      >
         {triggerContent}
       </span>
     );
@@ -130,7 +129,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">
-        {showEnvironmentPicker && availableEnvironments && onEnvironmentChange ? (
+        {canSwitchEnvironment && availableEnvironments && onEnvironmentChange ? (
           <>
             <MenuGroup>
               <MenuGroupLabel>Run on</MenuGroupLabel>
@@ -138,21 +137,18 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                 value={environmentId}
                 onValueChange={(value) => onEnvironmentChange(value as EnvironmentId)}
               >
-                {availableEnvironments.map((env) => {
-                  const Icon = env.isPrimary ? MonitorIcon : CloudIcon;
-                  return (
-                    <MenuRadioItem
-                      key={env.environmentId}
-                      disabled={envLocked}
-                      value={env.environmentId}
-                    >
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <Icon className="size-3" />
-                        <span className="min-w-0 truncate">{env.label}</span>
-                      </span>
-                    </MenuRadioItem>
-                  );
-                })}
+                {availableEnvironments.map((env) => (
+                  <MenuRadioItem
+                    key={env.environmentId}
+                    disabled={envLocked}
+                    value={env.environmentId}
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <BranchToolbarEnvironmentIcon kind={env.iconKind} className="size-3" />
+                      <span className="min-w-0 truncate">{env.label}</span>
+                    </span>
+                  </MenuRadioItem>
+                ))}
               </MenuRadioGroup>
             </MenuGroup>
             <MenuSeparator />
@@ -233,9 +229,9 @@ export const BranchToolbar = memo(function BranchToolbar({
     });
   const envModeLocked = envLocked || (serverThread !== undefined && activeWorktreePath !== null);
 
-  const showEnvironmentPicker = Boolean(
-    availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
-  );
+  const environmentCount = availableEnvironments?.length ?? 0;
+  const showEnvironmentIndicator = shouldShowEnvironmentIndicator(environmentCount);
+  const canSwitchEnvironment = Boolean(environmentCount > 1 && onEnvironmentChange);
   const isMobile = useIsMobile();
 
   if (!hasActiveThread || !activeProject) return null;
@@ -248,7 +244,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           envModeLocked={envModeLocked}
           environmentId={environmentId}
           availableEnvironments={availableEnvironments}
-          showEnvironmentPicker={showEnvironmentPicker}
+          canSwitchEnvironment={canSwitchEnvironment}
           onEnvironmentChange={onEnvironmentChange}
           effectiveEnvMode={effectiveEnvMode}
           activeWorktreePath={activeWorktreePath}
@@ -256,13 +252,13 @@ export const BranchToolbar = memo(function BranchToolbar({
         />
       ) : (
         <div className="flex min-w-0 shrink-0 items-center gap-1">
-          {showEnvironmentPicker && availableEnvironments && onEnvironmentChange && (
+          {showEnvironmentIndicator && availableEnvironments && (
             <>
               <BranchToolbarEnvironmentSelector
                 envLocked={envLocked}
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}
-                onEnvironmentChange={onEnvironmentChange}
+                {...(onEnvironmentChange ? { onEnvironmentChange } : {})}
               />
               <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
             </>

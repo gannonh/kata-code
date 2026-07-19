@@ -60,6 +60,38 @@ describe("browser target resolver", () => {
     );
   });
 
+  // Desktop dev mode points the environment httpBaseUrl at 127.0.0.1. A dev
+  // server bound to ::1 only (vite's default `localhost` resolution on some
+  // machines) must still load, so loopback environments resolve via
+  // `localhost` and let Chromium pick the stack.
+  it("resolves loopback environment ports via localhost, not the literal environment host", async () => {
+    readEnvironmentConnection.mockReturnValue({
+      knownEnvironment: { target: { httpBaseUrl: "http://127.0.0.1:3773" } },
+    });
+    const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
+    expect(
+      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
+        kind: "environment-port",
+        port: 5735,
+      }),
+    ).toEqual({
+      requestedUrl: "http://localhost:5735/",
+      resolvedUrl: "http://localhost:5735/",
+      resolutionKind: "direct",
+      environmentId: "environment-1",
+    });
+  });
+
+  it("keeps typed localhost URLs on localhost for loopback environments on 127.0.0.1", async () => {
+    readEnvironmentConnection.mockReturnValue({
+      knownEnvironment: { target: { httpBaseUrl: "http://127.0.0.1:3773" } },
+    });
+    const { resolveDiscoveredServerUrl } = await import("./browserTargetResolver");
+    expect(resolveDiscoveredServerUrl(EnvironmentId.make("environment-1"), "localhost:5735")).toBe(
+      "http://localhost:5735/",
+    );
+  });
+
   it("supports private IPv6 environment hosts", async () => {
     readEnvironmentConnection.mockReturnValue({
       knownEnvironment: { target: { httpBaseUrl: "http://[::1]:3773" } },

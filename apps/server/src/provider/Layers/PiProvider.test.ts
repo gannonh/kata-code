@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 // @effect-diagnostics nodeBuiltinImport:off - Tests create temporary Pi skill directories.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -18,6 +19,7 @@ import {
   mapPiSkills,
   piModelCapabilities,
   piModelSlug,
+  resolvePiModelSelection,
   resolvePiProjectSkillPaths,
   resolvePiThinkingLevelForSession,
   type PiModelShape,
@@ -32,6 +34,47 @@ const sampleModel = (): PiModelShape => ({
   provider: "anthropic",
   reasoning: true,
   thinkingLevelMap: { xhigh: "max" },
+});
+
+it.effect("includes the GPT-5.6 Sol migration target in the Pi catalog", () =>
+  Effect.promise(async () => {
+    const runtime = await ModelRuntime.create({ allowModelNetwork: false });
+    expect(runtime.getModel("openai-codex", "gpt-5.6-sol")).toMatchObject({
+      provider: "openai-codex",
+      id: "gpt-5.6-sol",
+      reasoning: true,
+    });
+  }),
+);
+
+describe("resolvePiModelSelection", () => {
+  const anthropic = sampleModel();
+  const openai: PiModelShape = {
+    id: "gpt-5.6-sol",
+    name: "GPT-5.6 Sol",
+    provider: "openai-codex",
+    reasoning: true,
+  };
+  const models = [anthropic, openai];
+
+  it("defaults to the first model when no slug is provided", () => {
+    expect(resolvePiModelSelection(undefined, models)).toBe(anthropic);
+    expect(resolvePiModelSelection("", models)).toBe(anthropic);
+  });
+
+  it("matches slashless model ids", () => {
+    expect(resolvePiModelSelection("gpt-5.6-sol", models)).toBe(openai);
+  });
+
+  it("matches provider-qualified slugs", () => {
+    expect(resolvePiModelSelection("openai-codex/gpt-5.6-sol", models)).toBe(openai);
+    expect(resolvePiModelSelection("anthropic/claude-opus-4-6", models)).toBe(anthropic);
+  });
+
+  it("returns undefined for unknown slugs", () => {
+    expect(resolvePiModelSelection("missing-model", models)).toBeUndefined();
+    expect(resolvePiModelSelection("other/gpt-5.6-sol", models)).toBeUndefined();
+  });
 });
 
 describe("PiProvider mappers", () => {

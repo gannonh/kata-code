@@ -92,6 +92,7 @@ describe("DockerSandboxProvider (non-Docker unit coverage)", () => {
         expect(d.supportsRenewTimeout).toBe(false);
         expect(d.supportsCopyInto).toBe(true);
         expect(d.supportsLifecycle).toBe(true);
+        expect(d.supportsProjectSource).toBe(true);
         expect(d.baseImages?.[0]).toBe(DEFAULT_DOCKER_CONFIG.image);
       }),
   );

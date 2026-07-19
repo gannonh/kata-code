@@ -1,4 +1,6 @@
-# Pi provider verification evidence
+# E2E verification evidence
+
+## Pi provider
 
 Manual walkthrough screenshots captured via agent_browser against the running
 web app (default `~/.katacode` home, Pi agent dir `KATACODE_E2E_PI_AGENT_DIR`)
@@ -28,6 +30,13 @@ gated by `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`,
 
 - adds Pi as an enabled first-party provider instance (Pi first heading, Enable checked, add-instance flow)
 - surfaces a Pi rail in the composer model picker (AC 4)
+
+## Branch toolbar environment
+
+`branch-toolbar-environment-single-local.png` was captured via `playwright-cli`
+on 2026-07-18. It shows the single local environment as `This device` beside the
+separate `Local checkout` workspace control. Docker and Vercel icon mappings
+are covered by `BranchToolbarEnvironmentSelector.browser.tsx`.
 
 ## Gotcha captured
 

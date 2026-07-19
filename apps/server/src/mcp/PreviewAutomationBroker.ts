@@ -279,7 +279,7 @@ const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         operation: input.operation,
         input: input.input,
         timeoutMs,
-      });
+      } as PreviewAutomationRequest);
       if (!offered) {
         return yield* new PreviewAutomationUnavailableError({
           message: "The preview automation client is no longer accepting requests.",

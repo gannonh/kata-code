@@ -1,29 +1,29 @@
 /**
- * `vercelGitHubSource` — pure helpers for the Vercel GitHub source selection.
+ * `sandboxGitHubSource` — pure helpers for sandbox GitHub source selection.
  *
- * The Vercel sandbox driver clones a selected GitHub repository/branch through
- * Vercel native Git source. These helpers derive the canonical repository key
- * (matching `RepositoryIdentity.canonicalKey`, so saved per-repo settings key
+ * Docker and Vercel sandbox targets share one `{ repository, branch }` source
+ * shape. These helpers derive the canonical repository key (matching
+ * `RepositoryIdentity.canonicalKey`, so saved per-repo settings key
  * consistently), the HTTPS clone URL, and a non-secret source fingerprint the
  * session store persists to guard against a changed source on lifecycle start.
  *
- * @module vercelGitHubSource
+ * @module sandboxGitHubSource
  */
 // @effect-diagnostics nodeBuiltinImport:off - node:crypto for the source-fingerprint hash.
 import * as NodeCrypto from "node:crypto";
 
 import { normalizeGitRemoteUrl } from "@kata-sh/code-shared/git";
 
-/** A resolved Vercel GitHub source: the selected repo/branch plus derived
- *  clone URL and canonical key. */
-export interface ResolvedVercelSource {
+/** A resolved GitHub source: the selected repo/branch plus derived clone URL
+ *  and canonical key. */
+export interface ResolvedSandboxGitHubSource {
   /** Canonical `owner/name` as selected. */
   readonly repository: string;
   /** Selected branch. */
   readonly branch: string;
   /** `github.com/<owner>/<name>` (lowercased), the saved-env map key. */
   readonly repositoryKey: string;
-  /** HTTPS clone URL passed to the native Git source. */
+  /** HTTPS clone URL for native or in-container clone. */
   readonly httpsUrl: string;
 }
 
@@ -38,9 +38,9 @@ export function deriveGitHubRepositoryKey(repository: string): string {
   return normalizeGitRemoteUrl(buildGitHubHttpsUrl(repository));
 }
 
-/** Read a `{ source: { repository, branch } }` payload from a decoded Vercel
+/** Read a `{ source: { repository, branch } }` payload from decoded sandbox
  *  config and resolve it. Returns `null` when no complete source is present. */
-export function resolveVercelSource(config: unknown): ResolvedVercelSource | null {
+export function resolveSandboxGitHubSource(config: unknown): ResolvedSandboxGitHubSource | null {
   if (config === null || typeof config !== "object") return null;
   const source = (config as { source?: unknown }).source;
   if (source === null || typeof source !== "object") return null;

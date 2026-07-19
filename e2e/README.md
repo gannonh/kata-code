@@ -40,6 +40,14 @@ Canonical `KATACODE_CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` are al
 | `OPENAI_API_KEY`              | Required when provider is OpenAI                                |
 | `ANTHROPIC_API_KEY`           | Required when provider is Anthropic                             |
 
+### Pi dependency-update validation
+
+Set `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and
+`KATACODE_E2E_PI_MODEL` to an authenticated built-in model introduced by the
+migration target. `@pi-update` omits the source `models.json` and does not
+register the model as custom, so model selection proves the installed Pi catalog
+discovered it.
+
 ### Cursor skill tests (`@cursor`)
 
 | Variable                          | Purpose                                                                                                                  |
@@ -131,6 +139,9 @@ Requires a built server CLI (`apps/server/dist/bin.mjs`) and an active
 `katacode connect login` session.
 
 ```bash
+# Run E2E harness and flow unit tests
+vp run test:e2e-unit
+
 # List tests
 vp run e2e --list
 
@@ -157,13 +168,15 @@ On macOS, Playwright Electron launches always open a visible app window. **`e2e:
 
 ### Feature tags
 
-| Tag         | Coverage                               |
-| ----------- | -------------------------------------- |
-| `@smoke`    | App launch, pairing, and shell surface |
-| `@auth`     | Clerk Google test-user sign-in         |
-| `@settings` | Settings theme persistence             |
-| `@agent`    | Real LLM deterministic reply           |
-| `@cursor`   | Cursor skill discovery and invocation  |
+| Tag          | Coverage                                           |
+| ------------ | -------------------------------------------------- |
+| `@smoke`     | App launch, pairing, and shell surface             |
+| `@auth`      | Clerk Google test-user sign-in                     |
+| `@settings`  | Settings theme persistence                         |
+| `@agent`     | Real LLM deterministic reply                       |
+| `@pi`        | Real Pi provider lifecycle                         |
+| `@pi-update` | Built-in Pi catalog discovery and real-model reply |
+| `@cursor`    | Cursor skill discovery and invocation              |
 
 Filter with `--grep`, for example `vp run e2e --project desktop-dev --grep @settings`.
 

@@ -47,14 +47,15 @@ export class VercelRemoteSetupError extends Data.TaggedError("VercelRemoteSetupE
 export function readRemoteEnvironmentConfig(
   driver: SandboxProvider,
   handle: SandboxHandle,
+  workspacePath: string = VERCEL_WORKSPACE,
 ): Effect.Effect<string | null, VercelRemoteSetupError | SandboxProviderError> {
   return Effect.gen(function* () {
     const probe = yield* driver.exec(handle, "test -f .kata/environment.json", {
-      cwd: VERCEL_WORKSPACE,
+      cwd: workspacePath,
     });
     if (probe.exitCode !== 0) return null;
     const read = yield* driver.exec(handle, "cat .kata/environment.json", {
-      cwd: VERCEL_WORKSPACE,
+      cwd: workspacePath,
     });
     if (read.exitCode !== 0) {
       return yield* new VercelRemoteSetupError({
@@ -99,6 +100,9 @@ export function seedGitHubAuth(input: {
   readonly handle: SandboxHandle;
   readonly token: string;
   readonly nonce: string;
+  /** Working directory for the auth exec. Defaults to the Vercel clone root;
+   *  Docker passes `/workspace` (or `/`) because `/vercel/sandbox` does not exist. */
+  readonly cwd?: string;
 }): Effect.Effect<void, VercelRemoteSetupError | SandboxProviderError> {
   return Effect.gen(function* () {
     const copyIntoCap = input.driver.copyInto;
@@ -179,7 +183,7 @@ export function seedGitHubAuth(input: {
         Effect.gen(function* () {
           const command = buildGitHubAuthSeedCommand(tokenFilePath);
           const result = yield* input.driver.exec(input.handle, command, {
-            cwd: VERCEL_WORKSPACE,
+            cwd: input.cwd ?? VERCEL_WORKSPACE,
           });
           if (result.exitCode !== 0) {
             const stderr = redactSecrets(result.stderr, [input.token]);

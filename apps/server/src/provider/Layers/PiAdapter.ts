@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import {
   type AgentSessionEvent,
   createAgentSession,
+  type CreateAgentSessionOptions,
   DefaultResourceLoader,
   SessionManager,
   type Skill,
@@ -70,10 +71,12 @@ import {
   trimToUndefined,
 } from "./piExtensionUi.ts";
 import {
+  type PiModelRuntimeFactory,
+  type PiModelRuntimeShape,
   type PiModelShape,
-  createPiRegistries,
-  piModelSlug,
+  createPiModelRuntime,
   resolvePiAgentDir,
+  resolvePiModelSelection,
   resolvePiProjectSkillPaths,
   resolvePiThinkingLevelForSession,
 } from "./PiProvider.ts";
@@ -112,12 +115,26 @@ const PI_TUI_ONLY_CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   addAutocompleteProvider: "to add terminal input autocomplete",
 };
 
+/** Session-create options with structural model/runtime shapes for tests. */
+type PiCreateAgentSessionOptions = Omit<
+  CreateAgentSessionOptions,
+  "model" | "modelRuntime" | "thinkingLevel"
+> & {
+  readonly model?: PiModelShape;
+  readonly modelRuntime?: PiModelRuntimeShape;
+  readonly thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
+};
+
 export interface PiAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly instanceId?: ProviderInstanceId;
   /** Override SDK session creation for tests. */
-  readonly createSession?: typeof createAgentSession;
-  /** Override the model list used for selection (tests); defaults to the registry. */
+  readonly createSession?: (
+    options?: PiCreateAgentSessionOptions,
+  ) => ReturnType<typeof createAgentSession>;
+  /** Override model runtime creation for tests. */
+  readonly createModelRuntime?: PiModelRuntimeFactory;
+  /** Override the model list used for selection (tests). */
   readonly availableModels?: ReadonlyArray<PiModelShape>;
   /** Observe published runtime events without subscribing to the stream (tests). */
   readonly onEvent?: (event: ProviderRuntimeEvent) => void;
@@ -218,7 +235,6 @@ export function makePiAdapter(
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const agentDir = resolvePiAgentDir(piSettings.agentDir);
-    const { authStorage, modelRegistry } = createPiRegistries(agentDir);
 
     const stampSync = () => ({
       eventId: EventId.make(randomUUID()),
@@ -530,20 +546,6 @@ export function makePiAdapter(
       return [];
     };
 
-    const availableModels = (options?.availableModels ??
-      modelRegistry.getAvailable()) as ReadonlyArray<PiModelShape>;
-
-    const resolveModel = (
-      modelSelection: ProviderSessionStartInput["modelSelection"],
-    ): PiModelShape | undefined => {
-      const slug = modelSelection?.model;
-      if (slug) {
-        const slash = slug.indexOf("/");
-        if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
-      }
-      return availableModels[0];
-    };
-
     const settleTurn = (
       threadId: ThreadId,
       turnId: TurnId,
@@ -683,13 +685,48 @@ export function makePiAdapter(
         }
 
         const cwd = input.cwd?.trim() || process.cwd();
-        const model = resolveModel(input.modelSelection);
+        // Docker provision starts `katacode serve` before credential seed
+        // copyInto completes. Create a fresh runtime for every session so it
+        // reads credentials after the seed is available.
+        const runtimeFactory = options?.createModelRuntime ?? createPiModelRuntime;
+        const modelRuntime = yield* Effect.tryPromise({
+          try: () => runtimeFactory(agentDir),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "startSession",
+              detail: `Failed to initialize Pi model runtime: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }.`,
+              cause,
+            }),
+        });
+        const discoveredModels = options?.availableModels
+          ? options.availableModels
+          : yield* Effect.tryPromise({
+              try: () => modelRuntime.getAvailable(),
+              catch: (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "startSession",
+                  detail: `Failed to discover authenticated Pi models: ${
+                    cause instanceof Error ? cause.message : String(cause)
+                  }.`,
+                  cause,
+                }),
+            });
+        const availableModels = discoveredModels as ReadonlyArray<PiModelShape>;
+        const model = resolvePiModelSelection(input.modelSelection?.model, availableModels);
         if (!model) {
+          const slug = input.modelSelection?.model?.trim();
+          const issue =
+            slug && slug.length > 0
+              ? `Pi could not use model '${slug}' for this session (${String(availableModels.length)} authenticated model(s) available). Configure Pi auth or select a runtime-discovered model.`
+              : "Pi has no authenticated model available for this session. Configure Pi auth or select a runtime-discovered model.";
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "startSession",
-            issue:
-              "Pi has no authenticated model available for this session. Configure Pi auth or select a runtime-discovered model.",
+            issue,
           });
         }
         const thinkingLevel = resolvePiThinkingLevelForSession(model, input.modelSelection);
@@ -718,7 +755,10 @@ export function makePiAdapter(
 
         const created = yield* Effect.tryPromise({
           try: async () => {
-            const factory = options?.createSession ?? createAgentSession;
+            const factory =
+              options?.createSession ??
+              ((sessionOptions?: PiCreateAgentSessionOptions) =>
+                createAgentSession(sessionOptions as CreateAgentSessionOptions));
             // Build the resource loader ourselves so project trust follows
             // `piSettings.projectTrustPolicy` for Pi prompts/extensions. Project
             // skill directories are supplied as explicit additional skill paths
@@ -747,10 +787,9 @@ export function makePiAdapter(
             const createdSession = await factory({
               cwd,
               ...(agentDir ? { agentDir } : {}),
-              model: model as never,
-              ...(thinkingLevel ? { thinkingLevel: thinkingLevel as never } : {}),
-              authStorage,
-              modelRegistry,
+              model,
+              ...(thinkingLevel ? { thinkingLevel } : {}),
+              modelRuntime,
               resourceLoader,
               sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],

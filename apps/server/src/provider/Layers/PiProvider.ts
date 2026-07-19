@@ -17,10 +17,9 @@
  * @module provider/Layers/PiProvider
  */
 import {
-  AuthStorage,
   DefaultResourceLoader,
   getAgentDir,
-  ModelRegistry,
+  ModelRuntime,
   type PromptTemplate,
   type Skill,
 } from "@earendil-works/pi-coding-agent";
@@ -89,6 +88,12 @@ export interface PiModelShape {
   readonly thinkingLevelMap?: Record<string, string | null>;
 }
 
+export interface PiModelRuntimeShape {
+  getAvailable(): Promise<ReadonlyArray<PiModelShape>>;
+}
+
+export type PiModelRuntimeFactory = (agentDir: string) => Promise<PiModelRuntimeShape>;
+
 export interface PiResourceDiscoveryInput {
   readonly agentDir: string;
   readonly cwd: string;
@@ -128,6 +133,24 @@ export class PiProviderDiscoveryError extends Schema.TaggedErrorClass<PiProvider
  */
 export function piModelSlug(model: Pick<PiModelShape, "provider" | "id">): string {
   return `${model.provider}/${model.id}`;
+}
+
+/**
+ * Resolve a model selection slug against runtime-discovered models.
+ *
+ * - No slug → first available model
+ * - Slug with `/` after the first character → match `piModelSlug(model)`
+ * - Otherwise → match `model.id` (slashless id)
+ */
+export function resolvePiModelSelection(
+  modelSlug: string | undefined,
+  availableModels: ReadonlyArray<PiModelShape>,
+): PiModelShape | undefined {
+  const slug = modelSlug?.trim();
+  if (!slug) return availableModels[0];
+  const slash = slug.indexOf("/");
+  if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
+  return availableModels.find((model) => model.id === slug);
 }
 
 /**
@@ -262,27 +285,19 @@ export function resolvePiAgentDir(agentDir: string): string {
   return trimmed.length > 0 ? expandHomePath(trimmed) : getAgentDir();
 }
 
-/**
- * Build the Pi SDK auth + model registries for an agent directory. When
- * `agentDir` is empty the SDK default locations are used. Shared by the
- * discovery layer and the live adapter so both resolve registries identically.
- */
+export const createPiModelRuntime: PiModelRuntimeFactory = async (agentDir) => {
+  const resolvedAgentDir = resolvePiAgentDir(agentDir);
+  return ModelRuntime.create({
+    authPath: `${resolvedAgentDir}/auth.json`,
+    modelsPath: `${resolvedAgentDir}/models.json`,
+  });
+};
+
 export function resolvePiProjectSkillPaths(cwd: string): ReadonlyArray<string> {
   const resolvedCwd = NodePath.resolve(cwd);
   return PI_PROJECT_SKILL_DIRECTORY_NAMES.map((directoryName) =>
     NodePath.join(resolvedCwd, directoryName),
   ).filter((candidate) => NodeFs.existsSync(candidate));
-}
-
-export function createPiRegistries(agentDir: string): {
-  readonly authStorage: AuthStorage;
-  readonly modelRegistry: ModelRegistry;
-} {
-  const authStorage = agentDir ? AuthStorage.create(`${agentDir}/auth.json`) : AuthStorage.create();
-  const modelRegistry = agentDir
-    ? ModelRegistry.create(authStorage, `${agentDir}/models.json`)
-    : ModelRegistry.create(authStorage);
-  return { authStorage, modelRegistry };
 }
 
 const probePiVersion = (
@@ -341,7 +356,7 @@ export const discoverPiResources = Effect.fn("discoverPiResources")(function* (
 });
 
 /**
- * Real SDK discovery: CLI version probe + `ModelRegistry.getAvailable()` for
+ * Real SDK discovery: CLI version probe + `ModelRuntime.getAvailable()` for
  * authenticated models + bounded resource discovery for skills and prompt
  * commands. Returns the mapped `PiDiscoveryResult`. Tests inject a fake
  * `discover` into `checkPiProviderStatus` instead.
@@ -351,9 +366,8 @@ export const discoverPiProvider = Effect.fn("discoverPiProvider")(function* (
 ): Effect.fn.Return<PiDiscoveryResult, never, ChildProcessSpawner.ChildProcessSpawner> {
   const environment = input.environment ?? process.env;
   const version = yield* probePiVersion(input.binaryPath, environment);
-  const models = yield* Effect.sync(() =>
-    createPiRegistries(input.agentDir).modelRegistry.getAvailable(),
-  );
+  const modelRuntime = yield* Effect.promise(() => createPiModelRuntime(input.agentDir));
+  const models = yield* Effect.promise(() => modelRuntime.getAvailable());
   const resources = yield* discoverPiResources(input);
 
   return {

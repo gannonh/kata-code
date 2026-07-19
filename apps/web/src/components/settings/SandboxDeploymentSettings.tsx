@@ -4,7 +4,6 @@ import { useAuth } from "@clerk/react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EnvironmentId,
-  SandboxProviderDriverKind,
   type SavedSandboxEnvironmentMap,
   type SandboxInstanceSummary,
   type SandboxProviderInstanceConfig,
@@ -29,14 +28,12 @@ import { toastManager } from "../ui/toast";
 import { useHostedConnectAuthPrompt } from "../clerk/useHostedConnectAuthPrompt";
 import { DeploymentTargetCard } from "./SandboxDeploymentTargetCard";
 import {
-  shouldSeedRepositoryForStart,
   resolveSandboxListUiState,
+  shouldSeedProjectRepositoryForStart,
 } from "./SandboxDeploymentSettings.logic";
 import { SettingsSection } from "./settingsLayout";
 
 export { DeploymentTargetCard };
-
-const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
 /** Per-instance busy state for the long-running RPCs. */
 type BusyOp = "test" | "start" | "dispose" | "renew" | "stop";
@@ -278,6 +275,15 @@ export function SandboxDeploymentSettings({
     [repositoryProjects, selectedRepositoryKeyByInstance, instanceMap],
   );
 
+  const updateInstance = useCallback(
+    (instanceId: string, next: SandboxProviderInstanceConfig) => {
+      updateSettings({
+        sandboxProviderInstances: { ...instanceMap, [instanceId]: next },
+      });
+    },
+    [instanceMap, updateSettings],
+  );
+
   const handleTest = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "test", async () => {
@@ -325,11 +331,10 @@ export function SandboxDeploymentSettings({
     (instanceId: string) =>
       withBusy(instanceId, "start", async () => {
         const instance = (instanceMap as Record<string, SandboxProviderInstanceConfig>)[instanceId];
-        // Vercel clones its GitHub source server-side from config; never attach
-        // a local project repository for it.
-        const isVercelInstance = (instance?.driver as string) === (VERCEL_KIND as string);
-        const shouldSeedRepository =
-          !isVercelInstance && shouldSeedRepositoryForStart(summaryById[instanceId]);
+        const shouldSeedRepository = shouldSeedProjectRepositoryForStart({
+          driver: (instance?.driver as string) ?? "",
+          summary: summaryById[instanceId],
+        });
         const project = shouldSeedRepository ? resolveSelectedProject(instanceId) : undefined;
         const startedRepositoryKey = shouldSeedRepository
           ? (project?.repositoryIdentity?.canonicalKey as string | undefined)
@@ -441,8 +446,8 @@ export function SandboxDeploymentSettings({
       openAuthPrompt,
       refreshList,
       resolveSelectedProject,
-      selectedRepositoryKeyByInstance,
       summaryById,
+      updateInstance,
       withBusy,
     ],
   );
@@ -631,15 +636,6 @@ export function SandboxDeploymentSettings({
       });
     },
     [activeSession, instanceMap, updateSettings],
-  );
-
-  const updateInstance = useCallback(
-    (instanceId: string, next: SandboxProviderInstanceConfig) => {
-      updateSettings({
-        sandboxProviderInstances: { ...instanceMap, [instanceId]: next },
-      });
-    },
-    [instanceMap, updateSettings],
   );
 
   const instanceEntries = Object.entries(instanceMap);

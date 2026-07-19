@@ -22,6 +22,11 @@ export const SandboxProviderDescriptor = Schema.Struct({
   supportsCopyInto: Schema.Boolean,
   /** Driver supports durable stop/start lifecycle (`lifecycle`). */
   supportsLifecycle: Schema.Boolean,
+  /**
+   * Driver clones a configured GitHub `{ repository, branch }` source into the
+   * sandbox workspace on create (`projectSource` capability).
+   */
+  supportsProjectSource: Schema.Boolean,
   baseImages: Schema.optional(Schema.Array(Schema.String)),
 });
 export type SandboxProviderDescriptor = typeof SandboxProviderDescriptor.Type;

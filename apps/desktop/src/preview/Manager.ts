@@ -315,6 +315,12 @@ const isPreviewInputSignal = (value: unknown): value is PreviewInputSignal => {
   );
 };
 
+const isErrAborted = (cause: unknown): boolean =>
+  typeof cause === "object" &&
+  cause !== null &&
+  ((cause as { errno?: unknown }).errno === -3 ||
+    (cause as { code?: unknown }).code === "ERR_ABORTED");
+
 const inputSignalsMatch = (left: PreviewInputSignal, right: PreviewInputSignal): boolean => {
   if (left.kind !== right.kind) return false;
   if (left.kind === "pointer" && right.kind === "pointer") {
@@ -1219,7 +1225,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       yield* attempt("navigate.reload", () => wc.reload());
       return;
     }
-    yield* attemptPromise("navigate.loadURL", () => wc.loadURL(url));
+    // Electron aborts an in-flight loadURL with ERR_ABORTED (-3) when a newer
+    // navigation supersedes it (form submit, redirect, or a follow-up navigate).
+    // The superseding navigation still loads, so treat the abort as success; the
+    // caller's readiness wait observes whichever page actually loads.
+    yield* attemptPromise("navigate.loadURL", () => wc.loadURL(url)).pipe(
+      Effect.catchIf(
+        (error) => isErrAborted(error.cause),
+        () => Effect.void,
+      ),
+    );
   });
 
   const withWebContents = Effect.fn("PreviewManager.withWebContents")(function* (

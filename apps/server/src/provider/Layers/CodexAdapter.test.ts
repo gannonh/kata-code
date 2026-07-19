@@ -512,7 +512,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
           item: {
             type: "mcpToolCall",
             id: "mcp_1",
-            server: "t3-code",
+            server: "kata",
             tool: "preview_status",
             arguments: {},
             durationMs: 12,
@@ -529,7 +529,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         return;
       }
       assert.equal(firstEvent.value.payload.itemType, "mcp_tool_call");
-      assert.equal(firstEvent.value.payload.title, "t3-code · preview_status");
+      assert.equal(firstEvent.value.payload.title, "kata · preview_status");
       assert.deepStrictEqual(firstEvent.value.payload.data, {
         completedAtMs: 1_778_000_000_000,
         threadId: "thread-1",
@@ -537,7 +537,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         item: {
           type: "mcpToolCall",
           id: "mcp_1",
-          server: "t3-code",
+          server: "kata",
           tool: "preview_status",
           arguments: {},
           durationMs: 12,
@@ -1220,7 +1220,7 @@ scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
 
 it.effect("flushes managed native logs when the adapter layer shuts down", () =>
   Effect.gen(function* () {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-codex-adapter-native-log-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kata-codex-adapter-native-log-"));
     const basePath = path.join(tempDir, "provider-native.ndjson");
     const runtimeFactory = makeRuntimeFactory();
     const scope = yield* Scope.make("sequential");

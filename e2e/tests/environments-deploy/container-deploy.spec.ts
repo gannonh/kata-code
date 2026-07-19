@@ -8,8 +8,8 @@ import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
   authorizeConnectCli,
+  cleanupConnectEnvironments,
   extractConnectEnvironmentId,
-  registerConnectAccountSweepCleanup,
   registerConnectEnvironmentCleanup,
   withConnectBrowser,
 } from "../../src/flows/connect.ts";
@@ -17,10 +17,11 @@ import {
   addContainerEnvironment,
   deploymentTargetCard,
   openConnectionsSettings,
+  selectSandboxGitHubSource,
 } from "../../src/flows/settings.ts";
 import { dismissBlockingToasts } from "../../src/flows/navigation.ts";
 import { deleteSandboxDeploymentTarget } from "../../src/flows/sandboxDeployment.ts";
-import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/workspace.ts";
+import { readSandboxGitHubSourceSelection } from "../../src/harness/env.ts";
 import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
 import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts";
 
@@ -33,14 +34,10 @@ import { expect, resetAppToHome, test } from "../../src/harness/testFixtures.ts"
  * two-client rule).
  */
 
-/**
- * Authorize Connect CLI and register the account-level safety sweep before
- * Create & run so an aborted create still has teardown registered. Environment
- * id cleanup is registered later via {@link registerConnectEnvironmentTeardown}.
- */
-async function authorizeConnectAndRegisterAccountSweep(runContext: E2ERunContext): Promise<void> {
+/** Authorize Connect CLI and clear leftover envs before creating a sandbox. */
+async function authorizeConnect(runContext: E2ERunContext): Promise<void> {
   await withConnectBrowser((connectPage) => authorizeConnectCli(runContext, connectPage));
-  registerConnectAccountSweepCleanup(runContext, { olderThanHours: 1 });
+  await cleanupConnectEnvironments(runContext);
 }
 
 /** Register per-environment Connect cleanup once Session ready exposes the id. */
@@ -55,6 +52,21 @@ function registerConnectEnvironmentTeardown(
     );
   }
   registerConnectEnvironmentCleanup(runContext, environmentId);
+}
+
+/** Resolve the GitHub source the Docker create path requires. SKIP when unset. */
+function requireDockerGitHubSource(testInfo: {
+  skip: (condition?: boolean, description?: string) => void;
+}): {
+  readonly repository: string;
+  readonly branch: string | undefined;
+} {
+  const source = readSandboxGitHubSourceSelection();
+  testInfo.skip(
+    source === null,
+    "E2E_SANDBOX_SOURCE_REPOSITORY (or E2E_DOCKER_SOURCE_REPOSITORY / E2E_VERCEL_SOURCE_REPOSITORY) not set; Docker Create requires a host-gh-accessible GitHub source",
+  );
+  return source!;
 }
 
 /** Resolve the host port from a loopback httpBaseUrl like `http://localhost:32789`. */
@@ -317,6 +329,9 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       // Expand the card to reach the config + Test connection controls.
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
+      const source = requireDockerGitHubSource(testInfo);
+      await selectSandboxGitHubSource(page, card, source);
+
       // Test connection: validate -> provision -> dispose -> done, all ok. The
       // provision step boots the real katacode image and waits for /healthz, so
       // `provision: ok` proves the in-container server reached readiness.
@@ -327,9 +342,7 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await expect(progress).toContainText("dispose: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
       await expect(progress).toContainText("done: ok", { timeout: E2E_TIMEOUTS.agentReplyMs });
 
-      // Authorize Connect + account sweep before Create & run so aborted creates
-      // still have teardown registered (mirrors vercel-deploy ordering).
-      await authorizeConnectAndRegisterAccountSweep(runContext);
+      await authorizeConnect(runContext);
 
       // Start session (AC-1.10): provision the real katacode image, auto-register
       // with Connect using the signed-in app user's Clerk relay token, and surface
@@ -369,50 +382,36 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
   );
 
   test(
-    "saved repo environment seeds, injects secrets, and launches setup processes",
+    "saved repo environment injects secrets and launches setup after GitHub clone",
     { tag: [E2E_TAGS.environmentsDeploy, E2E_TAGS.sandbox] },
     async ({ authenticatedAppWindow, runContext }, testInfo) => {
       const page = authenticatedAppWindow;
+      const source = requireDockerGitHubSource(testInfo);
       const secret = `**************${Date.now()}`;
-      const workspacePath = await createSeededGitWorkspace(runContext, {
-        name: "phase2-env",
-        remoteUrl: "https://github.com/kata-sh/e2e-phase2.git",
-        files: {
-          "package.json": '{"name":"e2e-phase2-env","scripts":{"test":"echo ok"}}',
-          "e2e-seed.txt": "seed ok\n",
-          ".kata/environment.json": JSON.stringify(
-            {
-              install:
-                'sh -c \'test -f /workspace/e2e-seed.txt && printf install-from-repo > /tmp/kata-phase2-install.txt && printf "%s" "$KATA_E2E_SECRET" > /tmp/kata-phase2-secret.txt\'',
-              start: "sh -c 'sleep 300'",
-              terminals: [{ name: "worker", command: "sh -c 'sleep 301'" }],
-            },
-            null,
-            2,
-          ),
-        },
-      });
 
       await openConnectionsSettings(page);
       await dismissBlockingToasts(page);
 
       await addContainerEnvironment(page, "E2E Phase2");
 
-      await createOrOpenProject(page, workspacePath);
-      await openConnectionsSettings(page);
-      await dismissBlockingToasts(page);
-
       const card = deploymentTargetCard(page, "E2E Phase2");
       await expect(card).toBeVisible({ timeout: E2E_TIMEOUTS.authMs });
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
+      await selectSandboxGitHubSource(page, card, source);
+
       const editor = card.getByTestId("saved-environment-editor");
       await expect(editor).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
-      await expect(editor.getByText("kata-sh/e2e-phase2")).toBeVisible({
-        timeout: E2E_TIMEOUTS.authMs,
-      });
-      await editor.getByRole("combobox", { name: "Saved environment" }).click();
-      await page.getByRole("option", { name: /github\.com\/kata-sh\/e2e-phase2/ }).click();
+
+      // Configure install/start via saved env keyed by the GitHub source canonical key.
+      const installField = editor.getByLabel("Install", { exact: true });
+      await installField.fill(
+        'sh -c \'printf install-from-repo > /tmp/kata-phase2-install.txt && printf "%s" "$KATA_E2E_SECRET" > /tmp/kata-phase2-secret.txt\'',
+      );
+      await installField.blur();
+      const startField = editor.getByLabel("Start", { exact: true });
+      await startField.fill("sh -c 'sleep 300'");
+      await startField.blur();
 
       await editor.getByRole("button", { name: "Add", exact: true }).click();
       await editor.getByLabel("Environment variable name 1").fill("KATA_E2E_SECRET");
@@ -421,10 +420,9 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await page.keyboard.insertText(secret);
       await expect(secretInput).toHaveValue(secret);
       await secretInput.press("Enter");
-      // Wait for the env-var value to be committed (saved state visible) before proceeding.
       await expect(editor.getByLabel("Environment variable value 1")).toHaveValue(secret);
 
-      await authorizeConnectAndRegisterAccountSweep(runContext);
+      await authorizeConnect(runContext);
 
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Create & run sandbox" }).click();
@@ -432,8 +430,6 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       await expect(sessionLine).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
       registerConnectEnvironmentTeardown(runContext, await sessionLine.textContent());
 
-      // Assert secret redaction BEFORE capturing the screenshot so a regression
-      // can't persist sensitive text into a CI artifact.
       const progress = card.locator("pre");
       await expect(progress).not.toContainText(secret);
 
@@ -453,6 +449,20 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
         )
         .not.toBe("");
 
+      // /workspace is the selected GitHub clone, not a host archive seed.
+      const gitRoot = await execInContainer(
+        containerId,
+        "git -C /workspace rev-parse --is-inside-work-tree",
+      );
+      expect(gitRoot.exitCode).toBe(0);
+      expect(gitRoot.stdout.trim()).toBe("true");
+      const remoteUrl = await execInContainer(
+        containerId,
+        "git -C /workspace remote get-url origin",
+      );
+      expect(remoteUrl.exitCode).toBe(0);
+      expect(remoteUrl.stdout).toContain(source.repository);
+
       const installMarker = await execInContainer(containerId, "cat /tmp/kata-phase2-install.txt");
       expect(installMarker.exitCode).toBe(0);
       expect(installMarker.stdout).toBe("install-from-repo");
@@ -463,11 +473,10 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
 
       const processList = await execInContainer(
         containerId,
-        "ps -eo args | grep -E 'sleep 300|sleep 301' | grep -v grep",
+        "ps -eo args | grep -E 'sleep 300' | grep -v grep",
       );
       expect(processList.exitCode).toBe(0);
       expect(processList.stdout).toContain("sleep 300");
-      expect(processList.stdout).toContain("sleep 301");
 
       const workspaceSecretSearch = await execInContainer(
         containerId,
@@ -495,7 +504,10 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       const card = await addContainerEnvironment(page, "E2E Phase3a");
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
-      await authorizeConnectAndRegisterAccountSweep(runContext);
+      const source = requireDockerGitHubSource(testInfo);
+      await selectSandboxGitHubSource(page, card, source);
+
+      await authorizeConnect(runContext);
 
       await dismissBlockingToasts(page);
       await card.getByRole("button", { name: "Create & run sandbox" }).click();
@@ -560,7 +572,10 @@ test.describe(`Environments/deployments container target ${E2E_TAGS.environments
       const card = await addContainerEnvironment(page, "E2E Lifecycle");
       await card.getByRole("button", { name: /Toggle .* details/ }).click();
 
-      await authorizeConnectAndRegisterAccountSweep(runContext);
+      const source = requireDockerGitHubSource(testInfo);
+      await selectSandboxGitHubSource(page, card, source);
+
+      await authorizeConnect(runContext);
 
       // Create & run the sandbox.
       await dismissBlockingToasts(page);

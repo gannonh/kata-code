@@ -9,6 +9,7 @@ export {
   DockerSandboxProvider,
   dockerConfigDecoder,
   DOCKER_KIND,
+  DOCKER_WORKSPACE,
   type DockerSandboxHandleState,
 } from "./DockerSandboxProvider.ts";
 export { DockerSandboxConfig, DEFAULT_DOCKER_CONFIG } from "./config.ts";

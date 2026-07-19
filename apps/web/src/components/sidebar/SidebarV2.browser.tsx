@@ -508,6 +508,25 @@ describe("Sidebar v2 fixtures + playground", () => {
     }
   });
 
+  it("keeps active session metadata on one row and truncates long branch names", async () => {
+    const mounted = await mountApp("mixed-tiers");
+    try {
+      const projectRow = document.querySelector<HTMLElement>(
+        '[data-section="active"][data-sub-state="settled"] .sb-project-row',
+      );
+      const branch = projectRow?.querySelector<HTMLElement>(".sb-branch") ?? null;
+
+      expect(projectRow).toBeTruthy();
+      expect(branch).toBeTruthy();
+      expect(getComputedStyle(projectRow!).flexWrap).toBe("nowrap");
+      expect(getComputedStyle(branch!).overflow).toBe("hidden");
+      expect(getComputedStyle(branch!).textOverflow).toBe("ellipsis");
+      expect(getComputedStyle(branch!).whiteSpace).toBe("nowrap");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("waiting-only lists approval, input, and plan-ready rows under Active", async () => {
     const mounted = await mountApp("waiting-only");
     try {

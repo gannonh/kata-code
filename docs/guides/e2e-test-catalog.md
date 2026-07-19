@@ -16,15 +16,16 @@ Tag selection differs by suite: desktop uses Playwright `--grep @tag`; mobile us
 
 Specs under [`e2e/tests/`](../../e2e/tests/) use a project-aware fixture and can run against Electron (`desktop-dev`) or Chromium (`web-dev`). The browser recording template under `e2e/tests/web/` remains web-only.
 
-| Test                                                                                   | Tag         | Covers                                                                               |
-| -------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| [`smoke/app-launch.spec.ts`](../../e2e/tests/smoke/app-launch.spec.ts)                 | `@smoke`    | Launches either target past pairing and reaches the app shell                        |
-| [`smoke/sidebar-v2.spec.ts`](../../e2e/tests/smoke/sidebar-v2.spec.ts)                 | `@sidebar`  | Attention-tier sidebar chrome, no show-more, new-session accordion opens             |
-| [`agent/deterministic-chat.spec.ts`](../../e2e/tests/agent/deterministic-chat.spec.ts) | `@agent`    | Exact assistant reply from a real provider                                           |
-| [`agent/cursor-skills.spec.ts`](../../e2e/tests/agent/cursor-skills.spec.ts)           | `@cursor`   | Cursor filesystem skills in the Composer menu and path-qualified token insertion     |
-| [`agent/pi-smoke.spec.ts`](../../e2e/tests/agent/pi-smoke.spec.ts)                     | `@pi`       | Pi streaming, interrupt/stop, tool-call work row, runtime-mode warning (creds-gated) |
-| [`settings/theme.spec.ts`](../../e2e/tests/settings/theme.spec.ts)                     | `@settings` | Dark theme persists after reload                                                     |
-| [`settings/pi-provider.spec.ts`](../../e2e/tests/settings/pi-provider.spec.ts)         | `@settings` | Pi first in providers, add Pi instance, Pi rail in model picker                      |
+| Test                                                                                   | Tag          | Covers                                                                               |
+| -------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------ |
+| [`smoke/app-launch.spec.ts`](../../e2e/tests/smoke/app-launch.spec.ts)                 | `@smoke`     | Launches either target past pairing and reaches the app shell                        |
+| [`smoke/sidebar-v2.spec.ts`](../../e2e/tests/smoke/sidebar-v2.spec.ts)                 | `@sidebar`   | Attention-tier sidebar chrome, no show-more, new-session accordion opens             |
+| [`agent/deterministic-chat.spec.ts`](../../e2e/tests/agent/deterministic-chat.spec.ts) | `@agent`     | Exact assistant reply from a real provider                                           |
+| [`agent/cursor-skills.spec.ts`](../../e2e/tests/agent/cursor-skills.spec.ts)           | `@cursor`    | Cursor filesystem skills in the Composer menu and path-qualified token insertion     |
+| [`agent/pi-smoke.spec.ts`](../../e2e/tests/agent/pi-smoke.spec.ts)                     | `@pi`        | Pi streaming, interrupt/stop, tool-call work row, runtime-mode warning (creds-gated) |
+| [`agent/pi-catalog.spec.ts`](../../e2e/tests/agent/pi-catalog.spec.ts)                 | `@pi-update` | Built-in Pi catalog discovery and real-model reply (creds-gated)                     |
+| [`settings/theme.spec.ts`](../../e2e/tests/settings/theme.spec.ts)                     | `@settings`  | Dark theme persists after reload                                                     |
+| [`settings/pi-provider.spec.ts`](../../e2e/tests/settings/pi-provider.spec.ts)         | `@settings`  | Pi first in providers, add Pi instance, Pi rail in model picker                      |
 
 Harness and flows (shared building blocks, not tests): [`e2e/src/harness/`](../../e2e/src/harness/), [`e2e/src/flows/`](../../e2e/src/flows/).
 
@@ -34,7 +35,7 @@ Each spec file shares one Electron session (one dev stack, one Clerk sign-in) ac
 
 ### Pi E2E gates
 
-Credentialed `@pi` tests require `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and `KATACODE_E2E_PI_MODEL`. Manual walkthrough evidence lives in [`e2e/verify-evidence/`](../../e2e/verify-evidence/README.md).
+Credentialed `@pi` and `@pi-update` tests require `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and `KATACODE_E2E_PI_MODEL`. Set the model to an authenticated built-in model introduced by the migration target when running `@pi-update`. The gate omits the source `models.json` and leaves custom-model registration disabled, so selection proves the installed Pi catalog discovered the model. Manual walkthrough evidence lives in [`e2e/verify-evidence/`](../../e2e/verify-evidence/README.md).
 
 ### Cursor E2E gates
 
@@ -51,12 +52,14 @@ pnpm exec playwright install
 ### Commands
 
 ```bash
+vp run test:e2e-unit                               # run E2E harness and flow unit tests
 vp run e2e --list                                  # list desktop tests
 vp run e2e:desktop                                 # run shared specs on Electron
 vp run e2e:web                                     # run shared specs + recording template on Chromium
 vp run e2e:cross-platform --grep @smoke            # run a selection on both dev targets
 vp run e2e:headed --project desktop-dev --grep @smoke
 vp run e2e:ui --grep @settings                     # Playwright UI mode
+vp run e2e --list --grep @pi-update                 # list Pi catalog migration gate
 
 # packaged release app
 KATACODE_E2E_RELEASE_APP="/path/to/Kata Code.app" vp run e2e:release --grep @smoke

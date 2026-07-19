@@ -3,7 +3,6 @@
 import { scopedThreadKey } from "@kata-sh/code-client-runtime";
 import type {
   PreviewAutomationNavigateInput,
-  PreviewAutomationOpenInput,
   PreviewAutomationRequest,
   PreviewAutomationResponse,
   PreviewAutomationStatus,
@@ -87,23 +86,42 @@ const currentStatus = async (
   };
 };
 
-const serializeError = (error: unknown): NonNullable<PreviewAutomationResponse["error"]> => {
-  if (error instanceof Error) {
+const unwrapAutomationError = (error: unknown): unknown => {
+  if (!(error instanceof Error)) return error;
+  const cause = "cause" in error ? (error as { cause?: unknown }).cause : undefined;
+  if (!(cause instanceof Error)) return error;
+  // Desktop IPC should already flatten PreviewManagerError, but keep this path
+  // for direct throws and older desktops.
+  if (
+    error.name === "PreviewManagerError" ||
+    error.message.startsWith("Desktop preview operation failed:") ||
+    cause.name.startsWith("PreviewAutomation")
+  ) {
+    return cause;
+  }
+  return error;
+};
+
+export const serializePreviewAutomationError = (
+  error: unknown,
+): NonNullable<PreviewAutomationResponse["error"]> => {
+  const unwrapped = unwrapAutomationError(error);
+  if (unwrapped instanceof Error) {
     const detail =
-      "detail" in error && (error as { detail?: unknown }).detail !== undefined
-        ? (error as { detail?: unknown }).detail
+      "detail" in unwrapped && (unwrapped as { detail?: unknown }).detail !== undefined
+        ? (unwrapped as { detail?: unknown }).detail
         : undefined;
     return {
-      _tag: error.name.startsWith("PreviewAutomation")
-        ? error.name
+      _tag: unwrapped.name.startsWith("PreviewAutomation")
+        ? unwrapped.name
         : "PreviewAutomationExecutionError",
-      message: error.message,
+      message: unwrapped.message,
       ...(detail === undefined ? {} : { detail }),
     };
   }
   return {
     _tag: "PreviewAutomationExecutionError",
-    message: String(error),
+    message: String(unwrapped),
   };
 };
 
@@ -138,7 +156,7 @@ export function PreviewAutomationOwner(props: {
         case "status":
           return currentStatus(threadRef, visible);
         case "open": {
-          const input = request.input as PreviewAutomationOpenInput;
+          const { input } = request;
           let activeTabId =
             (input.reuseExistingTab ?? true) ? (state.snapshot?.tabId ?? null) : null;
           if (!activeTabId) {
@@ -159,7 +177,7 @@ export function PreviewAutomationOwner(props: {
         }
         case "navigate": {
           if (!previewBridge || !tabId) throw new Error("Preview tab is not initialized.");
-          const input = request.input as PreviewAutomationNavigateInput;
+          const { input } = request;
           const resolution = resolveBrowserNavigationTarget(
             threadRef.environmentId,
             input.target ?? { kind: "url", url: input.url! },
@@ -177,40 +195,22 @@ export function PreviewAutomationOwner(props: {
           return previewBridge.automation.snapshot(tabId);
         case "click":
           if (!previewBridge || !tabId) throw new Error("Preview tab is not initialized.");
-          return previewBridge.automation.click(
-            tabId,
-            request.input as Parameters<typeof previewBridge.automation.click>[1],
-          );
+          return previewBridge.automation.click(tabId, request.input);
         case "type":
           if (!previewBridge || !tabId) throw new Error("Preview tab is not initialized.");
-          return previewBridge.automation.type(
-            tabId,
-            request.input as Parameters<typeof previewBridge.automation.type>[1],
-          );
+          return previewBridge.automation.type(tabId, request.input);
         case "press":
           if (!previewBridge || !tabId) throw new Error("Preview tab is not initialized.");
-          return previewBridge.automation.press(
-            tabId,
-            request.input as Parameters<typeof previewBridge.automation.press>[1],
-          );
+          return previewBridge.automation.press(tabId, request.input);
         case "scroll":
           if (!previewBridge || !tabId) throw new Error("Preview tab is not initialized.");
-          return previewBridge.automation.scroll(
-            tabId,
-            request.input as Parameters<typeof previewBridge.automation.scroll>[1],
-          );
+          return previewBridge.automation.scroll(tabId, request.input);
         case "evaluate":
           if (!previewBridge || !tabId) throw new Error("Preview tab is not initialized.");
-          return previewBridge.automation.evaluate(
-            tabId,
-            request.input as Parameters<typeof previewBridge.automation.evaluate>[1],
-          );
+          return previewBridge.automation.evaluate(tabId, request.input);
         case "waitFor":
           if (!previewBridge || !tabId) throw new Error("Preview tab is not initialized.");
-          return previewBridge.automation.waitFor(
-            tabId,
-            request.input as Parameters<typeof previewBridge.automation.waitFor>[1],
-          );
+          return previewBridge.automation.waitFor(tabId, request.input);
         case "recordingStart": {
           if (!tabId) throw new Error("Preview tab is not initialized.");
           await startBrowserRecording(tabId);
@@ -250,7 +250,7 @@ export function PreviewAutomationOwner(props: {
             api.preview.automation.respond({
               requestId: request.requestId,
               ok: false,
-              error: serializeError(error),
+              error: serializePreviewAutomationError(error),
             }),
         );
       },

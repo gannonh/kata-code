@@ -5,11 +5,14 @@ export {
   deriveLocalBranchNameFromRemoteRef,
 } from "@kata-sh/code-shared/git";
 
+export type EnvironmentIconKind = "device" | "container" | "cloud";
+
 export interface EnvironmentOption {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   label: string;
   isPrimary: boolean;
+  iconKind: EnvironmentIconKind;
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);
@@ -22,12 +25,35 @@ function normalizeDisplayLabel(value: string | null | undefined): string | null 
   return trimmed && trimmed.length > 0 ? trimmed : null;
 }
 
+export function resolveBranchToolbarProjectLabel(input: {
+  projectName: string;
+  repositoryName: string | null | undefined;
+}): string {
+  return normalizeDisplayLabel(input.repositoryName) ?? input.projectName;
+}
+
+export function shouldShowEnvironmentIndicator(environmentCount: number): boolean {
+  return environmentCount > 0;
+}
+
+export function resolveEnvironmentIconKind(input: {
+  isPrimary: boolean;
+  sandboxProviderKind: string | null | undefined;
+}): EnvironmentIconKind {
+  if (input.isPrimary) return "device";
+  return input.sandboxProviderKind === "docker" ? "container" : "cloud";
+}
+
 export function resolveEnvironmentOptionLabel(input: {
   isPrimary: boolean;
   environmentId: EnvironmentId;
+  projectName?: string | null;
   runtimeLabel?: string | null;
   savedLabel?: string | null;
 }): string {
+  const projectName = normalizeDisplayLabel(input.projectName);
+  if (projectName) return projectName;
+
   const runtimeLabel = normalizeDisplayLabel(input.runtimeLabel);
   const savedLabel = normalizeDisplayLabel(input.savedLabel);
 

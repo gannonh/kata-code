@@ -24,6 +24,7 @@
     "test:unit": "vp run -r test",
     "test:coverage": "vp run test",
     "test:desktop-smoke": "vp run --filter @kata-sh/code-desktop smoke-test",
+    "test:e2e-unit": "vp test run --config e2e/vite.config.ts",
     "knip": "knip --no-exit-code",
     "knip:strict": "knip",
     "fmt": "vp fmt",
@@ -62,7 +63,9 @@
     "check:okf": "node scripts/check-okf.mjs",
     "worktree:setup": "bash scripts/worktree-setup.sh",
     "build:docker-image": "docker build -t katacode:local .",
-    "verify:docker-image": "node --experimental-strip-types scripts/verify-docker-image.ts"
+    "verify:docker-image": "node --experimental-strip-types scripts/verify-docker-image.ts",
+    "verify:pi-docker-runtime": "node scripts/verifyPiDockerRuntime.ts",
+    "verify:pi-update": "node scripts/piUpdateVerification.ts"
   },
   "devDependencies": {
     "@babel/plugin-transform-react-jsx": "7.28.6",

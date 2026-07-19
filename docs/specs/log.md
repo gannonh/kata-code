@@ -1,5 +1,9 @@
 # Specs log
 
+## 2026-07-18 (Shared sandbox GitHub source picker implemented)
+
+Implemented [Shared sandbox GitHub source picker and Docker remote seed](/specs/2026-07-17-shared-sandbox-github-source-design.md): `SandboxGitHubSourcePicker` shared by Docker and Vercel cards; Docker Create requires GitHub source, seeds host `gh` auth, shallow-clones into `/workspace`, persists source fingerprints, and rejects Start mismatches. Closed deferred Docker remote-source [#29](https://github.com/gannonh/kata-code/issues/29).
+
 ## 2026-07-17 (Sidebar v2 shell attention-state detection verified)
 
 Verified [shell attention-state detection](/specs/2026-07-16-sidebar-v2-state-detection-design.md): maintainer UAT passed live Waiting via approval, Claude `AskUserQuestion`, Codex Plan-mode `request_user_input`, and Blocked via provider startup failure plus successful recovery. Live Waiting E2E remains deferred ([#39](https://github.com/gannonh/kata-code/issues/39)); smoke `@sidebar` remains the live gate.

@@ -150,13 +150,13 @@ describe("buildTurnStartParams", () => {
   });
 });
 
-describe("T3 browser developer instructions", () => {
+describe("Kata browser developer instructions", () => {
   it("prefers the product-native preview tools in both collaboration modes", () => {
     for (const instructions of [
       CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
       CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
     ]) {
-      assert.match(instructions, /t3-code/);
+      assert.match(instructions, /kata/);
       assert.match(instructions, /preview_status/);
       assert.match(instructions, /preview_open/);
       assert.match(instructions, /Do not switch to global browser skills/);
@@ -169,7 +169,7 @@ describe("hasConfiguredMcpServer", () => {
     assert.equal(hasConfiguredMcpServer(undefined), false);
     assert.equal(hasConfiguredMcpServer(["--model", "gpt-5.4"]), false);
     assert.equal(
-      hasConfiguredMcpServer(["-c", 'mcp_servers.t3-code.url="http://127.0.0.1/mcp"']),
+      hasConfiguredMcpServer(["-c", 'mcp_servers.kata.url="http://127.0.0.1/mcp"']),
       true,
     );
   });

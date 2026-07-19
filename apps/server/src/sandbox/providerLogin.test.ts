@@ -84,6 +84,7 @@ function makeFakeDriver(opts?: { readonly scriptPresent?: boolean; readonly outp
         supportsRenewTimeout: false,
         supportsCopyInto: false,
         supportsLifecycle: false,
+        supportsProjectSource: false,
       }),
   };
   return { driver, handle };

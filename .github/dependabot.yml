@@ -1,12 +1,14 @@
 # Dependabot version updates with a minimum package age (cooldown).
 # Docs: https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference#cooldown-
+# Dependabot requires a unique (ecosystem, directory, target-branch) triple, so
+# npm cannot split into daily-Pi + weekly-rest lanes on `/`. One daily npm update
+# keeps Pi actionable via group + cooldown exclusion; other deps use cooldown.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
     open-pull-requests-limit: 10
     # Wait until a release has been on the registry for N days before opening a PR.
     cooldown:
@@ -14,7 +16,12 @@ updates:
       semver-major-days: 7
       semver-minor-days: 3
       semver-patch-days: 3
+      exclude:
+        - "@earendil-works/pi-*"
     groups:
+      pi-runtime:
+        patterns:
+          - "@earendil-works/pi-*"
       production-dependencies:
         dependency-type: production
       development-dependencies:
@@ -31,11 +38,9 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # github-actions supports cooldown.default-days only (not semver-*-days).
     cooldown:
       default-days: 3
-      semver-major-days: 7
-      semver-minor-days: 3
-      semver-patch-days: 3
     groups:
       github-actions:
         patterns:

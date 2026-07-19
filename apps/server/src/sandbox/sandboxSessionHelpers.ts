@@ -65,6 +65,7 @@ export function toSummary(
       supportsSnapshot: descriptor.supportsSnapshot,
       supportsRenewTimeout: descriptor.supportsRenewTimeout,
       supportsLifecycle: descriptor.supportsLifecycle,
+      supportsProjectSource: descriptor.supportsProjectSource,
       ...(storeRecord
         ? {
             runningSession: {

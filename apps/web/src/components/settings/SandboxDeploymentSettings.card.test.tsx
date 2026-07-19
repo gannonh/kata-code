@@ -65,6 +65,7 @@ function noSessionSummary(): SandboxInstanceSummary {
     supportsSnapshot: false,
     supportsRenewTimeout: false,
     supportsLifecycle: true,
+    supportsProjectSource: true,
   } as unknown as SandboxInstanceSummary;
 }
 
@@ -78,6 +79,7 @@ function runningSummary(): SandboxInstanceSummary {
     supportsSnapshot: false,
     supportsRenewTimeout: false,
     supportsLifecycle: true,
+    supportsProjectSource: true,
     runningSession: {
       environmentId: "env_abc",
       endpoint: {
@@ -102,6 +104,7 @@ function stoppedSummary(): SandboxInstanceSummary {
     supportsSnapshot: false,
     supportsRenewTimeout: false,
     supportsLifecycle: true,
+    supportsProjectSource: true,
     runningSession: {
       environmentId: "env_abc",
       endpoint: {
@@ -216,9 +219,39 @@ describe("DeploymentTargetCard lifecycle actions (AC-L10/L11/L12)", () => {
     expect(html).toContain("stopped");
   });
 
-  it("docker: retains the saved environment selector", () => {
+  it("docker: renders the shared GitHub source picker instead of a local project selector (AC-1)", () => {
     const html = renderCard(makeProps({ summary: noSessionSummary() }));
-    expect(html).toContain(">Saved environment<");
+    expect(html).toContain(">GitHub repository<");
+    expect(html).toContain(">Branch<");
+    expect(html).toContain("Select a repository");
+    expect(html).toContain("Choose a GitHub repository and branch to configure its setup.");
+    expect(html).not.toContain(">Saved environment<");
+  });
+
+  it("docker: disables Create when no source is selected", () => {
+    const html = renderCard(makeProps({ summary: noSessionSummary() }));
+    const createIndex = html.indexOf("Create &amp; run sandbox");
+    expect(createIndex).toBeGreaterThan(-1);
+    const buttonStart = html.lastIndexOf("<button", createIndex);
+    expect(html.slice(buttonStart, createIndex)).toContain("disabled");
+  });
+
+  it("docker: locks the source while a session exists (AC-3)", () => {
+    const instance = {
+      ...makeInstance(),
+      config: {
+        image: "katacode:local",
+        command: "katacode serve --port 13773",
+        port: 13773,
+        source: { repository: "octocat/Hello-World", branch: "main" },
+      },
+    } as unknown as SandboxProviderInstanceConfig;
+    const html = renderCard({
+      ...makeProps({ summary: runningSummary() }),
+      instance,
+    });
+    expect(html).toContain("Delete this sandbox to change its repository or branch.");
+    expect(html).toContain("Kata reads");
   });
 
   it("vercel: renders machine size select and chevron affordance", () => {

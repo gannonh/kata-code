@@ -76,9 +76,14 @@ describe("makePiTextGeneration", () => {
   it.effect("generates a thread title from a fixture-backed Pi session", () =>
     Effect.gen(function* () {
       const { session } = makeFakeTextSession(TITLE_JSON);
+      const modelRuntime = { getAvailable: () => Promise.resolve(SAMPLE_MODELS) };
+      let receivedModelRuntime: unknown;
       const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
-        createSession: (() => Promise.resolve({ session })) as never,
-        availableModels: SAMPLE_MODELS,
+        createModelRuntime: async () => modelRuntime,
+        createSession: ((args: { modelRuntime: unknown }) => {
+          receivedModelRuntime = args.modelRuntime;
+          return Promise.resolve({ session });
+        }) as never,
       });
 
       const result = yield* textGeneration.generateThreadTitle({
@@ -88,6 +93,47 @@ describe("makePiTextGeneration", () => {
       });
 
       expect(result.title).toBe("Fix login bug");
+      expect(receivedModelRuntime).toBe(modelRuntime);
+    }),
+  );
+
+  it.effect("recreates model discovery after late sandbox credential seeding", () =>
+    Effect.gen(function* () {
+      let isCredentialSeeded = false;
+      let runtimeCreations = 0;
+      const receivedModelRuntimes: unknown[] = [];
+      const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
+        createModelRuntime: async () => {
+          runtimeCreations += 1;
+          return {
+            getAvailable: () => Promise.resolve(isCredentialSeeded ? SAMPLE_MODELS : []),
+          };
+        },
+        createSession: ((args: { modelRuntime: unknown }) => {
+          receivedModelRuntimes.push(args.modelRuntime);
+          return Promise.resolve({ session: makeFakeTextSession(TITLE_JSON).session });
+        }) as never,
+      });
+
+      expect(runtimeCreations).toBe(0);
+      isCredentialSeeded = true;
+
+      const first = yield* textGeneration.generateThreadTitle({
+        cwd: "/tmp",
+        message: "credentials are now available",
+        modelSelection: MODEL_SELECTION,
+      });
+      const second = yield* textGeneration.generateThreadTitle({
+        cwd: "/tmp",
+        message: "discover the current credentials again",
+        modelSelection: MODEL_SELECTION,
+      });
+
+      expect(first.title).toBe("Fix login bug");
+      expect(second.title).toBe("Fix login bug");
+      expect(runtimeCreations).toBe(2);
+      expect(receivedModelRuntimes).toHaveLength(2);
+      expect(receivedModelRuntimes[0]).not.toBe(receivedModelRuntimes[1]);
     }),
   );
 
@@ -171,6 +217,27 @@ describe("makePiTextGeneration", () => {
 
       expect(isTextGenerationError(error)).toBe(true);
       expect(error.operation).toBe("generateThreadTitle");
+    }),
+  );
+
+  it.effect("returns TextGenerationError for an unknown slashless model", () =>
+    Effect.gen(function* () {
+      const { session } = makeFakeTextSession(TITLE_JSON);
+      const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
+        createSession: (() => Promise.resolve({ session })) as never,
+        availableModels: SAMPLE_MODELS,
+      });
+
+      const error = yield* Effect.flip(
+        textGeneration.generateThreadTitle({
+          cwd: "/tmp",
+          message: "hello",
+          modelSelection: { ...MODEL_SELECTION, model: "custom-model" },
+        }),
+      );
+
+      expect(isTextGenerationError(error)).toBe(true);
+      expect(error.detail).toContain("custom-model");
     }),
   );
 

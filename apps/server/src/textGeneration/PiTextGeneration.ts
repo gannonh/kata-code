@@ -12,7 +12,11 @@
  *
  * @module textGeneration/PiTextGeneration
  */
-import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentSession,
+  type CreateAgentSessionOptions,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { PiSettings, TextGenerationError, type ModelSelection } from "@kata-sh/code-contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import * as Duration from "effect/Duration";
@@ -21,10 +25,12 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import {
-  createPiRegistries,
+  createPiModelRuntime,
+  type PiModelRuntimeFactory,
+  type PiModelRuntimeShape,
   type PiModelShape,
-  piModelSlug,
   resolvePiAgentDir,
+  resolvePiModelSelection,
 } from "../provider/Layers/PiProvider.ts";
 import type {
   BranchNameGenerationInput,
@@ -68,10 +74,24 @@ export interface PiTextSdkSession {
   subscribe(listener: (event: unknown) => void): () => void;
 }
 
+/** Session-create options with structural model/runtime shapes for tests. */
+type PiCreateAgentSessionOptions = Omit<
+  CreateAgentSessionOptions,
+  "model" | "modelRuntime" | "thinkingLevel"
+> & {
+  readonly model?: PiModelShape;
+  readonly modelRuntime?: PiModelRuntimeShape;
+  readonly thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
+};
+
 export interface PiTextGenerationOptions {
   readonly environment?: NodeJS.ProcessEnv;
   /** Override SDK session creation for tests. */
-  readonly createSession?: typeof createAgentSession;
+  readonly createSession?: (
+    options?: PiCreateAgentSessionOptions,
+  ) => ReturnType<typeof createAgentSession>;
+  /** Override model runtime creation for tests. */
+  readonly createModelRuntime?: PiModelRuntimeFactory;
   /** Override the model list used for selection (tests). */
   readonly availableModels?: ReadonlyArray<PiModelShape>;
 }
@@ -98,22 +118,12 @@ function modelSelectionStringOption(
   return typeof option?.value === "string" ? option.value : undefined;
 }
 
-export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* (
+export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function (
   piSettings: PiSettings,
   options?: PiTextGenerationOptions,
-): Effect.fn.Return<TextGenerationShape, never, never> {
+): Effect.Effect<TextGenerationShape> {
   const agentDir = resolvePiAgentDir(piSettings.agentDir);
-  const { authStorage, modelRegistry } = createPiRegistries(agentDir);
-  const availableModels = (options?.availableModels ??
-    modelRegistry.getAvailable()) as ReadonlyArray<PiModelShape>;
-
-  const resolveModel = (selection: ModelSelection): PiModelShape | undefined => {
-    const slug = selection.model;
-    if (!slug) return availableModels[0];
-    const slash = slug.indexOf("/");
-    if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
-    return availableModels.find((model) => model.id === slug) ?? availableModels[0];
-  };
+  const runtimeFactory = options?.createModelRuntime ?? createPiModelRuntime;
 
   const fail = (
     operation: TextGenerationOp,
@@ -137,27 +147,62 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
     modelSelection: ModelSelection;
   }) =>
     Effect.gen(function* () {
-      const model = resolveModel(modelSelection);
-      if (!model) {
-        return yield* Effect.fail(
+      // Docker starts the server before credential seeding completes. Create
+      // and query the runtime per operation so auth reflects the current agent
+      // directory when text generation begins.
+      const modelRuntime = yield* Effect.tryPromise({
+        try: () => runtimeFactory(agentDir),
+        catch: (cause) =>
           fail(
             operation,
-            `Pi has no authenticated model available for ${operation}. Configure Pi auth or select a runtime-discovered model.`,
+            `Failed to initialize Pi model runtime: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }.`,
+            cause,
           ),
-        );
+      });
+      const availableModels = options?.availableModels
+        ? options.availableModels
+        : ((yield* Effect.tryPromise({
+            try: () => modelRuntime.getAvailable(),
+            catch: (cause) =>
+              fail(
+                operation,
+                `Failed to discover authenticated Pi models: ${
+                  cause instanceof Error ? cause.message : String(cause)
+                }.`,
+                cause,
+              ),
+          })) as ReadonlyArray<PiModelShape>);
+      const model = resolvePiModelSelection(modelSelection.model, availableModels);
+      if (!model) {
+        const slug = modelSelection.model?.trim();
+        const detail =
+          slug && slug.length > 0
+            ? `Pi could not use model '${slug}' for ${operation} (${String(availableModels.length)} authenticated model(s) available). Configure Pi auth or select a runtime-discovered model.`
+            : `Pi has no authenticated model available for ${operation}. Configure Pi auth or select a runtime-discovered model.`;
+        return yield* Effect.fail(fail(operation, detail));
       }
       const thinkingLevel = modelSelectionStringOption(modelSelection, "thinkingLevel");
 
       const created = yield* Effect.tryPromise({
         try: async () => {
-          const factory = options?.createSession ?? createAgentSession;
+          const factory =
+            options?.createSession ??
+            ((sessionOptions?: PiCreateAgentSessionOptions) =>
+              createAgentSession(sessionOptions as CreateAgentSessionOptions));
           return factory({
             cwd: process.cwd(),
             ...(agentDir ? { agentDir } : {}),
-            model: model as never,
-            ...(thinkingLevel ? { thinkingLevel: thinkingLevel as never } : {}),
-            authStorage,
-            modelRegistry,
+            model,
+            ...(thinkingLevel
+              ? {
+                  thinkingLevel: thinkingLevel as NonNullable<
+                    CreateAgentSessionOptions["thinkingLevel"]
+                  >,
+                }
+              : {}),
+            modelRuntime,
             sessionManager: SessionManager.inMemory(process.cwd()),
             // Text generation is a one-shot structured query: no tools, so the
             // model returns JSON text directly.
@@ -301,10 +346,10 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
     return { title: sanitizePrTitle(generated.title), body: generated.body.trim() };
   });
 
-  return {
+  return Effect.succeed({
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-  } satisfies TextGenerationShape;
+  } satisfies TextGenerationShape);
 });

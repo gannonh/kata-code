@@ -39,52 +39,28 @@ export function extractConnectEnvironmentId(sessionText: string | null | undefin
   return match?.[1] ?? null;
 }
 
-/** Register cloud cleanup before the isolated token/home is destroyed. */
+/** Build cleanup arguments that target one environment created by this run. */
+export function buildConnectEnvironmentCleanupArgs(
+  environmentId: string,
+  katacodeHome: string,
+): ReadonlyArray<string> {
+  return ["cleanup", "--environment", environmentId, "--yes", "--base-dir", katacodeHome];
+}
+
+/** Register run-scoped cloud cleanup before the isolated token/home is destroyed. */
 export function registerConnectEnvironmentCleanup(
   runContext: E2ERunContext,
   environmentId: string,
 ): void {
   registerCleanup(runContext, async () => {
     try {
-      await runConnectCleanupCli(runContext, [
-        "cleanup",
-        "--environment",
-        environmentId,
-        "--yes",
-        "--base-dir",
-        runContext.katacodeHome,
-      ]);
+      await runConnectCleanupCli(
+        runContext,
+        buildConnectEnvironmentCleanupArgs(environmentId, runContext.katacodeHome),
+      );
     } catch (error) {
       logHarnessPhase(
         `Connect teardown could not remove ${environmentId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      throw error;
-    }
-  });
-}
-
-/**
- * Register fixture teardown that removes every Connect record visible to the
- * isolated CLI token (the shared E2E Clerk user). Prefer per-id cleanup when
- * the environment id is known; use this as a safety net after Connect auth so
- * aborted create/dispose paths cannot leave the account littered.
- */
-export function registerConnectAccountSweepCleanup(
-  runContext: E2ERunContext,
-  options?: { readonly olderThanHours?: number },
-): void {
-  registerCleanup(runContext, async () => {
-    const args = ["cleanup", "--yes", "--base-dir", runContext.katacodeHome];
-    if (options?.olderThanHours !== undefined) {
-      args.push("--older-than-hours", String(options.olderThanHours));
-    } else {
-      args.push("--all");
-    }
-    try {
-      await runConnectCleanupCli(runContext, args);
-    } catch (error) {
-      logHarnessPhase(
-        `Connect account sweep failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
@@ -107,6 +83,24 @@ export async function listConnectEnvironmentIds(
       ? [String(entry.environmentId)]
       : [],
   );
+}
+
+/**
+ * Remove leftover Connect environments for the isolated home before Create & run.
+ * Call after Connect CLI auth so the cleanup token is available; leftovers from a
+ * prior aborted deploy run otherwise block provisioning.
+ */
+export async function cleanupConnectEnvironments(runContext: E2ERunContext): Promise<void> {
+  const ids = await listConnectEnvironmentIds(runContext);
+  if (ids.length === 0) return;
+  logHarnessPhase(`Cleaning ${ids.length} leftover Connect environment(s) before Create & run...`);
+  await runConnectCleanupCli(runContext, [
+    "cleanup",
+    "--all",
+    "--yes",
+    "--base-dir",
+    runContext.katacodeHome,
+  ]);
 }
 
 /**

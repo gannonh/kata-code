@@ -58,10 +58,15 @@ export function formatPiSmokeSkipReason(missing: ReadonlyArray<string>): string 
  * Stages the Pi credentials needed for real-model authentication into this
  * E2E run's isolated Kata Code home. Pi reloads only this small directory.
  */
+export interface StagePiAgentDirectoryOptions {
+  readonly includeModels?: boolean;
+}
+
 export async function stagePiAgentDirectory(
   runContext: Pick<E2ERunContext, "katacodeHome">,
   sourceAgentDir: string,
   model: string,
+  options: StagePiAgentDirectoryOptions = {},
 ): Promise<string> {
   const stagedAgentDir = join(runContext.katacodeHome, "pi-agent");
   const sourceAuthPath = join(sourceAgentDir, PI_AGENT_AUTH_FILE);
@@ -76,10 +81,12 @@ export async function stagePiAgentDirectory(
 
   await mkdir(stagedAgentDir, { recursive: true });
   await copyFile(sourceAuthPath, join(stagedAgentDir, PI_AGENT_AUTH_FILE));
-  await copyOptionalFile(
-    join(sourceAgentDir, PI_AGENT_MODELS_FILE),
-    join(stagedAgentDir, PI_AGENT_MODELS_FILE),
-  );
+  if (options.includeModels !== false) {
+    await copyOptionalFile(
+      join(sourceAgentDir, PI_AGENT_MODELS_FILE),
+      join(stagedAgentDir, PI_AGENT_MODELS_FILE),
+    );
+  }
 
   if (model.startsWith("anthropic/")) {
     await writeFile(
@@ -91,7 +98,15 @@ export async function stagePiAgentDirectory(
   return stagedAgentDir;
 }
 
-export async function configureDefaultPiProvider(page: Page, config: PiSmokeConfig): Promise<void> {
+export interface ConfigurePiProviderOptions {
+  readonly registerCustomModel?: boolean;
+}
+
+export async function configureDefaultPiProvider(
+  page: Page,
+  config: PiSmokeConfig,
+  options: ConfigurePiProviderOptions = {},
+): Promise<void> {
   await openProviderSettings(page);
 
   const toggleDetails = page.getByLabel("Toggle Pi details");
@@ -104,11 +119,13 @@ export async function configureDefaultPiProvider(page: Page, config: PiSmokeConf
     await agentDir.press("Enter");
   }
 
-  const customModelInput = page.locator("#provider-instance-pi-custom-model");
-  await customModelInput.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
-  if ((await piCard.getByText(config.model, { exact: true }).count()) === 0) {
-    await customModelInput.fill(config.model);
-    await customModelInput.press("Enter");
+  if (options.registerCustomModel !== false) {
+    const customModelInput = page.locator("#provider-instance-pi-custom-model");
+    await customModelInput.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.assertionMs });
+    if ((await piCard.getByText(config.model, { exact: true }).count()) === 0) {
+      await customModelInput.fill(config.model);
+      await customModelInput.press("Enter");
+    }
   }
 
   await dismissBlockingToasts(page);

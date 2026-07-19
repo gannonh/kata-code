@@ -22,6 +22,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import {
   createModelCapabilities,
   getProviderOptionBooleanSelectionValue,
@@ -412,7 +413,7 @@ const makeCursorAcpProbeRuntime = (
           ...(environment ? { env: environment } : {}),
         },
         cwd: process.cwd(),
-        clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
+        clientInfo: { name: `${MCP_SERVER_NAME}-provider-probe`, version: "0.0.0" },
         authMethodId: "cursor_login",
         // Under `CURSOR_API_KEY`, the Cursor Agent CLI authenticates via the
         // API key and `authenticate` with `cursor_login` would trigger an

@@ -1,12 +1,12 @@
 import type { Locator } from "@playwright/test";
-import { readVercelCredentials, readVercelSourceSelection } from "../../src/harness/env.ts";
+import { readVercelCredentials, readSandboxGitHubSourceSelection } from "../../src/harness/env.ts";
 import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
   authorizeConnectCli,
+  cleanupConnectEnvironments,
   extractConnectEnvironmentId,
   listConnectEnvironmentIds,
-  registerConnectAccountSweepCleanup,
   registerConnectEnvironmentCleanup,
   withConnectBrowser,
 } from "../../src/flows/connect.ts";
@@ -42,9 +42,10 @@ import {
  *   E2E_VERCEL_SOURCE_REPOSITORY=owner/name vp run e2e ...
  */
 
-/** Mint a Connect CLI OAuth token into the isolated E2E home for relay registration. */
+/** Mint Connect CLI auth and clear leftover envs before Create & run. */
 async function authorizeIsolatedConnect(runContext: E2ERunContext): Promise<void> {
   await withConnectBrowser((connectPage) => authorizeConnectCli(runContext, connectPage));
+  await cleanupConnectEnvironments(runContext);
 }
 
 /**
@@ -88,7 +89,7 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
     { tag: [E2E_TAGS.environmentsDeploy] },
     async ({ authenticatedAppWindow, runContext }, testInfo) => {
       const creds = readVercelCredentials()!;
-      const source = readVercelSourceSelection();
+      const source = readSandboxGitHubSourceSelection();
       test.skip(
         source === null,
         "E2E_VERCEL_SOURCE_REPOSITORY not set; a GitHub source is required to create a Vercel sandbox",
@@ -122,10 +123,6 @@ test.describe(`Environments/deployments vercel target ${E2E_TAGS.environmentsDep
       // App Clerk sign-in alone is not enough — mint the CLI OAuth credential into
       // the isolated home before Create & run hits the relay.
       await authorizeIsolatedConnect(runContext);
-      // Soft-sweep remnants from aborted prior runs (same shared E2E Connect
-      // account) without touching in-flight environments from concurrent work.
-      registerConnectAccountSweepCleanup(runContext, { olderThanHours: 1 });
-
       // Create & run: provisions the sandbox from the native Git source,
       // Connect-auto-registers the public endpoint, and surfaces the public URL.
       await dismissBlockingToasts(page);

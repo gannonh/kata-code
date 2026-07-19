@@ -46,6 +46,9 @@ export class DesktopIpc extends Context.Service<DesktopIpc, DesktopIpcShape>()(
   "@kata-sh/code-desktop/ipc/DesktopIpc",
 ) {}
 
+export const toIpcFailure = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
 export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
   DesktopIpc.of({
     handle: Effect.fn("desktop.ipc.registerInvoke")(function* <E, R>({
@@ -64,7 +67,11 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
               Effect.gen(function* () {
                 yield* Effect.annotateCurrentSpan({ channel });
                 return yield* handler(raw);
-              }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),
+              }).pipe(
+                Effect.mapError(toIpcFailure),
+                Effect.annotateLogs({ channel }),
+                Effect.withSpan("desktop.ipc.invoke"),
+              ),
             ),
           );
         }),

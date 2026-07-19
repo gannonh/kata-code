@@ -129,6 +129,43 @@ export interface SandboxCopyIntoCapability {
 }
 
 /**
+ * How a driver materializes a configured GitHub source into the sandbox
+ * workspace during create.
+ *
+ * - `native-clone`: the cloud SDK clones during `provision` (Vercel).
+ * - `exec-clone`: the server runs an in-sandbox `git clone` after auth seed
+ *   (Docker).
+ */
+export type SandboxProjectSourceStrategy = "native-clone" | "exec-clone";
+
+/**
+ * Optional capability: clone a configured GitHub `{ repository, branch }`
+ * source into the sandbox workspace on create. Drivers that advertise this
+ * own source selection in their config and reject local-archive seeding.
+ * Absent ⇒ `describe().supportsProjectSource === false` and the server may
+ * seed a local worktree archive via `copyInto` when the caller provides one.
+ */
+export interface SandboxProjectSourceCapability {
+  /** Where the cloned workspace lives inside the sandbox. */
+  readonly workspacePath: string;
+  /**
+   * Working directory for the GitHub auth seed step. May differ from
+   * `workspacePath` when the workspace directory is created by the clone
+   * command itself (custom Docker images).
+   */
+  readonly authSeedCwd: string;
+  /** Whether provision performs the clone (`native-clone`) or the server does. */
+  readonly strategy: SandboxProjectSourceStrategy;
+  /** Whether `.kata/environment.json` Dockerfile builds are supported. */
+  readonly supportsDockerfileBuild: boolean;
+  /**
+   * When set, `startSession` appends the host GitHub token under this env name
+   * for the provision call only (native clone). Never persisted.
+   */
+  readonly sourceTokenEnv?: string;
+}
+
+/**
  * Optional capability: durable stop/start lifecycle.
  *
  * Both Vercel Sandbox (v2 persistent sandboxes) and Docker (named containers)
@@ -181,7 +218,8 @@ export interface SandboxLifecycleCapability {
  * Optional (driver may omit; registry exposes presence via `describe()` and
  * callers guard with capability checks): `snapshot` (snapshot lifecycle),
  * `renewTimeout` (extend session), `copyInto` (seed a repo archive into the
- * sandbox — Phase 2), `lifecycle` (durable stop/start — replaces `resume`).
+ * sandbox — Phase 2), `lifecycle` (durable stop/start — replaces `resume`),
+ * `projectSource` (GitHub source clone on create).
  */
 export interface SandboxProvider {
   readonly kind: SandboxProviderDriverKind;
@@ -212,6 +250,11 @@ export interface SandboxProvider {
   readonly copyInto?: SandboxCopyIntoCapability;
   /** Optional durable lifecycle capability (stop/start/status). Absent ⇒ `describe().supportsLifecycle === false`. */
   readonly lifecycle?: SandboxLifecycleCapability;
+  /**
+   * Optional GitHub project-source capability. Absent ⇒
+   * `describe().supportsProjectSource === false`.
+   */
+  readonly projectSource?: SandboxProjectSourceCapability;
   /**
    * Optional: when sandbox env is fixed at create time (Docker), return the
    * bootstrap token the in-sandbox server actually booted with. Absent ⇒

@@ -3,8 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
+  resolveEnvironmentIconKind,
   resolveEnvironmentOptionLabel,
   resolveBranchSelectionTarget,
+  resolveBranchToolbarProjectLabel,
   resolveCurrentWorkspaceLabel,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
@@ -12,6 +14,7 @@ import {
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
   shouldIncludeBranchPickerItem,
+  shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
@@ -84,7 +87,76 @@ describe("resolveBranchToolbarValue", () => {
   });
 });
 
+describe("resolveBranchToolbarProjectLabel", () => {
+  it("uses repository identity instead of a generic sandbox checkout directory", () => {
+    expect(
+      resolveBranchToolbarProjectLabel({
+        projectName: "sandbox",
+        repositoryName: "project-overview",
+      }),
+    ).toBe("project-overview");
+  });
+
+  it("falls back to the project name when repository identity is unavailable", () => {
+    expect(
+      resolveBranchToolbarProjectLabel({ projectName: "kata-code", repositoryName: null }),
+    ).toBe("kata-code");
+  });
+});
+
+describe("shouldShowEnvironmentIndicator", () => {
+  it("keeps the environment affordance visible for a single environment", () => {
+    expect(shouldShowEnvironmentIndicator(1)).toBe(true);
+  });
+
+  it("hides the affordance when no environment context exists", () => {
+    expect(shouldShowEnvironmentIndicator(0)).toBe(false);
+  });
+});
+
+describe("resolveEnvironmentIconKind", () => {
+  it("uses the device icon for the primary environment", () => {
+    expect(resolveEnvironmentIconKind({ isPrimary: true, sandboxProviderKind: "docker" })).toBe(
+      "device",
+    );
+  });
+
+  it("uses the container icon for Docker sandboxes", () => {
+    expect(resolveEnvironmentIconKind({ isPrimary: false, sandboxProviderKind: "docker" })).toBe(
+      "container",
+    );
+  });
+
+  it("uses the cloud icon for Vercel and other remote environments", () => {
+    expect(resolveEnvironmentIconKind({ isPrimary: false, sandboxProviderKind: "vercel" })).toBe(
+      "cloud",
+    );
+    expect(resolveEnvironmentIconKind({ isPrimary: false, sandboxProviderKind: null })).toBe(
+      "cloud",
+    );
+  });
+});
+
 describe("resolveEnvironmentOptionLabel", () => {
+  it("uses the project name for the branch toolbar context", () => {
+    expect(
+      resolveEnvironmentOptionLabel({
+        isPrimary: true,
+        environmentId: localEnvironmentId,
+        projectName: "kata-code",
+        runtimeLabel: "Julius's Mac mini",
+      }),
+    ).toBe("kata-code");
+    expect(
+      resolveEnvironmentOptionLabel({
+        isPrimary: false,
+        environmentId: remoteEnvironmentId,
+        projectName: "kata-code",
+        savedLabel: "vercel-test",
+      }),
+    ).toBe("kata-code");
+  });
+
   it("prefers the primary environment's machine label", () => {
     expect(
       resolveEnvironmentOptionLabel({

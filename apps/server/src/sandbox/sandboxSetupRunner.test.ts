@@ -50,6 +50,7 @@ function createRecordingDriver(overrides: {
         supportsRenewTimeout: false,
         supportsCopyInto: overrides.hasCopyInto !== false,
         supportsLifecycle: false,
+        supportsProjectSource: false,
       }),
     ...(overrides.copyInto ? { copyInto: { copyInto: overrides.copyInto } } : {}),
   };

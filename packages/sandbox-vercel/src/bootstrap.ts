@@ -9,6 +9,7 @@
  *
  * @module bootstrap
  */
+import { PI_SDK_PIN } from "@kata-sh/code-sandbox-contracts/piSdkPin";
 
 /** In-sandbox home for the katacode user (created and chowned at bootstrap). */
 export const SANDBOX_HOME = "/home/katacode";
@@ -16,16 +17,8 @@ export const SANDBOX_HOME = "/home/katacode";
 /** The katacode CLI npm package (bin `katacode`). */
 export const KATA_CLI_PACKAGE = "@kata-sh/code-cli";
 
-/**
- * Known-good pi SDK build pinned in sandbox installs. The published kata CLI
- * declares `@earendil-works/pi-*: ^0.80.0`; pi 0.80.8 (2026-07-16) removed the
- * root `AuthStorage` export, so a fresh `npm install -g` resolves a pi that
- * crashes `katacode serve` at module load and the sandbox never becomes ready.
- * Pinning the whole trio in one install command makes npm dedupe the CLI's
- * `^0.80.0` ranges to this build. Remove once a CLI built against the new pi
- * API is published.
- */
-export const PI_SDK_PIN = "0.80.2";
+/** Re-export the driver-neutral pin for callers that already import bootstrap. */
+export { PI_SDK_PIN };
 
 /**
  * Provider CLIs installed at bootstrap. Mirrors the Dockerfile install list so

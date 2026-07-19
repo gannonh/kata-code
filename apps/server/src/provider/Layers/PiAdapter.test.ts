@@ -204,6 +204,106 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
+  it.effect("recreates ModelRuntime on startSession after late credential seed", () =>
+    Effect.gen(function* () {
+      const selectedModel: PiModelShape = {
+        id: "gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
+        provider: "openai-codex",
+        reasoning: true,
+      };
+      const refreshedModelRuntime = {
+        getAvailable: () => Promise.resolve([selectedModel]),
+      };
+      let runtimeCreations = 0;
+      let sessionModelRuntime: unknown;
+      const { session } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        createModelRuntime: async () => {
+          runtimeCreations += 1;
+          return refreshedModelRuntime;
+        },
+        createSession: ((args: { modelRuntime: unknown }) => {
+          sessionModelRuntime = args.modelRuntime;
+          return Promise.resolve({ session });
+        }) as never,
+      });
+
+      const started = yield* adapter.startSession({
+        threadId: ThreadId.make("pi-thread-late-seed"),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("pi"),
+          model: "openai-codex/gpt-5.6-sol",
+        },
+      });
+
+      expect(started.model).toBe("openai-codex/gpt-5.6-sol");
+      expect(runtimeCreations).toBe(1);
+      expect(sessionModelRuntime).toBe(refreshedModelRuntime);
+    }),
+  );
+
+  it.effect("selects a requested slashless model id instead of the default", () =>
+    Effect.gen(function* () {
+      const requestedModel: PiModelShape = {
+        id: "gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
+        provider: "openai-codex",
+        reasoning: true,
+      };
+      const { session } = makeFakeSession();
+      let receivedModel: unknown;
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL, requestedModel],
+        createSession: ((args: { model: unknown }) => {
+          receivedModel = args.model;
+          return Promise.resolve({ session });
+        }) as never,
+      });
+
+      const started = yield* adapter.startSession({
+        threadId: ThreadId.make("pi-thread-slashless-model"),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("pi"),
+          model: requestedModel.id,
+        },
+      });
+
+      expect(receivedModel).toBe(requestedModel);
+      expect(started.model).toBe("openai-codex/gpt-5.6-sol");
+    }),
+  );
+
+  it.effect("rejects an unknown slashless model instead of changing the selection", () =>
+    Effect.gen(function* () {
+      const { session } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+      });
+
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId: ThreadId.make("pi-thread-unknown-slashless-model"),
+          runtimeMode: "full-access",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("pi"),
+            model: "custom-model",
+          },
+        }),
+      );
+
+      expect(error._tag).toBe("ProviderAdapterValidationError");
+      if (error._tag !== "ProviderAdapterValidationError") return;
+      expect(error.issue).toContain("custom-model");
+    }),
+  );
+
   it.effect("streams a successful turn as a canonical event sequence", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();
