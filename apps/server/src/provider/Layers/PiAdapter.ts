@@ -540,7 +540,7 @@ export function makePiAdapter(
       if (slug) {
         const slash = slug.indexOf("/");
         if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
-        return availableModels.find((model) => model.id === slug) ?? availableModels[0];
+        return availableModels.find((model) => model.id === slug);
       }
       return availableModels[0];
     };

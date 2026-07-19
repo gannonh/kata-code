@@ -116,7 +116,7 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function (
     if (!slug) return availableModels[0];
     const slash = slug.indexOf("/");
     if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
-    return availableModels.find((model) => model.id === slug) ?? availableModels[0];
+    return availableModels.find((model) => model.id === slug);
   };
 
   const fail = (
@@ -170,12 +170,12 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function (
           })) as ReadonlyArray<PiModelShape>);
       const model = resolveModel(modelSelection, availableModels);
       if (!model) {
-        return yield* Effect.fail(
-          fail(
-            operation,
-            `Pi has no authenticated model available for ${operation}. Configure Pi auth or select a runtime-discovered model.`,
-          ),
-        );
+        const slug = modelSelection.model?.trim();
+        const detail =
+          slug && slug.length > 0
+            ? `Pi could not use model '${slug}' for ${operation} (${String(availableModels.length)} authenticated model(s) available). Configure Pi auth or select a runtime-discovered model.`
+            : `Pi has no authenticated model available for ${operation}. Configure Pi auth or select a runtime-discovered model.`;
+        return yield* Effect.fail(fail(operation, detail));
       }
       const thinkingLevel = modelSelectionStringOption(modelSelection, "thinkingLevel");
 

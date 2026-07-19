@@ -275,6 +275,15 @@ export function SandboxDeploymentSettings({
     [repositoryProjects, selectedRepositoryKeyByInstance, instanceMap],
   );
 
+  const updateInstance = useCallback(
+    (instanceId: string, next: SandboxProviderInstanceConfig) => {
+      updateSettings({
+        sandboxProviderInstances: { ...instanceMap, [instanceId]: next },
+      });
+    },
+    [instanceMap, updateSettings],
+  );
+
   const handleTest = useCallback(
     (instanceId: string) =>
       withBusy(instanceId, "test", async () => {
@@ -438,6 +447,7 @@ export function SandboxDeploymentSettings({
       refreshList,
       resolveSelectedProject,
       summaryById,
+      updateInstance,
       withBusy,
     ],
   );
@@ -626,15 +636,6 @@ export function SandboxDeploymentSettings({
       });
     },
     [activeSession, instanceMap, updateSettings],
-  );
-
-  const updateInstance = useCallback(
-    (instanceId: string, next: SandboxProviderInstanceConfig) => {
-      updateSettings({
-        sandboxProviderInstances: { ...instanceMap, [instanceId]: next },
-      });
-    },
-    [instanceMap, updateSettings],
   );
 
   const instanceEntries = Object.entries(instanceMap);

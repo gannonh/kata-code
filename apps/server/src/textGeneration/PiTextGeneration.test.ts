@@ -220,6 +220,27 @@ describe("makePiTextGeneration", () => {
     }),
   );
 
+  it.effect("returns TextGenerationError for an unknown slashless model", () =>
+    Effect.gen(function* () {
+      const { session } = makeFakeTextSession(TITLE_JSON);
+      const textGeneration = yield* makePiTextGeneration(decodePiSettings({}), {
+        createSession: (() => Promise.resolve({ session })) as never,
+        availableModels: SAMPLE_MODELS,
+      });
+
+      const error = yield* Effect.flip(
+        textGeneration.generateThreadTitle({
+          cwd: "/tmp",
+          message: "hello",
+          modelSelection: { ...MODEL_SELECTION, model: "custom-model" },
+        }),
+      );
+
+      expect(isTextGenerationError(error)).toBe(true);
+      expect(error.detail).toContain("custom-model");
+    }),
+  );
+
   it.effect("returns TextGenerationError when the model is not available", () =>
     Effect.gen(function* () {
       const { session } = makeFakeTextSession(TITLE_JSON);

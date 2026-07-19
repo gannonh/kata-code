@@ -278,6 +278,32 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
+  it.effect("rejects an unknown slashless model instead of changing the selection", () =>
+    Effect.gen(function* () {
+      const { session } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+      });
+
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId: ThreadId.make("pi-thread-unknown-slashless-model"),
+          runtimeMode: "full-access",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("pi"),
+            model: "custom-model",
+          },
+        }),
+      );
+
+      expect(error._tag).toBe("ProviderAdapterValidationError");
+      if (error._tag !== "ProviderAdapterValidationError") return;
+      expect(error.issue).toContain("custom-model");
+    }),
+  );
+
   it.effect("streams a successful turn as a canonical event sequence", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();
