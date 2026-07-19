@@ -437,14 +437,77 @@ export const PreviewAutomationOwner = Schema.Struct({
 });
 export type PreviewAutomationOwner = typeof PreviewAutomationOwner.Type;
 
-export const PreviewAutomationRequest = Schema.Struct({
+const PreviewAutomationRequestFields = {
   requestId: TrimmedNonEmptyString,
   threadId: ThreadId,
   tabId: Schema.optional(PreviewTabId),
-  operation: PreviewAutomationOperation,
-  input: Schema.Unknown,
   timeoutMs: Schema.Int.check(Schema.isGreaterThan(0)),
-});
+} as const;
+
+const PreviewAutomationEmptyInput = Schema.optional(Schema.Struct({}));
+
+export const PreviewAutomationRequest = Schema.Union([
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("status"),
+    input: PreviewAutomationEmptyInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("open"),
+    input: PreviewAutomationOpenInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("navigate"),
+    input: PreviewAutomationNavigateInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("snapshot"),
+    input: PreviewAutomationEmptyInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("click"),
+    input: PreviewAutomationClickInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("type"),
+    input: PreviewAutomationTypeInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("press"),
+    input: PreviewAutomationPressInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("scroll"),
+    input: PreviewAutomationScrollInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("evaluate"),
+    input: PreviewAutomationEvaluateInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("waitFor"),
+    input: PreviewAutomationWaitForInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("recordingStart"),
+    input: PreviewAutomationEmptyInput,
+  }),
+  Schema.Struct({
+    ...PreviewAutomationRequestFields,
+    operation: Schema.Literal("recordingStop"),
+    input: PreviewAutomationEmptyInput,
+  }),
+]);
 export type PreviewAutomationRequest = typeof PreviewAutomationRequest.Type;
 
 export const PreviewAutomationResponse = Schema.Struct({
