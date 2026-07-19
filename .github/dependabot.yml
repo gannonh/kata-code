@@ -1,6 +1,8 @@
 # Dependabot version updates with a minimum package age (cooldown).
 # Docs: https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference#cooldown-
-# Daily npm is Pi-only (grouped, actionable bumps). Weekly npm covers the rest with cooldown.
+# Dependabot requires a unique (ecosystem, directory, target-branch) triple, so
+# npm cannot split into daily-Pi + weekly-rest lanes on `/`. One daily npm update
+# keeps Pi actionable via group + cooldown exclusion; other deps use cooldown.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -8,26 +10,18 @@ updates:
     schedule:
       interval: daily
     open-pull-requests-limit: 10
-    allow:
-      - dependency-name: "@earendil-works/pi-*"
-    groups:
-      pi-runtime:
-        patterns:
-          - "@earendil-works/pi-*"
-
-  - package-ecosystem: npm
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
     # Wait until a release has been on the registry for N days before opening a PR.
     cooldown:
       default-days: 3
       semver-major-days: 7
       semver-minor-days: 3
       semver-patch-days: 3
+      exclude:
+        - "@earendil-works/pi-*"
     groups:
+      pi-runtime:
+        patterns:
+          - "@earendil-works/pi-*"
       production-dependencies:
         dependency-type: production
       development-dependencies:
@@ -37,8 +31,6 @@ updates:
       # covers non-catalog root and app deps plus lockfile drift.
       - dependency-name: "effect"
       - dependency-name: "@effect/*"
-      # Daily lane owns Pi package bumps.
-      - dependency-name: "@earendil-works/pi-*"
 
   - package-ecosystem: github-actions
     directory: /
