@@ -182,6 +182,7 @@ const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource
   getSnapshot: instance.snapshot.getSnapshot,
   refresh: instance.snapshot.refresh,
   streamChanges: instance.snapshot.streamChanges,
+  subscribeChanges: instance.snapshot.subscribeChanges,
 });
 
 export const ProviderRegistryLive = Layer.effect(
@@ -541,13 +542,14 @@ export const ProviderRegistryLive = Layer.effect(
           newlyAdded.push([instanceId, instance] as const);
         }
 
-        // Fork long-lived subscriptions to each new/rebuilt instance's
-        // change stream before reading its current snapshot. If the
-        // driver's own initial probe finishes during this sync, either
-        // the current read or the active subscriber observes the result.
+        // Subscribe synchronously, then fork the consumer loop, so a
+        // probe publish cannot land before the subscription is registered.
+        // `Stream.fromPubSub` alone is unsafe here: forkScoped only schedules
+        // the fiber, and subscribe is deferred until the stream starts.
         for (const [, instance] of newlyAdded) {
           const source = buildSnapshotSource(instance);
-          yield* Stream.runForEach(source.streamChanges, (provider) =>
+          const subscription = yield* source.subscribeChanges;
+          yield* Stream.runForEach(Stream.fromSubscription(subscription), (provider) =>
             correlateSnapshotWithSource(source, provider).pipe(Effect.flatMap(syncProvider)),
           ).pipe(Effect.forkScoped);
         }
