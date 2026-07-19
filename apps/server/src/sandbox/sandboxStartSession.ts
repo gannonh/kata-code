@@ -17,8 +17,6 @@ import {
   type SandboxHandle,
   type SandboxProvider,
 } from "@kata-sh/code-sandbox/driver";
-import { VERCEL_KIND, VERCEL_SOURCE_TOKEN_ENV } from "@kata-sh/code-sandbox-vercel";
-
 import type * as CliTokenManager from "../cloud/CliTokenManager.ts";
 import {
   decodeEnvironmentConfigText,
@@ -46,14 +44,13 @@ import type { registerAndFinalizeSession as registerAndFinalizeSessionImpl } fro
 import { resolveSandboxGitHubSource, sourceFingerprint } from "./sandboxGitHubSource.ts";
 import {
   cloneGitHubSourceIntoWorkspace,
-  DOCKER_WORKSPACE,
   DockerRemoteSetupError,
+  ensureGitAndGhAvailable,
   readDockerRemoteEnvironmentConfig,
 } from "./dockerRemoteSetup.ts";
 import {
   readRemoteEnvironmentConfig,
   seedGitHubAuth,
-  VERCEL_WORKSPACE,
   VercelRemoteSetupError,
 } from "./vercelRemoteSetup.ts";
 
@@ -74,6 +71,8 @@ export interface SandboxStartSessionRuntime {
   readonly getStore: () => SandboxSessionStore;
   readonly liveSessions: Map<string, LiveSession>;
   readonly nameNamespace: string | undefined;
+  /** Override for tests; production uses `buildRegistry()`. */
+  readonly registry?: ReturnType<typeof buildRegistry>;
   readonly refreshLockedInstanceStatus: (
     sessionKey: string,
     settings: ServerSettings,
@@ -149,7 +148,7 @@ export const startSandboxSession = (
           message: "A session is already running for this sandbox environment.",
         });
       }
-      const registry = buildRegistry();
+      const registry = runtime.registry ?? buildRegistry();
       const config = (settings.sandboxProviderInstances as SandboxProviderInstanceConfigMap)[
         instanceId as SandboxProviderInstanceId
       ];
@@ -164,9 +163,8 @@ export const startSandboxSession = (
       if (inst.kind !== "available") {
         return yield* registryError(inst.reason, inst.message);
       }
-      const isVercel = (inst.driver.kind as string) === (VERCEL_KIND as string);
-      const isDocker = (inst.driver.kind as string) === "docker";
-      const usesGitHubSource = isVercel || isDocker;
+      const projectSource = inst.driver.projectSource;
+      const usesGitHubSource = projectSource !== undefined;
 
       // ── Start-from-stopped path ──
       if (existing !== undefined && existing.status === "stopped") {
@@ -286,8 +284,8 @@ export const startSandboxSession = (
       }
 
       // ── Provision path (no existing record) ──
-      // Docker and Vercel clone their selected GitHub repo/branch. Other
-      // drivers retain local worktree archive seeding.
+      // Drivers with `projectSource` clone their selected GitHub repo/branch.
+      // Other drivers retain local worktree archive seeding.
       const githubSource = usesGitHubSource
         ? resolveSandboxGitHubSource(resolvedConfig.config)
         : null;
@@ -295,7 +293,7 @@ export const startSandboxSession = (
         return yield* new SandboxRpcError({
           reason: "invalid-config",
           message:
-            "Docker and Vercel sandboxes clone their GitHub source; a local repository cannot be provided.",
+            "This sandbox clones its configured GitHub source; a local repository cannot be provided.",
         });
       }
       if (usesGitHubSource && githubSource === null) {
@@ -340,12 +338,12 @@ export const startSandboxSession = (
       const envWithLabel = config.displayName
         ? [...env, ["KATACODE_ENVIRONMENT_LABEL", config.displayName] as const]
         : env;
-      // The transient source token is appended only for the Vercel create call;
-      // the Vercel driver extracts it for the native source and excludes it from
-      // the sandbox env. It is never persisted or seeded via env.
+      // Native-clone drivers accept a transient host GitHub token via a
+      // driver-declared env name for the provision call only. Never persisted.
+      const sourceTokenEnv = projectSource?.sourceTokenEnv;
       const provisionEnv =
-        isVercel && githubToken !== undefined
-          ? [...envWithLabel, [VERCEL_SOURCE_TOKEN_ENV, githubToken] as const]
+        sourceTokenEnv !== undefined && githubToken !== undefined
+          ? [...envWithLabel, [sourceTokenEnv, githubToken] as const]
           : envWithLabel;
 
       const handle = yield* inst.driver
@@ -363,6 +361,24 @@ export const startSandboxSession = (
           .disposeAfterFailure(sessionKey, inst.driver, handle)
           .pipe(Effect.andThen(Effect.fail(error)));
 
+      // Exec-clone drivers need git/gh before credential/auth seed. Fail loud
+      // on custom images that omit them (only the repo Dockerfile installs gh).
+      if (
+        githubSource !== null &&
+        projectSource !== undefined &&
+        projectSource.strategy === "exec-clone"
+      ) {
+        yield* ensureGitAndGhAvailable(inst.driver, handle).pipe(
+          Effect.catch((error: DockerRemoteSetupError | SandboxProviderError) =>
+            failProvision(
+              error._tag === "DockerRemoteSetupError"
+                ? new SandboxRpcError({ reason: "provision-failed", message: error.message })
+                : mapDriverError(error),
+            ),
+          ),
+        );
+      }
+
       yield* runCredentialSeed(inst.driver, handle).pipe(
         Effect.catch((error: SetupFailed | SandboxProviderError) =>
           failProvision(
@@ -371,10 +387,10 @@ export const startSandboxSession = (
         ),
       );
 
-      // ── GitHub-sourced setup (Vercel native clone workspace, Docker in-container clone) ──
-      if (githubSource !== null) {
-        // Seed authenticated gh/Git into the sandbox filesystem (before Docker
-        // clone so git can use the credential helper).
+      // ── GitHub-sourced setup (capability-driven clone + workspace setup) ──
+      if (githubSource !== null && projectSource !== undefined) {
+        // Seed authenticated gh/Git into the sandbox filesystem (before
+        // exec-clone so git can use the credential helper).
         // @effect-diagnostics-next-line effect(globalDateInEffect):off - random nonce, not a clock read.
         const authNonce = NodeCrypto.randomBytes(8).toString("hex");
         yield* seedGitHubAuth({
@@ -382,9 +398,7 @@ export const startSandboxSession = (
           handle,
           token: githubToken as string,
           nonce: authNonce,
-          // Auth seed only needs a valid cwd. Custom Docker images may not
-          // create /workspace until the clone command runs.
-          cwd: isVercel ? VERCEL_WORKSPACE : "/",
+          cwd: projectSource.authSeedCwd,
         }).pipe(
           Effect.catch((error: VercelRemoteSetupError | SandboxProviderError) =>
             failProvision(
@@ -395,17 +409,17 @@ export const startSandboxSession = (
           ),
         );
 
-        const workspacePath = isVercel ? VERCEL_WORKSPACE : DOCKER_WORKSPACE;
+        const workspacePath = projectSource.workspacePath;
 
-        // Docker: shallow-clone the selected source into /workspace after auth seed.
-        // Vercel: native SDK clone already populated /vercel/sandbox at provision.
-        if (isDocker) {
+        // Exec-clone: shallow-clone after auth seed. Native-clone: SDK already
+        // populated the workspace during provision.
+        if (projectSource.strategy === "exec-clone") {
           yield* cloneGitHubSourceIntoWorkspace({
             driver: inst.driver,
             handle,
             httpsUrl: githubSource.httpsUrl,
             branch: githubSource.branch,
-            workspacePath: DOCKER_WORKSPACE,
+            workspacePath,
           }).pipe(
             Effect.catch((error: DockerRemoteSetupError | SandboxProviderError) =>
               failProvision(
@@ -418,8 +432,8 @@ export const startSandboxSession = (
         }
 
         const remoteRaw = yield* (
-          isVercel
-            ? readRemoteEnvironmentConfig(inst.driver, handle)
+          projectSource.strategy === "native-clone"
+            ? readRemoteEnvironmentConfig(inst.driver, handle, workspacePath)
             : readDockerRemoteEnvironmentConfig(inst.driver, handle, workspacePath)
         ).pipe(
           Effect.catch(
@@ -443,12 +457,14 @@ export const startSandboxSession = (
           repositoryKey: githubSource.repositoryKey,
           savedSandboxEnvironments: settings.savedSandboxEnvironments,
         }).resolved;
-        if (loadedResolved.build?.dockerfile !== undefined && isVercel) {
+        if (
+          loadedResolved.build?.dockerfile !== undefined &&
+          !projectSource.supportsDockerfileBuild
+        ) {
           return yield* failProvision(
             new SandboxRpcError({
               reason: "invalid-config",
-              message:
-                ".kata/environment.json requests a Dockerfile build, which the Vercel sandbox driver does not support. Use a local Docker deployment target for this repository.",
+              message: `.kata/environment.json requests a Dockerfile build, which the "${inst.driver.kind as string}" sandbox driver does not support. Use a local Docker deployment target for this repository.`,
             }),
           );
         }
@@ -474,7 +490,7 @@ export const startSandboxSession = (
 
         if (
           loaded.resolved.build?.dockerfile !== undefined &&
-          (inst.driver.kind as string) !== "docker"
+          !(inst.driver.projectSource?.supportsDockerfileBuild === true)
         ) {
           return yield* failProvision(
             new SandboxRpcError({

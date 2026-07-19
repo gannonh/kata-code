@@ -9,6 +9,7 @@
  *
  * @module bootstrap
  */
+import { PI_SDK_PIN } from "@kata-sh/code-sandbox-contracts/piSdkPin";
 
 /** In-sandbox home for the katacode user (created and chowned at bootstrap). */
 export const SANDBOX_HOME = "/home/katacode";
@@ -16,12 +17,8 @@ export const SANDBOX_HOME = "/home/katacode";
 /** The katacode CLI npm package (bin `katacode`). */
 export const KATA_CLI_PACKAGE = "@kata-sh/code-cli";
 
-/**
- * Keeps the published Kata CLI and sandbox Pi binary on the tested
- * ModelRuntime API. Pinning the trio in one install command keeps their
- * runtime versions aligned.
- */
-export const PI_SDK_PIN = "0.80.10";
+/** Re-export the driver-neutral pin for callers that already import bootstrap. */
+export { PI_SDK_PIN };
 
 /**
  * Provider CLIs installed at bootstrap. Mirrors the Dockerfile install list so

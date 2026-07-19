@@ -87,6 +87,8 @@ export const SandboxInstanceSummary = Schema.Union([
     supportsRenewTimeout: Schema.Boolean,
     /** Driver supports durable stop/start lifecycle (`lifecycle`). */
     supportsLifecycle: Schema.optional(Schema.Boolean),
+    /** Driver clones a configured GitHub source on create (`projectSource`). */
+    supportsProjectSource: Schema.optional(Schema.Boolean),
     runningSession: Schema.optional(SandboxRunningSession),
   }),
   Schema.Struct({

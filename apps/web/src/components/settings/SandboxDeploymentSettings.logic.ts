@@ -109,14 +109,16 @@ export function shouldSeedRepositoryForStart(summary: SandboxInstanceSummary | u
 }
 
 /** Preserve project archive seeding for create paths owned by sandbox drivers
- * other than Docker and Vercel, which clone their configured GitHub source. */
+ * that do not advertise `supportsProjectSource` (GitHub clone on create). */
 export function shouldSeedProjectRepositoryForStart(input: {
   readonly driver: string;
   readonly summary: SandboxInstanceSummary | undefined;
 }): boolean {
-  const isGitHubSourceDriver =
-    input.driver === DOCKER_SANDBOX_KIND || input.driver === VERCEL_SANDBOX_KIND;
-  return !isGitHubSourceDriver && shouldSeedRepositoryForStart(input.summary);
+  const supportsProjectSource =
+    input.summary?.kind === "available"
+      ? input.summary.supportsProjectSource === true
+      : input.driver === DOCKER_SANDBOX_KIND || input.driver === VERCEL_SANDBOX_KIND;
+  return !supportsProjectSource && shouldSeedRepositoryForStart(input.summary);
 }
 
 /** A GitHub source selection persisted on a sandbox instance config. */
@@ -124,9 +126,6 @@ export interface SandboxGitHubSourceSelection {
   readonly repository: string;
   readonly branch: string;
 }
-
-/** @deprecated Prefer `SandboxGitHubSourceSelection`. */
-export type VercelSourceSelection = SandboxGitHubSourceSelection;
 
 /** Read the `{ repository, branch }` source from an opaque sandbox config, or
  *  null when either value is missing. */
@@ -146,9 +145,6 @@ export function readSandboxGitHubSource(config: unknown): SandboxGitHubSourceSel
   }
   return { repository: repository.trim(), branch: branch.trim() };
 }
-
-/** @deprecated Prefer `readSandboxGitHubSource`. */
-export const readVercelSource = readSandboxGitHubSource;
 
 /** Write a GitHub source onto an opaque config, clearing it when repository is
  *  empty. Branch resets when the repository changes. */
@@ -181,9 +177,6 @@ export function setSandboxGitHubSource(
   return base;
 }
 
-/** @deprecated Prefer `setSandboxGitHubSource`. */
-export const setVercelSource = setSandboxGitHubSource;
-
 /** The canonical GitHub repository key for an `owner/name` selection
  *  (`github.com/<owner>/<name>` lowercased). Reuses the shared
  *  `normalizeGitRemoteUrl` so it matches the server derivation exactly. */
@@ -192,28 +185,14 @@ export function sandboxGitHubSourceRepositoryKey(repository: string): string {
   return normalizeGitRemoteUrl(`https://github.com/${owner}.git`);
 }
 
-/** @deprecated Prefer `sandboxGitHubSourceRepositoryKey`. */
-export const vercelSourceRepositoryKey = sandboxGitHubSourceRepositoryKey;
-
 /** Whether a GitHub-sourced sandbox target can be created: a complete source is
- *  required for Docker and Vercel. Other drivers are unaffected (always true). */
+ *  required when the driver clones from GitHub. Other drivers are unaffected. */
 export function canCreateGitHubSourcedSandbox(input: {
   readonly requiresGitHubSource: boolean;
   readonly config: unknown;
 }): boolean {
   if (!input.requiresGitHubSource) return true;
   return readSandboxGitHubSource(input.config) !== null;
-}
-
-/** @deprecated Prefer `canCreateGitHubSourcedSandbox`. */
-export function canCreateVercelSandbox(input: {
-  readonly isVercel: boolean;
-  readonly config: unknown;
-}): boolean {
-  return canCreateGitHubSourcedSandbox({
-    requiresGitHubSource: input.isVercel,
-    config: input.config,
-  });
 }
 
 export function makeSandboxProviderInstanceId(input: {

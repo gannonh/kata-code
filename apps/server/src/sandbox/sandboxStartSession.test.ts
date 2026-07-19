@@ -37,6 +37,7 @@ function driverWithResolver(resolve: SandboxProvider["resolveBootstrapToken"]): 
         supportsRenewTimeout: false,
         supportsCopyInto: false,
         supportsLifecycle: true,
+        supportsProjectSource: false,
       }),
     ...(resolve ? { resolveBootstrapToken: resolve } : {}),
   };

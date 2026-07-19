@@ -47,14 +47,15 @@ export class VercelRemoteSetupError extends Data.TaggedError("VercelRemoteSetupE
 export function readRemoteEnvironmentConfig(
   driver: SandboxProvider,
   handle: SandboxHandle,
+  workspacePath: string = VERCEL_WORKSPACE,
 ): Effect.Effect<string | null, VercelRemoteSetupError | SandboxProviderError> {
   return Effect.gen(function* () {
     const probe = yield* driver.exec(handle, "test -f .kata/environment.json", {
-      cwd: VERCEL_WORKSPACE,
+      cwd: workspacePath,
     });
     if (probe.exitCode !== 0) return null;
     const read = yield* driver.exec(handle, "cat .kata/environment.json", {
-      cwd: VERCEL_WORKSPACE,
+      cwd: workspacePath,
     });
     if (read.exitCode !== 0) {
       return yield* new VercelRemoteSetupError({

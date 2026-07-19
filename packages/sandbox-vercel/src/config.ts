@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 import { makeProviderSettingsSchema } from "@kata-sh/code-contracts/settings";
 import { PortSchema, TrimmedNonEmptyString } from "@kata-sh/code-contracts/baseSchemas";
 import type { SandboxProviderInstanceConfig } from "@kata-sh/code-contracts/sandboxProviderInstance";
+import { SandboxGitHubSource } from "@kata-sh/code-sandbox-contracts/githubSource";
 
 /**
  * Vercel Sandbox driver config. `auth` is hidden from the settings form
@@ -74,10 +75,7 @@ export const VercelSandboxConfig = makeProviderSettingsSchema(
       ),
     ),
     source: Schema.optionalKey(
-      Schema.Struct({
-        repository: TrimmedNonEmptyString,
-        branch: TrimmedNonEmptyString,
-      }).pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+      SandboxGitHubSource.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
     auth: Schema.optionalKey(
       Schema.Struct({

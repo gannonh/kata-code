@@ -27,9 +27,6 @@ export interface ResolvedSandboxGitHubSource {
   readonly httpsUrl: string;
 }
 
-/** @deprecated Prefer `ResolvedSandboxGitHubSource`. */
-export type ResolvedVercelSource = ResolvedSandboxGitHubSource;
-
 /** Build the HTTPS clone URL for an `owner/name` GitHub repository. */
 export function buildGitHubHttpsUrl(repository: string): string {
   return `https://github.com/${repository}.git`;
@@ -66,9 +63,6 @@ export function resolveSandboxGitHubSource(config: unknown): ResolvedSandboxGitH
     httpsUrl: buildGitHubHttpsUrl(trimmedRepository),
   };
 }
-
-/** @deprecated Prefer `resolveSandboxGitHubSource`. */
-export const resolveVercelSource = resolveSandboxGitHubSource;
 
 /** Compute a non-secret fingerprint for a source selection. Persisted with the
  *  session record so lifecycle start can reject a changed source. */

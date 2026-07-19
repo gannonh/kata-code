@@ -54,6 +54,7 @@ function execDriver(
         supportsRenewTimeout: true,
         supportsCopyInto: true,
         supportsLifecycle: true,
+        supportsProjectSource: false,
       }),
     copyInto: { copyInto: () => Effect.void },
   } as unknown as SandboxProvider;

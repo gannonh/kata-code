@@ -100,7 +100,8 @@ export function DeploymentTargetCard({
 }: DeploymentTargetCardProps) {
   const isVercel = (instance.driver as string) === (VERCEL_KIND as string);
   const isDocker = (instance.driver as string) === (DOCKER_KIND as string);
-  const usesGitHubSource = isVercel || isDocker;
+  const usesGitHubSource =
+    summary?.kind === "available" ? summary.supportsProjectSource === true : isVercel || isDocker;
   const runningSession = summary?.kind === "available" ? summary.runningSession : undefined;
   const supportsRenewTimeout =
     summary?.kind === "available" ? summary.supportsRenewTimeout : undefined;

@@ -9,6 +9,7 @@ export {
   VercelSandboxProvider,
   vercelConfigDecoder,
   VERCEL_KIND,
+  VERCEL_WORKSPACE,
   makeVercelSandboxProvider,
   type VercelSandboxHandleState,
 } from "./VercelSandboxProvider.ts";
@@ -27,6 +28,7 @@ export {
   SANDBOX_HOME,
   KATA_CLI_PACKAGE,
   PROVIDER_CLI_PACKAGES,
+  PI_SDK_PIN,
   buildBootstrapScript,
   buildKillServeCommand,
   buildReplaceServeCommand,

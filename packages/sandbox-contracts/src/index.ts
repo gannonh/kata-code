@@ -8,5 +8,7 @@
 export * from "./instance.ts";
 export * from "@kata-sh/code-contracts/savedSandboxEnvironment";
 export * from "./environmentConfig.ts";
+export * from "./githubSource.ts";
+export * from "./piSdkPin.ts";
 export * from "./sessionState.ts";
 export * from "./reachability.ts";

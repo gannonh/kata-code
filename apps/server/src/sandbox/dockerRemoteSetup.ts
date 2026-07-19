@@ -21,10 +21,35 @@ export const DOCKER_WORKSPACE = "/workspace";
 
 /** Fail-loud error for a Docker remote clone failure. */
 export class DockerRemoteSetupError extends Data.TaggedError("DockerRemoteSetupError")<{
-  readonly stage: "clone" | "read-config";
+  readonly stage: "preflight" | "clone" | "read-config";
   readonly message: string;
   readonly cause?: unknown;
 }> {}
+
+/**
+ * Fail loud when the running sandbox image lacks `git` or `gh`. Custom images
+ * often omit GitHub CLI; only the repo Dockerfile installs it by default.
+ */
+export function ensureGitAndGhAvailable(
+  driver: SandboxProvider,
+  handle: SandboxHandle,
+): Effect.Effect<void, DockerRemoteSetupError | SandboxProviderError> {
+  return Effect.gen(function* () {
+    const result = yield* driver.exec(
+      handle,
+      "command -v git >/dev/null && command -v gh >/dev/null",
+      { cwd: "/" },
+    );
+    if (result.exitCode !== 0) {
+      return yield* new DockerRemoteSetupError({
+        stage: "preflight",
+        message:
+          "This Docker image is missing `git` and/or `gh`, which are required to clone a GitHub source. " +
+          "Use the `katacode:local` image, or install git and GitHub CLI in your custom image.",
+      });
+    }
+  });
+}
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;

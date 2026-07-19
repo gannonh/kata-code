@@ -23,6 +23,7 @@ import {
   type SandboxProvisionRequest,
   type SandboxReachability,
   type SandboxProvider,
+  type SandboxProjectSourceCapability,
   type SandboxSnapshotCapability,
   type SandboxRenewTimeoutCapability,
   SandboxProviderError,
@@ -44,6 +45,7 @@ export interface StubDriverOptions {
   readonly withRenewTimeout?: boolean;
   readonly withCopyInto?: boolean;
   readonly withLifecycle?: boolean;
+  readonly withProjectSource?: boolean;
 }
 
 /**
@@ -78,6 +80,15 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
       }
     : undefined;
 
+  const projectSource: SandboxProjectSourceCapability | undefined = options.withProjectSource
+    ? {
+        workspacePath: "/workspace",
+        authSeedCwd: "/",
+        strategy: "exec-clone",
+        supportsDockerfileBuild: true,
+      }
+    : undefined;
+
   const descriptor: SandboxProviderDescriptor = {
     kind,
     reachabilityKind: SandboxReachabilityKind.make("loopback"),
@@ -85,6 +96,7 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
     supportsRenewTimeout: options.withRenewTimeout === true,
     supportsCopyInto: options.withCopyInto === true,
     supportsLifecycle: options.withLifecycle === true,
+    supportsProjectSource: options.withProjectSource === true,
   };
 
   return {
@@ -129,5 +141,6 @@ export function createStubSandboxProvider(options: StubDriverOptions = {}): Sand
     ...(renewTimeout !== undefined ? { renewTimeout } : {}),
     ...(copyInto !== undefined ? { copyInto } : {}),
     ...(lifecycle !== undefined ? { lifecycle } : {}),
+    ...(projectSource !== undefined ? { projectSource } : {}),
   };
 }

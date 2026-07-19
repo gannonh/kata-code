@@ -26,6 +26,14 @@
     "./reachability": {
       "types": "./src/reachability.ts",
       "import": "./src/reachability.ts"
+    },
+    "./githubSource": {
+      "types": "./src/githubSource.ts",
+      "import": "./src/githubSource.ts"
+    },
+    "./piSdkPin": {
+      "types": "./src/piSdkPin.ts",
+      "import": "./src/piSdkPin.ts"
     }
   },
   "scripts": {

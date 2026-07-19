@@ -49,6 +49,7 @@ function execDriver(
         supportsRenewTimeout: false,
         supportsCopyInto: true,
         supportsLifecycle: true,
+        supportsProjectSource: false,
       }),
   } as unknown as SandboxProvider;
   return Object.assign(driver, { execs });

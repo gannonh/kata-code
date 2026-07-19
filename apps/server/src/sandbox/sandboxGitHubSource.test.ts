@@ -4,7 +4,6 @@ import {
   buildGitHubHttpsUrl,
   deriveGitHubRepositoryKey,
   resolveSandboxGitHubSource,
-  resolveVercelSource,
   sourceFingerprint,
 } from "./sandboxGitHubSource.ts";
 
@@ -29,10 +28,6 @@ describe("sandboxGitHubSource", () => {
       repositoryKey: "github.com/octocat/hello-world",
       httpsUrl: "https://github.com/octocat/Hello-World.git",
     });
-    // Alias retained for Vercel call sites.
-    expect(
-      resolveVercelSource({ source: { repository: "octocat/Hello-World", branch: "main" } }),
-    ).toEqual(resolved);
   });
 
   it("returns null when no source is configured", () => {

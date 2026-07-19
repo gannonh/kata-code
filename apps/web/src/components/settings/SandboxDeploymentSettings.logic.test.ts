@@ -21,7 +21,6 @@ import {
   setSandboxGitHubSource,
   sandboxGitHubSourceRepositoryKey,
   canCreateGitHubSourcedSandbox,
-  canCreateVercelSandbox,
 } from "./SandboxDeploymentSettings.logic";
 
 describe("resolveSandboxListUiState", () => {
@@ -131,14 +130,6 @@ describe("sandbox GitHub source selection logic", () => {
     ).toBe(true);
     // Drivers that do not require GitHub source are unaffected.
     expect(canCreateGitHubSourcedSandbox({ requiresGitHubSource: false, config: {} })).toBe(true);
-    // Deprecated Vercel helper remains compatible.
-    expect(canCreateVercelSandbox({ isVercel: true, config: {} })).toBe(false);
-    expect(
-      canCreateVercelSandbox({
-        isVercel: true,
-        config: { source: { repository: "octocat/Hello-World", branch: "main" } },
-      }),
-    ).toBe(true);
   });
 });
 
@@ -288,6 +279,7 @@ describe("resolveSandboxLifecycleState (identity recovery R1: id-based join)", (
       supportsSnapshot: false,
       supportsRenewTimeout: false,
       supportsLifecycle: true,
+      supportsProjectSource: false,
       ...(session !== undefined
         ? {
             runningSession: {

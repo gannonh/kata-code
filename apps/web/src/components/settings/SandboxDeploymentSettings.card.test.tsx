@@ -65,6 +65,7 @@ function noSessionSummary(): SandboxInstanceSummary {
     supportsSnapshot: false,
     supportsRenewTimeout: false,
     supportsLifecycle: true,
+    supportsProjectSource: true,
   } as unknown as SandboxInstanceSummary;
 }
 
@@ -78,6 +79,7 @@ function runningSummary(): SandboxInstanceSummary {
     supportsSnapshot: false,
     supportsRenewTimeout: false,
     supportsLifecycle: true,
+    supportsProjectSource: true,
     runningSession: {
       environmentId: "env_abc",
       endpoint: {
@@ -102,6 +104,7 @@ function stoppedSummary(): SandboxInstanceSummary {
     supportsSnapshot: false,
     supportsRenewTimeout: false,
     supportsLifecycle: true,
+    supportsProjectSource: true,
     runningSession: {
       environmentId: "env_abc",
       endpoint: {

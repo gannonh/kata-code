@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema";
 
 import { makeProviderSettingsSchema } from "@kata-sh/code-contracts/settings";
 import { PortSchema, TrimmedNonEmptyString } from "@kata-sh/code-contracts/baseSchemas";
+import { SandboxGitHubSource } from "@kata-sh/code-sandbox-contracts/githubSource";
 
 export const DockerSandboxConfig = makeProviderSettingsSchema({
   image: TrimmedNonEmptyString.pipe(
@@ -39,10 +40,7 @@ export const DockerSandboxConfig = makeProviderSettingsSchema({
   /** GitHub source selection owned by the Docker card picker (hidden from the
    *  generic settings form). Optional only for legacy targets; Create requires it. */
   source: Schema.optionalKey(
-    Schema.Struct({
-      repository: TrimmedNonEmptyString,
-      branch: TrimmedNonEmptyString,
-    }).pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    SandboxGitHubSource.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
   ),
 });
 

@@ -70,6 +70,9 @@ import {
 
 export const VERCEL_KIND = SandboxProviderDriverKind.make("vercel");
 
+/** Vercel's native clone workspace (default session working directory). */
+export const VERCEL_WORKSPACE = "/vercel/sandbox";
+
 // Hoist compiled schema function to module scope (kata-code/no-inline-schema-compile).
 // `decodeVercelSandboxConfig` (from config.ts) performs the legacy-key strip;
 // the raw `Schema.decodeUnknownSync(VercelSandboxConfig)` is kept for tests
@@ -887,11 +890,19 @@ export function makeVercelSandboxProvider(
         supportsRenewTimeout: true,
         supportsCopyInto: true,
         supportsLifecycle: true,
+        supportsProjectSource: true,
       } satisfies SandboxProviderDescriptor),
 
     lifecycle,
     renewTimeout,
     copyInto,
+    projectSource: {
+      workspacePath: VERCEL_WORKSPACE,
+      authSeedCwd: VERCEL_WORKSPACE,
+      strategy: "native-clone",
+      supportsDockerfileBuild: false,
+      sourceTokenEnv: VERCEL_SOURCE_TOKEN_ENV,
+    },
   };
 
   return provider;

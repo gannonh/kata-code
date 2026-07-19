@@ -785,6 +785,7 @@ describe("VercelSandboxProvider", () => {
       expect(d.supportsRenewTimeout).toBe(true);
       expect(d.supportsCopyInto).toBe(true);
       expect(d.supportsLifecycle).toBe(true);
+      expect(d.supportsProjectSource).toBe(true);
       expect(d.maxLifetimeMs).toBe(86_400_000);
     }),
   );

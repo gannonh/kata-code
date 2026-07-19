@@ -56,6 +56,7 @@ function makeFakeDriver(
     supportsRenewTimeout: false,
     supportsCopyInto: false,
     supportsLifecycle: true,
+    supportsProjectSource: false,
   };
   const driver: SandboxProvider = {
     kind: FAKE_KIND,
