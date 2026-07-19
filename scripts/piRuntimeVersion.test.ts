@@ -95,11 +95,9 @@ describe("Pi runtime version alignment", () => {
     expect(actions.directory).toBe("/");
     expect(actions.schedule).toEqual({ interval: "weekly", day: "monday" });
     expect(actions["open-pull-requests-limit"]).toBe(5);
+    // github-actions does not support semver-*-days cooldown keys.
     expect(actions.cooldown).toEqual({
       "default-days": 3,
-      "semver-major-days": 7,
-      "semver-minor-days": 3,
-      "semver-patch-days": 3,
     });
     expect(actions.groups).toEqual({
       "github-actions": { patterns: ["*"] },
