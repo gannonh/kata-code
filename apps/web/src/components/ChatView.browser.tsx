@@ -1867,15 +1867,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
+      // Locked mobile run context prefers the environment/project label over the
+      // workspace-mode fallback ("Local checkout") once a thread has messages.
       await waitForElement(
         () =>
           Array.from(document.querySelectorAll<HTMLElement>("span")).find(
-            (element) => element.textContent?.trim() === "Local checkout",
+            (element) => element.textContent?.trim() === "Project",
           ) ?? null,
         "Unable to find static mobile workspace label.",
       );
 
-      expect(findButtonByText("Local checkout")).toBeNull();
+      expect(findButtonByText("Project")).toBeNull();
     } finally {
       await mounted.cleanup();
     }
