@@ -46,36 +46,8 @@ export class DesktopIpc extends Context.Service<DesktopIpc, DesktopIpcShape>()(
   "@kata-sh/code-desktop/ipc/DesktopIpc",
 ) {}
 
-/**
- * Flatten PreviewManagerError wrappers before they cross IPC. Electron only
- * reliably preserves Error.name/message on the wire, and the renderer maps
- * those into agent-facing preview automation failures. Without unwrapping,
- * agents see "Desktop preview operation failed: automationClick" instead of
- * "No element matches locator ...".
- */
-export const toIpcFailure = (error: unknown): Error => {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "_tag" in error &&
-    (error as { _tag: unknown })._tag === "PreviewManagerError"
-  ) {
-    const cause = (error as { cause?: unknown }).cause;
-    if (cause instanceof Error) {
-      const next = new Error(cause.message) as Error & { detail?: unknown };
-      next.name = cause.name;
-      if ("detail" in cause && (cause as { detail?: unknown }).detail !== undefined) {
-        next.detail = (cause as { detail?: unknown }).detail;
-      }
-      return next;
-    }
-    if (cause !== undefined && cause !== null) {
-      return new Error(String(cause));
-    }
-  }
-  if (error instanceof Error) return error;
-  return new Error(String(error));
-};
+export const toIpcFailure = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
 
 export const make = (ipcMain: DesktopIpcMain): DesktopIpcShape =>
   DesktopIpc.of({
