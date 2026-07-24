@@ -128,6 +128,48 @@ describe("instance-scoped model selection", () => {
     );
   });
 
+  it("drops stale live custom models removed from instance settings", () => {
+    const providers: ServerProvider[] = [
+      {
+        ...provider({
+          provider: ProviderDriverKind.make("claudeAgent"),
+          instanceId: "claudeAgent",
+          models: ["claude-sonnet-4-6"],
+        }),
+        models: [
+          {
+            slug: "claude-sonnet-4-6",
+            name: "Claude Sonnet 4.6",
+            isCustom: false,
+            capabilities: {},
+          },
+          {
+            slug: "claude-opus-5",
+            name: "claude-opus-5",
+            isCustom: true,
+            capabilities: null,
+          },
+        ],
+      },
+    ];
+    const settings: UnifiedSettings = {
+      ...settingsWithProviderInstances(),
+      providerInstances: {
+        [ProviderInstanceId.make("claudeAgent")]: {
+          driver: ProviderDriverKind.make("claudeAgent"),
+          config: { customModels: [] },
+        },
+      },
+    };
+    const stock = deriveProviderInstanceEntries(providers).find(
+      (entry) => entry.instanceId === "claudeAgent",
+    )!;
+
+    expect(getAppModelOptionsForInstance(settings, stock).map((option) => option.slug)).toEqual([
+      "claude-sonnet-4-6",
+    ]);
+  });
+
   it("does not inject an unknown selected slug into the stock instance list", () => {
     const providers = [
       provider({
