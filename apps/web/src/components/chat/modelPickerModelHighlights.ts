@@ -5,7 +5,8 @@ import type { ProviderDriverKind } from "@kata-sh/code-contracts";
  * Add entries as `provider:slug` when you want to highlight freshly shipped models.
  */
 const NEW_MODEL_KEYS = new Set<string>([
-  // Example: "claudeAgent:claude-opus-4-7",
+  "claudeAgent:claude-opus-5",
+  "claudeAgent:claude-sonnet-5",
 ]);
 
 export function isModelPickerNewModel(provider: ProviderDriverKind, slug: string): boolean {
