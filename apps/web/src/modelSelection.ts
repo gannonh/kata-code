@@ -143,39 +143,63 @@ export function normalizeCustomModelSlugs(
   return normalizedModels;
 }
 
+function appendCustomAppModelOptions(
+  options: AppModelOption[],
+  input: {
+    readonly liveModels: ReadonlyArray<ServerProvider["models"][number]>;
+    readonly customModels: ReadonlyArray<string>;
+    readonly provider: ProviderDriverKind;
+  },
+): AppModelOption[] {
+  const seen = new Set(options.map((option) => option.slug));
+  const builtInModelSlugs = new Set(seen);
+  const liveCustomModelsBySlug = new Map(
+    Arr.filterMap(input.liveModels, (model) =>
+      model.isCustom ? Result.succeed([model.slug, model] as const) : Result.failVoid,
+    ),
+  );
+
+  for (const slug of normalizeCustomModelSlugs(
+    input.customModels,
+    builtInModelSlugs,
+    input.provider,
+  )) {
+    if (seen.has(slug)) {
+      continue;
+    }
+
+    seen.add(slug);
+    const liveCustom = liveCustomModelsBySlug.get(slug);
+    options.push(liveCustom ? toAppModelOption(liveCustom) : { slug, name: slug, isCustom: true });
+  }
+
+  return options;
+}
+
 export function getAppModelOptions(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   provider: ProviderDriverKind,
   _selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getProviderModels(providers, provider).map(toAppModelOption);
-  const seen = new Set(options.map((option) => option.slug));
-  const builtInModelSlugs = new Set(
-    Arr.filterMap(getProviderModels(providers, provider), (model) =>
-      model.isCustom ? Result.failVoid : Result.succeed(model.slug),
-    ),
+  // Built-ins come from the live provider snapshot. Custom rows come only from
+  // current settings so a deleted custom model cannot linger after the probe
+  // snapshot goes stale (same rule as settings' deriveProviderModelsForDisplay).
+  const liveModels = getProviderModels(providers, provider);
+  const options = appendCustomAppModelOptions(
+    liveModels.filter((model) => !model.isCustom).map(toAppModelOption),
+    {
+      liveModels,
+      customModels: readInstanceCustomModels(
+        settings,
+        defaultInstanceIdForDriver(provider),
+        provider,
+      ),
+      provider,
+    },
   );
 
-  // Read from the default instance's config first (that's where edits
-  // now land), falling back to the legacy per-kind bucket so unmigrated
-  // settings and the initial render before the first write both still
-  // see the user's authored custom models.
   const defaultInstanceId = defaultInstanceIdForDriver(provider);
-  const customModels = readInstanceCustomModels(settings, defaultInstanceId, provider);
-  for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs, provider)) {
-    if (seen.has(slug)) {
-      continue;
-    }
-
-    seen.add(slug);
-    options.push({
-      slug,
-      name: slug,
-      isCustom: true,
-    });
-  }
-
   return applyInstanceModelPreferences(
     options,
     readInstanceModelPreferences(settings, defaultInstanceId),
@@ -197,24 +221,14 @@ export function getAppModelOptionsForInstance(
   settings: UnifiedSettings,
   entry: ProviderInstanceEntry,
 ): AppModelOption[] {
-  const options: AppModelOption[] = entry.models.map(toAppModelOption);
-  const seen = new Set(options.map((option) => option.slug));
-  const builtInModelSlugs = new Set(
-    Arr.filterMap(entry.models, (model) =>
-      model.isCustom ? Result.failVoid : Result.succeed(model.slug),
-    ),
+  const options = appendCustomAppModelOptions(
+    entry.models.filter((model) => !model.isCustom).map(toAppModelOption),
+    {
+      liveModels: entry.models,
+      customModels: readInstanceCustomModels(settings, entry.instanceId, entry.driverKind),
+      provider: entry.driverKind,
+    },
   );
-
-  const customModels = readInstanceCustomModels(settings, entry.instanceId, entry.driverKind);
-  const normalizer = entry.driverKind;
-  for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs, normalizer)) {
-    if (seen.has(slug)) {
-      continue;
-    }
-
-    seen.add(slug);
-    options.push({ slug, name: slug, isCustom: true });
-  }
 
   return applyInstanceModelPreferences(
     options,
