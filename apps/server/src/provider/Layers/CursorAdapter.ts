@@ -1115,13 +1115,13 @@ export function makeCursorAdapter(
           let failure: CursorRetriableFailure | undefined;
           let attempts = 0;
           while (attempts < CURSOR_RETRIABLE_MAX_ATTEMPTS) {
-            // Re-check after backoff (and before the first attempt) so a cancel,
-            // stop, or steer during the sleep window cannot resume stale work.
-            if (
-              ctx.stopped ||
-              ctx.promptsInFlight !== 1 ||
-              ctx.interruptGeneration !== interruptGenerationAtStart
-            ) {
+            // Abort on cancel/stop before every attempt. The promptsInFlight
+            // check is retry-only: a steer itself has promptsInFlight > 1 and
+            // must still dispatch its first session/prompt.
+            if (ctx.stopped || ctx.interruptGeneration !== interruptGenerationAtStart) {
+              break;
+            }
+            if (attempts > 0 && ctx.promptsInFlight !== 1) {
               break;
             }
 
