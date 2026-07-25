@@ -615,7 +615,10 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("falls back to the active provider's first model when props.model belongs to another provider (#1982)", async () => {
+  it("shows the unresolved slug when props.model belongs to another provider", async () => {
+    // Composer-level selection should rewrite foreign slugs before render.
+    // The picker must not fall back to options[0] — that mislabels colliding
+    // Pi display names (openai vs openai-codex both named "GPT-5.6 Sol").
     const host = document.createElement("div");
     document.body.append(host);
     const onInstanceModelChange = vi.fn();
@@ -652,8 +655,8 @@ describe("ProviderModelPicker", () => {
       );
       expect(trigger).not.toBeNull();
       const label = trigger?.textContent ?? "";
-      expect(label).not.toContain("gpt-5-codex");
-      expect(label).toContain("Claude Opus 4.6");
+      expect(label).toContain("gpt-5-codex");
+      expect(label).not.toContain("Claude Opus 4.6");
     } finally {
       await screen.unmount();
       host.remove();
