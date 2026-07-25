@@ -142,7 +142,7 @@ RUN printf '#!/bin/sh\nexec node /app/apps/server/dist/bin.mjs "$@"\n' > /usr/lo
 # installer, not npm: it downloads the platform binary and symlinks `agent` +
 # `cursor-agent` into ~/.local/bin, so it is installed as the katacode user
 # below.
-ARG PI_SDK_VERSION=0.80.10
+ARG PI_SDK_VERSION=0.82.1
 RUN npm install -g \
     @openai/codex \
     @anthropic-ai/claude-code \

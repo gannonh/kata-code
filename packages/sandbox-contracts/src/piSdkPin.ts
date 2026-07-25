@@ -9,4 +9,4 @@
  */
 
 /** Exact `@earendil-works/pi-*` version string (no range). */
-export const PI_SDK_PIN = "0.80.10";
+export const PI_SDK_PIN = "0.82.1";
