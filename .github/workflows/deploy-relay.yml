@@ -45,7 +45,7 @@ jobs:
       ALCHEMY_TELEMETRY_DISABLED: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -111,7 +111,7 @@ jobs:
 
       - name: Publish relay deploy commit status
         if: ${{ !failure() && !cancelled() }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const dryRun = "${{ github.event.inputs.dry_run }}" === "true";
