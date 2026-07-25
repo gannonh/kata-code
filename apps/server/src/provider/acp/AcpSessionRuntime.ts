@@ -56,6 +56,17 @@ export interface AcpSessionRuntimeOptions {
    */
   readonly skipAuthenticate?: boolean;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
+  /**
+   * Decide whether an assistant text chunk reaches the event stream. Returning
+   * `false` drops the chunk before any assistant item is opened for it.
+   *
+   * The hook runs inline while the incoming ACP message batch is routed, so it
+   * always completes before the matching `session/prompt` response resolves.
+   * Callers can therefore record state here and read it immediately after
+   * `prompt` returns. Cursor uses this to intercept transport failures that the
+   * Agent CLI reports as assistant prose instead of a JSON-RPC error.
+   */
+  readonly filterAssistantChunk?: (text: string) => Effect.Effect<boolean>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -254,6 +265,9 @@ const makeAcpSessionRuntime = (
         toolCallsRef,
         assistantSegmentRef,
         params: notification,
+        ...(options.filterAssistantChunk
+          ? { filterAssistantChunk: options.filterAssistantChunk }
+          : {}),
       }),
     );
 
@@ -615,12 +629,14 @@ const handleSessionUpdate = ({
   toolCallsRef,
   assistantSegmentRef,
   params,
+  filterAssistantChunk,
 }: {
   readonly queue: Queue.Queue<AcpParsedSessionEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly params: EffectAcpSchema.SessionNotification;
+  readonly filterAssistantChunk?: (text: string) => Effect.Effect<boolean>;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
     const parsed = parseSessionUpdateEvent(params);
@@ -657,6 +673,9 @@ const handleSessionUpdate = ({
         continue;
       }
       if (event._tag === "ContentDelta") {
+        if (filterAssistantChunk && !(yield* filterAssistantChunk(event.text))) {
+          continue;
+        }
         if (event.text.trim().length === 0) {
           const assistantSegmentState = yield* Ref.get(assistantSegmentRef);
           if (!assistantSegmentState.activeItemId) {

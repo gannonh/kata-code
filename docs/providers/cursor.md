@@ -87,6 +87,32 @@ interactive `agent login`. When `CURSOR_API_KEY` is present:
 This is the recommended path for headless, CI, and E2E runs (see
 [Cursor E2E gates](/guides/e2e-test-catalog.md#cursor-e2e-gates)).
 
+## Retriable transport failures
+
+The Cursor Agent CLI reports upstream connection failures as assistant text
+rather than as a protocol error — the ACP `session/prompt` call resolves with
+`stopReason: "end_turn"` and the turn's only content is a chunk like:
+
+```
+Error: RetriableError: [aborted] read ECONNRESET
+Error: RetriableError: [unavailable] PING timed out
+Error: RetriableError: [unknown] Premature close
+```
+
+Kata Code intercepts these chunks before they reach the transcript and
+re-issues the prompt, up to 3 attempts total with 1s then 3s backoff. Each
+retry emits a `runtime.warning` naming the failure and the attempt number.
+
+When the budget is exhausted the turn ends as `turn.completed` with
+`state: "failed"` plus a `runtime.error` (`class: "transport_error"`), so the
+session shows an error instead of an assistant message containing the error
+string. Retries are skipped when the turn was cancelled, the session stopped,
+or a concurrent steer is in flight.
+
+Detection lives in `apps/server/src/provider/acp/CursorRetriableFailure.ts`;
+the retry loop is in `CursorAdapter.sendTurn`, fed by the
+`filterAssistantChunk` hook on `AcpSessionRuntime`.
+
 ## Provider skills
 
 Cursor discovers **filesystem skills** from skill directories on disk and

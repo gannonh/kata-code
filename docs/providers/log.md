@@ -1,5 +1,9 @@
 # Providers log
 
+## 2026-07-25 (Cursor retriable transport failures)
+
+- Cursor turns that failed with `Error: RetriableError: [aborted] read ECONNRESET` (also `[unavailable] PING timed out`, `[unknown] Premature close`) previously rendered as successful assistant messages containing the error string, because the Agent CLI reports these as `agent_message_chunk` text followed by `stopReason: "end_turn"` rather than as a JSON-RPC error. The adapter now suppresses those chunks, retries the prompt (3 attempts, 1s/3s backoff, one `runtime.warning` per retry), and on exhaustion emits `runtime.error` (`transport_error`) with `turn.completed` `state: "failed"`. Detection: `apps/server/src/provider/acp/CursorRetriableFailure.ts`; retry loop in `CursorAdapter.sendTurn` via the new `filterAssistantChunk` hook on `AcpSessionRuntime`. See [Cursor provider guide — Retriable transport failures](/providers/cursor.md#retriable-transport-failures).
+
 ## 2026-07-03 (Pi skill token expansion)
 
 - Pi provider `$` skill tokens now expand through the Pi SDK resource loader before a turn is sent, covering global skills and project-local `.pi/skills`, `.agents/skills`, or `.agent/skills`. Updated [Pi provider guide](/providers/pi.md) and [provider architecture](/architecture/providers.md#provider-skills).
