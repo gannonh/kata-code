@@ -1466,12 +1466,14 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
 
       let interrupted = false;
+      const runtimeEvents: ProviderRuntimeEvent[] = [];
       const turnCompletedReady = yield* Deferred.make<ProviderRuntimeEvent>();
       const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
         Effect.gen(function* () {
           if (String(event.threadId) !== String(threadId)) {
             return;
           }
+          runtimeEvents.push(event);
           // Interrupt as soon as the retry is announced — before/during the
           // backoff sleep, when no ACP prompt is active for session/cancel.
           if (event.type === "runtime.warning" && !interrupted) {
@@ -1502,6 +1504,9 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       if (turnCompleted.type === "turn.completed") {
         assert.equal(turnCompleted.payload.state, "cancelled");
       }
+      // Terminal transport errors are reserved for retry exhaustion — cancel
+      // during backoff must not emit runtime.error.
+      assert.isUndefined(runtimeEvents.find((event) => event.type === "runtime.error"));
 
       const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
       const promptCount = requests.filter((entry) => entry.method === "session/prompt").length;

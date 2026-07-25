@@ -143,16 +143,17 @@ interface CursorSessionContext {
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   /**
-   * Per-attempt probe for Cursor retriable transport failures. `sendTurn`
-   * bumps `generation` at the start of each `session/prompt` so overlapping
-   * steers cannot claim each other's marker, and the chunk filter / tool-call
-   * path record into the live generation before the prompt response resolves.
+   * Active attempt probe for Cursor retriable transport failures. Each
+   * `session/prompt` installs its own object into `current`; the chunk filter
+   * and tool-call path write only while this session has a single in-flight
+   * prompt, so overlapping steers cannot contaminate each other's retry state.
    */
   readonly retriableProbe: {
-    generation: number;
-    failure: CursorRetriableFailure | undefined;
-    /** True when this attempt already emitted assistant content or tool activity. */
-    producedOutput: boolean;
+    current: {
+      failure: CursorRetriableFailure | undefined;
+      /** True when this attempt already emitted assistant content or tool activity. */
+      producedOutput: boolean;
+    };
   };
   /**
    * Bumped by `interruptTurn` so a retry backoff sleep can observe cancellation
@@ -559,13 +560,14 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
-          // Written by `filterAssistantChunk` / tool-call handling below while
-          // the ACP message batch is routed, so `sendTurn` can read the probe
-          // as soon as the matching `session/prompt` response resolves.
+          // Each prompt attempt swaps `current` to a fresh object; writers below
+          // mutate that object so `sendTurn` can read it after `session/prompt`
+          // resolves even if a later steer has already replaced `current`.
           const retriableProbe: CursorSessionContext["retriableProbe"] = {
-            generation: 0,
-            failure: undefined,
-            producedOutput: false,
+            current: {
+              failure: undefined,
+              producedOutput: false,
+            },
           };
 
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
@@ -577,15 +579,21 @@ export function makeCursorAdapter(
             filterAssistantChunk: (text) =>
               Effect.sync(() => {
                 const failure = parseCursorRetriableFailure(text);
+                // Only the sole in-flight prompt may record retry state — during
+                // a steer, late chunks from the superseded prompt must not land
+                // on the steer's probe (failure text is still suppressed).
+                const soleOwner = ctx?.promptsInFlight === 1;
                 if (failure) {
-                  retriableProbe.failure = failure;
+                  if (soleOwner) {
+                    retriableProbe.current.failure = failure;
+                  }
                   return false;
                 }
                 // Non-failure assistant text that will be emitted means this
                 // attempt already produced transcript content; retrying would
                 // duplicate it.
-                if (text.trim().length > 0) {
-                  retriableProbe.producedOutput = true;
+                if (soleOwner && text.trim().length > 0) {
+                  retriableProbe.current.producedOutput = true;
                 }
                 return true;
               }),
@@ -882,8 +890,12 @@ export function makeCursorAdapter(
                     return;
                   case "ToolCallUpdated":
                     // Tool activity counts as committed attempt output — retrying
-                    // the prompt would risk duplicating side effects.
-                    ctx.retriableProbe.producedOutput = true;
+                    // the prompt would risk duplicating side effects. Skip while
+                    // steers overlap so a superseded prompt cannot dirty the
+                    // active attempt's probe.
+                    if (ctx.promptsInFlight === 1) {
+                      ctx.retriableProbe.current.producedOutput = true;
+                    }
                     yield* logNative(
                       ctx.threadId,
                       "session/update",
@@ -1098,10 +1110,14 @@ export function makeCursorAdapter(
               break;
             }
 
-            const attemptGeneration = ctx.retriableProbe.generation + 1;
-            ctx.retriableProbe.generation = attemptGeneration;
-            ctx.retriableProbe.failure = undefined;
-            ctx.retriableProbe.producedOutput = false;
+            // Fresh probe object per attempt. Writers mutate this reference; a
+            // concurrent steer installs its own object into `current`, leaving
+            // this attempt's local state intact.
+            const attemptProbe = {
+              failure: undefined as CursorRetriableFailure | undefined,
+              producedOutput: false,
+            };
+            ctx.retriableProbe.current = attemptProbe;
 
             result = yield* ctx.acp
               .prompt({
@@ -1121,14 +1137,8 @@ export function makeCursorAdapter(
               ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
             }
 
-            // Only consume the probe when this prompt still owns it — a steer
-            // that started mid-attempt bumps generation and takes the slot.
-            const ownsProbe = ctx.retriableProbe.generation === attemptGeneration;
-            failure = ownsProbe ? ctx.retriableProbe.failure : undefined;
-            const producedOutput = ownsProbe ? ctx.retriableProbe.producedOutput : true;
-            if (ownsProbe) {
-              ctx.retriableProbe.failure = undefined;
-            }
+            failure = attemptProbe.failure;
+            const producedOutput = attemptProbe.producedOutput;
 
             // A cancelled turn, prior transcript/tool output, a stopped session,
             // an interrupt during backoff, or a concurrent steer all mean
