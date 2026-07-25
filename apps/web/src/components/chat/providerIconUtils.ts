@@ -55,6 +55,26 @@ export function getTriggerDisplayModelName(model: ModelEsque): string {
   return getDisplayModelName(model, { preferShortName: true });
 }
 
-export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  return getTriggerDisplayModelName(model);
+/**
+ * Trigger label for the composer model picker. When multiple options share the
+ * same display name (common for Pi sub-providers), append `subProvider` so the
+ * closed trigger cannot visually lie about which slug is selected.
+ */
+export function getTriggerDisplayModelLabel(
+  model: ModelEsque,
+  siblings?: ReadonlyArray<ModelEsque>,
+): string {
+  const name = getTriggerDisplayModelName(model);
+  const subProvider = model.subProvider?.trim();
+  if (!subProvider) {
+    return name;
+  }
+  if (!siblings || siblings.length === 0) {
+    return name;
+  }
+  const normalizedName = name.toLowerCase();
+  const collisionCount = siblings.filter(
+    (option) => getTriggerDisplayModelName(option).toLowerCase() === normalizedName,
+  ).length;
+  return collisionCount > 1 ? `${name} · ${subProvider}` : name;
 }

@@ -3,6 +3,10 @@
 # Dependabot requires a unique (ecosystem, directory, target-branch) triple, so
 # npm cannot split into daily-Pi + weekly-rest lanes on `/`. One daily npm update
 # keeps Pi actionable via group + cooldown exclusion; other deps use cooldown.
+#
+# Group matching: Dependabot may prefer more "specific" groups (e.g. those with
+# dependency-type) over pattern-only groups. Exclude Pi from the catch-all
+# production/development groups so `pi-runtime` actually owns `@earendil-works/pi-*`.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -24,8 +28,12 @@ updates:
           - "@earendil-works/pi-*"
       production-dependencies:
         dependency-type: production
+        exclude-patterns:
+          - "@earendil-works/pi-*"
       development-dependencies:
         dependency-type: development
+        exclude-patterns:
+          - "@earendil-works/pi-*"
     ignore:
       # Catalog/workspace versions are managed intentionally; Dependabot still
       # covers non-catalog root and app deps plus lockfile drift.

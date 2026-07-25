@@ -12,11 +12,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent } from "./ModelPickerContent";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
-import {
-  ModelEsque,
-  getTriggerDisplayModelLabel,
-  getTriggerDisplayModelName,
-} from "./providerIconUtils";
+import { ModelEsque, getTriggerDisplayModelLabel } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
@@ -61,15 +57,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
-  // If the current slug belongs to a different instance (for example after
-  // a provider switch or disable), prefer the active instance's first
-  // option so the trigger icon and label stay in sync instead of showing
-  // a stale foreign slug.
-  const selectedModel =
-    selectedInstanceOptions.find((option) => option.slug === props.model) ??
-    selectedInstanceOptions[0];
-  const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model;
-  const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model;
+  // Only resolve the trigger against the exact selected slug. Falling back to
+  // options[0] can mislabel another sub-provider when display names collide
+  // (e.g. openai vs openai-codex both named "GPT-5.6 Sol").
+  const selectedModel = selectedInstanceOptions.find((option) => option.slug === props.model);
+  const triggerTitle = selectedModel
+    ? getTriggerDisplayModelLabel(selectedModel, selectedInstanceOptions)
+    : props.model;
+  const triggerLabel = selectedModel
+    ? getTriggerDisplayModelLabel(selectedModel, selectedInstanceOptions)
+    : props.model;
   const duplicateDriverCount = props.instanceEntries.filter(
     (entry) => activeEntry !== null && entry.driverKind === activeEntry.driverKind,
   ).length;

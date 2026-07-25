@@ -78,11 +78,15 @@ describe("Pi runtime version alignment", () => {
     expect(npm.groups?.["pi-runtime"]).toEqual({
       patterns: ["@earendil-works/pi-*"],
     });
+    // Catch-all type groups must exclude Pi so pattern-only `pi-runtime` wins
+    // (Dependabot specificity can otherwise swallow Pi into production-dependencies).
     expect(npm.groups?.["production-dependencies"]).toEqual({
       "dependency-type": "production",
+      "exclude-patterns": ["@earendil-works/pi-*"],
     });
     expect(npm.groups?.["development-dependencies"]).toEqual({
       "dependency-type": "development",
+      "exclude-patterns": ["@earendil-works/pi-*"],
     });
     expect(npm.ignore).toEqual([
       { "dependency-name": "effect" },
