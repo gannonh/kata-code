@@ -144,9 +144,8 @@ interface CursorSessionContext {
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   /**
    * Active attempt probe for Cursor retriable transport failures. Each
-   * `session/prompt` installs its own object into `current`; the chunk filter
-   * and tool-call path write only while this session has a single in-flight
-   * prompt, so overlapping steers cannot contaminate each other's retry state.
+   * `session/prompt` installs its own object into `current`; writers only
+   * record while a single unsteered prompt owns the turn.
    */
   readonly retriableProbe: {
     current: {
@@ -155,6 +154,13 @@ interface CursorSessionContext {
       producedOutput: boolean;
     };
   };
+  /**
+   * Once a steer overlaps an in-flight prompt, ACP session updates are no
+   * longer attributable to a single attempt (including delayed notifications
+   * that arrive after `promptsInFlight` returns to 1). Disable retry recording
+   * and replay for the rest of the turn.
+   */
+  retriableRetriesDisabled: boolean;
   /**
    * Bumped by `interruptTurn` so a retry backoff sleep can observe cancellation
    * even when no ACP prompt is active to receive `session/cancel`.
@@ -579,12 +585,13 @@ export function makeCursorAdapter(
             filterAssistantChunk: (text) =>
               Effect.sync(() => {
                 const failure = parseCursorRetriableFailure(text);
-                // Only the sole in-flight prompt may record retry state — during
-                // a steer, late chunks from the superseded prompt must not land
-                // on the steer's probe (failure text is still suppressed).
-                const soleOwner = ctx?.promptsInFlight === 1;
+                // Only an unsteered sole in-flight prompt may record retry
+                // state. After a steer, even delayed chunks that arrive once
+                // promptsInFlight is 1 again are not attributable (failure
+                // text is still suppressed).
+                const canRecord = ctx?.promptsInFlight === 1 && !ctx.retriableRetriesDisabled;
                 if (failure) {
-                  if (soleOwner) {
+                  if (canRecord) {
                     retriableProbe.current.failure = failure;
                   }
                   return false;
@@ -592,7 +599,7 @@ export function makeCursorAdapter(
                 // Non-failure assistant text that will be emitted means this
                 // attempt already produced transcript content; retrying would
                 // duplicate it.
-                if (soleOwner && text.trim().length > 0) {
+                if (canRecord && text.trim().length > 0) {
                   retriableProbe.current.producedOutput = true;
                 }
                 return true;
@@ -836,6 +843,7 @@ export function makeCursorAdapter(
             pendingUserInputs,
             turns: [],
             retriableProbe,
+            retriableRetriesDisabled: false,
             interruptGeneration: 0,
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
@@ -890,10 +898,9 @@ export function makeCursorAdapter(
                     return;
                   case "ToolCallUpdated":
                     // Tool activity counts as committed attempt output — retrying
-                    // the prompt would risk duplicating side effects. Skip while
-                    // steers overlap so a superseded prompt cannot dirty the
-                    // active attempt's probe.
-                    if (ctx.promptsInFlight === 1) {
+                    // the prompt would risk duplicating side effects. Skip once
+                    // a steer has made session updates unattributable.
+                    if (ctx.promptsInFlight === 1 && !ctx.retriableRetriesDisabled) {
                       ctx.retriableProbe.current.producedOutput = true;
                     }
                     yield* logNative(
@@ -984,6 +991,14 @@ export function makeCursorAdapter(
         // resolving from here on does not settle the turn; the matching
         // decrement is the `ensuring` below.
         ctx.promptsInFlight += 1;
+        if (ctx.promptsInFlight === 1) {
+          // Fresh turn — retries are attributable again.
+          ctx.retriableRetriesDisabled = false;
+        } else {
+          // Steer overlap: session updates (including delayed ones) can no
+          // longer be attributed to a single attempt for the rest of the turn.
+          ctx.retriableRetriesDisabled = true;
+        }
 
         return yield* Effect.gen(function* () {
           const turnModelSelection =
@@ -1146,6 +1161,7 @@ export function makeCursorAdapter(
             const canRetry =
               failure !== undefined &&
               !producedOutput &&
+              !ctx.retriableRetriesDisabled &&
               result.stopReason !== "cancelled" &&
               !ctx.stopped &&
               ctx.promptsInFlight === 1 &&
@@ -1181,7 +1197,8 @@ export function makeCursorAdapter(
           };
 
           const interrupted = ctx.interruptGeneration !== interruptGenerationAtStart;
-          const abandonedForSteerOrStop = ctx.stopped || ctx.promptsInFlight !== 1;
+          const abandonedForSteerOrStop =
+            ctx.stopped || ctx.promptsInFlight !== 1 || ctx.retriableRetriesDisabled;
           const unrecoveredFailure =
             failure !== undefined &&
             result.stopReason !== "cancelled" &&
