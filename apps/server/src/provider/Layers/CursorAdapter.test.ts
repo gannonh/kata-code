@@ -1446,6 +1446,134 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     }),
   );
 
+  it.effect("does not retry a Cursor retriable failure after cancel during backoff", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-retriable-cancel-backoff");
+      const tempDir = yield* Effect.promise(() =>
+        mkdtemp(path.join(os.tmpdir(), "cursor-retriable-cancel-")),
+      );
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      yield* Effect.promise(() => writeFile(requestLogPath, "", "utf8"));
+
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({
+          T3_ACP_RETRIABLE_FAILURE_PROMPTS: "-1",
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+        }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      let interrupted = false;
+      const turnCompletedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.gen(function* () {
+          if (String(event.threadId) !== String(threadId)) {
+            return;
+          }
+          // Interrupt as soon as the retry is announced — before/during the
+          // backoff sleep, when no ACP prompt is active for session/cancel.
+          if (event.type === "runtime.warning" && !interrupted) {
+            interrupted = true;
+            yield* adapter.interruptTurn(threadId);
+            return;
+          }
+          if (event.type === "turn.completed") {
+            yield* Deferred.succeed(turnCompletedReady, event).pipe(Effect.ignore);
+          }
+        }),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      yield* joinWithClock(adapter.sendTurn({ threadId, input: "do the work", attachments: [] }));
+      const turnCompleted = yield* Deferred.await(turnCompletedReady);
+      yield* Fiber.interrupt(runtimeEventsFiber);
+
+      assert.isTrue(interrupted);
+      assert.equal(turnCompleted.type, "turn.completed");
+      if (turnCompleted.type === "turn.completed") {
+        assert.equal(turnCompleted.payload.state, "cancelled");
+      }
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const promptCount = requests.filter((entry) => entry.method === "session/prompt").length;
+      // One failed attempt only — interrupt during backoff must not reissue.
+      assert.equal(promptCount, 1);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("does not retry a Cursor retriable failure after partial assistant output", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-retriable-partial-output");
+      const tempDir = yield* Effect.promise(() =>
+        mkdtemp(path.join(os.tmpdir(), "cursor-retriable-partial-")),
+      );
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      yield* Effect.promise(() => writeFile(requestLogPath, "", "utf8"));
+
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({
+          T3_ACP_RETRIABLE_FAILURE_PROMPTS: "1",
+          T3_ACP_RETRIABLE_FAILURE_LEAD_IN_TEXT: "partial work",
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+        }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => String(event.threadId) === String(threadId)),
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      yield* joinWithClock(adapter.sendTurn({ threadId, input: "do the work", attachments: [] }));
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const deltas = runtimeEvents.filter((event) => event.type === "content.delta");
+      assert.deepStrictEqual(
+        deltas.map((event) => (event.type === "content.delta" ? event.payload.delta : "")),
+        ["partial work"],
+      );
+
+      // Partial output makes replay unsafe — fail the turn instead of retrying.
+      assert.isUndefined(runtimeEvents.find((event) => event.type === "runtime.warning"));
+      const runtimeError = runtimeEvents.find((event) => event.type === "runtime.error");
+      assert.isDefined(runtimeError);
+
+      const turnCompleted = runtimeEvents.find((event) => event.type === "turn.completed");
+      assert.isDefined(turnCompleted);
+      if (turnCompleted?.type === "turn.completed") {
+        assert.equal(turnCompleted.payload.state, "failed");
+      }
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      assert.equal(requests.filter((entry) => entry.method === "session/prompt").length, 1);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect(
     "applies fast mode on the first turn when modelSelection uses a non-default instance id",
     () => {

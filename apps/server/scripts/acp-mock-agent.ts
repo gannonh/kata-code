@@ -30,6 +30,9 @@ const retriableFailurePrompts = Number(process.env.T3_ACP_RETRIABLE_FAILURE_PROM
 const retriableFailureText =
   process.env.T3_ACP_RETRIABLE_FAILURE_TEXT ??
   "\n\nError: RetriableError: [aborted] read ECONNRESET";
+// Optional assistant text emitted before the retriable-failure marker on the
+// same prompt — used to verify the adapter refuses to retry after partial output.
+const retriableFailureLeadInText = process.env.T3_ACP_RETRIABLE_FAILURE_LEAD_IN_TEXT;
 let promptCount = 0;
 const permissionOptionIds = {
   allowOnce: process.env.T3_ACP_ALLOW_ONCE_OPTION_ID ?? "allow-once",
@@ -379,6 +382,15 @@ const program = Effect.gen(function* () {
 
       promptCount += 1;
       if (retriableFailurePrompts < 0 || promptCount <= retriableFailurePrompts) {
+        if (retriableFailureLeadInText) {
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: retriableFailureLeadInText },
+            },
+          });
+        }
         yield* agent.client.sessionUpdate({
           sessionId: requestedSessionId,
           update: {

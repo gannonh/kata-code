@@ -143,12 +143,22 @@ interface CursorSessionContext {
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   /**
-   * Retriable transport failure observed in the assistant stream since the
-   * current `session/prompt` attempt started. Written by the ACP chunk filter
-   * (which runs inline before the prompt response resolves) and consumed by
-   * `sendTurn` to decide whether to retry.
+   * Per-attempt probe for Cursor retriable transport failures. `sendTurn`
+   * bumps `generation` at the start of each `session/prompt` so overlapping
+   * steers cannot claim each other's marker, and the chunk filter / tool-call
+   * path record into the live generation before the prompt response resolves.
    */
-  readonly retriableFailure: { current: CursorRetriableFailure | undefined };
+  readonly retriableProbe: {
+    generation: number;
+    failure: CursorRetriableFailure | undefined;
+    /** True when this attempt already emitted assistant content or tool activity. */
+    producedOutput: boolean;
+  };
+  /**
+   * Bumped by `interruptTurn` so a retry backoff sleep can observe cancellation
+   * even when no ACP prompt is active to receive `session/cancel`.
+   */
+  interruptGeneration: number;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
   /** Number of sendTurn prompts currently in flight or being prepared.
@@ -549,11 +559,13 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
-          // Written by `filterAssistantChunk` below while the ACP message
-          // batch is routed, so `sendTurn` can read it as soon as the matching
-          // `session/prompt` response resolves.
-          const retriableFailure: { current: CursorRetriableFailure | undefined } = {
-            current: undefined,
+          // Written by `filterAssistantChunk` / tool-call handling below while
+          // the ACP message batch is routed, so `sendTurn` can read the probe
+          // as soon as the matching `session/prompt` response resolves.
+          const retriableProbe: CursorSessionContext["retriableProbe"] = {
+            generation: 0,
+            failure: undefined,
+            producedOutput: false,
           };
 
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
@@ -565,11 +577,17 @@ export function makeCursorAdapter(
             filterAssistantChunk: (text) =>
               Effect.sync(() => {
                 const failure = parseCursorRetriableFailure(text);
-                if (!failure) {
-                  return true;
+                if (failure) {
+                  retriableProbe.failure = failure;
+                  return false;
                 }
-                retriableFailure.current = failure;
-                return false;
+                // Non-failure assistant text that will be emitted means this
+                // attempt already produced transcript content; retrying would
+                // duplicate it.
+                if (text.trim().length > 0) {
+                  retriableProbe.producedOutput = true;
+                }
+                return true;
               }),
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: MCP_SERVER_NAME, version: "0.0.0" },
@@ -809,7 +827,8 @@ export function makeCursorAdapter(
             pendingApprovals,
             pendingUserInputs,
             turns: [],
-            retriableFailure,
+            retriableProbe,
+            interruptGeneration: 0,
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             promptsInFlight: 0,
@@ -862,6 +881,9 @@ export function makeCursorAdapter(
                     );
                     return;
                   case "ToolCallUpdated":
+                    // Tool activity counts as committed attempt output — retrying
+                    // the prompt would risk duplicating side effects.
+                    ctx.retriableProbe.producedOutput = true;
                     yield* logNative(
                       ctx.threadId,
                       "session/update",
@@ -1056,14 +1078,31 @@ export function makeCursorAdapter(
 
           // Cursor reports upstream transport failures as assistant prose with
           // `stopReason: "end_turn"` rather than as a JSON-RPC error. The chunk
-          // filter records those into `ctx.retriableFailure` before the prompt
+          // filter records those into `ctx.retriableProbe` before the prompt
           // response resolves, so a failed attempt is detectable here and the
           // prompt can be re-issued.
-          let result!: EffectAcpSchema.PromptResponse;
+          const interruptGenerationAtStart = ctx.interruptGeneration;
+          // Default for the rare path where we abort before the first prompt
+          // (interrupt/stop/steer races the loop entry).
+          let result: EffectAcpSchema.PromptResponse = { stopReason: "cancelled" };
           let failure: CursorRetriableFailure | undefined;
           let attempts = 0;
           while (attempts < CURSOR_RETRIABLE_MAX_ATTEMPTS) {
-            ctx.retriableFailure.current = undefined;
+            // Re-check after backoff (and before the first attempt) so a cancel,
+            // stop, or steer during the sleep window cannot resume stale work.
+            if (
+              ctx.stopped ||
+              ctx.promptsInFlight !== 1 ||
+              ctx.interruptGeneration !== interruptGenerationAtStart
+            ) {
+              break;
+            }
+
+            const attemptGeneration = ctx.retriableProbe.generation + 1;
+            ctx.retriableProbe.generation = attemptGeneration;
+            ctx.retriableProbe.failure = undefined;
+            ctx.retriableProbe.producedOutput = false;
+
             result = yield* ctx.acp
               .prompt({
                 prompt: promptParts,
@@ -1082,16 +1121,25 @@ export function makeCursorAdapter(
               ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
             }
 
-            failure = ctx.retriableFailure.current;
-            ctx.retriableFailure.current = undefined;
-            // A cancelled turn, a stopped session, or a concurrent steer all
-            // mean the user already changed the plan; retrying would fight the
-            // newer intent.
+            // Only consume the probe when this prompt still owns it — a steer
+            // that started mid-attempt bumps generation and takes the slot.
+            const ownsProbe = ctx.retriableProbe.generation === attemptGeneration;
+            failure = ownsProbe ? ctx.retriableProbe.failure : undefined;
+            const producedOutput = ownsProbe ? ctx.retriableProbe.producedOutput : true;
+            if (ownsProbe) {
+              ctx.retriableProbe.failure = undefined;
+            }
+
+            // A cancelled turn, prior transcript/tool output, a stopped session,
+            // an interrupt during backoff, or a concurrent steer all mean
+            // retrying would fight newer intent or duplicate committed work.
             const canRetry =
               failure !== undefined &&
+              !producedOutput &&
               result.stopReason !== "cancelled" &&
               !ctx.stopped &&
               ctx.promptsInFlight === 1 &&
+              ctx.interruptGeneration === interruptGenerationAtStart &&
               attempts < CURSOR_RETRIABLE_MAX_ATTEMPTS;
             if (!canRetry) {
               break;
@@ -1122,8 +1170,15 @@ export function makeCursorAdapter(
             model: resolvedModel,
           };
 
+          const interrupted = ctx.interruptGeneration !== interruptGenerationAtStart;
+          const abandonedForSteerOrStop = ctx.stopped || ctx.promptsInFlight !== 1;
           const unrecoveredFailure =
-            failure !== undefined && result.stopReason !== "cancelled" ? failure : undefined;
+            failure !== undefined &&
+            result.stopReason !== "cancelled" &&
+            !interrupted &&
+            !abandonedForSteerOrStop
+              ? failure
+              : undefined;
           if (unrecoveredFailure) {
             yield* offerRuntimeEvent({
               type: "runtime.error",
@@ -1145,7 +1200,7 @@ export function makeCursorAdapter(
           // Only the last remaining prompt settles the turn — a steer-
           // superseded prompt resolving (usually cancelled) while another is
           // in flight or pending must leave the merged turn running.
-          if (ctx.promptsInFlight === 1) {
+          if (ctx.promptsInFlight === 1 && !ctx.stopped) {
             yield* offerRuntimeEvent({
               type: "turn.completed",
               ...(yield* makeEventStamp()),
@@ -1154,12 +1209,12 @@ export function makeCursorAdapter(
               turnId,
               payload: {
                 state:
-                  result.stopReason === "cancelled"
+                  interrupted || result.stopReason === "cancelled"
                     ? "cancelled"
                     : unrecoveredFailure
                       ? "failed"
                       : "completed",
-                stopReason: result.stopReason ?? null,
+                stopReason: interrupted ? "cancelled" : (result.stopReason ?? null),
                 ...(unrecoveredFailure
                   ? {
                       errorMessage: cursorRetryExhaustedMessage({
@@ -1189,6 +1244,9 @@ export function makeCursorAdapter(
     const interruptTurn: CursorAdapterShape["interruptTurn"] = (threadId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
+        // Bump before cancel so a retry loop sleeping between attempts observes
+        // the interrupt even when no ACP prompt is active.
+        ctx.interruptGeneration += 1;
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
         yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
         yield* Effect.ignore(
