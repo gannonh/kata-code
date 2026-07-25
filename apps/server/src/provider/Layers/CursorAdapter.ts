@@ -69,6 +69,14 @@ import {
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
 import { applyCursorAcpModelSelection, makeCursorAcpRuntime } from "../acp/CursorAcpSupport.ts";
 import {
+  CURSOR_RETRIABLE_MAX_ATTEMPTS,
+  cursorRetriableBackoffMillis,
+  cursorRetryExhaustedMessage,
+  cursorRetryWarningMessage,
+  parseCursorRetriableFailure,
+  type CursorRetriableFailure,
+} from "../acp/CursorRetriableFailure.ts";
+import {
   CursorAskQuestionRequest,
   CursorCreatePlanRequest,
   CursorUpdateTodosRequest,
@@ -134,6 +142,13 @@ interface CursorSessionContext {
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  /**
+   * Retriable transport failure observed in the assistant stream since the
+   * current `session/prompt` attempt started. Written by the ACP chunk filter
+   * (which runs inline before the prompt response resolves) and consumed by
+   * `sendTurn` to decide whether to retry.
+   */
+  readonly retriableFailure: { current: CursorRetriableFailure | undefined };
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
   /** Number of sendTurn prompts currently in flight or being prepared.
@@ -534,12 +549,28 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
+          // Written by `filterAssistantChunk` below while the ACP message
+          // batch is routed, so `sendTurn` can read it as soon as the matching
+          // `session/prompt` response resolves.
+          const retriableFailure: { current: CursorRetriableFailure | undefined } = {
+            current: undefined,
+          };
+
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
             ...(options?.environment ? { environment: options.environment } : {}),
             childProcessSpawner,
             cwd,
+            filterAssistantChunk: (text) =>
+              Effect.sync(() => {
+                const failure = parseCursorRetriableFailure(text);
+                if (!failure) {
+                  return true;
+                }
+                retriableFailure.current = failure;
+                return false;
+              }),
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: MCP_SERVER_NAME, version: "0.0.0" },
             ...(mcpSession
@@ -778,6 +809,7 @@ export function makeCursorAdapter(
             pendingApprovals,
             pendingUserInputs,
             turns: [],
+            retriableFailure,
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             promptsInFlight: 0,
@@ -1022,28 +1054,93 @@ export function makeCursorAdapter(
             });
           }
 
-          const result = yield* ctx.acp
-            .prompt({
-              prompt: promptParts,
-            })
-            .pipe(
-              Effect.mapError((error) =>
-                mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
-              ),
-            );
+          // Cursor reports upstream transport failures as assistant prose with
+          // `stopReason: "end_turn"` rather than as a JSON-RPC error. The chunk
+          // filter records those into `ctx.retriableFailure` before the prompt
+          // response resolves, so a failed attempt is detectable here and the
+          // prompt can be re-issued.
+          let result!: EffectAcpSchema.PromptResponse;
+          let failure: CursorRetriableFailure | undefined;
+          let attempts = 0;
+          while (attempts < CURSOR_RETRIABLE_MAX_ATTEMPTS) {
+            ctx.retriableFailure.current = undefined;
+            result = yield* ctx.acp
+              .prompt({
+                prompt: promptParts,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
+                ),
+              );
+            attempts += 1;
 
-          const turnRecord = ctx.turns.find((turn) => turn.id === turnId);
-          if (turnRecord) {
-            turnRecord.items.push({ prompt: promptParts, result });
-          } else {
-            ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
+            const turnRecord = ctx.turns.find((turn) => turn.id === turnId);
+            if (turnRecord) {
+              turnRecord.items.push({ prompt: promptParts, result });
+            } else {
+              ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
+            }
+
+            failure = ctx.retriableFailure.current;
+            ctx.retriableFailure.current = undefined;
+            // A cancelled turn, a stopped session, or a concurrent steer all
+            // mean the user already changed the plan; retrying would fight the
+            // newer intent.
+            const canRetry =
+              failure !== undefined &&
+              result.stopReason !== "cancelled" &&
+              !ctx.stopped &&
+              ctx.promptsInFlight === 1 &&
+              attempts < CURSOR_RETRIABLE_MAX_ATTEMPTS;
+            if (!canRetry) {
+              break;
+            }
+
+            yield* offerRuntimeEvent({
+              type: "runtime.warning",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: {
+                message: cursorRetryWarningMessage({
+                  failure: failure!,
+                  attempt: attempts,
+                  maxAttempts: CURSOR_RETRIABLE_MAX_ATTEMPTS,
+                }),
+                detail: { code: failure!.code, message: failure!.message },
+              },
+            });
+            yield* Effect.sleep(`${cursorRetriableBackoffMillis(attempts)} millis`);
           }
+
           ctx.session = {
             ...ctx.session,
             activeTurnId: turnId,
             updatedAt: yield* nowIso,
             model: resolvedModel,
           };
+
+          const unrecoveredFailure =
+            failure !== undefined && result.stopReason !== "cancelled" ? failure : undefined;
+          if (unrecoveredFailure) {
+            yield* offerRuntimeEvent({
+              type: "runtime.error",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: {
+                message: cursorRetryExhaustedMessage({
+                  failure: unrecoveredFailure,
+                  attempts,
+                }),
+                class: "transport_error",
+                detail: { code: unrecoveredFailure.code },
+              },
+            });
+          }
 
           // Only the last remaining prompt settles the turn — a steer-
           // superseded prompt resolving (usually cancelled) while another is
@@ -1056,8 +1153,21 @@ export function makeCursorAdapter(
               threadId: input.threadId,
               turnId,
               payload: {
-                state: result.stopReason === "cancelled" ? "cancelled" : "completed",
+                state:
+                  result.stopReason === "cancelled"
+                    ? "cancelled"
+                    : unrecoveredFailure
+                      ? "failed"
+                      : "completed",
                 stopReason: result.stopReason ?? null,
+                ...(unrecoveredFailure
+                  ? {
+                      errorMessage: cursorRetryExhaustedMessage({
+                        failure: unrecoveredFailure,
+                        attempts,
+                      }),
+                    }
+                  : {}),
               },
             });
           }

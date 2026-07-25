@@ -100,6 +100,24 @@ async function readJsonLines(filePath: string) {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+/**
+ * Run `effect` while pumping the TestClock so real-clock work in the mock ACP
+ * child (stdio round trips) and virtual-clock work in the adapter (retry
+ * backoff) can both make progress.
+ */
+function joinWithClock<A, E>(effect: Effect.Effect<A, E>) {
+  return Effect.gen(function* () {
+    const fiber = yield* Effect.forkChild(effect);
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      if (fiber.pollUnsafe() !== undefined) {
+        return yield* Fiber.join(fiber);
+      }
+      yield* TestClock.adjust("50 millis");
+    }
+    throw new Error("Timed out waiting for the effect to settle.");
+  });
+}
+
 async function waitForFileContent(filePath: string, attempts = 40) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -1300,6 +1318,129 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       const lastFastConfig = fastConfigRequests[fastConfigRequests.length - 1];
       assert.equal((lastFastConfig?.params as Record<string, unknown>)?.value, "false");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  // Cursor reports upstream transport failures as assistant prose
+  // (`Error: RetriableError: [aborted] read ECONNRESET`) followed by
+  // `stopReason: "end_turn"`. Without interception those render as a
+  // successful assistant message whose body is an error string, which is what
+  // users saw as "the turn completed but said nothing useful".
+  it.effect("retries a Cursor retriable transport failure and hides it from the transcript", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-retriable-recovers");
+
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_RETRIABLE_FAILURE_PROMPTS: "1" }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => String(event.threadId) === String(threadId)),
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      yield* joinWithClock(adapter.sendTurn({ threadId, input: "do the work", attachments: [] }));
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const deltas = runtimeEvents.filter((event) => event.type === "content.delta");
+
+      // The failure chunk never becomes assistant content; only the recovered
+      // attempt's output reaches the transcript.
+      assert.deepStrictEqual(
+        deltas.map((event) => (event.type === "content.delta" ? event.payload.delta : "")),
+        ["hello from mock"],
+      );
+
+      // The retry is announced rather than silent, so a slow turn is
+      // explainable after the fact.
+      const warning = runtimeEvents.find((event) => event.type === "runtime.warning");
+      assert.isDefined(warning);
+      if (warning?.type === "runtime.warning") {
+        assert.include(warning.payload.message, "read ECONNRESET");
+        assert.include(warning.payload.message, "attempt 2 of 3");
+      }
+
+      assert.isUndefined(runtimeEvents.find((event) => event.type === "runtime.error"));
+
+      const turnCompleted = runtimeEvents.find((event) => event.type === "turn.completed");
+      assert.isDefined(turnCompleted);
+      if (turnCompleted?.type === "turn.completed") {
+        assert.equal(turnCompleted.payload.state, "completed");
+      }
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("fails the turn after Cursor retriable failures exhaust the retry budget", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-retriable-exhausted");
+
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_RETRIABLE_FAILURE_PROMPTS: "-1" }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => String(event.threadId) === String(threadId)),
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      yield* joinWithClock(adapter.sendTurn({ threadId, input: "do the work", attachments: [] }));
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      // Retries are bounded: one warning per retry, never an unbounded loop.
+      assert.equal(runtimeEvents.filter((event) => event.type === "runtime.warning").length, 2);
+
+      // A turn that never produced output must surface as an error, not as a
+      // completed turn whose only content is the provider's error string.
+      assert.isEmpty(runtimeEvents.filter((event) => event.type === "content.delta"));
+
+      const runtimeError = runtimeEvents.find((event) => event.type === "runtime.error");
+      assert.isDefined(runtimeError);
+      if (runtimeError?.type === "runtime.error") {
+        assert.include(runtimeError.payload.message, "Cursor failed after 3 attempts");
+        assert.include(runtimeError.payload.message, "read ECONNRESET");
+        assert.equal(runtimeError.payload.class, "transport_error");
+      }
+
+      const turnCompleted = runtimeEvents.find((event) => event.type === "turn.completed");
+      assert.isDefined(turnCompleted);
+      if (turnCompleted?.type === "turn.completed") {
+        assert.equal(turnCompleted.payload.state, "failed");
+        assert.include(
+          String(turnCompleted.payload.errorMessage),
+          "Cursor failed after 3 attempts",
+        );
+      }
 
       yield* adapter.stopSession(threadId);
     }),
