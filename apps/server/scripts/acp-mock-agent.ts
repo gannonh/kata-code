@@ -23,6 +23,17 @@ const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
+// Number of leading prompts that answer with a Cursor-style retriable
+// transport failure (assistant prose + `end_turn`) instead of real output.
+// `-1` fails every prompt.
+const retriableFailurePrompts = Number(process.env.T3_ACP_RETRIABLE_FAILURE_PROMPTS ?? "0");
+const retriableFailureText =
+  process.env.T3_ACP_RETRIABLE_FAILURE_TEXT ??
+  "\n\nError: RetriableError: [aborted] read ECONNRESET";
+// Optional assistant text emitted before the retriable-failure marker on the
+// same prompt — used to verify the adapter refuses to retry after partial output.
+const retriableFailureLeadInText = process.env.T3_ACP_RETRIABLE_FAILURE_LEAD_IN_TEXT;
+let promptCount = 0;
 const permissionOptionIds = {
   allowOnce: process.env.T3_ACP_ALLOW_ONCE_OPTION_ID ?? "allow-once",
   allowAlways: process.env.T3_ACP_ALLOW_ALWAYS_OPTION_ID ?? "allow-always",
@@ -367,6 +378,27 @@ const program = Effect.gen(function* () {
 
       if (Number.isFinite(promptDelayMs) && promptDelayMs > 0) {
         yield* Effect.sleep(`${promptDelayMs} millis`);
+      }
+
+      promptCount += 1;
+      if (retriableFailurePrompts < 0 || promptCount <= retriableFailurePrompts) {
+        if (retriableFailureLeadInText) {
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: retriableFailureLeadInText },
+            },
+          });
+        }
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: retriableFailureText },
+          },
+        });
+        return { stopReason: "end_turn" };
       }
 
       if (emitInterleavedAssistantToolCalls) {
