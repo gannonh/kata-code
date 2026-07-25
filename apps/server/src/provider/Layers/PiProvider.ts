@@ -140,7 +140,8 @@ export function piModelSlug(model: Pick<PiModelShape, "provider" | "id">): strin
  *
  * - No slug → first available model
  * - Slug with `/` after the first character → match `piModelSlug(model)`
- * - Otherwise → match `model.id` (slashless id)
+ * - Otherwise → match `model.id` (slashless id) only when exactly one model
+ *   has that id; duplicate ids across providers require a qualified slug
  */
 export function resolvePiModelSelection(
   modelSlug: string | undefined,
@@ -150,7 +151,9 @@ export function resolvePiModelSelection(
   if (!slug) return availableModels[0];
   const slash = slug.indexOf("/");
   if (slash > 0) return availableModels.find((model) => piModelSlug(model) === slug);
-  return availableModels.find((model) => model.id === slug);
+  const idMatches = availableModels.filter((model) => model.id === slug);
+  if (idMatches.length === 1) return idMatches[0];
+  return undefined;
 }
 
 /**

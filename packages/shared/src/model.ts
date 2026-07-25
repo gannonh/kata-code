@@ -271,9 +271,17 @@ export function resolveSelectableModel(
     return direct.slug;
   }
 
-  const byName = options.find((option) => option.name.toLowerCase() === trimmed.toLowerCase());
-  if (byName) {
-    return byName.slug;
+  // Display names are not unique across Pi sub-providers (e.g. openai vs
+  // openai-codex both expose "GPT-5.6 Sol"). Only resolve by name when exactly
+  // one option matches — otherwise require the provider-qualified slug.
+  const nameMatches = options.filter(
+    (option) => option.name.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (nameMatches.length === 1) {
+    return nameMatches[0]!.slug;
+  }
+  if (nameMatches.length > 1) {
+    return null;
   }
 
   const normalized = normalizeModelSlug(trimmed, provider);

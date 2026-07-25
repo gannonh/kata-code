@@ -130,6 +130,27 @@ describe("resolveSelectableModel", () => {
       resolveSelectableModel(ProviderDriverKind.make("claudeAgent"), "sonnet-4.6", options),
     ).toBe("claude-sonnet-4-6");
   });
+
+  it("preserves provider-qualified slugs when display names collide", () => {
+    const pi = ProviderDriverKind.make("pi");
+    const options = [
+      { slug: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol" },
+      { slug: "openai-codex/gpt-5.6-sol", name: "GPT-5.6 Sol" },
+    ];
+    expect(resolveSelectableModel(pi, "openai-codex/gpt-5.6-sol", options)).toBe(
+      "openai-codex/gpt-5.6-sol",
+    );
+    expect(resolveSelectableModel(pi, "openai/gpt-5.6-sol", options)).toBe("openai/gpt-5.6-sol");
+  });
+
+  it("does not resolve ambiguous duplicate display names to an arbitrary first slug", () => {
+    const pi = ProviderDriverKind.make("pi");
+    const options = [
+      { slug: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol" },
+      { slug: "openai-codex/gpt-5.6-sol", name: "GPT-5.6 Sol" },
+    ];
+    expect(resolveSelectableModel(pi, "GPT-5.6 Sol", options)).toBeNull();
+  });
 });
 
 describe("misc helpers", () => {

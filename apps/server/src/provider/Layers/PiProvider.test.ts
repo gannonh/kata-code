@@ -62,7 +62,7 @@ describe("resolvePiModelSelection", () => {
     expect(resolvePiModelSelection("", models)).toBe(anthropic);
   });
 
-  it("matches slashless model ids", () => {
+  it("matches slashless model ids when unique", () => {
     expect(resolvePiModelSelection("gpt-5.6-sol", models)).toBe(openai);
   });
 
@@ -74,6 +74,25 @@ describe("resolvePiModelSelection", () => {
   it("returns undefined for unknown slugs", () => {
     expect(resolvePiModelSelection("missing-model", models)).toBeUndefined();
     expect(resolvePiModelSelection("other/gpt-5.6-sol", models)).toBeUndefined();
+  });
+
+  it("does not pick an arbitrary provider for duplicate slashless ids", () => {
+    const openaiDirect: PiModelShape = {
+      id: "gpt-5.6-sol",
+      name: "GPT-5.6 Sol",
+      provider: "openai",
+      reasoning: true,
+    };
+    const openaiCodex: PiModelShape = {
+      id: "gpt-5.6-sol",
+      name: "GPT-5.6 Sol",
+      provider: "openai-codex",
+      reasoning: true,
+    };
+    expect(resolvePiModelSelection("gpt-5.6-sol", [openaiDirect, openaiCodex])).toBeUndefined();
+    expect(resolvePiModelSelection("openai-codex/gpt-5.6-sol", [openaiDirect, openaiCodex])).toBe(
+      openaiCodex,
+    );
   });
 });
 
