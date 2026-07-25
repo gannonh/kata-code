@@ -108,7 +108,10 @@ async function readJsonLines(filePath: string) {
 function joinWithClock<A, E>(effect: Effect.Effect<A, E>) {
   return Effect.gen(function* () {
     const fiber = yield* Effect.forkChild(effect);
-    for (let attempt = 0; attempt < 600; attempt += 1) {
+    // Exhausted-retry cases issue three real ACP prompts plus 1s/3s virtual
+    // backoff; CI under load can need a longer poll window than a single
+    // recover-after-one-failure path.
+    for (let attempt = 0; attempt < 2_000; attempt += 1) {
       if (fiber.pollUnsafe() !== undefined) {
         return yield* Fiber.join(fiber);
       }
