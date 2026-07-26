@@ -132,6 +132,23 @@ export function resolveAgentActivitySuspension(input: {
   return input.rejectedCredential === input.currentCredential ? "suspended" : "resumed";
 }
 
+/**
+ * Whether a publish-time auth rejection should update the suspension record.
+ *
+ * Only the credential that is still current in the secret store may be
+ * recorded. A late rejection for a rotated-away credential must not overwrite
+ * a rejection already recorded for the credential in use now — otherwise the
+ * next publish treats the stale rejection as "resumed" and retries the
+ * already-rejected current credential.
+ */
+export function shouldRecordRejectedCredential(input: {
+  readonly rejectedCredential: string;
+  readonly currentCredential: string | null;
+}): boolean {
+  if (input.currentCredential === null) return true;
+  return input.rejectedCredential === input.currentCredential;
+}
+
 const RELAY_AGENT_ACTIVITY_DETAIL_MAX_LENGTH = 160;
 const REDACTED_RELAY_AGENT_FAILURE_DETAIL = "The agent run failed.";
 
@@ -344,24 +361,44 @@ const make = Effect.gen(function* () {
     );
 
   /** Suspend publishing for the exact credential the failed publish used.
-   *  Callers must pass the publish-time credential — re-reading the secret
-   *  store here can race with lease rotation and permanently suspend the
-   *  newly rotated credential. */
+   *  Callers must pass the publish-time credential — never the secret-store
+   *  value at failure time (that races lease rotation). Late rejections for
+   *  rotated-away credentials are ignored so they cannot clear a suspension
+   *  already recorded for the current credential. */
   const suspendForRejectedCredential = (
     threadId: ThreadId,
     cause: Cause.Cause<unknown>,
     rejectedCredential: string,
   ) =>
-    Ref.set(rejectedCredentialRef, rejectedCredential).pipe(
-      Effect.andThen(
-        Effect.logError(
-          "agent activity publishing suspended: Connect credential rejected. Publishing resumes automatically once Kata Code Connect issues a new credential.",
-          {
-            threadId,
-            cause: Cause.pretty(cause),
-          },
-        ),
-      ),
+    readRelayConfig.pipe(
+      Effect.orElseSucceed(() => null),
+      Effect.flatMap((relayConfig) => {
+        const currentCredential = relayConfig?.environmentCredential ?? null;
+        if (
+          !shouldRecordRejectedCredential({
+            rejectedCredential,
+            currentCredential,
+          })
+        ) {
+          return Effect.logDebug(
+            "agent activity auth rejection ignored; publish credential was already rotated",
+            {
+              threadId,
+            },
+          );
+        }
+        return Ref.set(rejectedCredentialRef, rejectedCredential).pipe(
+          Effect.andThen(
+            Effect.logError(
+              "agent activity publishing suspended: Connect credential rejected. Publishing resumes automatically once Kata Code Connect issues a new credential.",
+              {
+                threadId,
+                cause: Cause.pretty(cause),
+              },
+            ),
+          ),
+        );
+      }),
     );
 
   const makeRelayClient = (relayConfig: {

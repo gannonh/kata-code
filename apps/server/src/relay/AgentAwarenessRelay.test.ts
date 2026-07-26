@@ -159,6 +159,29 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     ).toBe("resumed");
   });
 
+  it("records only rejections for the credential still current in the secret store", () => {
+    // Publish with A fails after rotation to B: do not record A (would look like
+    // a resume against B). Publish with B fails while B is current: record B.
+    expect(
+      AgentAwarenessRelay.shouldRecordRejectedCredential({
+        rejectedCredential: "credential-A",
+        currentCredential: "credential-B",
+      }),
+    ).toBe(false);
+    expect(
+      AgentAwarenessRelay.shouldRecordRejectedCredential({
+        rejectedCredential: "credential-B",
+        currentCredential: "credential-B",
+      }),
+    ).toBe(true);
+    expect(
+      AgentAwarenessRelay.shouldRecordRejectedCredential({
+        rejectedCredential: "credential-A",
+        currentCredential: null,
+      }),
+    ).toBe(true);
+  });
+
   it("derives the thread id from the aggregate id for thread events without payload thread ids", () => {
     const threadId = "thread-aggregate-1" as ThreadId;
     const now = "2026-05-25T00:00:00.000Z";
