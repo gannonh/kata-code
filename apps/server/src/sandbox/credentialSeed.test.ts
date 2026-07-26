@@ -119,3 +119,44 @@ describe("credentialSeed host install trees", () => {
     }),
   );
 });
+
+describe("credentialSeed pi extension packages", () => {
+  vitIt.effect("keeps npm package specs so sandbox extensions can be installed", () =>
+    Effect.gen(function* () {
+      // Pi extensions register providers at runtime (pi-anthropic-oauth supplies
+      // the Anthropic OAuth provider). Dropping `packages` left seeded OAuth
+      // credentials unusable and turns settled with no assistant output.
+      const tmpHome = yield* Effect.promise(() =>
+        fs.promises.mkdtemp(path.join(os.tmpdir(), "kata-seed-")),
+      );
+      const piDir = path.join(tmpHome, ".pi", "agent");
+      yield* Effect.promise(() => fs.promises.mkdir(piDir, { recursive: true }));
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(
+          path.join(piDir, "settings.json"),
+          '{"defaultProvider":"anthropic","packages":["npm:pi-anthropic-oauth","file:/Users/host/local-ext"]}',
+        ),
+      );
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(path.join(piDir, "auth.json"), '{"anthropic":{"type":"oauth"}}', {
+          mode: 0o600,
+        }),
+      );
+      // Host install tree stays excluded: darwin binaries cannot run in a Linux VM.
+      const hostModules = path.join(piDir, "npm", "node_modules", "pi-anthropic-oauth");
+      yield* Effect.promise(() => fs.promises.mkdir(hostModules, { recursive: true }));
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(path.join(hostModules, "index.js"), "HOST_EXTENSION_BUILD"),
+      );
+
+      const archives = yield* buildCredentialSeedArchives({ hostHome: tmpHome });
+      yield* Effect.promise(() => fs.promises.rm(tmpHome, { recursive: true, force: true }));
+
+      const staticText = Buffer.from(archives.static as Uint8Array).toString("latin1");
+      expect(staticText).toContain("npm:pi-anthropic-oauth");
+      // Host-only specs cannot resolve in the sandbox.
+      expect(staticText).not.toContain("file:/Users/host/local-ext");
+      expect(staticText).not.toContain("HOST_EXTENSION_BUILD");
+    }),
+  );
+});

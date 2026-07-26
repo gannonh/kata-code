@@ -32,6 +32,7 @@ import {
   registryError,
   resolveProvisionImage,
   runCredentialSeed,
+  runPiPackageInstall,
 } from "./sandboxProvisionHelpers.ts";
 import {
   buildRegistry,
@@ -385,6 +386,14 @@ export const startSandboxSession = (
             error._tag === "SetupFailed" ? mapSetupFailed(error) : mapDriverError(error),
           ),
         ),
+      );
+
+      // Pi extensions register providers (Anthropic OAuth among them), so the
+      // seeded `packages` list is installed from npm here — the host
+      // `node_modules` tree holds platform-specific binaries and is never
+      // copied. Runs after the credential seed so `settings.json` is in place.
+      yield* runPiPackageInstall(inst.driver, handle).pipe(
+        Effect.catch((error: SandboxProviderError) => failProvision(mapDriverError(error))),
       );
 
       // ── GitHub-sourced setup (capability-driven clone + workspace setup) ──

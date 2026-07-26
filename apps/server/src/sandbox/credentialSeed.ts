@@ -31,6 +31,7 @@ import * as os from "node:os";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 
+import { filterSandboxInstallablePiPackages } from "./piSandboxPackages.ts";
 import { packUstarArchive, type UstarFile, type UstarContent } from "./ustarWriter.ts";
 
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
@@ -337,16 +338,28 @@ function sanitizeCodexConfig(raw: string, hostHome: string): string | null {
   return changed ? result.join("\n") : null;
 }
 
-/** Sanitize Pi `settings.json`: strip the `packages` list so the in-container
- *  Pi SDK doesn't try to `npm install` host-installed extensions (esbuild,
- *  koffi, etc.) that have platform-specific binaries and block the provider
- *  probe past its 10s timeout. Packages are optional extensions; the core
- *  SDK auth + models work without them. Returns sanitized text or null. */
+/** Sanitize Pi `settings.json`: keep only registry-resolvable (`npm:`)
+ *  entries in `packages`.
+ *
+ *  Extensions register providers at runtime — `pi-anthropic-oauth` supplies
+ *  the Anthropic OAuth provider — so dropping `packages` entirely left seeded
+ *  OAuth credentials unusable and turns settled with no assistant output. The
+ *  host `npm/node_modules` tree stays excluded (darwin-native binaries); the
+ *  sandbox installs these specs from npm during setup instead.
+ *
+ *  Local/path specs are dropped because they reference host trees the sandbox
+ *  cannot resolve. Returns sanitized text or null when unchanged. */
 function sanitizePiSettings(raw: string, _hostHome: string): string | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!Array.isArray(parsed.packages) || parsed.packages.length === 0) return null;
-    delete parsed.packages;
+    const installable = filterSandboxInstallablePiPackages(parsed.packages);
+    if (installable.length === parsed.packages.length) return null;
+    if (installable.length === 0) {
+      delete parsed.packages;
+    } else {
+      parsed.packages = [...installable];
+    }
     return JSON.stringify(parsed, null, 2);
   } catch {
     return null;
