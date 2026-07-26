@@ -51,7 +51,12 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as HttpEffect from "effect/unstable/http/HttpEffect";
 import { HttpServerRequest, HttpServerResponse, HttpTraceContext } from "effect/unstable/http";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import {
+  HttpClient,
+  HttpClientError,
+  HttpClientRequest,
+  HttpClientResponse,
+} from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
@@ -521,6 +526,31 @@ const cloudRelayConfigHandler = Effect.fn("environment.cloud.relayConfig")(
   }),
 );
 
+/**
+ * Relay error bodies carry the `reason` and `traceId` that identify which
+ * server-side step failed. Reporting only the status code turned every
+ * failure into an opaque "non 2xx status code", so a link failure could not
+ * be told apart from a managed-endpoint outage without relay-side logs.
+ */
+export const describeRelayErrorBody = (body: unknown): string | null => {
+  if (typeof body !== "object" || body === null) return null;
+  const { _tag, code, reason, traceId } = body as Record<string, unknown>;
+  const parts = [_tag ?? code, reason].filter((part) => typeof part === "string");
+  if (parts.length === 0) return null;
+  const suffix = typeof traceId === "string" ? ` (traceId ${traceId})` : "";
+  return `${parts.join(": ")}${suffix}`;
+};
+
+/** Read the relay's error body off a failed request, when the failure carries
+ *  a response. Never fails: diagnostics must not mask the original error. */
+const readRelayErrorDetail = (cause: unknown): Effect.Effect<string | null> => {
+  if (!HttpClientError.isHttpClientError(cause) || !cause.response) return Effect.succeed(null);
+  return cause.response.json.pipe(
+    Effect.map(describeRelayErrorBody),
+    Effect.orElseSucceed(() => null),
+  );
+};
+
 const relayClientRequest = <A>(
   dependencies: CloudHttpDependencies,
   input: {
@@ -536,11 +566,16 @@ const relayClientRequest = <A>(
     Effect.flatMap(dependencies.httpClient.execute),
     Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.flatMap(HttpClientResponse.schemaBodyJson(input.schema)),
-    Effect.mapError(
-      (cause) =>
-        new EnvironmentHttpInternalServerError({
-          message: `Kata Code Connect relay request failed: ${String(cause)}`,
-        }),
+    Effect.catch((cause) =>
+      readRelayErrorDetail(cause).pipe(
+        Effect.map(
+          (detail) =>
+            new EnvironmentHttpInternalServerError({
+              message: `Kata Code Connect relay request failed: ${String(cause)}${detail ? ` — ${detail}` : ""}`,
+            }),
+        ),
+        Effect.flatMap(Effect.fail),
+      ),
     ),
     withRelayClientTracing,
   );

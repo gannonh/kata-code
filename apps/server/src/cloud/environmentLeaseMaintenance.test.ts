@@ -6,7 +6,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { expect } from "vite-plus/test";
 
 import {
-  reconcileEnvironmentLeaseOnStartup,
+  renewOrReconcileEnvironmentLease,
   startEnvironmentLeaseMaintenance,
 } from "./environmentLeaseMaintenance.ts";
 
@@ -16,7 +16,7 @@ it.effect("keeps a live startup lease without rotating its environment credentia
   Effect.gen(function* () {
     let reconcileCalls = 0;
 
-    const result = yield* reconcileEnvironmentLeaseOnStartup({
+    const result = yield* renewOrReconcileEnvironmentLease({
       renewLease: Effect.succeed(true),
       reconcileLink: Effect.sync(() => {
         reconcileCalls += 1;
@@ -32,7 +32,7 @@ it.effect("reconciles an absent or expired startup lease", () =>
   Effect.gen(function* () {
     let reconcileCalls = 0;
 
-    const result = yield* reconcileEnvironmentLeaseOnStartup({
+    const result = yield* renewOrReconcileEnvironmentLease({
       renewLease: Effect.succeed(false),
       reconcileLink: Effect.sync(() => {
         reconcileCalls += 1;
@@ -44,7 +44,7 @@ it.effect("reconciles an absent or expired startup lease", () =>
   }),
 );
 
-it.effect("starts lease renewal when startup reconciliation fails", () =>
+it.effect("starts lease renewal after the interval when startup reconciliation fails", () =>
   Effect.scoped(
     Effect.gen(function* () {
       let reconcileCalls = 0;
@@ -66,10 +66,14 @@ it.effect("starts lease renewal when startup reconciliation fails", () =>
       yield* Effect.yieldNow;
 
       expect(reconcileCalls).toBe(1);
-      expect(renewalCalls).toBe(1);
+      expect(renewalCalls).toBe(0);
       expect(settledCalls).toBe(1);
+
+      yield* TestClock.adjust(Duration.minutes(5));
+      yield* Effect.yieldNow;
+      expect(renewalCalls).toBe(1);
     }),
-  ),
+  ).pipe(Effect.provide(TestClock.layer())),
 );
 
 it.effect("continues lease renewal after an iteration fails", () =>
@@ -86,11 +90,14 @@ it.effect("continues lease renewal after an iteration fails", () =>
         renewalInterval: Duration.minutes(5),
       });
       yield* Effect.yieldNow;
+      expect(renewalCalls).toBe(0);
+
+      yield* TestClock.adjust(Duration.minutes(5));
+      yield* Effect.yieldNow;
       expect(renewalCalls).toBe(1);
 
       yield* TestClock.adjust(Duration.minutes(5));
       yield* Effect.yieldNow;
-
       expect(renewalCalls).toBe(2);
     }),
   ).pipe(Effect.provide(TestClock.layer())),

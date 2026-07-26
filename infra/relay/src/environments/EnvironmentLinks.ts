@@ -248,18 +248,13 @@ const make = Effect.gen(function* () {
               revokedAt: null,
               updatedAt: now,
             },
-            // A cleanup claim owns a terminal transition. Relinking may revive
-            // previously revoked rows, but it cannot reactivate a row while
-            // destructive cleanup is in flight.
+            // A bounded cleanup attempt owns the terminal transition while its
+            // token is live. Relinking may cancel a released or expired claim,
+            // which lets an environment recover after cleanup fails.
             setWhere: or(
               isNull(relayEnvironmentLinks.cleanupClaimedAt),
-              and(
-                isNotNull(relayEnvironmentLinks.revokedAt),
-                or(
-                  isNull(relayEnvironmentLinks.cleanupAttemptToken),
-                  lt(relayEnvironmentLinks.cleanupAttemptExpiresAt, now),
-                ),
-              ),
+              isNull(relayEnvironmentLinks.cleanupAttemptToken),
+              lt(relayEnvironmentLinks.cleanupAttemptExpiresAt, now),
             )!,
           })
           .returning({ environmentId: relayEnvironmentLinks.environmentId });
