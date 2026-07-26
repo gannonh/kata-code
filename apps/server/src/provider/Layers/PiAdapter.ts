@@ -48,6 +48,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as PubSub from "effect/PubSub";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -74,11 +75,13 @@ import {
   type PiModelRuntimeFactory,
   type PiModelRuntimeShape,
   type PiModelShape,
+  applyPendingExtensionProviders,
   createPiModelRuntime,
   resolvePiAgentDir,
   resolvePiModelSelection,
   resolvePiProjectSkillPaths,
   resolvePiThinkingLevelForSession,
+  type PiExtensionProviderRuntime,
 } from "./PiProvider.ts";
 import { expandProviderSkillTokensInPrompt } from "../skills/filesystemSkills.ts";
 import {
@@ -701,35 +704,6 @@ export function makePiAdapter(
               cause,
             }),
         });
-        const discoveredModels = options?.availableModels
-          ? options.availableModels
-          : yield* Effect.tryPromise({
-              try: () => modelRuntime.getAvailable(),
-              catch: (cause) =>
-                new ProviderAdapterRequestError({
-                  provider: PROVIDER,
-                  method: "startSession",
-                  detail: `Failed to discover authenticated Pi models: ${
-                    cause instanceof Error ? cause.message : String(cause)
-                  }.`,
-                  cause,
-                }),
-            });
-        const availableModels = discoveredModels as ReadonlyArray<PiModelShape>;
-        const model = resolvePiModelSelection(input.modelSelection?.model, availableModels);
-        if (!model) {
-          const slug = input.modelSelection?.model?.trim();
-          const issue =
-            slug && slug.length > 0
-              ? `Pi could not use model '${slug}' for this session (${String(availableModels.length)} authenticated model(s) available). Configure Pi auth or select a runtime-discovered model.`
-              : "Pi has no authenticated model available for this session. Configure Pi auth or select a runtime-discovered model.";
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "startSession",
-            issue,
-          });
-        }
-        const thinkingLevel = resolvePiThinkingLevelForSession(model, input.modelSelection);
 
         const serverConfigOption = yield* Effect.serviceOption(ServerConfig);
         const fileSystemOption = yield* Effect.serviceOption(FileSystem.FileSystem);
@@ -753,6 +727,10 @@ export function makePiAdapter(
           );
         }
 
+        // Model resolution runs after the resource loader reloads so extension
+        // providers (e.g. pi-cursor-sdk → `cursor/*`) are flushed into the
+        // ModelRuntime before selection. Tests can still inject `availableModels`
+        // to skip that path.
         const created = yield* Effect.tryPromise({
           try: async () => {
             const factory =
@@ -772,6 +750,45 @@ export function makePiAdapter(
               resolveProjectTrust: () =>
                 Promise.resolve(piSettings.projectTrustPolicy === "always"),
             });
+
+            if (!options?.availableModels) {
+              applyPendingExtensionProviders(
+                modelRuntime,
+                resourceLoader.getExtensions().runtime as PiExtensionProviderRuntime,
+              );
+            }
+
+            let availableModels: ReadonlyArray<PiModelShape>;
+            try {
+              availableModels = options?.availableModels
+                ? options.availableModels
+                : ((await modelRuntime.getAvailable()) as ReadonlyArray<PiModelShape>);
+            } catch (cause) {
+              throw new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "startSession",
+                detail: `Failed to discover authenticated Pi models: ${
+                  cause instanceof Error ? cause.message : String(cause)
+                }.`,
+                cause,
+              });
+            }
+
+            const model = resolvePiModelSelection(input.modelSelection?.model, availableModels);
+            if (!model) {
+              const slug = input.modelSelection?.model?.trim();
+              const issue =
+                slug && slug.length > 0
+                  ? `Pi could not use model '${slug}' for this session (${String(availableModels.length)} authenticated model(s) available). Configure Pi auth or select a runtime-discovered model.`
+                  : "Pi has no authenticated model available for this session. Configure Pi auth or select a runtime-discovered model.";
+              throw new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "startSession",
+                issue,
+              });
+            }
+            const thinkingLevel = resolvePiThinkingLevelForSession(model, input.modelSelection);
+
             // A resume cursor is a Pi session file path. Open the existing
             // session file instead of creating a fresh in-memory one so the
             // resumed session inherits the prior conversation history.
@@ -794,17 +811,25 @@ export function makePiAdapter(
               sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
             });
-            return { ...createdSession, resourceLoader };
+            return { ...createdSession, resourceLoader, model };
           },
-          catch: (cause) =>
-            new ProviderAdapterRequestError({
+          catch: (cause) => {
+            if (
+              Schema.is(ProviderAdapterValidationError)(cause) ||
+              Schema.is(ProviderAdapterRequestError)(cause)
+            ) {
+              return cause;
+            }
+            return new ProviderAdapterRequestError({
               provider: PROVIDER,
               method: "startSession",
               detail: `Failed to start Pi session: ${cause instanceof Error ? cause.message : String(cause)}.`,
               cause,
-            }),
+            });
+          },
         });
 
+        const model = created.model;
         const sdkSession = created.session as unknown as PiSdkSession;
         const resumeCursor = sdkSession.sessionFile;
         const createdAt = DateTime.formatIso(DateTime.nowUnsafe());

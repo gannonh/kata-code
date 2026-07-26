@@ -304,6 +304,79 @@ describe("makePiAdapter (vertical slice)", () => {
     }),
   );
 
+  it.effect("selects models registered by Pi extensions after resource load", () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(path.join(os.tmpdir(), "pi-adapter-ext-"));
+      const agentDir = path.join(root, "agent");
+      try {
+        const extensionDir = path.join(agentDir, "extensions");
+        mkdirSync(extensionDir, { recursive: true });
+        writeFileSync(
+          path.join(extensionDir, "cursor-stub.ts"),
+          `
+export default function (pi) {
+  pi.registerProvider("cursor", {
+    name: "Cursor",
+    baseUrl: "https://cursor.test",
+    apiKey: "cursor-test-key",
+    api: "openai-completions",
+    models: [{
+      id: "composer-1",
+      name: "Composer 1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 4096,
+    }],
+  });
+}
+`,
+        );
+
+        const cursorModel: PiModelShape = {
+          id: "composer-1",
+          name: "Composer 1",
+          provider: "cursor",
+          reasoning: false,
+        };
+        const registeredProviders: string[] = [];
+        const runtime = {
+          getAvailable: async () =>
+            registeredProviders.includes("cursor") ? [cursorModel] : [SAMPLE_MODEL],
+          registerProvider: (name: string) => {
+            registeredProviders.push(name);
+          },
+        };
+        const { session } = makeFakeSession();
+        let receivedModel: unknown;
+        const adapter = yield* makePiAdapter(decodePiSettings({ agentDir }), {
+          instanceId: ProviderInstanceId.make("pi"),
+          createModelRuntime: async () => runtime,
+          createSession: ((args: { model: unknown }) => {
+            receivedModel = args.model;
+            return Promise.resolve({ session });
+          }) as never,
+        });
+
+        const started = yield* adapter.startSession({
+          threadId: ThreadId.make("pi-thread-cursor-ext"),
+          runtimeMode: "full-access",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("pi"),
+            model: "cursor/composer-1",
+          },
+        });
+
+        expect(registeredProviders).toContain("cursor");
+        expect(receivedModel).toBe(cursorModel);
+        expect(started.model).toBe("cursor/composer-1");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.effect("streams a successful turn as a canonical event sequence", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();

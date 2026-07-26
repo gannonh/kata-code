@@ -10,8 +10,10 @@ import * as Schema from "effect/Schema";
 import { PiSettings, type ServerProviderModel } from "@kata-sh/code-contracts";
 
 import {
+  applyPendingExtensionProviders,
   checkPiProviderStatus,
   discoverPiResources,
+  loadPiExtensionProvidersIntoRuntime,
   PiProviderDiscoveryError,
   makePendingPiProvider,
   mapPiModels,
@@ -23,6 +25,7 @@ import {
   resolvePiProjectSkillPaths,
   resolvePiThinkingLevelForSession,
   type PiModelShape,
+  type PiModelRuntimeShape,
 } from "./PiProvider.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
@@ -207,6 +210,111 @@ describe("PiProvider mappers", () => {
 
         expect(resources.skills.map((skill) => skill.name)).toContain("librarian");
         expect(resources.slashCommands.map((command) => command.name)).toContain("deploy");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it("flushes queued extension provider registrations into the model runtime", () => {
+    const registered: Array<{ name: string; config: unknown }> = [];
+    const natives: unknown[] = [];
+    const runtime: PiModelRuntimeShape = {
+      getAvailable: async () => [],
+      registerProvider: (name, config) => {
+        registered.push({ name, config });
+      },
+      registerNativeProvider: (provider) => {
+        natives.push(provider);
+      },
+    };
+
+    applyPendingExtensionProviders(runtime, {
+      pendingProviderRegistrations: [
+        { name: "cursor", config: { name: "Cursor", apiKey: "test-key" } },
+      ],
+      pendingNativeProviderRegistrations: [{ provider: { id: "native-ext" } }],
+    });
+
+    expect(registered).toEqual([
+      { name: "cursor", config: { name: "Cursor", apiKey: "test-key" } },
+    ]);
+    expect(natives).toEqual([{ id: "native-ext" }]);
+  });
+
+  it("skips extension flush when the runtime has no register methods", () => {
+    const runtime: PiModelRuntimeShape = {
+      getAvailable: async () => [],
+    };
+    // Must not throw on test fakes that only implement getAvailable.
+    applyPendingExtensionProviders(runtime, {
+      pendingProviderRegistrations: [{ name: "cursor", config: {} }],
+      pendingNativeProviderRegistrations: [],
+    });
+  });
+
+  it.effect("loads extension-registered providers into ModelRuntime for discovery", () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(path.join(os.tmpdir(), "pi-provider-ext-models-"));
+      const agentDir = path.join(root, "agent");
+      try {
+        const extensionDir = path.join(agentDir, "extensions");
+        mkdirSync(extensionDir, { recursive: true });
+        // Minimal extension that registers a provider the way pi-cursor-sdk does.
+        writeFileSync(
+          path.join(extensionDir, "test-provider.ts"),
+          `
+export default function (pi) {
+  pi.registerProvider("test-ext", {
+    name: "Test Ext",
+    baseUrl: "https://example.test",
+    apiKey: "test-ext-api-key",
+    api: "openai-completions",
+    models: [{
+      id: "ext-model-1",
+      name: "Ext Model 1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 4096,
+    }],
+  });
+}
+`,
+        );
+
+        const registered: string[] = [];
+        const runtime: PiModelRuntimeShape = {
+          getAvailable: async () =>
+            registered.includes("test-ext")
+              ? [
+                  {
+                    id: "ext-model-1",
+                    name: "Ext Model 1",
+                    provider: "test-ext",
+                    reasoning: false,
+                  },
+                ]
+              : [],
+          registerProvider: (name) => {
+            registered.push(name);
+          },
+        };
+
+        yield* Effect.promise(() =>
+          loadPiExtensionProvidersIntoRuntime(runtime, {
+            agentDir,
+            cwd: root,
+            projectTrustPolicy: "always",
+          }),
+        );
+
+        expect(registered).toContain("test-ext");
+        const models = yield* Effect.promise(() => runtime.getAvailable());
+        expect(models.map((model) => `${model.provider}/${model.id}`)).toContain(
+          "test-ext/ext-model-1",
+        );
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
