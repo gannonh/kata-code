@@ -51,7 +51,6 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
-  SidebarContent,
   SidebarFooter,
   SidebarGroup,
   SidebarHeader,
@@ -679,7 +678,19 @@ export default function Sidebar() {
         <SettingsSidebarNav pathname={pathname} />
       ) : (
         <>
-          <SidebarContent className="gap-0">
+          {/*
+            Fill the sidebar column with a definite height (no outer ScrollArea).
+            Thread scrolling lives on `.sb-list-scroll`; the new-session sheet is
+            `position:absolute; inset:0` on `.sidebar-v2` and must size to the
+            viewport — not to the underlying thread-list content height. Wrapping
+            this tree in SidebarContent/ScrollArea made the sheet collapse to the
+            short empty-list height and force an inner scrollbar (nightly vs dev).
+          */}
+          <div
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            data-sidebar="content"
+            data-slot="sidebar-content"
+          >
             {showArm64IntelBuildWarning && arm64IntelBuildWarningDescription ? (
               <SidebarGroup className="px-2 pt-2 pb-0">
                 <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8">
@@ -715,7 +726,7 @@ export default function Sidebar() {
               deleteThread={deleteThread}
               onOrderedThreadKeysChange={setAttentionOrderedThreadKeys}
             />
-          </SidebarContent>
+          </div>
 
           <SidebarSeparator />
           <SidebarChromeFooter />
