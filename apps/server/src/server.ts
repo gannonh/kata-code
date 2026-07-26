@@ -81,7 +81,7 @@ import {
 } from "./cloud/http.ts";
 import * as ConnectStartupGate from "./cloud/connectStartupGate.ts";
 import {
-  reconcileEnvironmentLeaseOnStartup,
+  renewOrReconcileEnvironmentLease,
   startEnvironmentLeaseMaintenance,
 } from "./cloud/environmentLeaseMaintenance.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
@@ -462,28 +462,34 @@ export const makeServerLayer = Layer.unwrap(
           yield* ConnectStartupGate.completeConnectStartupGate;
           return;
         }
-        const primaryLinkDesired = yield* CloudCliState.readCliDesiredCloudLink;
+        const primaryLinkDesired = yield* CloudCliState.readCloudLeaseRenewalRequired;
         const server = yield* HttpServer.HttpServer;
         const address = server.address;
         if (typeof address === "string" || !("port" in address)) {
           yield* ConnectStartupGate.completeConnectStartupGate;
           return;
         }
+        const maintainPrimaryLink = renewOrReconcileEnvironmentLease({
+          renewLease: renewDesiredCloudLinkLease(),
+          reconcileLink: reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`),
+        });
+        // Re-read on every tick: linking through the app writes the credential
+        // after startup. If renewal reports that the relay link is gone, a full
+        // reconciliation rotates the rejected credential without a restart.
         const renewLeases = Effect.all(
           [
-            primaryLinkDesired ? renewDesiredCloudLinkLease() : Effect.succeed(false),
+            CloudCliState.readCloudLeaseRenewalRequired.pipe(
+              Effect.flatMap((renewalRequired) =>
+                renewalRequired ? maintainPrimaryLink : Effect.void,
+              ),
+            ),
             renewSandboxRelayLeases(),
           ],
           { concurrency: 2 },
         ).pipe(Effect.asVoid);
         const startupReconcile = primaryLinkDesired
           ? Effect.sleep("250 millis").pipe(
-              Effect.andThen(
-                reconcileEnvironmentLeaseOnStartup({
-                  renewLease: renewDesiredCloudLinkLease(),
-                  reconcileLink: reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`),
-                }),
-              ),
+              Effect.andThen(maintainPrimaryLink),
               Effect.retry({ times: 4 }),
               Effect.tap((result) =>
                 Effect.logInfo(

@@ -123,6 +123,65 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     );
   });
 
+  it("resumes publishing once Connect issues a credential different from the rejected one", () => {
+    // A lapsed environment lease makes the relay reject the credential. Keying
+    // suspension to a bare flag wedged publishing until the server restarted,
+    // so a relink alone did not recover it.
+    //
+    // Suspension must record the publish-time credential (A), not a secret-store
+    // reread: if lease reconcile rotates A→B before suspension records, recording
+    // B would suspend forever because B stays current and renewals will not
+    // rotate it again.
+    expect(
+      AgentAwarenessRelay.resolveAgentActivitySuspension({
+        rejectedCredential: null,
+        currentCredential: "credential-1",
+      }),
+    ).toBe("active");
+    expect(
+      AgentAwarenessRelay.resolveAgentActivitySuspension({
+        rejectedCredential: "credential-1",
+        currentCredential: "credential-1",
+      }),
+    ).toBe("suspended");
+    expect(
+      AgentAwarenessRelay.resolveAgentActivitySuspension({
+        rejectedCredential: "credential-1",
+        currentCredential: "credential-2",
+      }),
+    ).toBe("resumed");
+    // Publish failed with A; secret store already holds rotated B → resume.
+    expect(
+      AgentAwarenessRelay.resolveAgentActivitySuspension({
+        rejectedCredential: "credential-A",
+        currentCredential: "credential-B",
+      }),
+    ).toBe("resumed");
+  });
+
+  it("records only rejections for the credential still current in the secret store", () => {
+    // Publish with A fails after rotation to B: do not record A (would look like
+    // a resume against B). Publish with B fails while B is current: record B.
+    expect(
+      AgentAwarenessRelay.shouldRecordRejectedCredential({
+        rejectedCredential: "credential-A",
+        currentCredential: "credential-B",
+      }),
+    ).toBe(false);
+    expect(
+      AgentAwarenessRelay.shouldRecordRejectedCredential({
+        rejectedCredential: "credential-B",
+        currentCredential: "credential-B",
+      }),
+    ).toBe(true);
+    expect(
+      AgentAwarenessRelay.shouldRecordRejectedCredential({
+        rejectedCredential: "credential-A",
+        currentCredential: null,
+      }),
+    ).toBe(true);
+  });
+
   it("derives the thread id from the aggregate id for thread events without payload thread ids", () => {
     const threadId = "thread-aggregate-1" as ThreadId;
     const now = "2026-05-25T00:00:00.000Z";

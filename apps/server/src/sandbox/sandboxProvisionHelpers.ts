@@ -21,6 +21,7 @@ import { DEFAULT_DOCKER_CONFIG } from "@kata-sh/code-sandbox-docker";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { buildCredentialSeedArchives } from "./credentialSeed.ts";
 import { EnvironmentConfigLoadError } from "./environmentConfigLoader.ts";
+import { buildPiPackageInstallCommands, resolveHostPiPackages } from "./piSandboxPackages.ts";
 import { SetupFailed } from "./sandboxSetupRunner.ts";
 import { loadStoredSandboxCredentials } from "./storedSandboxCredentials.ts";
 
@@ -133,6 +134,42 @@ export function runCredentialSeed(
             }),
         ),
       );
+    }
+  });
+}
+
+/** Sandbox home the credential seed extracts into. */
+const SANDBOX_HOME = "/home/katacode";
+
+/**
+ * Install the Pi extension packages declared in the host's `settings.json`.
+ *
+ * The seed ships the `packages` list but never the host `npm/node_modules`
+ * tree (darwin-native binaries), so the sandbox resolves the same specs from
+ * npm. Installing here — during provision, before `katacode serve` handles a
+ * session — keeps the cost off the provider probe's timeout budget.
+ *
+ * Extensions are optional: a non-zero install exit logs a warning and leaves
+ * the sandbox usable for providers that need no extension. A missing or
+ * package-less host `settings.json` is a no-op.
+ */
+export function runPiPackageInstall(
+  driver: SandboxProvider,
+  handle: SandboxHandle,
+): Effect.Effect<void, SandboxProviderError> {
+  return Effect.gen(function* () {
+    const installs = buildPiPackageInstallCommands({
+      packages: yield* resolveHostPiPackages(),
+      home: SANDBOX_HOME,
+    });
+
+    for (const install of installs) {
+      const result = yield* driver.exec(handle, install.command, { cwd: SANDBOX_HOME });
+      if (result.exitCode !== 0) {
+        yield* Effect.logWarning(
+          `[sandbox] Pi extension install failed for ${install.spec} (exit ${result.exitCode}); providers it registers (for example Anthropic OAuth) are unavailable in this sandbox: ${result.stderr.slice(-512)}`,
+        );
+      }
     }
   });
 }

@@ -196,8 +196,8 @@ describe("EnvironmentLinks", () => {
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });
 
-  it.effect("rejects relinking a cleanup-claimed environment", () => {
-    let cleanupClaimed = true;
+  it.effect("blocks relinking only while a cleanup attempt owns the environment", () => {
+    let cleanupAttemptActive = true;
     let setWhere: unknown;
     const fakeDb = {
       insert: () => ({
@@ -205,11 +205,7 @@ describe("EnvironmentLinks", () => {
           onConflictDoUpdate: (config: { readonly setWhere?: unknown }) => ({
             returning: () => {
               setWhere = config.setWhere;
-              if (cleanupClaimed && config.setWhere !== undefined) {
-                return Effect.succeed([]);
-              }
-              cleanupClaimed = false;
-              return Effect.succeed([{ environmentId: "env-1" }]);
+              return Effect.succeed(cleanupAttemptActive ? [] : [{ environmentId: "env-1" }]);
             },
           }),
         }),
@@ -246,13 +242,12 @@ describe("EnvironmentLinks", () => {
           Effect.orElseSucceed(() => true),
         );
       expect(rejected).toBe(true);
-      expect(cleanupClaimed).toBe(true);
       const condition = new PgDialect().sqlToQuery(setWhere as never);
       expect(condition.sql).toContain('"relay_environment_links"."cleanup_claimed_at" is null');
-      expect(condition.sql).toContain('"relay_environment_links"."revoked_at" is not null');
-      expect(condition.sql).toContain(" or ");
+      expect(condition.sql).toContain('"relay_environment_links"."cleanup_attempt_token" is null');
+      expect(condition.sql).toContain('"relay_environment_links"."cleanup_attempt_expires_at" <');
 
-      cleanupClaimed = false;
+      cleanupAttemptActive = false;
       yield* links.upsert({
         userId: "user-1",
         request,
@@ -260,7 +255,6 @@ describe("EnvironmentLinks", () => {
         endpoint,
         managedEndpointAllocationId: null,
       });
-      expect(cleanupClaimed).toBe(false);
     }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.succeed(RelayDb, fakeDb)))));
   });
 

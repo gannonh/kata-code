@@ -11,7 +11,11 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
-import { reconcileDesiredCloudLink, traceRelayBrokerHandler } from "./http.ts";
+import {
+  describeRelayErrorBody,
+  reconcileDesiredCloudLink,
+  traceRelayBrokerHandler,
+} from "./http.ts";
 import { consumeCloudReplayGuards } from "./replayGuards.ts";
 import {
   CloudManagedEndpointRuntime,
@@ -102,6 +106,19 @@ describe("traceRelayBrokerHandler", () => {
       expect(Option.getOrUndefined(span.parent)?.spanId).toBe("0123456789abcdef");
     }),
   );
+});
+
+describe("describeRelayErrorBody", () => {
+  it("keeps the reason and trace ID needed to diagnose a relay failure", () => {
+    expect(
+      describeRelayErrorBody({
+        _tag: "RelayEnvironmentLinkFailedError",
+        code: "environment_link_failed",
+        reason: "link_persistence_failed",
+        traceId: "trace-123",
+      }),
+    ).toBe("RelayEnvironmentLinkFailedError: link_persistence_failed (traceId trace-123)");
+  });
 });
 
 describe("reconcileDesiredCloudLink", () => {

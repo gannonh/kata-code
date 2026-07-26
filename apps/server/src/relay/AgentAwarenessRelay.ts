@@ -115,6 +115,40 @@ export function isAgentActivityPublishingEnabled(value: string | null): boolean 
   return value === "true";
 }
 
+/**
+ * Decide whether publishing is still suspended for the credential now in the
+ * secret store.
+ *
+ * Suspension is keyed to the exact credential the relay rejected, so a renewed
+ * credential (relink, or the startup reconcile that rotates it) resumes
+ * publishing on its own. Keying it to a bare flag meant a dead lease wedged
+ * publishing until the server restarted.
+ */
+export function resolveAgentActivitySuspension(input: {
+  readonly rejectedCredential: string | null;
+  readonly currentCredential: string;
+}): "active" | "suspended" | "resumed" {
+  if (input.rejectedCredential === null) return "active";
+  return input.rejectedCredential === input.currentCredential ? "suspended" : "resumed";
+}
+
+/**
+ * Whether a publish-time auth rejection should update the suspension record.
+ *
+ * Only the credential that is still current in the secret store may be
+ * recorded. A late rejection for a rotated-away credential must not overwrite
+ * a rejection already recorded for the credential in use now — otherwise the
+ * next publish treats the stale rejection as "resumed" and retries the
+ * already-rejected current credential.
+ */
+export function shouldRecordRejectedCredential(input: {
+  readonly rejectedCredential: string;
+  readonly currentCredential: string | null;
+}): boolean {
+  if (input.currentCredential === null) return true;
+  return input.rejectedCredential === input.currentCredential;
+}
+
 const RELAY_AGENT_ACTIVITY_DETAIL_MAX_LENGTH = 160;
 const REDACTED_RELAY_AGENT_FAILURE_DETAIL = "The agent run failed.";
 
@@ -279,7 +313,11 @@ const make = Effect.gen(function* () {
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   const activeSnapshotPublishedRef = yield* Ref.make(false);
   const publishedStateByThreadRef = yield* Ref.make(new Map<ThreadId, string>());
-  const publishSuspendedRef = yield* Ref.make(false);
+  // Publishing suspends on an auth rejection so a dead credential cannot spam
+  // the relay. It records the credential that was rejected rather than a bare
+  // flag: once Connect writes a new one (relink, or the startup reconcile that
+  // rotates it), publishing resumes on its own instead of needing a restart.
+  const rejectedCredentialRef = yield* Ref.make<string | null>(null);
 
   const readSecretString = (name: string) =>
     secrets.get(name).pipe(Effect.map((bytes) => (bytes ? new TextDecoder().decode(bytes) : null)));
@@ -299,6 +337,70 @@ const make = Effect.gen(function* () {
     Effect.map(isAgentActivityPublishingEnabled),
   );
 
+  /** True while `credential` is the exact one the relay rejected. A rotated
+   *  credential clears the suspension so publishing resumes without a restart. */
+  const isCredentialRejected = (currentCredential: string) =>
+    Ref.get(rejectedCredentialRef).pipe(
+      Effect.flatMap((rejectedCredential) => {
+        switch (resolveAgentActivitySuspension({ rejectedCredential, currentCredential })) {
+          case "active":
+            return Effect.succeed(false);
+          case "suspended":
+            return Effect.succeed(true);
+          case "resumed":
+            return Ref.set(rejectedCredentialRef, null).pipe(
+              Effect.andThen(
+                Effect.logInfo(
+                  "agent activity publishing resumed; Kata Code Connect credential was renewed",
+                ),
+              ),
+              Effect.as(false),
+            );
+        }
+      }),
+    );
+
+  /** Suspend publishing for the exact credential the failed publish used.
+   *  Callers must pass the publish-time credential — never the secret-store
+   *  value at failure time (that races lease rotation). Late rejections for
+   *  rotated-away credentials are ignored so they cannot clear a suspension
+   *  already recorded for the current credential. */
+  const suspendForRejectedCredential = (
+    threadId: ThreadId,
+    cause: Cause.Cause<unknown>,
+    rejectedCredential: string,
+  ) =>
+    readRelayConfig.pipe(
+      Effect.orElseSucceed(() => null),
+      Effect.flatMap((relayConfig) => {
+        const currentCredential = relayConfig?.environmentCredential ?? null;
+        if (
+          !shouldRecordRejectedCredential({
+            rejectedCredential,
+            currentCredential,
+          })
+        ) {
+          return Effect.logDebug(
+            "agent activity auth rejection ignored; publish credential was already rotated",
+            {
+              threadId,
+            },
+          );
+        }
+        return Ref.set(rejectedCredentialRef, rejectedCredential).pipe(
+          Effect.andThen(
+            Effect.logError(
+              "agent activity publishing suspended: Connect credential rejected. Publishing resumes automatically once Kata Code Connect issues a new credential.",
+              {
+                threadId,
+                cause: Cause.pretty(cause),
+              },
+            ),
+          ),
+        );
+      }),
+    );
+
   const makeRelayClient = (relayConfig: {
     readonly url: string;
     readonly environmentCredential: string;
@@ -316,15 +418,6 @@ const make = Effect.gen(function* () {
 
   const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
     yield* waitForConnectStartup;
-    if (yield* Ref.get(publishSuspendedRef)) {
-      yield* Effect.logDebug(
-        "agent activity publish skipped; publishing suspended after auth rejection",
-        {
-          threadId,
-        },
-      );
-      return;
-    }
     const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
       Effect.orElseSucceed(() => false),
     );
@@ -341,131 +434,133 @@ const make = Effect.gen(function* () {
       });
       return;
     }
-    const relayClient = yield* makeRelayClient(relayConfig);
-    const environmentId = yield* serverEnvironment.getEnvironmentId;
-
-    const publishState = (input: {
-      readonly projectId: string | null;
-      readonly state: RelayAgentActivityState | null;
-      readonly reason: string;
-    }) =>
-      Effect.gen(function* () {
-        const proof = yield* makePublishProof({
-          privateKey: cloudLinkKeyPair.privateKey,
-          relayIssuer: relayConfig.issuer,
-          environmentId,
+    if (yield* isCredentialRejected(relayConfig.environmentCredential)) {
+      yield* Effect.logDebug(
+        "agent activity publish skipped; publishing suspended after auth rejection",
+        {
           threadId,
-          state: input.state,
-          jti: yield* crypto.randomUUIDv4,
-        });
-
-        yield* Effect.logInfo("publishing agent activity for thread", {
-          environmentId,
-          threadId,
-          projectId: input.projectId,
-          statePhase: input.state?.phase ?? null,
-          hasState: input.state !== null,
-          reason: input.reason,
-        });
-
-        const response = yield* relayClient.server.publishAgentActivity({
-          params: {
-            environmentId,
-            threadId,
-          },
-          payload: {
-            state: input.state,
-            proof,
-          },
-        });
-
-        yield* Effect.logInfo("agent activity publish completed", {
-          environmentId,
-          threadId,
-          ok: response.ok,
-          deliveries: deliveryStats(response.deliveries),
-        });
-      });
-
-    const thread = yield* snapshotQuery.getThreadShellById(threadId);
-    const project = Option.isSome(thread)
-      ? yield* snapshotQuery.getProjectShellById(thread.value.projectId)
-      : Option.none<OrchestrationProjectShell>();
-    const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
-      environmentId,
-      threadId,
-      thread,
-      project,
-    });
-    const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
-    const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
-    if (publishedStateByThread.get(threadId) === publishIdentity) {
-      yield* Effect.logDebug("agent activity publish skipped; projected state unchanged", {
-        environmentId,
-        threadId,
-        reason: snapshot.reason,
-      });
+        },
+      );
       return;
     }
 
-    if (snapshot.reason === "thread-not-found") {
-      yield* Effect.logDebug("publishing agent activity tombstone; thread not found", {
-        environmentId,
-        threadId,
-      });
-    } else if (snapshot.reason === "project-not-found") {
-      yield* Effect.logDebug("publishing agent activity tombstone; project not found", {
-        environmentId,
-        threadId,
-        projectId: snapshot.projectId,
-      });
-    }
+    // Auth rejection must suspend using this publish's credential. Handling it
+    // here (not after a secret-store reread) avoids racing lease rotation.
+    yield* Effect.gen(function* () {
+      const relayClient = yield* makeRelayClient(relayConfig);
+      const environmentId = yield* serverEnvironment.getEnvironmentId;
 
-    yield* publishState({
-      projectId: snapshot.projectId,
-      state: snapshot.state,
-      reason: snapshot.reason,
-    });
-    yield* Ref.update(publishedStateByThreadRef, (publishedStates) => {
-      const nextPublishedStates = new Map(publishedStates);
-      nextPublishedStates.set(threadId, publishIdentity);
-      return nextPublishedStates;
-    });
+      const publishState = (input: {
+        readonly projectId: string | null;
+        readonly state: RelayAgentActivityState | null;
+        readonly reason: string;
+      }) =>
+        Effect.gen(function* () {
+          const proof = yield* makePublishProof({
+            privateKey: cloudLinkKeyPair.privateKey,
+            relayIssuer: relayConfig.issuer,
+            environmentId,
+            threadId,
+            state: input.state,
+            jti: yield* crypto.randomUUIDv4,
+          });
+
+          yield* Effect.logInfo("publishing agent activity for thread", {
+            environmentId,
+            threadId,
+            projectId: input.projectId,
+            statePhase: input.state?.phase ?? null,
+            hasState: input.state !== null,
+            reason: input.reason,
+          });
+
+          const response = yield* relayClient.server.publishAgentActivity({
+            params: {
+              environmentId,
+              threadId,
+            },
+            payload: {
+              state: input.state,
+              proof,
+            },
+          });
+
+          yield* Effect.logInfo("agent activity publish completed", {
+            environmentId,
+            threadId,
+            ok: response.ok,
+            deliveries: deliveryStats(response.deliveries),
+          });
+        });
+
+      const thread = yield* snapshotQuery.getThreadShellById(threadId);
+      const project = Option.isSome(thread)
+        ? yield* snapshotQuery.getProjectShellById(thread.value.projectId)
+        : Option.none<OrchestrationProjectShell>();
+      const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
+        environmentId,
+        threadId,
+        thread,
+        project,
+      });
+      const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
+      const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
+      if (publishedStateByThread.get(threadId) === publishIdentity) {
+        yield* Effect.logDebug("agent activity publish skipped; projected state unchanged", {
+          environmentId,
+          threadId,
+          reason: snapshot.reason,
+        });
+        return;
+      }
+
+      if (snapshot.reason === "thread-not-found") {
+        yield* Effect.logDebug("publishing agent activity tombstone; thread not found", {
+          environmentId,
+          threadId,
+        });
+      } else if (snapshot.reason === "project-not-found") {
+        yield* Effect.logDebug("publishing agent activity tombstone; project not found", {
+          environmentId,
+          threadId,
+          projectId: snapshot.projectId,
+        });
+      }
+
+      yield* publishState({
+        projectId: snapshot.projectId,
+        state: snapshot.state,
+        reason: snapshot.reason,
+      });
+      yield* Ref.update(publishedStateByThreadRef, (publishedStates) => {
+        const nextPublishedStates = new Map(publishedStates);
+        nextPublishedStates.set(threadId, publishIdentity);
+        return nextPublishedStates;
+      });
+    }).pipe(
+      Effect.catchCause((cause) => {
+        if (isAgentActivityAuthRejection(cause)) {
+          return suspendForRejectedCredential(threadId, cause, relayConfig.environmentCredential);
+        }
+        return Effect.failCause(cause);
+      }),
+    );
   });
 
   const publishThread: AgentAwarenessRelayShape["publishThread"] = (threadId) =>
     publishThreadUnsafe(threadId).pipe(
-      Effect.catchCause((cause) => {
-        if (isAgentActivityAuthRejection(cause)) {
-          return Ref.set(publishSuspendedRef, true).pipe(
-            Effect.andThen(
-              Effect.logError(
-                "agent activity publishing suspended: Connect credential rejected. Relink Kata Code Connect, then restart the server.",
-                {
-                  threadId,
-                  cause: Cause.pretty(cause),
-                },
-              ),
-            ),
-          );
-        }
-        return Effect.logWarning("agent activity publish failed", {
+      Effect.catchCause((cause) =>
+        Effect.logWarning("agent activity publish failed", {
           threadId,
           cause: Cause.pretty(cause),
-        });
-      }),
+        }),
+      ),
       Effect.withSpan("AgentAwarenessRelay.publishThread"),
       withRelayClientTracing,
     );
 
   const publishActiveThreadsUnsafe = Effect.gen(function* () {
     yield* waitForConnectStartup;
-    if (yield* Ref.get(publishSuspendedRef)) {
-      yield* Effect.logDebug(
-        "agent activity snapshot skipped; publishing suspended after auth rejection",
-      );
-      return true;
-    }
     const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
       Effect.orElseSucceed(() => false),
     );
@@ -477,6 +572,12 @@ const make = Effect.gen(function* () {
     if (!relayConfig) {
       yield* Effect.logDebug("agent activity snapshot skipped; Kata Code Connect config missing");
       return false;
+    }
+    if (yield* isCredentialRejected(relayConfig.environmentCredential)) {
+      yield* Effect.logDebug(
+        "agent activity snapshot skipped; publishing suspended after auth rejection",
+      );
+      return true;
     }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
     const snapshot = yield* snapshotQuery.getShellSnapshot();

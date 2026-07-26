@@ -653,4 +653,37 @@ describe("Sidebar v2 fixtures + playground", () => {
       await mounted.cleanup();
     }
   });
+
+  it("new-session sheet fills the sidebar viewport when the thread list is short", async () => {
+    // waiting-only seeds a handful of threads. Before the layout fix, the absolute
+    // new-session sheet sized to that short content height inside SidebarContent's
+    // ScrollArea and forced an inner scrollbar even with few projects.
+    const mounted = await mountApp("waiting-only");
+    try {
+      const list = await waitForSidebarV2();
+      const sidebarInner = document.querySelector<HTMLElement>('[data-slot="sidebar-inner"]');
+      expect(sidebarInner, "sidebar-inner should mount").toBeTruthy();
+
+      // List column must fill most of the sidebar chrome, not shrink-wrap threads.
+      expect(list.clientHeight / (sidebarInner!.clientHeight || 1)).toBeGreaterThan(0.55);
+
+      const newThreadButton = document.querySelector<HTMLElement>(
+        '[data-testid="new-thread-button"]',
+      );
+      expect(newThreadButton).toBeTruthy();
+      newThreadButton!.click();
+
+      const panel = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="sidebar-new-session-panel"]'),
+        "New session panel should open",
+      );
+      expect(panel.clientHeight).toBe(list.clientHeight);
+
+      const body = panel.querySelector<HTMLElement>(".sb-sheet-body");
+      expect(body).toBeTruthy();
+      expect(body!.scrollHeight).toBeLessThanOrEqual(body!.clientHeight + 1);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
 });

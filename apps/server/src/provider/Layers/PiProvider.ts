@@ -90,9 +90,50 @@ export interface PiModelShape {
 
 export interface PiModelRuntimeShape {
   getAvailable(): Promise<ReadonlyArray<PiModelShape>>;
+  /** Present on the real Pi SDK `ModelRuntime`; optional for test fakes. */
+  registerProvider?(providerId: string, config: unknown): void;
+  /** Present on the real Pi SDK `ModelRuntime`; optional for test fakes. */
+  registerNativeProvider?(provider: unknown): void;
 }
 
 export type PiModelRuntimeFactory = (agentDir: string) => Promise<PiModelRuntimeShape>;
+
+/**
+ * Structural view of the extension runtime's queued provider registrations.
+ * Extensions call `pi.registerProvider` during load; those calls queue here
+ * until something flushes them into a `ModelRuntime` (normally `bindCore`
+ * inside `AgentSession`). Kata flushes them earlier so discovery and session
+ * model selection see extension-registered providers such as `cursor`.
+ */
+export interface PiExtensionProviderRuntime {
+  readonly pendingProviderRegistrations: ReadonlyArray<{
+    readonly name: string;
+    readonly config: unknown;
+  }>;
+  readonly pendingNativeProviderRegistrations: ReadonlyArray<{
+    readonly provider: unknown;
+  }>;
+}
+
+/**
+ * Flush extension-queued provider registrations into a `ModelRuntime`.
+ * No-ops when the runtime is a test fake without register methods.
+ */
+export function applyPendingExtensionProviders(
+  modelRuntime: PiModelRuntimeShape,
+  extensionRuntime: PiExtensionProviderRuntime,
+): void {
+  const registerProvider = modelRuntime.registerProvider?.bind(modelRuntime);
+  const registerNativeProvider = modelRuntime.registerNativeProvider?.bind(modelRuntime);
+  if (!registerProvider && !registerNativeProvider) return;
+
+  for (const { name, config } of extensionRuntime.pendingProviderRegistrations) {
+    registerProvider?.(name, config);
+  }
+  for (const { provider } of extensionRuntime.pendingNativeProviderRegistrations) {
+    registerNativeProvider?.(provider);
+  }
+}
 
 export interface PiResourceDiscoveryInput {
   readonly agentDir: string;
@@ -325,10 +366,10 @@ const probePiVersion = (
 
 /**
  * Discover the skills and prompt commands shown in Kata's Pi provider UI.
- * Provider health checks must not execute extensions, load themes, or scan
- * context files because those runtime-only resources can synchronously block
- * the server event loop and starve WebSocket heartbeats. Project skill paths
- * and the trust policy still apply so discovery matches the real agent cwd.
+ * Skills/prompt discovery keeps extensions off so a blocking extension cannot
+ * stall skill enumeration. Extension-registered *models* are loaded separately
+ * via {@link loadPiExtensionProvidersIntoRuntime}. Project skill paths and the
+ * trust policy still apply so discovery matches the real agent cwd.
  */
 export const discoverPiResources = Effect.fn("discoverPiResources")(function* (
   input: PiResourceDiscoveryInput,
@@ -359,10 +400,38 @@ export const discoverPiResources = Effect.fn("discoverPiResources")(function* (
 });
 
 /**
- * Real SDK discovery: CLI version probe + `ModelRuntime.getAvailable()` for
- * authenticated models + bounded resource discovery for skills and prompt
- * commands. Returns the mapped `PiDiscoveryResult`. Tests inject a fake
- * `discover` into `checkPiProviderStatus` instead.
+ * Load Pi extensions and flush their `registerProvider` calls into `modelRuntime`
+ * so extension-registered providers (e.g. `cursor` from `pi-cursor-sdk`) appear
+ * in `getAvailable()`. Themes/context/skills are skipped; only extension modules
+ * run. Bounded by the caller (provider status probe timeout).
+ */
+export async function loadPiExtensionProvidersIntoRuntime(
+  modelRuntime: PiModelRuntimeShape,
+  input: PiResourceDiscoveryInput,
+): Promise<void> {
+  const loader = new DefaultResourceLoader({
+    cwd: input.cwd,
+    agentDir: input.agentDir || getAgentDir(),
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+  });
+  await loader.reload({
+    resolveProjectTrust: () => Promise.resolve(input.projectTrustPolicy === "always"),
+  });
+  applyPendingExtensionProviders(
+    modelRuntime,
+    loader.getExtensions().runtime as PiExtensionProviderRuntime,
+  );
+}
+
+/**
+ * Real SDK discovery: CLI version probe + extension-aware
+ * `ModelRuntime.getAvailable()` for authenticated models + bounded resource
+ * discovery for skills and prompt commands. Returns the mapped
+ * `PiDiscoveryResult`. Tests inject a fake `discover` into
+ * `checkPiProviderStatus` instead.
  */
 export const discoverPiProvider = Effect.fn("discoverPiProvider")(function* (
   input: PiDiscoveryInput,
@@ -370,7 +439,13 @@ export const discoverPiProvider = Effect.fn("discoverPiProvider")(function* (
   const environment = input.environment ?? process.env;
   const version = yield* probePiVersion(input.binaryPath, environment);
   const modelRuntime = yield* Effect.promise(() => createPiModelRuntime(input.agentDir));
-  const models = yield* Effect.promise(() => modelRuntime.getAvailable());
+  // Extension providers (cursor, oauth helpers, …) only exist after their
+  // modules run and registrations are flushed into the runtime. Without this
+  // step the picker only shows built-in / models.json entries.
+  const models = yield* Effect.promise(async () => {
+    await loadPiExtensionProvidersIntoRuntime(modelRuntime, input);
+    return modelRuntime.getAvailable();
+  });
   const resources = yield* discoverPiResources(input);
 
   return {

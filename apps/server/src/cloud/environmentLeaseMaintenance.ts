@@ -4,9 +4,9 @@ import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 
 /** Renews an existing live link before considering a full reconciliation.
- * Reconciliation rotates the environment credential, so running it on every
- * startup can invalidate agent-activity requests already using that credential. */
-export function reconcileEnvironmentLeaseOnStartup<ERenew, RRenew, EReconcile, RReconcile>(input: {
+ * Reconciliation rotates the environment credential and is required when the
+ * relay no longer has a renewable link. */
+export function renewOrReconcileEnvironmentLease<ERenew, RRenew, EReconcile, RReconcile>(input: {
   readonly renewLease: Effect.Effect<boolean, ERenew, RRenew>;
   readonly reconcileLink: Effect.Effect<void, EReconcile, RReconcile>;
 }): Effect.Effect<"renewed" | "reconciled", ERenew | EReconcile, RRenew | RReconcile> {
@@ -38,14 +38,17 @@ export function startEnvironmentLeaseMaintenance<EStartup, RStartup, ERenew, RRe
         Effect.ensuring(onStartupSettled),
       ),
     );
+    const renewalInterval = input.renewalInterval ?? "5 minutes";
+    const renewOnce = input.renewLeases.pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Failed to renew Kata Code Connect environment lease", {
+          cause,
+        }),
+      ),
+    );
     yield* Effect.forkScoped(
-      input.renewLeases.pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning("Failed to renew Kata Code Connect environment lease", {
-            cause,
-          }),
-        ),
-        Effect.repeat(Schedule.spaced(input.renewalInterval ?? "5 minutes")),
+      Effect.sleep(renewalInterval).pipe(
+        Effect.andThen(renewOnce.pipe(Effect.repeat(Schedule.spaced(renewalInterval)))),
       ),
     );
   });
