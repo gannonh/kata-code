@@ -69,21 +69,33 @@ export function readPiPackagesFromSettings(raw: string): ReadonlyArray<string> {
   return filterSandboxInstallablePiPackages(packages);
 }
 
+/** One package spec paired with the command that installs it. */
+export interface PiPackageInstallCommand {
+  readonly spec: string;
+  readonly command: string;
+}
+
 /**
- * Build the in-sandbox install command for the given package specs.
+ * Build one install command per package spec.
  *
- * Runs with `HOME` pointed at the sandbox home so `pi` installs into the same
- * agent dir the credential seed wrote. Returns `null` when there is nothing to
- * install so callers can skip the exec entirely.
+ * `pi install` accepts a single source per invocation — a second positional
+ * argument is rejected as `Unexpected argument` and the whole command exits
+ * non-zero — so specs cannot be batched. Running them separately also keeps a
+ * failure attributable to the package that caused it.
+ *
+ * `HOME` points at the sandbox home so `pi` installs into the same agent dir
+ * the credential seed wrote. `--no-approve` keeps the non-interactive install
+ * from stalling on a project-trust prompt.
  */
-export function buildPiPackageInstallCommand(input: {
+export function buildPiPackageInstallCommands(input: {
   readonly packages: ReadonlyArray<string>;
   readonly home: string;
-}): string | null {
-  const packages = filterSandboxInstallablePiPackages(input.packages);
-  if (packages.length === 0) return null;
-  const specs = packages.map(shellSingleQuote).join(" ");
-  return `HOME=${shellSingleQuote(input.home)} pi install ${specs}`;
+}): ReadonlyArray<PiPackageInstallCommand> {
+  const home = shellSingleQuote(input.home);
+  return filterSandboxInstallablePiPackages(input.packages).map((spec) => ({
+    spec,
+    command: `HOME=${home} pi install ${shellSingleQuote(spec)} --no-approve`,
+  }));
 }
 
 /**

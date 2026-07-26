@@ -21,7 +21,7 @@ import { DEFAULT_DOCKER_CONFIG } from "@kata-sh/code-sandbox-docker";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { buildCredentialSeedArchives } from "./credentialSeed.ts";
 import { EnvironmentConfigLoadError } from "./environmentConfigLoader.ts";
-import { buildPiPackageInstallCommand, resolveHostPiPackages } from "./piSandboxPackages.ts";
+import { buildPiPackageInstallCommands, resolveHostPiPackages } from "./piSandboxPackages.ts";
 import { SetupFailed } from "./sandboxSetupRunner.ts";
 import { loadStoredSandboxCredentials } from "./storedSandboxCredentials.ts";
 
@@ -158,17 +158,18 @@ export function runPiPackageInstall(
   handle: SandboxHandle,
 ): Effect.Effect<void, SandboxProviderError> {
   return Effect.gen(function* () {
-    const command = buildPiPackageInstallCommand({
+    const installs = buildPiPackageInstallCommands({
       packages: yield* resolveHostPiPackages(),
       home: SANDBOX_HOME,
     });
-    if (command === null) return;
 
-    const result = yield* driver.exec(handle, command, { cwd: SANDBOX_HOME });
-    if (result.exitCode !== 0) {
-      yield* Effect.logWarning(
-        `[sandbox] Pi extension install exited ${result.exitCode}; extension-backed providers (for example Anthropic OAuth) may be unavailable in this sandbox: ${result.stderr.slice(-512)}`,
-      );
+    for (const install of installs) {
+      const result = yield* driver.exec(handle, install.command, { cwd: SANDBOX_HOME });
+      if (result.exitCode !== 0) {
+        yield* Effect.logWarning(
+          `[sandbox] Pi extension install failed for ${install.spec} (exit ${result.exitCode}); providers it registers (for example Anthropic OAuth) are unavailable in this sandbox: ${result.stderr.slice(-512)}`,
+        );
+      }
     }
   });
 }

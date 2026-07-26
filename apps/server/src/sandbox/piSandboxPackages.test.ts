@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  buildPiPackageInstallCommand,
+  buildPiPackageInstallCommands,
   filterSandboxInstallablePiPackages,
   readPiPackagesFromSettings,
 } from "./piSandboxPackages.ts";
@@ -45,29 +45,56 @@ describe("readPiPackagesFromSettings", () => {
   });
 });
 
-describe("buildPiPackageInstallCommand", () => {
+describe("buildPiPackageInstallCommands", () => {
   it("installs into the sandbox agent dir the credential seed wrote", () => {
-    const command = buildPiPackageInstallCommand({
-      packages: ["npm:pi-anthropic-oauth"],
+    expect(
+      buildPiPackageInstallCommands({
+        packages: ["npm:pi-anthropic-oauth"],
+        home: "/home/katacode",
+      }),
+    ).toEqual([
+      {
+        spec: "npm:pi-anthropic-oauth",
+        command: "HOME='/home/katacode' pi install 'npm:pi-anthropic-oauth' --no-approve",
+      },
+    ]);
+  });
+
+  it("emits one command per spec because pi install takes a single source", () => {
+    // Batching specs makes pi reject the second positional argument
+    // ("Unexpected argument") and exit non-zero without installing anything.
+    const commands = buildPiPackageInstallCommands({
+      packages: ["npm:pi-anthropic-oauth", "npm:pi-subagents"],
       home: "/home/katacode",
     });
 
-    expect(command).toBe("HOME='/home/katacode' pi install 'npm:pi-anthropic-oauth'");
+    expect(commands.map((entry) => entry.spec)).toEqual([
+      "npm:pi-anthropic-oauth",
+      "npm:pi-subagents",
+    ]);
+    for (const entry of commands) {
+      expect(entry.command).toContain(`pi install '${entry.spec}'`);
+    }
   });
 
-  it("returns null when nothing is installable so callers skip the exec", () => {
-    expect(buildPiPackageInstallCommand({ packages: [], home: "/home/katacode" })).toBeNull();
+  it("returns nothing when no spec is installable so callers skip the exec", () => {
+    expect(buildPiPackageInstallCommands({ packages: [], home: "/home/katacode" })).toEqual([]);
     expect(
-      buildPiPackageInstallCommand({ packages: ["file:/Users/host/ext"], home: "/home/katacode" }),
-    ).toBeNull();
+      buildPiPackageInstallCommands({
+        packages: ["file:/Users/host/ext"],
+        home: "/home/katacode",
+      }),
+    ).toEqual([]);
   });
 
   it("quotes specs so shell metacharacters cannot break out of the command", () => {
-    const command = buildPiPackageInstallCommand({
+    const [entry] = buildPiPackageInstallCommands({
       packages: ["npm:evil'; rm -rf /; echo '"],
       home: "/home/katacode",
     });
 
-    expect(command).toBe("HOME='/home/katacode' pi install 'npm:evil'\\''; rm -rf /; echo '\\'''");
+    expect(entry?.command).toBe(
+      "HOME='/home/katacode' pi install 'npm:evil'\\''; rm -rf /; echo '\\''' --no-approve",
+    );
   });
 });
