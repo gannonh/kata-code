@@ -123,6 +123,30 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     );
   });
 
+  it("resumes publishing once Connect issues a credential different from the rejected one", () => {
+    // A lapsed environment lease makes the relay reject the credential. Keying
+    // suspension to a bare flag wedged publishing until the server restarted,
+    // so a relink alone did not recover it.
+    expect(
+      AgentAwarenessRelay.resolveAgentActivitySuspension({
+        rejectedCredential: null,
+        currentCredential: "credential-1",
+      }),
+    ).toBe("active");
+    expect(
+      AgentAwarenessRelay.resolveAgentActivitySuspension({
+        rejectedCredential: "credential-1",
+        currentCredential: "credential-1",
+      }),
+    ).toBe("suspended");
+    expect(
+      AgentAwarenessRelay.resolveAgentActivitySuspension({
+        rejectedCredential: "credential-1",
+        currentCredential: "credential-2",
+      }),
+    ).toBe("resumed");
+  });
+
   it("derives the thread id from the aggregate id for thread events without payload thread ids", () => {
     const threadId = "thread-aggregate-1" as ThreadId;
     const now = "2026-05-25T00:00:00.000Z";

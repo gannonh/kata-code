@@ -485,6 +485,12 @@ const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(fu
     stringToBytes(payload.environmentCredential),
   );
   yield* dependencies.secrets.set(CLOUD_MINT_PUBLIC_KEY, stringToBytes(payload.cloudMintPublicKey));
+  // An environment holding a relay credential must also renew its lease. The
+  // relay only authenticates a credential while a live lease exists (15 min),
+  // and renewal is gated on the desired-link flag — so a config applied through
+  // this path without the flag authenticated until the lease lapsed, then
+  // failed every publish with not_authorized until a manual relink.
+  yield* CliState.setCliDesiredCloudLink(true);
   if (payload.endpointRuntime) {
     const endpointRuntimeJson = yield* encodeEndpointRuntimeConfigJson(payload.endpointRuntime);
     yield* dependencies.secrets.set(

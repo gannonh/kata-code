@@ -462,16 +462,23 @@ export const makeServerLayer = Layer.unwrap(
           yield* ConnectStartupGate.completeConnectStartupGate;
           return;
         }
-        const primaryLinkDesired = yield* CloudCliState.readCliDesiredCloudLink;
+        const primaryLinkDesired = yield* CloudCliState.readCloudLeaseRenewalRequired;
         const server = yield* HttpServer.HttpServer;
         const address = server.address;
         if (typeof address === "string" || !("port" in address)) {
           yield* ConnectStartupGate.completeConnectStartupGate;
           return;
         }
+        // Re-read on every tick: linking through the app writes the credential
+        // after startup, and a renewal loop bound to the startup value would
+        // never renew that lease.
         const renewLeases = Effect.all(
           [
-            primaryLinkDesired ? renewDesiredCloudLinkLease() : Effect.succeed(false),
+            CloudCliState.readCloudLeaseRenewalRequired.pipe(
+              Effect.flatMap((renewalRequired) =>
+                renewalRequired ? renewDesiredCloudLinkLease() : Effect.succeed(false),
+              ),
+            ),
             renewSandboxRelayLeases(),
           ],
           { concurrency: 2 },

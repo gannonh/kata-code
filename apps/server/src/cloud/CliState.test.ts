@@ -55,4 +55,25 @@ it.layer(NodeServices.layer)("CliState", (it) => {
       }
     }).pipe(Effect.provide(makeTestLayer())),
   );
+
+  it.effect("requires lease renewal whenever a relay credential is held", () =>
+    Effect.gen(function* () {
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+
+      expect(yield* CliState.readCloudLeaseRenewalRequired).toBe(false);
+
+      // A credential without the desired-link flag still needs renewal: the
+      // relay authenticates it only while a live lease exists, so skipping
+      // renewal made every publish fail with not_authorized once it lapsed.
+      yield* secrets.set(RELAY_ENVIRONMENT_CREDENTIAL_SECRET, new TextEncoder().encode("cred"));
+      expect(yield* CliState.readCloudLeaseRenewalRequired).toBe(true);
+
+      yield* secrets.remove(RELAY_ENVIRONMENT_CREDENTIAL_SECRET);
+      yield* CliState.setCliDesiredCloudLink(true);
+      expect(yield* CliState.readCloudLeaseRenewalRequired).toBe(true);
+
+      yield* CliState.clearPersistedCloudLink;
+      expect(yield* CliState.readCloudLeaseRenewalRequired).toBe(false);
+    }).pipe(Effect.provide(makeTestLayer())),
+  );
 });
