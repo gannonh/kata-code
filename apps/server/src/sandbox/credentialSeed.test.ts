@@ -159,4 +159,61 @@ describe("credentialSeed pi extension packages", () => {
       expect(staticText).not.toContain("HOST_EXTENSION_BUILD");
     }),
   );
+
+  vitIt.effect("seeds pi-cursor-sdk model catalog caches for warm sandbox discovery", () =>
+    Effect.gen(function* () {
+      // Without the model-list cache, pi-cursor-sdk falls through to a live
+      // Cursor.models.list / @cursor/sdk load that often exceeds the Pi probe
+      // timeout — leaving no cursor/* models even though the extension installed.
+      const tmpHome = yield* Effect.promise(() =>
+        fs.promises.mkdtemp(path.join(os.tmpdir(), "kata-seed-")),
+      );
+      const piDir = path.join(tmpHome, ".pi", "agent");
+      yield* Effect.promise(() => fs.promises.mkdir(piDir, { recursive: true }));
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(
+          path.join(piDir, "settings.json"),
+          '{"packages":["npm:pi-cursor-sdk"]}',
+        ),
+      );
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(
+          path.join(piDir, "cursor-sdk-model-list.json"),
+          '{"version":1,"fetchedAt":1,"keyFingerprint":"abcd","models":[{"id":"composer-2.5","displayName":"Composer 2.5"}]}',
+          { mode: 0o600 },
+        ),
+      );
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(
+          path.join(piDir, "cursor-sdk-context-windows.json"),
+          '{"composer-2.5":200000}',
+          { mode: 0o600 },
+        ),
+      );
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(path.join(piDir, "cursor-sdk.json"), '{"fastDefaults":{}}', {
+          mode: 0o600,
+        }),
+      );
+      // Legacy / host-only caches stay excluded.
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(path.join(piDir, "cursor-model-cache.json"), "LEGACY_CURSOR_CACHE"),
+      );
+      yield* Effect.promise(() =>
+        fs.promises.writeFile(path.join(piDir, "models-store.json"), "HOST_MODELS_STORE"),
+      );
+
+      const archives = yield* buildCredentialSeedArchives({ hostHome: tmpHome });
+      yield* Effect.promise(() => fs.promises.rm(tmpHome, { recursive: true, force: true }));
+
+      expect(archives.static).not.toBeNull();
+      const staticText = Buffer.from(archives.static as Uint8Array).toString("latin1");
+      expect(staticText).toContain(".pi/agent/cursor-sdk-model-list.json");
+      expect(staticText).toContain("composer-2.5");
+      expect(staticText).toContain(".pi/agent/cursor-sdk-context-windows.json");
+      expect(staticText).toContain(".pi/agent/cursor-sdk.json");
+      expect(staticText).not.toContain("LEGACY_CURSOR_CACHE");
+      expect(staticText).not.toContain("HOST_MODELS_STORE");
+    }),
+  );
 });

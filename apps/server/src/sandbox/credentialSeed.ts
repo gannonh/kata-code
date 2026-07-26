@@ -183,9 +183,12 @@ const PI_EXCLUDES: ReadonlyArray<ExcludePattern> = [
   { name: "mcp-cache.json" },
   { name: "mcp-npx-cache.json" },
   { name: "mcp-onboarding.json" },
-  { name: "cursor-sdk.json" },
-  { name: "cursor-sdk-context-windows.json" },
-  { name: "cursor-sdk-model-list.json" },
+  // Seed `cursor-sdk-model-list.json` / `cursor-sdk-context-windows.json` /
+  // `cursor-sdk.json`: pi-cursor-sdk uses the model-list cache (keyed by API-key
+  // fingerprint, never the key itself) to register `cursor/*` models without a
+  // live Cursor.models.list round-trip. Excluding it forced cold discovery in
+  // the sandbox, which often exceeds the Pi provider probe timeout and left
+  // no cursor models in the picker even though the extension installed.
   { name: "cursor-model-cache.json" },
   { name: "models-store.json" },
   { name: ".DS_Store" },
