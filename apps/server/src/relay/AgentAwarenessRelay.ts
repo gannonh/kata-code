@@ -343,13 +343,16 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /** Suspend publishing for the credential currently in the secret store. */
-  const suspendForRejectedCredential = (threadId: ThreadId, cause: Cause.Cause<unknown>) =>
-    readRelayConfig.pipe(
-      Effect.orElseSucceed(() => null),
-      Effect.flatMap((relayConfig) =>
-        Ref.set(rejectedCredentialRef, relayConfig?.environmentCredential ?? null),
-      ),
+  /** Suspend publishing for the exact credential the failed publish used.
+   *  Callers must pass the publish-time credential — re-reading the secret
+   *  store here can race with lease rotation and permanently suspend the
+   *  newly rotated credential. */
+  const suspendForRejectedCredential = (
+    threadId: ThreadId,
+    cause: Cause.Cause<unknown>,
+    rejectedCredential: string,
+  ) =>
+    Ref.set(rejectedCredentialRef, rejectedCredential).pipe(
       Effect.andThen(
         Effect.logError(
           "agent activity publishing suspended: Connect credential rejected. Publishing resumes automatically once Kata Code Connect issues a new credential.",
@@ -403,109 +406,118 @@ const make = Effect.gen(function* () {
       );
       return;
     }
-    const relayClient = yield* makeRelayClient(relayConfig);
-    const environmentId = yield* serverEnvironment.getEnvironmentId;
 
-    const publishState = (input: {
-      readonly projectId: string | null;
-      readonly state: RelayAgentActivityState | null;
-      readonly reason: string;
-    }) =>
-      Effect.gen(function* () {
-        const proof = yield* makePublishProof({
-          privateKey: cloudLinkKeyPair.privateKey,
-          relayIssuer: relayConfig.issuer,
-          environmentId,
-          threadId,
-          state: input.state,
-          jti: yield* crypto.randomUUIDv4,
-        });
+    // Auth rejection must suspend using this publish's credential. Handling it
+    // here (not after a secret-store reread) avoids racing lease rotation.
+    yield* Effect.gen(function* () {
+      const relayClient = yield* makeRelayClient(relayConfig);
+      const environmentId = yield* serverEnvironment.getEnvironmentId;
 
-        yield* Effect.logInfo("publishing agent activity for thread", {
-          environmentId,
-          threadId,
-          projectId: input.projectId,
-          statePhase: input.state?.phase ?? null,
-          hasState: input.state !== null,
-          reason: input.reason,
-        });
-
-        const response = yield* relayClient.server.publishAgentActivity({
-          params: {
+      const publishState = (input: {
+        readonly projectId: string | null;
+        readonly state: RelayAgentActivityState | null;
+        readonly reason: string;
+      }) =>
+        Effect.gen(function* () {
+          const proof = yield* makePublishProof({
+            privateKey: cloudLinkKeyPair.privateKey,
+            relayIssuer: relayConfig.issuer,
             environmentId,
             threadId,
-          },
-          payload: {
             state: input.state,
-            proof,
-          },
+            jti: yield* crypto.randomUUIDv4,
+          });
+
+          yield* Effect.logInfo("publishing agent activity for thread", {
+            environmentId,
+            threadId,
+            projectId: input.projectId,
+            statePhase: input.state?.phase ?? null,
+            hasState: input.state !== null,
+            reason: input.reason,
+          });
+
+          const response = yield* relayClient.server.publishAgentActivity({
+            params: {
+              environmentId,
+              threadId,
+            },
+            payload: {
+              state: input.state,
+              proof,
+            },
+          });
+
+          yield* Effect.logInfo("agent activity publish completed", {
+            environmentId,
+            threadId,
+            ok: response.ok,
+            deliveries: deliveryStats(response.deliveries),
+          });
         });
 
-        yield* Effect.logInfo("agent activity publish completed", {
+      const thread = yield* snapshotQuery.getThreadShellById(threadId);
+      const project = Option.isSome(thread)
+        ? yield* snapshotQuery.getProjectShellById(thread.value.projectId)
+        : Option.none<OrchestrationProjectShell>();
+      const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
+        environmentId,
+        threadId,
+        thread,
+        project,
+      });
+      const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
+      const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
+      if (publishedStateByThread.get(threadId) === publishIdentity) {
+        yield* Effect.logDebug("agent activity publish skipped; projected state unchanged", {
           environmentId,
           threadId,
-          ok: response.ok,
-          deliveries: deliveryStats(response.deliveries),
+          reason: snapshot.reason,
         });
-      });
+        return;
+      }
 
-    const thread = yield* snapshotQuery.getThreadShellById(threadId);
-    const project = Option.isSome(thread)
-      ? yield* snapshotQuery.getProjectShellById(thread.value.projectId)
-      : Option.none<OrchestrationProjectShell>();
-    const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
-      environmentId,
-      threadId,
-      thread,
-      project,
-    });
-    const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
-    const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
-    if (publishedStateByThread.get(threadId) === publishIdentity) {
-      yield* Effect.logDebug("agent activity publish skipped; projected state unchanged", {
-        environmentId,
-        threadId,
+      if (snapshot.reason === "thread-not-found") {
+        yield* Effect.logDebug("publishing agent activity tombstone; thread not found", {
+          environmentId,
+          threadId,
+        });
+      } else if (snapshot.reason === "project-not-found") {
+        yield* Effect.logDebug("publishing agent activity tombstone; project not found", {
+          environmentId,
+          threadId,
+          projectId: snapshot.projectId,
+        });
+      }
+
+      yield* publishState({
+        projectId: snapshot.projectId,
+        state: snapshot.state,
         reason: snapshot.reason,
       });
-      return;
-    }
-
-    if (snapshot.reason === "thread-not-found") {
-      yield* Effect.logDebug("publishing agent activity tombstone; thread not found", {
-        environmentId,
-        threadId,
+      yield* Ref.update(publishedStateByThreadRef, (publishedStates) => {
+        const nextPublishedStates = new Map(publishedStates);
+        nextPublishedStates.set(threadId, publishIdentity);
+        return nextPublishedStates;
       });
-    } else if (snapshot.reason === "project-not-found") {
-      yield* Effect.logDebug("publishing agent activity tombstone; project not found", {
-        environmentId,
-        threadId,
-        projectId: snapshot.projectId,
-      });
-    }
-
-    yield* publishState({
-      projectId: snapshot.projectId,
-      state: snapshot.state,
-      reason: snapshot.reason,
-    });
-    yield* Ref.update(publishedStateByThreadRef, (publishedStates) => {
-      const nextPublishedStates = new Map(publishedStates);
-      nextPublishedStates.set(threadId, publishIdentity);
-      return nextPublishedStates;
-    });
+    }).pipe(
+      Effect.catchCause((cause) => {
+        if (isAgentActivityAuthRejection(cause)) {
+          return suspendForRejectedCredential(threadId, cause, relayConfig.environmentCredential);
+        }
+        return Effect.failCause(cause);
+      }),
+    );
   });
 
   const publishThread: AgentAwarenessRelayShape["publishThread"] = (threadId) =>
     publishThreadUnsafe(threadId).pipe(
-      Effect.catchCause((cause) => {
-        if (isAgentActivityAuthRejection(cause)) {
-          return suspendForRejectedCredential(threadId, cause);
-        }
-        return Effect.logWarning("agent activity publish failed", {
+      Effect.catchCause((cause) =>
+        Effect.logWarning("agent activity publish failed", {
           threadId,
           cause: Cause.pretty(cause),
-        });
-      }),
+        }),
+      ),
       Effect.withSpan("AgentAwarenessRelay.publishThread"),
       withRelayClientTracing,
     );

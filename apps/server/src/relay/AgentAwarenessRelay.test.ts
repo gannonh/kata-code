@@ -127,6 +127,11 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     // A lapsed environment lease makes the relay reject the credential. Keying
     // suspension to a bare flag wedged publishing until the server restarted,
     // so a relink alone did not recover it.
+    //
+    // Suspension must record the publish-time credential (A), not a secret-store
+    // reread: if lease reconcile rotates A→B before suspension records, recording
+    // B would suspend forever because B stays current and renewals will not
+    // rotate it again.
     expect(
       AgentAwarenessRelay.resolveAgentActivitySuspension({
         rejectedCredential: null,
@@ -143,6 +148,13 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
       AgentAwarenessRelay.resolveAgentActivitySuspension({
         rejectedCredential: "credential-1",
         currentCredential: "credential-2",
+      }),
+    ).toBe("resumed");
+    // Publish failed with A; secret store already holds rotated B → resume.
+    expect(
+      AgentAwarenessRelay.resolveAgentActivitySuspension({
+        rejectedCredential: "credential-A",
+        currentCredential: "credential-B",
       }),
     ).toBe("resumed");
   });
