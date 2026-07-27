@@ -9,7 +9,8 @@ import type {
 import { useEffect, useRef } from "react";
 
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
-import { ensureEnvironmentApi } from "~/environmentApi";
+import { readEnvironmentApi } from "~/environmentApi";
+import { readEnvironmentConnection, subscribeEnvironmentConnections } from "~/environments/runtime";
 import { type DesktopPreviewOverlay, usePreviewStateStore } from "~/previewStateStore";
 
 import { previewBridge } from "./previewBridge";
@@ -31,30 +32,54 @@ export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: str
   const lastDesktopNavStatus = useRef<DesktopPreviewTabState["navStatus"] | null>(null);
   useEffect(() => {
     if (!bridge || typeof window === "undefined") return;
-    const api = ensureEnvironmentApi(threadRef.environmentId);
-    lastReportedUrl.current = null;
-    lastReportedKind.current = null;
-    lastDesktopNavStatus.current = null;
-    const unsubscribe = bridge.onStateChange((changedTabId, state) => {
-      if (changedTabId !== tabId) return;
-      if (shouldClearBrowserPointer(lastDesktopNavStatus.current, state.navStatus)) {
-        clearBrowserPointer(tabId);
-      }
-      lastDesktopNavStatus.current = state.navStatus;
-      applyDesktopState(threadRef, tabId, projectDesktopState(state));
-      const reported = buildReportInput({
-        threadId: threadRef.threadId,
-        tabId,
-        state,
-        lastReportedUrl: lastReportedUrl.current,
-        lastReportedKind: lastReportedKind.current,
+    let clientIdentity: object | null = null;
+    let unsubscribeBridge: () => void = () => undefined;
+    let api = readEnvironmentApi(threadRef.environmentId);
+
+    const attach = () => {
+      const connection = readEnvironmentConnection(threadRef.environmentId);
+      const nextApi = readEnvironmentApi(threadRef.environmentId);
+      const nextIdentity = connection?.client ?? nextApi ?? null;
+      if (nextIdentity === clientIdentity) return;
+
+      unsubscribeBridge();
+      unsubscribeBridge = () => undefined;
+      clientIdentity = nextIdentity;
+      api = nextApi;
+      if (!api) return;
+
+      lastReportedUrl.current = null;
+      lastReportedKind.current = null;
+      lastDesktopNavStatus.current = null;
+      unsubscribeBridge = bridge.onStateChange((changedTabId, state) => {
+        if (changedTabId !== tabId) return;
+        if (shouldClearBrowserPointer(lastDesktopNavStatus.current, state.navStatus)) {
+          clearBrowserPointer(tabId);
+        }
+        lastDesktopNavStatus.current = state.navStatus;
+        applyDesktopState(threadRef, tabId, projectDesktopState(state));
+        const currentApi = api;
+        if (!currentApi) return;
+        const reported = buildReportInput({
+          threadId: threadRef.threadId,
+          tabId,
+          state,
+          lastReportedUrl: lastReportedUrl.current,
+          lastReportedKind: lastReportedKind.current,
+        });
+        if (!reported) return;
+        lastReportedUrl.current = reported.lastReportedUrl;
+        lastReportedKind.current = reported.lastReportedKind;
+        void currentApi.preview.reportStatus(reported.input).catch(() => undefined);
       });
-      if (!reported) return;
-      lastReportedUrl.current = reported.lastReportedUrl;
-      lastReportedKind.current = reported.lastReportedKind;
-      void api.preview.reportStatus(reported.input).catch(() => undefined);
-    });
-    return unsubscribe;
+    };
+
+    const unsubscribeConnections = subscribeEnvironmentConnections(attach);
+    attach();
+    return () => {
+      unsubscribeConnections();
+      unsubscribeBridge();
+    };
   }, [applyDesktopState, bridge, clearBrowserPointer, tabId, threadRef]);
 }
 

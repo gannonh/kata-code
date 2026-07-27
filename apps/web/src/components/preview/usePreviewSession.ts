@@ -4,7 +4,7 @@ import { scopedThreadKey } from "@kata-sh/code-client-runtime";
 import type { ScopedThreadRef } from "@kata-sh/code-contracts";
 import { useEffect } from "react";
 
-import { ensureEnvironmentApi, readEnvironmentApi } from "~/environmentApi";
+import { readEnvironmentApi } from "~/environmentApi";
 import { readEnvironmentConnection, subscribeEnvironmentConnections } from "~/environments/runtime";
 import { readPreviewStateRevision, usePreviewStateStore } from "~/previewStateStore";
 
@@ -54,7 +54,11 @@ export function usePreviewSession(threadRef: ScopedThreadRef): void {
       return;
     }
 
-    const api = ensureEnvironmentApi(threadRef.environmentId);
+    const api = readEnvironmentApi(threadRef.environmentId);
+    if (!api) {
+      applyServerSnapshot(threadRef, null);
+      return;
+    }
     void api.preview
       .open({ threadId: threadIdValue, url: recoverableUrl })
       .then((snapshot) => {

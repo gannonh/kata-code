@@ -10,7 +10,8 @@ import type {
 } from "@kata-sh/code-contracts";
 import { useCallback, useEffect, useId, useRef } from "react";
 
-import { ensureEnvironmentApi } from "~/environmentApi";
+import { ensureEnvironmentApi, readEnvironmentApi } from "~/environmentApi";
+import { readEnvironmentConnection, subscribeEnvironmentConnections } from "~/environments/runtime";
 import { selectThreadPreviewState, usePreviewStateStore } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { resolveBrowserNavigationTarget } from "~/browser/browserTargetResolver";
@@ -234,50 +235,81 @@ export function PreviewAutomationOwner(props: {
     handlerRef.current = handleRequest;
   }, [handleRequest]);
 
+  // Sandbox re-provision / reconnect windows leave the thread mounted while the
+  // environment WS client is absent. Wait for the connection instead of throwing
+  // (which previously crashed the whole app via the root error boundary).
   useEffect(() => {
-    const api = ensureEnvironmentApi(threadRef.environmentId);
-    return api.preview.automation.connect(
-      { clientId: automationClientId },
-      (request) => {
-        void handlerRef.current(request).then(
-          (result) =>
-            api.preview.automation.respond({
-              requestId: request.requestId,
-              ok: true,
-              ...(result === undefined ? {} : { result }),
-            }),
-          (error) =>
-            api.preview.automation.respond({
-              requestId: request.requestId,
-              ok: false,
-              error: serializePreviewAutomationError(error),
-            }),
-        );
-      },
-      {
-        onResubscribe: () => {
-          const ownerState = ownerStateRef.current;
-          const state = selectThreadPreviewState(
-            usePreviewStateStore.getState().byThreadKey,
-            ownerState.threadRef,
+    if (typeof window === "undefined") return;
+    let clientIdentity: object | null = null;
+    let unsubscribeAutomation: () => void = () => undefined;
+
+    const attach = () => {
+      const connection = readEnvironmentConnection(threadRef.environmentId);
+      const api = readEnvironmentApi(threadRef.environmentId);
+      const nextIdentity = connection?.client ?? api ?? null;
+      if (nextIdentity === clientIdentity) return;
+
+      unsubscribeAutomation();
+      unsubscribeAutomation = () => undefined;
+      clientIdentity = nextIdentity;
+      if (!api) return;
+
+      unsubscribeAutomation = api.preview.automation.connect(
+        { clientId: automationClientId },
+        (request) => {
+          void handlerRef.current(request).then(
+            (result) =>
+              api.preview.automation.respond({
+                requestId: request.requestId,
+                ok: true,
+                ...(result === undefined ? {} : { result }),
+              }),
+            (error) =>
+              api.preview.automation.respond({
+                requestId: request.requestId,
+                ok: false,
+                error: serializePreviewAutomationError(error),
+              }),
           );
-          void api.preview.automation.reportOwner({
-            clientId: automationClientId,
-            environmentId: ownerState.threadRef.environmentId,
-            threadId: ownerState.threadRef.threadId,
-            tabId: state.snapshot?.tabId ?? null,
-            visible: ownerState.visible,
-            supportsAutomation: Boolean(previewBridge?.automation),
-            focusedAt: new Date().toISOString(),
-          });
         },
-      },
-    );
+        {
+          onResubscribe: () => {
+            const ownerState = ownerStateRef.current;
+            const state = selectThreadPreviewState(
+              usePreviewStateStore.getState().byThreadKey,
+              ownerState.threadRef,
+            );
+            void api.preview.automation.reportOwner({
+              clientId: automationClientId,
+              environmentId: ownerState.threadRef.environmentId,
+              threadId: ownerState.threadRef.threadId,
+              tabId: state.snapshot?.tabId ?? null,
+              visible: ownerState.visible,
+              supportsAutomation: Boolean(previewBridge?.automation),
+              focusedAt: new Date().toISOString(),
+            });
+          },
+        },
+      );
+    };
+
+    const unsubscribeConnections = subscribeEnvironmentConnections(attach);
+    attach();
+    return () => {
+      unsubscribeConnections();
+      unsubscribeAutomation();
+    };
   }, [automationClientId, threadRef.environmentId]);
 
   useEffect(() => {
-    const api = ensureEnvironmentApi(threadRef.environmentId);
+    if (typeof window === "undefined") return;
+    let clientIdentity: object | null = null;
+    let unsubscribePreviewState: () => void = () => undefined;
+    let attachedApi: ReturnType<typeof readEnvironmentApi> | null = null;
+
     const report = () => {
+      const api = attachedApi;
+      if (!api) return;
       const state = selectThreadPreviewState(
         usePreviewStateStore.getState().byThreadKey,
         threadRef,
@@ -292,18 +324,46 @@ export function PreviewAutomationOwner(props: {
         focusedAt: new Date().toISOString(),
       });
     };
-    report();
-    window.addEventListener("focus", report);
-    const unsubscribe = usePreviewStateStore.subscribe((state, previous) => {
-      const key = scopedThreadKey(threadRef);
-      if (state.byThreadKey[key]?.snapshot?.tabId !== previous.byThreadKey[key]?.snapshot?.tabId) {
+
+    const attach = () => {
+      const connection = readEnvironmentConnection(threadRef.environmentId);
+      const api = readEnvironmentApi(threadRef.environmentId);
+      const nextIdentity = connection?.client ?? api ?? null;
+      if (nextIdentity === clientIdentity) {
         report();
+        return;
       }
-    });
+
+      if (attachedApi) {
+        void attachedApi.preview.automation.clearOwner({ clientId: automationClientId });
+      }
+      unsubscribePreviewState();
+      unsubscribePreviewState = () => undefined;
+      clientIdentity = nextIdentity;
+      attachedApi = api ?? null;
+      if (!api) return;
+
+      report();
+      unsubscribePreviewState = usePreviewStateStore.subscribe((state, previous) => {
+        const key = scopedThreadKey(threadRef);
+        if (
+          state.byThreadKey[key]?.snapshot?.tabId !== previous.byThreadKey[key]?.snapshot?.tabId
+        ) {
+          report();
+        }
+      });
+    };
+
+    const unsubscribeConnections = subscribeEnvironmentConnections(attach);
+    window.addEventListener("focus", report);
+    attach();
     return () => {
+      unsubscribeConnections();
       window.removeEventListener("focus", report);
-      unsubscribe();
-      void api.preview.automation.clearOwner({ clientId: automationClientId });
+      unsubscribePreviewState();
+      if (attachedApi) {
+        void attachedApi.preview.automation.clearOwner({ clientId: automationClientId });
+      }
     };
   }, [automationClientId, threadRef, visible]);
 

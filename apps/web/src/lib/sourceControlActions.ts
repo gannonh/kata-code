@@ -29,7 +29,7 @@ import {
   useTransition,
 } from "react";
 
-import { ensureEnvironmentApi } from "../environmentApi";
+import { ensureEnvironmentApi, readEnvironmentApi } from "../environmentApi";
 import { readEnvironmentConnection } from "../environments/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { getVcsStatusSnapshot, refreshVcsStatus } from "./vcsStatusState";
@@ -452,8 +452,18 @@ export function usePullRequestResolution(
     });
 
     let cancelled = false;
-    ensureEnvironmentApi(stableTarget.environmentId)
-      .git.resolvePullRequest({ cwd: stableTarget.cwd, reference: stableTarget.reference })
+    const api = readEnvironmentApi(stableTarget.environmentId);
+    if (!api) {
+      setState({
+        data: cached,
+        error: new Error(`Environment API not found for environment ${stableTarget.environmentId}`),
+        isPending: false,
+        isFetching: false,
+      });
+      return;
+    }
+    api.git
+      .resolvePullRequest({ cwd: stableTarget.cwd, reference: stableTarget.reference })
       .then((result) => {
         if (cancelled) {
           return;
