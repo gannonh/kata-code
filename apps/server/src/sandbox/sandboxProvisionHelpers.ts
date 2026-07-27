@@ -20,6 +20,7 @@ import {
 import { DEFAULT_DOCKER_CONFIG } from "@kata-sh/code-sandbox-docker";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { buildCredentialSeedArchives } from "./credentialSeed.ts";
+import { buildRefreshCursorModelListCacheCommand } from "./cursorSdkCacheSeed.ts";
 import { EnvironmentConfigLoadError } from "./environmentConfigLoader.ts";
 import { buildPiPackageInstallCommands, resolveHostPiPackages } from "./piSandboxPackages.ts";
 import { SetupFailed } from "./sandboxSetupRunner.ts";
@@ -66,6 +67,9 @@ export function registryError(
 ): SandboxRpcError {
   return new SandboxRpcError({ reason, message });
 }
+
+/** Sandbox home the credential seed extracts into. */
+const SANDBOX_HOME = "/home/katacode";
 
 /**
  * Turn an effect into an Either-shaped `{ _tag: "Left"|"Right" }` value.
@@ -135,11 +139,23 @@ export function runCredentialSeed(
         ),
       );
     }
+
+    // Stamp the seeded Cursor model-list cache with the VM clock so host/sandbox
+    // skew cannot invalidate the warm-discovery path (see cursorSdkCacheSeed).
+    const refresh = yield* driver.exec(
+      handle,
+      buildRefreshCursorModelListCacheCommand(SANDBOX_HOME),
+      {
+        cwd: SANDBOX_HOME,
+      },
+    );
+    if (refresh.exitCode !== 0) {
+      yield* Effect.logWarning(
+        `[sandbox] could not refresh seeded cursor-sdk model-list cache timestamps (exit ${refresh.exitCode}); cursor models may require a live discovery round-trip: ${refresh.stderr.slice(-512)}`,
+      );
+    }
   });
 }
-
-/** Sandbox home the credential seed extracts into. */
-const SANDBOX_HOME = "/home/katacode";
 
 /**
  * Install the Pi extension packages declared in the host's `settings.json`.

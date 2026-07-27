@@ -46,7 +46,7 @@ import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
-  AUTH_PROBE_TIMEOUT_MS,
+  PI_AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
   parseGenericCliVersion,
   spawnAndCollect,
@@ -549,7 +549,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
     cwd: process.cwd(),
     projectTrustPolicy: piSettings.projectTrustPolicy,
     environment,
-  }).pipe(Effect.timeoutOption(Duration.millis(AUTH_PROBE_TIMEOUT_MS)), Effect.result);
+  }).pipe(Effect.timeoutOption(Duration.millis(PI_AUTH_PROBE_TIMEOUT_MS)), Effect.result);
 
   if (Result.isFailure(discovery)) {
     const error = discovery.failure;

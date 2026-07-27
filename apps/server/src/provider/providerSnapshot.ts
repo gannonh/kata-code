@@ -21,6 +21,10 @@ import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 export const DEFAULT_TIMEOUT_MS = 4_000;
 // Auth status checks involve disk/network lookups and can be slow on first run (especially Windows)
 export const AUTH_PROBE_TIMEOUT_MS = 10_000;
+// Pi discovery loads extension modules (e.g. pi-cursor-sdk) before getAvailable().
+// Cold extension load + model registration regularly exceeds the shared 10s budget
+// in sandboxes, which drops extension-registered providers like cursor/*.
+export const PI_AUTH_PROBE_TIMEOUT_MS = 30_000;
 
 export interface CommandResult {
   readonly stdout: string;
