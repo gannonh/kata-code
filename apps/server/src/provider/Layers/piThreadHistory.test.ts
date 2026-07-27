@@ -216,5 +216,32 @@ describe("piThreadHistory", () => {
         ]),
       ).toBe("second");
     });
+
+    it("ignores history before fromIndex so a silent turn cannot replay the previous reply", () => {
+      const history = [
+        { role: "user", content: "first question" },
+        { role: "assistant", content: [{ type: "text", text: "first answer" }] },
+        { role: "user", content: "second question" },
+      ];
+      // The second turn appended only the user message: no assistant text of
+      // its own. Scanning from the turn's baseline must not return "first
+      // answer", which is what made the UI repeat the last message.
+      expect(extractLatestAssistantReplyText(history, 2)).toBeUndefined();
+    });
+
+    it("returns the current turn's reply when it appended assistant text", () => {
+      const history = [
+        { role: "user", content: "first question" },
+        { role: "assistant", content: [{ type: "text", text: "first answer" }] },
+        { role: "user", content: "second question" },
+        { role: "assistant", content: [{ type: "text", text: "second answer" }] },
+      ];
+      expect(extractLatestAssistantReplyText(history, 2)).toBe("second answer");
+    });
+
+    it("returns undefined when history shrank below the baseline (mid-turn compaction)", () => {
+      const history = [{ role: "assistant", content: [{ type: "text", text: "summary" }] }];
+      expect(extractLatestAssistantReplyText(history, 5)).toBeUndefined();
+    });
   });
 });

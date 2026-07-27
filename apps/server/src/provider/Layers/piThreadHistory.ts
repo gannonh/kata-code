@@ -68,11 +68,20 @@ export function extractAssistantThinkingFromPiMessage(message: unknown): string 
  * history. Returns only `text` blocks, never `thinking` blocks, so reasoning
  * output never leaks into the chat message. Reasoning-only turns surface as
  * `undefined` here and are handled by the adapter's zero-output failure path.
+ *
+ * `fromIndex` bounds the scan to messages appended by the current turn. The
+ * caller records the history length when the turn starts; without that bound
+ * a turn that produced no assistant text would return the *previous* turn's
+ * reply and the UI would replay the last message for every new turn. When the
+ * history shrank below `fromIndex` (compaction mid-turn) the scan yields
+ * `undefined` rather than falling back to pre-turn history.
  */
 export function extractLatestAssistantReplyText(
   messages: ReadonlyArray<unknown>,
+  fromIndex = 0,
 ): string | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
+  const start = Math.max(0, fromIndex);
+  for (let index = messages.length - 1; index >= start; index -= 1) {
     const message = messages[index];
     const text = extractAssistantTextFromPiMessage(message);
     if (text) {

@@ -482,6 +482,69 @@ export default function (pi) {
     }),
   );
 
+  it.effect("does not replay the previous turn's reply when a turn produces no output", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-no-replay");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+      });
+
+      // Turn 1 produces a real assistant reply via SDK history.
+      yield* adapter.sendTurn({ threadId, input: "first" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+      hooks.setMessages([
+        { role: "user", content: "first", timestamp: 1 },
+        { role: "assistant", content: [{ type: "text", text: "First reply" }], timestamp: 2 },
+      ]);
+      hooks.resolvePrompt();
+      yield* Effect.tryPromise(() =>
+        recorder.waitFor(
+          () => recorder.events.filter((event) => event.type === "turn.completed").length >= 1,
+        ),
+      );
+
+      // Turn 2 appends only the user message: the provider produced no
+      // assistant text. Settlement must not resurface "First reply".
+      yield* adapter.sendTurn({ threadId, input: "second" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+      hooks.setMessages([
+        { role: "user", content: "first", timestamp: 1 },
+        { role: "assistant", content: [{ type: "text", text: "First reply" }], timestamp: 2 },
+        { role: "user", content: "second", timestamp: 3 },
+      ]);
+      hooks.resolvePrompt();
+      yield* Effect.tryPromise(() =>
+        recorder.waitFor(
+          () => recorder.events.filter((event) => event.type === "turn.completed").length >= 2,
+        ),
+      );
+
+      const assistantCompletions = recorder.events.filter(
+        (event) =>
+          event.type === "item.completed" && event.payload.itemType === "assistant_message",
+      );
+      const secondCompletion = assistantCompletions.at(-1);
+      expect(
+        (secondCompletion?.payload as { readonly detail?: string } | undefined)?.detail,
+      ).toBeUndefined();
+      // A silent turn is a failure, not a success with stale text.
+      expect((secondCompletion?.payload as { readonly status?: string } | undefined)?.status).toBe(
+        "failed",
+      );
+    }),
+  );
+
   it.effect("emits final assistant text from SDK message_end when deltas are missing", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();

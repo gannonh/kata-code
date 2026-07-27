@@ -156,6 +156,12 @@ interface PiTurnOutputState {
   assistantTextChars: number;
   reasoningTextChars: number;
   toolCallsCompleted: number;
+  /**
+   * Length of `sdk.messages` when the turn started. Settlement only scans
+   * messages at or after this index for fallback assistant text, so a turn
+   * with no output never replays the previous turn's reply.
+   */
+  historyBaseline: number;
 }
 
 interface PiSessionContext {
@@ -327,6 +333,7 @@ export function makePiAdapter(
         assistantTextChars: 0,
         reasoningTextChars: 0,
         toolCallsCompleted: 0,
+        historyBaseline: ctx.sdk.messages?.length ?? 0,
       };
       ctx.turnOutput.set(key, next);
       return next;
@@ -575,9 +582,13 @@ export function makePiAdapter(
           return;
         }
         const ctx = sessions.get(threadId);
+        // Bound the fallback scan to this turn's slice of session history.
+        // Scanning the whole history would resurface the previous turn's
+        // reply whenever the current turn produced no assistant text.
+        const historyBaseline = ctx?.turnOutput.get(String(turnId))?.historyBaseline ?? 0;
         const settlementDetail =
           outcome.state === "completed" && ctx
-            ? extractLatestAssistantReplyText(ctx.sdk.messages ?? [])
+            ? extractLatestAssistantReplyText(ctx.sdk.messages ?? [], historyBaseline)
             : undefined;
         const completedWithoutOutput =
           outcome.state === "completed" && !settlementDetail && !hasObservedTurnOutput(ctx, turnId);
@@ -1070,6 +1081,9 @@ export function makePiAdapter(
 
         const turnId = TurnId.make(randomUUID());
         ctx.activeTurnId = turnId;
+        // Seed the output state before prompting so the history baseline is
+        // captured even when the turn never emits a delta or tool call.
+        turnOutputState(ctx, turnId);
 
         yield* publish(
           makeEvent(input.threadId, {
