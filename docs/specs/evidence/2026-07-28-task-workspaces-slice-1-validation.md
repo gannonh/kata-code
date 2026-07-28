@@ -67,23 +67,23 @@ fetching pnpm; the successful Actions result supersedes that environment-only fa
 
 ## Acceptance-criterion matrix
 
-| AC | Evidence |
-| --- | --- |
-| 1 | `TaskWorkspaceNewView` browser surface and typed `task.create` contract. |
-| 2 | `TaskWorkspaceView.browser.tsx` plus stage schemas and rendering. |
-| 3 | Contract/store tests and integration assertions for immutable numbered revisions. |
-| 4 | Integration test rejects Questions completion without the required artifact. |
-| 5 | Integration test rejects Plan approval before the Plan artifact exists. |
-| 6 | Real-Git integration assertion for distinct worktree path, branch, and provisioned state. |
-| 7 | Server-owned Build phase/work-item schemas, commands, projection, and workspace rendering. |
-| 8 | Real-Git integration assertion for fixture commit and full SHA. |
-| 9 | Integration assertion for status, summary, timestamp, and tested commit SHA. |
-| 10 | Premature and stale signoff rejection assertions. |
-| 11 | Browser component assertion for Verified plus unavailable Deliver state. |
-| 12 | Restart replay assertions for stage, revisions, worktree binding, Build SHA, and evidence. |
-| 13 | Duplicate artifact and Plan-approval command assertions, including one worktree creation. |
-| 14 | Invalid transition exits are failures and accepted state remains usable afterward. |
-| 15 | Linked Questions-stage thread assertion; existing chat router/server regression suite passes. |
+| AC  | Evidence                                                                                      |
+| --- | --------------------------------------------------------------------------------------------- |
+| 1   | `TaskWorkspaceNewView` browser surface and typed `task.create` contract.                      |
+| 2   | `TaskWorkspaceView.browser.tsx` plus stage schemas and rendering.                             |
+| 3   | Contract/store tests and integration assertions for immutable numbered revisions.             |
+| 4   | Integration test rejects Questions completion without the required artifact.                  |
+| 5   | Integration test rejects Plan approval before the Plan artifact exists.                       |
+| 6   | Real-Git integration assertion for distinct worktree path, branch, and provisioned state.     |
+| 7   | Server-owned Build phase/work-item schemas, commands, projection, and workspace rendering.    |
+| 8   | Real-Git integration assertion for fixture commit and full SHA.                               |
+| 9   | Integration assertion for status, summary, timestamp, and tested commit SHA.                  |
+| 10  | Premature and stale signoff rejection assertions.                                             |
+| 11  | Browser component assertion for Verified plus unavailable Deliver state.                      |
+| 12  | Restart replay assertions for stage, revisions, worktree binding, Build SHA, and evidence.    |
+| 13  | Duplicate artifact and Plan-approval command assertions, including one worktree creation.     |
+| 14  | Invalid transition exits are failures and accepted state remains usable afterward.            |
+| 15  | Linked Questions-stage thread assertion; existing chat router/server regression suite passes. |
 
 ## Manual evidence status
 
