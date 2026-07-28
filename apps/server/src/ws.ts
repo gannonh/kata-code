@@ -44,6 +44,7 @@ import {
   FilesystemBrowseError,
   AssetAccessError,
   EnvironmentAuthorizationError,
+  TASK_WORKSPACE_WS_METHODS,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -72,6 +73,7 @@ import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
+import { TaskWorkspaceService } from "./taskWorkspace/TaskWorkspaceService.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { configureSandboxRuntime, SandboxServiceLive } from "./sandbox/SandboxService.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
@@ -148,6 +150,8 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
+  [TASK_WORKSPACE_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
+  [TASK_WORKSPACE_WS_METHODS.subscribe, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
@@ -271,6 +275,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
+      const taskWorkspaces = yield* TaskWorkspaceService;
       const keybindings = yield* Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const gitWorkflow = yield* GitWorkflowService;
@@ -807,6 +812,29 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       return WsRpcGroup.of({
+        [TASK_WORKSPACE_WS_METHODS.dispatchCommand]: (command) =>
+          observeRpcEffect(
+            TASK_WORKSPACE_WS_METHODS.dispatchCommand,
+            taskWorkspaces.dispatch(command),
+            { "rpc.aggregate": "task-workspace" },
+          ),
+        [TASK_WORKSPACE_WS_METHODS.subscribe]: (_input) =>
+          observeRpcStream(
+            TASK_WORKSPACE_WS_METHODS.subscribe,
+            Stream.concat(
+              Stream.fromEffect(taskWorkspaces.getSnapshot).pipe(
+                Stream.map((snapshot) => ({ kind: "snapshot" as const, snapshot })),
+              ),
+              taskWorkspaces.streamEvents.pipe(
+                Stream.map((event) => ({
+                  kind: "task-upserted" as const,
+                  sequence: event.sequence,
+                  task: event.task,
+                })),
+              ),
+            ),
+            { "rpc.aggregate": "task-workspace" },
+          ),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,

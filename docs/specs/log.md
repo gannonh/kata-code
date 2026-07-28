@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-07-28 (Task workspaces Slice 1 implementation started)
+
+- Added [Task workspaces Slice 1 child spec](/specs/2026-07-28-task-workspaces-slice-1-plan.md) for the Standard walking skeleton from Questions through exact-SHA Verify signoff.
+- Chose a dedicated durable task aggregate that links existing orchestration threads and delegates worktree operations to the existing Git workflow service.
+- Opened draft [PR #51](https://github.com/gannonh/kata-code/pull/51) on `agent/task-workspaces-slice-1`; implementation and evidence collection are in progress.
+
 ## 2026-07-18 (Shared sandbox GitHub source picker implemented)
 
 Implemented [Shared sandbox GitHub source picker and Docker remote seed](/specs/2026-07-17-shared-sandbox-github-source-design.md): `SandboxGitHubSourcePicker` shared by Docker and Vercel cards; Docker Create requires GitHub source, seeds host `gh` auth, shallow-clones into `/workspace`, persists source fingerprints, and rejects Start mismatches. Closed deferred Docker remote-source [#29](https://github.com/gannonh/kata-code/issues/29).

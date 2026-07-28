@@ -92,6 +92,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
+import { TaskWorkspaceSidebar } from "./taskWorkspace/TaskWorkspaceSidebar";
 
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 
@@ -714,6 +715,7 @@ export default function Sidebar() {
                 </Alert>
               </SidebarGroup>
             ) : null}
+            <TaskWorkspaceSidebar />
             <ThreadListSidebar
               sortedProjects={sortedProjects}
               activeRouteThreadKey={routeThreadKey}

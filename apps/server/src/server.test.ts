@@ -103,6 +103,10 @@ import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./server
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
+import {
+  TaskWorkspaceService,
+  type TaskWorkspaceServiceShape,
+} from "./taskWorkspace/TaskWorkspaceService.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import {
@@ -363,6 +367,7 @@ const buildAppUnderTest = (options?: {
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
+    taskWorkspace?: Partial<TaskWorkspaceServiceShape>;
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
@@ -730,6 +735,21 @@ const buildAppUnderTest = (options?: {
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
           getThreadCheckpointContext: () => Effect.succeed(Option.none()),
           ...options?.layers?.projectionSnapshotQuery,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(TaskWorkspaceService)({
+          dispatch: (command) =>
+            Effect.succeed({
+              sequence: 0,
+              task: {
+                id: command.taskId,
+              } as never,
+            }),
+          getSnapshot: Effect.succeed({ sequence: 0, tasks: [] }),
+          getTask: () => Effect.succeed(null),
+          streamEvents: Stream.empty,
+          ...options?.layers?.taskWorkspace,
         }),
       ),
       Layer.provide(

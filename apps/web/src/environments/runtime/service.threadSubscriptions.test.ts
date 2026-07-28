@@ -99,6 +99,10 @@ vi.mock("@kata-sh/code-client-runtime", async (importOriginal) => {
       searchGitHubRepositories: vi.fn(),
       listGitHubBranches: vi.fn(),
     },
+    taskWorkspaces: {
+      dispatchCommand: vi.fn(),
+      subscribe: vi.fn(),
+    },
     orchestration: {
       dispatchCommand: vi.fn(),
       getTurnDiff: vi.fn(),

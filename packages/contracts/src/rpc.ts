@@ -58,6 +58,13 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
+import {
+  TASK_WORKSPACE_WS_METHODS,
+  TaskWorkspaceCommand,
+  TaskWorkspaceDispatchResult,
+  TaskWorkspaceError,
+  TaskWorkspaceStreamItem,
+} from "./taskWorkspace.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   RelayClientInstallFailedError,
@@ -771,6 +778,22 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
+export const WsTaskWorkspaceDispatchCommandRpc = Rpc.make(
+  TASK_WORKSPACE_WS_METHODS.dispatchCommand,
+  {
+    payload: TaskWorkspaceCommand,
+    success: TaskWorkspaceDispatchResult,
+    error: Schema.Union([TaskWorkspaceError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsTaskWorkspaceSubscribeRpc = Rpc.make(TASK_WORKSPACE_WS_METHODS.subscribe, {
+  payload: Schema.Struct({}),
+  success: TaskWorkspaceStreamItem,
+  error: Schema.Union([TaskWorkspaceError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 export const WsSubscribeTerminalMetadataRpc = Rpc.make(WS_METHODS.subscribeTerminalMetadata, {
   payload: Schema.Struct({}),
   success: TerminalMetadataStreamEvent,
@@ -880,4 +903,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsTaskWorkspaceDispatchCommandRpc,
+  WsTaskWorkspaceSubscribeRpc,
 );
