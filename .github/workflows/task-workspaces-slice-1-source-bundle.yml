@@ -10,17 +10,33 @@ permissions:
 jobs:
   source-bundle:
     name: Source Bundle
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Create source archive
-        run: tar --exclude=.git -czf "$RUNNER_TEMP/kata-code-source.tgz" .
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
 
-      - name: Upload source archive
+      - name: Capture local tooling
+        run: |
+          mkdir -p .tooling/bin
+          cp --dereference "$(command -v vp)" .tooling/bin/vp
+          cp --dereference "$(command -v node)" .tooling/bin/node
+          printf '%s\n' "$(node --version)" > .tooling/node-version.txt
+          printf '%s\n' "$(vp --version)" > .tooling/vp-version.txt
+
+      - name: Create development archive
+        run: tar --exclude=.git -czf "$RUNNER_TEMP/kata-code-dev.tgz" .
+
+      - name: Upload development archive
         uses: actions/upload-artifact@v4
         with:
-          name: task-workspaces-slice-1-source
-          path: ${{ runner.temp }}/kata-code-source.tgz
+          name: task-workspaces-slice-1-dev
+          path: ${{ runner.temp }}/kata-code-dev.tgz
           retention-days: 1
