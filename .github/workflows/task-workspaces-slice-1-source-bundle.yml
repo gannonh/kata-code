@@ -31,12 +31,29 @@ jobs:
           printf '%s\n' "$(node --version)" > .tooling/node-version.txt
           printf '%s\n' "$(vp --version)" > .tooling/vp-version.txt
 
-      - name: Create development archive
-        run: tar --exclude=.git -czf "$RUNNER_TEMP/kata-code-dev.tgz" .
+      - name: Create split development archive
+        run: |
+          tar --exclude=.git -czf "$RUNNER_TEMP/kata-code-dev.tgz" .
+          split -b 350m "$RUNNER_TEMP/kata-code-dev.tgz" "$RUNNER_TEMP/kata-code-dev.part-"
+          ls -lh "$RUNNER_TEMP"/kata-code-dev.part-*
 
-      - name: Upload development archive
+      - name: Upload development archive part aa
         uses: actions/upload-artifact@v4
         with:
-          name: task-workspaces-slice-1-dev
-          path: ${{ runner.temp }}/kata-code-dev.tgz
+          name: task-workspaces-slice-1-dev-aa
+          path: ${{ runner.temp }}/kata-code-dev.part-aa
+          retention-days: 1
+
+      - name: Upload development archive part ab
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-workspaces-slice-1-dev-ab
+          path: ${{ runner.temp }}/kata-code-dev.part-ab
+          retention-days: 1
+
+      - name: Upload development archive part ac
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-workspaces-slice-1-dev-ac
+          path: ${{ runner.temp }}/kata-code-dev.part-ac
           retention-days: 1
