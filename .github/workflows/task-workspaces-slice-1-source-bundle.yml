@@ -1,4 +1,4 @@
-name: Task Workspaces Slice 1 Source Bundle
+name: Task Workspaces Slice 1 Tooling Bundle
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   source-bundle:
-    name: Source Bundle
+    name: Tooling Bundle
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -23,37 +23,18 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Capture local tooling
+      - name: Capture real Node runtime
         run: |
-          mkdir -p .tooling/bin
-          cp --dereference "$(command -v vp)" .tooling/bin/vp
-          cp --dereference "$(command -v node)" .tooling/bin/node
-          printf '%s\n' "$(node --version)" > .tooling/node-version.txt
-          printf '%s\n' "$(vp --version)" > .tooling/vp-version.txt
+          mkdir -p "$RUNNER_TEMP/task-workspaces-tooling"
+          cp --dereference "$(node -p 'process.execPath')" "$RUNNER_TEMP/task-workspaces-tooling/node"
+          cp --dereference "$(command -v vp)" "$RUNNER_TEMP/task-workspaces-tooling/vp"
+          node --version > "$RUNNER_TEMP/task-workspaces-tooling/node-version.txt"
+          vp --version > "$RUNNER_TEMP/task-workspaces-tooling/vp-version.txt"
+          file "$RUNNER_TEMP/task-workspaces-tooling/node"
 
-      - name: Create split development archive
-        run: |
-          tar --exclude=.git -czf "$RUNNER_TEMP/kata-code-dev.tgz" .
-          split -b 350m "$RUNNER_TEMP/kata-code-dev.tgz" "$RUNNER_TEMP/kata-code-dev.part-"
-          ls -lh "$RUNNER_TEMP"/kata-code-dev.part-*
-
-      - name: Upload development archive part aa
+      - name: Upload tooling
         uses: actions/upload-artifact@v4
         with:
-          name: task-workspaces-slice-1-dev-aa
-          path: ${{ runner.temp }}/kata-code-dev.part-aa
-          retention-days: 1
-
-      - name: Upload development archive part ab
-        uses: actions/upload-artifact@v4
-        with:
-          name: task-workspaces-slice-1-dev-ab
-          path: ${{ runner.temp }}/kata-code-dev.part-ab
-          retention-days: 1
-
-      - name: Upload development archive part ac
-        uses: actions/upload-artifact@v4
-        with:
-          name: task-workspaces-slice-1-dev-ac
-          path: ${{ runner.temp }}/kata-code-dev.part-ac
+          name: task-workspaces-slice-1-tooling
+          path: ${{ runner.temp }}/task-workspaces-tooling
           retention-days: 1
