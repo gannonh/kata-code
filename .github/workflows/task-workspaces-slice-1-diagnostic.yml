@@ -1,43 +1,28 @@
-name: Task Workspaces Slice 1 Diagnostic
+name: Task Workspaces Slice 1 Diagnostic Cleanup
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  check-log:
-    name: Capture check output
+  cleanup:
+    name: Remove diagnostic workflow
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
     steps:
-      - name: Checkout
+      - name: Checkout feature branch
         uses: actions/checkout@v7
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
         with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
 
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @kata-sh/code-desktop ensure:electron
-
-      - name: Capture check output
-        shell: bash
+      - name: Remove diagnostic workflow
         run: |
-          set +e
-          vp check > "$RUNNER_TEMP/vp-check.log" 2>&1
-          status=$?
-          printf '\nexit_status=%s\n' "$status" >> "$RUNNER_TEMP/vp-check.log"
-          exit 0
-
-      - name: Upload check output
-        uses: actions/upload-artifact@v4
-        with:
-          name: task-workspaces-slice-1-check-log
-          path: ${{ runner.temp }}/vp-check.log
-          retention-days: 1
+          rm -f .github/workflows/task-workspaces-slice-1-diagnostic.yml
+          git config user.name "Kata Code Agent"
+          git config user.email "tasks@kata.sh"
+          git add -A
+          git commit -m "chore(task-workspaces): remove check diagnostics"
+          git push origin "HEAD:${{ github.head_ref }}"
