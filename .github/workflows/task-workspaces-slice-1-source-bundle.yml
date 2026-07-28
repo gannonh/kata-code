@@ -1,0 +1,26 @@
+name: Task Workspaces Slice 1 Source Bundle
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  source-bundle:
+    name: Source Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create source archive
+        run: tar --exclude=.git -czf kata-code-source.tgz .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-workspaces-slice-1-source
+          path: kata-code-source.tgz
+          retention-days: 1
