@@ -1,0 +1,43 @@
+name: Task Workspaces Slice 1 Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-log:
+    name: Capture check output
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @kata-sh/code-desktop ensure:electron
+
+      - name: Capture check output
+        shell: bash
+        run: |
+          set +e
+          vp check > "$RUNNER_TEMP/vp-check.log" 2>&1
+          status=$?
+          printf '\nexit_status=%s\n' "$status" >> "$RUNNER_TEMP/vp-check.log"
+          exit 0
+
+      - name: Upload check output
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-workspaces-slice-1-check-log
+          path: ${{ runner.temp }}/vp-check.log
+          retention-days: 1
