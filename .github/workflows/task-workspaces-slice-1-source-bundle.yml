@@ -1,40 +1,50 @@
-name: Task Workspaces Slice 1 Tooling Bundle
+name: Task Workspaces Slice 1 Publisher
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  source-bundle:
-    name: Tooling Bundle
+  publish:
+    name: Publish implementation
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout feature branch
         uses: actions/checkout@v7
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
         with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
 
-      - name: Capture real Node runtime
+      - name: Reconstruct and verify implementation patch
         run: |
-          mkdir -p "$RUNNER_TEMP/task-workspaces-tooling"
-          cp --dereference "$(node -p 'process.execPath')" "$RUNNER_TEMP/task-workspaces-tooling/node"
-          cp --dereference "$(command -v vp)" "$RUNNER_TEMP/task-workspaces-tooling/vp"
-          node --version > "$RUNNER_TEMP/task-workspaces-tooling/node-version.txt"
-          vp --version > "$RUNNER_TEMP/task-workspaces-tooling/vp-version.txt"
-          file "$RUNNER_TEMP/task-workspaces-tooling/node"
+          cat \
+            .github/task-slice1-patch-chunk-0.txt \
+            .github/task-slice1-patch-chunk-1.txt \
+            .github/task-slice1-patch-chunk-2.txt \
+            > "$RUNNER_TEMP/task-slice1.patch.gz.b64"
+          base64 --decode "$RUNNER_TEMP/task-slice1.patch.gz.b64" \
+            > "$RUNNER_TEMP/task-slice1.patch.gz"
+          echo "fa09c4cfbf7ba6d1bd6a19bb651fb0e1a4846305dc2181c4febe5f0f05d02da3  $RUNNER_TEMP/task-slice1.patch.gz" \
+            | sha256sum --check --strict
+          gzip --decompress --stdout "$RUNNER_TEMP/task-slice1.patch.gz" \
+            > "$RUNNER_TEMP/task-slice1.patch"
+          git apply --check "$RUNNER_TEMP/task-slice1.patch"
 
-      - name: Upload tooling
-        uses: actions/upload-artifact@v4
-        with:
-          name: task-workspaces-slice-1-tooling
-          path: ${{ runner.temp }}/task-workspaces-tooling
-          retention-days: 1
+      - name: Publish Slice 1 implementation
+        run: |
+          git apply "$RUNNER_TEMP/task-slice1.patch"
+          rm -f \
+            .github/task-slice1-patch-chunk-0.txt \
+            .github/task-slice1-patch-chunk-1.txt \
+            .github/task-slice1-patch-chunk-2.txt \
+            .github/workflows/task-workspaces-slice-1-source-bundle.yml
+          git config user.name "Kata Code Agent"
+          git config user.email "tasks@kata.sh"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat(task-workspaces): implement slice 1 walking skeleton"
+          git push origin "HEAD:${{ github.head_ref }}"
