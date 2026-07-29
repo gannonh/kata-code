@@ -307,15 +307,25 @@ registerFileSessionSeed(fileURLToPath(import.meta.url), async (context) => {
 async function openTask(page: Page, id: string): Promise<void> {
   const taskLink = page.locator(`a[href$="/tasks/${id}"]`).first();
   await expect(taskLink).toBeVisible();
-  await page.evaluate((taskId) => {
-    if (window.location.hash.startsWith("#/")) {
-      window.location.hash = `/tasks/${taskId}`;
+  const href = await taskLink.getAttribute("href");
+  expect(href).not.toBeNull();
+  await page.evaluate((routeHref) => {
+    const hashIndex = routeHref.indexOf("#/");
+    if (hashIndex >= 0) {
+      window.location.hash = routeHref.slice(hashIndex + 1);
       return;
     }
-    window.history.pushState({}, "", `/tasks/${taskId}`);
+    window.history.pushState({}, "", routeHref);
     window.dispatchEvent(new PopStateEvent("popstate"));
-  }, id);
-  await expect(page.getByTestId("task-artifacts-panel")).toBeVisible();
+  }, href!);
+  await expect(page).toHaveURL(new RegExp(`/tasks/${id}$`));
+  try {
+    await expect(page.getByTestId("task-artifacts-panel")).toBeVisible();
+  } catch (error) {
+    const body = await page.locator("body").innerText();
+    console.error(`[task-workspaces] route diagnostics\n${page.url()}\n${body.slice(0, 4_000)}`);
+    throw error;
+  }
 }
 
 async function dispatchTaskCommand(page: Page, command: TaskWorkspaceCommand): Promise<void> {
