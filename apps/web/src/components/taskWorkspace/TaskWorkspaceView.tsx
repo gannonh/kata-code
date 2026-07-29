@@ -10,6 +10,7 @@ import { CheckCircle2Icon, CircleIcon, GitBranchIcon, Loader2Icon } from "lucide
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
 import { currentTaskStage, useTaskWorkspaceStore } from "../../taskWorkspace/taskWorkspaceStore";
@@ -57,14 +58,18 @@ function statusLabel(stage: TaskWorkspaceStage): string {
 }
 
 export function TaskWorkspaceView({ taskId }: { taskId: string }) {
-  const task = useTaskWorkspaceStore((state) => state.taskById[taskId] ?? null);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
-  const [questionsMarkdown, setQuestionsMarkdown] = useState("");
-  const [planMarkdown, setPlanMarkdown] = useState(DEFAULT_PLAN);
+  return hasCloudPublicConfig() ? (
+    <ClerkTaskWorkspaceView taskId={taskId} />
+  ) : (
+    <TaskWorkspaceViewContent
+      taskId={taskId}
+      currentUser={{ kind: "user", id: "local-user", displayName: "You" }}
+    />
+  );
+}
+
+function ClerkTaskWorkspaceView({ taskId }: { taskId: string }) {
   const { user } = useClerk();
-  const commands = useTaskWorkspaceCommands(taskId);
-  const { dispatch, commandBase, pendingAction, isBusy, error } = commands;
   const currentUser = useMemo<TaskWorkspaceCommentAuthor>(
     () => ({
       kind: "user",
@@ -74,6 +79,24 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
     }),
     [user],
   );
+
+  return <TaskWorkspaceViewContent taskId={taskId} currentUser={currentUser} />;
+}
+
+function TaskWorkspaceViewContent({
+  taskId,
+  currentUser,
+}: {
+  taskId: string;
+  currentUser: TaskWorkspaceCommentAuthor;
+}) {
+  const task = useTaskWorkspaceStore((state) => state.taskById[taskId] ?? null);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const [questionsMarkdown, setQuestionsMarkdown] = useState("");
+  const [planMarkdown, setPlanMarkdown] = useState(DEFAULT_PLAN);
+  const commands = useTaskWorkspaceCommands(taskId);
+  const { dispatch, commandBase, pendingAction, isBusy, error } = commands;
 
   const questionsArtifact = task ? latestArtifact(task, "questions") : null;
   const planArtifact = task ? latestArtifact(task, "plan") : null;

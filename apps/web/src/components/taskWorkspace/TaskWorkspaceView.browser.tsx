@@ -12,6 +12,7 @@ import { TaskWorkspaceView } from "./TaskWorkspaceView";
 const mocks = vi.hoisted(() => ({
   dispatchCommand: vi.fn<(command: unknown) => Promise<void>>(async () => undefined),
   primaryEnvironmentId: "environment-local" as string | null,
+  useClerk: vi.fn(() => ({ user: null })),
 }));
 
 vi.mock("../../environments/primary", () => ({
@@ -19,7 +20,11 @@ vi.mock("../../environments/primary", () => ({
 }));
 
 vi.mock("@clerk/react", () => ({
-  useClerk: () => ({ user: null }),
+  useClerk: mocks.useClerk,
+}));
+
+vi.mock("../../cloud/publicConfig", () => ({
+  hasCloudPublicConfig: () => false,
 }));
 
 vi.mock("../../environments/runtime", () => ({
@@ -122,6 +127,7 @@ async function renderTask(task: TaskWorkspace) {
 
 beforeEach(() => {
   mocks.dispatchCommand.mockClear();
+  mocks.useClerk.mockClear();
   mocks.primaryEnvironmentId = "environment-local";
   useTaskWorkspaceStore.getState().reset();
 });
@@ -130,6 +136,7 @@ describe("TaskWorkspaceView", () => {
   it("renders the Questions stage and dispatches a versioned artifact command", async () => {
     await renderTask(baseTask);
 
+    expect(mocks.useClerk).not.toHaveBeenCalled();
     await expect.element(page.getByText("Questions session")).toBeVisible();
     await page.getByTestId("task-questions-editor").fill("# Questions\n\nNo blockers.");
     await page.getByTestId("task-save-questions").click();
