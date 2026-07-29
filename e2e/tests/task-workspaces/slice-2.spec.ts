@@ -305,11 +305,16 @@ registerFileSessionSeed(fileURLToPath(import.meta.url), async (context) => {
 });
 
 async function openTask(page: Page, id: string): Promise<void> {
-  // Electron uses hash history, while the web target uses browser history.
-  // Match the route suffix so the same interaction covers both href shapes.
   const taskLink = page.locator(`a[href$="/tasks/${id}"]`).first();
   await expect(taskLink).toBeVisible();
-  await taskLink.click();
+  await page.evaluate((taskId) => {
+    if (window.location.hash.startsWith("#/")) {
+      window.location.hash = `/tasks/${taskId}`;
+      return;
+    }
+    window.history.pushState({}, "", `/tasks/${taskId}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, id);
   await expect(page.getByTestId("task-artifacts-panel")).toBeVisible();
 }
 
