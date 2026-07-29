@@ -738,38 +738,38 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(TaskWorkspaceService)({
-          dispatch: (command) =>
-            Effect.succeed({
-              sequence: 0,
-              task: {
-                id: command.taskId,
-              } as never,
-            }),
-          getSnapshot: Effect.succeed({ sequence: 0, tasks: [] }),
-          getTask: () => Effect.succeed(null),
-          streamEvents: Stream.empty,
-          ...options?.layers?.taskWorkspace,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(CheckpointDiffQuery)({
-          getTurnDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          getFullThreadDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          ...options?.layers?.checkpointDiffQuery,
-        }),
+        Layer.mergeAll(
+          Layer.mock(TaskWorkspaceService)({
+            dispatch: (command) =>
+              Effect.succeed({
+                sequence: 0,
+                task: {
+                  id: command.taskId,
+                } as never,
+              }),
+            getSnapshot: Effect.succeed({ sequence: 0, tasks: [] }),
+            getTask: () => Effect.succeed(null),
+            streamEvents: Stream.empty,
+            ...options?.layers?.taskWorkspace,
+          }),
+          Layer.mock(CheckpointDiffQuery)({
+            getTurnDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            getFullThreadDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            ...options?.layers?.checkpointDiffQuery,
+          }),
+        ),
       ),
     );
 
