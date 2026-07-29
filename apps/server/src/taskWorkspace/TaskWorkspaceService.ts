@@ -149,6 +149,9 @@ function upsertArtifact(
     markdown: command.markdown,
     revision,
     sourceSessionId: command.sourceSessionId ?? null,
+    // Slice 2 lineage/block-index population is deferred to the Phase B reducer.
+    supersedesRevisionId: null,
+    blockIndex: [],
     createdAt: command.createdAt,
   } as const;
   const nextArtifact = existing
@@ -211,6 +214,7 @@ function initialTask(
     sessions: [],
     artifacts: [],
     comments: [],
+    contextManifests: [],
     build: {
       phases: [
         {
@@ -408,6 +412,12 @@ export const make = Effect.gen(function* () {
                 id: `session-${task.sessions.length + 1}`,
                 stage: command.stage,
                 threadId: command.threadId,
+                role: command.role,
+                provider: null,
+                status: "active" as const,
+                parentSessionId: null,
+                forkPoint: null,
+                contextManifestId: command.contextManifestId ?? null,
                 createdAt: command.createdAt,
               },
             ],
@@ -688,6 +698,11 @@ export const make = Effect.gen(function* () {
             delivery: { state: "unavailable" },
             updatedAt: command.createdAt,
           });
+        }
+        default: {
+          // Slice 2 commands (fork, select-revision, context-manifest.create,
+          // comment.*) are decoded by the contracts but handled in Phase B.
+          return yield* taskError(command, `Command '${command.type}' is not supported yet.`);
         }
       }
     } catch (cause) {

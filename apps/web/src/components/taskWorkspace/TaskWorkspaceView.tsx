@@ -273,6 +273,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                               ...commandBase("task.session.link"),
                               stage,
                               threadId: selectedThread.id,
+                              role: "primary",
                             },
                             "link-session",
                           );

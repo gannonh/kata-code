@@ -68,6 +68,7 @@ const baseTask: TaskWorkspace = {
   sessions: [],
   artifacts: [],
   comments: [],
+  contextManifests: [],
   build: {
     phases: [
       {

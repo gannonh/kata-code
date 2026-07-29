@@ -28,6 +28,7 @@ function makeTask(id: string, updatedAt: string): TaskWorkspace {
     sessions: [],
     artifacts: [],
     comments: [],
+    contextManifests: [],
     build: { phases: [], resultingCommitSha: null },
     verification: { criteria: [], results: [], signedOffAt: null },
     sourceLinks: [],

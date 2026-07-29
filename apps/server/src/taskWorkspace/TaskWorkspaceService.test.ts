@@ -159,6 +159,7 @@ describe("TaskWorkspaceService", () => {
               createdAt: now(2),
               stage: "questions",
               threadId: ThreadId.make("thread-questions"),
+              role: "primary",
             }),
           ),
         );
