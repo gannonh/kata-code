@@ -215,7 +215,13 @@ function upsertArtifact(
   command: Extract<TaskWorkspaceCommand, { type: "task.artifact.upsert" }>,
 ): TaskWorkspace {
   const existing = task.artifacts.find((artifact) => artifact.kind === command.kind);
-  const revision = (existing?.currentRevision ?? 0) + 1;
+  // Allocate the next revision number from the max stored revision, not currentRevision.
+  // Select-revision can leave currentRevision behind the latest lineage tip; upserting from
+  // that state must still append a unique higher revision (never collide on id/number).
+  const maxStoredRevision = existing
+    ? existing.revisions.reduce((max, candidate) => Math.max(max, candidate.revision), 0)
+    : 0;
+  const revision = maxStoredRevision + 1;
   const previousRevisionId =
     existing?.revisions.find((candidate) => candidate.revision === existing.currentRevision)?.id ??
     null;

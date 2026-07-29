@@ -622,6 +622,34 @@ describe("TaskWorkspaceService", () => {
         expect(selected.task.artifacts[0]?.currentRevision).toBe(1);
         expect(selected.task.artifacts[0]?.revisions).toHaveLength(2);
 
+        // Upsert after selecting an older current must append a unique tip (r3),
+        // not collide with the existing r2 lineage entry / revision id.
+        const afterSelectUpsert = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s2-questions-r3-after-select"),
+              taskId: slice2TaskId,
+              createdAt: now(12),
+              kind: "questions",
+              title: "Questions",
+              markdown: ["<!-- kata:block:intro -->", "# Intro", "Third body.", ""].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        const afterSelectArtifact = afterSelectUpsert.task.artifacts[0];
+        expect(afterSelectArtifact?.currentRevision).toBe(3);
+        expect(afterSelectArtifact?.revisions.map((entry) => entry.revision)).toEqual([1, 2, 3]);
+        expect(afterSelectArtifact?.revisions.map((entry) => entry.id)).toEqual([
+          "questions-revision-1",
+          "questions-revision-2",
+          "questions-revision-3",
+        ]);
+        expect(afterSelectArtifact?.revisions[2]?.supersedesRevisionId).toBe(
+          "questions-revision-1",
+        );
+
         // Selecting a non-existent revision fails.
         const badSelect = yield* runtime.runPromiseExit(
           service.dispatch(
@@ -629,7 +657,7 @@ describe("TaskWorkspaceService", () => {
               type: "task.artifact.select-revision",
               commandId: CommandId.make("s2-select-bad"),
               taskId: slice2TaskId,
-              createdAt: now(12),
+              createdAt: now(13),
               kind: "questions",
               revision: 99,
             }),
