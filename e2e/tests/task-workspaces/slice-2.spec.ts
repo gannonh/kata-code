@@ -305,11 +305,9 @@ registerFileSessionSeed(fileURLToPath(import.meta.url), async (context) => {
 });
 
 async function openTask(page: Page, id: string): Promise<void> {
-  const url = new URL(page.url());
-  url.pathname = `/tasks/${id}`;
-  url.search = "";
-  url.hash = "";
-  await page.goto(url.toString());
+  const taskLink = page.locator(`a[href="/tasks/${id}"]`).first();
+  await expect(taskLink).toBeVisible();
+  await taskLink.click();
   await expect(page.getByTestId("task-artifacts-panel")).toBeVisible();
 }
 
