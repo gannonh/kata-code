@@ -103,6 +103,40 @@ function requireArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind): 
   }
 }
 
+function requireContextManifest(task: TaskWorkspace, manifestId: string): void {
+  if (!task.contextManifests.some((manifest) => manifest.id === manifestId)) {
+    throw new Error(`Context manifest '${manifestId}' was not found.`);
+  }
+}
+
+function validateContextManifestRefs(
+  task: TaskWorkspace,
+  command: Extract<TaskWorkspaceCommand, { type: "task.context-manifest.create" }>,
+): void {
+  if (
+    command.sessionId !== undefined &&
+    command.sessionId !== null &&
+    !task.sessions.some((session) => session.id === command.sessionId)
+  ) {
+    throw new Error(`Session '${command.sessionId}' was not found.`);
+  }
+
+  for (const ref of command.artifactRefs) {
+    const artifact = task.artifacts.find((candidate) => candidate.kind === ref.kind);
+    const revision = artifact?.revisions.find((candidate) => candidate.revision === ref.revision);
+    if (!revision) {
+      throw new Error(`Revision ${ref.revision} does not exist for the ${ref.kind} artifact.`);
+    }
+    for (const blockId of ref.blockIds) {
+      if (!revision.blockIndex.some((entry) => entry.id === blockId)) {
+        throw new Error(
+          `Block '${blockId}' does not exist in revision ${ref.revision} of the ${ref.kind} artifact.`,
+        );
+      }
+    }
+  }
+}
+
 function expectedTaskWorktreePath(
   worktreesDir: string,
   workspaceRoot: string,
@@ -153,10 +187,16 @@ function tryAdoptExistingWorktree(
 function buildBlockIndex(markdown: string): ReadonlyArray<TaskWorkspaceBlockIndexEntry> {
   const markerRe = /<!--\s*kata:block:([\w.-]+)\s*-->/g;
   const markers: Array<{ id: string; markerStart: number; contentStart: number }> = [];
+  const seenIds = new Set<string>();
   let match: RegExpExecArray | null;
   while ((match = markerRe.exec(markdown)) !== null) {
+    const id = match[1]!;
+    if (seenIds.has(id)) {
+      throw new Error(`Duplicate artifact block id '${id}'.`);
+    }
+    seenIds.add(id);
     markers.push({
-      id: match[1]!,
+      id,
       markerStart: match.index,
       contentStart: match.index + match[0].length,
     });
@@ -166,7 +206,10 @@ function buildBlockIndex(markdown: string): ReadonlyArray<TaskWorkspaceBlockInde
   for (let index = 0; index < markers.length; index += 1) {
     const current = markers[index]!;
     const end = index + 1 < markers.length ? markers[index + 1]!.markerStart : markdown.length;
-    const content = markdown.slice(current.contentStart, end);
+    // Inter-block spacing and the file's final newline are formatting boundaries,
+    // not block content. Ignore trailing boundary whitespace so routine Markdown
+    // formatting does not make anchored comments stale.
+    const content = markdown.slice(current.contentStart, end).trimEnd();
     const contentHash = createHash("sha256").update(content).digest("hex");
     const headingMatch = content.match(headingRe);
     const headingPath = headingMatch ? [headingMatch[1]!] : [];
@@ -497,8 +540,11 @@ export const make = Effect.gen(function* () {
           ) {
             throw new Error(`A ${command.role} session requires a context manifest.`);
           }
+          if (command.contextManifestId != null) {
+            requireContextManifest(task, command.contextManifestId);
+          }
           if (task.sessions.some((session) => session.threadId === command.threadId)) {
-            return yield* append(command, { ...task, updatedAt: command.createdAt });
+            throw new Error(`Thread '${command.threadId}' is already linked to this task.`);
           }
           return yield* append(command, {
             ...task,
@@ -537,8 +583,9 @@ export const make = Effect.gen(function* () {
               );
             }
           }
+          requireContextManifest(task, command.contextManifestId);
           if (task.sessions.some((session) => session.threadId === command.threadId)) {
-            return yield* append(command, { ...task, updatedAt: command.createdAt });
+            throw new Error(`Thread '${command.threadId}' is already linked to this task.`);
           }
           return yield* append(command, {
             ...task,
@@ -581,6 +628,7 @@ export const make = Effect.gen(function* () {
           });
         }
         case "task.context-manifest.create": {
+          validateContextManifestRefs(task, command);
           const manifestId = `manifest-${task.contextManifests.length + 1}`;
           return yield* append(command, {
             ...task,

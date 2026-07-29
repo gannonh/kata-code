@@ -392,6 +392,7 @@ describe("TaskWorkspaceService", () => {
     const baseDir = NodePath.join(root, "state");
     yield* Effect.tryPromise(() => NodeFs.mkdir(repoRoot, { recursive: true }));
     const runtime = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+    yield* Effect.addFinalizer(() => runtime.dispose);
     return { runtime, repoRoot, baseDir };
   });
 
@@ -435,120 +436,6 @@ describe("TaskWorkspaceService", () => {
           ),
         );
 
-        // Context manifest for downstream sessions.
-        const manifested = yield* runtime.runPromise(
-          service.dispatch(
-            command({
-              type: "task.context-manifest.create",
-              commandId: CommandId.make("s2-manifest"),
-              taskId: slice2TaskId,
-              createdAt: now(3),
-              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
-              notes: "context for alternatives",
-              sessionId: "session-1",
-            }),
-          ),
-        );
-        expect(manifested.task.contextManifests).toEqual([
-          expect.objectContaining({ id: "manifest-1", notes: "context for alternatives" }),
-        ]);
-
-        // Alternative link without a manifest is rejected.
-        const alternativeWithoutManifest = yield* runtime.runPromiseExit(
-          service.dispatch(
-            command({
-              type: "task.session.link",
-              commandId: CommandId.make("s2-alt-no-manifest"),
-              taskId: slice2TaskId,
-              createdAt: now(4),
-              stage: "questions",
-              threadId: ThreadId.make("thread-alt"),
-              role: "alternative",
-            }),
-          ),
-        );
-        expect(alternativeWithoutManifest._tag).toBe("Failure");
-
-        // Alternative link with a manifest succeeds.
-        yield* runtime.runPromise(
-          service.dispatch(
-            command({
-              type: "task.session.link",
-              commandId: CommandId.make("s2-alt-manifest"),
-              taskId: slice2TaskId,
-              createdAt: now(5),
-              stage: "questions",
-              threadId: ThreadId.make("thread-alt"),
-              role: "alternative",
-              contextManifestId: "manifest-1",
-            }),
-          ),
-        );
-
-        // Ad-hoc link uses stage null and does not advance the workflow.
-        const adHoc = yield* runtime.runPromise(
-          service.dispatch(
-            command({
-              type: "task.session.link",
-              commandId: CommandId.make("s2-adhoc"),
-              taskId: slice2TaskId,
-              createdAt: now(6),
-              stage: null,
-              threadId: ThreadId.make("thread-adhoc"),
-              role: "ad-hoc",
-            }),
-          ),
-        );
-        expect(adHoc.task.workflowRuns.at(-1)?.currentStage).toBe("questions");
-        expect(
-          adHoc.task.sessions.find((session) => session.threadId === "thread-adhoc"),
-        ).toMatchObject({ role: "ad-hoc", stage: null });
-
-        // Fork records parent + fork point + manifest.
-        const forked = yield* runtime.runPromise(
-          service.dispatch(
-            command({
-              type: "task.session.fork",
-              commandId: CommandId.make("s2-fork"),
-              taskId: slice2TaskId,
-              createdAt: now(7),
-              parentSessionId: "session-1",
-              threadId: ThreadId.make("thread-fork"),
-              forkPoint: "turn-3",
-              role: "reviewer",
-              contextManifestId: "manifest-1",
-              stage: "questions",
-            }),
-          ),
-        );
-        expect(
-          forked.task.sessions.find((session) => session.threadId === "thread-fork"),
-        ).toMatchObject({
-          role: "reviewer",
-          parentSessionId: "session-1",
-          forkPoint: "turn-3",
-          contextManifestId: "manifest-1",
-        });
-
-        // Fork against a missing parent fails loudly.
-        const missingParentFork = yield* runtime.runPromiseExit(
-          service.dispatch(
-            command({
-              type: "task.session.fork",
-              commandId: CommandId.make("s2-fork-missing"),
-              taskId: slice2TaskId,
-              createdAt: now(8),
-              parentSessionId: "session-999",
-              threadId: ThreadId.make("thread-fork-missing"),
-              forkPoint: "turn-1",
-              role: "reviewer",
-              contextManifestId: "manifest-1",
-              stage: "questions",
-            }),
-          ),
-        );
-        expect(missingParentFork._tag).toBe("Failure");
-
         // Artifact upsert persists a block index with heading paths and content hashes.
         const withBlocks = yield* runtime.runPromise(
           service.dispatch(
@@ -556,7 +443,7 @@ describe("TaskWorkspaceService", () => {
               type: "task.artifact.upsert",
               commandId: CommandId.make("s2-questions-r1"),
               taskId: slice2TaskId,
-              createdAt: now(9),
+              createdAt: now(3),
               kind: "questions",
               title: "Questions",
               markdown: [
@@ -586,6 +473,232 @@ describe("TaskWorkspaceService", () => {
 
         // Frontmatter `status: approved` does not mutate the workflow.
         expect(withBlocks.task.workflowRuns.at(-1)?.currentStage).toBe("questions");
+
+        // Context manifest for downstream sessions.
+        const manifested = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+              notes: "context for alternatives",
+              sessionId: "session-1",
+            }),
+          ),
+        );
+        expect(manifested.task.contextManifests).toEqual([
+          expect.objectContaining({ id: "manifest-1", notes: "context for alternatives" }),
+        ]);
+
+        const missingRevisionManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2-manifest-missing-revision"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactRefs: [{ kind: "questions", revision: 0, blockIds: [] }],
+              notes: null,
+              sessionId: null,
+            }),
+          ),
+        );
+        expect(missingRevisionManifest._tag).toBe("Failure");
+
+        const missingBlockManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2-manifest-missing-block"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["missing"] }],
+              notes: null,
+              sessionId: null,
+            }),
+          ),
+        );
+        expect(missingBlockManifest._tag).toBe("Failure");
+
+        const missingSessionManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2-manifest-missing-session"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+              notes: null,
+              sessionId: "session-999",
+            }),
+          ),
+        );
+        expect(missingSessionManifest._tag).toBe("Failure");
+
+        // Alternative link without a manifest is rejected.
+        const alternativeWithoutManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-alt-no-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(5),
+              stage: "questions",
+              threadId: ThreadId.make("thread-alt"),
+              role: "alternative",
+            }),
+          ),
+        );
+        expect(alternativeWithoutManifest._tag).toBe("Failure");
+
+        const alternativeWithUnknownManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-alt-unknown-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(5),
+              stage: "questions",
+              threadId: ThreadId.make("thread-alt-unknown"),
+              role: "alternative",
+              contextManifestId: "manifest-999",
+            }),
+          ),
+        );
+        expect(alternativeWithUnknownManifest._tag).toBe("Failure");
+
+        // Alternative link with a manifest succeeds.
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-alt-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(6),
+              stage: "questions",
+              threadId: ThreadId.make("thread-alt"),
+              role: "alternative",
+              contextManifestId: "manifest-1",
+            }),
+          ),
+        );
+
+        // Ad-hoc link uses stage null and does not advance the workflow.
+        const adHoc = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-adhoc"),
+              taskId: slice2TaskId,
+              createdAt: now(7),
+              stage: null,
+              threadId: ThreadId.make("thread-adhoc"),
+              role: "ad-hoc",
+            }),
+          ),
+        );
+        expect(adHoc.task.workflowRuns.at(-1)?.currentStage).toBe("questions");
+        expect(
+          adHoc.task.sessions.find((session) => session.threadId === "thread-adhoc"),
+        ).toMatchObject({ role: "ad-hoc", stage: null });
+
+        const reusedLinkThread = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-link-reused-thread"),
+              taskId: slice2TaskId,
+              createdAt: now(7),
+              stage: "questions",
+              threadId: ThreadId.make("thread-primary"),
+              role: "debugging",
+            }),
+          ),
+        );
+        expect(reusedLinkThread._tag).toBe("Failure");
+
+        // Fork records parent + fork point + manifest.
+        const forked = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.fork",
+              commandId: CommandId.make("s2-fork"),
+              taskId: slice2TaskId,
+              createdAt: now(8),
+              parentSessionId: "session-1",
+              threadId: ThreadId.make("thread-fork"),
+              forkPoint: "turn-3",
+              role: "reviewer",
+              contextManifestId: "manifest-1",
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(
+          forked.task.sessions.find((session) => session.threadId === "thread-fork"),
+        ).toMatchObject({
+          role: "reviewer",
+          parentSessionId: "session-1",
+          forkPoint: "turn-3",
+          contextManifestId: "manifest-1",
+        });
+
+        // Fork against a missing parent fails loudly.
+        const missingParentFork = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.fork",
+              commandId: CommandId.make("s2-fork-missing"),
+              taskId: slice2TaskId,
+              createdAt: now(9),
+              parentSessionId: "session-999",
+              threadId: ThreadId.make("thread-fork-missing"),
+              forkPoint: "turn-1",
+              role: "reviewer",
+              contextManifestId: "manifest-1",
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(missingParentFork._tag).toBe("Failure");
+
+        const missingManifestFork = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.fork",
+              commandId: CommandId.make("s2-fork-missing-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(9),
+              parentSessionId: "session-1",
+              threadId: ThreadId.make("thread-fork-missing-manifest"),
+              forkPoint: "turn-1",
+              role: "reviewer",
+              contextManifestId: "manifest-999",
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(missingManifestFork._tag).toBe("Failure");
+
+        const reusedForkThread = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.fork",
+              commandId: CommandId.make("s2-fork-reused-thread"),
+              taskId: slice2TaskId,
+              createdAt: now(9),
+              parentSessionId: "session-1",
+              threadId: ThreadId.make("thread-alt"),
+              forkPoint: "turn-2",
+              role: "reviewer",
+              contextManifestId: "manifest-1",
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(reusedForkThread._tag).toBe("Failure");
 
         // Second revision sets lineage back to the first revision.
         const withSecond = yield* runtime.runPromise(
@@ -665,7 +778,30 @@ describe("TaskWorkspaceService", () => {
         );
         expect(badSelect._tag).toBe("Failure");
 
-        yield* runtime.dispose;
+        const duplicateBlockUpsert = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s2-duplicate-block"),
+              taskId: slice2TaskId,
+              createdAt: now(13),
+              kind: "questions",
+              title: "Questions",
+              markdown: [
+                "<!-- kata:block:intro -->",
+                "# Intro",
+                "First.",
+                "<!-- kata:block:intro -->",
+                "# Intro again",
+                "Second.",
+              ].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        expect(duplicateBlockUpsert._tag).toBe("Failure");
+        const afterDuplicateBlock = yield* runtime.runPromise(service.getTask(slice2TaskId));
+        expect(afterDuplicateBlock?.artifacts[0]?.currentRevision).toBe(3);
       }),
     30_000,
   );
@@ -794,6 +930,19 @@ describe("TaskWorkspaceService", () => {
           ),
         );
 
+        // Boundary-only whitespace changes do not invalidate block hashes.
+        const withBoundaryWhitespace = `${rev1.replace(
+          "<!-- kata:block:steps -->",
+          "\n\n<!-- kata:block:steps -->",
+        )}\n\n`;
+        const afterBoundaryWhitespace = yield* runtime.runPromise(
+          upsert("s2c-boundary-whitespace", now(7), withBoundaryWhitespace),
+        );
+        expect(afterBoundaryWhitespace.task.comments.map((thread) => thread.status)).toEqual([
+          "open",
+          "open",
+        ]);
+
         // Revision 2 changes the intro body only -> intro outdated, steps still open.
         const rev2 = [
           "<!-- kata:block:intro -->",
@@ -882,98 +1031,99 @@ describe("TaskWorkspaceService", () => {
         expect(afterOrphan.task.comments.find((t) => t.id === "comment-1")?.status).toBe(
           "orphaned",
         );
-
-        yield* runtime.dispose;
       }),
     30_000,
   );
 
-  it.effect("replays Slice 2 comments, sessions, manifests, and block indexes after restart", () =>
-    Effect.gen(function* () {
-      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-s2-restart-");
-      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+  it.effect(
+    "replays Slice 2 comments, sessions, manifests, and block indexes after restart",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-s2-restart-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
 
-      yield* runtime.runPromise(service.dispatch(createSlice2Task(now(1), repoRoot)));
-      yield* runtime.runPromise(
-        service.dispatch(
-          command({
-            type: "task.context-manifest.create",
-            commandId: CommandId.make("s2r-manifest"),
-            taskId: slice2TaskId,
-            createdAt: now(2),
-            artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
-            notes: null,
-            sessionId: null,
-          }),
-        ),
-      );
-      yield* runtime.runPromise(
-        service.dispatch(
-          command({
-            type: "task.session.link",
-            commandId: CommandId.make("s2r-link"),
-            taskId: slice2TaskId,
-            createdAt: now(3),
-            stage: "questions",
-            threadId: ThreadId.make("thread-restart"),
-            role: "alternative",
-            contextManifestId: "manifest-1",
-          }),
-        ),
-      );
-      yield* runtime.runPromise(
-        service.dispatch(
-          command({
-            type: "task.artifact.upsert",
-            commandId: CommandId.make("s2r-upsert"),
-            taskId: slice2TaskId,
-            createdAt: now(4),
-            kind: "questions",
-            title: "Questions",
-            markdown: ["<!-- kata:block:intro -->", "# Intro", "Body.", ""].join("\n"),
-            sourceSessionId: null,
-          }),
-        ),
-      );
-      yield* runtime.runPromise(
-        service.dispatch(
-          command({
-            type: "task.comment.create",
-            commandId: CommandId.make("s2r-comment"),
-            taskId: slice2TaskId,
-            createdAt: now(5),
-            artifactId: "questions-artifact",
-            anchorBlockId: "intro",
-            baseRevisionId: "questions-revision-1",
-            author: { kind: "user", id: "user-1", displayName: "Ada" },
-            body: "Please expand.",
-          }),
-        ),
-      );
-      yield* runtime.dispose;
+        yield* runtime.runPromise(service.dispatch(createSlice2Task(now(1), repoRoot)));
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s2r-upsert"),
+              taskId: slice2TaskId,
+              createdAt: now(2),
+              kind: "questions",
+              title: "Questions",
+              markdown: ["<!-- kata:block:intro -->", "# Intro", "Body.", ""].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2r-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(3),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+              notes: null,
+              sessionId: null,
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2r-link"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              stage: "questions",
+              threadId: ThreadId.make("thread-restart"),
+              role: "alternative",
+              contextManifestId: "manifest-1",
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.comment.create",
+              commandId: CommandId.make("s2r-comment"),
+              taskId: slice2TaskId,
+              createdAt: now(5),
+              artifactId: "questions-artifact",
+              anchorBlockId: "intro",
+              baseRevisionId: "questions-revision-1",
+              author: { kind: "user", id: "user-1", displayName: "Ada" },
+              body: "Please expand.",
+            }),
+          ),
+        );
+        yield* runtime.dispose;
 
-      const restarted = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
-      const restartedService = yield* restarted.runPromise(Effect.service(TaskWorkspaceService));
-      const replayed = yield* restarted.runPromise(restartedService.getTask(slice2TaskId));
-      expect(replayed?.contextManifests).toHaveLength(1);
-      expect(replayed?.sessions.find((s) => s.threadId === "thread-restart")).toMatchObject({
-        role: "alternative",
-        contextManifestId: "manifest-1",
-        status: "active",
-        provider: null,
-      });
-      expect(replayed?.artifacts[0]?.revisions[0]?.blockIndex[0]).toMatchObject({ id: "intro" });
-      expect(replayed?.comments[0]).toMatchObject({
-        id: "comment-1",
-        status: "open",
-        anchorBlockId: "intro",
-      });
-      expect(replayed?.comments[0]?.messages[0]?.author).toMatchObject({
-        kind: "user",
-        displayName: "Ada",
-      });
-      yield* restarted.dispose;
-    }),
+        const restarted = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+        const restartedService = yield* restarted.runPromise(Effect.service(TaskWorkspaceService));
+        const replayed = yield* restarted.runPromise(restartedService.getTask(slice2TaskId));
+        expect(replayed?.contextManifests).toHaveLength(1);
+        expect(replayed?.sessions.find((s) => s.threadId === "thread-restart")).toMatchObject({
+          role: "alternative",
+          contextManifestId: "manifest-1",
+          status: "active",
+          provider: null,
+        });
+        expect(replayed?.artifacts[0]?.revisions[0]?.blockIndex[0]).toMatchObject({ id: "intro" });
+        expect(replayed?.comments[0]).toMatchObject({
+          id: "comment-1",
+          status: "open",
+          anchorBlockId: "intro",
+        });
+        expect(replayed?.comments[0]?.messages[0]?.author).toMatchObject({
+          kind: "user",
+          displayName: "Ada",
+        });
+        yield* restarted.dispose;
+      }),
+    30_000,
   );
 
   it.effect("fails startup when persisted task history is corrupt", () =>

@@ -13,6 +13,31 @@ const decodeCommand = Schema.decodeUnknownEffect(TaskWorkspaceCommand);
 const decodeStreamItem = Schema.decodeUnknownEffect(TaskWorkspaceStreamItem);
 const decodeEvent = Schema.decodeUnknownEffect(TaskWorkspaceEvent);
 
+function slice1Task(overrides: Record<string, unknown>) {
+  return {
+    id: "task-1",
+    title: "Slice 1",
+    versions: {
+      taskContract: "task-workspace@0.1.0",
+      artifactContract: "task-artifact@0.1.0",
+      workflowDefinition: "standard@0.1.0",
+      prompt: "task-workspace-slice-1@0.1.0",
+    },
+    workspace: { repositories: [] },
+    workflowRuns: [],
+    sessions: [],
+    artifacts: [],
+    comments: [],
+    build: { phases: [], resultingCommitSha: null },
+    verification: { criteria: [], results: [], signedOffAt: null },
+    sourceLinks: [],
+    delivery: { state: "unavailable" },
+    createdAt: "2026-07-28T17:00:00.000Z",
+    updatedAt: "2026-07-28T17:00:00.000Z",
+    ...overrides,
+  };
+}
+
 it.effect("decodes the Standard task creation contract", () =>
   Effect.gen(function* () {
     const command = yield* decodeCommand({
@@ -122,17 +147,7 @@ it.effect("applies Slice 1 replay defaults when decoding a session without role 
       taskId: "task-1",
       type: "task.session.link",
       occurredAt: "2026-07-28T17:00:00.000Z",
-      task: {
-        id: "task-1",
-        title: "Slice 1",
-        versions: {
-          taskContract: "task-workspace@0.1.0",
-          artifactContract: "task-artifact@0.1.0",
-          workflowDefinition: "standard@0.1.0",
-          prompt: "task-workspace-slice-1@0.1.0",
-        },
-        workspace: { repositories: [] },
-        workflowRuns: [],
+      task: slice1Task({
         sessions: [
           {
             id: "session-1",
@@ -141,15 +156,7 @@ it.effect("applies Slice 1 replay defaults when decoding a session without role 
             createdAt: "2026-07-28T17:00:00.000Z",
           },
         ],
-        artifacts: [],
-        comments: [],
-        build: { phases: [], resultingCommitSha: null },
-        verification: { criteria: [], results: [], signedOffAt: null },
-        sourceLinks: [],
-        delivery: { state: "unavailable" },
-        createdAt: "2026-07-28T17:00:00.000Z",
-        updatedAt: "2026-07-28T17:00:00.000Z",
-      },
+      }),
     });
 
     const session = event.task.sessions[0];
@@ -176,18 +183,7 @@ it.effect("applies Slice 1 replay defaults when decoding an artifact revision", 
       taskId: "task-1",
       type: "task.artifact.upsert",
       occurredAt: "2026-07-28T17:00:00.000Z",
-      task: {
-        id: "task-1",
-        title: "Slice 1",
-        versions: {
-          taskContract: "task-workspace@0.1.0",
-          artifactContract: "task-artifact@0.1.0",
-          workflowDefinition: "standard@0.1.0",
-          prompt: "task-workspace-slice-1@0.1.0",
-        },
-        workspace: { repositories: [] },
-        workflowRuns: [],
-        sessions: [],
+      task: slice1Task({
         artifacts: [
           {
             id: "artifact-plan",
@@ -206,14 +202,7 @@ it.effect("applies Slice 1 replay defaults when decoding an artifact revision", 
             ],
           },
         ],
-        comments: [],
-        build: { phases: [], resultingCommitSha: null },
-        verification: { criteria: [], results: [], signedOffAt: null },
-        sourceLinks: [],
-        delivery: { state: "unavailable" },
-        createdAt: "2026-07-28T17:00:00.000Z",
-        updatedAt: "2026-07-28T17:00:00.000Z",
-      },
+      }),
     });
 
     const revision = event.task.artifacts[0]?.revisions[0];
