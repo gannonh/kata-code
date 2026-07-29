@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces Slice 2 child plan drafted)
+
+- Added Draft [Slice 2 child plan](/specs/2026-07-29-task-workspaces-slice-2-plan.md) for artifact workspace, block comments, multi-session/ad hoc/fork/reviewer (TW-AC5/6/7), base SHA `12cc158e`.
+- Adversarial review incorporated: parent role literals, persisted block index, command schemas, stable AC ids, author identity, child-spec research/UI/test/evidence sections.
+- Branch: `cursor/task-workspaces-slice-2-3420`. Awaiting human review before Approved / Build.
+
 ## 2026-07-29 (Task workspaces parent Approved; Slice 1 Verified)
 
 - Marked [Task workspaces vertical-slices parent](/specs/2026-07-28-task-workspaces-vertical-slices-design.md) **Approved**; it supersedes [Task mode](/specs/2026-07-03-task-mode-design.md).
