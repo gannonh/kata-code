@@ -362,9 +362,19 @@ test.describe(`Task workspaces Slice 2 ${E2E_TAGS.taskWorkspaces}`, () => {
     await expect(artifacts.getByText("Revised body.")).toBeVisible();
 
     const sessions = appWindow.getByTestId("task-sessions-panel");
-    await expect(sessions.getByText("alternative", { exact: true })).toBeVisible();
-    await expect(sessions.getByText("ad-hoc", { exact: true })).toBeVisible();
-    await expect(sessions.getByText("reviewer", { exact: true })).toBeVisible();
+    await expect(
+      sessions
+        .getByTestId("task-session-session-alternative")
+        .getByText("alternative", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      sessions.getByTestId("task-session-session-ad-hoc").getByText("ad-hoc", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      sessions
+        .getByTestId("task-session-session-review-fork")
+        .getByText("reviewer", { exact: true }),
+    ).toBeVisible();
     await expect(
       sessions
         .getByTestId("task-session-session-review-fork")
