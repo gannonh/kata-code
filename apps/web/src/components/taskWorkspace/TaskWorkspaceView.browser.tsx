@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { EnvironmentId, ProjectId, type TaskWorkspace } from "@kata-sh/code-contracts";
+import { ProjectId, type TaskWorkspace, ThreadId } from "@kata-sh/code-contracts";
 import { page } from "vite-plus/test/browser";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -11,10 +11,20 @@ import { TaskWorkspaceView } from "./TaskWorkspaceView";
 
 const mocks = vi.hoisted(() => ({
   dispatchCommand: vi.fn<(command: unknown) => Promise<void>>(async () => undefined),
+  primaryEnvironmentId: "environment-local" as string | null,
+  useClerk: vi.fn(() => ({ user: null })),
 }));
 
 vi.mock("../../environments/primary", () => ({
-  usePrimaryEnvironmentId: () => EnvironmentId.make("environment-local"),
+  usePrimaryEnvironmentId: () => mocks.primaryEnvironmentId,
+}));
+
+vi.mock("@clerk/react", () => ({
+  useClerk: mocks.useClerk,
+}));
+
+vi.mock("../../cloud/publicConfig", () => ({
+  hasCloudPublicConfig: () => false,
 }));
 
 vi.mock("../../environments/runtime", () => ({
@@ -68,6 +78,7 @@ const baseTask: TaskWorkspace = {
   sessions: [],
   artifacts: [],
   comments: [],
+  contextManifests: [],
   build: {
     phases: [
       {
@@ -116,6 +127,8 @@ async function renderTask(task: TaskWorkspace) {
 
 beforeEach(() => {
   mocks.dispatchCommand.mockClear();
+  mocks.useClerk.mockClear();
+  mocks.primaryEnvironmentId = "environment-local";
   useTaskWorkspaceStore.getState().reset();
 });
 
@@ -123,6 +136,7 @@ describe("TaskWorkspaceView", () => {
   it("renders the Questions stage and dispatches a versioned artifact command", async () => {
     await renderTask(baseTask);
 
+    expect(mocks.useClerk).not.toHaveBeenCalled();
     await expect.element(page.getByText("Questions session")).toBeVisible();
     await page.getByTestId("task-questions-editor").fill("# Questions\n\nNo blockers.");
     await page.getByTestId("task-save-questions").click();
@@ -134,6 +148,204 @@ describe("TaskWorkspaceView", () => {
       kind: "questions",
       markdown: "# Questions\n\nNo blockers.",
     });
+  });
+
+  it("renders the artifacts panel with revision lineage and the sessions navigator", async () => {
+    // Router-linked "Open" buttons need a RouterProvider; render without a
+    // primary environment so the navigator lists sessions without those links.
+    mocks.primaryEnvironmentId = null;
+    await renderTask({
+      ...baseTask,
+      workflowRuns: [
+        {
+          ...baseTask.workflowRuns[0]!,
+          currentStage: "plan",
+        },
+      ],
+      sessions: [
+        {
+          id: "session-1",
+          stage: "plan",
+          threadId: ThreadId.make("thread-plan-primary"),
+          role: "primary",
+          provider: "codex",
+          status: "active",
+          parentSessionId: null,
+          forkPoint: null,
+          contextManifestId: null,
+          createdAt: "2026-07-28T17:05:00.000Z",
+        },
+      ],
+      artifacts: [
+        {
+          id: "artifact-plan",
+          kind: "plan",
+          currentRevision: 2,
+          revisions: [
+            {
+              id: "artifact-plan-r1",
+              kind: "plan",
+              title: "Implementation plan",
+              markdown: "# Plan v1",
+              revision: 1,
+              sourceSessionId: "session-1",
+              supersedesRevisionId: null,
+              blockIndex: [],
+              createdAt: "2026-07-28T17:06:00.000Z",
+            },
+            {
+              id: "artifact-plan-r2",
+              kind: "plan",
+              title: "Implementation plan",
+              markdown: "# Plan v2",
+              revision: 2,
+              sourceSessionId: "session-1",
+              supersedesRevisionId: "artifact-plan-r1",
+              blockIndex: [],
+              createdAt: "2026-07-28T17:07:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    await expect.element(page.getByTestId("task-artifacts-panel")).toBeVisible();
+    await expect.element(page.getByTestId("task-artifact-revision-1")).toBeVisible();
+    await expect.element(page.getByTestId("task-artifact-revision-2")).toBeVisible();
+
+    const sessionsPanel = page.getByTestId("task-sessions-panel");
+    await expect.element(sessionsPanel).toBeVisible();
+    await expect
+      .element(sessionsPanel.getByText(/provider codex .* thread thread-pla/))
+      .toBeVisible();
+
+    await page.getByTestId("task-artifact-revision-1").click();
+    await page.getByTestId("task-select-revision").click();
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.artifact.select-revision",
+      kind: "plan",
+      revision: 1,
+    });
+
+    await expect.element(page.getByLabelText("Manifest revision")).toHaveValue("2");
+    await page.getByRole("button", { name: "Inspect" }).click();
+    await expect.element(page.getByLabelText("Manifest target session")).toHaveValue("");
+  });
+
+  it("uses the primary stage session even when an alternative was linked first", async () => {
+    mocks.primaryEnvironmentId = null;
+    await renderTask({
+      ...baseTask,
+      workflowRuns: [{ ...baseTask.workflowRuns[0]!, currentStage: "plan" }],
+      sessions: [
+        {
+          id: "session-alternative",
+          stage: "plan",
+          threadId: ThreadId.make("thread-alternative"),
+          role: "alternative",
+          provider: null,
+          status: "active",
+          parentSessionId: null,
+          forkPoint: null,
+          contextManifestId: "manifest-1",
+          createdAt: "2026-07-28T17:05:00.000Z",
+        },
+        {
+          id: "session-primary",
+          stage: "plan",
+          threadId: ThreadId.make("thread-primary"),
+          role: "primary",
+          provider: null,
+          status: "active",
+          parentSessionId: null,
+          forkPoint: null,
+          contextManifestId: null,
+          createdAt: "2026-07-28T17:06:00.000Z",
+        },
+      ],
+      artifacts: [
+        {
+          id: "plan-artifact",
+          kind: "plan",
+          currentRevision: 1,
+          revisions: [
+            {
+              id: "plan-revision-1",
+              kind: "plan",
+              title: "Plan",
+              markdown: "# Plan",
+              revision: 1,
+              sourceSessionId: "session-primary",
+              supersedesRevisionId: null,
+              blockIndex: [],
+              createdAt: "2026-07-28T17:07:00.000Z",
+            },
+          ],
+        },
+      ],
+      contextManifests: [
+        {
+          id: "manifest-1",
+          taskId: baseTask.id,
+          sessionId: null,
+          artifactRefs: [{ kind: "plan", revision: 1, blockIds: [] }],
+          notes: null,
+          createdAt: "2026-07-28T17:04:00.000Z",
+        },
+      ],
+    });
+
+    await page.getByTestId("task-plan-editor").fill("# Updated plan");
+    await page.getByTestId("task-save-plan").click();
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.artifact.upsert",
+      sourceSessionId: "session-primary",
+    });
+  });
+
+  it("preserves comment input when command dispatch fails", async () => {
+    mocks.dispatchCommand.mockRejectedValueOnce(new Error("Rejected comment"));
+    await renderTask({
+      ...baseTask,
+      workflowRuns: [{ ...baseTask.workflowRuns[0]!, currentStage: "plan" }],
+      artifacts: [
+        {
+          id: "plan-artifact",
+          kind: "plan",
+          currentRevision: 1,
+          revisions: [
+            {
+              id: "plan-revision-1",
+              kind: "plan",
+              title: "Plan",
+              markdown: "<!-- kata:block:intro -->\n# Intro\nBody.",
+              revision: 1,
+              sourceSessionId: null,
+              supersedesRevisionId: null,
+              blockIndex: [
+                {
+                  id: "intro",
+                  headingPath: ["Intro"],
+                  contentHash: "abc123",
+                },
+              ],
+              createdAt: "2026-07-28T17:07:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    await page.getByLabelText("Comment block").selectOptions("intro");
+    await page.getByLabelText("Comment body").fill("Keep this text");
+    await page.getByTestId("task-comment-create").click();
+
+    await expect.element(page.getByLabelText("Comment block")).toHaveValue("intro");
+    await expect.element(page.getByLabelText("Comment body")).toHaveValue("Keep this text");
+    await expect
+      .element(page.getByTestId("task-command-error"))
+      .toHaveTextContent("Rejected comment");
   });
 
   it("renders exact-SHA Verified signoff and keeps Deliver unavailable", async () => {

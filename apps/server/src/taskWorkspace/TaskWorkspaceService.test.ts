@@ -159,6 +159,7 @@ describe("TaskWorkspaceService", () => {
               createdAt: now(2),
               stage: "questions",
               threadId: ThreadId.make("thread-questions"),
+              role: "primary",
             }),
           ),
         );
@@ -374,7 +375,768 @@ describe("TaskWorkspaceService", () => {
         ).toHaveLength(1);
         expect(createCount.value).toBe(1);
         yield* restarted.dispose;
-      }),
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function* (
+    prefix: string,
+  ) {
+    const root = yield* Effect.tryPromise(() =>
+      NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), prefix)),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.tryPromise(() => NodeFs.rm(root, { recursive: true, force: true })).pipe(Effect.orDie),
+    );
+    const repoRoot = NodePath.join(root, "repo");
+    const baseDir = NodePath.join(root, "state");
+    yield* Effect.tryPromise(() => NodeFs.mkdir(repoRoot, { recursive: true }));
+    const runtime = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+    yield* Effect.addFinalizer(() => runtime.dispose);
+    return { runtime, repoRoot, baseDir };
+  });
+
+  const slice2TaskId = TaskWorkspaceId.make("slice-2-integration");
+
+  const createSlice2Task = (createdAt: string, repoRoot: string) =>
+    command({
+      type: "task.create",
+      commandId: CommandId.make("s2-create"),
+      taskId: slice2TaskId,
+      createdAt,
+      title: "Slice 2 integration",
+      projectId,
+      workspaceRoot: repoRoot,
+      baseRef: "main",
+      preset: "standard",
+      approvalPolicy: "before-build",
+    });
+
+  it.effect(
+    "persists block index and lineage and runs Slice 2 sessions/manifests without advancing the workflow",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-s2-sessions-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+        yield* runtime.runPromise(service.dispatch(createSlice2Task(now(1), repoRoot)));
+
+        // Primary session links in the questions stage.
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-link-primary"),
+              taskId: slice2TaskId,
+              createdAt: now(2),
+              stage: "questions",
+              threadId: ThreadId.make("thread-primary"),
+              role: "primary",
+            }),
+          ),
+        );
+
+        // Artifact upsert persists a block index with heading paths and content hashes.
+        const withBlocks = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s2-questions-r1"),
+              taskId: slice2TaskId,
+              createdAt: now(3),
+              kind: "questions",
+              title: "Questions",
+              markdown: [
+                "---",
+                "status: approved",
+                "---",
+                "<!-- kata:block:intro -->",
+                "# Intro",
+                "First body.",
+                "",
+                "<!-- kata:block:steps -->",
+                "# Steps",
+                "Do the thing.",
+                "",
+              ].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        const revision1 = withBlocks.task.artifacts[0]?.revisions[0];
+        expect(revision1?.blockIndex).toEqual([
+          expect.objectContaining({ id: "intro", headingPath: ["Intro"] }),
+          expect.objectContaining({ id: "steps", headingPath: ["Steps"] }),
+        ]);
+        expect(revision1?.blockIndex[0]?.contentHash).toMatch(/^[0-9a-f]{64}$/);
+        expect(revision1?.supersedesRevisionId).toBeNull();
+
+        // Frontmatter `status: approved` does not mutate the workflow.
+        expect(withBlocks.task.workflowRuns.at(-1)?.currentStage).toBe("questions");
+
+        // Context manifest for downstream sessions.
+        const manifested = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+              notes: "context for alternatives",
+              sessionId: "session-1",
+            }),
+          ),
+        );
+        expect(manifested.task.contextManifests).toEqual([
+          expect.objectContaining({ id: "manifest-1", notes: "context for alternatives" }),
+        ]);
+
+        const missingRevisionManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2-manifest-missing-revision"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactRefs: [{ kind: "questions", revision: 0, blockIds: [] }],
+              notes: null,
+              sessionId: null,
+            }),
+          ),
+        );
+        expect(missingRevisionManifest._tag).toBe("Failure");
+
+        const missingBlockManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2-manifest-missing-block"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["missing"] }],
+              notes: null,
+              sessionId: null,
+            }),
+          ),
+        );
+        expect(missingBlockManifest._tag).toBe("Failure");
+
+        const missingSessionManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2-manifest-missing-session"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+              notes: null,
+              sessionId: "session-999",
+            }),
+          ),
+        );
+        expect(missingSessionManifest._tag).toBe("Failure");
+
+        // Alternative link without a manifest is rejected.
+        const alternativeWithoutManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-alt-no-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(5),
+              stage: "questions",
+              threadId: ThreadId.make("thread-alt"),
+              role: "alternative",
+            }),
+          ),
+        );
+        expect(alternativeWithoutManifest._tag).toBe("Failure");
+
+        const alternativeWithUnknownManifest = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-alt-unknown-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(5),
+              stage: "questions",
+              threadId: ThreadId.make("thread-alt-unknown"),
+              role: "alternative",
+              contextManifestId: "manifest-999",
+            }),
+          ),
+        );
+        expect(alternativeWithUnknownManifest._tag).toBe("Failure");
+
+        // Alternative link with a manifest succeeds.
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-alt-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(6),
+              stage: "questions",
+              threadId: ThreadId.make("thread-alt"),
+              role: "alternative",
+              contextManifestId: "manifest-1",
+            }),
+          ),
+        );
+
+        // Ad-hoc link uses stage null and does not advance the workflow.
+        const adHoc = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-adhoc"),
+              taskId: slice2TaskId,
+              createdAt: now(7),
+              stage: null,
+              threadId: ThreadId.make("thread-adhoc"),
+              role: "ad-hoc",
+            }),
+          ),
+        );
+        expect(adHoc.task.workflowRuns.at(-1)?.currentStage).toBe("questions");
+        expect(
+          adHoc.task.sessions.find((session) => session.threadId === "thread-adhoc"),
+        ).toMatchObject({ role: "ad-hoc", stage: null });
+
+        const reusedLinkThread = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2-link-reused-thread"),
+              taskId: slice2TaskId,
+              createdAt: now(7),
+              stage: "questions",
+              threadId: ThreadId.make("thread-primary"),
+              role: "debugging",
+            }),
+          ),
+        );
+        expect(reusedLinkThread._tag).toBe("Failure");
+
+        // Fork records parent + fork point + manifest.
+        const forked = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.fork",
+              commandId: CommandId.make("s2-fork"),
+              taskId: slice2TaskId,
+              createdAt: now(8),
+              parentSessionId: "session-1",
+              threadId: ThreadId.make("thread-fork"),
+              forkPoint: "turn-3",
+              role: "reviewer",
+              contextManifestId: "manifest-1",
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(
+          forked.task.sessions.find((session) => session.threadId === "thread-fork"),
+        ).toMatchObject({
+          role: "reviewer",
+          parentSessionId: "session-1",
+          forkPoint: "turn-3",
+          contextManifestId: "manifest-1",
+        });
+
+        // Fork against a missing parent fails loudly.
+        const missingParentFork = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.fork",
+              commandId: CommandId.make("s2-fork-missing"),
+              taskId: slice2TaskId,
+              createdAt: now(9),
+              parentSessionId: "session-999",
+              threadId: ThreadId.make("thread-fork-missing"),
+              forkPoint: "turn-1",
+              role: "reviewer",
+              contextManifestId: "manifest-1",
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(missingParentFork._tag).toBe("Failure");
+
+        const missingManifestFork = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.fork",
+              commandId: CommandId.make("s2-fork-missing-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(9),
+              parentSessionId: "session-1",
+              threadId: ThreadId.make("thread-fork-missing-manifest"),
+              forkPoint: "turn-1",
+              role: "reviewer",
+              contextManifestId: "manifest-999",
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(missingManifestFork._tag).toBe("Failure");
+
+        const reusedForkThread = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.session.fork",
+              commandId: CommandId.make("s2-fork-reused-thread"),
+              taskId: slice2TaskId,
+              createdAt: now(9),
+              parentSessionId: "session-1",
+              threadId: ThreadId.make("thread-alt"),
+              forkPoint: "turn-2",
+              role: "reviewer",
+              contextManifestId: "manifest-1",
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(reusedForkThread._tag).toBe("Failure");
+
+        // Second revision sets lineage back to the first revision.
+        const withSecond = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s2-questions-r2"),
+              taskId: slice2TaskId,
+              createdAt: now(10),
+              kind: "questions",
+              title: "Questions",
+              markdown: ["<!-- kata:block:intro -->", "# Intro", "Second body.", ""].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        const artifact = withSecond.task.artifacts[0];
+        expect(artifact?.currentRevision).toBe(2);
+        expect(artifact?.revisions[1]?.supersedesRevisionId).toBe("questions-revision-1");
+
+        // Select the older revision as current without deleting newer revisions.
+        const selected = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.select-revision",
+              commandId: CommandId.make("s2-select"),
+              taskId: slice2TaskId,
+              createdAt: now(11),
+              kind: "questions",
+              revision: 1,
+            }),
+          ),
+        );
+        expect(selected.task.artifacts[0]?.currentRevision).toBe(1);
+        expect(selected.task.artifacts[0]?.revisions).toHaveLength(2);
+
+        // Upsert after selecting an older current must append a unique tip (r3),
+        // not collide with the existing r2 lineage entry / revision id.
+        const afterSelectUpsert = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s2-questions-r3-after-select"),
+              taskId: slice2TaskId,
+              createdAt: now(12),
+              kind: "questions",
+              title: "Questions",
+              markdown: ["<!-- kata:block:intro -->", "# Intro", "Third body.", ""].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        const afterSelectArtifact = afterSelectUpsert.task.artifacts[0];
+        expect(afterSelectArtifact?.currentRevision).toBe(3);
+        expect(afterSelectArtifact?.revisions.map((entry) => entry.revision)).toEqual([1, 2, 3]);
+        expect(afterSelectArtifact?.revisions.map((entry) => entry.id)).toEqual([
+          "questions-revision-1",
+          "questions-revision-2",
+          "questions-revision-3",
+        ]);
+        expect(afterSelectArtifact?.revisions[2]?.supersedesRevisionId).toBe(
+          "questions-revision-1",
+        );
+
+        // Selecting a non-existent revision fails.
+        const badSelect = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.artifact.select-revision",
+              commandId: CommandId.make("s2-select-bad"),
+              taskId: slice2TaskId,
+              createdAt: now(13),
+              kind: "questions",
+              revision: 99,
+            }),
+          ),
+        );
+        expect(badSelect._tag).toBe("Failure");
+
+        const duplicateBlockUpsert = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s2-duplicate-block"),
+              taskId: slice2TaskId,
+              createdAt: now(13),
+              kind: "questions",
+              title: "Questions",
+              markdown: [
+                "<!-- kata:block:intro -->",
+                "# Intro",
+                "First.",
+                "<!-- kata:block:intro -->",
+                "# Intro again",
+                "Second.",
+              ].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        expect(duplicateBlockUpsert._tag).toBe("Failure");
+        const afterDuplicateBlock = yield* runtime.runPromise(service.getTask(slice2TaskId));
+        expect(afterDuplicateBlock?.artifacts[0]?.currentRevision).toBe(3);
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "tracks comment lifecycle across content, heading, reorder, and removal edits",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-s2-comments-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+        yield* runtime.runPromise(service.dispatch(createSlice2Task(now(1), repoRoot)));
+
+        const upsert = (commandId: string, createdAt: string, markdown: string) =>
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make(commandId),
+              taskId: slice2TaskId,
+              createdAt,
+              kind: "questions",
+              title: "Questions",
+              markdown,
+              sourceSessionId: null,
+            }),
+          );
+
+        // Adjacent markers with a single trailing newline keep each block's
+        // hashed region position-stable so reorders preserve identity.
+        const rev1 = [
+          "<!-- kata:block:intro -->",
+          "# Intro",
+          "First body.",
+          "<!-- kata:block:steps -->",
+          "# Steps",
+          "Do the thing.",
+          "",
+        ].join("\n");
+        yield* runtime.runPromise(upsert("s2c-r1", now(2), rev1));
+
+        // Create + reply on the intro block.
+        const created = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.comment.create",
+              commandId: CommandId.make("s2c-comment"),
+              taskId: slice2TaskId,
+              createdAt: now(3),
+              artifactId: "questions-artifact",
+              anchorBlockId: "intro",
+              baseRevisionId: "questions-revision-1",
+              author: { kind: "user", id: "user-1", displayName: "Ada" },
+              body: "Clarify the intro.",
+            }),
+          ),
+        );
+        expect(created.task.comments).toEqual([
+          expect.objectContaining({ id: "comment-1", status: "open", anchorBlockId: "intro" }),
+        ]);
+
+        // Duplicate command id does not create another thread.
+        const duplicate = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.comment.create",
+              commandId: CommandId.make("s2c-comment"),
+              taskId: slice2TaskId,
+              createdAt: now(3),
+              artifactId: "questions-artifact",
+              anchorBlockId: "intro",
+              baseRevisionId: "questions-revision-1",
+              author: { kind: "user", id: "user-1", displayName: "Ada" },
+              body: "Clarify the intro.",
+            }),
+          ),
+        );
+        expect(duplicate.task.comments).toHaveLength(1);
+
+        // Comment against a missing block fails loudly.
+        const missingBlock = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.comment.create",
+              commandId: CommandId.make("s2c-missing-block"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              artifactId: "questions-artifact",
+              anchorBlockId: "does-not-exist",
+              baseRevisionId: "questions-revision-1",
+              author: { kind: "user", id: "user-1", displayName: "Ada" },
+              body: "No anchor.",
+            }),
+          ),
+        );
+        expect(missingBlock._tag).toBe("Failure");
+
+        const replied = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.comment.reply",
+              commandId: CommandId.make("s2c-reply"),
+              taskId: slice2TaskId,
+              createdAt: now(5),
+              threadId: "comment-1",
+              author: { kind: "agent", id: "agent-1", displayName: "Kata" },
+              body: "On it.",
+            }),
+          ),
+        );
+        expect(replied.task.comments[0]?.messages).toHaveLength(2);
+
+        // Comment on the steps block too.
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.comment.create",
+              commandId: CommandId.make("s2c-steps"),
+              taskId: slice2TaskId,
+              createdAt: now(6),
+              artifactId: "questions-artifact",
+              anchorBlockId: "steps",
+              baseRevisionId: "questions-revision-1",
+              author: { kind: "user", id: "user-1", displayName: "Ada" },
+              body: "Steps look fine.",
+            }),
+          ),
+        );
+
+        // Boundary-only whitespace changes do not invalidate block hashes.
+        const withBoundaryWhitespace = `${rev1.replace(
+          "<!-- kata:block:steps -->",
+          "\n\n<!-- kata:block:steps -->",
+        )}\n\n`;
+        const afterBoundaryWhitespace = yield* runtime.runPromise(
+          upsert("s2c-boundary-whitespace", now(7), withBoundaryWhitespace),
+        );
+        expect(afterBoundaryWhitespace.task.comments.map((thread) => thread.status)).toEqual([
+          "open",
+          "open",
+        ]);
+
+        // Semantic trailing spaces remain part of the block hash because Markdown
+        // renders two spaces before a newline as a hard line break.
+        const withHardBreak = rev1.replace(
+          "First body.\n<!-- kata:block:steps -->",
+          "First body.  \n<!-- kata:block:steps -->",
+        );
+        const afterHardBreak = yield* runtime.runPromise(
+          upsert("s2c-hard-break", now(7), withHardBreak),
+        );
+        expect(afterHardBreak.task.comments.map((thread) => thread.status)).toEqual([
+          "outdated",
+          "open",
+        ]);
+
+        // Revision 2 changes the intro body only -> intro outdated, steps still open.
+        const rev2 = [
+          "<!-- kata:block:intro -->",
+          "# Intro",
+          "Changed body.",
+          "<!-- kata:block:steps -->",
+          "# Steps",
+          "Do the thing.",
+          "",
+        ].join("\n");
+        const afterContentChange = yield* runtime.runPromise(upsert("s2c-r2", now(7), rev2));
+        const introThread = afterContentChange.task.comments.find((t) => t.id === "comment-1");
+        const stepsThread = afterContentChange.task.comments.find((t) => t.id === "comment-2");
+        expect(introThread?.status).toBe("outdated");
+        expect(stepsThread?.status).toBe("open");
+
+        // Revision 3 restores the intro body to the base hash -> intro open again.
+        const afterRestore = yield* runtime.runPromise(upsert("s2c-r3", now(8), rev1));
+        expect(afterRestore.task.comments.find((t) => t.id === "comment-1")?.status).toBe("open");
+
+        // Resolve the steps thread; resolved threads never change afterwards.
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.comment.resolve",
+              commandId: CommandId.make("s2c-resolve"),
+              taskId: slice2TaskId,
+              createdAt: now(9),
+              threadId: "comment-2",
+              resolvedBy: { kind: "user", id: "user-1", displayName: "Ada" },
+            }),
+          ),
+        );
+
+        // Reply to a resolved thread is rejected.
+        const replyResolved = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.comment.reply",
+              commandId: CommandId.make("s2c-reply-resolved"),
+              taskId: slice2TaskId,
+              createdAt: now(10),
+              threadId: "comment-2",
+              author: { kind: "user", id: "user-1", displayName: "Ada" },
+              body: "Reopen?",
+            }),
+          ),
+        );
+        expect(replyResolved._tag).toBe("Failure");
+
+        // Revision 4 changes only the intro heading text -> intro outdated (region hash changed);
+        // the resolved steps thread stays resolved.
+        const rev4 = [
+          "<!-- kata:block:intro -->",
+          "# Introduction",
+          "First body.",
+          "<!-- kata:block:steps -->",
+          "# Steps",
+          "Do the thing.",
+          "",
+        ].join("\n");
+        const afterHeading = yield* runtime.runPromise(upsert("s2c-r4", now(11), rev4));
+        expect(afterHeading.task.comments.find((t) => t.id === "comment-1")?.status).toBe(
+          "outdated",
+        );
+        expect(afterHeading.task.comments.find((t) => t.id === "comment-2")?.status).toBe(
+          "resolved",
+        );
+
+        // Revision 5 reorders blocks without changing their contents -> intro restored to open.
+        const reorderable = [
+          "<!-- kata:block:steps -->",
+          "# Steps",
+          "Do the thing.",
+          "<!-- kata:block:intro -->",
+          "# Intro",
+          "First body.",
+          "",
+        ].join("\n");
+        const afterReorder = yield* runtime.runPromise(upsert("s2c-r5", now(12), reorderable));
+        expect(afterReorder.task.comments.find((t) => t.id === "comment-1")?.status).toBe("open");
+
+        // Revision 6 removes the intro marker -> intro thread becomes orphaned.
+        const rev6 = ["<!-- kata:block:steps -->", "# Steps", "Do the thing.", ""].join("\n");
+        const afterOrphan = yield* runtime.runPromise(upsert("s2c-r6", now(13), rev6));
+        expect(afterOrphan.task.comments.find((t) => t.id === "comment-1")?.status).toBe(
+          "orphaned",
+        );
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "replays Slice 2 comments, sessions, manifests, and block indexes after restart",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-s2-restart-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+        yield* runtime.runPromise(service.dispatch(createSlice2Task(now(1), repoRoot)));
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s2r-upsert"),
+              taskId: slice2TaskId,
+              createdAt: now(2),
+              kind: "questions",
+              title: "Questions",
+              markdown: ["<!-- kata:block:intro -->", "# Intro", "Body.", ""].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s2r-manifest"),
+              taskId: slice2TaskId,
+              createdAt: now(3),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+              notes: null,
+              sessionId: null,
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("s2r-link"),
+              taskId: slice2TaskId,
+              createdAt: now(4),
+              stage: "questions",
+              threadId: ThreadId.make("thread-restart"),
+              role: "alternative",
+              contextManifestId: "manifest-1",
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.comment.create",
+              commandId: CommandId.make("s2r-comment"),
+              taskId: slice2TaskId,
+              createdAt: now(5),
+              artifactId: "questions-artifact",
+              anchorBlockId: "intro",
+              baseRevisionId: "questions-revision-1",
+              author: { kind: "user", id: "user-1", displayName: "Ada" },
+              body: "Please expand.",
+            }),
+          ),
+        );
+        yield* runtime.dispose;
+
+        const restarted = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+        const restartedService = yield* restarted.runPromise(Effect.service(TaskWorkspaceService));
+        const replayed = yield* restarted.runPromise(restartedService.getTask(slice2TaskId));
+        expect(replayed?.contextManifests).toHaveLength(1);
+        expect(replayed?.sessions.find((s) => s.threadId === "thread-restart")).toMatchObject({
+          role: "alternative",
+          contextManifestId: "manifest-1",
+          status: "active",
+          provider: null,
+        });
+        expect(replayed?.artifacts[0]?.revisions[0]?.blockIndex[0]).toMatchObject({ id: "intro" });
+        expect(replayed?.comments[0]).toMatchObject({
+          id: "comment-1",
+          status: "open",
+          anchorBlockId: "intro",
+        });
+        expect(replayed?.comments[0]?.messages[0]?.author).toMatchObject({
+          kind: "user",
+          displayName: "Ada",
+        });
+        yield* restarted.dispose;
+      }).pipe(Effect.scoped),
     30_000,
   );
 

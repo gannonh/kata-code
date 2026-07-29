@@ -1,5 +1,29 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces Slice 2 review hardening complete)
+
+- Completed [PR #58](https://github.com/gannonh/kata-code/pull/58) review hardening: enforced manifest/revision/block/session references, rejected duplicate block IDs and reused threads, stabilized boundary hashes, selected only primary stage sessions, and preserved comment input on command failure.
+- Added the cumulative desktop-dev `@task-workspaces` Playwright scenario for Slice 2 plus the Slice 1 Standard path, and made it a required macOS CI job.
+- Closed the Slice 1 / Slice 2 E2E debt ([#52](https://github.com/gannonh/kata-code/issues/52), [#57](https://github.com/gannonh/kata-code/issues/57)); validation recommendation is **Ready to merge**.
+
+## 2026-07-29 (Task workspaces Slice 2 verified — pending user sign-off)
+
+- Completed Verify for [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md): focused 130 tests + browser panel tests, headed UAT package `uat-evidence/web-20260729-175915/`, validation record Complete.
+- Fixed revision allocation after select-revision (`cfc97c64`) so upserts never collide on revision ids.
+- Playwright `@task-workspaces` remains deferred ([#57](https://github.com/gannonh/kata-code/issues/57)). Draft [PR #58](https://github.com/gannonh/kata-code/pull/58) awaits human sign-off.
+
+## 2026-07-29 (Task workspaces Slice 2 implemented — validation pending)
+
+- Built Slice 2 on `cursor/task-workspaces-slice-2-3420`: contracts (sessions/comments/blocks/manifests), server reducer, web artifacts/sessions/comments panels.
+- Closed plan-only PR #54; implementation proceeds under explicit Build override from Draft.
+- Focused tests: 130 passed. Headed UAT + Playwright `@task-workspaces` E2E remain for Verify.
+
+## 2026-07-29 (Task workspaces Slice 2 child plan drafted)
+
+- Added Draft [Slice 2 child plan](/specs/2026-07-29-task-workspaces-slice-2-plan.md) for artifact workspace, block comments, multi-session/ad hoc/fork/reviewer (TW-AC5/6/7), base SHA `12cc158e`.
+- Adversarial review incorporated: parent role literals, persisted block index, command schemas, stable AC ids, author identity, child-spec research/UI/test/evidence sections.
+- Branch: `cursor/task-workspaces-slice-2-3420`. Awaiting human review before Approved / Build.
+
 ## 2026-07-29 (Task workspaces parent Approved; Slice 1 Verified)
 
 - Marked [Task workspaces vertical-slices parent](/specs/2026-07-28-task-workspaces-vertical-slices-design.md) **Approved**; it supersedes [Task mode](/specs/2026-07-03-task-mode-design.md).

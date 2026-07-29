@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-29 (Task workspaces Slice 2 completed)
+
+Completed [Task workspaces Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md) review hardening and cumulative desktop `@task-workspaces` E2E. Updated the [validation record](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md) to **Ready to merge** and closed the Slice 1 / Slice 2 E2E deferrals.
+
 ## 2026-07-18 (Shared sandbox GitHub source)
 
 Implemented [shared sandbox GitHub source picker](/specs/2026-07-17-shared-sandbox-github-source-design.md): Docker and Vercel share `SandboxGitHubSourcePicker`; Docker remote clone into `/workspace`; closed deferred [#29](https://github.com/gannonh/kata-code/issues/29).
