@@ -11,12 +11,6 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 
-const LOCAL_USER: TaskWorkspaceCommentAuthor = {
-  kind: "user",
-  id: "local-user",
-  displayName: "You",
-};
-
 const STATUS_VARIANT: Record<
   TaskWorkspaceCommentStatus,
   "success" | "warning" | "outline" | "secondary"
@@ -34,9 +28,11 @@ function blockLabel(headingPath: readonly string[], id: string): string {
 export function CommentsPanel({
   task,
   commands,
+  currentUser,
 }: {
   task: TaskWorkspace;
   commands: TaskWorkspaceCommands;
+  currentUser: TaskWorkspaceCommentAuthor;
 }) {
   const [selectedKind, setSelectedKind] = useState<TaskWorkspaceArtifactKind>("plan");
   const [anchorBlockId, setAnchorBlockId] = useState("");
@@ -107,6 +103,7 @@ export function CommentsPanel({
                 return (
                   <li
                     key={thread.id}
+                    data-testid={`task-comment-${thread.id}`}
                     className="space-y-2 rounded-lg border border-border/70 p-3 text-xs"
                   >
                     <div className="flex flex-wrap items-center gap-2">
@@ -140,13 +137,13 @@ export function CommentsPanel({
                         <Button
                           size="xs"
                           variant="ghost"
-                          disabled={commands.busy}
+                          disabled={commands.isBusy}
                           onClick={() =>
                             void commands.dispatch(
                               {
                                 ...commands.commandBase("task.comment.resolve"),
                                 threadId: thread.id,
-                                resolvedBy: LOCAL_USER,
+                                resolvedBy: currentUser,
                               },
                               "resolve-comment",
                             )
@@ -167,18 +164,19 @@ export function CommentsPanel({
                         <Button
                           size="xs"
                           variant="outline"
-                          disabled={!replyBody.trim() || commands.busy}
-                          onClick={() => {
+                          disabled={!replyBody.trim() || commands.isBusy}
+                          onClick={async () => {
                             if (!replyBody.trim()) return;
-                            void commands.dispatch(
+                            const succeeded = await commands.dispatch(
                               {
                                 ...commands.commandBase("task.comment.reply"),
                                 threadId: thread.id,
-                                author: LOCAL_USER,
+                                author: currentUser,
                                 body: replyBody.trim(),
                               },
                               "reply-comment",
                             );
+                            if (!succeeded) return;
                             setReplyThreadId(null);
                             setReplyBody("");
                           }}
@@ -228,20 +226,21 @@ export function CommentsPanel({
                   data-testid="task-comment-create"
                   size="sm"
                   variant="outline"
-                  disabled={!anchorBlockId || !body.trim() || !currentRevision || commands.busy}
-                  onClick={() => {
+                  disabled={!anchorBlockId || !body.trim() || !currentRevision || commands.isBusy}
+                  onClick={async () => {
                     if (!anchorBlockId || !body.trim() || !currentRevision) return;
-                    void commands.dispatch(
+                    const succeeded = await commands.dispatch(
                       {
                         ...commands.commandBase("task.comment.create"),
                         artifactId: artifact.id,
                         anchorBlockId,
                         baseRevisionId: currentRevision.id,
-                        author: LOCAL_USER,
+                        author: currentUser,
                         body: body.trim(),
                       },
                       "create-comment",
                     );
+                    if (!succeeded) return;
                     setBody("");
                     setAnchorBlockId("");
                   }}

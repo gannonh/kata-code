@@ -1,17 +1,18 @@
-import type {
-  EnvironmentId,
-  TaskWorkspace,
+import {
   TaskWorkspaceArtifactKind,
-  TaskWorkspaceSessionRole,
-  TaskWorkspaceStage,
+  type EnvironmentId,
+  type TaskWorkspace,
+  type TaskWorkspaceSessionRole,
+  type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { SidebarThreadSummary } from "../../types";
 import type { TaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { shortTaskWorkspaceId } from "./taskWorkspacePresentation";
 
 const SESSION_ROLES: ReadonlyArray<TaskWorkspaceSessionRole> = [
   "primary",
@@ -21,16 +22,7 @@ const SESSION_ROLES: ReadonlyArray<TaskWorkspaceSessionRole> = [
   "ad-hoc",
 ];
 
-const ARTIFACT_KINDS: ReadonlyArray<TaskWorkspaceArtifactKind> = [
-  "questions",
-  "plan",
-  "verification",
-];
-
-function shortId(id: string | null): string {
-  if (!id) return "—";
-  return id.length > 10 ? `${id.slice(0, 10)}…` : id;
-}
+const ARTIFACT_KINDS: ReadonlyArray<TaskWorkspaceArtifactKind> = TaskWorkspaceArtifactKind.literals;
 
 function manifestRequired(role: TaskWorkspaceSessionRole): boolean {
   return role === "alternative" || role === "reviewer";
@@ -60,9 +52,10 @@ export function SessionsPanel({
   const [forkManifestId, setForkManifestId] = useState("");
 
   const [manifestKind, setManifestKind] = useState<TaskWorkspaceArtifactKind>("plan");
-  const [manifestRevision, setManifestRevision] = useState("0");
+  const [manifestRevision, setManifestRevision] = useState("");
   const [manifestBlockIds, setManifestBlockIds] = useState("");
   const [manifestNotes, setManifestNotes] = useState("");
+  const [manifestSessionId, setManifestSessionId] = useState("");
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
@@ -75,6 +68,30 @@ export function SessionsPanel({
 
   const linkStage: TaskWorkspaceStage | null = linkRole === "ad-hoc" ? null : stage;
   const forkStage: TaskWorkspaceStage | null = forkRole === "ad-hoc" ? null : stage;
+  const linkedThreadIds = useMemo(
+    () => new Set(task.sessions.map((session) => session.threadId)),
+    [task.sessions],
+  );
+  const unlinkedThreads = useMemo(
+    () => availableThreads.filter((thread) => !linkedThreadIds.has(thread.id)),
+    [availableThreads, linkedThreadIds],
+  );
+  const manifestArtifact =
+    task.artifacts.find((artifact) => artifact.kind === manifestKind) ?? null;
+  const manifestRevisions = useMemo(
+    () =>
+      manifestArtifact
+        ? [...manifestArtifact.revisions].sort((left, right) => left.revision - right.revision)
+        : [],
+    [manifestArtifact],
+  );
+  const effectiveManifestRevision = manifestRevisions.some(
+    (candidate) => String(candidate.revision) === manifestRevision,
+  )
+    ? manifestRevision
+    : manifestArtifact === null
+      ? ""
+      : String(manifestArtifact.currentRevision);
 
   return (
     <section
@@ -97,6 +114,7 @@ export function SessionsPanel({
             return (
               <li
                 key={session.id}
+                data-testid={`task-session-${session.id}`}
                 className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs"
                 data-active={isSelected || undefined}
               >
@@ -105,7 +123,12 @@ export function SessionsPanel({
                 </Badge>
                 <span className="text-muted-foreground">
                   stage {session.stage ?? "ad-hoc"} · provider {session.provider ?? "—"} ·{" "}
-                  {session.status} · thread {shortId(session.threadId)}
+                  {session.status} · thread {shortTaskWorkspaceId(session.threadId)}
+                  {session.parentSessionId
+                    ? ` · parent ${shortTaskWorkspaceId(session.parentSessionId)} · fork ${
+                        session.forkPoint ?? "—"
+                      }`
+                    : ""}
                 </span>
                 <div className="ml-auto flex gap-1.5">
                   <Button
@@ -151,7 +174,7 @@ export function SessionsPanel({
             onChange={(event) => setLinkThreadId(event.currentTarget.value)}
           >
             <option value="">Select thread</option>
-            {availableThreads.map((thread) => (
+            {unlinkedThreads.map((thread) => (
               <option key={thread.id} value={thread.id}>
                 {thread.title}
               </option>
@@ -196,10 +219,10 @@ export function SessionsPanel({
             variant="outline"
             className="w-full"
             disabled={
-              !linkThreadId || commands.busy || (manifestRequired(linkRole) && !linkManifestId)
+              !linkThreadId || commands.isBusy || (manifestRequired(linkRole) && !linkManifestId)
             }
             onClick={() => {
-              const thread = availableThreads.find((candidate) => candidate.id === linkThreadId);
+              const thread = unlinkedThreads.find((candidate) => candidate.id === linkThreadId);
               if (!thread) return;
               void commands.dispatch(
                 {
@@ -230,7 +253,7 @@ export function SessionsPanel({
             <option value="">Parent session</option>
             {task.sessions.map((session) => (
               <option key={session.id} value={session.id}>
-                {session.role} · {shortId(session.id)}
+                {session.role} · {shortTaskWorkspaceId(session.id)}
               </option>
             ))}
           </select>
@@ -248,7 +271,7 @@ export function SessionsPanel({
             onChange={(event) => setForkThreadId(event.currentTarget.value)}
           >
             <option value="">Select thread</option>
-            {availableThreads.map((thread) => (
+            {unlinkedThreads.map((thread) => (
               <option key={thread.id} value={thread.id}>
                 {thread.title}
               </option>
@@ -289,10 +312,10 @@ export function SessionsPanel({
               !forkPoint.trim() ||
               !forkThreadId ||
               !forkManifestId ||
-              commands.busy
+              commands.isBusy
             }
             onClick={() => {
-              const thread = availableThreads.find((candidate) => candidate.id === forkThreadId);
+              const thread = unlinkedThreads.find((candidate) => candidate.id === forkThreadId);
               if (!forkParentId || !thread || !forkManifestId) return;
               void commands.dispatch(
                 {
@@ -333,15 +356,33 @@ export function SessionsPanel({
                 </option>
               ))}
             </select>
-            <input
+            <select
               aria-label="Manifest revision"
-              type="number"
-              min={0}
               className="h-8 w-20 rounded-lg border border-input bg-background px-2 text-xs"
-              value={manifestRevision}
+              value={effectiveManifestRevision}
               onChange={(event) => setManifestRevision(event.currentTarget.value)}
-            />
+            >
+              <option value="">Revision</option>
+              {manifestRevisions.map((revision) => (
+                <option key={revision.id} value={revision.revision}>
+                  r{revision.revision}
+                </option>
+              ))}
+            </select>
           </div>
+          <select
+            aria-label="Manifest target session"
+            className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"
+            value={manifestSessionId}
+            onChange={(event) => setManifestSessionId(event.currentTarget.value)}
+          >
+            <option value="">No target session</option>
+            {task.sessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.role} · {shortTaskWorkspaceId(session.id)}
+              </option>
+            ))}
+          </select>
           <input
             aria-label="Manifest block ids"
             className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"
@@ -360,20 +401,26 @@ export function SessionsPanel({
             size="sm"
             variant="outline"
             className="w-full"
-            disabled={commands.busy || Number.isNaN(Number(manifestRevision))}
-            onClick={() => {
-              const revision = Number(manifestRevision);
-              if (Number.isNaN(revision)) return;
+            disabled={commands.isBusy || effectiveManifestRevision === ""}
+            onClick={async () => {
+              const revision = Number(effectiveManifestRevision);
+              if (
+                effectiveManifestRevision === "" ||
+                !Number.isInteger(revision) ||
+                !manifestRevisions.some((candidate) => candidate.revision === revision)
+              ) {
+                return;
+              }
               const blockIds = manifestBlockIds
                 .split(",")
                 .map((value) => value.trim())
                 .filter((value) => value.length > 0);
-              void commands.dispatch(
+              await commands.dispatch(
                 {
                   ...commands.commandBase("task.context-manifest.create"),
                   artifactRefs: [{ kind: manifestKind, revision, blockIds }],
                   notes: manifestNotes.trim() ? manifestNotes.trim() : null,
-                  sessionId: selectedSessionId,
+                  sessionId: manifestSessionId || null,
                 },
                 "create-manifest",
               );
@@ -405,15 +452,15 @@ export function SessionsPanel({
             </p>
           ) : inspectedManifest === null ? (
             <p className="text-xs text-muted-foreground">
-              Session {shortId(selectedSession.id)} has no context manifest.
+              Session {shortTaskWorkspaceId(selectedSession.id)} has no context manifest.
             </p>
           ) : (
             <div className="space-y-2 text-xs">
               <p className="font-medium">{inspectedManifest.id}</p>
               <ul className="space-y-1">
-                {inspectedManifest.artifactRefs.map((ref, index) => (
+                {inspectedManifest.artifactRefs.map((ref) => (
                   <li
-                    key={`${ref.kind}-${ref.revision}-${index}`}
+                    key={`${ref.kind}-${ref.revision}-${ref.blockIds.join(",")}`}
                     className="text-muted-foreground"
                   >
                     {ref.kind} r{ref.revision} · blocks{" "}

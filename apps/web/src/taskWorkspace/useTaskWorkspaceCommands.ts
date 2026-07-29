@@ -12,10 +12,10 @@ export type TaskCommandBase<T extends TaskWorkspaceCommand["type"]> = {
 };
 
 export interface TaskWorkspaceCommands {
-  readonly dispatch: (command: TaskWorkspaceCommand, action: string) => Promise<void>;
+  readonly dispatch: (command: TaskWorkspaceCommand, action: string) => Promise<boolean>;
   readonly commandBase: <T extends TaskWorkspaceCommand["type"]>(type: T) => TaskCommandBase<T>;
   readonly pendingAction: string | null;
-  readonly busy: boolean;
+  readonly isBusy: boolean;
   readonly error: string | null;
   readonly setError: (message: string | null) => void;
 }
@@ -34,8 +34,10 @@ export function useTaskWorkspaceCommands(taskId: string): TaskWorkspaceCommands 
     setError(null);
     try {
       await getPrimaryEnvironmentConnection().client.taskWorkspaces.dispatchCommand(command);
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Task command failed.");
+      return false;
     } finally {
       setPendingAction(null);
     }
@@ -55,7 +57,7 @@ export function useTaskWorkspaceCommands(taskId: string): TaskWorkspaceCommands 
     dispatch,
     commandBase,
     pendingAction,
-    busy: pendingAction !== null,
+    isBusy: pendingAction !== null,
     error,
     setError,
   };

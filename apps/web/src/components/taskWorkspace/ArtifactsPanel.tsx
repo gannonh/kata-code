@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import type { TaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { shortTaskWorkspaceId } from "./taskWorkspacePresentation";
 
 const ARTIFACT_KIND_LABELS: Record<TaskWorkspaceArtifactKind, string> = {
   questions: "Questions",
@@ -15,13 +16,24 @@ const ARTIFACT_KIND_LABELS: Record<TaskWorkspaceArtifactKind, string> = {
   verification: "Verification",
 };
 
-function shortId(id: string | null): string {
-  if (!id) return "—";
-  return id.length > 12 ? `${id.slice(0, 12)}…` : id;
-}
-
 function revisionMarkdown(artifact: TaskWorkspaceArtifact, revision: number): string {
   return artifact.revisions.find((entry) => entry.revision === revision)?.markdown ?? "";
+}
+
+function nearestRevision(
+  revisions: ReadonlyArray<TaskWorkspaceArtifact["revisions"][number]>,
+  requested: number | null,
+  fallback: number | null,
+): number | null {
+  if (revisions.length === 0) return null;
+  const target = requested ?? fallback ?? revisions[0]!.revision;
+  return revisions.reduce(
+    (nearest, candidate) =>
+      Math.abs(candidate.revision - target) < Math.abs(nearest - target)
+        ? candidate.revision
+        : nearest,
+    revisions[0]!.revision,
+  );
 }
 
 export function ArtifactsPanel({
@@ -49,9 +61,13 @@ export function ArtifactsPanel({
     [artifact],
   );
 
-  const effectiveSelected = selectedRevision ?? artifact?.currentRevision ?? null;
-  const left = compareLeft ?? revisions[0]?.revision ?? null;
-  const right = compareRight ?? artifact?.currentRevision ?? null;
+  const effectiveSelected = nearestRevision(
+    revisions,
+    selectedRevision,
+    artifact?.currentRevision ?? null,
+  );
+  const left = nearestRevision(revisions, compareLeft, revisions[0]?.revision ?? null);
+  const right = nearestRevision(revisions, compareRight, artifact?.currentRevision ?? null);
 
   return (
     <section
@@ -129,8 +145,9 @@ export function ArtifactsPanel({
                             ) : null}
                           </span>
                           <span className="text-muted-foreground">
-                            id {shortId(revision.id)} · supersedes{" "}
-                            {shortId(revision.supersedesRevisionId)} · {revision.createdAt}
+                            id {shortTaskWorkspaceId(revision.id)} · supersedes{" "}
+                            {shortTaskWorkspaceId(revision.supersedesRevisionId)} ·{" "}
+                            {revision.createdAt}
                           </span>
                         </button>
                       </li>
@@ -145,7 +162,7 @@ export function ArtifactsPanel({
                     disabled={
                       effectiveSelected === null ||
                       effectiveSelected === artifact.currentRevision ||
-                      commands.busy
+                      commands.isBusy
                     }
                     onClick={() => {
                       if (effectiveSelected === null) return;

@@ -1,8 +1,10 @@
 import {
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
+  type TaskWorkspaceCommentAuthor,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
+import { useClerk } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
 import { CheckCircle2Icon, CircleIcon, GitBranchIcon, Loader2Icon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -60,9 +62,18 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const [questionsMarkdown, setQuestionsMarkdown] = useState("");
   const [planMarkdown, setPlanMarkdown] = useState(DEFAULT_PLAN);
-  const [selectedThreadId, setSelectedThreadId] = useState("");
+  const { user } = useClerk();
   const commands = useTaskWorkspaceCommands(taskId);
-  const { dispatch, commandBase, pendingAction, busy, error } = commands;
+  const { dispatch, commandBase, pendingAction, isBusy, error } = commands;
+  const currentUser = useMemo<TaskWorkspaceCommentAuthor>(
+    () => ({
+      kind: "user",
+      id: user?.id ?? "local-user",
+      displayName:
+        user?.fullName?.trim() || user?.primaryEmailAddress?.emailAddress.trim() || "You",
+    }),
+    [user],
+  );
 
   const questionsArtifact = task ? latestArtifact(task, "questions") : null;
   const planArtifact = task ? latestArtifact(task, "plan") : null;
@@ -90,12 +101,6 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
     if (planArtifact) setPlanMarkdown(planArtifact.markdown);
   }, [planArtifact?.id, planArtifact?.revision]);
 
-  useEffect(() => {
-    if (!selectedThreadId && availableThreads[0]) {
-      setSelectedThreadId(availableThreads[0].id);
-    }
-  }, [availableThreads, selectedThreadId]);
-
   if (!task) {
     return (
       <SidebarInset className="h-dvh min-h-0 bg-background text-foreground">
@@ -106,7 +111,8 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
     );
   }
 
-  const linkedSession = task.sessions.find((session) => session.stage === stage) ?? null;
+  const linkedSession =
+    task.sessions.find((session) => session.stage === stage && session.role === "primary") ?? null;
   const buildItem = task.build.phases[0]?.workItems[0] ?? null;
   const verificationResult = task.verification.results.find(
     (result) => result.criterionId === task.verification.criteria[0]?.id,
@@ -215,45 +221,9 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                       Open linked session
                     </Button>
                   ) : (
-                    <div className="flex min-w-0 gap-2">
-                      <select
-                        aria-label="Stage session"
-                        data-testid="task-session-select"
-                        className="h-8 min-w-44 rounded-lg border border-input bg-background px-2 text-xs"
-                        value={selectedThreadId}
-                        onChange={(event) => setSelectedThreadId(event.currentTarget.value)}
-                      >
-                        <option value="">Select thread</option>
-                        {availableThreads.map((thread) => (
-                          <option key={thread.id} value={thread.id}>
-                            {thread.title}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!selectedThreadId || busy}
-                        onClick={() => {
-                          if (!selectedThreadId) return;
-                          const selectedThread = availableThreads.find(
-                            (thread) => thread.id === selectedThreadId,
-                          );
-                          if (!selectedThread) return;
-                          void dispatch(
-                            {
-                              ...commandBase("task.session.link"),
-                              stage,
-                              threadId: selectedThread.id,
-                              role: "primary",
-                            },
-                            "link-session",
-                          );
-                        }}
-                      >
-                        Link session
-                      </Button>
-                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Link a primary session from the Sessions panel below.
+                    </p>
                   )}
                 </div>
               </section>
@@ -283,7 +253,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                       data-testid="task-save-questions"
                       size="sm"
                       variant="outline"
-                      disabled={!questionsMarkdown.trim() || busy}
+                      disabled={!questionsMarkdown.trim() || isBusy}
                       onClick={() =>
                         void dispatch(
                           {
@@ -302,7 +272,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                     <Button
                       data-testid="task-complete-questions"
                       size="sm"
-                      disabled={!questionsArtifact || busy}
+                      disabled={!questionsArtifact || isBusy}
                       onClick={() =>
                         void dispatch(
                           { ...commandBase("task.questions.complete") },
@@ -340,7 +310,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                       data-testid="task-save-plan"
                       size="sm"
                       variant="outline"
-                      disabled={!planMarkdown.trim() || busy}
+                      disabled={!planMarkdown.trim() || isBusy}
                       onClick={() =>
                         void dispatch(
                           {
@@ -359,7 +329,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                     <Button
                       data-testid="task-approve-plan"
                       size="sm"
-                      disabled={!planArtifact || busy}
+                      disabled={!planArtifact || isBusy}
                       onClick={() =>
                         void dispatch({ ...commandBase("task.plan.approve") }, "approve-plan")
                       }
@@ -397,7 +367,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={buildItem?.status === "running" || busy}
+                    disabled={buildItem?.status === "running" || isBusy}
                     onClick={() =>
                       void dispatch(
                         {
@@ -414,7 +384,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                   <Button
                     data-testid="task-apply-fixture"
                     size="sm"
-                    disabled={busy}
+                    disabled={isBusy}
                     onClick={() =>
                       void dispatch({ ...commandBase("task.fixture.apply") }, "apply-fixture")
                     }
@@ -460,7 +430,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                     data-testid="task-run-verification"
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={isBusy}
                     onClick={() =>
                       void dispatch(
                         {
@@ -476,7 +446,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                   <Button
                     data-testid="task-signoff"
                     size="sm"
-                    disabled={verificationResult?.status !== "pass" || busy}
+                    disabled={verificationResult?.status !== "pass" || isBusy}
                     onClick={() =>
                       void dispatch(
                         { ...commandBase("task.verification.signoff") },
@@ -525,7 +495,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
               primaryEnvironmentId={primaryEnvironmentId}
               stage={stage}
             />
-            <CommentsPanel task={task} commands={commands} />
+            <CommentsPanel task={task} commands={commands} currentUser={currentUser} />
 
             <section className="flex items-center justify-between rounded-xl border border-border bg-card p-4">
               <div>
