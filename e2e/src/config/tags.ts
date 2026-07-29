@@ -10,6 +10,7 @@ export const E2E_TAGS = {
   sandbox: "@sandbox",
   environmentsDeploy: "@environments-deploy",
   sidebar: "@sidebar",
+  taskWorkspaces: "@task-workspaces",
 } as const;
 
 export type E2ETag = (typeof E2E_TAGS)[keyof typeof E2E_TAGS];

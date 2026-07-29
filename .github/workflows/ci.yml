@@ -118,6 +118,24 @@ jobs:
             src/components/settings/SettingsPanels.browser.tsx \
             src/components/taskWorkspace/TaskWorkspaceView.browser.tsx
 
+  test_task_workspaces_e2e:
+    name: Test Task Workspaces E2E
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Run task-workspaces E2E
+        run: vp exec playwright test --config e2e/playwright.config.ts --project desktop-dev --grep @task-workspaces
+
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
     runs-on: macos-15
