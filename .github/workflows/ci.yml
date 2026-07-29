@@ -115,7 +115,8 @@ jobs:
             src/components/chat/MessagesTimeline.browser.tsx \
             src/components/chat/ProviderModelPicker.browser.tsx \
             src/components/chat/CompactComposerControlsMenu.browser.tsx \
-            src/components/settings/SettingsPanels.browser.tsx
+            src/components/settings/SettingsPanels.browser.tsx \
+            src/components/taskWorkspace/TaskWorkspaceView.browser.tsx
 
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
