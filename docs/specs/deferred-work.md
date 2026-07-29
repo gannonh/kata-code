@@ -53,9 +53,9 @@ Each entry should include:
 - **Status:** deferred
 - **Tracking issue:** [#57](https://github.com/gannonh/kata-code/issues/57)
 - **Area:** task-workspaces, e2e
-- **Source:** [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md)
-- **Rationale:** Build lands with unit/integration/browser coverage; headed UAT + e2e remain for Verify.
-- **Revisit trigger:** Slice 2 Verify phase / AGENTS Feature Validation close-out.
+- **Source:** [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md) · [Validation](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md)
+- **Rationale:** Slice 2 Verify completed with headed UAT + unit/integration/browser coverage; Playwright `e2e/tests` `@task-workspaces` still required for AGENTS Feature Validation close-out (same pattern as Slice 1 [#52](https://github.com/gannonh/kata-code/issues/52)).
+- **Revisit trigger:** Before marking Slice 2 merge Accepted without residual Feature Validation debt, or when authoring shared task-workspace e2e flows.
 
 ### Task workspaces Slice 1 Playwright E2E under `e2e/tests/`
 

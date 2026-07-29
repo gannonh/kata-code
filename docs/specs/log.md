@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces Slice 2 verified — pending user sign-off)
+
+- Completed Verify for [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md): focused 130 tests + browser panel tests, headed UAT package `uat-evidence/web-20260729-175915/`, validation record Complete.
+- Fixed revision allocation after select-revision (`cfc97c64`) so upserts never collide on revision ids.
+- Playwright `@task-workspaces` remains deferred ([#57](https://github.com/gannonh/kata-code/issues/57)). Draft [PR #58](https://github.com/gannonh/kata-code/pull/58) awaits human sign-off.
+
 ## 2026-07-29 (Task workspaces Slice 2 implemented — validation pending)
 
 - Built Slice 2 on `cursor/task-workspaces-slice-2-3420`: contracts (sessions/comments/blocks/manifests), server reducer, web artifacts/sessions/comments panels.
