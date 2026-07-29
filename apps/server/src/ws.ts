@@ -819,22 +819,9 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             { "rpc.aggregate": "task-workspace" },
           ),
         [TASK_WORKSPACE_WS_METHODS.subscribe]: (_input) =>
-          observeRpcStream(
-            TASK_WORKSPACE_WS_METHODS.subscribe,
-            Stream.concat(
-              Stream.fromEffect(taskWorkspaces.getSnapshot).pipe(
-                Stream.map((snapshot) => ({ kind: "snapshot" as const, snapshot })),
-              ),
-              taskWorkspaces.streamEvents.pipe(
-                Stream.map((event) => ({
-                  kind: "task-upserted" as const,
-                  sequence: event.sequence,
-                  task: event.task,
-                })),
-              ),
-            ),
-            { "rpc.aggregate": "task-workspace" },
-          ),
+          observeRpcStreamEffect(TASK_WORKSPACE_WS_METHODS.subscribe, taskWorkspaces.subscribe, {
+            "rpc.aggregate": "task-workspace",
+          }),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,

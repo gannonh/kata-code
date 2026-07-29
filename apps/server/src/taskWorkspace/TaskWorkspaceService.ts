@@ -18,6 +18,7 @@ import {
   type TaskWorkspaceEvent as TaskWorkspaceEventValue,
   type TaskWorkspaceId,
   type TaskWorkspaceSnapshot,
+  type TaskWorkspaceStreamItem,
 } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -25,6 +26,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
@@ -94,6 +96,44 @@ function requireArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind): 
   if (!latestArtifact(task, kind)) {
     throw new Error(`Task '${task.id}' requires a ${kind} artifact before this transition.`);
   }
+}
+
+function expectedTaskWorktreePath(
+  worktreesDir: string,
+  workspaceRoot: string,
+  newRefName: string,
+): string {
+  return NodePath.join(
+    worktreesDir,
+    NodePath.basename(workspaceRoot),
+    newRefName.replace(/\//g, "-"),
+  );
+}
+
+function tryAdoptExistingWorktree(
+  worktreePath: string,
+  expectedRefName: string,
+): Effect.Effect<{
+  readonly worktree: { readonly path: string; readonly refName: string };
+} | null> {
+  return Effect.tryPromise({
+    try: async () => {
+      await NodeFs.access(worktreePath);
+      const { stdout } = await execFileAsync(
+        "git",
+        ["-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"],
+        { encoding: "utf8" },
+      );
+      if (stdout.trim() !== expectedRefName) return null;
+      return {
+        worktree: {
+          path: worktreePath,
+          refName: expectedRefName,
+        },
+      };
+    },
+    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+  }).pipe(Effect.orElseSucceed(() => null));
 }
 
 function upsertArtifact(
@@ -263,6 +303,7 @@ export interface TaskWorkspaceServiceShape {
   readonly getSnapshot: Effect.Effect<TaskWorkspaceSnapshot, never>;
   readonly getTask: (taskId: TaskWorkspaceId) => Effect.Effect<TaskWorkspace | null, never>;
   readonly streamEvents: Stream.Stream<TaskWorkspaceEventValue>;
+  readonly subscribe: Effect.Effect<Stream.Stream<TaskWorkspaceStreamItem>, never, Scope.Scope>;
 }
 
 export class TaskWorkspaceService extends Context.Service<
@@ -407,18 +448,35 @@ export const make = Effect.gen(function* () {
           requireArtifact(task, "plan");
           const repository = task.workspace.repositories[0];
           if (!repository) throw new Error("The task has no repository binding.");
-          const worktree = yield* gitWorkflow
-            .createWorktree({
-              cwd: repository.workspaceRoot,
-              refName: repository.baseRef,
-              newRefName: `katacode/task-${safeBranchSegment(task.id)}`,
-              path: null,
-            })
-            .pipe(
-              Effect.mapError((cause) =>
-                taskError(command, "Failed to provision the task worktree.", cause),
-              ),
-            );
+          const newRefName = `katacode/task-${safeBranchSegment(task.id)}`;
+          const worktreePath = expectedTaskWorktreePath(
+            config.worktreesDir,
+            repository.workspaceRoot,
+            newRefName,
+          );
+          const existingWorktree = yield* tryAdoptExistingWorktree(worktreePath, newRefName);
+          const worktree =
+            existingWorktree ??
+            (yield* gitWorkflow
+              .createWorktree({
+                cwd: repository.workspaceRoot,
+                refName: repository.baseRef,
+                newRefName,
+                path: worktreePath,
+              })
+              .pipe(
+                Effect.catch((cause) =>
+                  tryAdoptExistingWorktree(worktreePath, newRefName).pipe(
+                    Effect.flatMap((adopted) =>
+                      adopted
+                        ? Effect.succeed(adopted)
+                        : Effect.fail(
+                            taskError(command, "Failed to provision the task worktree.", cause),
+                          ),
+                    ),
+                  ),
+                ),
+              ));
           return yield* append(command, {
             ...task,
             workspace: {
@@ -443,15 +501,20 @@ export const make = Effect.gen(function* () {
         case "task.build.work-item.set-status": {
           requireStage(task, "build");
           let found = false;
-          const phases = task.build.phases.map((phase) => ({
-            ...phase,
-            status: command.status === "running" ? ("running" as const) : phase.status,
-            workItems: phase.workItems.map((item) => {
+          const phases = task.build.phases.map((phase) => {
+            const workItems = phase.workItems.map((item) => {
               if (item.id !== command.workItemId) return item;
               found = true;
               return { ...item, status: command.status };
-            }),
-          }));
+            });
+            const ownsWorkItem = phase.workItems.some((item) => item.id === command.workItemId);
+            return {
+              ...phase,
+              status:
+                ownsWorkItem && command.status === "running" ? ("running" as const) : phase.status,
+              workItems,
+            };
+          });
           if (!found) throw new Error(`Work item '${command.workItemId}' was not found.`);
           return yield* append(command, {
             ...task,
@@ -483,8 +546,23 @@ export const make = Effect.gen(function* () {
             "-m",
             "feat(task-workspaces): apply slice 1 fixture",
           ]).pipe(
-            Effect.mapError((cause) =>
-              taskError(command, "Failed to commit the fixture file.", cause),
+            Effect.catch((cause) =>
+              Effect.gen(function* () {
+                const contents = yield* Effect.tryPromise({
+                  try: async () => NodeFs.readFile(fixturePath, "utf8"),
+                  catch: () => "",
+                }).pipe(Effect.orElseSucceed(() => ""));
+                const status = yield* runGit(worktreePath, [
+                  "status",
+                  "--porcelain",
+                  "--",
+                  FIXTURE_FILE,
+                ]).pipe(Effect.orElseSucceed(() => "dirty"));
+                if (contents === FIXTURE_CONTENT && status.trim() === "") {
+                  return "";
+                }
+                return yield* taskError(command, "Failed to commit the fixture file.", cause);
+              }),
             ),
           );
           const commitSha = yield* runGit(worktreePath, ["rev-parse", "HEAD"]).pipe(
@@ -637,6 +715,28 @@ export const make = Effect.gen(function* () {
     get streamEvents() {
       return Stream.fromPubSub(eventPubSub);
     },
+    subscribe: Effect.gen(function* () {
+      const subscription = yield* PubSub.subscribe(eventPubSub);
+      const snapshot: TaskWorkspaceSnapshot = {
+        sequence,
+        tasks: [...taskById.values()].toSorted((left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt),
+        ),
+      };
+      return Stream.concat(
+        Stream.succeed({ kind: "snapshot" as const, snapshot }),
+        Stream.fromSubscription(subscription).pipe(
+          Stream.filter((event) => event.sequence > snapshot.sequence),
+          Stream.map(
+            (event): TaskWorkspaceStreamItem => ({
+              kind: "task-upserted",
+              sequence: event.sequence,
+              task: event.task,
+            }),
+          ),
+        ),
+      );
+    }),
   });
 });
 

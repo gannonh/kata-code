@@ -67,8 +67,8 @@ function makeGitWorkflow(baseDir: string, createCount: { value: number }): GitWo
       Effect.tryPromise({
         try: async () => {
           createCount.value += 1;
-          const worktreePath = NodePath.join(baseDir, "task-worktree");
           const newRefName = input.newRefName ?? "katacode/task-test";
+          const worktreePath = input.path ?? NodePath.join(baseDir, "task-worktree");
           await git(input.cwd, ["worktree", "add", "-b", newRefName, worktreePath, input.refName]);
           return {
             worktree: {
