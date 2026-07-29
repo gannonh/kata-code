@@ -133,6 +133,12 @@ jobs:
           cache: true
           run-install: true
 
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @kata-sh/code-desktop ensure:electron
+
+      - name: Build desktop pipeline
+        run: vp run build:desktop
+
       - name: Run task-workspaces E2E
         run: vp exec playwright test --config e2e/playwright.config.ts --project desktop-dev --grep @task-workspaces
 
