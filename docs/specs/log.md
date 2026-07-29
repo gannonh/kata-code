@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces Slice 2 implemented — validation pending)
+
+- Built Slice 2 on `cursor/task-workspaces-slice-2-3420`: contracts (sessions/comments/blocks/manifests), server reducer, web artifacts/sessions/comments panels.
+- Closed plan-only PR #54; implementation proceeds under explicit Build override from Draft.
+- Focused tests: 130 passed. Headed UAT + Playwright `@task-workspaces` E2E remain for Verify.
+
 ## 2026-07-29 (Task workspaces Slice 2 child plan drafted)
 
 - Added Draft [Slice 2 child plan](/specs/2026-07-29-task-workspaces-slice-2-plan.md) for artifact workspace, block comments, multi-session/ad hoc/fork/reviewer (TW-AC5/6/7), base SHA `12cc158e`.

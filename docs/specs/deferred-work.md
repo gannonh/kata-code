@@ -30,6 +30,33 @@ Each entry should include:
 
 ## Deferred / review queue
 
+### Task workspaces rich context manifests (Slice 3+)
+
+- **Status:** deferred
+- **Tracking issue:** [#55](https://github.com/gannonh/kata-code/issues/55)
+- **Area:** task-workspaces, context
+- **Source:** [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md)
+- **Rationale:** Slice 2 ships minimal manifests (`artifactRefs` + notes).
+- **Revisit trigger:** Slice 3+ context-budget work.
+
+### Task workspaces Build-debug UX for `debugging` role
+
+- **Status:** deferred
+- **Tracking issue:** [#56](https://github.com/gannonh/kata-code/issues/56)
+- **Area:** task-workspaces, build
+- **Source:** [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md)
+- **Rationale:** Role is in schema/navigator; dedicated Build-debug flow deferred.
+- **Revisit trigger:** Product request for Build-debug sessions.
+
+### Task workspaces Slice 2 Playwright E2E under `e2e/tests/`
+
+- **Status:** deferred
+- **Tracking issue:** [#57](https://github.com/gannonh/kata-code/issues/57)
+- **Area:** task-workspaces, e2e
+- **Source:** [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md)
+- **Rationale:** Build lands with unit/integration/browser coverage; headed UAT + e2e remain for Verify.
+- **Revisit trigger:** Slice 2 Verify phase / AGENTS Feature Validation close-out.
+
 ### Task workspaces Slice 1 Playwright E2E under `e2e/tests/`
 
 - **Status:** deferred

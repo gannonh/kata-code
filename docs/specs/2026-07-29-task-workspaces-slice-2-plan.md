@@ -2,7 +2,8 @@
 type: Spec
 title: "Task workspaces Slice 2 — Artifact workspace, comments, revisions, and multiple sessions"
 description: "Child implementation plan for the second autonomous vertical slice: make a Standard task a reviewable workspace with artifact lineage/selection, stable block comments, multiple stage sessions, ad hoc sessions, context forks, and reviewer sessions."
-status: Draft
+status: Implemented
+approved_at: 2026-07-29T17:15:00Z
 tags: [specs, task-workspaces, workflows, artifacts, comments, sessions, orchestration, web, server]
 timestamp: 2026-07-29T16:54:00Z
 parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
@@ -13,10 +14,9 @@ base_sha: 12cc158e8b8210e96b74800b7b9772280ffe8d59
 
 ## Status
 
-**Draft.** Authorized by the Approved parent
-[Task workspaces vertical-slices design](/specs/2026-07-28-task-workspaces-vertical-slices-design.md)
-and the merged Slice 1 baseline. This child spec implements only Slice 2 and does not approve
-any later slice.
+**Implemented — validation pending.** User explicitly directed Build from the Draft child plan
+(approval-gate override). This child spec implements only Slice 2 and does not approve any later
+slice.
 
 ## Outcome
 
