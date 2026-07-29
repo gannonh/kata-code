@@ -1,5 +1,11 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces parent Approved; Slice 1 Verified)
+
+- Marked [Task workspaces vertical-slices parent](/specs/2026-07-28-task-workspaces-vertical-slices-design.md) **Approved**; it supersedes [Task mode](/specs/2026-07-03-task-mode-design.md).
+- Recorded Slice 1 as **Verified** after squash-merge of [PR #51](https://github.com/gannonh/kata-code/pull/51) (`a660027c`); validation recommendation Accepted.
+- Next active planning item: Slice 2 (artifact workspace, comments, revisions, multiple sessions).
+
 ## 2026-07-29 (Task workspaces Slice 1 PR review remediation)
 
 - Addressed legitimate PR #51 review findings: subscribe-before-snapshot, project hydration on `/tasks/new`, worktree/fixture side-effect recovery, phase status scoping, shared `currentTaskStage`, event type literals.

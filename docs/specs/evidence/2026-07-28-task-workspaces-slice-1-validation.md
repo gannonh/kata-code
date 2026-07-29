@@ -3,6 +3,7 @@ type: Evidence
 title: "Task workspaces Slice 1 validation"
 description: "Automated and manual validation record for the Standard task-workspace walking skeleton."
 status: Complete
+recommendation: Accepted — merged via PR #51
 tags: [evidence, task-workspaces, workflows, verification, slice-1]
 timestamp: 2026-07-29T15:52:00Z
 parent: /specs/2026-07-28-task-workspaces-slice-1-plan.md
@@ -121,5 +122,4 @@ Recorded Build SHA: `2bef69679f38f60ccfe11205ae37389ab9cfb1bf`
 
 ## Recommendation
 
-Automated gates and headed UAT are complete for Slice 1. Merge recommendation remains
-**Pending user sign-off**.
+**Accepted — merged** via [PR #51](https://github.com/gannonh/kata-code/pull/51) (`a660027c`).

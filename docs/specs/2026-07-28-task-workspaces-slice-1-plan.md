@@ -2,7 +2,9 @@
 type: Spec
 title: "Task workspaces Slice 1 — Standard walking skeleton"
 description: "Child implementation plan for the first autonomous vertical slice: create a durable Standard task workspace, approve a plan, provision one worktree, apply a deterministic fixture change, verify the exact commit, and sign off as Verified."
-status: Verified — pending user sign-off
+status: Verified
+approved_at: 2026-07-28T10:00:00-07:00
+verified_at: 2026-07-29T16:42:27Z
 tags: [specs, task-workspaces, workflows, orchestration, verification, web, server]
 timestamp: 2026-07-28T10:00:00-07:00
 parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
@@ -12,8 +14,9 @@ parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
 
 ## Status
 
-**Verified — pending user sign-off.** Automated gates and headed UAT evidence are complete for Slice 1. This child
-spec remains authorized only for Slice 1 and does not approve any later slice.
+**Verified.** Merged to `main` via [PR #51](https://github.com/gannonh/kata-code/pull/51)
+(`a660027c`). This child spec remains authorized only for Slice 1 and does not approve any
+later slice.
 
 ## Outcome
 

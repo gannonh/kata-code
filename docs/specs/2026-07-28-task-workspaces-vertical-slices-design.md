@@ -2,7 +2,7 @@
 type: Spec
 title: "Task workspaces — artifact-driven workflows delivered as autonomous vertical slices"
 description: "Replacement architecture for Task Mode: tasks are versioned workspaces containing repository bindings, sessions, artifacts, comments, workflow runs, verification evidence, source context, and delivery state; implementation proceeds through independently specified vertical slices."
-status: Draft
+status: Approved
 tags:
   [
     specs,
@@ -24,17 +24,19 @@ supersedes_on_approval: /specs/2026-07-03-task-mode-design.md
 
 ## Status
 
-**Draft.**
+**Approved.**
 
-When approved, this spec supersedes
+This spec supersedes
 [Task mode — workflow-driven tasks with a live plan artifact panel](/specs/2026-07-03-task-mode-design.md).
-Until then, the July 3 spec remains the approved source of truth.
 
 This document is the parent architecture and delivery roadmap. It does **not** authorize a
 single large implementation. Every vertical slice defined below must receive its own dated
 child spec before code changes begin. Approval of this parent spec delegates child-spec
 approval to an autonomous agent only under the rules in
 [Autonomous slice delivery contract](#autonomous-slice-delivery-contract).
+
+Slice 1 is merged (`a660027c` / PR #51). Task-workspace contracts from Slice 1 are no longer
+provisional; later slices extend them through child specs.
 
 ## Goal
 
@@ -903,7 +905,8 @@ contracts.
 - Task-keyed workspace panel.
 - Pi as the reference provider; shared web code with desktop-dev UAT.
 
-Contracts remain provisional until Slice 1 UAT is accepted.
+Contracts were provisional until Slice 1 UAT acceptance; Slice 1 is merged, so those contracts
+are now the base for later slices.
 
 **Required evidence:**
 
@@ -1235,7 +1238,7 @@ appropriate to its scope.
 
 | Risk                                                        | Mitigation                                                                                                                  |
 | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| The domain becomes too broad before any UX is proven.       | Slice 1 is a thin full loop; contracts remain provisional until its UAT is accepted.                                        |
+| The domain becomes too broad before any UX is proven.       | Slice 1 is a thin full loop; contracts stayed provisional until its UAT was accepted and merged.                            |
 | Multiple artifacts increase context and UI complexity.      | Artifact kinds, lineage, current revision, context manifests, and a dedicated workspace panel keep boundaries explicit.     |
 | A provider cannot call the task-control transport reliably. | Slice 1 treats transport as a blocking proof; all providers ultimately use the same structured CLI/API contract.            |
 | Artifact and server state diverge.                          | Artifacts own content and static definitions; server owns execution state; revisions and hashes make drift visible.         |
