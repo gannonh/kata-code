@@ -48,25 +48,6 @@ Each entry should include:
 - **Rationale:** Role is in schema/navigator; dedicated Build-debug flow deferred.
 - **Revisit trigger:** Product request for Build-debug sessions.
 
-### Task workspaces Slice 2 Playwright E2E under `e2e/tests/`
-
-- **Status:** deferred
-- **Tracking issue:** [#57](https://github.com/gannonh/kata-code/issues/57)
-- **Area:** task-workspaces, e2e
-- **Source:** [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md) · [Validation](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md)
-- **Rationale:** Slice 2 Verify completed with headed UAT + unit/integration/browser coverage; Playwright `e2e/tests` `@task-workspaces` still required for AGENTS Feature Validation close-out (same pattern as Slice 1 [#52](https://github.com/gannonh/kata-code/issues/52)).
-- **Revisit trigger:** Before marking Slice 2 merge Accepted without residual Feature Validation debt, or when authoring shared task-workspace e2e flows.
-
-### Task workspaces Slice 1 Playwright E2E under `e2e/tests/`
-
-- **Status:** deferred
-- **Tracking issue:** [#52](https://github.com/gannonh/kata-code/issues/52)
-- **Area:** task-workspaces, e2e, web
-- **Source:** [Slice 1](/specs/2026-07-28-task-workspaces-slice-1-plan.md) · [PR #51](https://github.com/gannonh/kata-code/pull/51)
-- **Rationale:** Slice 1 acceptance used focused tests, browser components, CI gates, and headed UAT; AGENTS.md `e2e/tests/` coverage remains owed for long-term regression protection.
-- **Revisit trigger:** Next task-workspaces hardening slice or before treating Slice 1 as fully closed under AGENTS Feature Validation.
-- **Notes:** Headed evidence package: `uat-evidence/web-20260729-152008/`.
-
 ### Task workspaces crash-safe NDJSON event log
 
 - **Status:** deferred

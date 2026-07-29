@@ -14,10 +14,9 @@ base_sha: 12cc158e8b8210e96b74800b7b9772280ffe8d59
 
 ## Status
 
-**Verified — pending user sign-off.** Built from Draft under explicit user override; headed UAT +
-focused gates recorded in
+**Verified — ready to merge.** Built from Draft under explicit user override; headed UAT, focused
+gates, review hardening, and cumulative desktop `@task-workspaces` E2E are recorded in
 [Slice 2 validation](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md).
-Playwright `@task-workspaces` remains deferred ([#57](https://github.com/gannonh/kata-code/issues/57)).
 This child spec implements only Slice 2 and does not approve any later slice.
 
 ## Outcome

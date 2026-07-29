@@ -3,7 +3,7 @@ type: Evidence
 title: "Task workspaces Slice 2 validation"
 description: "Automated and manual validation record for the artifact workspace, comments, revisions, and multiple sessions slice."
 status: Complete
-recommendation: Pending user sign-off
+recommendation: Ready to merge
 tags: [evidence, task-workspaces, workflows, verification, slice-2]
 timestamp: 2026-07-29T18:11:00Z
 parent: /specs/2026-07-29-task-workspaces-slice-2-plan.md
@@ -22,10 +22,11 @@ non-effect, and Slice 1 path continuity on the same aggregate.
 
 ## Product SHA under test
 
-`cfc97c64acbed0eadb820557edfbb344291e2f21`
+`463112393ae31b4c2c180725b57391894e65dae8`
 
-Includes fix: artifact upsert allocates the next revision from `max(stored revisions)+1`
-so select-revision cannot cause colliding revision ids.
+Includes the revision-allocation fix plus review hardening for context-reference integrity,
+duplicate block markers, boundary-whitespace hashes, primary-session selection, command failure
+handling, manifest creation, scoped test cleanup, and the cumulative desktop E2E gate.
 
 ## Automated evidence
 
@@ -53,20 +54,33 @@ cd apps/web && vp test --project browser src/components/taskWorkspace/TaskWorksp
 
 ```text
 Test Files  1 passed (1)
-Tests       3 passed (3)
+Tests       6 passed (6)
+```
+
+Desktop E2E:
+
+```bash
+vp exec playwright test \
+  --config e2e/playwright.config.ts \
+  --project desktop-dev \
+  --grep @task-workspaces
+```
+
+```text
+Tests  5 passed (5)
 ```
 
 ### Repository gates
 
-| Gate                          | Result                     | Notes                                                               |
-| ----------------------------- | -------------------------- | ------------------------------------------------------------------- |
-| `vp check`                    | Pass                       | Local                                                               |
-| `vp run typecheck`            | Pass                       | Local                                                               |
-| Components browser shard      | Pass                       | CI Test Browser                                                     |
-| `vp run release:smoke`        | Pass                       | CI                                                                  |
-| `vp run test`                 | CI pending                 | Local Docker-guarded sandbox tests need Docker daemon               |
-| GitHub Actions CI             | In progress / mostly green | Check, Test Browser, Release Smoke, Mobile, CodeQL pass on fix push |
-| Playwright `@task-workspaces` | Deferred                   | [#57](https://github.com/gannonh/kata-code/issues/57)               |
+| Gate                          | Result | Notes                                                                            |
+| ----------------------------- | ------ | -------------------------------------------------------------------------------- |
+| `vp check`                    | Pass   | Local + CI Check                                                                 |
+| `vp run typecheck`            | Pass   | Local + CI Check                                                                 |
+| Components browser shard      | Pass   | CI Test Browser                                                                  |
+| `vp run release:smoke`        | Pass   | CI Release Smoke                                                                 |
+| `vp run test`                 | Pass   | CI Test                                                                          |
+| GitHub Actions CI             | Pass   | [run 30493118787](https://github.com/gannonh/kata-code/actions/runs/30493118787) |
+| Playwright `@task-workspaces` | Pass   | Desktop-dev cumulative Slice 1 + Slice 2 scenarios                               |
 
 ## Headed UAT evidence
 
@@ -113,7 +127,16 @@ Program mapping: TW-AC5/6/7 incremental covered by the rows above.
 ## Bugs found in Verify
 
 1. **Revision id collision after select-revision** — upsert used `currentRevision+1`, so selecting an older tip and upserting produced a duplicate `plan-revision-2` React key. Fixed in `cfc97c64` (`max(stored)+1`) with regression coverage.
+2. **Review integrity gaps** — dangling manifest references, reused thread no-ops, duplicate block
+   identities, whitespace-sensitive hashes, invalid manifest revisions/targets, optimistic input
+   loss, and non-primary stage selection were fixed in `8a39c4c` / `ce9c31b`.
+3. **Missing cumulative E2E gate** — added `e2e/tests/task-workspaces/slice-2.spec.ts` and a
+   macOS desktop-dev CI job. The scenario covers Slice 2 plus the Slice 1 Standard path.
 
 ## Recommendation
 
-**Pending user sign-off.** Draft [PR #58](https://github.com/gannonh/kata-code/pull/58) should not merge until a human accepts this validation record. Playwright E2E remains tracked in [#57](https://github.com/gannonh/kata-code/issues/57).
+**Ready to merge.** [PR #58](https://github.com/gannonh/kata-code/pull/58) has complete automated
+and headed evidence, all review threads are resolved, and the cumulative `@task-workspaces` E2E
+closes the residual Slice 1 / Slice 2 validation debt tracked by
+[#52](https://github.com/gannonh/kata-code/issues/52) and
+[#57](https://github.com/gannonh/kata-code/issues/57).
