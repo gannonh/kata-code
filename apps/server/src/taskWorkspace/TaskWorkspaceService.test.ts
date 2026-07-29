@@ -375,7 +375,7 @@ describe("TaskWorkspaceService", () => {
         ).toHaveLength(1);
         expect(createCount.value).toBe(1);
         yield* restarted.dispose;
-      }),
+      }).pipe(Effect.scoped),
     30_000,
   );
 
@@ -802,7 +802,7 @@ describe("TaskWorkspaceService", () => {
         expect(duplicateBlockUpsert._tag).toBe("Failure");
         const afterDuplicateBlock = yield* runtime.runPromise(service.getTask(slice2TaskId));
         expect(afterDuplicateBlock?.artifacts[0]?.currentRevision).toBe(3);
-      }),
+      }).pipe(Effect.scoped),
     30_000,
   );
 
@@ -1031,7 +1031,7 @@ describe("TaskWorkspaceService", () => {
         expect(afterOrphan.task.comments.find((t) => t.id === "comment-1")?.status).toBe(
           "orphaned",
         );
-      }),
+      }).pipe(Effect.scoped),
     30_000,
   );
 
@@ -1122,7 +1122,7 @@ describe("TaskWorkspaceService", () => {
           displayName: "Ada",
         });
         yield* restarted.dispose;
-      }),
+      }).pipe(Effect.scoped),
     30_000,
   );
 
