@@ -1,5 +1,10 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces Slice 1 verified — pending user sign-off)
+
+- Completed Verify for [Slice 1](/specs/2026-07-28-task-workspaces-slice-1-plan.md): CI green on [run 30465264985](https://github.com/gannonh/kata-code/actions/runs/30465264985), focused 122 tests, headed UAT package `uat-evidence/web-20260729-152008/` including restart rehydration, duplicate-command, and linked-session (AC15) evidence.
+- Updated [validation record](/specs/evidence/2026-07-28-task-workspaces-slice-1-validation.md) to Complete; Slice 1 status **Verified — pending user sign-off**. Merge remains blocked on human sign-off ([PR #51](https://github.com/gannonh/kata-code/pull/51)).
+
 ## 2026-07-28 (Task workspaces Slice 1 implementation started)
 
 - Added [Task workspaces Slice 1 child spec](/specs/2026-07-28-task-workspaces-slice-1-plan.md) for the Standard walking skeleton from Questions through exact-SHA Verify signoff.
