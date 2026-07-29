@@ -53,6 +53,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     review: {
       getDiffPreview: rpcClient.review.getDiffPreview,
     },
+    taskWorkspaces: {
+      dispatchCommand: rpcClient.taskWorkspaces.dispatchCommand,
+      subscribe: (callback, options) => rpcClient.taskWorkspaces.subscribe(callback, options),
+    },
     orchestration: {
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,

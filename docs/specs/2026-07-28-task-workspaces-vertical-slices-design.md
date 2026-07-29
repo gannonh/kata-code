@@ -3,7 +3,19 @@ type: Spec
 title: "Task workspaces — artifact-driven workflows delivered as autonomous vertical slices"
 description: "Replacement architecture for Task Mode: tasks are versioned workspaces containing repository bindings, sessions, artifacts, comments, workflow runs, verification evidence, source context, and delivery state; implementation proceeds through independently specified vertical slices."
 status: Draft
-tags: [specs, task-workspaces, workflows, artifacts, orchestration, comments, verification, delivery, web, desktop]
+tags:
+  [
+    specs,
+    task-workspaces,
+    workflows,
+    artifacts,
+    orchestration,
+    comments,
+    verification,
+    delivery,
+    web,
+    desktop,
+  ]
 timestamp: 2026-07-28T00:00:00-07:00
 supersedes_on_approval: /specs/2026-07-03-task-mode-design.md
 ---
@@ -109,25 +121,25 @@ state, and explicit user signoff.
 
 ## Vocabulary
 
-| Term | Meaning |
-| --- | --- |
-| **Task** | Top-level durable unit of work and product workspace. |
-| **Workspace** | Repository bindings, provisioning policy, worktrees, setup state, and local-file policy owned by a task. |
-| **Workflow definition** | Versioned stage graph and policy bundle selected for a task. |
-| **Workflow run** | Task-specific execution of a workflow definition. |
-| **Stage instance** | One occurrence of a workflow stage. Stage instances may repeat after restart or amendment. |
-| **Session** | One provider conversation attached to a task and optionally to a stage instance. |
-| **Artifact** | Stable task-owned output with one or more revisions, such as questions, research, design, plan, verification report, HTML mockup, or image. |
-| **Artifact revision** | Immutable record of an artifact's content hash, path, producer session, and source commit at a point in time. |
-| **Block** | Stable addressable region inside an artifact used for comments and context selection. |
-| **Comment** | Threaded note anchored to an artifact block or task entity. |
-| **Build phase** | Ordered implementation unit containing work items and checkpoint policy. |
-| **Work item** | Server-owned execution record derived from an approved plan. |
-| **Checkpoint** | Policy boundary after a Build phase or check result. |
-| **Amendment** | Reviewed change to an approved plan triggered by Build or Verify findings. |
-| **Verification record** | Pass, fail, or blocked result for one acceptance criterion at one commit SHA. |
-| **Source** | Optional external origin such as inline text, GitHub issue, Linear ticket, or Jira issue. |
-| **Delivery** | Branch, commits, pull request, source linkage, and delivery status. |
+| Term                    | Meaning                                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Task**                | Top-level durable unit of work and product workspace.                                                                                       |
+| **Workspace**           | Repository bindings, provisioning policy, worktrees, setup state, and local-file policy owned by a task.                                    |
+| **Workflow definition** | Versioned stage graph and policy bundle selected for a task.                                                                                |
+| **Workflow run**        | Task-specific execution of a workflow definition.                                                                                           |
+| **Stage instance**      | One occurrence of a workflow stage. Stage instances may repeat after restart or amendment.                                                  |
+| **Session**             | One provider conversation attached to a task and optionally to a stage instance.                                                            |
+| **Artifact**            | Stable task-owned output with one or more revisions, such as questions, research, design, plan, verification report, HTML mockup, or image. |
+| **Artifact revision**   | Immutable record of an artifact's content hash, path, producer session, and source commit at a point in time.                               |
+| **Block**               | Stable addressable region inside an artifact used for comments and context selection.                                                       |
+| **Comment**             | Threaded note anchored to an artifact block or task entity.                                                                                 |
+| **Build phase**         | Ordered implementation unit containing work items and checkpoint policy.                                                                    |
+| **Work item**           | Server-owned execution record derived from an approved plan.                                                                                |
+| **Checkpoint**          | Policy boundary after a Build phase or check result.                                                                                        |
+| **Amendment**           | Reviewed change to an approved plan triggered by Build or Verify findings.                                                                  |
+| **Verification record** | Pass, fail, or blocked result for one acceptance criterion at one commit SHA.                                                               |
+| **Source**              | Optional external origin such as inline text, GitHub issue, Linear ticket, or Jira issue.                                                   |
+| **Delivery**            | Branch, commits, pull request, source linkage, and delivery status.                                                                         |
 
 ## Locked architecture decisions
 
@@ -360,6 +372,7 @@ Addressable Markdown blocks use stable embedded IDs, for example:
 
 ```markdown
 <!-- kata:block:approach-auth -->
+
 ## Authentication approach
 ```
 
@@ -1220,19 +1233,19 @@ appropriate to its scope.
 
 ## Risks and mitigations
 
-| Risk | Mitigation |
-| --- | --- |
-| The domain becomes too broad before any UX is proven. | Slice 1 is a thin full loop; contracts remain provisional until its UAT is accepted. |
-| Multiple artifacts increase context and UI complexity. | Artifact kinds, lineage, current revision, context manifests, and a dedicated workspace panel keep boundaries explicit. |
-| A provider cannot call the task-control transport reliably. | Slice 1 treats transport as a blocking proof; all providers ultimately use the same structured CLI/API contract. |
-| Artifact and server state diverge. | Artifacts own content and static definitions; server owns execution state; revisions and hashes make drift visible. |
-| Repeated sessions race workflow state. | Aggregate versions, idempotency keys, and stage-instance ownership reject conflicting mutations. |
-| Plans become stale during Build. | Controlled amendment flow records the finding and resumes from checkpoints. |
-| Evidence is captured against the wrong code. | Every verification record and evidence manifest carries the tested commit SHA; later code changes mark results stale. |
-| Multi-repo and setup features expose secrets. | Allowlisted files, never-commit policy, redacted setup logs, source validation, and secret scans. |
-| Autonomous agents silently reduce scope. | Child specs inherit locked acceptance criteria; blocked criteria remain blocked; parent deviations require human direction. |
-| Large recordings bloat Git history. | Store large video/trace artifacts in CI or PR artifacts and link them from the evidence report. |
-| Eight slices create coordination overhead. | One child spec and one draft PR per slice; explicit dependency SHAs; no broad parallel implementation. |
+| Risk                                                        | Mitigation                                                                                                                  |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| The domain becomes too broad before any UX is proven.       | Slice 1 is a thin full loop; contracts remain provisional until its UAT is accepted.                                        |
+| Multiple artifacts increase context and UI complexity.      | Artifact kinds, lineage, current revision, context manifests, and a dedicated workspace panel keep boundaries explicit.     |
+| A provider cannot call the task-control transport reliably. | Slice 1 treats transport as a blocking proof; all providers ultimately use the same structured CLI/API contract.            |
+| Artifact and server state diverge.                          | Artifacts own content and static definitions; server owns execution state; revisions and hashes make drift visible.         |
+| Repeated sessions race workflow state.                      | Aggregate versions, idempotency keys, and stage-instance ownership reject conflicting mutations.                            |
+| Plans become stale during Build.                            | Controlled amendment flow records the finding and resumes from checkpoints.                                                 |
+| Evidence is captured against the wrong code.                | Every verification record and evidence manifest carries the tested commit SHA; later code changes mark results stale.       |
+| Multi-repo and setup features expose secrets.               | Allowlisted files, never-commit policy, redacted setup logs, source validation, and secret scans.                           |
+| Autonomous agents silently reduce scope.                    | Child specs inherit locked acceptance criteria; blocked criteria remain blocked; parent deviations require human direction. |
+| Large recordings bloat Git history.                         | Store large video/trace artifacts in CI or PR artifacts and link them from the evidence report.                             |
+| Eight slices create coordination overhead.                  | One child spec and one draft PR per slice; explicit dependency SHAs; no broad parallel implementation.                      |
 
 ## Explicitly deferred
 

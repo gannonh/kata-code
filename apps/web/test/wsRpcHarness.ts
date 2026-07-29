@@ -1,4 +1,9 @@
-import { ORCHESTRATION_WS_METHODS, WS_METHODS, WsRpcGroup } from "@kata-sh/code-contracts";
+import {
+  ORCHESTRATION_WS_METHODS,
+  TASK_WORKSPACE_WS_METHODS,
+  WS_METHODS,
+  WsRpcGroup,
+} from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as PubSub from "effect/PubSub";
@@ -29,6 +34,7 @@ interface BrowserWsRpcHarnessOptions {
 const STREAM_METHODS = new Set<string>([
   ORCHESTRATION_WS_METHODS.subscribeShell,
   ORCHESTRATION_WS_METHODS.subscribeThread,
+  TASK_WORKSPACE_WS_METHODS.subscribe,
   WS_METHODS.gitRunStackedAction,
   WS_METHODS.terminalAttach,
   WS_METHODS.subscribeVcsStatus,

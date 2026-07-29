@@ -1,5 +1,21 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces Slice 1 PR review remediation)
+
+- Addressed legitimate PR #51 review findings: subscribe-before-snapshot, project hydration on `/tasks/new`, worktree/fixture side-effect recovery, phase status scoping, shared `currentTaskStage`, event type literals.
+- Deferred Playwright `e2e/tests/` coverage ([#52](https://github.com/gannonh/kata-code/issues/52)) and crash-safe NDJSON append ([#53](https://github.com/gannonh/kata-code/issues/53)); recorded in [deferred-work](/specs/deferred-work.md).
+
+## 2026-07-29 (Task workspaces Slice 1 verified — pending user sign-off)
+
+- Completed Verify for [Slice 1](/specs/2026-07-28-task-workspaces-slice-1-plan.md): CI green on [run 30465264985](https://github.com/gannonh/kata-code/actions/runs/30465264985), focused 122 tests, headed UAT package `uat-evidence/web-20260729-152008/` including restart rehydration, duplicate-command, and linked-session (AC15) evidence.
+- Updated [validation record](/specs/evidence/2026-07-28-task-workspaces-slice-1-validation.md) to Complete; Slice 1 status **Verified — pending user sign-off**. Merge remains blocked on human sign-off ([PR #51](https://github.com/gannonh/kata-code/pull/51)).
+
+## 2026-07-28 (Task workspaces Slice 1 implementation started)
+
+- Added [Task workspaces Slice 1 child spec](/specs/2026-07-28-task-workspaces-slice-1-plan.md) for the Standard walking skeleton from Questions through exact-SHA Verify signoff.
+- Chose a dedicated durable task aggregate that links existing orchestration threads and delegates worktree operations to the existing Git workflow service.
+- Opened draft [PR #51](https://github.com/gannonh/kata-code/pull/51) on `agent/task-workspaces-slice-1`; implementation and evidence collection are in progress.
+
 ## 2026-07-18 (Shared sandbox GitHub source picker implemented)
 
 Implemented [Shared sandbox GitHub source picker and Docker remote seed](/specs/2026-07-17-shared-sandbox-github-source-design.md): `SandboxGitHubSourcePicker` shared by Docker and Vercel cards; Docker Create requires GitHub source, seeds host `gh` auth, shallow-clones into `/workspace`, persists source fingerprints, and rejects Start mismatches. Closed deferred Docker remote-source [#29](https://github.com/gannonh/kata-code/issues/29).

@@ -4,6 +4,7 @@ import {
   type GitRunStackedActionResult,
   type LocalApi,
   ORCHESTRATION_WS_METHODS,
+  TASK_WORKSPACE_WS_METHODS,
   type RelayClientInstallProgressEvent,
   type RelayClientStatus,
   type SandboxProviderLoginEvent,
@@ -204,6 +205,10 @@ export interface WsRpcClient {
       typeof WS_METHODS.sandboxSearchGitHubRepositories
     >;
     readonly listGitHubBranches: RpcUnaryMethod<typeof WS_METHODS.sandboxListGitHubBranches>;
+  };
+  readonly taskWorkspaces: {
+    readonly dispatchCommand: RpcUnaryMethod<typeof TASK_WORKSPACE_WS_METHODS.dispatchCommand>;
+    readonly subscribe: RpcStreamMethod<typeof TASK_WORKSPACE_WS_METHODS.subscribe>;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -471,6 +476,16 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.sandboxSearchGitHubRepositories](input)),
       listGitHubBranches: (input) =>
         transport.request((client) => client[WS_METHODS.sandboxListGitHubBranches](input)),
+    },
+    taskWorkspaces: {
+      dispatchCommand: (input) =>
+        transport.request((client) => client[TASK_WORKSPACE_WS_METHODS.dispatchCommand](input)),
+      subscribe: (listener, options) =>
+        transport.subscribe(
+          (client) => client[TASK_WORKSPACE_WS_METHODS.subscribe]({}),
+          listener,
+          subscriptionOptions(options, TASK_WORKSPACE_WS_METHODS.subscribe),
+        ),
     },
     orchestration: {
       dispatchCommand: (input) =>

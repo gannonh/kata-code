@@ -46,6 +46,7 @@ import {
 } from "../rpc/serverState";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
+import { TaskWorkspaceBootstrap } from "../taskWorkspace/TaskWorkspaceBootstrap";
 import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import {
   ensureEnvironmentConnectionBootstrapped,
@@ -150,6 +151,7 @@ function RootRouteView() {
       <AnchoredToastProvider>
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
+        {primaryEnvironmentAuthenticated ? <TaskWorkspaceBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
         <RelayClientInstallDialog />
         <SshPasswordPromptDialog />

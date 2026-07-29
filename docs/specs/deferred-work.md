@@ -30,6 +30,26 @@ Each entry should include:
 
 ## Deferred / review queue
 
+### Task workspaces Slice 1 Playwright E2E under `e2e/tests/`
+
+- **Status:** deferred
+- **Tracking issue:** [#52](https://github.com/gannonh/kata-code/issues/52)
+- **Area:** task-workspaces, e2e, web
+- **Source:** [Slice 1](/specs/2026-07-28-task-workspaces-slice-1-plan.md) · [PR #51](https://github.com/gannonh/kata-code/pull/51)
+- **Rationale:** Slice 1 acceptance used focused tests, browser components, CI gates, and headed UAT; AGENTS.md `e2e/tests/` coverage remains owed for long-term regression protection.
+- **Revisit trigger:** Next task-workspaces hardening slice or before treating Slice 1 as fully closed under AGENTS Feature Validation.
+- **Notes:** Headed evidence package: `uat-evidence/web-20260729-152008/`.
+
+### Task workspaces crash-safe NDJSON event log
+
+- **Status:** deferred
+- **Tracking issue:** [#53](https://github.com/gannonh/kata-code/issues/53)
+- **Area:** task-workspaces, server, persistence
+- **Source:** [Slice 1](/specs/2026-07-28-task-workspaces-slice-1-plan.md) · [PR #51](https://github.com/gannonh/kata-code/pull/51)
+- **Rationale:** Slice 1 keeps fail-loud startup on corrupt history; fsync + trailing-truncate quarantine is hardening beyond the walking skeleton.
+- **Revisit trigger:** Persistence hardening slice or first production crash that truncates the event log.
+- **Notes:** Mid-file corruption must continue to fail startup rather than silently reset.
+
 ### Live Waiting chip E2E for sidebar state detection
 
 - **Status:** deferred

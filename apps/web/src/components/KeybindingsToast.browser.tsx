@@ -13,6 +13,7 @@ import {
   type ServerLifecycleWelcomePayload,
   ServerConfig as ServerConfigSchema,
   ServerSettings,
+  TASK_WORKSPACE_WS_METHODS,
   type ThreadId,
   WS_METHODS,
 } from "@kata-sh/code-contracts";
@@ -555,6 +556,17 @@ describe("Keybindings update toast", () => {
               snapshot: {
                 snapshotSequence: fixture.snapshot.snapshotSequence,
                 thread: fixture.snapshot.threads[0],
+              },
+            },
+          ];
+        }
+        if (request._tag === TASK_WORKSPACE_WS_METHODS.subscribe) {
+          return [
+            {
+              kind: "snapshot",
+              snapshot: {
+                sequence: 0,
+                tasks: [],
               },
             },
           ];

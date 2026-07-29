@@ -95,6 +95,11 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
+import type {
+  TaskWorkspaceCommand,
+  TaskWorkspaceDispatchResult,
+  TaskWorkspaceStreamItem,
+} from "./taskWorkspace.ts";
 import { EnvironmentId } from "./baseSchemas.ts";
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
@@ -1192,6 +1197,13 @@ export interface EnvironmentApi {
       options?: {
         onResubscribe?: () => void;
       },
+    ) => () => void;
+  };
+  taskWorkspaces: {
+    dispatchCommand: (command: TaskWorkspaceCommand) => Promise<TaskWorkspaceDispatchResult>;
+    subscribe: (
+      callback: (event: TaskWorkspaceStreamItem) => void,
+      options?: { onResubscribe?: () => void },
     ) => () => void;
   };
   preview: {
