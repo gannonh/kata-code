@@ -3,10 +3,15 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { CommandId, ProjectId } from "./baseSchemas.ts";
-import { TaskWorkspaceCommand, TaskWorkspaceStreamItem } from "./taskWorkspace.ts";
+import {
+  TaskWorkspaceCommand,
+  TaskWorkspaceEvent,
+  TaskWorkspaceStreamItem,
+} from "./taskWorkspace.ts";
 
 const decodeCommand = Schema.decodeUnknownEffect(TaskWorkspaceCommand);
 const decodeStreamItem = Schema.decodeUnknownEffect(TaskWorkspaceStreamItem);
+const decodeEvent = Schema.decodeUnknownEffect(TaskWorkspaceEvent);
 
 it.effect("decodes the Standard task creation contract", () =>
   Effect.gen(function* () {
@@ -60,5 +65,43 @@ it.effect("decodes a task snapshot stream item", () =>
     });
 
     assert.strictEqual(item.kind, "snapshot");
+  }),
+);
+
+it.effect("rejects unknown task workspace event types", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeEvent({
+        sequence: 1,
+        eventId: "event-1",
+        commandId: "command-1",
+        taskId: "task-1",
+        type: "task.unknown.command",
+        occurredAt: "2026-07-28T17:00:00.000Z",
+        task: {
+          id: "task-1",
+          title: "Slice 1",
+          versions: {
+            taskContract: "task-workspace@0.1.0",
+            artifactContract: "task-artifact@0.1.0",
+            workflowDefinition: "standard@0.1.0",
+            prompt: "task-workspace-slice-1@0.1.0",
+          },
+          workspace: { repositories: [] },
+          workflowRuns: [],
+          sessions: [],
+          artifacts: [],
+          comments: [],
+          build: { phases: [], resultingCommitSha: null },
+          verification: { criteria: [], results: [], signedOffAt: null },
+          sourceLinks: [],
+          delivery: { state: "unavailable" },
+          createdAt: "2026-07-28T17:00:00.000Z",
+          updatedAt: "2026-07-28T17:00:00.000Z",
+        },
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
   }),
 );

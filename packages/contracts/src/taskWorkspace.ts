@@ -226,12 +226,25 @@ export const TaskWorkspaceCommand = Schema.Union([
 ]);
 export type TaskWorkspaceCommand = typeof TaskWorkspaceCommand.Type;
 
+export const TaskWorkspaceEventType = Schema.Literals([
+  "task.create",
+  "task.session.link",
+  "task.artifact.upsert",
+  "task.questions.complete",
+  "task.plan.approve",
+  "task.build.work-item.set-status",
+  "task.fixture.apply",
+  "task.verification.run",
+  "task.verification.signoff",
+]);
+export type TaskWorkspaceEventType = typeof TaskWorkspaceEventType.Type;
+
 export const TaskWorkspaceEvent = Schema.Struct({
   sequence: NonNegativeInt,
   eventId: TrimmedNonEmptyString,
   commandId: CommandId,
   taskId: TaskWorkspaceId,
-  type: TrimmedNonEmptyString,
+  type: TaskWorkspaceEventType,
   occurredAt: IsoDateTime,
   task: TaskWorkspace,
 });
