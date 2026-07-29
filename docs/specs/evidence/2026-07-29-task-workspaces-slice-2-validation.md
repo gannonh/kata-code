@@ -3,7 +3,7 @@ type: Evidence
 title: "Task workspaces Slice 2 validation"
 description: "Automated and manual validation record for the artifact workspace, comments, revisions, and multiple sessions slice."
 status: Complete
-recommendation: Ready to merge
+recommendation: Accepted — merged via PR #58
 tags: [evidence, task-workspaces, workflows, verification, slice-2]
 timestamp: 2026-07-29T18:11:00Z
 parent: /specs/2026-07-29-task-workspaces-slice-2-plan.md
@@ -135,8 +135,9 @@ Program mapping: TW-AC5/6/7 incremental covered by the rows above.
 
 ## Recommendation
 
-**Ready to merge.** [PR #58](https://github.com/gannonh/kata-code/pull/58) has complete automated
-and headed evidence, all review threads are resolved, and the cumulative `@task-workspaces` E2E
+**Accepted — merged.** [PR #58](https://github.com/gannonh/kata-code/pull/58) had complete
+automated and headed evidence, all 16 review threads resolved, and all nine head checks green;
+it squash-merged to `main` as `25ce0cc1` on 2026-07-29. The cumulative `@task-workspaces` E2E
 closes the residual Slice 1 / Slice 2 validation debt tracked by
 [#52](https://github.com/gannonh/kata-code/issues/52) and
 [#57](https://github.com/gannonh/kata-code/issues/57).

@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-29 (Task workspaces Slice 2 merged)
+
+Squash-merged [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md) to `main` as `25ce0cc1` via [PR #58](https://github.com/gannonh/kata-code/pull/58). Recorded the slice **Verified — merged** and its [validation record](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md) **Accepted**. Slice 3 (workflow presets and guided context boundaries) is the next planning item.
+
 ## 2026-07-29 (Task workspaces Slice 2 completed)
 
 Completed [Task workspaces Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md) review hardening and cumulative desktop `@task-workspaces` E2E. Updated the [validation record](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md) to **Ready to merge** and closed the Slice 1 / Slice 2 E2E deferrals.

@@ -1,5 +1,12 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces Slice 2 merged)
+
+- Squash-merged [PR #58](https://github.com/gannonh/kata-code/pull/58) to `main` as `25ce0cc1`; all nine head checks green and 16/16 review threads resolved.
+- Marked [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md) **Verified — merged** and its [validation record](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md) **Accepted**.
+- Closed the Slice 1 / Slice 2 E2E debt ([#52](https://github.com/gannonh/kata-code/issues/52), [#57](https://github.com/gannonh/kata-code/issues/57)) via the cumulative desktop `@task-workspaces` job.
+- Next planning item: Slice 3 (workflow presets and guided context boundaries); [#55](https://github.com/gannonh/kata-code/issues/55) folds into it by its own revisit trigger.
+
 ## 2026-07-29 (Task workspaces Slice 2 review hardening complete)
 
 - Completed [PR #58](https://github.com/gannonh/kata-code/pull/58) review hardening: enforced manifest/revision/block/session references, rejected duplicate block IDs and reused threads, stabilized boundary hashes, selected only primary stage sessions, and preserved comment input on command failure.

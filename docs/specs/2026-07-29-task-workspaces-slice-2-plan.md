@@ -4,6 +4,7 @@ title: "Task workspaces Slice 2 — Artifact workspace, comments, revisions, and
 description: "Child implementation plan for the second autonomous vertical slice: make a Standard task a reviewable workspace with artifact lineage/selection, stable block comments, multiple stage sessions, ad hoc sessions, context forks, and reviewer sessions."
 status: Verified
 approved_at: 2026-07-29T17:15:00Z
+verified_at: 2026-07-29T23:20:00Z
 tags: [specs, task-workspaces, workflows, artifacts, comments, sessions, orchestration, web, server]
 timestamp: 2026-07-29T16:54:00Z
 parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
@@ -14,8 +15,9 @@ base_sha: 12cc158e8b8210e96b74800b7b9772280ffe8d59
 
 ## Status
 
-**Verified — ready to merge.** Built from Draft under explicit user override; headed UAT, focused
-gates, review hardening, and cumulative desktop `@task-workspaces` E2E are recorded in
+**Verified.** Merged to `main` via [PR #58](https://github.com/gannonh/kata-code/pull/58)
+(`25ce0cc1`). Built from Draft under explicit user override; headed UAT, focused gates, review
+hardening, and cumulative desktop `@task-workspaces` E2E are recorded in
 [Slice 2 validation](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md).
 This child spec implements only Slice 2 and does not approve any later slice.
 
