@@ -22,7 +22,7 @@ non-effect, and Slice 1 path continuity on the same aggregate.
 
 ## Product SHA under test
 
-`463112393ae31b4c2c180725b57391894e65dae8`
+`55141e35d8ea993f07001cdc234b7f3a007881bf`
 
 Includes the revision-allocation fix plus review hardening for context-reference integrity,
 duplicate block markers, boundary-whitespace hashes, primary-session selection, command failure
@@ -79,7 +79,7 @@ Tests  5 passed (5)
 | Components browser shard      | Pass   | CI Test Browser                                                                  |
 | `vp run release:smoke`        | Pass   | CI Release Smoke                                                                 |
 | `vp run test`                 | Pass   | CI Test                                                                          |
-| GitHub Actions CI             | Pass   | [run 30493118787](https://github.com/gannonh/kata-code/actions/runs/30493118787) |
+| GitHub Actions CI             | Pass   | [run 30494084263](https://github.com/gannonh/kata-code/actions/runs/30494084263) |
 | Playwright `@task-workspaces` | Pass   | Desktop-dev cumulative Slice 1 + Slice 2 scenarios                               |
 
 ## Headed UAT evidence
