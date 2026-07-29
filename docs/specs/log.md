@@ -1,5 +1,10 @@
 # Specs log
 
+## 2026-07-29 (Task workspaces Slice 1 PR review remediation)
+
+- Addressed legitimate PR #51 review findings: subscribe-before-snapshot, project hydration on `/tasks/new`, worktree/fixture side-effect recovery, phase status scoping, shared `currentTaskStage`, event type literals.
+- Deferred Playwright `e2e/tests/` coverage ([#52](https://github.com/gannonh/kata-code/issues/52)) and crash-safe NDJSON append ([#53](https://github.com/gannonh/kata-code/issues/53)); recorded in [deferred-work](/specs/deferred-work.md).
+
 ## 2026-07-29 (Task workspaces Slice 1 verified — pending user sign-off)
 
 - Completed Verify for [Slice 1](/specs/2026-07-28-task-workspaces-slice-1-plan.md): CI green on [run 30465264985](https://github.com/gannonh/kata-code/actions/runs/30465264985), focused 122 tests, headed UAT package `uat-evidence/web-20260729-152008/` including restart rehydration, duplicate-command, and linked-session (AC15) evidence.
