@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { EnvironmentId, ProjectId, type TaskWorkspace } from "@kata-sh/code-contracts";
+import { ProjectId, type TaskWorkspace, ThreadId } from "@kata-sh/code-contracts";
 import { page } from "vite-plus/test/browser";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -11,10 +11,11 @@ import { TaskWorkspaceView } from "./TaskWorkspaceView";
 
 const mocks = vi.hoisted(() => ({
   dispatchCommand: vi.fn<(command: unknown) => Promise<void>>(async () => undefined),
+  primaryEnvironmentId: "environment-local" as string | null,
 }));
 
 vi.mock("../../environments/primary", () => ({
-  usePrimaryEnvironmentId: () => EnvironmentId.make("environment-local"),
+  usePrimaryEnvironmentId: () => mocks.primaryEnvironmentId,
 }));
 
 vi.mock("../../environments/runtime", () => ({
@@ -117,6 +118,7 @@ async function renderTask(task: TaskWorkspace) {
 
 beforeEach(() => {
   mocks.dispatchCommand.mockClear();
+  mocks.primaryEnvironmentId = "environment-local";
   useTaskWorkspaceStore.getState().reset();
 });
 
@@ -134,6 +136,85 @@ describe("TaskWorkspaceView", () => {
       taskId: "task-browser",
       kind: "questions",
       markdown: "# Questions\n\nNo blockers.",
+    });
+  });
+
+  it("renders the artifacts panel with revision lineage and the sessions navigator", async () => {
+    // Router-linked "Open" buttons need a RouterProvider; render without a
+    // primary environment so the navigator lists sessions without those links.
+    mocks.primaryEnvironmentId = null;
+    await renderTask({
+      ...baseTask,
+      workflowRuns: [
+        {
+          ...baseTask.workflowRuns[0]!,
+          currentStage: "plan",
+        },
+      ],
+      sessions: [
+        {
+          id: "session-1",
+          stage: "plan",
+          threadId: ThreadId.make("thread-plan-primary"),
+          role: "primary",
+          provider: "codex",
+          status: "active",
+          parentSessionId: null,
+          forkPoint: null,
+          contextManifestId: null,
+          createdAt: "2026-07-28T17:05:00.000Z",
+        },
+      ],
+      artifacts: [
+        {
+          id: "artifact-plan",
+          kind: "plan",
+          currentRevision: 2,
+          revisions: [
+            {
+              id: "artifact-plan-r1",
+              kind: "plan",
+              title: "Implementation plan",
+              markdown: "# Plan v1",
+              revision: 1,
+              sourceSessionId: "session-1",
+              supersedesRevisionId: null,
+              blockIndex: [],
+              createdAt: "2026-07-28T17:06:00.000Z",
+            },
+            {
+              id: "artifact-plan-r2",
+              kind: "plan",
+              title: "Implementation plan",
+              markdown: "# Plan v2",
+              revision: 2,
+              sourceSessionId: "session-1",
+              supersedesRevisionId: "artifact-plan-r1",
+              blockIndex: [],
+              createdAt: "2026-07-28T17:07:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    await expect.element(page.getByTestId("task-artifacts-panel")).toBeVisible();
+    await expect.element(page.getByTestId("task-artifact-revision-1")).toBeVisible();
+    await expect.element(page.getByTestId("task-artifact-revision-2")).toBeVisible();
+
+    const sessionsPanel = page.getByTestId("task-sessions-panel");
+    await expect.element(sessionsPanel).toBeVisible();
+    await expect
+      .element(sessionsPanel.getByText(/provider codex .* thread thread-pla/))
+      .toBeVisible();
+
+    await page.getByTestId("task-artifact-revision-1").click();
+    await page.getByTestId("task-select-revision").click();
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.artifact.select-revision",
+      kind: "plan",
+      revision: 1,
     });
   });
 

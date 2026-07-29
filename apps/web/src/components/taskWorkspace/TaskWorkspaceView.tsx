@@ -1,7 +1,6 @@
 import {
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
-  type TaskWorkspaceCommand,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import { Link } from "@tanstack/react-router";
@@ -10,14 +9,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
-import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
-import { newCommandId } from "../../lib/utils";
 import { currentTaskStage, useTaskWorkspaceStore } from "../../taskWorkspace/taskWorkspaceStore";
+import { useTaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { Textarea } from "../ui/textarea";
+import { ArtifactsPanel } from "./ArtifactsPanel";
+import { CommentsPanel } from "./CommentsPanel";
+import { SessionsPanel } from "./SessionsPanel";
 
 const STAGES: ReadonlyArray<{ id: TaskWorkspaceStage; label: string }> = [
   { id: "questions", label: "Questions" },
@@ -60,8 +61,8 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
   const [questionsMarkdown, setQuestionsMarkdown] = useState("");
   const [planMarkdown, setPlanMarkdown] = useState(DEFAULT_PLAN);
   const [selectedThreadId, setSelectedThreadId] = useState("");
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const commands = useTaskWorkspaceCommands(taskId);
+  const { dispatch, commandBase, pendingAction, busy, error } = commands;
 
   const questionsArtifact = task ? latestArtifact(task, "questions") : null;
   const planArtifact = task ? latestArtifact(task, "plan") : null;
@@ -95,34 +96,6 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
     }
   }, [availableThreads, selectedThreadId]);
 
-  async function dispatch(command: TaskWorkspaceCommand, action: string) {
-    setPendingAction(action);
-    setError(null);
-    try {
-      await getPrimaryEnvironmentConnection().client.taskWorkspaces.dispatchCommand(command);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Task command failed.");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  function commandBase<T extends TaskWorkspaceCommand["type"]>(
-    type: T,
-  ): {
-    readonly type: T;
-    readonly commandId: ReturnType<typeof newCommandId>;
-    readonly taskId: string;
-    readonly createdAt: string;
-  } {
-    return {
-      type,
-      commandId: newCommandId(),
-      taskId,
-      createdAt: new Date().toISOString(),
-    };
-  }
-
   if (!task) {
     return (
       <SidebarInset className="h-dvh min-h-0 bg-background text-foreground">
@@ -138,7 +111,6 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
   const verificationResult = task.verification.results.find(
     (result) => result.criterionId === task.verification.criteria[0]?.id,
   );
-  const busy = pendingAction !== null;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
@@ -544,6 +516,16 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
                 {error}
               </p>
             ) : null}
+
+            <ArtifactsPanel task={task} commands={commands} />
+            <SessionsPanel
+              task={task}
+              commands={commands}
+              availableThreads={availableThreads}
+              primaryEnvironmentId={primaryEnvironmentId}
+              stage={stage}
+            />
+            <CommentsPanel task={task} commands={commands} />
 
             <section className="flex items-center justify-between rounded-xl border border-border bg-card p-4">
               <div>
