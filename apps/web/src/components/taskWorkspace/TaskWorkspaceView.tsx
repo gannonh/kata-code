@@ -13,7 +13,7 @@ import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
 import { newCommandId } from "../../lib/utils";
-import { useTaskWorkspaceStore } from "../../taskWorkspace/taskWorkspaceStore";
+import { currentTaskStage, useTaskWorkspaceStore } from "../../taskWorkspace/taskWorkspaceStore";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
@@ -45,10 +45,6 @@ function latestArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind) {
   );
 }
 
-function currentStage(task: TaskWorkspace): TaskWorkspaceStage {
-  return task.workflowRuns.at(-1)?.currentStage ?? "questions";
-}
-
 function stageIndex(stage: TaskWorkspaceStage): number {
   return STAGES.findIndex((entry) => entry.id === stage);
 }
@@ -70,7 +66,7 @@ export function TaskWorkspaceView({ taskId }: { taskId: string }) {
   const questionsArtifact = task ? latestArtifact(task, "questions") : null;
   const planArtifact = task ? latestArtifact(task, "plan") : null;
   const verificationArtifact = task ? latestArtifact(task, "verification") : null;
-  const stage = task ? currentStage(task) : "questions";
+  const stage = task ? currentTaskStage(task) : "questions";
   const repository = task?.workspace.repositories[0] ?? null;
   const availableThreads = useMemo(
     () =>

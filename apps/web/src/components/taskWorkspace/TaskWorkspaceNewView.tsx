@@ -1,6 +1,6 @@
 import type { TaskWorkspaceCommand } from "@kata-sh/code-contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
@@ -23,13 +23,21 @@ export function TaskWorkspaceNewView() {
   const [projectId, setProjectId] = useState(availableProjects[0]?.id ?? "");
   const [baseRef, setBaseRef] = useState("main");
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setProjectId((currentProjectId) =>
+      availableProjects.some((project) => project.id === currentProjectId)
+        ? currentProjectId
+        : (availableProjects[0]?.id ?? ""),
+    );
+  }, [availableProjects]);
 
   const selectedProject = availableProjects.find((project) => project.id === projectId) ?? null;
 
   async function createTask() {
     if (!selectedProject || !title.trim() || !baseRef.trim()) return;
-    setSubmitting(true);
+    setIsSubmitting(true);
     setError(null);
     const taskId = `task-${randomUUID()}`;
     const createdAt = new Date().toISOString();
@@ -51,7 +59,7 @@ export function TaskWorkspaceNewView() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Task creation failed.");
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   }
 
@@ -135,10 +143,10 @@ export function TaskWorkspaceNewView() {
             <div className="flex justify-end">
               <Button
                 data-testid="task-create-submit"
-                disabled={!selectedProject || !title.trim() || !baseRef.trim() || submitting}
+                disabled={!selectedProject || !title.trim() || !baseRef.trim() || isSubmitting}
                 onClick={() => void createTask()}
               >
-                {submitting ? "Creating…" : "Create task"}
+                {isSubmitting ? "Creating…" : "Create task"}
               </Button>
             </div>
           </section>

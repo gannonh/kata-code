@@ -58,3 +58,9 @@ export const selectTaskWorkspaces = (state: TaskWorkspaceState): TaskWorkspace[]
     const task = state.taskById[taskId];
     return task ? [task] : [];
   });
+
+export function currentTaskStage(
+  task: TaskWorkspace,
+): TaskWorkspace["workflowRuns"][number]["currentStage"] {
+  return task.workflowRuns.at(-1)?.currentStage ?? "questions";
+}

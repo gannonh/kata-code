@@ -3,6 +3,7 @@ import { CheckCircle2Icon, ClipboardListIcon, PlusIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
 import {
+  currentTaskStage,
   selectTaskWorkspaces,
   useTaskWorkspaceStore,
 } from "../../taskWorkspace/taskWorkspaceStore";
@@ -43,7 +44,7 @@ export function TaskWorkspaceSidebar() {
           </SidebarMenuItem>
         ) : (
           tasks.map((task) => {
-            const stage = task.workflowRuns.at(-1)?.currentStage ?? "questions";
+            const stage = currentTaskStage(task);
             const active = pathname === `/tasks/${task.id}`;
             return (
               <SidebarMenuItem key={task.id}>
