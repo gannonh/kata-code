@@ -48,6 +48,7 @@ const STANDARD_WORKFLOW_VERSION = "standard@0.1.0";
 const PROMPT_VERSION = "task-workspace-slice-1@0.1.0";
 const FIXTURE_FILE = "task-workspace-slice-1.txt";
 const FIXTURE_CONTENT = "Kata Code Task Workspaces Slice 1 verified fixture.\n";
+const BLOCK_BOUNDARY_WHITESPACE_PATTERN = /(?:\r?\n[ \t]*)+$/u;
 
 function taskError(
   command: Pick<TaskWorkspaceCommand, "type" | "taskId">,
@@ -206,10 +207,11 @@ function buildBlockIndex(markdown: string): ReadonlyArray<TaskWorkspaceBlockInde
   for (let index = 0; index < markers.length; index += 1) {
     const current = markers[index]!;
     const end = index + 1 < markers.length ? markers[index + 1]!.markerStart : markdown.length;
-    // Inter-block spacing and the file's final newline are formatting boundaries,
-    // not block content. Ignore trailing boundary whitespace so routine Markdown
-    // formatting does not make anchored comments stale.
-    const content = markdown.slice(current.contentStart, end).trimEnd();
+    // Ignore blank lines at the block boundary, but retain whitespace on the final
+    // content line because two trailing spaces before a newline are a Markdown hard break.
+    const content = markdown
+      .slice(current.contentStart, end)
+      .replace(BLOCK_BOUNDARY_WHITESPACE_PATTERN, "");
     const contentHash = createHash("sha256").update(content).digest("hex");
     const headingMatch = content.match(headingRe);
     const headingPath = headingMatch ? [headingMatch[1]!] : [];

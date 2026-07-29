@@ -122,9 +122,13 @@ jobs:
     name: Test Task Workspaces E2E
     runs-on: macos-15
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1

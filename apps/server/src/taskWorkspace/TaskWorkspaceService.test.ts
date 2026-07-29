@@ -943,6 +943,20 @@ describe("TaskWorkspaceService", () => {
           "open",
         ]);
 
+        // Semantic trailing spaces remain part of the block hash because Markdown
+        // renders two spaces before a newline as a hard line break.
+        const withHardBreak = rev1.replace(
+          "First body.\n<!-- kata:block:steps -->",
+          "First body.  \n<!-- kata:block:steps -->",
+        );
+        const afterHardBreak = yield* runtime.runPromise(
+          upsert("s2c-hard-break", now(7), withHardBreak),
+        );
+        expect(afterHardBreak.task.comments.map((thread) => thread.status)).toEqual([
+          "outdated",
+          "open",
+        ]);
+
         // Revision 2 changes the intro body only -> intro outdated, steps still open.
         const rev2 = [
           "<!-- kata:block:intro -->",
