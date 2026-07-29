@@ -6,13 +6,18 @@
 import * as NodeFs from "node:fs/promises";
 import * as NodePath from "node:path";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 
 import {
   TaskWorkspaceError,
   type TaskWorkspace,
+  type TaskWorkspaceArtifact,
   type TaskWorkspaceArtifactKind,
+  type TaskWorkspaceArtifactRevision,
+  type TaskWorkspaceBlockIndexEntry,
   type TaskWorkspaceCommand,
+  type TaskWorkspaceCommentThread,
   type TaskWorkspaceDispatchResult,
   TaskWorkspaceEvent as TaskWorkspaceEventSchema,
   type TaskWorkspaceEvent as TaskWorkspaceEventValue,
@@ -136,25 +141,96 @@ function tryAdoptExistingWorktree(
   }).pipe(Effect.orElseSucceed(() => null));
 }
 
+/**
+ * Parse `<!-- kata:block:<id> -->` markers and build a persisted block index.
+ *
+ * Each entry captures the stable block `id`, the `headingPath` derived from the
+ * first Markdown heading in the block's region, and a `contentHash` over the
+ * region spanning from just after the marker to the next marker (or EOF). The
+ * hash makes heading/content edits detectable for the comment lifecycle while
+ * the stable `id` preserves comment identity across reorders.
+ */
+function buildBlockIndex(markdown: string): ReadonlyArray<TaskWorkspaceBlockIndexEntry> {
+  const markerRe = /<!--\s*kata:block:([\w.-]+)\s*-->/g;
+  const markers: Array<{ id: string; markerStart: number; contentStart: number }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = markerRe.exec(markdown)) !== null) {
+    markers.push({
+      id: match[1]!,
+      markerStart: match.index,
+      contentStart: match.index + match[0].length,
+    });
+  }
+  const headingRe = /^[ \t]*#{1,6}[ \t]+(.+?)[ \t]*$/m;
+  const entries: TaskWorkspaceBlockIndexEntry[] = [];
+  for (let index = 0; index < markers.length; index += 1) {
+    const current = markers[index]!;
+    const end = index + 1 < markers.length ? markers[index + 1]!.markerStart : markdown.length;
+    const content = markdown.slice(current.contentStart, end);
+    const contentHash = createHash("sha256").update(content).digest("hex");
+    const headingMatch = content.match(headingRe);
+    const headingPath = headingMatch ? [headingMatch[1]!] : [];
+    entries.push({ id: current.id, headingPath, contentHash });
+  }
+  return entries;
+}
+
+/**
+ * Recompute open/outdated comment threads for an artifact after a new revision.
+ *
+ * - Block absent from the new revision index -> `orphaned`.
+ * - Block present but its `contentHash` differs from the hash recorded at the
+ *   thread's `baseRevisionId` -> `outdated`.
+ * - Same hash -> `open` (restores a previously `outdated` thread).
+ *
+ * `resolved` and `orphaned` threads are never revived; threads are never dropped.
+ */
+function recomputeCommentsForArtifact(
+  task: TaskWorkspace,
+  artifact: TaskWorkspaceArtifact,
+  newRevision: TaskWorkspaceArtifactRevision,
+): ReadonlyArray<TaskWorkspaceCommentThread> {
+  return task.comments.map((thread) => {
+    if (thread.artifactId !== artifact.id) return thread;
+    if (thread.status !== "open" && thread.status !== "outdated") return thread;
+    const newEntry = newRevision.blockIndex.find((entry) => entry.id === thread.anchorBlockId);
+    if (!newEntry) {
+      return { ...thread, status: "orphaned" as const };
+    }
+    const baseRevision = artifact.revisions.find(
+      (revision) => revision.id === thread.baseRevisionId,
+    );
+    const baseHash = baseRevision?.blockIndex.find(
+      (entry) => entry.id === thread.anchorBlockId,
+    )?.contentHash;
+    if (baseHash !== undefined && newEntry.contentHash !== baseHash) {
+      return { ...thread, status: "outdated" as const };
+    }
+    return { ...thread, status: "open" as const };
+  });
+}
+
 function upsertArtifact(
   task: TaskWorkspace,
   command: Extract<TaskWorkspaceCommand, { type: "task.artifact.upsert" }>,
 ): TaskWorkspace {
   const existing = task.artifacts.find((artifact) => artifact.kind === command.kind);
   const revision = (existing?.currentRevision ?? 0) + 1;
-  const nextRevision = {
+  const previousRevisionId =
+    existing?.revisions.find((candidate) => candidate.revision === existing.currentRevision)?.id ??
+    null;
+  const nextRevision: TaskWorkspaceArtifactRevision = {
     id: `${command.kind}-revision-${revision}`,
     kind: command.kind,
     title: command.title,
     markdown: command.markdown,
     revision,
     sourceSessionId: command.sourceSessionId ?? null,
-    // Slice 2 lineage/block-index population is deferred to the Phase B reducer.
-    supersedesRevisionId: null,
-    blockIndex: [],
+    supersedesRevisionId: previousRevisionId,
+    blockIndex: buildBlockIndex(command.markdown),
     createdAt: command.createdAt,
-  } as const;
-  const nextArtifact = existing
+  };
+  const nextArtifact: TaskWorkspaceArtifact = existing
     ? {
         ...existing,
         currentRevision: revision,
@@ -171,6 +247,7 @@ function upsertArtifact(
     artifacts: existing
       ? task.artifacts.map((artifact) => (artifact.id === existing.id ? nextArtifact : artifact))
       : [...task.artifacts, nextArtifact],
+    comments: recomputeCommentsForArtifact(task, nextArtifact, nextRevision),
     updatedAt: command.createdAt,
   };
 }
@@ -396,10 +473,23 @@ export const make = Effect.gen(function* () {
 
       switch (command.type) {
         case "task.session.link": {
-          if (currentRun(task).currentStage !== command.stage) {
-            throw new Error(
-              `A ${command.stage} session cannot be linked while the task is in ${currentRun(task).currentStage}.`,
-            );
+          const stage = currentRun(task).currentStage;
+          if (command.role === "ad-hoc") {
+            if (command.stage !== null) {
+              throw new Error("An ad-hoc session must be linked with a null stage.");
+            }
+          } else {
+            if (command.stage === null || stage !== command.stage) {
+              throw new Error(
+                `A ${command.role} session cannot be linked while the task is in ${stage}.`,
+              );
+            }
+          }
+          if (
+            (command.role === "alternative" || command.role === "reviewer") &&
+            command.contextManifestId == null
+          ) {
+            throw new Error(`A ${command.role} session requires a context manifest.`);
           }
           if (task.sessions.some((session) => session.threadId === command.threadId)) {
             return yield* append(command, { ...task, updatedAt: command.createdAt });
@@ -421,6 +511,177 @@ export const make = Effect.gen(function* () {
                 createdAt: command.createdAt,
               },
             ],
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.session.fork": {
+          const stage = currentRun(task).currentStage;
+          const parent = task.sessions.find((session) => session.id === command.parentSessionId);
+          if (!parent) {
+            throw new Error(`Parent session '${command.parentSessionId}' was not found.`);
+          }
+          if (command.role === "ad-hoc") {
+            if (command.stage !== null) {
+              throw new Error("An ad-hoc session must be forked with a null stage.");
+            }
+          } else {
+            if (command.stage === null || stage !== command.stage) {
+              throw new Error(
+                `A ${command.role} session cannot be forked while the task is in ${stage}.`,
+              );
+            }
+          }
+          if (task.sessions.some((session) => session.threadId === command.threadId)) {
+            return yield* append(command, { ...task, updatedAt: command.createdAt });
+          }
+          return yield* append(command, {
+            ...task,
+            sessions: [
+              ...task.sessions,
+              {
+                id: `session-${task.sessions.length + 1}`,
+                stage: command.stage,
+                threadId: command.threadId,
+                role: command.role,
+                provider: null,
+                status: "active" as const,
+                parentSessionId: command.parentSessionId,
+                forkPoint: command.forkPoint,
+                contextManifestId: command.contextManifestId,
+                createdAt: command.createdAt,
+              },
+            ],
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.artifact.select-revision": {
+          const artifact = task.artifacts.find((candidate) => candidate.kind === command.kind);
+          if (!artifact) {
+            throw new Error(`Task '${task.id}' has no ${command.kind} artifact.`);
+          }
+          if (!artifact.revisions.some((revision) => revision.revision === command.revision)) {
+            throw new Error(
+              `Revision ${command.revision} does not exist for the ${command.kind} artifact.`,
+            );
+          }
+          return yield* append(command, {
+            ...task,
+            artifacts: task.artifacts.map((candidate) =>
+              candidate.id === artifact.id
+                ? { ...candidate, currentRevision: command.revision }
+                : candidate,
+            ),
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.context-manifest.create": {
+          const manifestId = `manifest-${task.contextManifests.length + 1}`;
+          return yield* append(command, {
+            ...task,
+            contextManifests: [
+              ...task.contextManifests,
+              {
+                id: manifestId,
+                taskId: task.id,
+                sessionId: command.sessionId ?? null,
+                artifactRefs: command.artifactRefs,
+                notes: command.notes ?? null,
+                createdAt: command.createdAt,
+              },
+            ],
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.comment.create": {
+          const artifact = task.artifacts.find((candidate) => candidate.id === command.artifactId);
+          if (!artifact) {
+            throw new Error(`Artifact '${command.artifactId}' was not found.`);
+          }
+          const baseRevision = artifact.revisions.find(
+            (revision) => revision.id === command.baseRevisionId,
+          );
+          if (!baseRevision) {
+            throw new Error(`Revision '${command.baseRevisionId}' was not found.`);
+          }
+          if (!baseRevision.blockIndex.some((entry) => entry.id === command.anchorBlockId)) {
+            throw new Error(
+              `Block '${command.anchorBlockId}' is not present in revision '${command.baseRevisionId}'.`,
+            );
+          }
+          const threadId = `comment-${task.comments.length + 1}`;
+          return yield* append(command, {
+            ...task,
+            comments: [
+              ...task.comments,
+              {
+                id: threadId,
+                taskId: task.id,
+                artifactId: command.artifactId,
+                anchorBlockId: command.anchorBlockId,
+                baseRevisionId: command.baseRevisionId,
+                status: "open" as const,
+                messages: [
+                  {
+                    id: `${threadId}-message-1`,
+                    author: command.author,
+                    body: command.body,
+                    createdAt: command.createdAt,
+                  },
+                ],
+                createdAt: command.createdAt,
+                resolvedAt: null,
+                resolvedBy: null,
+              },
+            ],
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.comment.reply": {
+          const thread = task.comments.find((candidate) => candidate.id === command.threadId);
+          if (!thread) {
+            throw new Error(`Comment thread '${command.threadId}' was not found.`);
+          }
+          if (thread.status !== "open" && thread.status !== "outdated") {
+            throw new Error(`Cannot reply to a ${thread.status} comment thread.`);
+          }
+          return yield* append(command, {
+            ...task,
+            comments: task.comments.map((candidate) =>
+              candidate.id === thread.id
+                ? {
+                    ...candidate,
+                    messages: [
+                      ...candidate.messages,
+                      {
+                        id: `${thread.id}-message-${candidate.messages.length + 1}`,
+                        author: command.author,
+                        body: command.body,
+                        createdAt: command.createdAt,
+                      },
+                    ],
+                  }
+                : candidate,
+            ),
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.comment.resolve": {
+          const thread = task.comments.find((candidate) => candidate.id === command.threadId);
+          if (!thread) {
+            throw new Error(`Comment thread '${command.threadId}' was not found.`);
+          }
+          return yield* append(command, {
+            ...task,
+            comments: task.comments.map((candidate) =>
+              candidate.id === thread.id
+                ? {
+                    ...candidate,
+                    status: "resolved" as const,
+                    resolvedAt: command.createdAt,
+                    resolvedBy: command.resolvedBy,
+                  }
+                : candidate,
+            ),
             updatedAt: command.createdAt,
           });
         }
@@ -700,9 +961,10 @@ export const make = Effect.gen(function* () {
           });
         }
         default: {
-          // Slice 2 commands (fork, select-revision, context-manifest.create,
-          // comment.*) are decoded by the contracts but handled in Phase B.
-          return yield* taskError(command, `Command '${command.type}' is not supported yet.`);
+          return yield* taskError(
+            command,
+            `Command '${(command as TaskWorkspaceCommand).type}' is not supported.`,
+          );
         }
       }
     } catch (cause) {
