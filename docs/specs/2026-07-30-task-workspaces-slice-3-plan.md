@@ -29,8 +29,12 @@ Resolved review decisions:
 2. **Definition storage:** registry-only. Tasks pin `definitionVersion`; no inline snapshot is
    stored in the aggregate. A pinned version this build no longer ships fails loudly with the
    version named.
-3. **Budget semantics:** not decided here — Phase C is out of Slice 3a's scope, so the default
-   budget value and overflow behavior are deferred to 3b's planning.
+3. **Budget semantics:** decided, to be built in 3b. Overflow **summarizes and flags**: the stage
+   generates a `summary` artifact, the manifest references it in place of the raw blocks, and the
+   inspector surfaces a prominent "N blocks compressed" marker so the lossy step is never
+   invisible. The budget is a **fixed token count** (default 32,000), not a fraction of a model's
+   context window — this matches the decision to estimate tokens locally and keeps budget tests
+   independent of provider or model metadata.
 
 This child spec plans only Slice 3 and does not approve any later slice.
 
@@ -165,9 +169,18 @@ decoding default of `"standard"` for pre-Slice-3 rows.
 
 `TaskWorkspaceContextManifest` gains `tokenEstimate`, `budget`, and `summaryArtifactRef`.
 Selection is explicit: the manifest records which block ids were carried, so the inspector shows
-provenance rather than a recomputed guess. When selected blocks exceed budget, the stage produces
-a `summary` artifact and the manifest references it instead of the raw blocks. This closes
+provenance rather than a recomputed guess. This closes
 [#55](https://github.com/gannonh/kata-code/issues/55).
+
+The budget is a fixed token count, defaulting to 32,000. A fraction-of-context-window budget was
+rejected: manifests carry no target model, and a model-dependent budget would make the budget
+tests depend on provider metadata.
+
+When selected blocks exceed the budget the stage produces a `summary` artifact, the manifest
+references it in place of the raw blocks, and the manifest records that it was compressed along
+with how many blocks it replaced. The inspector surfaces that prominently — summarization is
+automatic so Guided stays hands-off, but never silent, because a person reviewing a downstream
+artifact needs to know the upstream context was compressed.
 
 Token estimation is a deterministic local function in Slice 3 — reproducible in tests and
 CI-stable. Provider-accurate counting is out of scope.
@@ -227,8 +240,9 @@ Stable ids for Build/Verify matrices:
    per stage, each with its own revision history.
 3. **TW-S3-AC03** Each Guided next-stage session has a context manifest listing the exact block
    ids carried forward, a token estimate, and the budget.
-4. **TW-S3-AC04** When selected blocks exceed budget, a `summary` artifact is produced and the
-   manifest references it.
+4. **TW-S3-AC04** When selected blocks exceed the budget, a `summary` artifact is produced, the
+   manifest references it in place of the raw blocks, and the inspector shows how many blocks
+   were compressed.
 5. **TW-S3-AC05** A Freeform task accepts sessions and artifacts with no automatic stage
    advancement, and `task.stage.start` explicitly enters Plan and Verify.
 6. **TW-S3-AC06** Bumping a built-in definition version leaves an existing task on its pinned
@@ -268,5 +282,6 @@ on the unmodified tree.
   regression suite is the main risk; the suite is the mitigation.
 - **Slice size — resolved by the 3a / 3b split.** Phases A–B ship as Slice 3a; Guided, Freeform,
   and budgeting follow as Slice 3b.
-- **Budget semantics are a product decision.** What the default budget is, and whether overflow
-  summarizes silently or prompts, still needs an answer before Phase C in Slice 3b.
+- **Budget semantics — resolved.** Fixed 32,000-token budget; overflow summarizes automatically
+  and flags the compression in the inspector. The residual risk is that 32,000 is a guess until
+  we see real Guided manifests; treat it as a tunable default, not a contract.

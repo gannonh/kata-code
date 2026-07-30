@@ -6,7 +6,8 @@
 - Built Phases A–B on `claude/task-workspaces-slice-3`: append-only workflow definition registry, `standard@0.1.0` built-in, and a reducer that reads transitions and artifact-kind gating from the task's pinned definition.
 - Recorded the version-pinning negative proof (TW-S3-AC06) that the parent spec asked for; it was previously unprovable because no code resolved a version to a definition.
 - Slice 1 / Slice 2 Standard tests pass unmodified (TW-S3-AC07); server `taskWorkspace` suite 12 passed, contracts 192 passed.
-- Deferred to 3b: widened stage/kind/preset schemas, `task.stage.start`, manifest budget fields, and the workflow picker. Budget semantics still need a product answer.
+- Deferred to 3b: widened stage/kind/preset schemas, `task.stage.start`, manifest budget fields, and the workflow picker.
+- Settled 3b's open product decision: context budget is a fixed 32,000-token count (not a fraction of a model's context window), and budget overflow summarizes automatically but flags the compression in the manifest inspector rather than doing it silently.
 
 ## 2026-07-29 (Task workspaces Slice 2 merged)
 
