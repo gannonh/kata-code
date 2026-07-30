@@ -1,0 +1,132 @@
+import type { TaskWorkspaceArtifactKind, TaskWorkspaceStage } from "@kata-sh/code-contracts";
+
+/**
+ * Command types that move a task from one workflow stage to another.
+ *
+ * Stage *guards* (for example `task.build.work-item.set-status`, which requires
+ * `build` but does not leave it) are deliberately absent: only transitions are
+ * table-driven, because only transitions encode workflow shape.
+ */
+export type WorkflowTransitionCommandType =
+  | "task.questions.complete"
+  | "task.plan.approve"
+  | "task.fixture.apply"
+  | "task.verification.signoff";
+
+export type WorkflowStageTransition = {
+  readonly command: WorkflowTransitionCommandType;
+  readonly from: TaskWorkspaceStage;
+  readonly to: TaskWorkspaceStage;
+  /** Artifact kind that must exist at `from` before the transition is legal. */
+  readonly requiresArtifact: TaskWorkspaceArtifactKind | null;
+};
+
+export type WorkflowDefinition = {
+  readonly preset: "standard";
+  /** Registry key, `"<preset>@<semver>"`. Pinned onto the task at creation. */
+  readonly version: string;
+  readonly initialStage: TaskWorkspaceStage;
+  readonly terminalStage: TaskWorkspaceStage;
+  readonly stages: ReadonlyArray<TaskWorkspaceStage>;
+  /** Artifact kind a stage may write, or `null` where the stage writes none. */
+  readonly stageArtifactKinds: Readonly<
+    Partial<Record<TaskWorkspaceStage, TaskWorkspaceArtifactKind>>
+  >;
+  readonly transitions: ReadonlyArray<WorkflowStageTransition>;
+  readonly approvalPolicy: "before-build";
+  readonly promptBundleRef: string;
+};
+
+/**
+ * Standard workflow, version 0.1.0.
+ *
+ * This table reproduces the transitions that Slice 1 and Slice 2 hardcoded in
+ * the reducer. The Slice 1 / Slice 2 regression suite is the proof that it is
+ * faithful: if a Standard test needs editing to accommodate the engine, the
+ * table is wrong, not the test.
+ */
+export const STANDARD_WORKFLOW_V0_1_0: WorkflowDefinition = {
+  preset: "standard",
+  version: "standard@0.1.0",
+  initialStage: "questions",
+  terminalStage: "verified",
+  stages: ["questions", "plan", "build", "verify", "verified"],
+  stageArtifactKinds: {
+    questions: "questions",
+    plan: "plan",
+    verify: "verification",
+  },
+  transitions: [
+    {
+      command: "task.questions.complete",
+      from: "questions",
+      to: "plan",
+      requiresArtifact: "questions",
+    },
+    { command: "task.plan.approve", from: "plan", to: "build", requiresArtifact: "plan" },
+    { command: "task.fixture.apply", from: "build", to: "verify", requiresArtifact: null },
+    {
+      command: "task.verification.signoff",
+      from: "verify",
+      to: "verified",
+      requiresArtifact: null,
+    },
+  ],
+  approvalPolicy: "before-build",
+  promptBundleRef: "task-workspace-slice-1@0.1.0",
+};
+
+export type WorkflowDefinitionRegistry = ReadonlyMap<string, WorkflowDefinition>;
+
+export function makeWorkflowDefinitionRegistry(
+  definitions: ReadonlyArray<WorkflowDefinition>,
+): WorkflowDefinitionRegistry {
+  const entries = new Map<string, WorkflowDefinition>();
+  for (const definition of definitions) {
+    if (entries.has(definition.version)) {
+      throw new Error(`Duplicate workflow definition version '${definition.version}'.`);
+    }
+    entries.set(definition.version, definition);
+  }
+  return entries;
+}
+
+/**
+ * Append-only registry of built-in workflow definitions.
+ *
+ * Superseded versions are never removed. A task pins `definitionVersion` at
+ * creation and every later reducer decision resolves that exact key, so adding
+ * a newer version of a preset cannot change how an existing task behaves.
+ */
+export const BUILT_IN_WORKFLOW_DEFINITIONS: WorkflowDefinitionRegistry =
+  makeWorkflowDefinitionRegistry([STANDARD_WORKFLOW_V0_1_0]);
+
+/** The version new tasks pin when they select the Standard preset. */
+export const CURRENT_STANDARD_WORKFLOW_VERSION = STANDARD_WORKFLOW_V0_1_0.version;
+
+export function resolveWorkflowDefinition(
+  version: string,
+  registry: WorkflowDefinitionRegistry = BUILT_IN_WORKFLOW_DEFINITIONS,
+): WorkflowDefinition {
+  const definition = registry.get(version);
+  if (!definition) {
+    throw new Error(
+      `Workflow definition '${version}' is not registered. A task pinned to a definition that this build no longer ships cannot be advanced.`,
+    );
+  }
+  return definition;
+}
+
+export function transitionFor(
+  definition: WorkflowDefinition,
+  command: WorkflowTransitionCommandType,
+): WorkflowStageTransition | null {
+  return definition.transitions.find((transition) => transition.command === command) ?? null;
+}
+
+export function artifactKindForStage(
+  definition: WorkflowDefinition,
+  stage: TaskWorkspaceStage,
+): TaskWorkspaceArtifactKind | null {
+  return definition.stageArtifactKinds[stage] ?? null;
+}

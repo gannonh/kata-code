@@ -37,6 +37,14 @@ import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../config.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
+import {
+  artifactKindForStage,
+  CURRENT_STANDARD_WORKFLOW_VERSION,
+  resolveWorkflowDefinition,
+  transitionFor,
+  type WorkflowDefinition,
+  type WorkflowTransitionCommandType,
+} from "./workflowDefinitions.ts";
 
 const execFileAsync = promisify(execFile);
 const decodeTaskWorkspaceEvent = Schema.decodeUnknownSync(TaskWorkspaceEventSchema);
@@ -44,8 +52,6 @@ const isTaskWorkspaceError = Schema.is(TaskWorkspaceError);
 
 const TASK_CONTRACT_VERSION = "task-workspace@0.1.0";
 const ARTIFACT_CONTRACT_VERSION = "task-artifact@0.1.0";
-const STANDARD_WORKFLOW_VERSION = "standard@0.1.0";
-const PROMPT_VERSION = "task-workspace-slice-1@0.1.0";
 const FIXTURE_FILE = "task-workspace-slice-1.txt";
 const FIXTURE_CONTENT = "Kata Code Task Workspaces Slice 1 verified fixture.\n";
 const BLOCK_BOUNDARY_WHITESPACE_PATTERN = /(?:\r?\n[ \t]*)+$/u;
@@ -102,6 +108,35 @@ function requireArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind): 
   if (!latestArtifact(task, kind)) {
     throw new Error(`Task '${task.id}' requires a ${kind} artifact before this transition.`);
   }
+}
+
+/** Resolve the workflow definition this task was pinned to when it was created. */
+function definitionFor(task: TaskWorkspace): WorkflowDefinition {
+  return resolveWorkflowDefinition(currentRun(task).definitionVersion);
+}
+
+/**
+ * Validate and apply a table-driven stage transition.
+ *
+ * The command no longer names its successor stage: the pinned definition does.
+ * Returns the `workflowRuns` patch so callers keep control of the rest of the
+ * task mutation they perform alongside the transition.
+ */
+function applyTransition(
+  task: TaskWorkspace,
+  command: WorkflowTransitionCommandType,
+  updatedAt: TaskWorkspace["updatedAt"],
+): TaskWorkspace["workflowRuns"] {
+  const definition = definitionFor(task);
+  const transition = transitionFor(definition, command);
+  if (!transition) {
+    throw new Error(`Workflow '${definition.version}' does not define a '${command}' transition.`);
+  }
+  requireStage(task, transition.from);
+  if (transition.requiresArtifact) {
+    requireArtifact(task, transition.requiresArtifact);
+  }
+  return replaceCurrentRun(task, { currentStage: transition.to, updatedAt });
 }
 
 function requireContextManifest(task: TaskWorkspace, manifestId: string): void {
@@ -306,14 +341,18 @@ function upsertArtifact(
 function initialTask(
   command: Extract<TaskWorkspaceCommand, { type: "task.create" }>,
 ): TaskWorkspace {
+  // Pin the definition the task will resolve for the rest of its life. Later
+  // versions of the same preset are registered alongside, never in place, so a
+  // task created today keeps its original workflow shape.
+  const definition = resolveWorkflowDefinition(CURRENT_STANDARD_WORKFLOW_VERSION);
   return {
     id: command.taskId,
     title: command.title,
     versions: {
       taskContract: TASK_CONTRACT_VERSION,
       artifactContract: ARTIFACT_CONTRACT_VERSION,
-      workflowDefinition: STANDARD_WORKFLOW_VERSION,
-      prompt: PROMPT_VERSION,
+      workflowDefinition: definition.version,
+      prompt: definition.promptBundleRef,
     },
     workspace: {
       repositories: [
@@ -332,8 +371,8 @@ function initialTask(
       {
         id: "standard-run-1",
         preset: command.preset,
-        definitionVersion: STANDARD_WORKFLOW_VERSION,
-        currentStage: "questions",
+        definitionVersion: definition.version,
+        currentStage: definition.initialStage,
         approvalPolicy: command.approvalPolicy,
         createdAt: command.createdAt,
         updatedAt: command.createdAt,
@@ -743,14 +782,7 @@ export const make = Effect.gen(function* () {
         }
         case "task.artifact.upsert": {
           const stage = currentRun(task).currentStage;
-          const expectedKind =
-            stage === "questions"
-              ? "questions"
-              : stage === "plan"
-                ? "plan"
-                : stage === "verify"
-                  ? "verification"
-                  : null;
+          const expectedKind = artifactKindForStage(definitionFor(task), stage);
           if (expectedKind !== command.kind) {
             throw new Error(
               `A ${command.kind} artifact cannot be written while the task is in ${stage}.`,
@@ -759,20 +791,17 @@ export const make = Effect.gen(function* () {
           return yield* append(command, upsertArtifact(task, command));
         }
         case "task.questions.complete": {
-          requireStage(task, "questions");
-          requireArtifact(task, "questions");
+          const workflowRuns = applyTransition(task, command.type, command.createdAt);
           return yield* append(command, {
             ...task,
-            workflowRuns: replaceCurrentRun(task, {
-              currentStage: "plan",
-              updatedAt: command.createdAt,
-            }),
+            workflowRuns,
             updatedAt: command.createdAt,
           });
         }
         case "task.plan.approve": {
-          requireStage(task, "plan");
-          requireArtifact(task, "plan");
+          // Resolve the transition before provisioning: an illegal stage or a
+          // missing plan artifact must fail before any worktree is created.
+          const workflowRuns = applyTransition(task, command.type, command.createdAt);
           const repository = task.workspace.repositories[0];
           if (!repository) throw new Error("The task has no repository binding.");
           const newRefName = `katacode/task-${safeBranchSegment(task.id)}`;
@@ -818,10 +847,7 @@ export const make = Effect.gen(function* () {
                   : candidate,
               ),
             },
-            workflowRuns: replaceCurrentRun(task, {
-              currentStage: "build",
-              updatedAt: command.createdAt,
-            }),
+            workflowRuns,
             updatedAt: command.createdAt,
           });
         }
@@ -850,7 +876,7 @@ export const make = Effect.gen(function* () {
           });
         }
         case "task.fixture.apply": {
-          requireStage(task, "build");
+          const workflowRuns = applyTransition(task, command.type, command.createdAt);
           const repository = task.workspace.repositories[0];
           const worktreePath = repository?.worktreePath;
           if (!worktreePath) throw new Error("The task worktree has not been provisioned.");
@@ -909,10 +935,7 @@ export const make = Effect.gen(function* () {
           return yield* append(command, {
             ...task,
             build: { phases, resultingCommitSha: commitSha },
-            workflowRuns: replaceCurrentRun(task, {
-              currentStage: "verify",
-              updatedAt: command.createdAt,
-            }),
+            workflowRuns,
             updatedAt: command.createdAt,
           });
         }
@@ -989,7 +1012,7 @@ export const make = Effect.gen(function* () {
           );
         }
         case "task.verification.signoff": {
-          requireStage(task, "verify");
+          const workflowRuns = applyTransition(task, command.type, command.createdAt);
           const commitSha = task.build.resultingCommitSha;
           if (!commitSha) throw new Error("The task has no resulting commit.");
           const allPass = task.verification.criteria.every((criterion) =>
@@ -1007,10 +1030,7 @@ export const make = Effect.gen(function* () {
           }
           return yield* append(command, {
             ...task,
-            workflowRuns: replaceCurrentRun(task, {
-              currentStage: "verified",
-              updatedAt: command.createdAt,
-            }),
+            workflowRuns,
             verification: { ...task.verification, signedOffAt: command.createdAt },
             delivery: { state: "unavailable" },
             updatedAt: command.createdAt,

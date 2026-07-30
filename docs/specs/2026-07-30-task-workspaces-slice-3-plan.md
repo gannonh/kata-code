@@ -2,7 +2,8 @@
 type: Spec
 title: "Task workspaces Slice 3 — Workflow presets and guided context boundaries"
 description: "Child implementation plan for the third autonomous vertical slice: replace the hardcoded Standard rail with a data-driven, versioned workflow registry; ship Standard, Guided, and Freeform presets; and make context manifests budget-aware and inspectable."
-status: Draft
+status: Approved
+approved_at: 2026-07-30T00:00:00Z
 tags: [specs, task-workspaces, workflows, presets, context, versioning, orchestration, web, server]
 timestamp: 2026-07-30T00:00:00Z
 parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
@@ -13,8 +14,25 @@ base_sha: 6aceff8a85b8a6dfd673ceb9947b7518d8aa9579
 
 ## Status
 
-**Draft.** Awaiting human review before Approved / Build. This child spec plans only Slice 3 and
-does not approve any later slice.
+**Approved, split into 3a / 3b.** Reviewer approved the plan with the recommended split:
+
+- **Slice 3a (this branch, Phases A–B):** versioned workflow definition registry and a
+  table-driven reducer, Standard only. Proven by the Slice 1 / Slice 2 regression suite passing
+  unmodified.
+- **Slice 3b (later, Phases C–E):** Guided and Freeform presets, new stages/kinds, context
+  budgeting, and the web surfaces.
+
+Resolved review decisions:
+
+1. **Split:** yes — Phase B rewrites live transition logic, so it lands behind a green Standard
+   suite before new presets stack on it.
+2. **Definition storage:** registry-only. Tasks pin `definitionVersion`; no inline snapshot is
+   stored in the aggregate. A pinned version this build no longer ships fails loudly with the
+   version named.
+3. **Budget semantics:** not decided here — Phase C is out of Slice 3a's scope, so the default
+   budget value and overflow behavior are deferred to 3b's planning.
+
+This child spec plans only Slice 3 and does not approve any later slice.
 
 ## Outcome
 
@@ -49,7 +67,7 @@ Read before planning; these are the constraints Slice 3 actually inherits.
    `preset: "standard"` (line 271). Both must widen.
 3. **Versions are constants, not a registry.** `STANDARD_WORKFLOW_VERSION` /`PROMPT_VERSION` are
    module constants (service lines 45–48) stamped onto the task at creation. A task records the
-   version string but there is no way to resolve *that version's* definition later — so the
+   version string but there is no way to resolve _that version's_ definition later — so the
    parent spec's negative proof ("editing the latest definition does not mutate an existing
    task") is currently unprovable in either direction.
 4. **The stage union is Standard-shaped.** `TaskWorkspaceStage` is
@@ -58,8 +76,9 @@ Read before planning; these are the constraints Slice 3 actually inherits.
    `research` and `design` artifacts, and context budgeting needs a `summary` kind.
 6. **Artifact-kind gating is a hardcoded ladder.** `task.artifact.upsert` maps stage→kind with a
    nested ternary (service lines 744–758). This becomes a definition lookup.
-7. **Manifests are deliberately minimal.** `TaskWorkspaceContextManifest` carries `artifactRefs`
-   + `notes` only (contracts 166–176) — no token estimate, no budget, no summary linkage.
+7. **Manifests are deliberately minimal.** `TaskWorkspaceContextManifest` carries only
+   `artifactRefs` and `notes` (contracts 166–176) — no token estimate, no budget, no summary
+   linkage.
 8. **The creation UI hardcodes Standard.** `TaskWorkspaceNewView.tsx` posts `preset: "standard"`
    (line 53) and prints "Standard · standard@0.1.0" (line 124).
 9. **Worktree creation already happens at `task.plan.approve`**, not at creation — so
@@ -110,16 +129,17 @@ Read before planning; these are the constraints Slice 3 actually inherits.
 A workflow definition is a plain data record — ordered stages, per-stage artifact kind, allowed
 transitions, approval policy, prompt bundle ref. Built-ins live in an append-only registry keyed
 by `"<preset>@<semver>"`. A task pins `definitionVersion` at creation and every subsequent
-reducer decision resolves *that* key.
+reducer decision resolves _that_ key.
 
 This is what makes the parent spec's negative proof real: bumping `guided@0.1.0` → `guided@0.2.0`
 leaves `guided@0.1.0` in the registry, and the existing task keeps resolving the old record.
 Superseded versions are never deleted.
 
-**Open decision for review:** whether a task also stores an inline *snapshot* of its resolved
-definition. Registry-only is cleaner and keeps the aggregate small, but a definition dropped from
-a future build would strand old tasks. Recommendation: registry-only in Slice 3, with a decode
-error that names the missing version — and revisit if we ever ship user-authored definitions.
+**Decided (registry-only).** A task does not store an inline snapshot of its resolved definition.
+This keeps the aggregate small; the accepted cost is that a definition dropped from a future
+build strands tasks pinned to it, which `resolveWorkflowDefinition` surfaces as a loud error
+naming the missing version rather than a silent fallback. Revisit if we ship user-authored
+definitions.
 
 ### 2. Transitions become a lookup, not a ladder
 
@@ -165,17 +185,22 @@ accommodate the engine, that is a signal the table is wrong — not that the tes
 
 ## Implementation phases
 
-### Phase A — Workflow definition registry and contracts
+Phases A–B are Slice 3a and ship on this branch. Phases C–E are Slice 3b.
 
-Registry module + three built-ins; widened stage/kind/preset schemas; `task.stage.start`;
-manifest budget fields. Contract tests for Slice 1 / Slice 2 decode compatibility and for
-old-version resolution.
+### Phase A — Workflow definition registry (Slice 3a)
 
-### Phase B — Server reducer becomes table-driven
+Registry module with the `standard@0.1.0` built-in whose table reproduces Slice 1 / Slice 2
+behavior; version resolution, duplicate-version rejection, and a loud error naming an
+unresolvable pinned version. Unit tests including the version-pinning negative proof.
+
+Widened stage/kind/preset schemas, `task.stage.start`, and manifest budget fields move to
+Slice 3b, where the presets that need them land.
+
+### Phase B — Server reducer becomes table-driven (Slice 3a)
 
 Replace hardcoded transitions and the artifact-kind ladder with definition lookups. Standard
-regression suite must pass untouched. Negative proof test: mutate the latest definition in a
-fixture, assert an existing pinned task is unaffected. No-worktree-before-Build assertions.
+regression suite must pass untouched. Service test for pinning at creation, definition-driven
+artifact-kind gating and transition legality, and no-worktree-before-Build.
 
 ### Phase C — Guided path and context budgeting
 
@@ -214,12 +239,34 @@ Stable ids for Build/Verify matrices:
    defaults (`preset: "standard"`).
 10. **TW-S3-AC10** Restart retains preset, pinned versions, manifests, budgets, and summaries.
 
+## Slice 3a build record
+
+Phases A–B implemented on `claude/task-workspaces-slice-3` from base `6aceff8a`.
+
+- `apps/server/src/taskWorkspace/workflowDefinitions.ts` — registry, `standard@0.1.0`,
+  `resolveWorkflowDefinition`, `transitionFor`, `artifactKindForStage`.
+- `apps/server/src/taskWorkspace/TaskWorkspaceService.ts` — `definitionFor` / `applyTransition`;
+  all four transitions (`task.questions.complete`, `task.plan.approve`, `task.fixture.apply`,
+  `task.verification.signoff`) and the artifact-kind ladder now read the pinned definition;
+  `STANDARD_WORKFLOW_VERSION` / `PROMPT_VERSION` constants removed in favor of the definition.
+
+Gates: server `taskWorkspace` suite **12 passed** (5 pre-existing Standard tests unmodified —
+TW-S3-AC07 — plus 6 registry and 1 service test); contracts **192 passed**; `@kata-sh/code-cli`
+typecheck, lint, and format clean.
+
+Satisfied here: **TW-S3-AC06** (version-pinning negative proof), **TW-S3-AC07** (Slice 1 / Slice 2
+regression), **TW-S3-AC08** (no worktree before Build, Standard). The remaining acceptance
+criteria belong to Slice 3b.
+
+Note: `apps/server`'s full suite has 7 pre-existing failures unrelated to this work (Docker-guarded
+sandbox integration tests, plus two tests that assume a non-root user); they reproduce identically
+on the unmodified tree.
+
 ## Risks
 
 - **Phase B is the load-bearing change.** Rewriting live transition logic under a passing
   regression suite is the main risk; the suite is the mitigation.
-- **Slice size.** This is materially larger than Slice 2. Phases A–B (engine + registry, Standard
-  only) form a coherent shippable unit if we want to split; Phases C–E (Guided, Freeform,
-  budgeting) would then be Slice 3b. Flagged for the reviewer to decide before Build.
+- **Slice size — resolved by the 3a / 3b split.** Phases A–B ship as Slice 3a; Guided, Freeform,
+  and budgeting follow as Slice 3b.
 - **Budget semantics are a product decision.** What the default budget is, and whether overflow
-  summarizes silently or prompts, needs an answer before Phase C.
+  summarizes silently or prompts, still needs an answer before Phase C in Slice 3b.
