@@ -1,5 +1,14 @@
 # Specs log
 
+## 2026-07-30 (Task workspaces Slice 3a workflow engine built)
+
+- Approved the [Slice 3 child plan](/specs/2026-07-30-task-workspaces-slice-3-plan.md) with a 3a / 3b split: 3a is the engine (Standard only), 3b is Guided/Freeform plus context budgeting.
+- Built Phases A–B on `claude/task-workspaces-slice-3`: append-only workflow definition registry, `standard@0.1.0` built-in, and a reducer that reads transitions and artifact-kind gating from the task's pinned definition.
+- Recorded the version-pinning negative proof (TW-S3-AC06) that the parent spec asked for; it was previously unprovable because no code resolved a version to a definition.
+- Slice 1 / Slice 2 Standard tests pass unmodified (TW-S3-AC07); server `taskWorkspace` suite 12 passed, contracts 192 passed.
+- Deferred to 3b: widened stage/kind/preset schemas, `task.stage.start`, manifest budget fields, and the workflow picker.
+- Settled 3b's open product decision: context budget is a fixed 32,000-token count (not a fraction of a model's context window), and budget overflow summarizes automatically but flags the compression in the manifest inspector rather than doing it silently.
+
 ## 2026-07-29 (Task workspaces Slice 2 merged)
 
 - Squash-merged [PR #58](https://github.com/gannonh/kata-code/pull/58) to `main` as `25ce0cc1`; all nine head checks green and 16/16 review threads resolved.

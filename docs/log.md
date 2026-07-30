@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-07-30 (Task workspaces Slice 3a workflow engine)
+
+Approved the [Slice 3 plan](/specs/2026-07-30-task-workspaces-slice-3-plan.md) split into 3a (engine) and 3b (presets + context budgeting), and built 3a: a versioned workflow definition registry with the reducer reading stage transitions and artifact-kind gating from each task's pinned definition. Slice 1 / Slice 2 Standard behavior is unchanged and its tests pass unmodified.
+
 ## 2026-07-29 (Task workspaces Slice 2 merged)
 
 Squash-merged [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md) to `main` as `25ce0cc1` via [PR #58](https://github.com/gannonh/kata-code/pull/58). Recorded the slice **Verified — merged** and its [validation record](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md) **Accepted**. Slice 3 (workflow presets and guided context boundaries) is the next planning item.

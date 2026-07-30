@@ -412,6 +412,106 @@ describe("TaskWorkspaceService", () => {
       approvalPolicy: "before-build",
     });
 
+  const slice3TaskId = TaskWorkspaceId.make("slice-3-integration");
+
+  it.effect(
+    "pins the workflow definition at creation and drives stage rules from it",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-s3-workflow-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+        const created = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.create",
+              commandId: CommandId.make("s3-create"),
+              taskId: slice3TaskId,
+              createdAt: now(1),
+              title: "Slice 3 workflow engine",
+              projectId,
+              workspaceRoot: repoRoot,
+              baseRef: "main",
+              preset: "standard",
+              approvalPolicy: "before-build",
+            }),
+          ),
+        );
+
+        // The task pins a resolvable definition version and takes its initial
+        // stage and prompt bundle from that definition, not from a constant.
+        expect(created.task.versions.workflowDefinition).toBe("standard@0.1.0");
+        expect(created.task.versions.prompt).toBe("task-workspace-slice-1@0.1.0");
+        expect(created.task.workflowRuns.at(-1)?.definitionVersion).toBe("standard@0.1.0");
+        expect(created.task.workflowRuns.at(-1)?.currentStage).toBe("questions");
+
+        // Lazy provisioning: no worktree exists before Build.
+        expect(created.task.workspace.repositories[0]?.worktreePath).toBeNull();
+        expect(created.task.workspace.repositories[0]?.provisioningStatus).toBe("pending");
+
+        // Artifact-kind gating is a definition lookup: `plan` is not writable at `questions`.
+        const wrongKind = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s3-wrong-kind"),
+              taskId: slice3TaskId,
+              createdAt: now(2),
+              kind: "plan",
+              title: "Plan",
+              markdown: "# Plan",
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        expect(wrongKind._tag).toBe("Failure");
+
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s3-questions"),
+              taskId: slice3TaskId,
+              createdAt: now(3),
+              kind: "questions",
+              title: "Questions",
+              markdown: "# Questions\n\nNone.",
+              sourceSessionId: null,
+            }),
+          ),
+        );
+
+        const advanced = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.questions.complete",
+              commandId: CommandId.make("s3-questions-complete"),
+              taskId: slice3TaskId,
+              createdAt: now(4),
+            }),
+          ),
+        );
+        expect(advanced.task.workflowRuns.at(-1)?.currentStage).toBe("plan");
+        // Still no worktree at Plan — provisioning happens at the Build transition.
+        expect(advanced.task.workspace.repositories[0]?.worktreePath).toBeNull();
+
+        // Transition legality comes from the table: the same transition is not
+        // available a second time because `plan` is no longer its `from` stage.
+        const repeated = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.questions.complete",
+              commandId: CommandId.make("s3-questions-complete-again"),
+              taskId: slice3TaskId,
+              createdAt: now(5),
+            }),
+          ),
+        );
+        expect(repeated._tag).toBe("Failure");
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
   it.effect(
     "persists block index and lineage and runs Slice 2 sessions/manifests without advancing the workflow",
     () =>
