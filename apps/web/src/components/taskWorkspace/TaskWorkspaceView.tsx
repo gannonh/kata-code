@@ -1,7 +1,10 @@
 import {
+  TASK_WORKSPACE_STAGE_LABELS,
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
   type TaskWorkspaceCommentAuthor,
+  taskWorkspaceCatalogEntryForVersion,
+  type TaskWorkspacePresetCatalogEntry,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import { useClerk } from "@clerk/react";
@@ -21,15 +24,26 @@ import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { Textarea } from "../ui/textarea";
 import { ArtifactsPanel } from "./ArtifactsPanel";
 import { CommentsPanel } from "./CommentsPanel";
+import { ContextManifestPanel } from "./ContextManifestPanel";
 import { SessionsPanel } from "./SessionsPanel";
 
-const STAGES: ReadonlyArray<{ id: TaskWorkspaceStage; label: string }> = [
-  { id: "questions", label: "Questions" },
-  { id: "plan", label: "Plan" },
-  { id: "build", label: "Build" },
-  { id: "verify", label: "Verify" },
-  { id: "verified", label: "Verified" },
-];
+/**
+ * Rail shown when a task pins a definition version this build has no catalog
+ * entry for. Rendering the Standard ladder would be a guess; showing only the
+ * stage the task is actually in is honest.
+ */
+const UNKNOWN_DEFINITION_STAGES: ReadonlyArray<TaskWorkspaceStage> = [];
+
+/** Reasoning stages that write their own artifact and complete with their own command. */
+const REASONING_STAGES = [
+  { stage: "research", kind: "research", label: "Research", command: "task.research.complete" },
+  { stage: "design", kind: "design", label: "Design", command: "task.design.complete" },
+] as const satisfies ReadonlyArray<{
+  stage: TaskWorkspaceStage;
+  kind: TaskWorkspaceArtifactKind;
+  label: string;
+  command: "task.research.complete" | "task.design.complete";
+}>;
 
 const DEFAULT_PLAN = `# Plan
 
@@ -49,12 +63,212 @@ function latestArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind) {
   );
 }
 
-function stageIndex(stage: TaskWorkspaceStage): number {
-  return STAGES.findIndex((entry) => entry.id === stage);
+function statusLabel(stage: TaskWorkspaceStage): string {
+  return TASK_WORKSPACE_STAGE_LABELS[stage];
 }
 
-function statusLabel(stage: TaskWorkspaceStage): string {
-  return stage === "verified" ? "Verified" : stage[0]!.toUpperCase() + stage.slice(1);
+/**
+ * Progress rail for a preset that advances automatically (Standard, Guided).
+ *
+ * The stage order comes from the task's *pinned* definition, so a task created
+ * against an older version keeps rendering that version's shape.
+ */
+function WorkflowRail({
+  stages,
+  stage,
+}: {
+  stages: ReadonlyArray<TaskWorkspaceStage>;
+  stage: TaskWorkspaceStage;
+}) {
+  const currentIndex = stages.indexOf(stage);
+  return (
+    <ol
+      data-testid="task-workflow-rail"
+      className="grid overflow-hidden rounded-xl border border-border bg-card"
+      style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}
+    >
+      {stages.map((entry, index) => {
+        const complete = index < currentIndex || stage === "verified";
+        const active = entry === stage;
+        return (
+          <li
+            key={entry}
+            data-testid={`task-workflow-rail-${entry}`}
+            className="flex min-w-0 items-center gap-2 border-r border-border px-2 py-3 text-xs last:border-r-0 sm:px-3"
+            data-active={active || undefined}
+          >
+            {complete ? (
+              <CheckCircle2Icon className="size-4 shrink-0 text-success-foreground" />
+            ) : active ? (
+              <Loader2Icon className="size-4 shrink-0 animate-spin text-primary" />
+            ) : (
+              <CircleIcon className="size-4 shrink-0 text-muted-foreground/50" />
+            )}
+            <span className={active ? "truncate font-semibold" : "truncate text-muted-foreground"}>
+              {TASK_WORKSPACE_STAGE_LABELS[entry]}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
+ * Timeline for a preset with no automatic rail (Freeform).
+ *
+ * There is no "progress" to show, because nothing advances on its own — so this
+ * renders the stages the definition permits entering and lets the person start
+ * one explicitly. Build and Verified are absent by design: they are reached by
+ * approving a plan and signing off, the same as every other preset.
+ */
+function WorkflowTimeline({
+  catalogEntry,
+  stage,
+  commands,
+}: {
+  catalogEntry: TaskWorkspacePresetCatalogEntry;
+  stage: TaskWorkspaceStage;
+  commands: ReturnType<typeof useTaskWorkspaceCommands>;
+}) {
+  const isTerminal = stage === "verified";
+  return (
+    <section
+      data-testid="task-workflow-timeline"
+      className="space-y-3 rounded-xl border border-border bg-card p-4"
+    >
+      <div>
+        <h2 className="text-sm font-semibold">Timeline</h2>
+        <p className="text-xs text-muted-foreground">
+          Freeform does not advance on its own. Accumulate sessions and artifacts, then start a
+          stage when you are ready.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {catalogEntry.stages.map((entry) => {
+          const active = entry === stage;
+          const canStart =
+            !active && !isTerminal && catalogEntry.explicitEntryStages.includes(entry);
+          return (
+            <div
+              key={entry}
+              data-testid={`task-timeline-stage-${entry}`}
+              data-active={active || undefined}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+                active ? "border-primary bg-primary/5 font-semibold" : "border-border/70"
+              }`}
+            >
+              <span className={active ? "" : "text-muted-foreground"}>
+                {TASK_WORKSPACE_STAGE_LABELS[entry]}
+              </span>
+              {active ? (
+                <Badge size="sm" variant="secondary">
+                  current
+                </Badge>
+              ) : canStart ? (
+                <Button
+                  data-testid={`task-start-stage-${entry}`}
+                  size="xs"
+                  variant="outline"
+                  disabled={commands.isBusy}
+                  onClick={() =>
+                    void commands.dispatch(
+                      { ...commands.commandBase("task.stage.start"), stage: entry },
+                      `start-stage-${entry}`,
+                    )
+                  }
+                >
+                  Start
+                </Button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Editor for a Guided reasoning stage (Research, Design).
+ *
+ * Each reasoning stage owns one artifact kind and one completion command, so
+ * the two stages differ only by data — the rail they belong to is the
+ * definition's business, not this component's.
+ */
+function ReasoningStageSection({
+  task,
+  entry,
+  commands,
+  linkedSessionId,
+}: {
+  task: TaskWorkspace;
+  entry: (typeof REASONING_STAGES)[number];
+  commands: ReturnType<typeof useTaskWorkspaceCommands>;
+  linkedSessionId: string | null;
+}) {
+  const artifact = latestArtifact(task, entry.kind);
+  const [markdown, setMarkdown] = useState(artifact?.markdown ?? "");
+
+  useEffect(() => {
+    if (artifact) setMarkdown(artifact.markdown);
+  }, [artifact?.id, artifact?.revision]);
+
+  return (
+    <section className="space-y-4 rounded-xl border border-border bg-card p-4">
+      <div>
+        <h2 className="font-semibold">{entry.label} artifact</h2>
+        <p className="text-sm text-muted-foreground">
+          Guided records {entry.label.toLowerCase()} as its own artifact so the next stage can start
+          from a selection of its blocks rather than the whole transcript.
+        </p>
+      </div>
+      <Textarea
+        data-testid={`task-${entry.kind}-editor`}
+        className="min-h-56 font-mono text-xs"
+        value={markdown}
+        onChange={(event) => setMarkdown(event.currentTarget.value)}
+      />
+      <div className="flex flex-wrap justify-between gap-2">
+        <span className="text-xs text-muted-foreground">Revision {artifact?.revision ?? 0}</span>
+        <div className="flex gap-2">
+          <Button
+            data-testid={`task-save-${entry.kind}`}
+            size="sm"
+            variant="outline"
+            disabled={!markdown.trim() || commands.isBusy}
+            onClick={() =>
+              void commands.dispatch(
+                {
+                  ...commands.commandBase("task.artifact.upsert"),
+                  kind: entry.kind,
+                  title: entry.label,
+                  markdown,
+                  sourceSessionId: linkedSessionId,
+                },
+                `save-${entry.kind}`,
+              )
+            }
+          >
+            Save revision
+          </Button>
+          <Button
+            data-testid={`task-complete-${entry.kind}`}
+            size="sm"
+            disabled={!artifact || commands.isBusy}
+            onClick={() =>
+              void commands.dispatch(
+                { ...commands.commandBase(entry.command) },
+                `complete-${entry.kind}`,
+              )
+            }
+          >
+            Complete {entry.label}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export function TaskWorkspaceView({ taskId }: { taskId: string }) {
@@ -103,6 +317,13 @@ function TaskWorkspaceViewContent({
   const verificationArtifact = task ? latestArtifact(task, "verification") : null;
   const stage = task ? currentTaskStage(task) : "questions";
   const repository = task?.workspace.repositories[0] ?? null;
+  // Rendered from the task's pinned definition version, so bumping a built-in
+  // definition does not reshape a task that was created against the old one.
+  const catalogEntry = task
+    ? taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition)
+    : null;
+  const railStages = catalogEntry?.stages ?? UNKNOWN_DEFINITION_STAGES;
+  const isFreeform = (catalogEntry?.explicitEntryStages.length ?? 0) > 0;
   const availableThreads = useMemo(
     () =>
       task && repository
@@ -149,8 +370,12 @@ function TaskWorkspaceViewContent({
             <SidebarTrigger className="size-7 shrink-0 md:hidden" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{task.title}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                Standard · {task.versions.workflowDefinition} · before-build
+              <p
+                data-testid="task-workflow-summary"
+                className="truncate text-xs text-muted-foreground"
+              >
+                {catalogEntry?.label ?? "Unknown workflow"} · {task.versions.workflowDefinition} ·
+                before-build
               </p>
             </div>
             <Badge variant={stage === "verified" ? "success" : "secondary"}>
@@ -161,34 +386,11 @@ function TaskWorkspaceViewContent({
 
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
           <div className="mx-auto max-w-5xl space-y-5">
-            <ol className="grid grid-cols-5 overflow-hidden rounded-xl border border-border bg-card">
-              {STAGES.map((entry, index) => {
-                const complete = index < stageIndex(stage) || stage === "verified";
-                const active = entry.id === stage;
-                return (
-                  <li
-                    key={entry.id}
-                    className="flex min-w-0 items-center gap-2 border-r border-border px-2 py-3 text-xs last:border-r-0 sm:px-3"
-                    data-active={active || undefined}
-                  >
-                    {complete ? (
-                      <CheckCircle2Icon className="size-4 shrink-0 text-success-foreground" />
-                    ) : active ? (
-                      <Loader2Icon className="size-4 shrink-0 animate-spin text-primary" />
-                    ) : (
-                      <CircleIcon className="size-4 shrink-0 text-muted-foreground/50" />
-                    )}
-                    <span
-                      className={
-                        active ? "truncate font-semibold" : "truncate text-muted-foreground"
-                      }
-                    >
-                      {entry.label}
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
+            {railStages.length > 0 ? <WorkflowRail stages={railStages} stage={stage} /> : null}
+
+            {isFreeform && catalogEntry ? (
+              <WorkflowTimeline catalogEntry={catalogEntry} stage={stage} commands={commands} />
+            ) : null}
 
             <section className="grid gap-4 rounded-xl border border-border bg-card p-4 sm:grid-cols-2">
               <div>
@@ -309,6 +511,16 @@ function TaskWorkspaceViewContent({
                 </div>
               </section>
             ) : null}
+
+            {REASONING_STAGES.filter((entry) => entry.stage === stage).map((entry) => (
+              <ReasoningStageSection
+                key={entry.stage}
+                task={task}
+                entry={entry}
+                commands={commands}
+                linkedSessionId={linkedSession?.id ?? null}
+              />
+            ))}
 
             {stage === "plan" ? (
               <section className="space-y-4 rounded-xl border border-border bg-card p-4">
@@ -511,6 +723,7 @@ function TaskWorkspaceViewContent({
             ) : null}
 
             <ArtifactsPanel task={task} commands={commands} />
+            <ContextManifestPanel task={task} />
             <SessionsPanel
               task={task}
               commands={commands}

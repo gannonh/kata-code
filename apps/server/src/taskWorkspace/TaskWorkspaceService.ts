@@ -38,8 +38,9 @@ import * as Stream from "effect/Stream";
 import { ServerConfig } from "../config.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import {
+  allowsExplicitEntry,
   artifactKindForStage,
-  CURRENT_STANDARD_WORKFLOW_VERSION,
+  currentVersionForPreset,
   resolveWorkflowDefinition,
   transitionFor,
   type WorkflowDefinition,
@@ -137,6 +138,86 @@ function applyTransition(
     requireArtifact(task, transition.requiresArtifact);
   }
   return replaceCurrentRun(task, { currentStage: transition.to, updatedAt });
+}
+
+/**
+ * Deterministic local token estimate.
+ *
+ * Slice 3 deliberately does not call a provider tokenizer: budget behavior has
+ * to be reproducible in tests and stable in CI, and manifests carry no target
+ * model. Four characters per token is the usual rough ratio for English prose
+ * and Markdown; it is a budgeting heuristic, not a billing figure.
+ */
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/** Markdown of each block a manifest ref selects, in selection order. */
+function selectedBlockTexts(
+  task: TaskWorkspace,
+  refs: ReadonlyArray<TaskWorkspace["contextManifests"][number]["artifactRefs"][number]>,
+): ReadonlyArray<string> {
+  const texts: string[] = [];
+  for (const ref of refs) {
+    const artifact = task.artifacts.find((candidate) => candidate.kind === ref.kind);
+    const revision = artifact?.revisions.find((candidate) => candidate.revision === ref.revision);
+    if (!revision) continue;
+    for (const blockId of ref.blockIds) {
+      const entry = revision.blockIndex.find((candidate) => candidate.id === blockId);
+      if (!entry) continue;
+      texts.push(blockContent(revision.markdown, blockId) ?? "");
+    }
+  }
+  return texts;
+}
+
+/**
+ * Body of the generated `summary` artifact for an over-budget selection.
+ *
+ * Slice 3 does not call a model to summarize: it records what was selected and
+ * a truncated excerpt per block, which is deterministic and keeps the
+ * provenance auditable. Model-authored summaries are a later slice.
+ */
+function summaryMarkdown(
+  manifestId: string,
+  refs: ReadonlyArray<TaskWorkspace["contextManifests"][number]["artifactRefs"][number]>,
+  blockTexts: ReadonlyArray<string>,
+): string {
+  const lines = [
+    `# Context summary for ${manifestId}`,
+    "",
+    `Compressed ${blockTexts.length} block(s) that exceeded the context budget.`,
+    "",
+  ];
+  let cursor = 0;
+  for (const ref of refs) {
+    lines.push(`## ${ref.kind} revision ${ref.revision}`, "");
+    for (const blockId of ref.blockIds) {
+      const text = (blockTexts[cursor] ?? "").trim().replace(/\s+/gu, " ");
+      cursor += 1;
+      lines.push(`- \`${blockId}\`: ${text.slice(0, 200)}${text.length > 200 ? "…" : ""}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+/** Extract one `<!-- kata:block:<id> -->` region from an artifact revision. */
+function blockContent(markdown: string, blockId: string): string | null {
+  const markerRe = /<!--\s*kata:block:([\w.-]+)\s*-->/g;
+  const markers: Array<{ id: string; markerStart: number; contentStart: number }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = markerRe.exec(markdown)) !== null) {
+    markers.push({
+      id: match[1]!,
+      markerStart: match.index,
+      contentStart: match.index + match[0].length,
+    });
+  }
+  const index = markers.findIndex((marker) => marker.id === blockId);
+  if (index === -1) return null;
+  const end = index + 1 < markers.length ? markers[index + 1]!.markerStart : markdown.length;
+  return markdown.slice(markers[index]!.contentStart, end);
 }
 
 function requireContextManifest(task: TaskWorkspace, manifestId: string): void {
@@ -344,7 +425,7 @@ function initialTask(
   // Pin the definition the task will resolve for the rest of its life. Later
   // versions of the same preset are registered alongside, never in place, so a
   // task created today keeps its original workflow shape.
-  const definition = resolveWorkflowDefinition(CURRENT_STANDARD_WORKFLOW_VERSION);
+  const definition = resolveWorkflowDefinition(currentVersionForPreset(command.preset));
   return {
     id: command.taskId,
     title: command.title,
@@ -369,7 +450,7 @@ function initialTask(
     },
     workflowRuns: [
       {
-        id: "standard-run-1",
+        id: `${command.preset}-run-1`,
         preset: command.preset,
         definitionVersion: definition.version,
         currentStage: definition.initialStage,
@@ -671,19 +752,62 @@ export const make = Effect.gen(function* () {
         case "task.context-manifest.create": {
           validateContextManifestRefs(task, command);
           const manifestId = `manifest-${task.contextManifests.length + 1}`;
+          const definition = definitionFor(task);
+          // Omitting `budget` takes the workflow default; an explicit `null`
+          // opts this manifest out of budgeting entirely.
+          const budget =
+            command.budget === undefined ? definition.contextTokenBudget : command.budget;
+          const blockTexts = selectedBlockTexts(task, command.artifactRefs);
+          const selectionEstimate = blockTexts.reduce(
+            (total, text) => total + estimateTokens(text),
+            0,
+          );
+          const blockCount = blockTexts.length;
+          const overflows = budget !== null && selectionEstimate > budget;
+
+          // On overflow the selection is compressed into a `summary` artifact
+          // and the manifest points at that instead. The manifest keeps the
+          // compressed block count so the inspector can show what happened
+          // rather than silently presenting a smaller context as complete.
+          const summaryTask = overflows
+            ? upsertArtifact(task, {
+                ...command,
+                type: "task.artifact.upsert" as const,
+                kind: "summary" as const,
+                title: `Context summary for ${manifestId}`,
+                markdown: summaryMarkdown(manifestId, command.artifactRefs, blockTexts),
+                sourceSessionId: command.sessionId ?? null,
+              })
+            : null;
+          const summaryArtifact = summaryTask?.artifacts.find(
+            (candidate) => candidate.kind === "summary",
+          );
+          const manifest = {
+            id: manifestId,
+            taskId: task.id,
+            sessionId: command.sessionId ?? null,
+            artifactRefs: command.artifactRefs,
+            notes: command.notes ?? null,
+            tokenEstimate: selectionEstimate,
+            budget,
+            summaryArtifactRef: summaryArtifact
+              ? {
+                  kind: "summary" as const,
+                  revision: summaryArtifact.currentRevision,
+                  blockIds: [],
+                }
+              : null,
+            compressedBlockCount: overflows ? blockCount : 0,
+            createdAt: command.createdAt,
+          };
           return yield* append(command, {
             ...task,
-            contextManifests: [
-              ...task.contextManifests,
-              {
-                id: manifestId,
-                taskId: task.id,
-                sessionId: command.sessionId ?? null,
-                artifactRefs: command.artifactRefs,
-                notes: command.notes ?? null,
-                createdAt: command.createdAt,
-              },
-            ],
+            contextManifests: [...task.contextManifests, manifest],
+            // An overflowing selection is replaced by a generated `summary`
+            // artifact, so the manifest can reference the summary instead of
+            // the raw blocks.
+            artifacts: summaryTask ? summaryTask.artifacts : task.artifacts,
+            comments: summaryTask ? summaryTask.comments : task.comments,
             updatedAt: command.createdAt,
           });
         }
@@ -790,11 +914,40 @@ export const make = Effect.gen(function* () {
           }
           return yield* append(command, upsertArtifact(task, command));
         }
-        case "task.questions.complete": {
+        case "task.questions.complete":
+        case "task.research.complete":
+        case "task.design.complete": {
+          // Pure reasoning-stage completions: the definition decides both
+          // whether the transition exists and where it goes, so Standard
+          // (questions -> plan) and Guided (questions -> research -> design ->
+          // plan) share one handler.
           const workflowRuns = applyTransition(task, command.type, command.createdAt);
           return yield* append(command, {
             ...task,
             workflowRuns,
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.stage.start": {
+          const definition = definitionFor(task);
+          if (!allowsExplicitEntry(definition, command.stage)) {
+            throw new Error(
+              `Workflow '${definition.version}' does not allow explicitly starting '${command.stage}'.`,
+            );
+          }
+          const stage = currentRun(task).currentStage;
+          if (stage === command.stage) {
+            throw new Error(`Task '${task.id}' is already in '${command.stage}'.`);
+          }
+          if (stage === definition.terminalStage) {
+            throw new Error(`Task '${task.id}' is complete and cannot start another stage.`);
+          }
+          return yield* append(command, {
+            ...task,
+            workflowRuns: replaceCurrentRun(task, {
+              currentStage: command.stage,
+              updatedAt: command.createdAt,
+            }),
             updatedAt: command.createdAt,
           });
         }

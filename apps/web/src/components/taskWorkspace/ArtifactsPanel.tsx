@@ -12,8 +12,11 @@ import { shortTaskWorkspaceId } from "./taskWorkspacePresentation";
 
 const ARTIFACT_KIND_LABELS: Record<TaskWorkspaceArtifactKind, string> = {
   questions: "Questions",
+  research: "Research",
+  design: "Design",
   plan: "Plan",
   verification: "Verification",
+  summary: "Context summary",
 };
 
 function revisionMarkdown(artifact: TaskWorkspaceArtifact, revision: number): string {

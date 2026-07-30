@@ -1240,6 +1240,719 @@ describe("TaskWorkspaceService", () => {
     30_000,
   );
 
+  const guidedTaskId = TaskWorkspaceId.make("guided-integration");
+  const freeformTaskId = TaskWorkspaceId.make("freeform-integration");
+
+  /** A block long enough that a small budget is guaranteed to overflow. */
+  const longBlock = (id: string, filler: string) =>
+    [`<!-- kata:block:${id} -->`, `# ${id}`, filler.repeat(20), ""].join("\n");
+
+  it.effect(
+    "runs the Guided rail through Research and Design, one artifact per stage",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-guided-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+        const created = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.create",
+              commandId: CommandId.make("guided-create"),
+              taskId: guidedTaskId,
+              createdAt: now(1),
+              title: "Guided integration",
+              projectId,
+              workspaceRoot: repoRoot,
+              baseRef: "main",
+              preset: "guided",
+              approvalPolicy: "before-build",
+            }),
+          ),
+        );
+        expect(created.task.versions.workflowDefinition).toBe("guided@0.1.0");
+        expect(created.task.versions.prompt).toBe("task-workspace-guided@0.1.0");
+        expect(created.task.workflowRuns.at(-1)).toMatchObject({
+          id: "guided-run-1",
+          preset: "guided",
+          definitionVersion: "guided@0.1.0",
+          currentStage: "questions",
+        });
+        // TW-S3-AC08 for Guided: no worktree before Build.
+        expect(created.task.workspace.repositories[0]?.worktreePath).toBeNull();
+        expect(created.task.workspace.repositories[0]?.provisioningStatus).toBe("pending");
+
+        // Questions -> Research, not Questions -> Plan: the successor comes from
+        // the pinned definition, so the same command lands somewhere different
+        // than it does under Standard.
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("guided-questions"),
+              taskId: guidedTaskId,
+              createdAt: now(2),
+              kind: "questions",
+              title: "Questions",
+              markdown: ["<!-- kata:block:scope -->", "# Scope", "What ships?", ""].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        const atResearch = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.questions.complete",
+              commandId: CommandId.make("guided-questions-complete"),
+              taskId: guidedTaskId,
+              createdAt: now(3),
+            }),
+          ),
+        );
+        expect(atResearch.task.workflowRuns.at(-1)?.currentStage).toBe("research");
+
+        // Design cannot be completed from Research: transition legality is the table's.
+        const skipAhead = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.design.complete",
+              commandId: CommandId.make("guided-skip-design"),
+              taskId: guidedTaskId,
+              createdAt: now(4),
+            }),
+          ),
+        );
+        expect(skipAhead._tag).toBe("Failure");
+
+        // Research stage writes a `research` artifact and nothing else.
+        const wrongKindAtResearch = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("guided-wrong-kind"),
+              taskId: guidedTaskId,
+              createdAt: now(5),
+              kind: "design",
+              title: "Design",
+              markdown: "# Design",
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        expect(wrongKindAtResearch._tag).toBe("Failure");
+
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("guided-research"),
+              taskId: guidedTaskId,
+              createdAt: now(6),
+              kind: "research",
+              title: "Research",
+              markdown: ["<!-- kata:block:prior-art -->", "# Prior art", "Findings.", ""].join(
+                "\n",
+              ),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+
+        // TW-S3-AC03: the next-stage manifest records the exact blocks carried,
+        // a token estimate, and the budget it was measured against.
+        const manifested = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("guided-manifest"),
+              taskId: guidedTaskId,
+              createdAt: now(7),
+              artifactRefs: [
+                { kind: "questions", revision: 1, blockIds: ["scope"] },
+                { kind: "research", revision: 1, blockIds: ["prior-art"] },
+              ],
+              notes: "carried into design",
+              sessionId: null,
+            }),
+          ),
+        );
+        const manifest = manifested.task.contextManifests.at(-1);
+        expect(manifest?.artifactRefs.flatMap((ref) => ref.blockIds)).toEqual([
+          "scope",
+          "prior-art",
+        ]);
+        // Omitting `budget` takes the workflow default rather than leaving the
+        // manifest unbudgeted.
+        expect(manifest?.budget).toBe(32_000);
+        expect(manifest?.tokenEstimate).toBeGreaterThan(0);
+        expect(manifest?.tokenEstimate).toBeLessThan(32_000);
+        // Well under budget, so nothing was compressed and no summary exists.
+        expect(manifest?.compressedBlockCount).toBe(0);
+        expect(manifest?.summaryArtifactRef).toBeNull();
+        expect(manifested.task.artifacts.some((artifact) => artifact.kind === "summary")).toBe(
+          false,
+        );
+
+        const atDesign = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.research.complete",
+              commandId: CommandId.make("guided-research-complete"),
+              taskId: guidedTaskId,
+              createdAt: now(8),
+            }),
+          ),
+        );
+        expect(atDesign.task.workflowRuns.at(-1)?.currentStage).toBe("design");
+
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("guided-design"),
+              taskId: guidedTaskId,
+              createdAt: now(9),
+              kind: "design",
+              title: "Design",
+              markdown: ["<!-- kata:block:shape -->", "# Shape", "The approach.", ""].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        const atPlan = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.design.complete",
+              commandId: CommandId.make("guided-design-complete"),
+              taskId: guidedTaskId,
+              createdAt: now(10),
+            }),
+          ),
+        );
+        expect(atPlan.task.workflowRuns.at(-1)?.currentStage).toBe("plan");
+
+        // TW-S3-AC02: one artifact per reasoning stage, each with its own lineage.
+        expect(atPlan.task.artifacts.map((artifact) => artifact.kind)).toEqual([
+          "questions",
+          "research",
+          "design",
+        ]);
+        for (const artifact of atPlan.task.artifacts) {
+          expect(artifact.revisions).toHaveLength(1);
+          expect(artifact.currentRevision).toBe(1);
+        }
+        // Still nothing provisioned: Guided reaches Plan without a worktree.
+        expect(atPlan.task.workspace.repositories[0]?.worktreePath).toBeNull();
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "rejects Guided reasoning commands on a Standard task",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-standard-guard-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const standardTaskId = TaskWorkspaceId.make("standard-guard");
+
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.create",
+              commandId: CommandId.make("sg-create"),
+              taskId: standardTaskId,
+              createdAt: now(1),
+              title: "Standard guard",
+              projectId,
+              workspaceRoot: repoRoot,
+              baseRef: "main",
+              preset: "standard",
+              approvalPolicy: "before-build",
+            }),
+          ),
+        );
+
+        // Standard's table declares no research/design transition, so the
+        // widened command union does not widen Standard's behavior.
+        for (const [id, type] of [
+          ["sg-research", "task.research.complete"],
+          ["sg-design", "task.design.complete"],
+        ] as const) {
+          const exit = yield* runtime.runPromiseExit(
+            service.dispatch(
+              command({
+                type,
+                commandId: CommandId.make(id),
+                taskId: standardTaskId,
+                createdAt: now(2),
+              }),
+            ),
+          );
+          expect(exit._tag).toBe("Failure");
+        }
+
+        // Standard declares no explicit entries at all.
+        const explicitEntry = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.stage.start",
+              commandId: CommandId.make("sg-stage-start"),
+              taskId: standardTaskId,
+              createdAt: now(3),
+              stage: "plan",
+            }),
+          ),
+        );
+        expect(explicitEntry._tag).toBe("Failure");
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "summarizes an over-budget context selection and records the compression",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-budget-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const budgetTaskId = TaskWorkspaceId.make("budget-integration");
+
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.create",
+              commandId: CommandId.make("budget-create"),
+              taskId: budgetTaskId,
+              createdAt: now(1),
+              title: "Budget integration",
+              projectId,
+              workspaceRoot: repoRoot,
+              baseRef: "main",
+              preset: "guided",
+              approvalPolicy: "before-build",
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("budget-questions"),
+              taskId: budgetTaskId,
+              createdAt: now(2),
+              kind: "questions",
+              title: "Questions",
+              markdown: [
+                longBlock("alpha", "alpha detail. "),
+                longBlock("beta", "beta detail. "),
+              ].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+
+        const refs = [{ kind: "questions" as const, revision: 1, blockIds: ["alpha", "beta"] }];
+
+        // Under budget: raw blocks are carried and nothing is compressed.
+        const roomy = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("budget-roomy"),
+              taskId: budgetTaskId,
+              createdAt: now(3),
+              artifactRefs: refs,
+              notes: null,
+              sessionId: null,
+              budget: 100_000,
+            }),
+          ),
+        );
+        const roomyManifest = roomy.task.contextManifests.at(-1);
+        expect(roomyManifest?.budget).toBe(100_000);
+        expect(roomyManifest?.compressedBlockCount).toBe(0);
+        expect(roomyManifest?.summaryArtifactRef).toBeNull();
+        expect(roomy.task.artifacts.some((artifact) => artifact.kind === "summary")).toBe(false);
+        const rawEstimate = roomyManifest?.tokenEstimate ?? 0;
+        expect(rawEstimate).toBeGreaterThan(50);
+
+        // TW-S3-AC04: over budget produces a `summary` artifact, the manifest
+        // references it, and the compression is recorded rather than silent.
+        const tight = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("budget-tight"),
+              taskId: budgetTaskId,
+              createdAt: now(4),
+              artifactRefs: refs,
+              notes: null,
+              sessionId: null,
+              budget: 20,
+            }),
+          ),
+        );
+        const tightManifest = tight.task.contextManifests.at(-1);
+        expect(tightManifest?.budget).toBe(20);
+        expect(tightManifest?.tokenEstimate).toBe(rawEstimate);
+        expect(tightManifest?.compressedBlockCount).toBe(2);
+        expect(tightManifest?.summaryArtifactRef).toMatchObject({ kind: "summary", revision: 1 });
+
+        const summary = tight.task.artifacts.find((artifact) => artifact.kind === "summary");
+        expect(summary).toBeTruthy();
+        expect(summary?.currentRevision).toBe(1);
+        const summaryMarkdown = summary?.revisions.at(-1)?.markdown ?? "";
+        // The summary names what it stands in for, so the compression is auditable.
+        expect(summaryMarkdown).toContain("Compressed 2 block(s)");
+        expect(summaryMarkdown).toContain("alpha");
+        expect(summaryMarkdown).toContain("beta");
+        // Provenance is preserved: the manifest still records which blocks the
+        // summary replaced, so the inspector can show what was lost.
+        expect(tightManifest?.artifactRefs.flatMap((ref) => ref.blockIds)).toEqual([
+          "alpha",
+          "beta",
+        ]);
+
+        // A second overflow appends a new summary revision rather than colliding.
+        const again = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("budget-tight-again"),
+              taskId: budgetTaskId,
+              createdAt: now(5),
+              artifactRefs: refs,
+              notes: null,
+              sessionId: null,
+              budget: 20,
+            }),
+          ),
+        );
+        expect(again.task.contextManifests.at(-1)?.summaryArtifactRef).toMatchObject({
+          revision: 2,
+        });
+        expect(
+          again.task.artifacts.find((artifact) => artifact.kind === "summary")?.revisions,
+        ).toHaveLength(2);
+
+        // An explicit null budget opts out of budgeting entirely.
+        const unbudgeted = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("budget-none"),
+              taskId: budgetTaskId,
+              createdAt: now(6),
+              artifactRefs: refs,
+              notes: null,
+              sessionId: null,
+              budget: null,
+            }),
+          ),
+        );
+        expect(unbudgeted.task.contextManifests.at(-1)?.budget).toBeNull();
+        expect(unbudgeted.task.contextManifests.at(-1)?.compressedBlockCount).toBe(0);
+
+        // `summary` is machine-generated only: it is not any stage's kind, so a
+        // direct write of one is refused by the same gate that guards the rail.
+        const directSummary = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("budget-direct-summary"),
+              taskId: budgetTaskId,
+              createdAt: now(7),
+              kind: "summary",
+              title: "Hand-written summary",
+              markdown: "# Nope",
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        expect(directSummary._tag).toBe("Failure");
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "accumulates a Freeform task with no rail and converges through explicit stage entry",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-freeform-");
+        yield* Effect.tryPromise(() => git(repoRoot, ["init", "-b", "main"]));
+        yield* Effect.tryPromise(() =>
+          NodeFs.writeFile(NodePath.join(repoRoot, "README.md"), "# fixture\n", "utf8"),
+        );
+        yield* Effect.tryPromise(() => git(repoRoot, ["add", "README.md"]));
+        yield* Effect.tryPromise(() =>
+          git(repoRoot, ["commit", "-m", "chore: seed freeform repository"]),
+        );
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+        const created = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.create",
+              commandId: CommandId.make("ff-create"),
+              taskId: freeformTaskId,
+              createdAt: now(1),
+              title: "Freeform integration",
+              projectId,
+              workspaceRoot: repoRoot,
+              baseRef: "main",
+              preset: "freeform",
+              approvalPolicy: "before-build",
+            }),
+          ),
+        );
+        expect(created.task.versions.workflowDefinition).toBe("freeform@0.1.0");
+        expect(created.task.workflowRuns.at(-1)).toMatchObject({
+          id: "freeform-run-1",
+          preset: "freeform",
+          currentStage: "questions",
+        });
+        // TW-S3-AC08 for Freeform.
+        expect(created.task.workspace.repositories[0]?.worktreePath).toBeNull();
+
+        // TW-S3-AC05: no automatic advancement. Completing questions is not a
+        // transition Freeform declares, so the rail simply is not there.
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("ff-questions"),
+              taskId: freeformTaskId,
+              createdAt: now(2),
+              kind: "questions",
+              title: "Questions",
+              markdown: ["<!-- kata:block:notes -->", "# Notes", "Thinking out loud.", ""].join(
+                "\n",
+              ),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        const noRail = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.questions.complete",
+              commandId: CommandId.make("ff-questions-complete"),
+              taskId: freeformTaskId,
+              createdAt: now(3),
+            }),
+          ),
+        );
+        expect(noRail._tag).toBe("Failure");
+
+        // Sessions accumulate without moving the stage.
+        const sessioned = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.session.link",
+              commandId: CommandId.make("ff-link"),
+              taskId: freeformTaskId,
+              createdAt: now(4),
+              stage: "questions",
+              threadId: ThreadId.make("thread-freeform"),
+              role: "primary",
+            }),
+          ),
+        );
+        expect(sessioned.task.workflowRuns.at(-1)?.currentStage).toBe("questions");
+
+        // Explicit entry is the only way forward, and only into declared stages.
+        const intoBuild = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.stage.start",
+              commandId: CommandId.make("ff-into-build"),
+              taskId: freeformTaskId,
+              createdAt: now(5),
+              stage: "build",
+            }),
+          ),
+        );
+        expect(intoBuild._tag).toBe("Failure");
+
+        const sameStage = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.stage.start",
+              commandId: CommandId.make("ff-same-stage"),
+              taskId: freeformTaskId,
+              createdAt: now(6),
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(sameStage._tag).toBe("Failure");
+
+        const atResearch = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.stage.start",
+              commandId: CommandId.make("ff-into-research"),
+              taskId: freeformTaskId,
+              createdAt: now(7),
+              stage: "research",
+            }),
+          ),
+        );
+        expect(atResearch.task.workflowRuns.at(-1)?.currentStage).toBe("research");
+
+        // Freeform can return to a stage it has left — the point of no rail.
+        const backToQuestions = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.stage.start",
+              commandId: CommandId.make("ff-back-to-questions"),
+              taskId: freeformTaskId,
+              createdAt: now(8),
+              stage: "questions",
+            }),
+          ),
+        );
+        expect(backToQuestions.task.workflowRuns.at(-1)?.currentStage).toBe("questions");
+        // ...and amend the artifact that stage owns, which is why the return trip matters.
+        const amended = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("ff-questions-r2"),
+              taskId: freeformTaskId,
+              createdAt: now(9),
+              kind: "questions",
+              title: "Questions",
+              markdown: ["<!-- kata:block:notes -->", "# Notes", "Revised.", ""].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        expect(
+          amended.task.artifacts.find((artifact) => artifact.kind === "questions")?.revisions,
+        ).toHaveLength(2);
+
+        // Converge: explicit entry into Plan, then the usual approve/build path.
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.stage.start",
+              commandId: CommandId.make("ff-into-plan"),
+              taskId: freeformTaskId,
+              createdAt: now(10),
+              stage: "plan",
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("ff-plan"),
+              taskId: freeformTaskId,
+              createdAt: now(11),
+              kind: "plan",
+              title: "Plan",
+              markdown: "# Plan\n\nShip it.",
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        const approved = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.plan.approve",
+              commandId: CommandId.make("ff-approve"),
+              taskId: freeformTaskId,
+              createdAt: now(12),
+            }),
+          ),
+        );
+        expect(approved.task.workflowRuns.at(-1)?.currentStage).toBe("build");
+        expect(approved.task.workspace.repositories[0]?.provisioningStatus).toBe("provisioned");
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "retains preset, pinned versions, manifests, budgets, and summaries after restart",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-s3-restart-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const restartTaskId = TaskWorkspaceId.make("s3-restart");
+
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.create",
+              commandId: CommandId.make("s3r-create"),
+              taskId: restartTaskId,
+              createdAt: now(1),
+              title: "Slice 3 restart",
+              projectId,
+              workspaceRoot: repoRoot,
+              baseRef: "main",
+              preset: "guided",
+              approvalPolicy: "before-build",
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.artifact.upsert",
+              commandId: CommandId.make("s3r-questions"),
+              taskId: restartTaskId,
+              createdAt: now(2),
+              kind: "questions",
+              title: "Questions",
+              markdown: [
+                longBlock("wide", "a lot of context. "),
+                longBlock("also-wide", "even more context. "),
+              ].join("\n"),
+              sourceSessionId: null,
+            }),
+          ),
+        );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("s3r-manifest"),
+              taskId: restartTaskId,
+              createdAt: now(3),
+              artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["wide", "also-wide"] }],
+              notes: null,
+              sessionId: null,
+              budget: 25,
+            }),
+          ),
+        );
+        yield* runtime.dispose;
+
+        // TW-S3-AC10: everything Slice 3b added survives a replay from the log.
+        const restarted = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+        const restartedService = yield* restarted.runPromise(Effect.service(TaskWorkspaceService));
+        const replayed = yield* restarted.runPromise(restartedService.getTask(restartTaskId));
+
+        expect(replayed?.versions.workflowDefinition).toBe("guided@0.1.0");
+        expect(replayed?.workflowRuns.at(-1)).toMatchObject({
+          preset: "guided",
+          definitionVersion: "guided@0.1.0",
+        });
+        const manifest = replayed?.contextManifests.at(-1);
+        expect(manifest?.budget).toBe(25);
+        expect(manifest?.tokenEstimate).toBeGreaterThan(25);
+        expect(manifest?.compressedBlockCount).toBe(2);
+        expect(manifest?.summaryArtifactRef).toMatchObject({ kind: "summary", revision: 1 });
+        expect(
+          replayed?.artifacts.find((artifact) => artifact.kind === "summary")?.revisions,
+        ).toHaveLength(1);
+        yield* restarted.dispose;
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
   it.effect("fails startup when persisted task history is corrupt", () =>
     Effect.gen(function* () {
       const root = yield* Effect.tryPromise(() =>

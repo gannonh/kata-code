@@ -1,4 +1,10 @@
-import type { TaskWorkspaceCommand } from "@kata-sh/code-contracts";
+import {
+  TASK_WORKSPACE_PRESET_CATALOG,
+  TASK_WORKSPACE_STAGE_LABELS,
+  type TaskWorkspaceCommand,
+  type TaskWorkspacePreset,
+  taskWorkspacePresetCatalogEntry,
+} from "@kata-sh/code-contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -22,6 +28,7 @@ export function TaskWorkspaceNewView() {
   const [title, setTitle] = useState("Slice 1 task workspace");
   const [projectId, setProjectId] = useState(availableProjects[0]?.id ?? "");
   const [baseRef, setBaseRef] = useState("main");
+  const [preset, setPreset] = useState<TaskWorkspacePreset>("standard");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -34,6 +41,9 @@ export function TaskWorkspaceNewView() {
   }, [availableProjects]);
 
   const selectedProject = availableProjects.find((project) => project.id === projectId) ?? null;
+  // The version the task will pin. Displayed rather than assumed so it is
+  // obvious which definition a task was created against.
+  const selectedPreset = taskWorkspacePresetCatalogEntry(preset);
 
   async function createTask() {
     if (!selectedProject || !title.trim() || !baseRef.trim()) return;
@@ -50,7 +60,7 @@ export function TaskWorkspaceNewView() {
       projectId: selectedProject.id,
       workspaceRoot: selectedProject.cwd,
       baseRef: baseRef.trim(),
-      preset: "standard",
+      preset,
       approvalPolicy: "before-build",
     };
     try {
@@ -70,15 +80,15 @@ export function TaskWorkspaceNewView() {
           <SidebarTrigger className="size-7 shrink-0 md:hidden" />
           <div>
             <p className="text-xs font-medium text-muted-foreground">Task Workspaces</p>
-            <h1 className="text-base font-semibold">Create Standard task</h1>
+            <h1 className="text-base font-semibold">Create task</h1>
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-8">
           <section className="mx-auto max-w-2xl space-y-6 rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-7">
             <div>
-              <h2 className="text-lg font-semibold">Walking skeleton</h2>
+              <h2 className="text-lg font-semibold">New task workspace</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                One repository, Standard workflow, and approval before Build.
+                One repository, a pinned workflow definition, and approval before Build.
               </p>
             </div>
 
@@ -118,10 +128,58 @@ export function TaskWorkspaceNewView() {
               />
             </label>
 
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">Workflow</legend>
+              <div className="grid gap-2" data-testid="task-workflow-picker">
+                {TASK_WORKSPACE_PRESET_CATALOG.map((entry) => {
+                  const active = entry.preset === preset;
+                  return (
+                    <label
+                      key={entry.preset}
+                      data-testid={`task-workflow-option-${entry.preset}`}
+                      data-active={active || undefined}
+                      className={`flex cursor-pointer gap-3 rounded-xl border p-3 text-sm transition-colors ${
+                        active
+                          ? "border-primary bg-primary/5"
+                          : "border-border/70 hover:border-border"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="task-workflow-preset"
+                        className="mt-1 size-4 shrink-0"
+                        value={entry.preset}
+                        checked={active}
+                        onChange={() => setPreset(entry.preset)}
+                      />
+                      <span className="min-w-0 space-y-1">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{entry.label}</span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {entry.currentVersion}
+                          </span>
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {entry.description}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {entry.stages
+                            .map((stage) => TASK_WORKSPACE_STAGE_LABELS[stage])
+                            .join(" → ")}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+
             <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/20 p-4 text-sm sm:grid-cols-2">
               <div>
-                <p className="font-medium">Workflow</p>
-                <p className="text-muted-foreground">Standard · standard@0.1.0</p>
+                <p className="font-medium">Resolved definition</p>
+                <p data-testid="task-resolved-definition" className="text-muted-foreground">
+                  {selectedPreset.label} · {selectedPreset.currentVersion}
+                </p>
               </div>
               <div>
                 <p className="font-medium">Approval policy</p>

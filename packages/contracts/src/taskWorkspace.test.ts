@@ -4,8 +4,12 @@ import * as Schema from "effect/Schema";
 
 import { CommandId, ProjectId } from "./baseSchemas.ts";
 import {
+  TASK_WORKSPACE_PRESET_CATALOG,
+  TASK_WORKSPACE_STAGE_LABELS,
   TaskWorkspaceCommand,
+  taskWorkspaceCatalogEntryForVersion,
   TaskWorkspaceEvent,
+  taskWorkspacePresetCatalogEntry,
   TaskWorkspaceStreamItem,
 } from "./taskWorkspace.ts";
 
@@ -251,3 +255,185 @@ it.effect("rejects unknown task workspace event types", () =>
     assert.strictEqual(result._tag, "Failure");
   }),
 );
+
+// TW-S3-AC09: Slice 1 / Slice 2 rows predate the Slice 3b fields. Replaying them
+// must yield the pre-3b meaning — Standard preset, unbudgeted manifest, no
+// compression — rather than failing or inventing a budget.
+it.effect("replays a Slice 1 workflow run that predates the preset union", () =>
+  Effect.gen(function* () {
+    const event = yield* decodeEvent({
+      sequence: 3,
+      eventId: "event-3",
+      commandId: "command-3",
+      taskId: "task-1",
+      type: "task.create",
+      occurredAt: "2026-07-28T17:00:00.000Z",
+      task: slice1Task({
+        workflowRuns: [
+          {
+            id: "standard-run-1",
+            definitionVersion: "standard@0.1.0",
+            currentStage: "questions",
+            approvalPolicy: "before-build",
+            createdAt: "2026-07-28T17:00:00.000Z",
+            updatedAt: "2026-07-28T17:00:00.000Z",
+          },
+        ],
+      }),
+    });
+
+    const run = event.task.workflowRuns[0];
+    if (run === undefined) {
+      return assert.fail("Expected a decoded workflow run");
+    }
+    assert.strictEqual(run.preset, "standard");
+    assert.strictEqual(run.definitionVersion, "standard@0.1.0");
+  }),
+);
+
+it.effect("replays a Slice 2 context manifest as unbudgeted and uncompressed", () =>
+  Effect.gen(function* () {
+    const event = yield* decodeEvent({
+      sequence: 4,
+      eventId: "event-4",
+      commandId: "command-4",
+      taskId: "task-1",
+      type: "task.context-manifest.create",
+      occurredAt: "2026-07-29T17:00:00.000Z",
+      task: slice1Task({
+        contextManifests: [
+          {
+            id: "manifest-1",
+            taskId: "task-1",
+            artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+            createdAt: "2026-07-29T17:00:00.000Z",
+          },
+        ],
+      }),
+    });
+
+    const manifest = event.task.contextManifests[0];
+    if (manifest === undefined) {
+      return assert.fail("Expected a decoded context manifest");
+    }
+    assert.strictEqual(manifest.tokenEstimate, 0);
+    // `null` budget means "this manifest was never budgeted", which is exactly
+    // true of every Slice 2 manifest — distinct from a budget of 0.
+    assert.strictEqual(manifest.budget, null);
+    assert.strictEqual(manifest.summaryArtifactRef, null);
+    assert.strictEqual(manifest.compressedBlockCount, 0);
+    assert.strictEqual(manifest.sessionId, null);
+    assert.strictEqual(manifest.notes, null);
+  }),
+);
+
+it.effect("defaults preset to standard on a task.create command that omits it", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeCommand({
+      type: "task.create",
+      commandId: "command-legacy-create",
+      taskId: "task-1",
+      createdAt: "2026-07-28T17:00:00.000Z",
+      title: "Slice 1",
+      projectId: "project-1",
+      workspaceRoot: "/repo",
+      baseRef: "main",
+      approvalPolicy: "before-build",
+    });
+
+    if (command.type !== "task.create") {
+      return assert.fail("Expected task.create command");
+    }
+    assert.strictEqual(command.preset, "standard");
+  }),
+);
+
+it.effect("decodes the Slice 3b preset, stage, and reasoning-stage commands", () =>
+  Effect.gen(function* () {
+    for (const preset of ["standard", "guided", "freeform"] as const) {
+      const created = yield* decodeCommand({
+        type: "task.create",
+        commandId: `command-${preset}`,
+        taskId: "task-1",
+        createdAt: "2026-07-30T17:00:00.000Z",
+        title: preset,
+        projectId: "project-1",
+        workspaceRoot: "/repo",
+        baseRef: "main",
+        preset,
+        approvalPolicy: "before-build",
+      });
+      if (created.type !== "task.create") {
+        return assert.fail("Expected task.create command");
+      }
+      assert.strictEqual(created.preset, preset);
+    }
+
+    const stageStart = yield* decodeCommand({
+      type: "task.stage.start",
+      commandId: "command-stage-start",
+      taskId: "task-1",
+      createdAt: "2026-07-30T17:00:00.000Z",
+      stage: "research",
+    });
+    if (stageStart.type !== "task.stage.start") {
+      return assert.fail("Expected task.stage.start command");
+    }
+    assert.strictEqual(stageStart.stage, "research");
+
+    for (const type of ["task.research.complete", "task.design.complete"] as const) {
+      const command = yield* decodeCommand({
+        type,
+        commandId: `command-${type}`,
+        taskId: "task-1",
+        createdAt: "2026-07-30T17:00:00.000Z",
+      });
+      assert.strictEqual(command.type, type);
+    }
+
+    const budgeted = yield* decodeCommand({
+      type: "task.context-manifest.create",
+      commandId: "command-budgeted-manifest",
+      taskId: "task-1",
+      createdAt: "2026-07-30T17:00:00.000Z",
+      artifactRefs: [{ kind: "design", revision: 2, blockIds: ["shape"] }],
+      budget: 1_000,
+    });
+    if (budgeted.type !== "task.context-manifest.create") {
+      return assert.fail("Expected task.context-manifest.create command");
+    }
+    assert.strictEqual(budgeted.budget, 1_000);
+    assert.strictEqual(budgeted.artifactRefs[0]?.kind, "design");
+  }),
+);
+
+// Plain synchronous assertions: the catalog is static data, with no Effect to run.
+it("keeps the preset catalog aligned with the preset union", () => {
+  {
+    assert.deepStrictEqual(
+      TASK_WORKSPACE_PRESET_CATALOG.map((entry) => entry.preset),
+      ["standard", "guided", "freeform"],
+    );
+
+    for (const entry of TASK_WORKSPACE_PRESET_CATALOG) {
+      assert.strictEqual(taskWorkspacePresetCatalogEntry(entry.preset), entry);
+      assert.strictEqual(taskWorkspaceCatalogEntryForVersion(entry.currentVersion), entry);
+      // Every rail starts at questions and ends at the terminal stage.
+      assert.strictEqual(entry.stages[0], "questions");
+      assert.strictEqual(entry.stages.at(-1), "verified");
+      // Explicit entries are always stages the preset actually has, and never
+      // Build or Verified — those are reached by approving and signing off.
+      for (const stage of entry.explicitEntryStages) {
+        assert.ok(entry.stages.includes(stage));
+        assert.notStrictEqual(stage, "build");
+        assert.notStrictEqual(stage, "verified");
+      }
+      // Every stage label is renderable.
+      for (const stage of entry.stages) {
+        assert.ok(TASK_WORKSPACE_STAGE_LABELS[stage].length > 0);
+      }
+    }
+
+    assert.strictEqual(taskWorkspaceCatalogEntryForVersion("guided@9.9.9"), null);
+  }
+});

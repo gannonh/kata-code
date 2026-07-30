@@ -1,9 +1,17 @@
 import { describe, expect, it } from "@effect/vitest";
+import {
+  TASK_WORKSPACE_PRESET_CATALOG,
+  taskWorkspacePresetCatalogEntry,
+} from "@kata-sh/code-contracts";
 
 import {
+  allowsExplicitEntry,
   artifactKindForStage,
   BUILT_IN_WORKFLOW_DEFINITIONS,
+  currentVersionForPreset,
   CURRENT_STANDARD_WORKFLOW_VERSION,
+  FREEFORM_WORKFLOW_V0_1_0,
+  GUIDED_WORKFLOW_V0_1_0,
   makeWorkflowDefinitionRegistry,
   resolveWorkflowDefinition,
   STANDARD_WORKFLOW_V0_1_0,
@@ -206,5 +214,106 @@ describe("workflowDefinitions", () => {
     expect(
       transitionFor({ ...STANDARD_WORKFLOW_V0_1_0, transitions: [] }, "task.plan.approve"),
     ).toBeNull();
+  });
+
+  it("runs Guided through Questions, Research, Design, and Plan with an artifact per stage", () => {
+    expect(GUIDED_WORKFLOW_V0_1_0.initialStage).toBe("questions");
+    expect(
+      GUIDED_WORKFLOW_V0_1_0.transitions.map((transition) => [
+        transition.command,
+        transition.from,
+        transition.to,
+        transition.requiresArtifact,
+      ]),
+    ).toEqual([
+      ["task.questions.complete", "questions", "research", "questions"],
+      ["task.research.complete", "research", "design", "research"],
+      ["task.design.complete", "design", "plan", "design"],
+      ["task.plan.approve", "plan", "build", "plan"],
+      ["task.fixture.apply", "build", "verify", null],
+      ["task.verification.signoff", "verify", "verified", null],
+    ]);
+    // Each reasoning stage writes its own kind, which is what lets the next
+    // stage start from a selection of blocks rather than the prior transcript.
+    expect(artifactKindForStage(GUIDED_WORKFLOW_V0_1_0, "research")).toBe("research");
+    expect(artifactKindForStage(GUIDED_WORKFLOW_V0_1_0, "design")).toBe("design");
+    // Guided is a rail, so nothing may be entered out of order.
+    expect(GUIDED_WORKFLOW_V0_1_0.explicitEntryStages).toEqual([]);
+  });
+
+  it("gives Freeform no rail out of its initial stage, only explicit entries", () => {
+    expect(FREEFORM_WORKFLOW_V0_1_0.initialStage).toBe("questions");
+    expect(
+      FREEFORM_WORKFLOW_V0_1_0.transitions.some((transition) => transition.from === "questions"),
+    ).toBe(false);
+    expect(transitionFor(FREEFORM_WORKFLOW_V0_1_0, "task.questions.complete")).toBeNull();
+
+    for (const stage of ["questions", "research", "design", "plan", "verify"] as const) {
+      expect(allowsExplicitEntry(FREEFORM_WORKFLOW_V0_1_0, stage)).toBe(true);
+    }
+    // Build is reached by approving a plan and Verified by signoff, never
+    // explicitly — that is what keeps Freeform on the same delivery path.
+    expect(allowsExplicitEntry(FREEFORM_WORKFLOW_V0_1_0, "build")).toBe(false);
+    expect(allowsExplicitEntry(FREEFORM_WORKFLOW_V0_1_0, "verified")).toBe(false);
+    expect(FREEFORM_WORKFLOW_V0_1_0.transitions.map((transition) => transition.command)).toEqual([
+      "task.plan.approve",
+      "task.fixture.apply",
+      "task.verification.signoff",
+    ]);
+  });
+
+  // `transitionFor` resolves a command by first match, so a definition that
+  // declared the same command twice would silently strand the later one. No
+  // built-in does, and Slice 3b adds two more definitions, so lock it here.
+  // (The registry does not yet reject this at registration time — that is
+  // tracked on the Slice 3a PR; this test protects the shipped definitions
+  // either way.)
+  it("declares each transition command at most once per definition", () => {
+    for (const definition of BUILT_IN_WORKFLOW_DEFINITIONS.values()) {
+      const commands = definition.transitions.map((transition) => transition.command);
+      expect(new Set(commands).size, `${definition.version} has a duplicated command`).toBe(
+        commands.length,
+      );
+      // Every declared transition is therefore reachable by lookup.
+      for (const transition of definition.transitions) {
+        expect(transitionFor(definition, transition.command)).toBe(transition);
+      }
+    }
+  });
+
+  it("pins the matching current version for every preset", () => {
+    expect(currentVersionForPreset("standard")).toBe("standard@0.1.0");
+    expect(currentVersionForPreset("guided")).toBe("guided@0.1.0");
+    expect(currentVersionForPreset("freeform")).toBe("freeform@0.1.0");
+    for (const preset of ["standard", "guided", "freeform"] as const) {
+      expect(resolveWorkflowDefinition(currentVersionForPreset(preset)).preset).toBe(preset);
+    }
+  });
+
+  // Clients cannot execute a workflow, but they do render its rail. The catalog
+  // in contracts is that display projection; this is what stops it drifting away
+  // from the definitions it claims to describe.
+  it("keeps the shared preset catalog in sync with the built-in definitions", () => {
+    expect(TASK_WORKSPACE_PRESET_CATALOG.map((entry) => entry.preset)).toEqual([
+      "standard",
+      "guided",
+      "freeform",
+    ]);
+
+    for (const entry of TASK_WORKSPACE_PRESET_CATALOG) {
+      const definition = resolveWorkflowDefinition(entry.currentVersion);
+      expect(entry.currentVersion).toBe(currentVersionForPreset(entry.preset));
+      expect(definition.preset).toBe(entry.preset);
+      expect(entry.stages).toEqual(definition.stages);
+      expect(entry.explicitEntryStages).toEqual(definition.explicitEntryStages);
+      expect(taskWorkspacePresetCatalogEntry(entry.preset)).toBe(entry);
+    }
+
+    // Every registered built-in is projected; a new preset cannot ship unlisted.
+    for (const definition of BUILT_IN_WORKFLOW_DEFINITIONS.values()) {
+      expect(
+        TASK_WORKSPACE_PRESET_CATALOG.some((entry) => entry.currentVersion === definition.version),
+      ).toBe(true);
+    }
   });
 });
