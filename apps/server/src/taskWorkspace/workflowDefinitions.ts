@@ -86,6 +86,20 @@ export function makeWorkflowDefinitionRegistry(
     if (entries.has(definition.version)) {
       throw new Error(`Duplicate workflow definition version '${definition.version}'.`);
     }
+    const transitionCommands = new Set<WorkflowTransitionCommandType>();
+    for (const transition of definition.transitions) {
+      if (transitionCommands.has(transition.command)) {
+        throw new Error(
+          `Workflow definition '${definition.version}' declares duplicate transition command '${transition.command}'.`,
+        );
+      }
+      transitionCommands.add(transition.command);
+      if (transition.to === "build" && transition.command !== "task.plan.approve") {
+        throw new Error(
+          `Workflow definition '${definition.version}' enters Build through '${transition.command}', but only 'task.plan.approve' provisions the worktree.`,
+        );
+      }
+    }
     entries.set(definition.version, definition);
   }
   return entries;

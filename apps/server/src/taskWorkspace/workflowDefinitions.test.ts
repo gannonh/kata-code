@@ -18,7 +18,7 @@ const STANDARD_WORKFLOW_V0_2_0: WorkflowDefinition = {
   // Drops the questions gate: plan may be written from the first stage.
   stageArtifactKinds: { questions: "plan", plan: "plan", verify: "verification" },
   transitions: [
-    { command: "task.questions.complete", from: "questions", to: "build", requiresArtifact: null },
+    { command: "task.questions.complete", from: "questions", to: "plan", requiresArtifact: null },
     ...STANDARD_WORKFLOW_V0_1_0.transitions.filter(
       (transition) => transition.command !== "task.questions.complete",
     ),
@@ -78,7 +78,7 @@ describe("workflowDefinitions", () => {
 
     // The newer version really is different, so the assertions above are load-bearing.
     const latest = resolveWorkflowDefinition("standard@0.2.0", registry);
-    expect(transitionFor(latest, "task.questions.complete")?.to).toBe("build");
+    expect(transitionFor(latest, "task.questions.complete")?.requiresArtifact).toBeNull();
     expect(artifactKindForStage(latest, "questions")).toBe("plan");
   });
 
@@ -92,6 +92,49 @@ describe("workflowDefinitions", () => {
     expect(() =>
       makeWorkflowDefinitionRegistry([STANDARD_WORKFLOW_V0_1_0, STANDARD_WORKFLOW_V0_1_0]),
     ).toThrow("standard@0.1.0");
+  });
+
+  it("rejects duplicate transition commands within one definition", () => {
+    expect(() =>
+      makeWorkflowDefinitionRegistry([
+        {
+          ...STANDARD_WORKFLOW_V0_1_0,
+          version: "standard@duplicate-command",
+          transitions: [
+            ...STANDARD_WORKFLOW_V0_1_0.transitions,
+            {
+              command: "task.questions.complete",
+              from: "plan",
+              to: "verify",
+              requiresArtifact: null,
+            },
+          ],
+        },
+      ]),
+    ).toThrow(
+      "Workflow definition 'standard@duplicate-command' declares duplicate transition command 'task.questions.complete'.",
+    );
+  });
+
+  it("rejects transitions that enter Build without the provisioning command", () => {
+    expect(() =>
+      makeWorkflowDefinitionRegistry([
+        {
+          ...STANDARD_WORKFLOW_V0_1_0,
+          version: "standard@unprovisioned-build",
+          transitions: [
+            {
+              command: "task.questions.complete",
+              from: "questions",
+              to: "build",
+              requiresArtifact: null,
+            },
+          ],
+        },
+      ]),
+    ).toThrow(
+      "Workflow definition 'standard@unprovisioned-build' enters Build through 'task.questions.complete', but only 'task.plan.approve' provisions the worktree.",
+    );
   });
 
   it("returns null for a transition the definition does not declare", () => {
