@@ -291,6 +291,10 @@ describe("TaskWorkspaceView", () => {
           sessionId: null,
           artifactRefs: [{ kind: "plan", revision: 1, blockIds: [] }],
           notes: null,
+          tokenEstimate: 0,
+          budget: null,
+          summaryArtifactRef: null,
+          compressedBlockCount: 0,
           createdAt: "2026-07-28T17:04:00.000Z",
         },
       ],
@@ -405,5 +409,160 @@ describe("TaskWorkspaceView", () => {
     await expect.element(page.getByTestId("task-verified-state")).toBeVisible();
     await expect.element(page.getByText(/All criteria passed at 0123456789ab/)).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Deliver unavailable" })).toBeDisabled();
+  });
+
+  // TW-S3-AC02: the rail comes from the task's pinned definition, so a Guided
+  // task shows Research and Design where Standard shows neither.
+  it("renders the Guided rail from the pinned definition and completes a reasoning stage", async () => {
+    await renderTask({
+      ...baseTask,
+      versions: { ...baseTask.versions, workflowDefinition: "guided@0.1.0" },
+      workflowRuns: [
+        {
+          ...baseTask.workflowRuns[0]!,
+          id: "guided-run-1",
+          preset: "guided",
+          definitionVersion: "guided@0.1.0",
+          currentStage: "research",
+        },
+      ],
+    });
+
+    await expect
+      .element(page.getByTestId("task-workflow-summary"))
+      .toHaveTextContent(/Guided · guided@0\.1\.0/);
+    await expect.element(page.getByTestId("task-workflow-rail-research")).toBeVisible();
+    await expect.element(page.getByTestId("task-workflow-rail-design")).toBeVisible();
+
+    await page.getByTestId("task-research-editor").fill("# Research\n\nPrior art.");
+    await page.getByTestId("task-save-research").click();
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.artifact.upsert",
+      kind: "research",
+      markdown: "# Research\n\nPrior art.",
+    });
+  });
+
+  it("does not show reasoning stages on a Standard task", async () => {
+    await renderTask(baseTask);
+
+    await expect.element(page.getByTestId("task-workflow-rail-questions")).toBeVisible();
+    expect(page.getByTestId("task-workflow-rail-research").query()).toBeNull();
+    expect(page.getByTestId("task-research-editor").query()).toBeNull();
+    expect(page.getByTestId("task-workflow-timeline").query()).toBeNull();
+  });
+
+  // TW-S3-AC05: Freeform shows a timeline with explicit entry, not a rail that
+  // advances on its own.
+  it("renders the Freeform timeline and dispatches an explicit stage start", async () => {
+    await renderTask({
+      ...baseTask,
+      versions: { ...baseTask.versions, workflowDefinition: "freeform@0.1.0" },
+      workflowRuns: [
+        {
+          ...baseTask.workflowRuns[0]!,
+          id: "freeform-run-1",
+          preset: "freeform",
+          definitionVersion: "freeform@0.1.0",
+          currentStage: "questions",
+        },
+      ],
+    });
+
+    await expect.element(page.getByTestId("task-workflow-timeline")).toBeVisible();
+    // Build is never an explicit entry: it is reached by approving a plan.
+    expect(page.getByTestId("task-start-stage-build").query()).toBeNull();
+    // Nor is the stage the task is already in.
+    expect(page.getByTestId("task-start-stage-questions").query()).toBeNull();
+
+    await page.getByTestId("task-start-stage-plan").click();
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.stage.start",
+      taskId: "task-browser",
+      stage: "plan",
+    });
+  });
+
+  // TW-S3-AC03 / TW-S3-AC04: the inspector shows provenance, and compression is
+  // stated outright rather than left for someone to infer from a short manifest.
+  it("shows carried blocks, the budget, and a prominent compression marker", async () => {
+    await renderTask({
+      ...baseTask,
+      contextManifests: [
+        {
+          id: "manifest-1",
+          taskId: "task-browser",
+          sessionId: null,
+          artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+          notes: null,
+          tokenEstimate: 120,
+          budget: 32_000,
+          summaryArtifactRef: null,
+          compressedBlockCount: 0,
+          createdAt: "2026-07-28T17:10:00.000Z",
+        },
+        {
+          id: "manifest-2",
+          taskId: "task-browser",
+          sessionId: null,
+          artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["alpha", "beta", "gamma"] }],
+          notes: null,
+          tokenEstimate: 90_000,
+          budget: 32_000,
+          summaryArtifactRef: { kind: "summary", revision: 1, blockIds: [] },
+          compressedBlockCount: 3,
+          createdAt: "2026-07-28T17:11:00.000Z",
+        },
+      ],
+    });
+
+    await expect.element(page.getByTestId("task-context-manifests-panel")).toBeVisible();
+    await expect
+      .element(page.getByTestId("task-context-manifest-manifest-1-budget"))
+      .toHaveTextContent("120 / 32000 tokens");
+
+    // The uncompressed manifest carries no marker...
+    expect(page.getByTestId("task-context-manifest-manifest-1-compressed").query()).toBeNull();
+    // ...and the compressed one says so, naming the count and the summary.
+    await expect
+      .element(page.getByTestId("task-context-manifest-manifest-2-compressed"))
+      .toHaveTextContent(/3 blocks compressed/);
+    await expect
+      .element(page.getByTestId("task-context-manifest-manifest-2-compressed"))
+      .toHaveTextContent(/summary r1/);
+    await expect
+      .element(page.getByTestId("task-context-compressed-summary"))
+      .toHaveTextContent("1 compressed");
+
+    // Provenance is inspectable: the blocks the summary replaced are still listed.
+    await page.getByTestId("task-context-manifest-manifest-2").getByRole("button").click();
+    await expect
+      .element(page.getByTestId("task-context-manifest-manifest-2"))
+      .toHaveTextContent(/alpha, beta, gamma/);
+  });
+
+  it("renders an unbudgeted Slice 2 manifest without inventing a budget", async () => {
+    await renderTask({
+      ...baseTask,
+      contextManifests: [
+        {
+          id: "manifest-1",
+          taskId: "task-browser",
+          sessionId: null,
+          artifactRefs: [{ kind: "questions", revision: 1, blockIds: ["intro"] }],
+          notes: null,
+          tokenEstimate: 0,
+          budget: null,
+          summaryArtifactRef: null,
+          compressedBlockCount: 0,
+          createdAt: "2026-07-28T17:10:00.000Z",
+        },
+      ],
+    });
+
+    await expect
+      .element(page.getByTestId("task-context-manifest-manifest-1-budget"))
+      .toHaveTextContent("unbudgeted");
   });
 });

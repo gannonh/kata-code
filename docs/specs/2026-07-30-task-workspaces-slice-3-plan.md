@@ -276,6 +276,66 @@ Note: `apps/server`'s full suite has 7 pre-existing failures unrelated to this w
 sandbox integration tests, plus two tests that assume a non-root user); they reproduce identically
 on the unmodified tree.
 
+## Slice 3b build record
+
+Phases C–E implemented on `claude/task-workspaces-slice-3b`, stacked on Slice 3a.
+
+- `packages/contracts/src/taskWorkspace.ts` — widened `TaskWorkspaceStage`,
+  `TaskWorkspaceArtifactKind`, and `preset`; `task.stage.start`,
+  `task.research.complete`, `task.design.complete`; manifest `tokenEstimate` / `budget` /
+  `summaryArtifactRef` / `compressedBlockCount`; and `TASK_WORKSPACE_PRESET_CATALOG`, the
+  display projection clients render rails from.
+- `apps/server/src/taskWorkspace/workflowDefinitions.ts` — `guided@0.1.0`, `freeform@0.1.0`,
+  `explicitEntryStages`, `contextTokenBudget`, `DEFAULT_CONTEXT_TOKEN_BUDGET = 32_000`.
+- `apps/server/src/taskWorkspace/TaskWorkspaceService.ts` — preset-driven creation, one
+  table-driven handler for all reasoning-stage completions, `task.stage.start`, and
+  budget-aware manifest creation with `summary` generation on overflow.
+- `apps/web/src/components/taskWorkspace/` — workflow picker, preset-aware rail, Freeform
+  timeline, and `ContextManifestPanel` (new).
+- `e2e/tests/task-workspaces/slice-3.spec.ts` — Guided, Freeform, and budget-compression
+  scenarios (**written but not executed**; see below).
+
+### Decisions taken during Slice 3b
+
+1. **The preset catalog lives in contracts, keyed by definition version.** The web cannot
+   import the server registry, and hardcoding a second copy of each rail would drift. The
+   catalog is display-only — labels, ordered stages, explicit entries — and
+   `workflowDefinitions.test.ts` asserts every built-in definition matches its entry, so
+   drift fails a test rather than shipping. Keying by version rather than preset mirrors
+   the registry's append-only rule on the display side.
+2. **`questions` is an explicit entry for Freeform.** Artifact writes are gated on the
+   current stage, so without it a Freeform task could never amend its questions artifact
+   after moving on — a one-way door in the preset whose whole point is not having a rail.
+   Build and Verified remain non-entrable: they are reached by approving and signing off,
+   which is what keeps Freeform on the same delivery path.
+3. **`tokenEstimate` records the _selection_, not the post-compression payload.** It is
+   the number the budget decision was made against, so `tokenEstimate > budget` reads
+   directly as "this is why it was compressed". Recording the summary's size instead would
+   make every compressed manifest look comfortably in budget and hide the overflow.
+4. **`artifactRefs` are retained on a compressed manifest.** The summary is what the
+   session actually starts from, but the manifest still records which blocks it stands in
+   for, so the inspector shows provenance instead of an unexplained gap.
+
+### Gates
+
+| Check                                                                         | Result                                            |
+| ----------------------------------------------------------------------------- | ------------------------------------------------- |
+| `@kata-sh/code-contracts` / `code-cli` / `code-web` / `apps/server` typecheck | clean                                             |
+| `packages/contracts` suite                                                    | 197 passed (15 files)                             |
+| `apps/server` `taskWorkspace` suites                                          | 21 passed (2 files)                               |
+| `apps/web` `taskWorkspace` suites                                             | 16 passed (3 files)                               |
+| `pnpm lint`                                                                   | no new warnings                                   |
+| `pnpm fmt:check`                                                              | clean                                             |
+| `e2e/tests/task-workspaces/slice-3.spec.ts`                                   | **not executed** — needs a headed desktop harness |
+
+**TW-S3-AC07 evidence:** the Slice 1 / Slice 2 test files are pure additions —
+`git diff ddc5725 -- <test files>` reports zero deleted lines across
+`TaskWorkspaceService.test.ts`, `taskWorkspace.test.ts`, and
+`TaskWorkspaceView.browser.tsx`. No existing Standard assertion was edited.
+
+Satisfied here: **AC01**–**AC05**, **AC09**, **AC10**, and **AC08** extended to Guided and
+Freeform. **AC06** and **AC07** carried from Slice 3a and re-verified.
+
 ## Risks
 
 - **Phase B is the load-bearing change.** Rewriting live transition logic under a passing

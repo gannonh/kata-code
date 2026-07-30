@@ -1,4 +1,11 @@
-import type { TaskWorkspaceArtifactKind, TaskWorkspaceStage } from "@kata-sh/code-contracts";
+import type {
+  TaskWorkspaceArtifactKind,
+  TaskWorkspacePreset,
+  TaskWorkspaceStage,
+} from "@kata-sh/code-contracts";
+
+/** Budget applied to a context manifest when the command does not name one. */
+export const DEFAULT_CONTEXT_TOKEN_BUDGET = 32_000;
 
 /**
  * Command types that move a task from one workflow stage to another.
@@ -9,6 +16,8 @@ import type { TaskWorkspaceArtifactKind, TaskWorkspaceStage } from "@kata-sh/cod
  */
 export type WorkflowTransitionCommandType =
   | "task.questions.complete"
+  | "task.research.complete"
+  | "task.design.complete"
   | "task.plan.approve"
   | "task.fixture.apply"
   | "task.verification.signoff";
@@ -22,7 +31,7 @@ export type WorkflowStageTransition = {
 };
 
 export type WorkflowDefinition = {
-  readonly preset: "standard";
+  readonly preset: TaskWorkspacePreset;
   /** Registry key, `"<preset>@<semver>"`. Pinned onto the task at creation. */
   readonly version: string;
   readonly initialStage: TaskWorkspaceStage;
@@ -33,8 +42,18 @@ export type WorkflowDefinition = {
     Partial<Record<TaskWorkspaceStage, TaskWorkspaceArtifactKind>>
   >;
   readonly transitions: ReadonlyArray<WorkflowStageTransition>;
+  /**
+   * Stages `task.stage.start` may enter directly.
+   *
+   * This is what gives Freeform a rail-less timeline without a special code
+   * path: it declares explicit entries where Standard and Guided declare
+   * transitions. Empty means the preset has no explicit entry points.
+   */
+  readonly explicitEntryStages: ReadonlyArray<TaskWorkspaceStage>;
   readonly approvalPolicy: "before-build";
   readonly promptBundleRef: string;
+  /** Default token budget for context manifests created under this workflow. */
+  readonly contextTokenBudget: number;
 };
 
 /**
@@ -72,8 +91,100 @@ export const STANDARD_WORKFLOW_V0_1_0: WorkflowDefinition = {
       requiresArtifact: null,
     },
   ],
+  explicitEntryStages: [],
   approvalPolicy: "before-build",
   promptBundleRef: "task-workspace-slice-1@0.1.0",
+  contextTokenBudget: DEFAULT_CONTEXT_TOKEN_BUDGET,
+};
+
+/**
+ * Guided workflow, version 0.1.0.
+ *
+ * Adds the Research and Design reasoning stages between Questions and Plan.
+ * Each reasoning stage writes its own artifact so the next stage can start
+ * from a compact selection of blocks rather than the prior transcript.
+ */
+export const GUIDED_WORKFLOW_V0_1_0: WorkflowDefinition = {
+  preset: "guided",
+  version: "guided@0.1.0",
+  initialStage: "questions",
+  terminalStage: "verified",
+  stages: ["questions", "research", "design", "plan", "build", "verify", "verified"],
+  stageArtifactKinds: {
+    questions: "questions",
+    research: "research",
+    design: "design",
+    plan: "plan",
+    verify: "verification",
+  },
+  transitions: [
+    {
+      command: "task.questions.complete",
+      from: "questions",
+      to: "research",
+      requiresArtifact: "questions",
+    },
+    {
+      command: "task.research.complete",
+      from: "research",
+      to: "design",
+      requiresArtifact: "research",
+    },
+    { command: "task.design.complete", from: "design", to: "plan", requiresArtifact: "design" },
+    { command: "task.plan.approve", from: "plan", to: "build", requiresArtifact: "plan" },
+    { command: "task.fixture.apply", from: "build", to: "verify", requiresArtifact: null },
+    {
+      command: "task.verification.signoff",
+      from: "verify",
+      to: "verified",
+      requiresArtifact: null,
+    },
+  ],
+  explicitEntryStages: [],
+  approvalPolicy: "before-build",
+  promptBundleRef: "task-workspace-guided@0.1.0",
+  contextTokenBudget: DEFAULT_CONTEXT_TOKEN_BUDGET,
+};
+
+/**
+ * Freeform workflow, version 0.1.0.
+ *
+ * Declares no automatic transitions out of its initial stage: a Freeform task
+ * accumulates sessions and artifacts until someone explicitly enters Plan or
+ * Verify with `task.stage.start`. Once in Plan, the usual approve/build/verify
+ * transitions apply, so Freeform converges on the same delivery path.
+ */
+export const FREEFORM_WORKFLOW_V0_1_0: WorkflowDefinition = {
+  preset: "freeform",
+  version: "freeform@0.1.0",
+  initialStage: "questions",
+  terminalStage: "verified",
+  stages: ["questions", "research", "design", "plan", "build", "verify", "verified"],
+  stageArtifactKinds: {
+    questions: "questions",
+    research: "research",
+    design: "design",
+    plan: "plan",
+    verify: "verification",
+  },
+  transitions: [
+    { command: "task.plan.approve", from: "plan", to: "build", requiresArtifact: "plan" },
+    { command: "task.fixture.apply", from: "build", to: "verify", requiresArtifact: null },
+    {
+      command: "task.verification.signoff",
+      from: "verify",
+      to: "verified",
+      requiresArtifact: null,
+    },
+  ],
+  // `questions` is an explicit entry too, not just the initial stage: artifact
+  // writes are gated on the current stage, so without a way back a Freeform task
+  // could never amend its questions artifact after moving on. A preset whose
+  // point is having no rail should not have a one-way door in it.
+  explicitEntryStages: ["questions", "research", "design", "plan", "verify"],
+  approvalPolicy: "before-build",
+  promptBundleRef: "task-workspace-freeform@0.1.0",
+  contextTokenBudget: DEFAULT_CONTEXT_TOKEN_BUDGET,
 };
 
 export type WorkflowDefinitionRegistry = ReadonlyMap<string, WorkflowDefinition>;
@@ -134,10 +245,32 @@ export function makeWorkflowDefinitionRegistry(
  * a newer version of a preset cannot change how an existing task behaves.
  */
 export const BUILT_IN_WORKFLOW_DEFINITIONS: WorkflowDefinitionRegistry =
-  makeWorkflowDefinitionRegistry([STANDARD_WORKFLOW_V0_1_0]);
+  makeWorkflowDefinitionRegistry([
+    STANDARD_WORKFLOW_V0_1_0,
+    GUIDED_WORKFLOW_V0_1_0,
+    FREEFORM_WORKFLOW_V0_1_0,
+  ]);
 
 /** The version new tasks pin when they select the Standard preset. */
 export const CURRENT_STANDARD_WORKFLOW_VERSION = STANDARD_WORKFLOW_V0_1_0.version;
+
+/** Version a newly created task pins for each preset. */
+const CURRENT_VERSION_BY_PRESET: Readonly<Record<TaskWorkspacePreset, string>> = {
+  standard: STANDARD_WORKFLOW_V0_1_0.version,
+  guided: GUIDED_WORKFLOW_V0_1_0.version,
+  freeform: FREEFORM_WORKFLOW_V0_1_0.version,
+};
+
+export function currentVersionForPreset(preset: TaskWorkspacePreset): string {
+  return CURRENT_VERSION_BY_PRESET[preset];
+}
+
+export function allowsExplicitEntry(
+  definition: WorkflowDefinition,
+  stage: TaskWorkspaceStage,
+): boolean {
+  return definition.explicitEntryStages.includes(stage);
+}
 
 export function resolveWorkflowDefinition(
   version: string,

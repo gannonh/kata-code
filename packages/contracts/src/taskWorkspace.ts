@@ -18,8 +18,12 @@ export const TASK_WORKSPACE_WS_METHODS = {
 export const TaskWorkspaceId = TrimmedNonEmptyString;
 export type TaskWorkspaceId = typeof TaskWorkspaceId.Type;
 
+// `research` and `design` are Guided-only reasoning stages (Slice 3b). The union is
+// additive, so Slice 1 / Slice 2 events keep decoding unchanged.
 export const TaskWorkspaceStage = Schema.Literals([
   "questions",
+  "research",
+  "design",
   "plan",
   "build",
   "verify",
@@ -27,8 +31,108 @@ export const TaskWorkspaceStage = Schema.Literals([
 ]);
 export type TaskWorkspaceStage = typeof TaskWorkspaceStage.Type;
 
-export const TaskWorkspaceArtifactKind = Schema.Literals(["questions", "plan", "verification"]);
+// `summary` is written by context budgeting, not by a stage.
+export const TaskWorkspaceArtifactKind = Schema.Literals([
+  "questions",
+  "research",
+  "design",
+  "plan",
+  "verification",
+  "summary",
+]);
 export type TaskWorkspaceArtifactKind = typeof TaskWorkspaceArtifactKind.Type;
+
+export const TaskWorkspacePreset = Schema.Literals(["standard", "guided", "freeform"]);
+export type TaskWorkspacePreset = typeof TaskWorkspacePreset.Type;
+
+export const TASK_WORKSPACE_STAGE_LABELS: Readonly<Record<TaskWorkspaceStage, string>> = {
+  questions: "Questions",
+  research: "Research",
+  design: "Design",
+  plan: "Plan",
+  build: "Build",
+  verify: "Verify",
+  verified: "Verified",
+};
+
+/**
+ * Display projection of one built-in workflow definition.
+ *
+ * Behavior is owned by the server-side definition registry — this record only
+ * carries what a client needs to *render* a workflow it cannot execute: the
+ * picker copy, the ordered rail, and which stages accept `task.stage.start`.
+ * `workflowDefinitions.test.ts` asserts every built-in definition matches its
+ * entry here, so the two cannot drift silently.
+ */
+export type TaskWorkspacePresetCatalogEntry = {
+  readonly preset: TaskWorkspacePreset;
+  readonly label: string;
+  readonly description: string;
+  /** Registry key a newly created task of this preset pins. */
+  readonly currentVersion: string;
+  readonly stages: ReadonlyArray<TaskWorkspaceStage>;
+  readonly explicitEntryStages: ReadonlyArray<TaskWorkspaceStage>;
+};
+
+/**
+ * Catalog of the built-in presets, keyed by definition version.
+ *
+ * Keyed by version rather than preset so that shipping `guided@0.2.0` with a
+ * different rail leaves tasks pinned to `guided@0.1.0` rendering their original
+ * shape — the display-side mirror of the registry's append-only rule.
+ */
+export const TASK_WORKSPACE_PRESET_CATALOG: ReadonlyArray<TaskWorkspacePresetCatalogEntry> = [
+  {
+    preset: "standard",
+    label: "Standard",
+    description:
+      "Questions, then Plan, Build, and Verify. Approval before Build. The default for well-understood work.",
+    currentVersion: "standard@0.1.0",
+    stages: ["questions", "plan", "build", "verify", "verified"],
+    explicitEntryStages: [],
+  },
+  {
+    preset: "guided",
+    label: "Guided",
+    description:
+      "Adds Research and Design between Questions and Plan, each producing its own artifact and a budgeted context manifest for the next stage.",
+    currentVersion: "guided@0.1.0",
+    stages: ["questions", "research", "design", "plan", "build", "verify", "verified"],
+    explicitEntryStages: [],
+  },
+  {
+    preset: "freeform",
+    label: "Freeform",
+    description:
+      "No automatic rail. Accumulate sessions and artifacts, then explicitly start a stage when you are ready. Converges on the usual Plan, Build, Verify path.",
+    currentVersion: "freeform@0.1.0",
+    stages: ["questions", "research", "design", "plan", "build", "verify", "verified"],
+    explicitEntryStages: ["questions", "research", "design", "plan", "verify"],
+  },
+];
+
+export function taskWorkspacePresetCatalogEntry(
+  preset: TaskWorkspacePreset,
+): TaskWorkspacePresetCatalogEntry {
+  const entry = TASK_WORKSPACE_PRESET_CATALOG.find((candidate) => candidate.preset === preset);
+  if (!entry) throw new Error(`No catalog entry for workflow preset '${preset}'.`);
+  return entry;
+}
+
+/**
+ * Catalog entry for a task's pinned definition version, or `null` when the
+ * client does not ship a projection for it. Callers render a degraded rail
+ * rather than guessing at a shape they do not know.
+ */
+export function taskWorkspaceCatalogEntryForVersion(
+  definitionVersion: string,
+): TaskWorkspacePresetCatalogEntry | null {
+  return (
+    TASK_WORKSPACE_PRESET_CATALOG.find(
+      (candidate) => candidate.currentVersion === definitionVersion,
+    ) ?? null
+  );
+}
 
 export const TaskWorkspaceWorkStatus = Schema.Literals(["pending", "running", "completed"]);
 export type TaskWorkspaceWorkStatus = typeof TaskWorkspaceWorkStatus.Type;
@@ -171,6 +275,17 @@ export const TaskWorkspaceContextManifest = Schema.Struct({
   ),
   artifactRefs: Schema.Array(TaskWorkspaceContextManifestArtifactRef),
   notes: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Slice 3b budgeting. Slice 2 manifests replay with a zero estimate, a null
+  // budget (meaning "unbudgeted"), and no compression.
+  tokenEstimate: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  budget: Schema.NullOr(NonNegativeInt).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Set when the selection exceeded `budget` and was replaced by a summary.
+  // `compressedBlockCount` is how many blocks the summary stands in for, so the
+  // inspector can show the compression rather than silently hiding it.
+  summaryArtifactRef: Schema.NullOr(TaskWorkspaceContextManifestArtifactRef).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  compressedBlockCount: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
   createdAt: IsoDateTime,
 });
 export type TaskWorkspaceContextManifest = typeof TaskWorkspaceContextManifest.Type;
@@ -209,7 +324,8 @@ export type TaskWorkspaceVerificationResult = typeof TaskWorkspaceVerificationRe
 
 export const TaskWorkspaceWorkflowRun = Schema.Struct({
   id: TrimmedNonEmptyString,
-  preset: Schema.Literal("standard"),
+  // Pre-Slice-3b runs predate the preset union and are all Standard.
+  preset: TaskWorkspacePreset.pipe(Schema.withDecodingDefault(Effect.succeed("standard"))),
   definitionVersion: TrimmedNonEmptyString,
   currentStage: TaskWorkspaceStage,
   approvalPolicy: Schema.Literal("before-build"),
@@ -268,7 +384,7 @@ const TaskCreateCommand = Schema.Struct({
   projectId: ProjectId,
   workspaceRoot: TrimmedNonEmptyString,
   baseRef: TrimmedNonEmptyString,
-  preset: Schema.Literal("standard"),
+  preset: TaskWorkspacePreset.pipe(Schema.withDecodingDefault(Effect.succeed("standard"))),
   approvalPolicy: Schema.Literal("before-build"),
 });
 
@@ -307,6 +423,8 @@ const TaskContextManifestCreateCommand = Schema.Struct({
   artifactRefs: Schema.Array(TaskWorkspaceContextManifestArtifactRef),
   notes: Schema.optional(Schema.NullOr(Schema.String)),
   sessionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // Omit to use the workflow's default budget; `null` opts out of budgeting.
+  budget: Schema.optional(Schema.NullOr(NonNegativeInt)),
 });
 
 const TaskCommentCreateCommand = Schema.Struct({
@@ -348,9 +466,35 @@ const TaskQuestionsCompleteCommand = Schema.Struct({
   type: Schema.Literal("task.questions.complete"),
 });
 
+// Guided reasoning-stage completions. These mirror the existing per-stage
+// command style (`task.questions.complete`) rather than introducing a generic
+// stage-completion command alongside it.
+const TaskResearchCompleteCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.research.complete"),
+});
+
+const TaskDesignCompleteCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.design.complete"),
+});
+
 const TaskPlanApproveCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.plan.approve"),
+});
+
+/**
+ * Explicitly enter a stage the workflow does not rail into.
+ *
+ * Freeform declares its stages as explicit-entry only, so this is how a
+ * Freeform task reaches Plan or Verify. Guided and Standard reject it for any
+ * stage their own transitions already cover.
+ */
+const TaskStageStartCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.stage.start"),
+  stage: TaskWorkspaceStage,
 });
 
 const TaskBuildWorkItemSetStatusCommand = Schema.Struct({
@@ -387,7 +531,10 @@ export const TaskWorkspaceCommand = Schema.Union([
   TaskCommentReplyCommand,
   TaskCommentResolveCommand,
   TaskQuestionsCompleteCommand,
+  TaskResearchCompleteCommand,
+  TaskDesignCompleteCommand,
   TaskPlanApproveCommand,
+  TaskStageStartCommand,
   TaskBuildWorkItemSetStatusCommand,
   TaskFixtureApplyCommand,
   TaskVerificationRunCommand,
@@ -406,7 +553,10 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.comment.reply",
   "task.comment.resolve",
   "task.questions.complete",
+  "task.research.complete",
+  "task.design.complete",
   "task.plan.approve",
+  "task.stage.start",
   "task.build.work-item.set-status",
   "task.fixture.apply",
   "task.verification.run",
