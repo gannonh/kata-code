@@ -86,8 +86,29 @@ export function makeWorkflowDefinitionRegistry(
     if (entries.has(definition.version)) {
       throw new Error(`Duplicate workflow definition version '${definition.version}'.`);
     }
+    const stages = new Set(definition.stages);
+    if (!stages.has(definition.initialStage)) {
+      throw new Error(
+        `Workflow definition '${definition.version}' has undeclared initial stage '${definition.initialStage}'.`,
+      );
+    }
+    if (!stages.has(definition.terminalStage)) {
+      throw new Error(
+        `Workflow definition '${definition.version}' has undeclared terminal stage '${definition.terminalStage}'.`,
+      );
+    }
     const transitionCommands = new Set<WorkflowTransitionCommandType>();
     for (const transition of definition.transitions) {
+      if (!stages.has(transition.from)) {
+        throw new Error(
+          `Workflow definition '${definition.version}' transition '${transition.command}' starts from undeclared stage '${transition.from}'.`,
+        );
+      }
+      if (!stages.has(transition.to)) {
+        throw new Error(
+          `Workflow definition '${definition.version}' transition '${transition.command}' ends at undeclared stage '${transition.to}'.`,
+        );
+      }
       if (transitionCommands.has(transition.command)) {
         throw new Error(
           `Workflow definition '${definition.version}' declares duplicate transition command '${transition.command}'.`,

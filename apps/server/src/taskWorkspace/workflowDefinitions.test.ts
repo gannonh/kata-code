@@ -137,6 +137,70 @@ describe("workflowDefinitions", () => {
     );
   });
 
+  it("rejects lifecycle and transition stages outside the definition's stage set", () => {
+    const cases: ReadonlyArray<{
+      definition: WorkflowDefinition;
+      message: string;
+    }> = [
+      {
+        definition: {
+          ...STANDARD_WORKFLOW_V0_1_0,
+          version: "standard@undeclared-initial",
+          stages: ["plan", "build", "verify", "verified"],
+        },
+        message:
+          "Workflow definition 'standard@undeclared-initial' has undeclared initial stage 'questions'.",
+      },
+      {
+        definition: {
+          ...STANDARD_WORKFLOW_V0_1_0,
+          version: "standard@undeclared-terminal",
+          stages: ["questions", "plan", "build", "verify"],
+        },
+        message:
+          "Workflow definition 'standard@undeclared-terminal' has undeclared terminal stage 'verified'.",
+      },
+      {
+        definition: {
+          ...STANDARD_WORKFLOW_V0_1_0,
+          version: "standard@undeclared-transition-source",
+          stages: ["questions", "plan", "verify", "verified"],
+          transitions: [
+            {
+              command: "task.fixture.apply",
+              from: "build",
+              to: "verify",
+              requiresArtifact: null,
+            },
+          ],
+        },
+        message:
+          "Workflow definition 'standard@undeclared-transition-source' transition 'task.fixture.apply' starts from undeclared stage 'build'.",
+      },
+      {
+        definition: {
+          ...STANDARD_WORKFLOW_V0_1_0,
+          version: "standard@undeclared-transition-destination",
+          stages: ["questions", "build", "verify", "verified"],
+          transitions: [
+            {
+              command: "task.questions.complete",
+              from: "questions",
+              to: "plan",
+              requiresArtifact: "questions",
+            },
+          ],
+        },
+        message:
+          "Workflow definition 'standard@undeclared-transition-destination' transition 'task.questions.complete' ends at undeclared stage 'plan'.",
+      },
+    ];
+
+    for (const testCase of cases) {
+      expect(() => makeWorkflowDefinitionRegistry([testCase.definition])).toThrow(testCase.message);
+    }
+  });
+
   it("returns null for a transition the definition does not declare", () => {
     expect(transitionFor(STANDARD_WORKFLOW_V0_1_0, "task.plan.approve")).not.toBeNull();
     expect(
