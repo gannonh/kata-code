@@ -5,6 +5,7 @@ import {
   type TaskWorkspaceCommentAuthor,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
+import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
 import {
   TASK_WORKSPACE_STAGE_LABELS,
   taskWorkspaceCatalogEntryForVersion,
@@ -298,12 +299,13 @@ function buildStatusVariant(
 function BuildPanel({
   task,
   commands,
+  currentUser,
 }: {
   task: TaskWorkspace;
   commands: ReturnType<typeof useTaskWorkspaceCommands>;
+  currentUser: TaskWorkspaceCommentAuthor;
 }) {
   const [manualNotes, setManualNotes] = useState<Record<string, string>>({});
-  const latestManifest = task.contextManifests.at(-1) ?? null;
   const gate = task.build.amendmentGateId
     ? task.build.amendments.find((amendment) => amendment.id === task.build.amendmentGateId)
     : null;
@@ -379,7 +381,7 @@ function BuildPanel({
                   {
                     ...commands.commandBase("task.amendment.approve"),
                     amendmentId: gate.id,
-                    approvedBy: "local-user",
+                    approvedBy: currentUser.id,
                   },
                   "approve-amendment",
                 )
@@ -400,8 +402,21 @@ function BuildPanel({
             .map((checkId) => task.build.checks.find((check) => check.id === checkId))
             .filter((check): check is NonNullable<typeof check> => check !== undefined);
           const waitingCheckpoint = phase.checkpointId
-            ? task.build.checkpoints.find((checkpoint) => checkpoint.id === phase.checkpointId)
+            ? (task.build.checkpoints.find(
+                (checkpoint) =>
+                  checkpoint.id === phase.checkpointId && checkpoint.status === "waiting",
+              ) ?? null)
             : null;
+          const checkpointManifest = waitingCheckpoint?.contextManifestId
+            ? (task.contextManifests.find(
+                (manifest) => manifest.id === waitingCheckpoint.contextManifestId,
+              ) ?? null)
+            : null;
+          const planRevision = latestArtifact(task, "plan");
+          const checkpointCanContinue =
+            phase.status === "completed" &&
+            phase.workItems.every((item) => item.status === "completed") &&
+            phaseChecks.every((check) => check.status === "pass");
           return (
             <div
               key={phase.id}
@@ -462,14 +477,15 @@ function BuildPanel({
                     .map((checkId) => task.build.checks.find((check) => check.id === checkId))
                     .filter((check): check is NonNullable<typeof check> => check !== undefined);
                   const checksPass = itemChecks.every((check) => check.status === "pass");
-                  const dependenciesPass = item.dependsOn.every((dependencyId) =>
-                    phase.workItems.some(
-                      (candidate) =>
-                        candidate.id === dependencyId && candidate.status === "completed",
-                    ),
-                  );
+                  const itemDependenciesPass = dependenciesPass(phase, item);
+                  const phaseActive =
+                    phase.status === "running" && task.build.activePhaseId === phase.id;
                   const canComplete =
-                    item.status === "running" && checksPass && dependenciesPass && !gate;
+                    item.status === "running" &&
+                    checksPass &&
+                    itemDependenciesPass &&
+                    phaseActive &&
+                    !gate;
                   return (
                     <div
                       key={item.id}
@@ -503,7 +519,19 @@ function BuildPanel({
                               data-testid={`task-build-work-start-${item.id}`}
                               size="xs"
                               variant="outline"
-                              disabled={commands.isBusy || Boolean(gate)}
+                              disabled={
+                                commands.isBusy ||
+                                Boolean(gate) ||
+                                !itemDependenciesPass ||
+                                !phaseActive
+                              }
+                              title={
+                                !itemDependenciesPass
+                                  ? "Complete dependency work items first."
+                                  : !phaseActive
+                                    ? "Start this phase first."
+                                    : undefined
+                              }
                               onClick={() =>
                                 void commands.dispatch(
                                   {
@@ -523,7 +551,15 @@ function BuildPanel({
                               data-testid={`task-build-work-complete-${item.id}`}
                               size="xs"
                               disabled={commands.isBusy || !canComplete}
-                              title={!checksPass ? "Required checks must pass first." : undefined}
+                              title={
+                                !checksPass
+                                  ? "Required checks must pass first."
+                                  : !itemDependenciesPass
+                                    ? "Complete dependency work items first."
+                                    : !phaseActive
+                                      ? "Start this phase first."
+                                      : undefined
+                              }
                               onClick={() =>
                                 void commands.dispatch(
                                   {
@@ -600,7 +636,7 @@ function BuildPanel({
                                       !manualNotes[check.id]?.trim() ||
                                       Boolean(gate)
                                     }
-                                    onClick={() =>
+                                    onClick={() => {
                                       void commands.dispatch(
                                         {
                                           ...commands.commandBase("task.build.check.record-manual"),
@@ -608,12 +644,40 @@ function BuildPanel({
                                           status: "pass",
                                           note: manualNotes[check.id]!.trim(),
                                         },
-                                        `record-check-${check.id}`,
-                                      )
-                                    }
+                                        `record-check-${check.id}-pass`,
+                                      );
+                                    }}
                                   >
                                     Record pass
                                   </Button>
+                                  {(["fail", "blocked"] as const).map((status) => (
+                                    <Button
+                                      key={status}
+                                      data-testid={`task-build-check-record-${check.id}-${status}`}
+                                      size="xs"
+                                      variant="outline"
+                                      disabled={
+                                        commands.isBusy ||
+                                        !manualNotes[check.id]?.trim() ||
+                                        Boolean(gate)
+                                      }
+                                      onClick={() => {
+                                        void commands.dispatch(
+                                          {
+                                            ...commands.commandBase(
+                                              "task.build.check.record-manual",
+                                            ),
+                                            checkId: check.id,
+                                            status,
+                                            note: manualNotes[check.id]!.trim(),
+                                          },
+                                          `record-check-${check.id}-${status}`,
+                                        );
+                                      }}
+                                    >
+                                      {status === "fail" ? "Record fail" : "Block check"}
+                                    </Button>
+                                  ))}
                                 </div>
                               ) : null}
                               {check.output ? (
@@ -645,17 +709,26 @@ function BuildPanel({
                     <p className="text-[11px] text-muted-foreground">{waitingCheckpoint.reason}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {!latestManifest ? (
+                    {!checkpointManifest ? (
                       <Button
                         data-testid={`task-build-context-create-${waitingCheckpoint.id}`}
                         size="xs"
                         variant="outline"
-                        disabled={commands.isBusy}
+                        disabled={commands.isBusy || !planRevision}
                         onClick={() =>
                           void commands.dispatch(
                             {
                               ...commands.commandBase("task.context-manifest.create"),
-                              artifactRefs: [],
+                              checkpointId: waitingCheckpoint.id,
+                              artifactRefs: planRevision
+                                ? [
+                                    {
+                                      kind: "plan" as const,
+                                      revision: planRevision.revision,
+                                      blockIds: planRevision.blockIndex.map((block) => block.id),
+                                    },
+                                  ]
+                                : [],
                               notes: "Build checkpoint continuation context",
                               sessionId: null,
                               budget: null,
@@ -667,31 +740,33 @@ function BuildPanel({
                         Create context
                       </Button>
                     ) : null}
-                    <Button
-                      data-testid={`task-build-checkpoint-continue-${waitingCheckpoint.id}`}
-                      size="xs"
-                      disabled={commands.isBusy || !latestManifest || Boolean(gate)}
-                      title={!latestManifest ? "Create a context manifest first." : undefined}
-                      onClick={() =>
-                        void commands.dispatch(
-                          {
-                            ...commands.commandBase("task.build.checkpoint.continue"),
-                            checkpointId: waitingCheckpoint.id,
-                            threadId: ThreadId.make(`task-${task.id}-${waitingCheckpoint.id}`),
-                            contextManifestId: latestManifest!.id,
-                          },
-                          `continue-checkpoint-${waitingCheckpoint.id}`,
-                        )
-                      }
-                    >
-                      Continue
-                    </Button>
+                    {checkpointCanContinue ? (
+                      <Button
+                        data-testid={`task-build-checkpoint-continue-${waitingCheckpoint.id}`}
+                        size="xs"
+                        disabled={commands.isBusy || !checkpointManifest || Boolean(gate)}
+                        title={!checkpointManifest ? "Create a context manifest first." : undefined}
+                        onClick={() =>
+                          void commands.dispatch(
+                            {
+                              ...commands.commandBase("task.build.checkpoint.continue"),
+                              checkpointId: waitingCheckpoint.id,
+                              threadId: ThreadId.make(`task-${task.id}-${waitingCheckpoint.id}`),
+                              contextManifestId: checkpointManifest!.id,
+                            },
+                            `continue-checkpoint-${waitingCheckpoint.id}`,
+                          )
+                        }
+                      >
+                        Continue
+                      </Button>
+                    ) : null}
                     <Button
                       data-testid={`task-build-checkpoint-resume-${waitingCheckpoint.id}`}
                       size="xs"
                       variant="outline"
-                      disabled={commands.isBusy || !latestManifest || Boolean(gate)}
-                      title={!latestManifest ? "Create a context manifest first." : undefined}
+                      disabled={commands.isBusy || !checkpointManifest || Boolean(gate)}
+                      title={!checkpointManifest ? "Create a context manifest first." : undefined}
                       onClick={() =>
                         void commands.dispatch(
                           {
@@ -700,7 +775,7 @@ function BuildPanel({
                             threadId: ThreadId.make(
                               `task-${task.id}-resume-${waitingCheckpoint.id}`,
                             ),
-                            contextManifestId: latestManifest!.id,
+                            contextManifestId: checkpointManifest!.id,
                           },
                           `resume-checkpoint-${waitingCheckpoint.id}`,
                         )
@@ -769,7 +844,7 @@ function BuildPanel({
         <Button
           data-testid="task-apply-fixture"
           size="sm"
-          disabled={commands.isBusy}
+          disabled={commands.isBusy || Boolean(gate)}
           onClick={() =>
             void commands.dispatch(
               { ...commands.commandBase("task.fixture.apply") },
@@ -1093,7 +1168,9 @@ function TaskWorkspaceViewContent({
               </section>
             ) : null}
 
-            {stage === "build" ? <BuildPanel task={task} commands={commands} /> : null}
+            {stage === "build" ? (
+              <BuildPanel task={task} commands={commands} currentUser={currentUser} />
+            ) : null}
 
             {stage === "verify" ? (
               <section className="space-y-4 rounded-xl border border-border bg-card p-4">
