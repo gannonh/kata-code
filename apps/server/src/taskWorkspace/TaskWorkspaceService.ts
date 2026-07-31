@@ -1726,7 +1726,9 @@ export const make = Effect.gen(function* () {
                 ? {
                     ...phase,
                     status: "invalidated" as const,
-                    checkpointId: null,
+                    // Keep the waiting failure checkpoint attached so the Build panel can
+                    // offer the explicit resume path after the amendment is approved.
+                    checkpointId: phase.checkpointId,
                     workItems: phase.workItems.map((item) =>
                       amendment.affectedWorkItemIds.includes(item.id)
                         ? {
