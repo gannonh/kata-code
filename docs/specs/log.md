@@ -1,5 +1,15 @@
 # Specs log
 
+## 2026-07-30 (Task workspaces Slice 3 post-merge stabilization)
+
+- Added [PR #62](https://github.com/gannonh/kata-code/pull/62) for delayed review findings on
+  Slice 3: registry artifact-map validation, hard-bounded context summaries, and capability-based
+  Freeform controls.
+- Moved the workflow preset client projection from schema-only `packages/contracts` to
+  `packages/shared`.
+- Added browser and desktop E2E negative proof that Freeform renders no automatic rail or
+  unsupported completion actions.
+
 ## 2026-07-30 (Task workspaces Slice 3a workflow engine built)
 
 - Approved the [Slice 3 child plan](/specs/2026-07-30-task-workspaces-slice-3-plan.md) with a 3a / 3b split: 3a is the engine (Standard only), 3b is Guided/Freeform plus context budgeting.
