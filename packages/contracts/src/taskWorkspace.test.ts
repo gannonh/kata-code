@@ -63,6 +63,62 @@ it.effect("decodes the Standard task creation contract", () =>
   }),
 );
 
+it.effect("decodes Slice 4 Build controls and defaults legacy Build snapshots", () =>
+  Effect.gen(function* () {
+    const phaseCommand = yield* decodeCommand({
+      type: "task.build.phase.start",
+      commandId: "command-phase-start",
+      taskId: "task-1",
+      createdAt: "2026-07-30T17:00:00.000Z",
+      phaseId: "phase-1",
+    });
+    assert.strictEqual(phaseCommand.type, "task.build.phase.start");
+
+    const manualCommand = yield* decodeCommand({
+      type: "task.build.check.record-manual",
+      commandId: "command-manual-check",
+      taskId: "task-1",
+      createdAt: "2026-07-30T17:00:01.000Z",
+      checkId: "phase-1-check-1",
+      status: "pass",
+      note: "Reviewed by the operator.",
+    });
+    assert.strictEqual(manualCommand.type, "task.build.check.record-manual");
+
+    const event = yield* decodeEvent({
+      sequence: 1,
+      eventId: "event-slice-4-legacy",
+      commandId: "command-legacy",
+      taskId: "task-1",
+      type: "task.plan.approve",
+      occurredAt: "2026-07-28T17:00:00.000Z",
+      task: slice1Task({
+        build: {
+          phases: [
+            {
+              id: "phase-1",
+              title: "Legacy phase",
+              status: "pending",
+              workItems: [
+                { id: "work-item-1", title: "Legacy work", status: "pending", summary: null },
+              ],
+            },
+          ],
+          resultingCommitSha: null,
+        },
+      }),
+    });
+    const phase = event.task.build.phases[0];
+    if (phase === undefined) return assert.fail("Expected a legacy phase");
+    assert.strictEqual(phase.checkpointPolicy, "never");
+    assert.deepStrictEqual([...phase.checkIds], []);
+    assert.deepStrictEqual([...phase.workItems[0]!.dependsOn], []);
+    assert.strictEqual(event.task.build.activePhaseId, null);
+    assert.deepStrictEqual([...event.task.build.checkpoints], []);
+    assert.deepStrictEqual([...event.task.build.continuationSessionIds], []);
+  }),
+);
+
 it.effect("rejects mutable workflow prose as a task command", () =>
   Effect.gen(function* () {
     const result = yield* Effect.exit(
