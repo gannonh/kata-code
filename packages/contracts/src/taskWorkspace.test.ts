@@ -119,6 +119,22 @@ it.effect("decodes Slice 4 Build controls and defaults legacy Build snapshots", 
   }),
 );
 
+it.effect("requires a context manifest and thread for Build resume", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeCommand({
+        type: "task.build.resume",
+        commandId: "command-resume-without-context",
+        taskId: "task-1",
+        createdAt: "2026-07-30T17:00:00.000Z",
+        checkpointId: "checkpoint-1",
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
 it.effect("rejects mutable workflow prose as a task command", () =>
   Effect.gen(function* () {
     const result = yield* Effect.exit(
