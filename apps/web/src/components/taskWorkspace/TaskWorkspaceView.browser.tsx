@@ -470,6 +470,8 @@ describe("TaskWorkspaceView", () => {
     });
 
     await expect.element(page.getByTestId("task-workflow-timeline")).toBeVisible();
+    expect(page.getByTestId("task-workflow-rail").query()).toBeNull();
+    expect(page.getByTestId("task-complete-questions").query()).toBeNull();
     // Build is never an explicit entry: it is reached by approving a plan.
     expect(page.getByTestId("task-start-stage-build").query()).toBeNull();
     // Nor is the stage the task is already in.

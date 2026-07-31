@@ -1,10 +1,9 @@
+import { type TaskWorkspaceCommand, type TaskWorkspacePreset } from "@kata-sh/code-contracts";
 import {
   TASK_WORKSPACE_PRESET_CATALOG,
   TASK_WORKSPACE_STAGE_LABELS,
-  type TaskWorkspaceCommand,
-  type TaskWorkspacePreset,
   taskWorkspacePresetCatalogEntry,
-} from "@kata-sh/code-contracts";
+} from "@kata-sh/code-shared/taskWorkspacePresets";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";

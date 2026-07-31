@@ -1634,6 +1634,30 @@ describe("TaskWorkspaceService", () => {
           again.task.artifacts.find((artifact) => artifact.kind === "summary")?.revisions,
         ).toHaveLength(2);
 
+        // The generated replacement is itself hard-bounded, even when the
+        // effective budget is too small for the normal summary header.
+        const tiny = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.context-manifest.create",
+              commandId: CommandId.make("budget-tiny"),
+              taskId: budgetTaskId,
+              createdAt: now(6),
+              artifactRefs: refs,
+              notes: null,
+              sessionId: null,
+              budget: 1,
+            }),
+          ),
+        );
+        const tinySummary =
+          tiny.task.artifacts.find((artifact) => artifact.kind === "summary")?.revisions.at(-1)
+            ?.markdown ?? "";
+        expect(Math.ceil(tinySummary.length / 4)).toBeLessThanOrEqual(1);
+        expect(tiny.task.contextManifests.at(-1)?.summaryArtifactRef).toMatchObject({
+          revision: 3,
+        });
+
         // An explicit null budget opts out of budgeting entirely.
         const unbudgeted = yield* runtime.runPromise(
           service.dispatch(
