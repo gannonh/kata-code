@@ -130,17 +130,9 @@ test.describe(`Task workspaces Slice 4 ${E2E_TAGS.taskWorkspaces}`, () => {
     await appWindow.getByTestId("task-build-work-complete-work-item-1").click();
     await appWindow.getByTestId("task-build-work-start-work-item-2").click();
     await appWindow.getByLabel("Note for operator review").fill("Reviewed by the operator.");
-    await dispatchTaskCommand(appWindow, {
-      type: "task.build.check.record-manual",
-      commandId: CommandId.make("command-e2e-s4-manual-check"),
-      taskId,
-      createdAt: "2026-07-30T22:00:11.000Z",
-      checkId: "phase-1-check-2",
-      status: "pass",
-      note: "Reviewed by the operator.",
-    });
-    await appWindow.reload();
-    await expect(appWindow.getByTestId("task-build-panel")).toBeVisible();
+    await expect(appWindow.getByTestId("task-build-check-record-phase-1-check-2")).toBeEnabled();
+    await appWindow.getByTestId("task-build-check-record-phase-1-check-2").click();
+    await expect(appWindow.getByTestId("task-build-check-phase-1-check-2")).toContainText("pass");
     await appWindow.getByTestId("task-build-work-complete-work-item-2").click();
     await expect(appWindow.getByTestId("task-build-checkpoint-checkpoint-1")).toBeVisible();
 
@@ -161,6 +153,7 @@ test.describe(`Task workspaces Slice 4 ${E2E_TAGS.taskWorkspaces}`, () => {
       appWindow.getByTestId("task-build-invalidation-phase-2-work-item-1"),
     ).toBeVisible();
 
+    await appWindow.getByTestId("task-build-context-create-checkpoint-2").click();
     await appWindow.getByTestId("task-build-checkpoint-resume-checkpoint-2").click();
     await appWindow.getByTestId("task-build-work-start-phase-2-work-item-1").click();
     await appWindow.getByTestId("task-build-check-run-phase-2-check-1").click();
