@@ -112,6 +112,11 @@ export const TaskWorkspaceBuildCheckpoint = Schema.Struct({
   continuationSessionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  // Set when a checkpoint-specific continuation context has been prepared.
+  // Older checkpoints decode with no associated manifest.
+  contextManifestId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   continuedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
@@ -488,6 +493,7 @@ const TaskArtifactSelectRevisionCommand = Schema.Struct({
 const TaskContextManifestCreateCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.context-manifest.create"),
+  checkpointId: Schema.optional(TrimmedNonEmptyString),
   artifactRefs: Schema.Array(TaskWorkspaceContextManifestArtifactRef),
   notes: Schema.optional(Schema.NullOr(Schema.String)),
   sessionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -627,8 +633,8 @@ const TaskBuildResumeCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.build.resume"),
   checkpointId: TrimmedNonEmptyString,
-  threadId: Schema.optional(ThreadId),
-  contextManifestId: Schema.optional(TrimmedNonEmptyString),
+  threadId: ThreadId,
+  contextManifestId: TrimmedNonEmptyString,
 });
 
 const TaskFixtureApplyCommand = Schema.Struct({
