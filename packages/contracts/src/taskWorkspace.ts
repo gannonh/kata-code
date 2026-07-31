@@ -39,14 +39,124 @@ export const TaskWorkspaceArtifactKind = Schema.Literals([
   "plan",
   "verification",
   "summary",
+  "amendment",
 ]);
 export type TaskWorkspaceArtifactKind = typeof TaskWorkspaceArtifactKind.Type;
 
 export const TaskWorkspacePreset = Schema.Literals(["standard", "guided", "freeform"]);
 export type TaskWorkspacePreset = typeof TaskWorkspacePreset.Type;
 
-export const TaskWorkspaceWorkStatus = Schema.Literals(["pending", "running", "completed"]);
+export const TaskWorkspaceWorkStatus = Schema.Literals([
+  "pending",
+  "running",
+  "completed",
+  "blocked",
+  "invalidated",
+]);
 export type TaskWorkspaceWorkStatus = typeof TaskWorkspaceWorkStatus.Type;
+
+export const TaskWorkspaceCheckpointPolicy = Schema.Literals([
+  "always",
+  "manual-only",
+  "on-failure",
+  "never",
+]);
+export type TaskWorkspaceCheckpointPolicy = typeof TaskWorkspaceCheckpointPolicy.Type;
+
+export const TaskWorkspaceBuildCheckKind = Schema.Literals(["automated", "manual"]);
+export type TaskWorkspaceBuildCheckKind = typeof TaskWorkspaceBuildCheckKind.Type;
+
+export const TaskWorkspaceBuildCheckStatus = Schema.Literals([
+  "pending",
+  "running",
+  "pass",
+  "fail",
+  "blocked",
+]);
+export type TaskWorkspaceBuildCheckStatus = typeof TaskWorkspaceBuildCheckStatus.Type;
+
+export const TaskWorkspaceBuildCheck = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  phaseId: TrimmedNonEmptyString,
+  workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  kind: TaskWorkspaceBuildCheckKind,
+  status: TaskWorkspaceBuildCheckStatus,
+  label: TrimmedNonEmptyString,
+  command: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  output: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  note: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  exitCode: Schema.NullOr(Schema.Int).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  commitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  startedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  completedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type TaskWorkspaceBuildCheck = typeof TaskWorkspaceBuildCheck.Type;
+
+export const TaskWorkspaceCheckpointStatus = Schema.Literals(["waiting", "continued"]);
+export type TaskWorkspaceCheckpointStatus = typeof TaskWorkspaceCheckpointStatus.Type;
+
+export const TaskWorkspaceBuildCheckpoint = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  phaseId: TrimmedNonEmptyString,
+  reason: TrimmedNonEmptyString,
+  status: TaskWorkspaceCheckpointStatus,
+  checkIds: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  continuationSessionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  createdAt: IsoDateTime,
+  continuedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type TaskWorkspaceBuildCheckpoint = typeof TaskWorkspaceBuildCheckpoint.Type;
+
+export const TaskWorkspaceAmendmentStatus = Schema.Literals(["requested", "approved"]);
+export type TaskWorkspaceAmendmentStatus = typeof TaskWorkspaceAmendmentStatus.Type;
+
+export const TaskWorkspacePlanDiff = Schema.Struct({
+  baseRevisionId: TrimmedNonEmptyString,
+  proposedRevisionId: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  changedBlockIds: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+});
+export type TaskWorkspacePlanDiff = typeof TaskWorkspacePlanDiff.Type;
+
+export const TaskWorkspaceAmendment = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  basePlanRevisionId: TrimmedNonEmptyString,
+  triggeringPhaseId: TrimmedNonEmptyString,
+  triggeringWorkItemId: TrimmedNonEmptyString,
+  triggeringCheckId: TrimmedNonEmptyString,
+  expected: TrimmedNonEmptyString,
+  found: TrimmedNonEmptyString,
+  impact: TrimmedNonEmptyString,
+  proposedChanges: TrimmedNonEmptyString,
+  affectedPhaseIds: Schema.Array(TrimmedNonEmptyString),
+  affectedWorkItemIds: Schema.Array(TrimmedNonEmptyString),
+  dependentCheckIds: Schema.Array(TrimmedNonEmptyString),
+  status: TaskWorkspaceAmendmentStatus,
+  artifactRevisionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  planDiff: Schema.NullOr(TaskWorkspacePlanDiff).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  requestedAt: IsoDateTime,
+  approvedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  approvedBy: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+});
+export type TaskWorkspaceAmendment = typeof TaskWorkspaceAmendment.Type;
 
 export const TaskWorkspaceRepository = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -206,6 +316,15 @@ export const TaskWorkspaceWorkItem = Schema.Struct({
   title: TrimmedNonEmptyString,
   status: TaskWorkspaceWorkStatus,
   summary: Schema.NullOr(Schema.String),
+  dependsOn: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  checkIds: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  invalidationReason: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type TaskWorkspaceWorkItem = typeof TaskWorkspaceWorkItem.Type;
 
@@ -214,6 +333,20 @@ export const TaskWorkspaceBuildPhase = Schema.Struct({
   title: TrimmedNonEmptyString,
   status: TaskWorkspaceWorkStatus,
   workItems: Schema.Array(TaskWorkspaceWorkItem),
+  checkpointPolicy: TaskWorkspaceCheckpointPolicy.pipe(
+    Schema.withDecodingDefault(Effect.succeed("never")),
+  ),
+  checkIds: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  checkpointId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  phaseCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  startedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  completedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type TaskWorkspaceBuildPhase = typeof TaskWorkspaceBuildPhase.Type;
 
@@ -267,6 +400,30 @@ export const TaskWorkspace = Schema.Struct({
   build: Schema.Struct({
     phases: Schema.Array(TaskWorkspaceBuildPhase),
     resultingCommitSha: Schema.NullOr(TrimmedNonEmptyString),
+    activePhaseId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+    activeWorkItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+    checks: Schema.Array(TaskWorkspaceBuildCheck).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+    ),
+    checkpoints: Schema.Array(TaskWorkspaceBuildCheckpoint).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+    ),
+    amendments: Schema.Array(TaskWorkspaceAmendment).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+    ),
+    currentPlanRevisionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+    amendmentGateId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+    continuationSessionIds: Schema.Array(TrimmedNonEmptyString).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+    ),
   }),
   verification: Schema.Struct({
     criteria: Schema.Array(TaskWorkspaceCriterion),
@@ -412,7 +569,66 @@ const TaskBuildWorkItemSetStatusCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.build.work-item.set-status"),
   workItemId: TrimmedNonEmptyString,
-  status: Schema.Literals(["pending", "running"]),
+  status: Schema.Literals(["pending", "running", "completed"]),
+});
+
+const TaskBuildPhaseStartCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.build.phase.start"),
+  phaseId: TrimmedNonEmptyString,
+});
+
+const TaskBuildCheckRunCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.build.check.run"),
+  checkId: TrimmedNonEmptyString,
+});
+
+const TaskBuildCheckRecordManualCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.build.check.record-manual"),
+  checkId: TrimmedNonEmptyString,
+  status: Schema.Literals(["pass", "fail", "blocked"]),
+  note: TrimmedNonEmptyString,
+  commitSha: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+});
+
+const TaskBuildCheckpointContinueCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.build.checkpoint.continue"),
+  checkpointId: TrimmedNonEmptyString,
+  threadId: ThreadId,
+  contextManifestId: TrimmedNonEmptyString,
+});
+
+const TaskAmendmentRequestCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.amendment.request"),
+  phaseId: TrimmedNonEmptyString,
+  workItemId: TrimmedNonEmptyString,
+  checkId: TrimmedNonEmptyString,
+  expected: TrimmedNonEmptyString,
+  found: TrimmedNonEmptyString,
+  impact: TrimmedNonEmptyString,
+  proposedChanges: TrimmedNonEmptyString,
+  affectedPhaseIds: Schema.Array(TrimmedNonEmptyString),
+  affectedWorkItemIds: Schema.Array(TrimmedNonEmptyString),
+  dependentCheckIds: Schema.Array(TrimmedNonEmptyString),
+});
+
+const TaskAmendmentApproveCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.amendment.approve"),
+  amendmentId: TrimmedNonEmptyString,
+  approvedBy: TrimmedNonEmptyString,
+});
+
+const TaskBuildResumeCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.build.resume"),
+  checkpointId: TrimmedNonEmptyString,
+  threadId: Schema.optional(ThreadId),
+  contextManifestId: Schema.optional(TrimmedNonEmptyString),
 });
 
 const TaskFixtureApplyCommand = Schema.Struct({
@@ -446,7 +662,14 @@ export const TaskWorkspaceCommand = Schema.Union([
   TaskDesignCompleteCommand,
   TaskPlanApproveCommand,
   TaskStageStartCommand,
+  TaskBuildPhaseStartCommand,
   TaskBuildWorkItemSetStatusCommand,
+  TaskBuildCheckRunCommand,
+  TaskBuildCheckRecordManualCommand,
+  TaskBuildCheckpointContinueCommand,
+  TaskAmendmentRequestCommand,
+  TaskAmendmentApproveCommand,
+  TaskBuildResumeCommand,
   TaskFixtureApplyCommand,
   TaskVerificationRunCommand,
   TaskVerificationSignoffCommand,
@@ -468,7 +691,14 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.design.complete",
   "task.plan.approve",
   "task.stage.start",
+  "task.build.phase.start",
   "task.build.work-item.set-status",
+  "task.build.check.run",
+  "task.build.check.record-manual",
+  "task.build.checkpoint.continue",
+  "task.amendment.request",
+  "task.amendment.approve",
+  "task.build.resume",
   "task.fixture.apply",
   "task.verification.run",
   "task.verification.signoff",
