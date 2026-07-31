@@ -131,6 +131,10 @@ test.describe(`Task workspaces Slice 4 ${E2E_TAGS.taskWorkspaces}`, () => {
     await appWindow.getByTestId("task-build-work-start-work-item-2").click();
     const manualNote = appWindow.getByLabel("Note for operator review");
     await manualNote.fill("Reviewed by the operator.");
+    console.log(
+      "[task-workspaces] manual-check parent",
+      await manualNote.locator("xpath=..").innerHTML(),
+    );
     const recordPass = manualNote.locator("xpath=following-sibling::button[1]");
     await expect(recordPass).toBeEnabled();
     await recordPass.click();
