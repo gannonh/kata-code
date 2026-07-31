@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   TASK_WORKSPACE_PRESET_CATALOG,
   taskWorkspacePresetCatalogEntry,
-} from "@kata-sh/code-contracts";
+} from "@kata-sh/code-shared/taskWorkspacePresets";
 
 import {
   allowsExplicitEntry,
@@ -209,6 +209,23 @@ describe("workflowDefinitions", () => {
     }
   });
 
+  it("rejects artifact mappings for undeclared stages", () => {
+    expect(() =>
+      makeWorkflowDefinitionRegistry([
+        {
+          ...STANDARD_WORKFLOW_V0_1_0,
+          version: "standard@undeclared-artifact-stage",
+          stageArtifactKinds: {
+            ...STANDARD_WORKFLOW_V0_1_0.stageArtifactKinds,
+            retired: "plan",
+          } as WorkflowDefinition["stageArtifactKinds"],
+        },
+      ]),
+    ).toThrow(
+      "Workflow definition 'standard@undeclared-artifact-stage' maps an artifact kind for undeclared stage 'retired'.",
+    );
+  });
+
   it("returns null for a transition the definition does not declare", () => {
     expect(transitionFor(STANDARD_WORKFLOW_V0_1_0, "task.plan.approve")).not.toBeNull();
     expect(
@@ -306,6 +323,17 @@ describe("workflowDefinitions", () => {
       expect(definition.preset).toBe(entry.preset);
       expect(entry.stages).toEqual(definition.stages);
       expect(entry.explicitEntryStages).toEqual(definition.explicitEntryStages);
+      expect(entry.automaticCompletionStages).toEqual(
+        definition.transitions
+          .filter((transition) =>
+            [
+              "task.questions.complete",
+              "task.research.complete",
+              "task.design.complete",
+            ].includes(transition.command),
+          )
+          .map((transition) => transition.from),
+      );
       expect(taskWorkspacePresetCatalogEntry(entry.preset)).toBe(entry);
     }
 

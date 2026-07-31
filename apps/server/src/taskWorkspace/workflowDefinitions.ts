@@ -208,6 +208,13 @@ export function makeWorkflowDefinitionRegistry(
         `Workflow definition '${definition.version}' has undeclared terminal stage '${definition.terminalStage}'.`,
       );
     }
+    for (const stage of Object.keys(definition.stageArtifactKinds)) {
+      if (!stages.has(stage as TaskWorkspaceStage)) {
+        throw new Error(
+          `Workflow definition '${definition.version}' maps an artifact kind for undeclared stage '${stage}'.`,
+        );
+      }
+    }
     const transitionCommands = new Set<WorkflowTransitionCommandType>();
     for (const transition of definition.transitions) {
       if (!stages.has(transition.from)) {

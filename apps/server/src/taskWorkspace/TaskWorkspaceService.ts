@@ -182,11 +182,13 @@ function summaryMarkdown(
   manifestId: string,
   refs: ReadonlyArray<TaskWorkspace["contextManifests"][number]["artifactRefs"][number]>,
   blockTexts: ReadonlyArray<string>,
+  budget: number,
 ): string {
+  const provenance = refs.flatMap((ref) =>
+    ref.blockIds.map((blockId) => `${ref.kind}@${ref.revision}#${blockId}`),
+  );
   const lines = [
-    `# Context summary for ${manifestId}`,
-    "",
-    `Compressed ${blockTexts.length} block(s) that exceeded the context budget.`,
+    `Compressed ${blockTexts.length} block(s) for ${manifestId}: ${provenance.join(", ")}.`,
     "",
   ];
   let cursor = 0;
@@ -199,7 +201,7 @@ function summaryMarkdown(
     }
     lines.push("");
   }
-  return lines.join("\n");
+  return lines.join("\n").slice(0, budget * 4);
 }
 
 /** Extract one `<!-- kata:block:<id> -->` region from an artifact revision. */
@@ -775,7 +777,12 @@ export const make = Effect.gen(function* () {
                 type: "task.artifact.upsert" as const,
                 kind: "summary" as const,
                 title: `Context summary for ${manifestId}`,
-                markdown: summaryMarkdown(manifestId, command.artifactRefs, blockTexts),
+                markdown: summaryMarkdown(
+                  manifestId,
+                  command.artifactRefs,
+                  blockTexts,
+                  budget ?? 0,
+                ),
                 sourceSessionId: command.sessionId ?? null,
               })
             : null;

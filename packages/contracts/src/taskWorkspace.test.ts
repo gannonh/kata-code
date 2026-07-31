@@ -4,12 +4,8 @@ import * as Schema from "effect/Schema";
 
 import { CommandId, ProjectId } from "./baseSchemas.ts";
 import {
-  TASK_WORKSPACE_PRESET_CATALOG,
-  TASK_WORKSPACE_STAGE_LABELS,
   TaskWorkspaceCommand,
-  taskWorkspaceCatalogEntryForVersion,
   TaskWorkspaceEvent,
-  taskWorkspacePresetCatalogEntry,
   TaskWorkspaceStreamItem,
 } from "./taskWorkspace.ts";
 
@@ -407,33 +403,3 @@ it.effect("decodes the Slice 3b preset, stage, and reasoning-stage commands", ()
   }),
 );
 
-// Plain synchronous assertions: the catalog is static data, with no Effect to run.
-it("keeps the preset catalog aligned with the preset union", () => {
-  {
-    assert.deepStrictEqual(
-      TASK_WORKSPACE_PRESET_CATALOG.map((entry) => entry.preset),
-      ["standard", "guided", "freeform"],
-    );
-
-    for (const entry of TASK_WORKSPACE_PRESET_CATALOG) {
-      assert.strictEqual(taskWorkspacePresetCatalogEntry(entry.preset), entry);
-      assert.strictEqual(taskWorkspaceCatalogEntryForVersion(entry.currentVersion), entry);
-      // Every rail starts at questions and ends at the terminal stage.
-      assert.strictEqual(entry.stages[0], "questions");
-      assert.strictEqual(entry.stages.at(-1), "verified");
-      // Explicit entries are always stages the preset actually has, and never
-      // Build or Verified — those are reached by approving and signing off.
-      for (const stage of entry.explicitEntryStages) {
-        assert.ok(entry.stages.includes(stage));
-        assert.notStrictEqual(stage, "build");
-        assert.notStrictEqual(stage, "verified");
-      }
-      // Every stage label is renderable.
-      for (const stage of entry.stages) {
-        assert.ok(TASK_WORKSPACE_STAGE_LABELS[stage].length > 0);
-      }
-    }
-
-    assert.strictEqual(taskWorkspaceCatalogEntryForVersion("guided@9.9.9"), null);
-  }
-});

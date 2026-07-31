@@ -1,12 +1,14 @@
 import {
-  TASK_WORKSPACE_STAGE_LABELS,
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
   type TaskWorkspaceCommentAuthor,
-  taskWorkspaceCatalogEntryForVersion,
-  type TaskWorkspacePresetCatalogEntry,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
+import {
+  TASK_WORKSPACE_STAGE_LABELS,
+  taskWorkspaceCatalogEntryForVersion,
+  type TaskWorkspacePresetCatalogEntry,
+} from "@kata-sh/code-shared/taskWorkspacePresets";
 import { useClerk } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
 import { CheckCircle2Icon, CircleIcon, GitBranchIcon, Loader2Icon } from "lucide-react";
@@ -201,11 +203,13 @@ function ReasoningStageSection({
   entry,
   commands,
   linkedSessionId,
+  canComplete,
 }: {
   task: TaskWorkspace;
   entry: (typeof REASONING_STAGES)[number];
   commands: ReturnType<typeof useTaskWorkspaceCommands>;
   linkedSessionId: string | null;
+  canComplete: boolean;
 }) {
   const artifact = latestArtifact(task, entry.kind);
   const [markdown, setMarkdown] = useState(artifact?.markdown ?? "");
@@ -252,19 +256,21 @@ function ReasoningStageSection({
           >
             Save revision
           </Button>
-          <Button
-            data-testid={`task-complete-${entry.kind}`}
-            size="sm"
-            disabled={!artifact || commands.isBusy}
-            onClick={() =>
-              void commands.dispatch(
-                { ...commands.commandBase(entry.command) },
-                `complete-${entry.kind}`,
-              )
-            }
-          >
-            Complete {entry.label}
-          </Button>
+          {canComplete ? (
+            <Button
+              data-testid={`task-complete-${entry.kind}`}
+              size="sm"
+              disabled={!artifact || commands.isBusy}
+              onClick={() =>
+                void commands.dispatch(
+                  { ...commands.commandBase(entry.command) },
+                  `complete-${entry.kind}`,
+                )
+              }
+            >
+              Complete {entry.label}
+            </Button>
+          ) : null}
         </div>
       </div>
     </section>
@@ -386,7 +392,9 @@ function TaskWorkspaceViewContent({
 
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
           <div className="mx-auto max-w-5xl space-y-5">
-            {railStages.length > 0 ? <WorkflowRail stages={railStages} stage={stage} /> : null}
+            {!isFreeform && railStages.length > 0 ? (
+              <WorkflowRail stages={railStages} stage={stage} />
+            ) : null}
 
             {isFreeform && catalogEntry ? (
               <WorkflowTimeline catalogEntry={catalogEntry} stage={stage} commands={commands} />
@@ -494,19 +502,21 @@ function TaskWorkspaceViewContent({
                     >
                       Save revision
                     </Button>
-                    <Button
-                      data-testid="task-complete-questions"
-                      size="sm"
-                      disabled={!questionsArtifact || isBusy}
-                      onClick={() =>
-                        void dispatch(
-                          { ...commandBase("task.questions.complete") },
-                          "complete-questions",
-                        )
-                      }
-                    >
-                      Complete Questions
-                    </Button>
+                    {catalogEntry?.automaticCompletionStages.includes("questions") ? (
+                      <Button
+                        data-testid="task-complete-questions"
+                        size="sm"
+                        disabled={!questionsArtifact || isBusy}
+                        onClick={() =>
+                          void dispatch(
+                            { ...commandBase("task.questions.complete") },
+                            "complete-questions",
+                          )
+                        }
+                      >
+                        Complete Questions
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </section>
@@ -519,6 +529,9 @@ function TaskWorkspaceViewContent({
                 entry={entry}
                 commands={commands}
                 linkedSessionId={linkedSession?.id ?? null}
+                canComplete={
+                  catalogEntry?.automaticCompletionStages.includes(entry.stage) ?? false
+                }
               />
             ))}
 

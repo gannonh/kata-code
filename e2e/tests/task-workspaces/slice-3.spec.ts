@@ -152,6 +152,8 @@ test.describe(`Task workspaces Slice 3 ${E2E_TAGS.taskWorkspaces}`, () => {
 
     const timeline = appWindow.getByTestId("task-workflow-timeline");
     await expect(timeline).toBeVisible();
+    await expect(appWindow.getByTestId("task-workflow-rail")).toHaveCount(0);
+    await expect(appWindow.getByTestId("task-complete-questions")).toHaveCount(0);
     // Build is reached by approving a plan, never by explicit entry.
     await expect(appWindow.getByTestId("task-start-stage-build")).toHaveCount(0);
 
@@ -168,6 +170,7 @@ test.describe(`Task workspaces Slice 3 ${E2E_TAGS.taskWorkspaces}`, () => {
       "data-active",
       "true",
     );
+    await expect(appWindow.getByTestId("task-complete-research")).toHaveCount(0);
 
     await appWindow.getByTestId("task-start-stage-plan").click();
     await appWindow.getByTestId("task-save-plan").click();

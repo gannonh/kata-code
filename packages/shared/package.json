@@ -170,6 +170,10 @@
     "./branding": {
       "types": "./src/branding.ts",
       "import": "./src/branding.ts"
+    },
+    "./taskWorkspacePresets": {
+      "types": "./src/taskWorkspacePresets.ts",
+      "import": "./src/taskWorkspacePresets.ts"
     }
   },
   "scripts": {
