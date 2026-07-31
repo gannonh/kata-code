@@ -2,7 +2,8 @@
 type: Spec
 title: "Task workspaces Slice 4 — Hierarchical Build, checkpoints, and plan amendments"
 description: "Child implementation plan for the fourth autonomous vertical slice: make Build hierarchical, resumable, checkpointed, and explicit about reviewed plan amendments when implementation reality diverges from the approved plan."
-status: Draft
+status: Approved
+approved_at: 2026-07-30T00:00:00Z
 tags: [specs, task-workspaces, build, checkpoints, amendments, recovery, web, desktop]
 timestamp: 2026-07-30T00:00:00Z
 parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
@@ -13,12 +14,50 @@ base_sha: cf95a03c9c658d3677fc85d46d486a4ecfda57ae
 
 ## Status
 
-**Draft.** This child spec is based on the stabilized Slice 3 result. It is ready for
-adversarial scope review; implementation starts only after the spec is Approved.
+**Approved.** This child spec is based on the stabilized Slice 3 result. Delegated approval
+applies under the parent autonomous-slice contract: the scope stays inside Slice 4, no locked
+parent decision changes, and no unresolved product decision remains.
 
 The parent spec delegates child-slice planning through a draft PR, but does not authorize
 merging or human acceptance. This plan stays inside the parent Slice 4 boundary and does not
 revise a locked parent decision.
+
+### Delegated approval record
+
+Adversarial review completed against the current contracts, reducer, storage, UI, and test
+surfaces before implementation:
+
+- **Event sourcing/restart safety:** all new Build state remains in the existing task snapshot and
+  NDJSON event envelope; additive decoding defaults cover Slice 1–3 events.
+- **Command gates/idempotency:** every new control command is stage-local, carries the existing
+  `commandId`, and is rejected when the phase, check, checkpoint, or amendment state is invalid.
+- **Plan integrity:** amendments append an artifact and Plan revision diff; approval cannot edit
+  an earlier revision or complete a blocked item without the approval event.
+- **Targeted invalidation:** only affected work and dependent checks are invalidated; completed
+  unaffected history remains immutable and visible.
+- **Security:** automated checks use a server-owned allowlist rather than provider-supplied shell
+  commands; outputs and evidence follow the existing secret/path redaction boundary.
+- **Compatibility and scope:** legacy defaults, Standard fixture behavior, and the Slice 3
+  context/workflow contracts are preserved; Slice 5 verification, Slice 6 source intake, and
+  Slice 7 delivery remain excluded.
+
+No blocking finding remains. Implementation may begin from `cf95a03c9c658d3677fc85d46d486a4ecfda57ae`.
+
+### Implementation status
+
+Implementation is in progress on PR [#63](https://github.com/gannonh/kata-code/pull/63), based on
+the stabilized Slice 3 merge. The first implementation units include additive contracts,
+Plan-to-Build projection, reducer controls, restart-safe event snapshots, and the shared
+web/desktop Build panel. Local evidence so far:
+
+- `@kata-sh/code-contracts`: 197 tests pass;
+- `@kata-sh/code-cli` task-workspace suite: 12 tests pass;
+- `@kata-sh/code-web`: 1,299 unit tests pass;
+- `vp check`, `git diff --check`, and the contracts/server/web typechecks pass.
+
+Browser execution is currently blocked by the environment's missing Playwright Chromium binary;
+the full recursive typecheck is separately blocked by the missing `mobile-e2e` TypeScript
+executable. These are validation blockers, not product behavior claims.
 
 ## Outcome
 
@@ -425,7 +464,7 @@ The implementation PR must:
 
 - use a dedicated branch from `cf95a03c9c658d3677fc85d46d486a4ecfda57ae`;
 - include the acceptance matrix, test commands/results, UAT/evidence links, known gaps, manual
-  reproduction steps, rollback notes, and `Recommendation: Pending user sign-off`;
+  reproduction steps, rollback notes, and the current implementation validation status;
 - keep commits atomic and conventional; separate any incidental fix into its own commit/PR;
 - remain a draft until implementation, evidence, and fresh-context review are complete.
 
@@ -434,4 +473,4 @@ repositories/source setup (Slice 6), draft PR delivery (Slice 7), and provider-p
 (Slice 8). User-authored checks, arbitrary shell commands, rejection/revision editing UX, and
 automatic phase commits beyond an optional reference are explicitly outside this slice.
 
-**Recommendation: Pending user sign-off.**
+**Recommendation: Implementation is ready for CI and evidence review; final merge remains pending user sign-off.**
