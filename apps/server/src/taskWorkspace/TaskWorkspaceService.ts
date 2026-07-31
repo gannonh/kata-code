@@ -16,6 +16,9 @@ import {
   type TaskWorkspaceArtifactKind,
   type TaskWorkspaceArtifactRevision,
   type TaskWorkspaceBlockIndexEntry,
+  type TaskWorkspaceBuildCheck,
+  type TaskWorkspaceBuildCheckpoint,
+  type TaskWorkspaceBuildPhase,
   type TaskWorkspaceCommand,
   type TaskWorkspaceCommentThread,
   type TaskWorkspaceDispatchResult,
@@ -51,8 +54,8 @@ const execFileAsync = promisify(execFile);
 const decodeTaskWorkspaceEvent = Schema.decodeUnknownSync(TaskWorkspaceEventSchema);
 const isTaskWorkspaceError = Schema.is(TaskWorkspaceError);
 
-const TASK_CONTRACT_VERSION = "task-workspace@0.1.0";
-const ARTIFACT_CONTRACT_VERSION = "task-artifact@0.1.0";
+const TASK_CONTRACT_VERSION = "task-workspace@0.2.0";
+const ARTIFACT_CONTRACT_VERSION = "task-artifact@0.2.0";
 const FIXTURE_FILE = "task-workspace-slice-1.txt";
 const FIXTURE_CONTENT = "Kata Code Task Workspaces Slice 1 verified fixture.\n";
 const BLOCK_BOUNDARY_WHITESPACE_PATTERN = /(?:\r?\n[ \t]*)+$/u;
@@ -373,6 +376,144 @@ function recomputeCommentsForArtifact(
   });
 }
 
+function latestPlanRevision(task: TaskWorkspace): TaskWorkspaceArtifactRevision | null {
+  return latestArtifact(task, "plan");
+}
+
+/**
+ * Convert the small, human-authored Plan shape used by the task workspace into
+ * a durable Build projection. The parser is deliberately deterministic and
+ * conservative: unsupported text remains part of the Plan artifact and does
+ * not become executable task state.
+ */
+function buildFromPlan(task: TaskWorkspace): TaskWorkspace["build"] {
+  const plan = latestPlanRevision(task);
+  if (!plan) return task.build;
+
+  const phaseMatches = [...plan.markdown.matchAll(/^##\s+Phase\s+(.+)$/gim)];
+  if (phaseMatches.length === 0) {
+    return {
+      ...task.build,
+      currentPlanRevisionId: plan.id,
+    };
+  }
+
+  const phases: TaskWorkspaceBuildPhase[] = [];
+  const checks: TaskWorkspaceBuildCheck[] = [];
+  for (let phaseIndex = 0; phaseIndex < phaseMatches.length; phaseIndex += 1) {
+    const match = phaseMatches[phaseIndex]!;
+    const phaseId = `phase-${phaseIndex + 1}`;
+    const sectionStart = match.index ?? 0;
+    const sectionEnd = phaseMatches[phaseIndex + 1]?.index ?? plan.markdown.length;
+    const section = plan.markdown.slice(sectionStart, sectionEnd);
+    const title = match[1]!.trim();
+    const policyMatch = section.match(
+      /^\s*(?:Checkpoint(?: policy)?|Policy):\s*(always|manual-only|on-failure|never)\s*$/im,
+    );
+    const checkpointPolicy = (policyMatch?.[1] ??
+      "never") as TaskWorkspaceBuildPhase["checkpointPolicy"];
+    const workMatches = [...section.matchAll(/^###\s+Work item\s+(.+)$/gim)];
+    const workTitles =
+      workMatches.length > 0 ? workMatches.map((workMatch) => workMatch[1]!.trim()) : ["Work"];
+    const workItems = workTitles.map((title, workIndex) => ({
+      id: `${phaseId === "phase-1" ? "work-item" : phaseId + "-work-item"}-${workIndex + 1}`,
+      title,
+      status: "pending" as const,
+      summary: null,
+      dependsOn: [] as string[],
+      checkIds: [] as string[],
+      invalidationReason: null,
+    }));
+    for (const [workIndex, workMatch] of workMatches.entries()) {
+      const workStart = workMatch.index ?? 0;
+      const workEnd = workMatches[workIndex + 1]?.index ?? section.length;
+      const dependencyLine = section
+        .slice(workStart, workEnd)
+        .match(/^\s*(?:Depends on|Dependencies?):\s*(.+)$/im)?.[1];
+      if (!dependencyLine) continue;
+      const dependencyIds = dependencyLine
+        .split(",")
+        .map((dependency) => dependency.trim())
+        .filter(Boolean)
+        .map((dependency) => {
+          const resolved = workItems.find(
+            (candidate) => candidate.id === dependency || candidate.title === dependency,
+          );
+          if (!resolved) {
+            throw new Error(
+              `Work item '${workItems[workIndex]!.id}' depends on unknown work item '${dependency}'.`,
+            );
+          }
+          return resolved.id;
+        });
+      workItems[workIndex]!.dependsOn = dependencyIds;
+    }
+    const phaseChecks = [
+      ...section.matchAll(/^\s*[-*]\s*(?:(Automated|Manual)\s+)?Check:\s*(.+)$/gim),
+    ];
+    const checkIds: string[] = [];
+    for (const [checkIndex, checkMatch] of phaseChecks.entries()) {
+      const checkKind = checkMatch[1]?.toLowerCase() === "manual" ? "manual" : "automated";
+      const label = checkMatch[2]!.trim();
+      const checkId = `${phaseId}-check-${checkIndex + 1}`;
+      checkIds.push(checkId);
+      const checkPosition = checkMatch.index ?? 0;
+      const workItemIndex = workMatches.reduce(
+        (ownerIndex, workMatch, index) =>
+          (workMatch.index ?? 0) <= checkPosition ? index : ownerIndex,
+        0,
+      );
+      const workItem = workItems[workItemIndex] ?? workItems[0];
+      checks.push({
+        id: checkId,
+        phaseId,
+        workItemId: workItem?.id ?? null,
+        kind: checkKind,
+        status: "pending",
+        label,
+        command:
+          checkKind === "manual"
+            ? null
+            : label.toLowerCase().includes("fixture.mismatch")
+              ? "fixture.mismatch"
+              : "fixture.pass",
+        output: null,
+        note: null,
+        exitCode: null,
+        commitSha: null,
+        startedAt: null,
+        completedAt: null,
+      });
+      if (workItem) workItem.checkIds.push(checkId);
+    }
+    phases.push({
+      id: phaseId,
+      title,
+      status: "pending",
+      workItems,
+      checkpointPolicy,
+      checkIds,
+      checkpointId: null,
+      phaseCommitSha: null,
+      startedAt: null,
+      completedAt: null,
+    });
+  }
+
+  return {
+    phases,
+    resultingCommitSha: null,
+    activePhaseId: null,
+    activeWorkItemId: null,
+    checks,
+    checkpoints: [],
+    amendments: [],
+    currentPlanRevisionId: plan.id,
+    amendmentGateId: null,
+    continuationSessionIds: [],
+  };
+}
+
 function upsertArtifact(
   task: TaskWorkspace,
   command: Extract<TaskWorkspaceCommand, { type: "task.artifact.upsert" }>,
@@ -477,11 +618,28 @@ function initialTask(
               title: `Create and commit ${FIXTURE_FILE}`,
               status: "pending",
               summary: null,
+              dependsOn: [],
+              checkIds: [],
+              invalidationReason: null,
             },
           ],
+          checkpointPolicy: "never",
+          checkIds: [],
+          checkpointId: null,
+          phaseCommitSha: null,
+          startedAt: null,
+          completedAt: null,
         },
       ],
       resultingCommitSha: null,
+      activePhaseId: null,
+      activeWorkItemId: null,
+      checks: [],
+      checkpoints: [],
+      amendments: [],
+      currentPlanRevisionId: null,
+      amendmentGateId: null,
+      continuationSessionIds: [],
     },
     verification: {
       criteria: [
@@ -506,6 +664,110 @@ function safeBranchSegment(taskId: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   return (normalized || "task").slice(0, 32);
+}
+
+function phaseForBuild(task: TaskWorkspace, phaseId: string): TaskWorkspaceBuildPhase {
+  const phase = task.build.phases.find((candidate) => candidate.id === phaseId);
+  if (!phase) throw new Error(`Build phase '${phaseId}' was not found.`);
+  return phase;
+}
+
+function workItemForBuild(
+  phase: TaskWorkspaceBuildPhase,
+  workItemId: string,
+): TaskWorkspaceBuildPhase["workItems"][number] {
+  const workItem = phase.workItems.find((candidate) => candidate.id === workItemId);
+  if (!workItem) throw new Error(`Work item '${workItemId}' was not found.`);
+  return workItem;
+}
+
+function checkForBuild(task: TaskWorkspace, checkId: string): TaskWorkspaceBuildCheck {
+  const check = task.build.checks.find((candidate) => candidate.id === checkId);
+  if (!check) throw new Error(`Build check '${checkId}' was not found.`);
+  return check;
+}
+
+function requiredChecksPass(
+  build: TaskWorkspace["build"],
+  checkIds: ReadonlyArray<string>,
+): boolean {
+  return checkIds.every((checkId) =>
+    build.checks.some((check) => check.id === checkId && check.status === "pass"),
+  );
+}
+
+function dependenciesPass(
+  phase: TaskWorkspaceBuildPhase,
+  workItem: TaskWorkspaceBuildPhase["workItems"][number],
+): boolean {
+  return workItem.dependsOn.every((dependencyId) => {
+    const dependency = phase.workItems.find((candidate) => candidate.id === dependencyId);
+    return dependency?.status === "completed";
+  });
+}
+
+function checkpointReason(policy: TaskWorkspaceBuildPhase["checkpointPolicy"]): string {
+  return policy === "on-failure" ? "A required Build check failed." : "Phase checkpoint reached.";
+}
+
+function appendCheckpoint(
+  build: TaskWorkspace["build"],
+  phase: TaskWorkspaceBuildPhase,
+  now: string,
+): TaskWorkspace["build"] {
+  if (
+    build.checkpoints.some(
+      (checkpoint) => checkpoint.phaseId === phase.id && checkpoint.status === "waiting",
+    )
+  ) {
+    return build;
+  }
+  const checkpoint: TaskWorkspaceBuildCheckpoint = {
+    id: `checkpoint-${build.checkpoints.length + 1}`,
+    phaseId: phase.id,
+    reason: checkpointReason(phase.checkpointPolicy),
+    status: "waiting",
+    checkIds: phase.checkIds,
+    continuationSessionId: null,
+    createdAt: now,
+    continuedAt: null,
+  };
+  return {
+    ...build,
+    checkpoints: [...build.checkpoints, checkpoint],
+    phases: build.phases.map((candidate) =>
+      candidate.id === phase.id ? { ...candidate, checkpointId: checkpoint.id } : candidate,
+    ),
+  };
+}
+
+function startNextPhase(build: TaskWorkspace["build"], completedPhaseId: string, now: string) {
+  const completedPhase = build.phases.find((phase) => phase.id === completedPhaseId);
+  if (!completedPhase || completedPhase.status !== "completed") {
+    const resumableItem = completedPhase?.workItems.find(
+      (item) =>
+        item.status === "pending" || item.status === "blocked" || item.status === "invalidated",
+    );
+    return {
+      ...build,
+      activePhaseId: completedPhase?.id ?? null,
+      activeWorkItemId: resumableItem?.id ?? null,
+    };
+  }
+  const completedIndex = build.phases.findIndex((phase) => phase.id === completedPhaseId);
+  const next = build.phases.slice(completedIndex + 1).find((phase) => phase.status === "pending");
+  if (!next) return { ...build, activePhaseId: null, activeWorkItemId: null };
+  const firstPending = next.workItems.find((item) => item.status === "pending") ?? null;
+  return {
+    ...build,
+    activePhaseId: next.id,
+    activeWorkItemId: firstPending?.id ?? null,
+    phases: build.phases.map((phase) =>
+      phase.id === next.id
+        ? { ...phase, status: "running" as const, startedAt: phase.startedAt ?? now }
+        : phase,
+    ),
+  };
 }
 
 function runGit(cwd: string, args: ReadonlyArray<string>): Effect.Effect<string, Error> {
@@ -995,6 +1257,7 @@ export const make = Effect.gen(function* () {
               ));
           return yield* append(command, {
             ...task,
+            build: buildFromPlan(task),
             workspace: {
               repositories: task.workspace.repositories.map((candidate) =>
                 candidate.id === repository.id
@@ -1011,32 +1274,592 @@ export const make = Effect.gen(function* () {
             updatedAt: command.createdAt,
           });
         }
-        case "task.build.work-item.set-status": {
+        case "task.build.phase.start": {
           requireStage(task, "build");
-          let found = false;
-          const phases = task.build.phases.map((phase) => {
-            const workItems = phase.workItems.map((item) => {
-              if (item.id !== command.workItemId) return item;
-              found = true;
-              return { ...item, status: command.status };
-            });
-            const ownsWorkItem = phase.workItems.some((item) => item.id === command.workItemId);
-            return {
-              ...phase,
-              status:
-                ownsWorkItem && command.status === "running" ? ("running" as const) : phase.status,
-              workItems,
-            };
-          });
-          if (!found) throw new Error(`Work item '${command.workItemId}' was not found.`);
+          if (task.build.amendmentGateId) {
+            throw new Error("Build is paused at an amendment gate.");
+          }
+          const phase = phaseForBuild(task, command.phaseId);
+          const phaseIndex = task.build.phases.findIndex((candidate) => candidate.id === phase.id);
+          if (phase.status === "completed") {
+            throw new Error(`Build phase '${phase.id}' is already complete.`);
+          }
+          if (phase.status === "blocked" || phase.status === "invalidated") {
+            throw new Error(`Build phase '${phase.id}' must be resumed before it can start.`);
+          }
+          if (
+            task.build.phases
+              .slice(0, phaseIndex)
+              .some((candidate) => candidate.status !== "completed")
+          ) {
+            throw new Error(`Build phase '${phase.id}' has incomplete predecessor phases.`);
+          }
+          const firstPending = phase.workItems.find((item) => item.status === "pending") ?? null;
           return yield* append(command, {
             ...task,
-            build: { ...task.build, phases },
+            build: {
+              ...task.build,
+              activePhaseId: phase.id,
+              activeWorkItemId: firstPending?.id ?? null,
+              phases: task.build.phases.map((candidate) =>
+                candidate.id === phase.id
+                  ? {
+                      ...candidate,
+                      status: "running" as const,
+                      startedAt: candidate.startedAt ?? command.createdAt,
+                    }
+                  : candidate,
+              ),
+            },
             updatedAt: command.createdAt,
           });
         }
+        case "task.build.work-item.set-status": {
+          requireStage(task, "build");
+          if (task.build.amendmentGateId) {
+            throw new Error("Build is paused at an amendment gate.");
+          }
+          const owner = task.build.phases.find((phase) =>
+            phase.workItems.some((item) => item.id === command.workItemId),
+          );
+          if (!owner) throw new Error(`Work item '${command.workItemId}' was not found.`);
+          const item = workItemForBuild(owner, command.workItemId);
+          if (item.status === "blocked" || item.status === "invalidated") {
+            throw new Error(`Work item '${item.id}' must be resumed before it can change status.`);
+          }
+          if (command.status === "completed") {
+            if (!dependenciesPass(owner, item)) {
+              throw new Error(`Work item '${item.id}' has incomplete dependencies.`);
+            }
+            if (!requiredChecksPass(task.build, item.checkIds)) {
+              throw new Error(`Work item '${item.id}' has checks that have not passed.`);
+            }
+          }
+          let build: TaskWorkspace["build"] = {
+            ...task.build,
+            activePhaseId: owner.id,
+            activeWorkItemId: command.status === "completed" ? null : item.id,
+            phases: task.build.phases.map((phase) =>
+              phase.id === owner.id
+                ? {
+                    ...phase,
+                    status: command.status === "completed" ? phase.status : ("running" as const),
+                    startedAt: phase.startedAt ?? command.createdAt,
+                    workItems: phase.workItems.map((candidate) =>
+                      candidate.id === item.id
+                        ? { ...candidate, status: command.status }
+                        : candidate,
+                    ),
+                  }
+                : phase,
+            ),
+          };
+          const updatedPhase = phaseForBuild({ ...task, build }, owner.id);
+          const phaseComplete =
+            updatedPhase.workItems.every((candidate) => candidate.status === "completed") &&
+            requiredChecksPass(build, updatedPhase.checkIds);
+          if (command.status === "completed" && phaseComplete) {
+            build = {
+              ...build,
+              phases: build.phases.map((phase) =>
+                phase.id === owner.id
+                  ? { ...phase, status: "completed" as const, completedAt: command.createdAt }
+                  : phase,
+              ),
+              activePhaseId: null,
+              activeWorkItemId: null,
+            };
+            if (owner.checkpointPolicy === "always" || owner.checkpointPolicy === "manual-only") {
+              build = appendCheckpoint(
+                build,
+                { ...updatedPhase, status: "completed" },
+                command.createdAt,
+              );
+            } else {
+              build = startNextPhase(build, owner.id, command.createdAt);
+            }
+          }
+          return yield* append(command, {
+            ...task,
+            build,
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.build.check.run": {
+          requireStage(task, "build");
+          if (task.build.amendmentGateId) {
+            throw new Error("Build is paused at an amendment gate.");
+          }
+          const check = checkForBuild(task, command.checkId);
+          const phase = phaseForBuild(task, check.phaseId);
+          if (phase.status !== "running") {
+            throw new Error(`Build phase '${phase.id}' must be running before a check can run.`);
+          }
+          if (check.workItemId) {
+            const item = workItemForBuild(phase, check.workItemId);
+            if (item.status !== "running") {
+              throw new Error(`Work item '${item.id}' must be running before its check can run.`);
+            }
+          }
+          if (check.kind !== "automated") {
+            throw new Error(`Build check '${check.id}' is manual and cannot be run automatically.`);
+          }
+          const failed = check.command === "fixture.mismatch" || /mismatch/i.test(check.label);
+          const result: TaskWorkspaceBuildCheck = {
+            ...check,
+            status: failed ? "fail" : "pass",
+            output: failed
+              ? "Expected the Plan fixture content, but the codebase contained a deterministic mismatch."
+              : "Allowlisted deterministic check passed.",
+            exitCode: failed ? 1 : 0,
+            commitSha: task.build.resultingCommitSha,
+            startedAt: check.startedAt ?? command.createdAt,
+            completedAt: command.createdAt,
+          };
+          let build: TaskWorkspace["build"] = {
+            ...task.build,
+            checks: task.build.checks.map((candidate) =>
+              candidate.id === check.id ? result : candidate,
+            ),
+          };
+          if (failed && check.workItemId) {
+            build = {
+              ...build,
+              phases: build.phases.map((phase) =>
+                phase.id === check.phaseId
+                  ? {
+                      ...phase,
+                      status: "blocked" as const,
+                      workItems: phase.workItems.map((item) =>
+                        item.id === check.workItemId
+                          ? {
+                              ...item,
+                              status: "blocked" as const,
+                              invalidationReason: result.output,
+                            }
+                          : item,
+                      ),
+                    }
+                  : phase,
+              ),
+            };
+            const failedPhase = phaseForBuild({ ...task, build }, check.phaseId);
+            if (
+              failedPhase.checkpointPolicy === "on-failure" ||
+              failedPhase.checkpointPolicy === "always"
+            ) {
+              build = appendCheckpoint(build, failedPhase, command.createdAt);
+            }
+          }
+          return yield* append(command, { ...task, build, updatedAt: command.createdAt });
+        }
+        case "task.build.check.record-manual": {
+          requireStage(task, "build");
+          const check = checkForBuild(task, command.checkId);
+          const phase = phaseForBuild(task, check.phaseId);
+          if (phase.status !== "running") {
+            throw new Error(
+              `Build phase '${phase.id}' must be running before a check can be recorded.`,
+            );
+          }
+          if (check.workItemId) {
+            const item = workItemForBuild(phase, check.workItemId);
+            if (item.status !== "running") {
+              throw new Error(
+                `Work item '${item.id}' must be running before its check can be recorded.`,
+              );
+            }
+          }
+          if (check.kind !== "manual") {
+            throw new Error(
+              `Build check '${check.id}' is automated and cannot be recorded manually.`,
+            );
+          }
+          const result: TaskWorkspaceBuildCheck = {
+            ...check,
+            status: command.status,
+            note: command.note,
+            commitSha: command.commitSha ?? task.build.resultingCommitSha,
+            completedAt: command.createdAt,
+            startedAt: check.startedAt ?? command.createdAt,
+          };
+          let build: TaskWorkspace["build"] = {
+            ...task.build,
+            checks: task.build.checks.map((candidate) =>
+              candidate.id === check.id ? result : candidate,
+            ),
+          };
+          if (command.status !== "pass" && check.workItemId) {
+            build = {
+              ...build,
+              phases: build.phases.map((candidate) =>
+                candidate.id === check.phaseId
+                  ? {
+                      ...candidate,
+                      status: "blocked" as const,
+                      workItems: candidate.workItems.map((item) =>
+                        item.id === check.workItemId
+                          ? {
+                              ...item,
+                              status: "blocked" as const,
+                              invalidationReason: command.note,
+                            }
+                          : item,
+                      ),
+                    }
+                  : candidate,
+              ),
+            };
+            const failedPhase = phaseForBuild({ ...task, build }, check.phaseId);
+            if (
+              failedPhase.checkpointPolicy === "on-failure" ||
+              failedPhase.checkpointPolicy === "always"
+            ) {
+              build = appendCheckpoint(build, failedPhase, command.createdAt);
+            }
+          }
+          return yield* append(command, { ...task, build, updatedAt: command.createdAt });
+        }
+        case "task.build.checkpoint.continue": {
+          requireStage(task, "build");
+          if (task.build.amendmentGateId) {
+            throw new Error("Approve the pending amendment before continuing Build.");
+          }
+          const checkpoint = task.build.checkpoints.find(
+            (candidate) => candidate.id === command.checkpointId,
+          );
+          if (!checkpoint) throw new Error(`Checkpoint '${command.checkpointId}' was not found.`);
+          if (checkpoint.status !== "waiting") {
+            throw new Error(`Checkpoint '${checkpoint.id}' has already continued.`);
+          }
+          requireContextManifest(task, command.contextManifestId);
+          if (task.sessions.some((session) => session.threadId === command.threadId)) {
+            throw new Error(`Thread '${command.threadId}' is already linked to this task.`);
+          }
+          const sessionId = `session-${task.sessions.length + 1}`;
+          let build: TaskWorkspace["build"] = {
+            ...task.build,
+            checkpoints: task.build.checkpoints.map((candidate) =>
+              candidate.id === checkpoint.id
+                ? {
+                    ...candidate,
+                    status: "continued" as const,
+                    continuationSessionId: sessionId,
+                    continuedAt: command.createdAt,
+                  }
+                : candidate,
+            ),
+            continuationSessionIds: [...task.build.continuationSessionIds, sessionId],
+          };
+          build = startNextPhase(build, checkpoint.phaseId, command.createdAt);
+          return yield* append(command, {
+            ...task,
+            sessions: [
+              ...task.sessions,
+              {
+                id: sessionId,
+                stage: "build",
+                threadId: command.threadId,
+                role: "primary" as const,
+                provider: null,
+                status: "active" as const,
+                parentSessionId: null,
+                forkPoint: null,
+                contextManifestId: command.contextManifestId,
+                createdAt: command.createdAt,
+              },
+            ],
+            build,
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.amendment.request": {
+          const stage = currentRun(task).currentStage;
+          if (stage !== "build" && stage !== "verify") {
+            throw new Error(`Amendments are not available while the task is in '${stage}'.`);
+          }
+          const check = checkForBuild(task, command.checkId);
+          if (check.status !== "fail" && check.status !== "blocked") {
+            throw new Error(`Build check '${check.id}' has no failure requiring an amendment.`);
+          }
+          const phase = phaseForBuild(task, command.phaseId);
+          const item = workItemForBuild(phase, command.workItemId);
+          if (check.phaseId !== phase.id || check.workItemId !== item.id) {
+            throw new Error(
+              "The amendment trigger does not match the selected phase and work item.",
+            );
+          }
+          if (
+            command.affectedPhaseIds.some(
+              (phaseId) => !task.build.phases.some((candidate) => candidate.id === phaseId),
+            ) ||
+            command.affectedWorkItemIds.some(
+              (workItemId) =>
+                !task.build.phases.some((candidate) =>
+                  candidate.workItems.some((itemCandidate) => itemCandidate.id === workItemId),
+                ),
+            ) ||
+            command.dependentCheckIds.some(
+              (checkId) => !task.build.checks.some((candidate) => candidate.id === checkId),
+            )
+          ) {
+            throw new Error(
+              "An amendment may only target existing phases, work items, and checks.",
+            );
+          }
+          const plan = latestPlanRevision(task);
+          if (!plan)
+            throw new Error("An approved Plan is required before requesting an amendment.");
+          const amendmentId = `amendment-${task.build.amendments.length + 1}`;
+          const amendmentArtifactTask = upsertArtifact(task, {
+            type: "task.artifact.upsert",
+            commandId: command.commandId,
+            taskId: command.taskId,
+            createdAt: command.createdAt,
+            kind: "amendment",
+            title: `Build amendment ${amendmentId}`,
+            markdown: [
+              `# Amendment ${amendmentId}`,
+              "",
+              `- Expected: ${command.expected}`,
+              `- Found: ${command.found}`,
+              `- Impact: ${command.impact}`,
+              `- Proposed changes: ${command.proposedChanges}`,
+            ].join("\n"),
+            sourceSessionId: null,
+          });
+          const amendmentArtifact = latestArtifact(amendmentArtifactTask, "amendment");
+          const amendment = {
+            id: amendmentId,
+            basePlanRevisionId: plan.id,
+            triggeringPhaseId: phase.id,
+            triggeringWorkItemId: item.id,
+            triggeringCheckId: check.id,
+            expected: command.expected,
+            found: command.found,
+            impact: command.impact,
+            proposedChanges: command.proposedChanges,
+            affectedPhaseIds: command.affectedPhaseIds,
+            affectedWorkItemIds: command.affectedWorkItemIds,
+            dependentCheckIds: command.dependentCheckIds,
+            status: "requested" as const,
+            artifactRevisionId: amendmentArtifact?.id ?? null,
+            planDiff: null,
+            requestedAt: command.createdAt,
+            approvedAt: null,
+            approvedBy: null,
+          };
+          return yield* append(command, {
+            ...amendmentArtifactTask,
+            build: {
+              ...amendmentArtifactTask.build,
+              amendmentGateId: amendmentId,
+              amendments: [...amendmentArtifactTask.build.amendments, amendment],
+            },
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.amendment.approve": {
+          const stage = currentRun(task).currentStage;
+          if (stage !== "build" && stage !== "verify") {
+            throw new Error(`Amendments are not available while the task is in '${stage}'.`);
+          }
+          const amendment = task.build.amendments.find(
+            (candidate) => candidate.id === command.amendmentId,
+          );
+          if (!amendment) throw new Error(`Amendment '${command.amendmentId}' was not found.`);
+          if (amendment.status !== "requested") {
+            throw new Error(`Amendment '${amendment.id}' has already been approved.`);
+          }
+          const plan = latestPlanRevision(task);
+          if (!plan || plan.id !== amendment.basePlanRevisionId) {
+            throw new Error(
+              "The approved Plan changed; request a new amendment against its latest revision.",
+            );
+          }
+          const proposedMarkdown = [
+            plan.markdown.trimEnd(),
+            "",
+            `<!-- kata:block:amendment-${amendment.id} -->`,
+            `## Amendment ${amendment.id}`,
+            "",
+            amendment.proposedChanges,
+            "",
+          ].join("\n");
+          const amendedTask = upsertArtifact(task, {
+            type: "task.artifact.upsert",
+            commandId: command.commandId,
+            taskId: command.taskId,
+            createdAt: command.createdAt,
+            kind: "plan",
+            title: "Implementation plan (amended)",
+            markdown: proposedMarkdown,
+            sourceSessionId: null,
+          });
+          const proposedPlan = latestPlanRevision(amendedTask);
+          if (!proposedPlan) throw new Error("Failed to create the amended Plan revision.");
+          const changedBlockIds = [`amendment-${amendment.id}`];
+          const invalidatedBuild = {
+            ...amendedTask.build,
+            currentPlanRevisionId: proposedPlan.id,
+            amendmentGateId: null,
+            resultingCommitSha: null,
+            amendments: amendedTask.build.amendments.map((candidate) =>
+              candidate.id === amendment.id
+                ? {
+                    ...candidate,
+                    status: "approved" as const,
+                    artifactRevisionId: latestArtifact(amendedTask, "amendment")?.id ?? null,
+                    planDiff: {
+                      baseRevisionId: plan.id,
+                      proposedRevisionId: proposedPlan.id,
+                      summary: `Amendment ${amendment.id} updates the approved Build plan.`,
+                      changedBlockIds,
+                    },
+                    approvedAt: command.createdAt,
+                    approvedBy: command.approvedBy,
+                  }
+                : candidate,
+            ),
+            phases: amendedTask.build.phases.map((phase) =>
+              amendment.affectedPhaseIds.includes(phase.id)
+                ? {
+                    ...phase,
+                    status: "invalidated" as const,
+                    checkpointId: null,
+                    workItems: phase.workItems.map((item) =>
+                      amendment.affectedWorkItemIds.includes(item.id)
+                        ? {
+                            ...item,
+                            status: "invalidated" as const,
+                            invalidationReason: `Invalidated by approved amendment ${amendment.id}.`,
+                          }
+                        : item,
+                    ),
+                  }
+                : phase,
+            ),
+            checks: amendedTask.build.checks.map((check) =>
+              amendment.dependentCheckIds.includes(check.id)
+                ? {
+                    ...check,
+                    status: "pending" as const,
+                    command: check.command === "fixture.mismatch" ? "fixture.pass" : check.command,
+                    label: check.label.replace(/mismatch/giu, "amended"),
+                    output: null,
+                    note: null,
+                    exitCode: null,
+                    completedAt: null,
+                  }
+                : check,
+            ),
+          };
+          return yield* append(command, {
+            ...amendedTask,
+            build: invalidatedBuild,
+            updatedAt: command.createdAt,
+          });
+        }
+        case "task.build.resume": {
+          requireStage(task, "build");
+          if (task.build.amendmentGateId) {
+            throw new Error("Approve the pending amendment before resuming Build.");
+          }
+          const checkpoint = task.build.checkpoints.find(
+            (candidate) => candidate.id === command.checkpointId,
+          );
+          if (!checkpoint) throw new Error(`Checkpoint '${command.checkpointId}' was not found.`);
+          if (checkpoint.status !== "waiting") {
+            throw new Error(`Checkpoint '${checkpoint.id}' has already continued.`);
+          }
+          const phase = phaseForBuild(task, checkpoint.phaseId);
+          if (
+            phase.status === "completed" &&
+            phase.workItems.every((item) => item.status === "completed")
+          ) {
+            throw new Error(`Checkpoint '${checkpoint.id}' has no remaining work to resume.`);
+          }
+          const firstResumable = phase.workItems.find(
+            (item) =>
+              item.status === "invalidated" ||
+              item.status === "pending" ||
+              item.status === "blocked",
+          );
+          let build: TaskWorkspace["build"] = {
+            ...task.build,
+            activePhaseId: phase.id,
+            activeWorkItemId: firstResumable?.id ?? null,
+            checkpoints: task.build.checkpoints.map((candidate) =>
+              candidate.id === checkpoint.id
+                ? { ...candidate, status: "continued" as const, continuedAt: command.createdAt }
+                : candidate,
+            ),
+            phases: task.build.phases.map((candidate) =>
+              candidate.id === phase.id
+                ? {
+                    ...candidate,
+                    status: "running" as const,
+                    startedAt: candidate.startedAt ?? command.createdAt,
+                    workItems: candidate.workItems.map((item) =>
+                      item.status === "invalidated" || item.status === "blocked"
+                        ? { ...item, status: "pending" as const, invalidationReason: null }
+                        : item,
+                    ),
+                  }
+                : candidate,
+            ),
+          };
+          let sessions = task.sessions;
+          if (command.contextManifestId !== undefined || command.threadId !== undefined) {
+            if (!command.contextManifestId || !command.threadId) {
+              throw new Error(
+                "A resumed Build session requires both a thread and context manifest.",
+              );
+            }
+            requireContextManifest(task, command.contextManifestId);
+            if (task.sessions.some((session) => session.threadId === command.threadId)) {
+              throw new Error(`Thread '${command.threadId}' is already linked to this task.`);
+            }
+            const sessionId = `session-${task.sessions.length + 1}`;
+            sessions = [
+              ...task.sessions,
+              {
+                id: sessionId,
+                stage: "build" as const,
+                threadId: command.threadId,
+                role: "primary" as const,
+                provider: null,
+                status: "active" as const,
+                parentSessionId: null,
+                forkPoint: null,
+                contextManifestId: command.contextManifestId,
+                createdAt: command.createdAt,
+              },
+            ];
+            build = {
+              ...build,
+              continuationSessionIds: [...build.continuationSessionIds, sessionId],
+            };
+          }
+          return yield* append(command, { ...task, sessions, build, updatedAt: command.createdAt });
+        }
         case "task.fixture.apply": {
           const workflowRuns = applyTransition(task, command.type, command.createdAt);
+          if (
+            task.build.phases.some((phase) =>
+              phase.workItems.some(
+                (item) => item.status === "blocked" || item.status === "invalidated",
+              ),
+            ) ||
+            !requiredChecksPass(
+              task.build,
+              task.build.checks.map((check) => check.id),
+            )
+          ) {
+            throw new Error(
+              "The fixture adapter cannot bypass blocked work or checks that have not passed.",
+            );
+          }
           const repository = task.workspace.repositories[0];
           const worktreePath = repository?.worktreePath;
           if (!worktreePath) throw new Error("The task worktree has not been provisioned.");
@@ -1094,7 +1917,13 @@ export const make = Effect.gen(function* () {
           }));
           return yield* append(command, {
             ...task,
-            build: { phases, resultingCommitSha: commitSha },
+            build: {
+              ...task.build,
+              phases,
+              resultingCommitSha: commitSha,
+              activePhaseId: null,
+              activeWorkItemId: null,
+            },
             workflowRuns,
             updatedAt: command.createdAt,
           });
