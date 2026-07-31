@@ -139,6 +139,8 @@ test.describe(`Task workspaces Slice 4 ${E2E_TAGS.taskWorkspaces}`, () => {
       status: "pass",
       note: "Reviewed by the operator.",
     });
+    await appWindow.reload();
+    await expect(appWindow.getByTestId("task-build-panel")).toBeVisible();
     await appWindow.getByTestId("task-build-work-complete-work-item-2").click();
     await expect(appWindow.getByTestId("task-build-checkpoint-checkpoint-1")).toBeVisible();
 
