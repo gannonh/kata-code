@@ -1977,6 +1977,358 @@ describe("TaskWorkspaceService", () => {
     30_000,
   );
 
+  it.effect(
+    "projects hierarchical Build phases, checkpoints, amendments, and restart recovery",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-s4-build-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const dispatch = <T extends TaskWorkspaceCommand>(value: T) =>
+          runtime.runPromise(service.dispatch(value));
+        const slice4TaskId = TaskWorkspaceId.make("slice-4-integration");
+
+        yield* Effect.tryPromise(() => git(repoRoot, ["init", "-b", "main"]));
+        yield* Effect.tryPromise(() =>
+          NodeFs.writeFile(NodePath.join(repoRoot, "README.md"), "# Slice 4\n", "utf8"),
+        );
+        yield* Effect.tryPromise(() => git(repoRoot, ["add", "README.md"]));
+        yield* Effect.tryPromise(() => git(repoRoot, ["commit", "-m", "chore: seed slice 4"]));
+
+        yield* dispatch(
+          command({
+            type: "task.create",
+            commandId: CommandId.make("s4-create"),
+            taskId: slice4TaskId,
+            createdAt: now(1),
+            title: "Slice 4 Build",
+            projectId,
+            workspaceRoot: repoRoot,
+            baseRef: "main",
+            preset: "standard",
+            approvalPolicy: "before-build",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.artifact.upsert",
+            commandId: CommandId.make("s4-questions"),
+            taskId: slice4TaskId,
+            createdAt: now(2),
+            kind: "questions",
+            title: "Questions",
+            markdown: "# Questions\n\nNo blockers.",
+            sourceSessionId: null,
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.questions.complete",
+            commandId: CommandId.make("s4-questions-complete"),
+            taskId: slice4TaskId,
+            createdAt: now(3),
+          }),
+        );
+        const planMarkdown = [
+          "# Plan",
+          "",
+          "## Phase Prepare",
+          "Checkpoint policy: always",
+          "",
+          "### Work item Prepare fixture",
+          "- Check: fixture.pass",
+          "",
+          "### Work item Prepare review",
+          "Depends on: Prepare fixture",
+          "- Manual check: operator review",
+          "",
+          "## Phase Implement",
+          "Checkpoint policy: on-failure",
+          "",
+          "### Work item Implement fixture",
+          "- Check: fixture.mismatch",
+        ].join("\n");
+        yield* dispatch(
+          command({
+            type: "task.artifact.upsert",
+            commandId: CommandId.make("s4-plan"),
+            taskId: slice4TaskId,
+            createdAt: now(4),
+            kind: "plan",
+            title: "Plan",
+            markdown: planMarkdown,
+            sourceSessionId: null,
+          }),
+        );
+        const approved = yield* dispatch(
+          command({
+            type: "task.plan.approve",
+            commandId: CommandId.make("s4-plan-approve"),
+            taskId: slice4TaskId,
+            createdAt: now(5),
+          }),
+        );
+        expect(approved.task.build.phases).toHaveLength(2);
+        expect(approved.task.build.phases[0]?.workItems[1]?.dependsOn).toEqual(["work-item-1"]);
+        expect(approved.task.build.checks.map((check) => [check.kind, check.command])).toEqual([
+          ["automated", "fixture.pass"],
+          ["manual", null],
+          ["automated", "fixture.mismatch"],
+        ]);
+
+        const phaseStart = command({
+          type: "task.build.phase.start",
+          commandId: CommandId.make("s4-phase-start"),
+          taskId: slice4TaskId,
+          createdAt: now(6),
+          phaseId: "phase-1",
+        });
+        const started = yield* dispatch(phaseStart);
+        const duplicateStart = yield* dispatch(phaseStart);
+        expect(duplicateStart.sequence).toBe(started.sequence);
+
+        yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("s4-work-1-running"),
+            taskId: slice4TaskId,
+            createdAt: now(7),
+            workItemId: "work-item-1",
+            status: "running",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.build.check.run",
+            commandId: CommandId.make("s4-check-pass"),
+            taskId: slice4TaskId,
+            createdAt: now(8),
+            checkId: "phase-1-check-1",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("s4-work-1-complete"),
+            taskId: slice4TaskId,
+            createdAt: now(9),
+            workItemId: "work-item-1",
+            status: "completed",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("s4-work-2-running"),
+            taskId: slice4TaskId,
+            createdAt: now(10),
+            workItemId: "work-item-2",
+            status: "running",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.build.check.record-manual",
+            commandId: CommandId.make("s4-manual-check"),
+            taskId: slice4TaskId,
+            createdAt: now(11),
+            checkId: "phase-1-check-2",
+            status: "pass",
+            note: "Reviewed by the operator.",
+          }),
+        );
+        const prepared = yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("s4-work-2-complete"),
+            taskId: slice4TaskId,
+            createdAt: now(12),
+            workItemId: "work-item-2",
+            status: "completed",
+          }),
+        );
+        expect(prepared.task.build.checkpoints[0]).toMatchObject({
+          phaseId: "phase-1",
+          status: "waiting",
+        });
+
+        const manifest = yield* dispatch(
+          command({
+            type: "task.context-manifest.create",
+            commandId: CommandId.make("s4-manifest"),
+            taskId: slice4TaskId,
+            createdAt: now(13),
+            artifactRefs: [],
+            notes: "Approved Plan and Build state.",
+            sessionId: null,
+            budget: null,
+          }),
+        );
+        const continued = yield* dispatch(
+          command({
+            type: "task.build.checkpoint.continue",
+            commandId: CommandId.make("s4-checkpoint-continue"),
+            taskId: slice4TaskId,
+            createdAt: now(14),
+            checkpointId: "checkpoint-1",
+            threadId: ThreadId.make("thread-s4-continuation"),
+            contextManifestId: manifest.task.contextManifests[0]!.id,
+          }),
+        );
+        expect(continued.task.build.activePhaseId).toBe("phase-2");
+        expect(continued.task.sessions).toHaveLength(1);
+
+        yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("s4-implement-running"),
+            taskId: slice4TaskId,
+            createdAt: now(15),
+            workItemId: "phase-2-work-item-1",
+            status: "running",
+          }),
+        );
+        const failed = yield* dispatch(
+          command({
+            type: "task.build.check.run",
+            commandId: CommandId.make("s4-check-mismatch"),
+            taskId: slice4TaskId,
+            createdAt: now(16),
+            checkId: "phase-2-check-1",
+          }),
+        );
+        expect(failed.task.build.checks.at(-1)).toMatchObject({ status: "fail", exitCode: 1 });
+        expect(failed.task.build.phases[1]?.status).toBe("blocked");
+        const fixtureBypass = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.fixture.apply",
+              commandId: CommandId.make("s4-fixture-bypass"),
+              taskId: slice4TaskId,
+              createdAt: now(16),
+            }),
+          ),
+        );
+        expect(fixtureBypass._tag).toBe("Failure");
+        const prematureComplete = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.build.work-item.set-status",
+              commandId: CommandId.make("s4-implement-premature-complete"),
+              taskId: slice4TaskId,
+              createdAt: now(17),
+              workItemId: "phase-2-work-item-1",
+              status: "completed",
+            }),
+          ),
+        );
+        expect(prematureComplete._tag).toBe("Failure");
+
+        const requested = yield* dispatch(
+          command({
+            type: "task.amendment.request",
+            commandId: CommandId.make("s4-amendment-request"),
+            taskId: slice4TaskId,
+            createdAt: now(18),
+            phaseId: "phase-2",
+            workItemId: "phase-2-work-item-1",
+            checkId: "phase-2-check-1",
+            expected: "fixture content",
+            found: "mismatched content",
+            impact: "The implementation fixture cannot pass.",
+            proposedChanges: "Use the corrected fixture content.",
+            affectedPhaseIds: ["phase-2"],
+            affectedWorkItemIds: ["phase-2-work-item-1"],
+            dependentCheckIds: ["phase-2-check-1"],
+          }),
+        );
+        expect(requested.task.build.amendmentGateId).toBe("amendment-1");
+        expect(
+          requested.task.artifacts.find((artifact) => artifact.kind === "amendment"),
+        ).toBeTruthy();
+
+        const approvedAmendment = yield* dispatch(
+          command({
+            type: "task.amendment.approve",
+            commandId: CommandId.make("s4-amendment-approve"),
+            taskId: slice4TaskId,
+            createdAt: now(19),
+            amendmentId: "amendment-1",
+            approvedBy: "operator",
+          }),
+        );
+        expect(approvedAmendment.task.build.currentPlanRevisionId).toBe("plan-revision-2");
+        expect(approvedAmendment.task.build.amendments[0]?.status).toBe("approved");
+        expect(approvedAmendment.task.build.phases[0]?.status).toBe("completed");
+        expect(approvedAmendment.task.build.phases[1]?.status).toBe("invalidated");
+        expect(approvedAmendment.task.build.checks.at(-1)?.status).toBe("pending");
+
+        yield* runtime.dispose;
+        const restarted = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+        const restartedService = yield* restarted.runPromise(Effect.service(TaskWorkspaceService));
+        const recovered = yield* restarted.runPromise(restartedService.getTask(slice4TaskId));
+        expect(recovered?.build.amendmentGateId).toBeNull();
+        expect(recovered?.build.currentPlanRevisionId).toBe("plan-revision-2");
+        expect(recovered?.build.phases[1]?.status).toBe("invalidated");
+        expect(recovered?.sessions).toHaveLength(1);
+
+        const resumed = yield* restarted.runPromise(
+          restartedService.dispatch(
+            command({
+              type: "task.build.resume",
+              commandId: CommandId.make("s4-resume"),
+              taskId: slice4TaskId,
+              createdAt: now(20),
+              checkpointId: "checkpoint-2",
+              threadId: ThreadId.make("thread-s4-resumed"),
+              contextManifestId: "manifest-1",
+            }),
+          ),
+        );
+        expect(resumed.task.build.phases[1]?.status).toBe("running");
+        expect(resumed.task.build.phases[1]?.workItems[0]?.status).toBe("pending");
+        expect(resumed.task.sessions).toHaveLength(2);
+        yield* restarted.runPromise(
+          restartedService.dispatch(
+            command({
+              type: "task.build.work-item.set-status",
+              commandId: CommandId.make("s4-resumed-running"),
+              taskId: slice4TaskId,
+              createdAt: now(21),
+              workItemId: "phase-2-work-item-1",
+              status: "running",
+            }),
+          ),
+        );
+        yield* restarted.runPromise(
+          restartedService.dispatch(
+            command({
+              type: "task.build.check.run",
+              commandId: CommandId.make("s4-amended-check"),
+              taskId: slice4TaskId,
+              createdAt: now(22),
+              checkId: "phase-2-check-1",
+            }),
+          ),
+        );
+        const completed = yield* restarted.runPromise(
+          restartedService.dispatch(
+            command({
+              type: "task.build.work-item.set-status",
+              commandId: CommandId.make("s4-resumed-complete"),
+              taskId: slice4TaskId,
+              createdAt: now(23),
+              workItemId: "phase-2-work-item-1",
+              status: "completed",
+            }),
+          ),
+        );
+        expect(completed.task.build.checks.at(-1)?.status).toBe("pass");
+        expect(completed.task.build.phases[1]?.status).toBe("completed");
+        yield* restarted.dispose;
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
   it.effect("fails startup when persisted task history is corrupt", () =>
     Effect.gen(function* () {
       const root = yield* Effect.tryPromise(() =>
