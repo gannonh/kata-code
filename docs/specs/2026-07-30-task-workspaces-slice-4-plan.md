@@ -45,7 +45,7 @@ No blocking finding remains. Implementation may begin from `cf95a03c9c658d3677fc
 
 ### Implementation status
 
-Implementation is in progress on PR [#63](https://github.com/gannonh/kata-code/pull/63), based on
+Implementation is complete on PR [#63](https://github.com/gannonh/kata-code/pull/63), based on
 the stabilized Slice 3 merge. The first implementation units include additive contracts,
 Plan-to-Build projection, reducer controls, restart-safe event snapshots, and the shared
 web/desktop Build panel. Local evidence so far:
@@ -54,6 +54,8 @@ web/desktop Build panel. Local evidence so far:
 - `@kata-sh/code-cli` task-workspace suite: 12 tests pass;
 - `@kata-sh/code-web`: 1,299 unit tests pass;
 - `vp check`, `git diff --check`, and the contracts/server/web typechecks pass.
+- Remote CI run 334 is green for Check, Test, browser tests, Task Workspaces E2E (9/9), Mobile
+  Native Static Analysis, and Release Smoke; CodeQL run 130 is green.
 
 Browser execution is currently blocked by the environment's missing Playwright Chromium binary;
 the full recursive typecheck is separately blocked by the missing `mobile-e2e` TypeScript
@@ -473,4 +475,4 @@ repositories/source setup (Slice 6), draft PR delivery (Slice 7), and provider-p
 (Slice 8). User-authored checks, arbitrary shell commands, rejection/revision editing UX, and
 automatic phase commits beyond an optional reference are explicitly outside this slice.
 
-**Recommendation: Implementation is ready for CI and evidence review; final merge remains pending user sign-off.**
+**Recommendation: Implementation and CI/evidence review are complete; final merge remains pending user sign-off.**
