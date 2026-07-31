@@ -1,6 +1,16 @@
 # Specs log
 
-## 2026-07-30 (Task workspaces Slice 3 merged; Slice 4 drafted)
+## 2026-07-30 (Task workspaces Slice 4 approved; implementation started)
+
+- Marked the [Slice 4 child plan](/specs/2026-07-30-task-workspaces-slice-4-plan.md) **Approved**
+  after delegated adversarial review. Implementation is proceeding on [PR #63](https://github.com/gannonh/kata-code/pull/63)
+  from the stabilized Slice 3 base.
+- Added durable hierarchical Build contracts and reducer controls for phase/work-item state,
+  automated and manual checks, checkpoint continuation, amendment artifacts and Plan diffs,
+  targeted invalidation, resume sessions, and legacy replay defaults.
+- Added the shared web/desktop Build panel and browser assertions for phase trees, failed checks,
+  amendment gates, and explicit approval controls. Contracts, server task-workspace tests, and
+  web unit tests pass; browser execution awaits the unavailable local Playwright Chromium binary.
 
 - Squash-merged [PR #62](https://github.com/gannonh/kata-code/pull/62) at
   `cf95a03c9c658d3677fc85d46d486a4ecfda57ae` after CI and CodeQL passed; all five delayed Slice 3
@@ -9,7 +19,6 @@
   stabilized main SHA. It defines hierarchical Build phases, check records, checkpoint policies,
   amendment artifacts and Plan diffs, targeted invalidation, continuation sessions, restart
   recovery, and the negative proof against silent Plan mutation or work-item completion.
-
 
 ## 2026-07-30 (Task workspaces Slice 3 post-merge stabilization)
 
