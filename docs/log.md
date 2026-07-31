@@ -1,5 +1,15 @@
 # OKF bundle log
 
+## 2026-07-31 (Task workspaces Slice 4 review hardening)
+
+Addressed the actionable PR #63 review findings: Build checks now use a server-owned allowlist;
+phase, work-item, dependency, checkpoint, and amendment invariants are enforced in the reducer;
+checkpoint context manifests reference the approved Plan revision; continuation sessions are
+durable; the shared dependency predicate keeps web and server controls aligned; and the Build
+panel exposes manual pass/fail/blocked outcomes with the current approving user. Contracts,
+shared, and task-workspace server suites pass locally. Browser execution and full-workspace
+tooling remain environment-blocked by the missing Playwright binary and filtered-install gaps.
+
 ## 2026-07-30 (Task workspaces Slice 3a workflow engine)
 
 Approved the [Slice 3 plan](/specs/2026-07-30-task-workspaces-slice-3-plan.md) split into 3a (engine) and 3b (presets + context budgeting), and built 3a: a versioned workflow definition registry with the reducer reading stage transitions and artifact-kind gating from each task's pinned definition. Slice 1 / Slice 2 Standard behavior is unchanged and its tests pass unmodified.
