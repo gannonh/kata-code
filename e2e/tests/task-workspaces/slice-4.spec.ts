@@ -129,9 +129,11 @@ test.describe(`Task workspaces Slice 4 ${E2E_TAGS.taskWorkspaces}`, () => {
     await appWindow.getByTestId("task-build-check-run-phase-1-check-1").click();
     await appWindow.getByTestId("task-build-work-complete-work-item-1").click();
     await appWindow.getByTestId("task-build-work-start-work-item-2").click();
-    await appWindow.getByLabel("Note for operator review").fill("Reviewed by the operator.");
-    await expect(appWindow.getByTestId("task-build-check-record-phase-1-check-2")).toBeEnabled();
-    await appWindow.getByTestId("task-build-check-record-phase-1-check-2").click();
+    const manualNote = appWindow.getByLabel("Note for operator review");
+    await manualNote.fill("Reviewed by the operator.");
+    const recordPass = manualNote.locator("..").getByRole("button", { name: "Record pass" });
+    await expect(recordPass).toBeEnabled();
+    await recordPass.click();
     await expect(appWindow.getByTestId("task-build-check-phase-1-check-2")).toContainText("pass");
     await appWindow.getByTestId("task-build-work-complete-work-item-2").click();
     await expect(appWindow.getByTestId("task-build-checkpoint-checkpoint-1")).toBeVisible();
