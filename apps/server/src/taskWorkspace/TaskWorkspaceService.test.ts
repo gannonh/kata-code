@@ -2260,6 +2260,7 @@ describe("TaskWorkspaceService", () => {
         expect(approvedAmendment.task.build.amendments[0]?.status).toBe("approved");
         expect(approvedAmendment.task.build.phases[0]?.status).toBe("completed");
         expect(approvedAmendment.task.build.phases[1]?.status).toBe("invalidated");
+        expect(approvedAmendment.task.build.phases[1]?.checkpointId).toBe("checkpoint-2");
         expect(approvedAmendment.task.build.checks.at(-1)?.status).toBe("pending");
 
         yield* runtime.dispose;
