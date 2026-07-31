@@ -91,11 +91,28 @@ const baseTask: TaskWorkspace = {
             title: "Create and commit task-workspace-slice-1.txt",
             status: "pending",
             summary: null,
+            dependsOn: [],
+            checkIds: [],
+            invalidationReason: null,
           },
         ],
+        checkpointPolicy: "never",
+        checkIds: [],
+        checkpointId: null,
+        phaseCommitSha: null,
+        startedAt: null,
+        completedAt: null,
       },
     ],
     resultingCommitSha: null,
+    activePhaseId: null,
+    activeWorkItemId: null,
+    checks: [],
+    checkpoints: [],
+    amendments: [],
+    currentPlanRevisionId: null,
+    amendmentGateId: null,
+    continuationSessionIds: [],
   },
   verification: {
     criteria: [
@@ -133,6 +150,110 @@ beforeEach(() => {
 });
 
 describe("TaskWorkspaceView", () => {
+  it("renders the hierarchical Build panel and amendment gate states", async () => {
+    const firstPhase = baseTask.build.phases[0]!;
+    await renderTask({
+      ...baseTask,
+      workflowRuns: [{ ...baseTask.workflowRuns[0]!, currentStage: "build" }],
+      build: {
+        ...baseTask.build,
+        activePhaseId: "phase-2",
+        activeWorkItemId: "phase-2-work-item-1",
+        phases: [
+          {
+            ...firstPhase,
+            title: "Prepare",
+            status: "completed",
+            completedAt: "2026-07-30T17:00:00.000Z",
+            workItems: [
+              {
+                ...firstPhase.workItems[0]!,
+                status: "completed",
+                summary: "Prepare completed.",
+              },
+            ],
+          },
+          {
+            ...firstPhase,
+            id: "phase-2",
+            title: "Implement",
+            status: "blocked",
+            checkpointPolicy: "on-failure",
+            checkIds: ["phase-2-check-1"],
+            workItems: [
+              {
+                ...firstPhase.workItems[0]!,
+                id: "phase-2-work-item-1",
+                title: "Implement fixture",
+                status: "blocked",
+                checkIds: ["phase-2-check-1"],
+                invalidationReason: "The approved fixture does not match the codebase.",
+              },
+            ],
+          },
+        ],
+        checks: [
+          {
+            id: "phase-2-check-1",
+            phaseId: "phase-2",
+            workItemId: "phase-2-work-item-1",
+            kind: "automated",
+            status: "fail",
+            label: "fixture.mismatch",
+            command: "fixture.mismatch",
+            output: "Expected the approved fixture, found a mismatch.",
+            note: null,
+            exitCode: 1,
+            commitSha: null,
+            startedAt: "2026-07-30T17:01:00.000Z",
+            completedAt: "2026-07-30T17:01:01.000Z",
+          },
+        ],
+        amendments: [
+          {
+            id: "amendment-1",
+            basePlanRevisionId: "plan-revision-1",
+            triggeringPhaseId: "phase-2",
+            triggeringWorkItemId: "phase-2-work-item-1",
+            triggeringCheckId: "phase-2-check-1",
+            expected: "approved fixture",
+            found: "mismatched fixture",
+            impact: "The work item cannot complete.",
+            proposedChanges: "Update the approved fixture.",
+            affectedPhaseIds: ["phase-2"],
+            affectedWorkItemIds: ["phase-2-work-item-1"],
+            dependentCheckIds: ["phase-2-check-1"],
+            status: "requested",
+            artifactRevisionId: "amendment-revision-1",
+            planDiff: null,
+            requestedAt: "2026-07-30T17:02:00.000Z",
+            approvedAt: null,
+            approvedBy: null,
+          },
+        ],
+        amendmentGateId: "amendment-1",
+      },
+    });
+
+    await expect.element(page.getByTestId("task-build-panel")).toBeVisible();
+    await expect.element(page.getByTestId("task-build-phase-phase-2")).toBeVisible();
+    await expect.element(page.getByTestId("task-build-amendment-gate")).toBeVisible();
+    await expect
+      .element(page.getByTestId("task-build-amendment-expected"))
+      .toHaveTextContent("approved fixture");
+    await expect
+      .element(page.getByText("Expected the approved fixture, found a mismatch."))
+      .toBeVisible();
+    await page.getByTestId("task-build-amendment-approve-amendment-1").click();
+
+    expect(mocks.dispatchCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "task.amendment.approve",
+        amendmentId: "amendment-1",
+      }),
+    );
+  });
+
   it("renders the Questions stage and dispatches a versioned artifact command", async () => {
     await renderTask(baseTask);
 
@@ -374,6 +495,7 @@ describe("TaskWorkspaceView", () => {
         },
       ],
       build: {
+        ...baseTask.build,
         phases: [
           {
             ...baseTask.build.phases[0]!,
