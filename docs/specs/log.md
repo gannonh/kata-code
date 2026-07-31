@@ -1,5 +1,13 @@
 # Specs log
 
+## 2026-07-30 (Task workspaces Slice 4 implementation verified)
+
+- Completed the approved Slice 4 implementation on [PR #63](https://github.com/gannonh/kata-code/pull/63).
+- Remote CI run 334 and CodeQL run 130 are green, including the cumulative nine-test desktop
+  `@task-workspaces` E2E path; local contract, reducer, web, formatting, and quality gates also pass.
+- Preserved the waiting failure checkpoint through amendment invalidation so the Build panel exposes
+  the explicit Resume action after approval. Final merge remains pending user sign-off.
+
 ## 2026-07-30 (Task workspaces Slice 4 approved; implementation started)
 
 - Marked the [Slice 4 child plan](/specs/2026-07-30-task-workspaces-slice-4-plan.md) **Approved**
