@@ -621,12 +621,14 @@ function BuildPanel({
                                     className="min-w-48 flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs"
                                     placeholder="Short review note"
                                     value={manualNotes[check.id] ?? ""}
-                                    onChange={(event) =>
+                                    onChange={(event) => {
+                                      const value =
+                                        (event.target as HTMLInputElement | null)?.value ?? "";
                                       setManualNotes((current) => ({
                                         ...current,
-                                        [check.id]: event.currentTarget.value,
-                                      }))
-                                    }
+                                        [check.id]: value,
+                                      }));
+                                    }}
                                   />
                                   <Button
                                     data-testid={`task-build-check-record-${check.id}`}
