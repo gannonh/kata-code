@@ -46,20 +46,19 @@ No blocking finding remains. Implementation may begin from `cf95a03c9c658d3677fc
 ### Implementation status
 
 Implementation is complete on PR [#63](https://github.com/gannonh/kata-code/pull/63), based on
-the stabilized Slice 3 merge. The first implementation units include additive contracts,
-Plan-to-Build projection, reducer controls, restart-safe event snapshots, and the shared
-web/desktop Build panel. Local evidence so far:
+the stabilized Slice 3 merge. The review follow-up hardens the server-owned check registry,
+phase/dependency ordering, checkpoint-specific Plan context, continuation-session persistence,
+manual check outcomes, and causal amendment invalidation. Local evidence for this pass:
 
-- `@kata-sh/code-contracts`: 197 tests pass;
+- `@kata-sh/code-contracts`: 198 tests pass;
+- `@kata-sh/code-shared`: 221 tests pass;
 - `@kata-sh/code-cli` task-workspace suite: 12 tests pass;
-- `@kata-sh/code-web`: 1,299 unit tests pass;
-- `vp check`, `git diff --check`, and the contracts/server/web typechecks pass.
-- Remote CI run 334 is green for Check, Test, browser tests, Task Workspaces E2E (9/9), Mobile
-  Native Static Analysis, and Release Smoke; CodeQL run 130 is green.
+- formatting and `git diff --check` pass.
 
-Browser execution is currently blocked by the environment's missing Playwright Chromium binary;
-the full recursive typecheck is separately blocked by the missing `mobile-e2e` TypeScript
-executable. These are validation blockers, not product behavior claims.
+Browser execution remains blocked by the environment's missing Playwright Chromium binary. The
+filtered web/CLI typechecks and repository-wide `vp check` are also blocked by pre-existing
+workspace dependency/tooling gaps in this environment; no changed task-workspace file appears
+in those diagnostics. Remote CI remains the authoritative full-workspace verification.
 
 ## Outcome
 
