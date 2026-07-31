@@ -2157,7 +2157,8 @@ describe("TaskWorkspaceService", () => {
             commandId: CommandId.make("s4-manifest"),
             taskId: slice4TaskId,
             createdAt: now(13),
-            artifactRefs: [],
+            checkpointId: "checkpoint-1",
+            artifactRefs: [{ kind: "plan", revision: 1, blockIds: [] }],
             notes: "Approved Plan and Build state.",
             sessionId: null,
             budget: null,
@@ -2174,6 +2175,10 @@ describe("TaskWorkspaceService", () => {
             contextManifestId: manifest.task.contextManifests[0]!.id,
           }),
         );
+        expect(continued.task.build.checkpoints[0]).toMatchObject({
+          contextManifestId: "manifest-1",
+          continuationSessionId: "session-1",
+        });
         expect(continued.task.build.activePhaseId).toBe("phase-2");
         expect(continued.task.sessions).toHaveLength(1);
 
@@ -2198,6 +2203,41 @@ describe("TaskWorkspaceService", () => {
         );
         expect(failed.task.build.checks.at(-1)).toMatchObject({ status: "fail", exitCode: 1 });
         expect(failed.task.build.phases[1]?.status).toBe("blocked");
+        const failureContinue = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.build.checkpoint.continue",
+              commandId: CommandId.make("s4-failure-checkpoint-continue"),
+              taskId: slice4TaskId,
+              createdAt: now(16),
+              checkpointId: "checkpoint-2",
+              threadId: ThreadId.make("thread-s4-invalid-continue"),
+              contextManifestId: "manifest-1",
+            }),
+          ),
+        );
+        expect(failureContinue._tag).toBe("Failure");
+        const unrelatedDependentCheck = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.amendment.request",
+              commandId: CommandId.make("s4-unrelated-dependent-check"),
+              taskId: slice4TaskId,
+              createdAt: now(17),
+              phaseId: "phase-2",
+              workItemId: "phase-2-work-item-1",
+              checkId: "phase-2-check-1",
+              expected: "fixture content",
+              found: "mismatched content",
+              impact: "The implementation fixture cannot pass.",
+              proposedChanges: "Use the corrected fixture content.",
+              affectedPhaseIds: ["phase-2"],
+              affectedWorkItemIds: ["phase-2-work-item-1"],
+              dependentCheckIds: ["phase-1-check-1"],
+            }),
+          ),
+        );
+        expect(unrelatedDependentCheck._tag).toBe("Failure");
         const fixtureBypass = yield* runtime.runPromiseExit(
           service.dispatch(
             command({
@@ -2263,6 +2303,24 @@ describe("TaskWorkspaceService", () => {
         expect(approvedAmendment.task.build.phases[1]?.checkpointId).toBe("checkpoint-2");
         expect(approvedAmendment.task.build.checks.at(-1)?.status).toBe("pending");
 
+        const resumedContext = yield* dispatch(
+          command({
+            type: "task.context-manifest.create",
+            commandId: CommandId.make("s4-resume-manifest"),
+            taskId: slice4TaskId,
+            createdAt: now(19),
+            checkpointId: "checkpoint-2",
+            artifactRefs: [{ kind: "plan", revision: 2, blockIds: [] }],
+            notes: "Amended Plan and Build state.",
+            sessionId: null,
+            budget: null,
+          }),
+        );
+        expect(resumedContext.task.build.checkpoints[1]).toMatchObject({
+          contextManifestId: "manifest-2",
+          status: "waiting",
+        });
+
         yield* runtime.dispose;
         const restarted = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
         const restartedService = yield* restarted.runPromise(Effect.service(TaskWorkspaceService));
@@ -2281,12 +2339,16 @@ describe("TaskWorkspaceService", () => {
               createdAt: now(20),
               checkpointId: "checkpoint-2",
               threadId: ThreadId.make("thread-s4-resumed"),
-              contextManifestId: "manifest-1",
+              contextManifestId: "manifest-2",
             }),
           ),
         );
         expect(resumed.task.build.phases[1]?.status).toBe("running");
         expect(resumed.task.build.phases[1]?.workItems[0]?.status).toBe("pending");
+        expect(resumed.task.build.checkpoints[1]).toMatchObject({
+          continuationSessionId: "session-2",
+          status: "continued",
+        });
         expect(resumed.task.sessions).toHaveLength(2);
         yield* restarted.runPromise(
           restartedService.dispatch(
