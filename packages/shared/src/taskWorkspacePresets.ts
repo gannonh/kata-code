@@ -1,7 +1,4 @@
-import type {
-  TaskWorkspacePreset,
-  TaskWorkspaceStage,
-} from "@kata-sh/code-contracts";
+import type { TaskWorkspacePreset, TaskWorkspaceStage } from "@kata-sh/code-contracts";
 
 export const TASK_WORKSPACE_STAGE_LABELS: Readonly<Record<TaskWorkspaceStage, string>> = {
   questions: "Questions",

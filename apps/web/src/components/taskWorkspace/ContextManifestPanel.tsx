@@ -1,7 +1,4 @@
-import {
-  type TaskWorkspace,
-  type TaskWorkspaceContextManifest,
-} from "@kata-sh/code-contracts";
+import { type TaskWorkspace, type TaskWorkspaceContextManifest } from "@kata-sh/code-contracts";
 import { TASK_WORKSPACE_STAGE_LABELS } from "@kata-sh/code-shared/taskWorkspacePresets";
 import { AlertTriangleIcon } from "lucide-react";
 import { useState } from "react";

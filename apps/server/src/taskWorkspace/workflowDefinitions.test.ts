@@ -190,6 +190,10 @@ describe("workflowDefinitions", () => {
           ...STANDARD_WORKFLOW_V0_1_0,
           version: "standard@undeclared-transition-destination",
           stages: ["questions", "build", "verify", "verified"],
+          stageArtifactKinds: {
+            questions: "questions",
+            verify: "verification",
+          },
           transitions: [
             {
               command: "task.questions.complete",
@@ -326,11 +330,9 @@ describe("workflowDefinitions", () => {
       expect(entry.automaticCompletionStages).toEqual(
         definition.transitions
           .filter((transition) =>
-            [
-              "task.questions.complete",
-              "task.research.complete",
-              "task.design.complete",
-            ].includes(transition.command),
+            ["task.questions.complete", "task.research.complete", "task.design.complete"].includes(
+              transition.command,
+            ),
           )
           .map((transition) => transition.from),
       );

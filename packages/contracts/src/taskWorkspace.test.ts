@@ -402,4 +402,3 @@ it.effect("decodes the Slice 3b preset, stage, and reasoning-stage commands", ()
     assert.strictEqual(budgeted.artifactRefs[0]?.kind, "design");
   }),
 );
-

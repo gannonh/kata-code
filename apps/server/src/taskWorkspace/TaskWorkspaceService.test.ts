@@ -1651,9 +1651,8 @@ describe("TaskWorkspaceService", () => {
           ),
         );
         const tinySummary =
-          tiny.task.artifacts
-            .find((artifact) => artifact.kind === "summary")
-            ?.revisions.at(-1)?.markdown ?? "";
+          tiny.task.artifacts.find((artifact) => artifact.kind === "summary")?.revisions.at(-1)
+            ?.markdown ?? "";
         expect(Math.ceil(tinySummary.length / 4)).toBeLessThanOrEqual(1);
         expect(tiny.task.contextManifests.at(-1)?.summaryArtifactRef).toMatchObject({
           revision: 3,

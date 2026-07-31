@@ -529,9 +529,7 @@ function TaskWorkspaceViewContent({
                 entry={entry}
                 commands={commands}
                 linkedSessionId={linkedSession?.id ?? null}
-                canComplete={
-                  catalogEntry?.automaticCompletionStages.includes(entry.stage) ?? false
-                }
+                canComplete={catalogEntry?.automaticCompletionStages.includes(entry.stage) ?? false}
               />
             ))}
 

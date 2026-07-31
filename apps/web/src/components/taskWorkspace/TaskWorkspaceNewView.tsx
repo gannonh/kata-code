@@ -1,7 +1,4 @@
-import {
-  type TaskWorkspaceCommand,
-  type TaskWorkspacePreset,
-} from "@kata-sh/code-contracts";
+import { type TaskWorkspaceCommand, type TaskWorkspacePreset } from "@kata-sh/code-contracts";
 import {
   TASK_WORKSPACE_PRESET_CATALOG,
   TASK_WORKSPACE_STAGE_LABELS,
