@@ -57,6 +57,7 @@ import {
 import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
+import { validateActiveTaskTurn } from "../../taskWorkspace/TaskWorkspaceService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
@@ -676,6 +677,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
       metricProvider = routed.adapter.provider;
       metricModel = input.modelSelection?.model;
+      yield* validateActiveTaskTurn({
+        threadId: input.threadId,
+        providerInstanceId: routed.instanceId,
+      }).pipe(
+        Effect.mapError((cause) =>
+          toValidationError("ProviderService.sendTurn", cause.message, cause),
+        ),
+      );
       yield* Effect.annotateCurrentSpan({
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),

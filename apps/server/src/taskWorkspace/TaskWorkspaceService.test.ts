@@ -12,6 +12,7 @@ import {
   CommandId,
   EnvironmentId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   TaskWorkspaceId,
   ThreadId,
@@ -24,6 +25,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -46,7 +48,9 @@ import {
   TaskWorkspaceSourceResolver,
   type TaskWorkspaceSourceResolution,
 } from "./Services/TaskWorkspaceSourceResolver.ts";
+import { TaskStageBridge, TaskStageBridgeLive } from "./TaskStageBridge.ts";
 import { TaskWorkspaceService, layer as TaskWorkspaceServiceLive } from "./TaskWorkspaceService.ts";
+import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
 
 const execFileAsync = promisify(execFile);
 const now = (second: number) => `2026-07-28T17:00:${String(second).padStart(2, "0")}.000Z`;
@@ -3371,6 +3375,40 @@ describe("TaskWorkspaceService guided flow", () => {
       expect(approved.task.sessions.some((s) => s.stage === "build")).toBe(false);
       // Later policy enqueues deterministic worktree provisioning.
       expect(approved.task.taskRevision).toBeGreaterThan(task.taskRevision);
+      expect(approved.task.workspace.repositories[0]?.provisioningStatus).toBe("pending");
+      const repository = approved.task.workspace.repositories[0]!;
+      const branch = "katacode/task-guided-task";
+      const worktreePath = NodePath.join(
+        baseDir,
+        "worktrees",
+        NodePath.basename(repoRoot),
+        branch.replace(/\//g, "-"),
+      );
+      const worktreeEntry = {
+        id: "outbox-worktree-approval-test",
+        environmentId: EnvironmentId.make("environment-local"),
+        taskId: approved.task.id,
+        operationKey: `guided-task:worktree:${repository.baseCommitSha}:later`,
+        target: "worktree" as const,
+        status: "pending" as const,
+        payload: {
+          branch,
+          path: worktreePath,
+          baseCommitSha: repository.baseCommitSha!,
+          sourceWorkspaceRoot: repository.workspaceRoot,
+        },
+        attemptCount: 0,
+        createdAt: now(21),
+        updatedAt: now(21),
+        completedAt: null,
+      } as const;
+      yield* runtime.runPromise(service.processWorktree(worktreeEntry));
+      const provisioned = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(provisioned.workspace.repositories[0]).toMatchObject({
+        provisioningStatus: "ready",
+        branch: "katacode/task-guided-task",
+      });
+      expect(provisioned.workspace.repositories[0]?.worktreePath).toBeTruthy();
     }),
   );
 
@@ -3411,5 +3449,86 @@ describe("TaskWorkspaceService guided flow", () => {
       expect(task.workflowRuns.at(-1)?.currentStage).toBe("questions");
       expect(task.artifacts.find((a) => a.kind === "questions")).toBeUndefined();
     }),
+  );
+});
+
+describe("TaskStageBridge", () => {
+  it.effect(
+    "loads selected context, proposes one completion, and rejects the superseded thread",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-stage-bridge-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+        yield* runtime.runPromise(
+          service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+        );
+        const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+        const threadId = task.bootstrap?.reservedThreadId!;
+        const providerInstanceId = ProviderInstanceId.make("instance-1");
+        const directoryLayer = Layer.succeed(ProviderSessionDirectory, {
+          getBinding: () =>
+            Effect.succeed(
+              Option.some({
+                threadId,
+                provider: ProviderDriverKind.make("claudeAgent"),
+                providerInstanceId,
+                runtimePayload: { activeTurnId: "turn-bridge-1" },
+              }),
+            ),
+          getProvider: () => Effect.succeed(ProviderDriverKind.make("claudeAgent")),
+          listThreadIds: () => Effect.succeed([threadId]),
+          listBindings: () => Effect.succeed([]),
+          upsert: () => Effect.void,
+        });
+        const bridgeLayer = TaskStageBridgeLive.pipe(
+          Layer.provide(directoryLayer),
+          Layer.provide(Layer.succeed(TaskWorkspaceService, service)),
+        );
+        const bridgeScope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(bridgeScope, Exit.void));
+        const bridgeContext = yield* Layer.buildWithScope(bridgeLayer, bridgeScope);
+        const bridge = yield* Effect.provide(Effect.service(TaskStageBridge), bridgeContext);
+        const scope = {
+          environmentId: EnvironmentId.make("environment-local"),
+          threadId,
+          providerInstanceId,
+          providerSessionId: "provider-session-bridge-1",
+        };
+
+        const context = yield* Effect.provide(bridge.context(scope), bridgeContext);
+        expect(context).toMatchObject({
+          stage: "questions",
+          occurrence: 0,
+          brief: "Add a guided onboarding flow.",
+          artifacts: [],
+        });
+        const acknowledgement = yield* Effect.provide(
+          bridge.complete(scope, {
+            summary: "Clarify complete.",
+            markdown: "# Clarify\n\nThe scope is clear.\n",
+          }),
+          bridgeContext,
+        );
+        expect(acknowledgement).toMatchObject({
+          accepted: true,
+          stage: "questions",
+          occurrence: 0,
+          providerTurnId: "turn-bridge-1",
+        });
+        const proposalTask = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        expect(proposalTask.occurrences[0]?.status).toBe("finalizing");
+
+        yield* runtime.runPromise(
+          service.settleProposal({
+            taskId: task.id,
+            occurrence: 0,
+            providerTurnId: "turn-bridge-1",
+            outcome: "completed",
+          }),
+        );
+        const stale = yield* Effect.exit(Effect.provide(bridge.context(scope), bridgeContext));
+        expect(stale._tag).toBe("Failure");
+      }),
   );
 });

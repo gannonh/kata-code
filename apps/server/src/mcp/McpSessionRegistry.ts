@@ -8,6 +8,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import { HttpServer } from "effect/unstable/http";
 
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
+import { authorizeActiveTaskStage } from "../taskWorkspace/TaskWorkspaceService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 
@@ -52,7 +53,7 @@ export interface McpSessionRegistryOptions {
   readonly now?: () => number;
 }
 
-const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1_000;
 const DEFAULT_MAXIMUM_LIFETIME_MS = 8 * 60 * 60 * 1_000;
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -98,12 +99,22 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       const rawToken = yield* crypto.randomBytes(32).pipe(Effect.map(tokenFromBytes), Effect.orDie);
       const tokenHash = yield* hashToken(rawToken);
       const expiresAt = issuedAt + maximumLifetimeMs;
+      const threadId = ThreadId.make(request.threadId);
+      const providerInstanceId = ProviderInstanceId.make(request.providerInstanceId);
+      const taskStageAuthorized = yield* authorizeActiveTaskStage({
+        environmentId,
+        threadId,
+        providerInstanceId,
+      });
+      const capabilities: ReadonlySet<McpInvocationContext.McpCapability> = new Set(
+        taskStageAuthorized ? ["preview", "task-stage"] : ["preview"],
+      );
       const scope: McpInvocationContext.McpInvocationScope = {
         environmentId,
-        threadId: ThreadId.make(request.threadId),
+        threadId,
         providerSessionId,
-        providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
-        capabilities: new Set(["preview"]),
+        providerInstanceId,
+        capabilities,
         issuedAt,
         expiresAt,
       };

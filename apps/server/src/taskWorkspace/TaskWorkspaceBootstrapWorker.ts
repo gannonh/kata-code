@@ -36,8 +36,13 @@ const makeWorker = Effect.gen(function* () {
       .pipe(Effect.mapError(() => "task-outbox-read-failed" as const))
       .pipe(Effect.catch(() => Effect.succeed([])));
     for (const entry of pending) {
-      if (entry.target !== "bootstrap") continue;
-      yield* taskWorkspaces.processBootstrap(entry).pipe(Effect.catch(() => Effect.void));
+      const process =
+        entry.target === "bootstrap"
+          ? taskWorkspaces.processBootstrap(entry)
+          : entry.target === "worktree"
+            ? taskWorkspaces.processWorktree(entry)
+            : Effect.void;
+      yield* process.pipe(Effect.catch(() => Effect.void));
     }
   });
 

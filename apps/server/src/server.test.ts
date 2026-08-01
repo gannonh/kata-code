@@ -760,6 +760,7 @@ const buildAppUnderTest = (options?: {
             streamEvents: Stream.empty,
             subscribe: Effect.succeed(Stream.empty),
             processBootstrap: () => Effect.void,
+            processWorktree: () => Effect.void,
             ...options?.layers?.taskWorkspace,
           }),
           Layer.mock(CheckpointDiffQuery)({

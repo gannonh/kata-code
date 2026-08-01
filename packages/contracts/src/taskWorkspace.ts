@@ -1289,3 +1289,66 @@ export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   ),
 });
 export type TaskWorkspaceBootstrapOutboxPayload = typeof TaskWorkspaceBootstrapOutboxPayload.Type;
+
+export const TaskWorkspaceWorktreeOutboxPayload = Schema.Struct({
+  branch: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  baseCommitSha: TrimmedNonEmptyString,
+  sourceWorkspaceRoot: TrimmedNonEmptyString,
+});
+export type TaskWorkspaceWorktreeOutboxPayload = typeof TaskWorkspaceWorktreeOutboxPayload.Type;
+
+/**
+ * Provider-neutral task-stage bridge payloads. The context result contains
+ * only untrusted task data selected by the server; trusted stage instructions
+ * and runtime internals stay outside the tool response.
+ */
+export const TaskStageContextArtifact = Schema.Struct({
+  kind: TaskWorkspaceArtifactKind,
+  revision: NonNegativeInt,
+  title: Schema.String,
+  markdown: Schema.String,
+});
+export type TaskStageContextArtifact = typeof TaskStageContextArtifact.Type;
+
+export const TaskStageContextResult = Schema.Struct({
+  stage: TaskWorkspaceStage,
+  occurrence: NonNegativeInt,
+  brief: Schema.String,
+  feedback: Schema.NullOr(Schema.String),
+  artifacts: Schema.Array(TaskStageContextArtifact),
+});
+export type TaskStageContextResult = typeof TaskStageContextResult.Type;
+
+export const TaskStageCompletionInput = Schema.Struct({
+  summary: TrimmedNonEmptyString,
+  markdown: Schema.String,
+});
+export type TaskStageCompletionInput = typeof TaskStageCompletionInput.Type;
+
+export const TaskStageCompletionAck = Schema.Struct({
+  accepted: Schema.Literal(true),
+  stage: TaskWorkspaceStage,
+  occurrence: NonNegativeInt,
+  proposalId: TrimmedNonEmptyString,
+  providerTurnId: TrimmedNonEmptyString,
+});
+export type TaskStageCompletionAck = typeof TaskStageCompletionAck.Type;
+
+export const TaskStageToolErrorCode = Schema.Literals([
+  "unauthorized",
+  "not-active",
+  "turn-unavailable",
+  "conflict",
+  "invalid",
+  "source-drift",
+]);
+export type TaskStageToolErrorCode = typeof TaskStageToolErrorCode.Type;
+
+export class TaskStageToolError extends Schema.TaggedErrorClass<TaskStageToolError>()(
+  "TaskStageToolError",
+  {
+    code: TaskStageToolErrorCode,
+    message: Schema.String,
+  },
+) {}

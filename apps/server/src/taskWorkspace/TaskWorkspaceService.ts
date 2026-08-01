@@ -14,6 +14,7 @@ import {
   TaskWorkspaceBootstrapOutboxPayload,
   TaskWorkspaceBootstrapState,
   TaskWorkspaceError,
+  TaskWorkspaceWorktreeOutboxPayload,
   CommandId,
   type TaskWorkspace,
   type TaskWorkspaceArtifact,
@@ -59,6 +60,7 @@ import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 import { TaskWorkspaceSourceResolverLive } from "./Layers/TaskWorkspaceSourceResolver.ts";
 import {
@@ -987,6 +989,9 @@ export interface TaskWorkspaceServiceShape {
   readonly processBootstrap: (
     entry: TaskWorkspaceOutboxEntry,
   ) => Effect.Effect<void, TaskWorkspaceError>;
+  readonly processWorktree: (
+    entry: TaskWorkspaceOutboxEntry,
+  ) => Effect.Effect<void, TaskWorkspaceError>;
   /**
    * Persist a typed completion proposal for the active stage occurrence and
    * provider turn (the task-stage bridge entry point). One proposal per
@@ -1011,12 +1016,49 @@ export interface TaskWorkspaceServiceShape {
     readonly providerTurnId: string;
     readonly outcome: "completed" | "aborted" | "failed";
   }) => Effect.Effect<TaskWorkspace, TaskWorkspaceError>;
+  readonly settleProviderTurn: (input: {
+    readonly threadId: ThreadId;
+    readonly providerTurnId: string;
+    readonly outcome: "completed" | "aborted" | "failed";
+  }) => Effect.Effect<void, TaskWorkspaceError>;
+  readonly validatePlanningRoot: (
+    taskId: TaskWorkspaceId,
+  ) => Effect.Effect<void, TaskWorkspaceError>;
+  readonly validateProviderTurn: (input: {
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: string;
+  }) => Effect.Effect<void, TaskWorkspaceError>;
+  readonly authorizeTaskStage: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: string;
+  }) => Effect.Effect<void, TaskWorkspaceError>;
 }
 
 export class TaskWorkspaceService extends Context.Service<
   TaskWorkspaceService,
   TaskWorkspaceServiceShape
 >()("@kata-sh/code-cli/taskWorkspace/TaskWorkspaceService") {}
+
+let activeTaskWorkspaceService: TaskWorkspaceServiceShape | undefined;
+
+export const validateActiveTaskTurn = (input: {
+  readonly threadId: ThreadId;
+  readonly providerInstanceId: string;
+}): Effect.Effect<void, TaskWorkspaceError> =>
+  activeTaskWorkspaceService ? activeTaskWorkspaceService.validateProviderTurn(input) : Effect.void;
+
+export const authorizeActiveTaskStage = (input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly providerInstanceId: string;
+}): Effect.Effect<boolean> =>
+  activeTaskWorkspaceService
+    ? activeTaskWorkspaceService.authorizeTaskStage(input).pipe(
+        Effect.as(true),
+        Effect.catch(() => Effect.succeed(false)),
+      )
+    : Effect.succeed(false);
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
@@ -1025,6 +1067,7 @@ export const make = Effect.gen(function* () {
   const store = yield* TaskWorkspaceStore;
   const sourceResolver = yield* TaskWorkspaceSourceResolver;
   const orchestrationEngine = yield* OrchestrationEngineService;
+  const providerInstanceRegistry = yield* Effect.serviceOption(ProviderInstanceRegistry);
   const serverEnvironment = yield* ServerEnvironment;
   const environmentId = yield* serverEnvironment.getEnvironmentId;
   const semaphore = yield* Semaphore.make(1);
@@ -1111,6 +1154,166 @@ export const make = Effect.gen(function* () {
     taskById.set(event.taskId, event.task);
     receiptByCommandId.set(event.commandId, { sequence: event.sequence, task: event.task });
   }
+
+  const settleProviderTurn: TaskWorkspaceServiceShape["settleProviderTurn"] = (input) =>
+    Effect.gen(function* () {
+      const current = [...taskById.values()].find((candidate) => {
+        const run = candidate.workflowRuns.at(-1);
+        if (!run) return false;
+        const occurrence = candidate.occurrences
+          .filter((entry) => entry.stage === run.currentStage)
+          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+        return occurrence?.threadId === input.threadId && occurrence.status === "finalizing";
+      });
+      if (!current) return;
+      yield* settleProposal({
+        taskId: current.id,
+        occurrence: current.occurrences
+          .filter((entry) => entry.threadId === input.threadId)
+          .toSorted((left, right) => right.ordinal - left.ordinal)[0]!.ordinal,
+        providerTurnId: input.providerTurnId,
+        outcome: input.outcome,
+      }).pipe(
+        Effect.catch((cause) =>
+          cause.message.includes("No proposal exists") ? Effect.void : Effect.fail(cause),
+        ),
+        Effect.asVoid,
+      );
+    });
+
+  const validatePlanningRoot: TaskWorkspaceServiceShape["validatePlanningRoot"] = (taskId) =>
+    Effect.gen(function* () {
+      const task = taskById.get(taskId);
+      if (!task) {
+        return yield* new TaskWorkspaceError({
+          message: `Task '${taskId}' was not found.`,
+          commandType: "task.internal",
+          taskId,
+        });
+      }
+      const repository = task.workspace.repositories[0];
+      if (!repository || task.preferences.worktreePolicy === "now") return;
+      if (repository.planningRootFingerprint === null) return;
+      const headSha = yield* runGit(repository.workspaceRoot, ["rev-parse", "HEAD"]).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: "Failed to resolve the planning root HEAD.",
+              commandType: "task.internal",
+              taskId,
+              cause,
+            }),
+        ),
+      );
+      const statusPorcelain = yield* runGit(repository.workspaceRoot, [
+        "status",
+        "--porcelain=v2",
+      ]).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: "Failed to inspect the planning root status.",
+              commandType: "task.internal",
+              taskId,
+              cause,
+            }),
+        ),
+      );
+      const fingerprint = createHash("sha256")
+        .update(`${headSha}\n${statusPorcelain}`)
+        .digest("hex");
+      if (fingerprint !== repository.planningRootFingerprint) {
+        return yield* new TaskWorkspaceError({
+          message:
+            "The planning root drifted since creation; restore the pinned source state before continuing.",
+          commandType: "task.internal",
+          taskId,
+        });
+      }
+    });
+
+  const authorizeTaskStage: TaskWorkspaceServiceShape["authorizeTaskStage"] = (input) =>
+    Effect.gen(function* () {
+      const task = [...taskById.values()].find(
+        (candidate) =>
+          candidate.environmentId === input.environmentId &&
+          candidate.preferences.modelSelection?.instanceId === input.providerInstanceId,
+      );
+      if (!task) {
+        return yield* new TaskWorkspaceError({
+          message: "No matching task-stage session exists.",
+          commandType: "task.internal",
+          taskId: "unknown",
+        });
+      }
+      const run = currentRun(task);
+      const occurrence = task.occurrences
+        .filter((candidate) => candidate.stage === run.currentStage)
+        .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+      const reservedThreadId = task.bootstrap?.reservedThreadId;
+      if (
+        !occurrence ||
+        (occurrence.threadId !== input.threadId && reservedThreadId !== input.threadId) ||
+        occurrence.status === "completed" ||
+        occurrence.status === "failed"
+      ) {
+        return yield* new TaskWorkspaceError({
+          message: `Thread '${input.threadId}' is not the active task primary.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      yield* validatePlanningRoot(task.id);
+    });
+
+  const validateProviderTurn: TaskWorkspaceServiceShape["validateProviderTurn"] = (input) =>
+    Effect.gen(function* () {
+      const task = [...taskById.values()].find((candidate) =>
+        candidate.occurrences.some((occurrence) => occurrence.threadId === input.threadId),
+      );
+      if (!task) return;
+      const run = currentRun(task);
+      const occurrence = task.occurrences
+        .filter((candidate) => candidate.stage === run.currentStage)
+        .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+      const reservedThreadId = task.bootstrap?.reservedThreadId;
+      if (
+        !occurrence ||
+        (occurrence.threadId !== input.threadId && reservedThreadId !== input.threadId)
+      ) {
+        return;
+      }
+      if (occurrence.status !== "running" && occurrence.status !== "finalizing") {
+        return yield* new TaskWorkspaceError({
+          message: `Task session for '${input.threadId}' is not accepting turns in state '${occurrence.status}'.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      if (!occurrence.sessionId) {
+        return yield* new TaskWorkspaceError({
+          message: `Task session for '${input.threadId}' is not ready.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      const session = task.sessions.find((candidate) => candidate.id === occurrence.sessionId);
+      if (!session || session.role !== "primary" || session.status !== "active") {
+        return yield* new TaskWorkspaceError({
+          message: `Task session for '${input.threadId}' is no longer active.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      if (task.preferences.modelSelection?.instanceId !== input.providerInstanceId) {
+        return yield* new TaskWorkspaceError({
+          message: `Provider instance '${input.providerInstanceId}' is not authorized for task '${task.id}'.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      yield* validatePlanningRoot(task.id);
+    });
 
   const makeOperationReceipt = (
     command: TaskWorkspaceCommand,
@@ -1529,6 +1732,21 @@ export const make = Effect.gen(function* () {
         }
         if (command.operationKey !== undefined) {
           validateCreateV2(command);
+          if (command.preset === "guided" && Option.isSome(providerInstanceRegistry)) {
+            const providerInstance = yield* providerInstanceRegistry.value.getInstance(
+              command.modelSelection!.instanceId,
+            );
+            if (
+              !providerInstance ||
+              !providerInstance.enabled ||
+              providerInstance.driverKind === "pi"
+            ) {
+              return yield* taskError(
+                command,
+                "Guided requires an enabled provider with enforced Plan mode, trusted instructions, and completion transport.",
+              );
+            }
+          }
         }
         const source =
           command.operationKey !== undefined
@@ -1582,6 +1800,27 @@ export const make = Effect.gen(function* () {
       const task = taskById.get(command.taskId);
       if (!task) {
         return yield* taskError(command, `Task '${command.taskId}' was not found.`);
+      }
+      const firstSliceGuided =
+        task.versions.taskContract === TASK_WORKSPACE_CONTRACT_VERSION_0_3_0 &&
+        definitionFor(task).availableInFirstSlice === true;
+      if (
+        firstSliceGuided &&
+        [
+          "task.artifact.upsert",
+          "task.context-manifest.create",
+          "task.session.link",
+          "task.session.fork",
+          "task.questions.complete",
+          "task.research.complete",
+          "task.design.complete",
+          "task.stage.start",
+        ].includes(command.type)
+      ) {
+        return yield* taskError(
+          command,
+          "Guided stage work is server-owned; use the task-stage bridge from the active conversation.",
+        );
       }
 
       switch (command.type) {
@@ -1987,19 +2226,31 @@ export const make = Effect.gen(function* () {
             error: null,
             updatedAt: now,
           };
-          const reopenedTask: TaskWorkspace = taskForRetry.bootstrap
-            ? {
-                ...taskForRetry,
-                bootstrap: {
-                  ...taskForRetry.bootstrap,
-                  status: "pending",
-                  currentStep: null,
-                  failure: null,
-                  attemptCount: taskForRetry.bootstrap.attemptCount + 1,
-                  updatedAt: now,
-                },
-              }
-            : taskForRetry;
+          const reopenedTask: TaskWorkspace =
+            Option.isSome(priorOutbox) && priorOutbox.value.target === "worktree"
+              ? {
+                  ...taskForRetry,
+                  workspace: {
+                    repositories: taskForRetry.workspace.repositories.map((repository) =>
+                      repository.id === "primary"
+                        ? { ...repository, provisioningStatus: "pending" as const }
+                        : repository,
+                    ),
+                  },
+                }
+              : taskForRetry.bootstrap
+                ? {
+                    ...taskForRetry,
+                    bootstrap: {
+                      ...taskForRetry.bootstrap,
+                      status: "pending",
+                      currentStep: null,
+                      failure: null,
+                      attemptCount: taskForRetry.bootstrap.attemptCount + 1,
+                      updatedAt: now,
+                    },
+                  }
+                : taskForRetry;
           return yield* append(command, reopenedTask, {
             operationReceipt: retriedReceipt,
             ...(Option.isSome(priorOutbox)
@@ -2085,6 +2336,16 @@ export const make = Effect.gen(function* () {
                   ? { ...candidate, status: "completed" as const }
                   : candidate,
               ),
+              workspace:
+                task.preferences.worktreePolicy === "later"
+                  ? {
+                      repositories: task.workspace.repositories.map((repository) =>
+                        repository.id === "primary"
+                          ? { ...repository, provisioningStatus: "pending" as const }
+                          : repository,
+                      ),
+                    }
+                  : task.workspace,
             };
             const worktreePolicy = task.preferences.worktreePolicy;
             if (worktreePolicy === "later") {
@@ -2158,8 +2419,10 @@ export const make = Effect.gen(function* () {
                 ],
               });
             }
-            return yield* append(command, approvedTask, {
-              ...(command.operationKey
+            return yield* append(
+              command,
+              approvedTask,
+              command.operationKey
                 ? {
                     operationReceipt: {
                       environmentId,
@@ -2177,8 +2440,8 @@ export const make = Effect.gen(function* () {
                       updatedAt: now,
                     },
                   }
-                : {}),
-            });
+                : {},
+            );
           }
           // Legacy approval: resolve the transition before provisioning.
           const workflowRuns = applyTransition(task, command.type, command.createdAt);
@@ -3194,6 +3457,121 @@ export const make = Effect.gen(function* () {
             ],
           });
         }
+        case "task.worktree.policy.set": {
+          if (command.policy === "never") {
+            return yield* taskError(
+              command,
+              "Post-approval worktree policy can change from Never to Now or Later only.",
+            );
+          }
+          if (command.expectedTaskRevision !== task.taskRevision) {
+            return yield* taskError(
+              command,
+              `Task revision ${task.taskRevision} does not match the expected revision ${command.expectedTaskRevision}.`,
+            );
+          }
+          if (task.preferences.worktreePolicy !== "never" || task.planGate !== null) {
+            return yield* taskError(
+              command,
+              "Worktree policy changes are available only for a Never task after Plan approval.",
+            );
+          }
+          const currentStage = currentRun(task).currentStage;
+          const planOccurrence = latestOccurrence(task, "plan");
+          const approvedGate = task.gateHistory.at(-1);
+          if (
+            currentStage !== "plan" ||
+            !planOccurrence ||
+            planOccurrence.status !== "completed" ||
+            planOccurrence.gateOutcome !== "approved" ||
+            !approvedGate ||
+            approvedGate.occurrence !== planOccurrence.ordinal ||
+            approvedGate.outcome !== "approved"
+          ) {
+            return yield* taskError(
+              command,
+              "The Plan must be approved before a Never task can provision a worktree.",
+            );
+          }
+          const repository = task.workspace.repositories[0];
+          if (!repository || !repository.baseCommitSha) {
+            return yield* taskError(command, "The task has no pinned repository base commit.");
+          }
+          const headSha = yield* runGit(repository.workspaceRoot, ["rev-parse", "HEAD"]).pipe(
+            Effect.mapError((cause) =>
+              taskError(command, "Failed to revalidate the planning root.", cause),
+            ),
+          );
+          const statusPorcelain = yield* runGit(repository.workspaceRoot, [
+            "status",
+            "--porcelain=v2",
+          ]).pipe(
+            Effect.mapError((cause) =>
+              taskError(command, "Failed to revalidate the planning root.", cause),
+            ),
+          );
+          const fingerprint = createHash("sha256")
+            .update(`${headSha}\n${statusPorcelain}`)
+            .digest("hex");
+          if (
+            repository.planningRootFingerprint === null ||
+            repository.planningRootFingerprint !== fingerprint
+          ) {
+            return yield* taskError(
+              command,
+              "The planning root drifted since creation; restore the pinned source state before provisioning.",
+            );
+          }
+          const now = yield* serverNow;
+          const branch = `katacode/task-${safeBranchSegment(task.id)}`;
+          const path = expectedTaskWorktreePath(
+            config.worktreesDir,
+            repository.workspaceRoot,
+            branch,
+          );
+          const worktreeOperationKey = `${task.id}:worktree:${repository.baseCommitSha}:${command.policy}`;
+          const nextTask: TaskWorkspace = {
+            ...task,
+            preferences: { ...task.preferences, worktreePolicy: command.policy },
+            workspace: {
+              repositories: task.workspace.repositories.map((candidate) =>
+                candidate.id === repository.id
+                  ? { ...candidate, provisioningStatus: "pending" as const }
+                  : candidate,
+              ),
+            },
+          };
+          return yield* append(command, nextTask, {
+            operationReceipt: {
+              environmentId,
+              taskId: task.id,
+              operationType: "task.worktree.policy.set",
+              operationKey: command.operationKey,
+              payloadDigest: canonicalTaskCommandDigest(command),
+              status: "completed",
+              attemptCount: 1,
+              sourceCommandIds: [command.commandId],
+              resultEventId: null,
+              resultTaskRevision: null,
+              error: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+            outbox: [
+              {
+                target: "worktree" as const,
+                operationKey: worktreeOperationKey,
+                payload: {
+                  branch,
+                  path,
+                  baseCommitSha: repository.baseCommitSha,
+                  sourceWorkspaceRoot: repository.workspaceRoot,
+                },
+                status: "pending" as const,
+              },
+            ],
+          });
+        }
         default: {
           return yield* taskError(
             command,
@@ -3369,6 +3747,7 @@ export const make = Effect.gen(function* () {
             taskId: input.taskId,
           });
         }
+        yield* validatePlanningRoot(input.taskId);
         const definition = definitionFor(task);
         const stage = currentRun(task).currentStage;
         const occurrence = activeOccurrence(task, stage);
@@ -3426,12 +3805,15 @@ export const make = Effect.gen(function* () {
                 }),
             ),
           );
-        if (Option.isSome(prior) && prior.value.payloadDigest !== input.payloadDigest) {
-          return yield* new TaskWorkspaceError({
-            message: `A different completion proposal already exists for turn '${input.providerTurnId}'.`,
-            commandType: "task.internal",
-            taskId: input.taskId,
-          });
+        if (Option.isSome(prior)) {
+          if (prior.value.payloadDigest !== input.payloadDigest) {
+            return yield* new TaskWorkspaceError({
+              message: `A different completion proposal already exists for turn '${input.providerTurnId}'.`,
+              commandType: "task.internal",
+              taskId: input.taskId,
+            });
+          }
+          return task;
         }
         const now = yield* serverNow;
         const proposalId = `proposal-${input.taskId}-${occurrence.ordinal}-${input.providerTurnId}`;
@@ -3734,6 +4116,165 @@ export const make = Effect.gen(function* () {
       }),
     );
 
+  const decodeWorktreePayload = Schema.decodeUnknownEffect(TaskWorkspaceWorktreeOutboxPayload);
+
+  const processWorktree = (
+    entry: TaskWorkspaceOutboxEntry,
+  ): Effect.Effect<void, TaskWorkspaceError> => {
+    const failure = (cause: unknown): Effect.Effect<void, TaskWorkspaceError> =>
+      Effect.gen(function* () {
+        const task = taskById.get(entry.taskId);
+        if (!task) {
+          return yield* new TaskWorkspaceError({
+            message: `Task '${entry.taskId}' was not found.`,
+            commandType: "task.internal",
+            taskId: entry.taskId,
+          });
+        }
+        const now = yield* serverNow;
+        const failedTask: TaskWorkspace = {
+          ...task,
+          workspace: {
+            repositories: task.workspace.repositories.map((repository) =>
+              repository.id === "primary"
+                ? { ...repository, provisioningStatus: "failed" as const }
+                : repository,
+            ),
+          },
+        };
+        yield* internalAppend("task.worktree.failed", failedTask, {
+          occurredAt: now,
+          operationReceipt: {
+            environmentId,
+            taskId: entry.taskId,
+            operationType: "task.worktree.provision",
+            operationKey: entry.operationKey,
+            payloadDigest: "server-internal",
+            status: "failed",
+            attemptCount: entry.attemptCount + 1,
+            sourceCommandIds: [],
+            resultEventId: null,
+            resultTaskRevision: null,
+            error: describeFailure(cause),
+            createdAt: now,
+            updatedAt: now,
+          },
+          outbox: [{ ...entry, status: "failed" }],
+        });
+      });
+
+    return semaphore
+      .withPermits(1)(
+        Effect.gen(function* () {
+          const task = taskById.get(entry.taskId);
+          if (!task) return yield* failure(new Error(`Task '${entry.taskId}' was not found.`));
+          const payload = yield* decodeWorktreePayload(entry.payload).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TaskWorkspaceError({
+                  message: "Failed to decode the worktree outbox payload.",
+                  commandType: "task.internal",
+                  taskId: entry.taskId,
+                  cause,
+                }),
+            ),
+          );
+          const repository = task.workspace.repositories.find(
+            (candidate) => candidate.workspaceRoot === payload.sourceWorkspaceRoot,
+          );
+          if (!repository || repository.baseCommitSha !== payload.baseCommitSha) {
+            return yield* failure(
+              new Error("The worktree outbox row does not match the pinned repository state."),
+            );
+          }
+          const expectedPath = expectedTaskWorktreePath(
+            config.worktreesDir,
+            repository.workspaceRoot,
+            payload.branch,
+          );
+          if (expectedPath !== payload.path) {
+            return yield* failure(new Error("The worktree path is not the persisted reservation."));
+          }
+          const existing = yield* tryAdoptExistingWorktree(payload.path, payload.branch);
+          const worktree =
+            existing ??
+            (yield* gitWorkflow
+              .createWorktree({
+                cwd: repository.workspaceRoot,
+                refName: payload.baseCommitSha,
+                newRefName: payload.branch,
+                path: payload.path,
+              })
+              .pipe(
+                Effect.catch((cause) =>
+                  tryAdoptExistingWorktree(payload.path, payload.branch).pipe(
+                    Effect.flatMap((adopted) =>
+                      adopted
+                        ? Effect.succeed(adopted)
+                        : Effect.fail(
+                            new TaskWorkspaceError({
+                              message: "Failed to provision the task worktree.",
+                              commandType: "task.internal",
+                              taskId: entry.taskId,
+                              cause,
+                            }),
+                          ),
+                    ),
+                  ),
+                ),
+              ));
+          const now = yield* serverNow;
+          const readyTask: TaskWorkspace = {
+            ...task,
+            workspace: {
+              repositories: task.workspace.repositories.map((candidate) =>
+                candidate.id === repository.id
+                  ? {
+                      ...candidate,
+                      branch: worktree.worktree.refName,
+                      worktreePath: worktree.worktree.path,
+                      provisioningStatus: "ready" as const,
+                    }
+                  : candidate,
+              ),
+            },
+          };
+          yield* internalAppend("task.worktree.ready", readyTask, {
+            occurredAt: now,
+            operationReceipt: {
+              environmentId,
+              taskId: entry.taskId,
+              operationType: "task.worktree.provision",
+              operationKey: entry.operationKey,
+              payloadDigest: "server-internal",
+              status: "completed",
+              attemptCount: entry.attemptCount + 1,
+              sourceCommandIds: [],
+              resultEventId: null,
+              resultTaskRevision: null,
+              error: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+            outbox: [{ ...entry, status: "completed" }],
+          });
+        }),
+      )
+      .pipe(
+        Effect.catch((cause) => failure(cause)),
+        Effect.mapError((cause) =>
+          isTaskWorkspaceError(cause)
+            ? cause
+            : new TaskWorkspaceError({
+                message: describeFailure(cause),
+                commandType: "task.internal",
+                taskId: entry.taskId,
+                cause,
+              }),
+        ),
+      );
+  };
+
   const processBootstrap = (
     entry: TaskWorkspaceOutboxEntry,
   ): Effect.Effect<void, TaskWorkspaceError> => {
@@ -4032,8 +4573,13 @@ export const make = Effect.gen(function* () {
   return TaskWorkspaceService.of({
     dispatch,
     processBootstrap,
+    processWorktree,
     proposeStageCompletion,
     settleProposal,
+    settleProviderTurn,
+    validatePlanningRoot,
+    validateProviderTurn,
+    authorizeTaskStage,
     getSnapshot: Effect.sync(() => ({
       sequence,
       tasks: [...taskById.values()].toSorted((left, right) =>
@@ -4069,4 +4615,18 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(TaskWorkspaceService, make);
+const taskWorkspaceLive = Effect.acquireRelease(
+  make.pipe(
+    Effect.tap((service) =>
+      Effect.sync(() => {
+        activeTaskWorkspaceService = service;
+      }),
+    ),
+  ),
+  (service) =>
+    Effect.sync(() => {
+      if (activeTaskWorkspaceService === service) activeTaskWorkspaceService = undefined;
+    }),
+);
+
+export const layer = Layer.effect(TaskWorkspaceService, taskWorkspaceLive);
