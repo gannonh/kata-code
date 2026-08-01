@@ -182,7 +182,7 @@ const snapshotInstanceKey = (provider: ServerProvider): ProviderInstanceId => {
 // its settings changed), a fresh source rides the new PubSub instead
 // of a closed one.
 const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => {
-  const supportsTaskStage = instance.adapter.capabilities.supportsTaskStage;
+  const supportsTaskStage = instance.adapter?.capabilities?.supportsTaskStage;
   const augment = (snapshot: ServerProvider): ServerProvider =>
     supportsTaskStage === undefined ? snapshot : { ...snapshot, supportsTaskStage };
   return {
