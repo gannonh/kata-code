@@ -1283,6 +1283,11 @@ export const make = Effect.gen(function* () {
       ) {
         return;
       }
+      if (occurrence.status === "starting" && reservedThreadId === input.threadId) {
+        // The deterministic bootstrap kickoff is the one provider turn that
+        // precedes the durable Ready transition.
+        return;
+      }
       if (occurrence.status !== "running" && occurrence.status !== "finalizing") {
         return yield* new TaskWorkspaceError({
           message: `Task session for '${input.threadId}' is not accepting turns in state '${occurrence.status}'.`,

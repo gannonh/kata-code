@@ -48,12 +48,16 @@ interface RegistryState {
 }
 
 export interface McpSessionRegistryOptions {
+  /** Preview credential idle lease. */
   readonly idleTimeoutMs?: number;
+  /** Task-stage credential idle lease. */
+  readonly taskStageIdleTimeoutMs?: number;
   readonly maximumLifetimeMs?: number;
   readonly now?: () => number;
 }
 
-const DEFAULT_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1_000;
+const DEFAULT_TASK_STAGE_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1_000;
 const DEFAULT_MAXIMUM_LIFETIME_MS = 8 * 60 * 60 * 1_000;
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -71,6 +75,8 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const state = yield* SynchronizedRef.make<RegistryState>({ records: new Map() });
   const currentTimeMillis = options.now ? Effect.sync(options.now) : Clock.currentTimeMillis;
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const taskStageIdleTimeoutMs =
+    options.taskStageIdleTimeoutMs ?? DEFAULT_TASK_STAGE_IDLE_TIMEOUT_MS;
   const maximumLifetimeMs = options.maximumLifetimeMs ?? DEFAULT_MAXIMUM_LIFETIME_MS;
   const endpoint =
     httpServer.address._tag === "TcpAddress"
@@ -84,10 +90,12 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
 
   const pruneExpired = (records: ReadonlyMap<string, CredentialRecord>, timestamp: number) => {
     const next = new Map(
-      Array.from(records).filter(
-        ([, record]) =>
-          timestamp <= record.scope.expiresAt && timestamp - record.lastUsedAt <= idleTimeoutMs,
-      ),
+      Array.from(records).filter(([, record]) => {
+        const lease = record.scope.capabilities.has("task-stage")
+          ? taskStageIdleTimeoutMs
+          : idleTimeoutMs;
+        return timestamp <= record.scope.expiresAt && timestamp - record.lastUsedAt <= lease;
+      }),
     );
     return next.size === records.size ? records : next;
   };

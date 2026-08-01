@@ -685,6 +685,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           toValidationError("ProviderService.sendTurn", cause.message, cause),
         ),
       );
+      // Rotate the thread-bound MCP lease before every provider turn. The
+      // registry adds task-stage capability only for the current task primary.
+      yield* prepareMcpSession(input.threadId, routed.instanceId);
       yield* Effect.annotateCurrentSpan({
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
