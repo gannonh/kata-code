@@ -329,6 +329,29 @@ const makeStore = Effect.gen(function* () {
       `,
   });
 
+  const findProposal = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      taskId: TaskWorkspaceId,
+      occurrence: Schema.Number,
+      providerTurnId: Schema.String,
+    }),
+    Result: ProposalRow,
+    execute: (request) =>
+      sql`
+        SELECT proposal_id AS "proposalId", environment_id AS "environmentId",
+          task_id AS "taskId", stage, occurrence, session_id AS "sessionId",
+          thread_id AS "threadId", provider_turn_id AS "providerTurnId",
+          payload_digest AS "payloadDigest", summary, markdown, status,
+          terminal_turn_outcome AS "terminalTurnOutcome",
+          committed_artifact_revision_id AS "committedArtifactRevisionId",
+          rejection_reason AS "rejectionReason", created_at AS "createdAt",
+          settled_at AS "settledAt"
+        FROM task_workspace_completion_proposals
+        WHERE task_id = ${request.taskId} AND occurrence = ${request.occurrence}
+          AND provider_turn_id = ${request.providerTurnId}
+      `,
+  });
+
   const readImportMeta = SqlSchema.findOneOption({
     Request: Schema.Struct({ id: Schema.String }),
     Result: ImportMetaRow,
@@ -625,6 +648,33 @@ const makeStore = Effect.gen(function* () {
     readPendingOutbox,
     upsertOutbox,
     upsertProposal,
+    getProposal: (input) =>
+      findProposal(input).pipe(
+        Effect.mapError(toSqlError("TaskWorkspaceStore.getProposal:query")),
+        Effect.map((option) =>
+          Option.map(option, (row) =>
+            Schema.decodeUnknownSync(TaskWorkspaceCompletionProposal)({
+              id: row.proposalId,
+              environmentId: row.environmentId,
+              taskId: row.taskId,
+              stage: row.stage,
+              occurrence: row.occurrence,
+              sessionId: row.sessionId,
+              threadId: row.threadId,
+              providerTurnId: row.providerTurnId,
+              payloadDigest: row.payloadDigest,
+              summary: row.summary,
+              markdown: row.markdown,
+              status: row.status,
+              terminalTurnOutcome: row.terminalTurnOutcome,
+              committedArtifactRevisionId: row.committedArtifactRevisionId,
+              rejectionReason: row.rejectionReason,
+              createdAt: row.createdAt,
+              settledAt: row.settledAt,
+            }),
+          ),
+        ),
+      ),
   } satisfies TaskWorkspaceStoreShape;
 });
 

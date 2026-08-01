@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 
 import { CommandId, ProjectId } from "./baseSchemas.ts";
 import {
+  TaskWorkspace,
   TaskWorkspaceCommand,
   TaskWorkspaceEvent,
   TaskWorkspaceStreamItem,
@@ -472,5 +473,174 @@ it.effect("decodes the Slice 3b preset, stage, and reasoning-stage commands", ()
     }
     assert.strictEqual(budgeted.budget, 1_000);
     assert.strictEqual(budgeted.artifactRefs[0]?.kind, "design");
+  }),
+);
+
+it.effect("decodes first-slice task.create and the new mutation commands", () =>
+  Effect.gen(function* () {
+    const create = yield* decodeCommand({
+      type: "task.create",
+      commandId: "command-v2-create",
+      taskId: "my-task",
+      createdAt: "2026-08-01T17:00:00.000Z",
+      title: "Guided onboarding",
+      projectId: "project-1",
+      baseRef: "main",
+      preset: "guided",
+      approvalPolicy: "before-build",
+      operationKey: "op-create-1",
+      brief: "Add a guided onboarding flow.",
+      source: { kind: "inline", body: "Add a guided onboarding flow." },
+      worktreePolicy: "later",
+      modelSelection: {
+        instanceId: "instance-1",
+        model: "claude-sonnet-4",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+    });
+    if (create.type !== "task.create") return assert.fail("Expected task.create");
+    assert.strictEqual(create.operationKey, "op-create-1");
+    assert.strictEqual(create.brief, "Add a guided onboarding flow.");
+    assert.strictEqual(create.worktreePolicy, "later");
+    assert.strictEqual(create.modelSelection?.model, "claude-sonnet-4");
+
+    const requestChanges = yield* decodeCommand({
+      type: "task.stage.request-changes",
+      commandId: "command-changes",
+      taskId: "my-task",
+      createdAt: "2026-08-01T17:00:00.000Z",
+      expectedTaskRevision: 9,
+      operationKey: "op-changes-1",
+      feedback: "The plan misses rollback handling.",
+    });
+    if (requestChanges.type !== "task.stage.request-changes") {
+      return assert.fail("Expected task.stage.request-changes");
+    }
+    assert.strictEqual(requestChanges.feedback, "The plan misses rollback handling.");
+
+    const policySet = yield* decodeCommand({
+      type: "task.worktree.policy.set",
+      commandId: "command-policy",
+      taskId: "my-task",
+      createdAt: "2026-08-01T17:00:00.000Z",
+      expectedTaskRevision: 10,
+      operationKey: "op-policy-1",
+      policy: "now",
+    });
+    if (policySet.type !== "task.worktree.policy.set") {
+      return assert.fail("Expected task.worktree.policy.set");
+    }
+    assert.strictEqual(policySet.policy, "now");
+
+    const recover = yield* decodeCommand({
+      type: "task.session.recover-primary",
+      commandId: "command-recover",
+      taskId: "my-task",
+      createdAt: "2026-08-01T17:00:00.000Z",
+      expectedTaskRevision: 11,
+      operationKey: "op-recover-1",
+      selection: { kind: "existing", sessionId: "session-3" },
+    });
+    if (recover.type !== "task.session.recover-primary") {
+      return assert.fail("Expected task.session.recover-primary");
+    }
+    assert.deepStrictEqual(recover.selection, { kind: "existing", sessionId: "session-3" });
+
+    const repair = yield* decodeCommand({
+      type: "task.environment.repair",
+      commandId: "command-repair",
+      taskId: "my-task",
+      createdAt: "2026-08-01T17:00:00.000Z",
+      expectedTaskRevision: 12,
+      operationKey: "op-repair-1",
+      projectId: "project-2",
+      workspaceRoot: "/repo/other",
+      baseRef: "main",
+    });
+    assert.strictEqual(repair.type, "task.environment.repair");
+
+    const retry = yield* decodeCommand({
+      type: "task.operation.retry",
+      commandId: "command-retry",
+      taskId: "my-task",
+      createdAt: "2026-08-01T17:00:00.000Z",
+      expectedTaskRevision: 13,
+      targetOperationKey: "op-bootstrap-1",
+    });
+    assert.strictEqual(retry.type, "task.operation.retry");
+  }),
+);
+
+it.effect("decodes the enriched dispatch result", () =>
+  Effect.gen(function* () {
+    const result = yield* Schema.decodeUnknownEffect(
+      Schema.Struct({
+        sequence: Schema.Number,
+        task: TaskWorkspace,
+        operation: Schema.Struct({
+          key: Schema.String,
+          status: Schema.String,
+          attempt: Schema.Number,
+        }),
+        taskRoute: Schema.Struct({ environmentId: Schema.String, taskId: Schema.String }),
+      }),
+    )({
+      sequence: 3,
+      task: slice1Task({}),
+      operation: { key: "op-create-1", status: "completed", attempt: 1 },
+      taskRoute: { environmentId: "environment-local", taskId: "task-1" },
+    });
+    assert.strictEqual(result.operation.status, "completed");
+    assert.strictEqual(result.taskRoute.taskId, "task-1");
+  }),
+);
+
+it.effect("decodes durable receipt, proposal, and outbox records", () =>
+  Effect.gen(function* () {
+    const decodeReceipt = Schema.decodeUnknownEffect(
+      Schema.Struct({
+        environmentId: Schema.String,
+        commandId: Schema.String,
+        taskId: Schema.String,
+        commandType: Schema.String,
+        commandDigest: Schema.String,
+        operationKey: Schema.NullOr(Schema.String),
+        status: Schema.String,
+        resultEventId: Schema.NullOr(Schema.String),
+        error: Schema.NullOr(Schema.String),
+        createdAt: Schema.String,
+      }),
+    );
+    const receipt = yield* decodeReceipt({
+      environmentId: "environment-local",
+      commandId: "command-1",
+      taskId: "task-1",
+      commandType: "task.create",
+      commandDigest: "sha256-canonical",
+      operationKey: "op-create-1",
+      status: "accepted",
+      resultEventId: "event-1",
+      error: null,
+      createdAt: "2026-08-01T17:00:00.000Z",
+    });
+    assert.strictEqual(receipt.status, "accepted");
+
+    const decodeProposal = Schema.decodeUnknownEffect(
+      Schema.Struct({
+        id: Schema.String,
+        taskId: Schema.String,
+        occurrence: Schema.Number,
+        providerTurnId: Schema.String,
+        status: Schema.String,
+      }),
+    );
+    const proposal = yield* decodeProposal({
+      id: "proposal-1",
+      taskId: "task-1",
+      occurrence: 0,
+      providerTurnId: "turn-1",
+      status: "proposed",
+    });
+    assert.strictEqual(proposal.status, "proposed");
   }),
 );

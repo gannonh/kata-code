@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - integration test creates a real temporary Git repository.
+// @effect-diagnostics preferSchemaOverJson:off - legacy NDJSON fixture is written with JSON.stringify to mirror the historical on-disk format.
 import { execFile } from "node:child_process";
 import * as NodeFs from "node:fs/promises";
 import * as NodeOs from "node:os";
@@ -10,6 +11,7 @@ import {
   CommandId,
   EnvironmentId,
   ProjectId,
+  ProviderInstanceId,
   TaskWorkspaceId,
   ThreadId,
   type TaskWorkspaceCommand,
@@ -126,6 +128,21 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
       Effect.exit(Effect.provide(effect, context)),
     dispose: Effect.provide(Scope.close(scope, Exit.void), context),
   };
+});
+
+const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function* (prefix: string) {
+  const root = yield* Effect.tryPromise(() =>
+    NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), prefix)),
+  );
+  yield* Effect.addFinalizer(() =>
+    Effect.tryPromise(() => NodeFs.rm(root, { recursive: true, force: true })).pipe(Effect.orDie),
+  );
+  const repoRoot = NodePath.join(root, "repo");
+  const baseDir = NodePath.join(root, "state");
+  yield* Effect.tryPromise(() => NodeFs.mkdir(repoRoot, { recursive: true }));
+  const runtime = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+  yield* Effect.addFinalizer(() => runtime.dispose);
+  return { runtime, repoRoot, baseDir };
 });
 
 describe("TaskWorkspaceService", () => {
@@ -399,23 +416,6 @@ describe("TaskWorkspaceService", () => {
       }).pipe(Effect.scoped),
     30_000,
   );
-
-  const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function* (
-    prefix: string,
-  ) {
-    const root = yield* Effect.tryPromise(() =>
-      NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), prefix)),
-    );
-    yield* Effect.addFinalizer(() =>
-      Effect.tryPromise(() => NodeFs.rm(root, { recursive: true, force: true })).pipe(Effect.orDie),
-    );
-    const repoRoot = NodePath.join(root, "repo");
-    const baseDir = NodePath.join(root, "state");
-    yield* Effect.tryPromise(() => NodeFs.mkdir(repoRoot, { recursive: true }));
-    const runtime = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
-    yield* Effect.addFinalizer(() => runtime.dispose);
-    return { runtime, repoRoot, baseDir };
-  });
 
   const slice2TaskId = TaskWorkspaceId.make("slice-2-integration");
 
@@ -2439,6 +2439,283 @@ describe("TaskWorkspaceService", () => {
 
       const exit = yield* Effect.exit(makeRuntime(repoRoot, baseDir, { value: 0 }));
       expect(exit._tag).toBe("Failure");
+    }),
+  );
+});
+
+describe("TaskWorkspaceService first-slice workflow", () => {
+  const guidedCreate = (overrides: Record<string, unknown> = {}) =>
+    command({
+      type: "task.create",
+      commandId: CommandId.make("wf-create-1"),
+      taskId: TaskWorkspaceId.make("guided-task"),
+      createdAt: now(1),
+      title: "Guided onboarding",
+      projectId,
+      baseRef: "main",
+      preset: "guided",
+      approvalPolicy: "before-build",
+      operationKey: "op-wf-create-1",
+      brief: "Add a guided onboarding flow.",
+      source: { kind: "inline", body: "Add a guided onboarding flow." },
+      worktreePolicy: "later",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("instance-1"),
+        model: "claude-sonnet-4",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+      ...overrides,
+    });
+
+  it.effect("creates a first-slice task with server-stamped identity", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot } = yield* setupRuntime("kata-task-slice5-create-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+      const result = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+
+      expect(result.task.environmentId).toBe(EnvironmentId.make("environment-local"));
+      expect(result.task.taskRevision).toBe(1);
+      expect(result.task.intake).toEqual({
+        brief: "Add a guided onboarding flow.",
+        source: { kind: "inline", body: "Add a guided onboarding flow." },
+      });
+      expect(result.task.preferences).toEqual({
+        worktreePolicy: "later",
+        modelSelection: {
+          instanceId: "instance-1",
+          model: "claude-sonnet-4",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
+        executionProfile: "planning",
+      });
+      expect(result.task.versions.taskContract).toBe("task-workspace@0.3.0");
+      expect(result.task.versions.artifactContract).toBe("task-artifact@0.3.0");
+      expect(result.task.occurrences[0]).toMatchObject({
+        stage: "questions",
+        ordinal: 0,
+        status: "starting",
+      });
+      expect(result.task.workspace.repositories[0]?.provisioningStatus).toBe("not-requested");
+      expect(result.task.workspace.repositories[0]?.baseCommitSha).toBeNull();
+      expect(result.taskRoute).toEqual({
+        environmentId: "environment-local",
+        taskId: "guided-task",
+      });
+      expect(result.operation).toEqual({
+        key: "op-wf-create-1",
+        status: "completed",
+        attempt: 1,
+        error: null,
+      });
+      expect(repoRoot).toBeTruthy();
+    }),
+  );
+
+  it.effect("replays one semantic operation across command ids without duplicate state", () =>
+    Effect.gen(function* () {
+      const { runtime } = yield* setupRuntime("kata-task-slice5-replay-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+      const first = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      const replayed = yield* runtime.runPromise(
+        service.dispatch(guidedCreate({ commandId: CommandId.make("wf-create-2") })),
+      );
+      expect(replayed.task.id).toBe(first.task.id);
+      expect(replayed.task.taskRevision).toBe(1);
+      expect(replayed.operation.status).toBe("completed");
+      expect(replayed.operation.attempt).toBe(1);
+
+      // The same operation key with a different payload is a typed conflict.
+      const conflict = yield* runtime.runPromise(
+        service
+          .dispatch(
+            guidedCreate({
+              commandId: CommandId.make("wf-create-3"),
+              operationKey: "op-wf-create-1",
+              brief: "A different brief.",
+              source: { kind: "inline", body: "A different brief." },
+            }),
+          )
+          .pipe(Effect.flip),
+      );
+      expect(conflict).toMatchObject({
+        _tag: "TaskWorkspaceError",
+        message: "Operation 'op-wf-create-1' was already used with a different payload.",
+      });
+    }),
+  );
+
+  it.effect("rejects a command id reused with a different payload", () =>
+    Effect.gen(function* () {
+      const { runtime } = yield* setupRuntime("kata-task-slice5-command-conflict-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+      yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      const conflict = yield* runtime.runPromise(
+        service
+          .dispatch(
+            guidedCreate({
+              commandId: CommandId.make("wf-create-1"),
+              brief: "Changed brief.",
+              source: { kind: "inline", body: "Changed brief." },
+            }),
+          )
+          .pipe(Effect.flip),
+      );
+      expect(conflict).toMatchObject({
+        _tag: "TaskWorkspaceError",
+        message: "Command 'wf-create-1' was already used with a different payload.",
+      });
+    }),
+  );
+
+  it.effect("rejects invalid slugs, oversized briefs, and mismatched sources before creation", () =>
+    Effect.gen(function* () {
+      const { runtime } = yield* setupRuntime("kata-task-slice5-validation-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+      const invalidSlug = yield* runtime.runPromiseExit(
+        service.dispatch(guidedCreate({ taskId: TaskWorkspaceId.make("Invalid-Slug!") })),
+      );
+      expect(invalidSlug._tag).toBe("Failure");
+
+      const upperSlug = yield* runtime.runPromiseExit(
+        service.dispatch(guidedCreate({ taskId: TaskWorkspaceId.make("myTask") })),
+      );
+      expect(upperSlug._tag).toBe("Failure");
+
+      const oversized = yield* runtime.runPromiseExit(
+        service.dispatch(
+          guidedCreate({
+            brief: "x".repeat(100_001),
+            source: { kind: "inline", body: "x".repeat(100_001) },
+          }),
+        ),
+      );
+      expect(oversized._tag).toBe("Failure");
+
+      const mismatched = yield* runtime.runPromiseExit(
+        service.dispatch(
+          guidedCreate({ brief: "Real brief.", source: { kind: "inline", body: "Other body." } }),
+        ),
+      );
+      expect(mismatched._tag).toBe("Failure");
+
+      const withoutModel = guidedCreate({
+        commandId: CommandId.make("wf-create-no-model"),
+        operationKey: "op-wf-create-2",
+      });
+      const { modelSelection: _ignored, ...rest } = withoutModel;
+      void _ignored;
+      const missingModel = yield* runtime.runPromiseExit(
+        service.dispatch(rest as TaskWorkspaceCommand),
+      );
+      expect(missingModel._tag).toBe("Failure");
+
+      // A rejected create gets a terminal rejected receipt; replaying it returns the same error.
+      const replay = yield* runtime.runPromiseExit(
+        service.dispatch(guidedCreate({ taskId: TaskWorkspaceId.make("Invalid-Slug!") })),
+      );
+      expect(replay._tag).toBe("Failure");
+    }),
+  );
+
+  it.effect("imports a legacy NDJSON log transactionally and never re-imports it", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.tryPromise(() =>
+        NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-task-slice5-import-")),
+      );
+      yield* Effect.addFinalizer(() =>
+        Effect.tryPromise(() => NodeFs.rm(root, { recursive: true, force: true })).pipe(
+          Effect.orDie,
+        ),
+      );
+      const repoRoot = NodePath.join(root, "repo");
+      const baseDir = NodePath.join(root, "state");
+      yield* Effect.tryPromise(() => NodeFs.mkdir(repoRoot, { recursive: true }));
+      const stateDir = NodePath.join(baseDir, "userdata");
+      yield* Effect.tryPromise(() => NodeFs.mkdir(stateDir, { recursive: true }));
+
+      const legacyEvent = {
+        sequence: 1,
+        eventId: "legacy-event-1",
+        commandId: "legacy-command-1",
+        taskId: "legacy-imported-task",
+        type: "task.create",
+        occurredAt: "2026-07-28T17:00:00.000Z",
+        task: {
+          id: "legacy-imported-task",
+          title: "Legacy imported",
+          versions: {
+            taskContract: "task-workspace@0.1.0",
+            artifactContract: "task-artifact@0.1.0",
+            workflowDefinition: "standard@0.1.0",
+            prompt: "task-workspace-slice-1@0.1.0",
+          },
+          workspace: {
+            repositories: [
+              {
+                id: "primary",
+                projectId: "project-1",
+                workspaceRoot: repoRoot,
+                baseRef: "main",
+                branch: null,
+                worktreePath: null,
+                provisioningStatus: "pending",
+              },
+            ],
+          },
+          workflowRuns: [
+            {
+              id: "standard-run-1",
+              preset: "standard",
+              definitionVersion: "standard@0.1.0",
+              currentStage: "questions",
+              approvalPolicy: "before-build",
+              createdAt: "2026-07-28T17:00:00.000Z",
+              updatedAt: "2026-07-28T17:00:00.000Z",
+            },
+          ],
+          sessions: [],
+          artifacts: [],
+          comments: [],
+          build: { phases: [], resultingCommitSha: null },
+          verification: { criteria: [], results: [], signedOffAt: null },
+          sourceLinks: [],
+          delivery: { state: "unavailable" },
+          createdAt: "2026-07-28T17:00:00.000Z",
+          updatedAt: "2026-07-28T17:00:00.000Z",
+        },
+      };
+      const legacyFile = NodePath.join(stateDir, "task-workspace-events.ndjson");
+      yield* Effect.tryPromise(() =>
+        NodeFs.writeFile(legacyFile, `${JSON.stringify(legacyEvent)}\n`, "utf8"),
+      );
+
+      const first = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+      yield* Effect.addFinalizer(() => first.dispose);
+      const firstService = yield* first.runPromise(Effect.service(TaskWorkspaceService));
+      const imported = yield* first.runPromise(
+        firstService.getTask(TaskWorkspaceId.make("legacy-imported-task")),
+      );
+      expect(imported).not.toBeNull();
+      expect(imported?.environmentId).toBe(EnvironmentId.make("environment-local"));
+      expect(imported?.intake.brief).toBe("Legacy imported");
+      expect(imported?.preferences.worktreePolicy).toBe("later");
+      expect(imported?.taskRevision).toBe(1);
+
+      // The legacy file is retained read-only; a restart must not re-import it.
+      yield* first.dispose;
+      const restarted = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+      yield* Effect.addFinalizer(() => restarted.dispose);
+      const restartedService = yield* restarted.runPromise(Effect.service(TaskWorkspaceService));
+      const again = yield* restarted.runPromise(
+        restartedService.getTask(TaskWorkspaceId.make("legacy-imported-task")),
+      );
+      expect(again?.taskRevision).toBe(1);
+      expect(again?.occurrences).toHaveLength(0);
+      expect(again?.gateHistory).toHaveLength(0);
     }),
   );
 });

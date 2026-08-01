@@ -86,6 +86,11 @@ export interface TaskWorkspaceStoreShape {
   readonly upsertProposal: (
     proposal: TaskWorkspaceCompletionProposal,
   ) => Effect.Effect<void, TaskWorkspaceStoreError>;
+  readonly getProposal: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly occurrence: number;
+    readonly providerTurnId: string;
+  }) => Effect.Effect<Option.Option<TaskWorkspaceCompletionProposal>, TaskWorkspaceStoreError>;
 }
 
 export class TaskWorkspaceStore extends Context.Service<
