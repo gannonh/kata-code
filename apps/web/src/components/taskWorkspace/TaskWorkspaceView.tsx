@@ -20,7 +20,12 @@ import { useShallow } from "zustand/react/shallow";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
-import { currentTaskStage, useTaskWorkspaceStore } from "../../taskWorkspace/taskWorkspaceStore";
+import {
+  currentTaskStage,
+  selectTaskRefsById,
+  taskWorkspaceKey,
+  useTaskWorkspaceStore,
+} from "../../taskWorkspace/taskWorkspaceStore";
 import { useTaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -894,7 +899,10 @@ function TaskWorkspaceViewContent({
   taskId: string;
   currentUser: TaskWorkspaceCommentAuthor;
 }) {
-  const task = useTaskWorkspaceStore((state) => state.taskById[taskId] ?? null);
+  const task = useTaskWorkspaceStore((state) => {
+    const ref = selectTaskRefsById(state, taskId)[0];
+    return ref ? (state.taskByRef[taskWorkspaceKey(ref.environmentId, ref.taskId)] ?? null) : null;
+  });
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const [questionsMarkdown, setQuestionsMarkdown] = useState("");

@@ -8,7 +8,9 @@ import { SidebarProvider } from "../ui/sidebar";
 import { TaskWorkspaceNewView } from "./TaskWorkspaceNewView";
 
 const mocks = vi.hoisted(() => ({
-  dispatchCommand: vi.fn<(command: unknown) => Promise<void>>(async () => undefined),
+  dispatchCommand: vi.fn<(command: unknown) => Promise<{ taskRoute: unknown }>>(async () => ({
+    taskRoute: { environmentId: "environment-local", taskId: "guided-onboarding" },
+  })),
   navigate: vi.fn(async () => undefined),
 }));
 
@@ -38,6 +40,43 @@ vi.mock("../../store", () => ({
   ],
 }));
 
+vi.mock("../../rpc/serverState", () => ({
+  useServerProviders: () => [
+    {
+      instanceId: "instance-1",
+      driver: "codex",
+      displayName: "Codex",
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready",
+      availability: "available",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-08-01T00:00:00.000Z",
+      models: [
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          isCustom: false,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                type: "select",
+                label: "Reasoning effort",
+                options: [
+                  { id: "low", label: "Low" },
+                  { id: "high", label: "High" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+  ],
+}));
+
 beforeEach(() => {
   mocks.dispatchCommand.mockClear();
   mocks.navigate.mockClear();
@@ -52,17 +91,15 @@ async function renderNewView() {
 }
 
 describe("TaskWorkspaceNewView", () => {
-  // TW-S3-AC01: all three presets, each with a description and its resolved
-  // definition version.
-  it("offers Standard, Guided, and Freeform with descriptions and versions", async () => {
+  it("offers Standard, Guided, and Freeform with capability labels", async () => {
     await renderNewView();
 
     await expect.element(page.getByTestId("task-workflow-picker")).toBeVisible();
 
     for (const [preset, label, version] of [
-      ["standard", "Standard", "standard@0.1.0"],
-      ["guided", "Guided", "guided@0.1.0"],
-      ["freeform", "Freeform", "freeform@0.1.0"],
+      ["standard", "Standard", "standard@0.2.0"],
+      ["guided", "Guided", "guided@0.2.0"],
+      ["freeform", "Freeform", "freeform@0.2.0"],
     ] as const) {
       const option = page.getByTestId(`task-workflow-option-${preset}`);
       await expect.element(option).toBeVisible();
@@ -70,59 +107,90 @@ describe("TaskWorkspaceNewView", () => {
       await expect.element(option).toHaveTextContent(version);
     }
 
-    // Descriptions distinguish the presets rather than just naming them.
+    // Guided is the creation default and labeled available through approved Plan.
     await expect
       .element(page.getByTestId("task-workflow-option-guided"))
-      .toHaveTextContent(/Research and Design/);
+      .toHaveTextContent("Available through approved Plan");
+    // Standard and Freeform are labeled preview shells.
+    await expect
+      .element(page.getByTestId("task-workflow-option-standard"))
+      .toHaveTextContent("Preview shell");
     await expect
       .element(page.getByTestId("task-workflow-option-freeform"))
-      .toHaveTextContent(/No automatic rail/);
+      .toHaveTextContent("Preview shell");
 
-    // Standard is the default, and its resolved version is displayed.
     await expect
       .element(page.getByTestId("task-resolved-definition"))
-      .toHaveTextContent("Standard · standard@0.1.0");
+      .toHaveTextContent("Guided · guided@0.2.0");
   });
 
-  it("shows the resolved definition for the selected preset", async () => {
+  it("shows the resolved definition and capability for the selected preset", async () => {
     await renderNewView();
 
-    await page.getByTestId("task-workflow-option-guided").click();
+    await page.getByTestId("task-workflow-option-standard").click();
     await expect
       .element(page.getByTestId("task-resolved-definition"))
-      .toHaveTextContent("Guided · guided@0.1.0");
+      .toHaveTextContent("Standard · standard@0.2.0");
 
     await page.getByTestId("task-workflow-option-freeform").click();
     await expect
       .element(page.getByTestId("task-resolved-definition"))
-      .toHaveTextContent("Freeform · freeform@0.1.0");
+      .toHaveTextContent("Freeform · freeform@0.2.0");
   });
 
-  it("creates the task with the chosen preset rather than a hardcoded Standard", async () => {
+  it("creates a first-slice task and navigates to the canonical route", async () => {
     await renderNewView();
 
-    await page.getByTestId("task-workflow-option-guided").click();
+    await page.getByTestId("task-brief-input").fill("Add a guided onboarding flow.");
     await page.getByTestId("task-create-submit").click();
 
     expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
     expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
       type: "task.create",
+      taskId: "guided-onboarding",
       preset: "guided",
+      worktreePolicy: "later",
       projectId: "project-1",
-      workspaceRoot: "/repo/kata-code",
-      approvalPolicy: "before-build",
+      brief: "Add a guided onboarding flow.",
+      source: { kind: "inline", body: "Add a guided onboarding flow." },
+      modelSelection: {
+        instanceId: "instance-1",
+        model: "gpt-5.4",
+        options: [{ id: "reasoningEffort", value: "low" }],
+      },
     });
-    expect(mocks.navigate).toHaveBeenCalledTimes(1);
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/tasks/$environmentId/$taskId",
+      params: { environmentId: "environment-local", taskId: "guided-onboarding" },
+    });
   });
 
-  it("still creates a Standard task when the default is left alone", async () => {
+  it("blocks creation while the brief is empty or the slug is invalid", async () => {
     await renderNewView();
 
-    await page.getByTestId("task-create-submit").click();
+    // Empty brief keeps the button disabled.
+    await expect.element(page.getByTestId("task-create-submit")).toBeDisabled();
 
-    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
-      type: "task.create",
-      preset: "standard",
-    });
+    // An invalid slug keeps it disabled even with a brief present.
+    await page.getByTestId("task-brief-input").fill("A brief.");
+    await page.getByTestId("task-slug-input").fill("Invalid Slug!");
+    await expect.element(page.getByTestId("task-create-submit")).toBeDisabled();
+    expect(mocks.dispatchCommand).not.toHaveBeenCalled();
+
+    // A valid slug enables creation.
+    await page.getByTestId("task-slug-input").fill("valid-slug");
+    await page.getByTestId("task-create-submit").click();
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers worktree timing options with planning-only description for Never", async () => {
+    await renderNewView();
+
+    for (const policy of ["now", "later", "never"] as const) {
+      await expect.element(page.getByTestId(`task-worktree-option-${policy}`)).toBeVisible();
+    }
+    await expect
+      .element(page.getByTestId("task-worktree-option-never"))
+      .toHaveTextContent(/planning-only/i);
   });
 });

@@ -1,8 +1,12 @@
 import type { TaskWorkspaceCommand } from "@kata-sh/code-contracts";
 import { useCallback, useState } from "react";
 
-import { getPrimaryEnvironmentConnection } from "../environments/runtime";
+import {
+  getPrimaryEnvironmentConnection,
+  requireEnvironmentConnection,
+} from "../environments/runtime";
 import { newCommandId } from "../lib/utils";
+import { selectTaskRefsById, useTaskWorkspaceStore } from "./taskWorkspaceStore";
 
 export type TaskCommandBase<T extends TaskWorkspaceCommand["type"]> = {
   readonly type: T;
@@ -24,6 +28,10 @@ export interface TaskWorkspaceCommands {
  * Shared task-workspace command runner. Centralizes dispatch, pending-action
  * tracking, and error surfacing so the workspace view and each panel share one
  * consistent error banner instead of duplicating request plumbing.
+ *
+ * Commands are dispatched through the task's owning environment connection:
+ * the client never supplies an authoritative environment id, so the connection
+ * is resolved from the task's environment partition in the store.
  */
 export function useTaskWorkspaceCommands(taskId: string): TaskWorkspaceCommands {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -33,7 +41,13 @@ export function useTaskWorkspaceCommands(taskId: string): TaskWorkspaceCommands 
     setPendingAction(action);
     setError(null);
     try {
-      await getPrimaryEnvironmentConnection().client.taskWorkspaces.dispatchCommand(command);
+      const refs = selectTaskRefsById(useTaskWorkspaceStore.getState(), command.taskId);
+      const environmentId = refs[0]?.environmentId;
+      const connection =
+        environmentId !== undefined
+          ? requireEnvironmentConnection(environmentId)
+          : getPrimaryEnvironmentConnection();
+      await connection.client.taskWorkspaces.dispatchCommand(command);
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Task command failed.");

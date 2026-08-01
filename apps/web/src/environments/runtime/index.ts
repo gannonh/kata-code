@@ -31,4 +31,6 @@ export {
   startEnvironmentConnectionService,
   subscribeEnvironmentConnections,
   subscribeProviderInvalidations,
+  listEnvironmentConnections,
 } from "./service";
+export type { EnvironmentConnection } from "@kata-sh/code-client-runtime";

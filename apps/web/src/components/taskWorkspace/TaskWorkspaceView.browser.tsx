@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { ProjectId, type TaskWorkspace, ThreadId } from "@kata-sh/code-contracts";
+import { EnvironmentId, ProjectId, type TaskWorkspace, ThreadId } from "@kata-sh/code-contracts";
 import { page } from "vite-plus/test/browser";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -35,6 +35,13 @@ vi.mock("../../environments/runtime", () => ({
       },
     },
   }),
+  requireEnvironmentConnection: () => ({
+    client: {
+      taskWorkspaces: {
+        dispatchCommand: mocks.dispatchCommand,
+      },
+    },
+  }),
 }));
 
 vi.mock("../../store", () => ({
@@ -44,7 +51,7 @@ vi.mock("../../store", () => ({
 
 const baseTask: TaskWorkspace = {
   id: "task-browser",
-  environmentId: null,
+  environmentId: EnvironmentId.make("environment-local"),
   title: "Browser task workspace",
   versions: {
     taskContract: "task-workspace@0.1.0",
@@ -141,7 +148,7 @@ const baseTask: TaskWorkspace = {
 };
 
 async function renderTask(task: TaskWorkspace) {
-  useTaskWorkspaceStore.getState().applyStreamItem({
+  useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
     kind: "snapshot",
     snapshot: { sequence: 1, tasks: [task] },
   });
