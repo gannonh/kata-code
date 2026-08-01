@@ -1,5 +1,15 @@
 # Specs log
 
+## 2026-08-01 (Task workflow UX reset draft)
+
+Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+following maintainer review of the current task screen. The proposed product-first slice keeps
+Kata-owned **Standard**, **Guided**, and **Freeform** templates, uses an inline brief for the
+first slice, automatically manages stage conversations and artifact handoffs, pauses Guided
+before Plan approval, and hides session/context-manifest plumbing from the default UI. The
+existing Slice 4 Build infrastructure and PR #63 are paused as implementation substrate pending
+this UX reset's review and approval.
+
 ## 2026-07-30 (Task workspaces Slice 4 implementation verified)
 
 - Completed the approved Slice 4 implementation on [PR #63](https://github.com/gannonh/kata-code/pull/63).

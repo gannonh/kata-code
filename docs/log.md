@@ -1,5 +1,14 @@
 # OKF bundle log
 
+## 2026-08-01 (Task workflow UX reset draft)
+
+Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+to re-baseline task onboarding around Kata-owned Standard, Guided, and Freeform flows. The
+first Guided-to-Plan slice uses an inline brief, automatic stage sessions and artifact handoffs,
+and a Plan approval gate while keeping context-manifest and session-linking mechanics internal.
+Updated the [specs roadmap](/specs/index.md); Slice 4 product integration and PR #63 are paused
+pending review of this reset.
+
 ## 2026-07-31 (Task workspaces Slice 4 review hardening)
 
 Addressed the actionable PR #63 review findings: Build checks now use a server-owned allowlist;
