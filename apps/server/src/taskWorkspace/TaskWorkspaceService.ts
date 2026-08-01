@@ -40,6 +40,7 @@ import {
   type TaskWorkspaceStageOccurrence,
   type TaskWorkspaceStreamItem,
   MessageId,
+  ProviderInstanceId,
   ThreadId,
   type EnvironmentId,
 } from "@kata-sh/code-contracts";
@@ -396,29 +397,27 @@ function tryAdoptExistingWorktree(
         { encoding: "utf8" },
       );
       if (branch.stdout.trim() !== expectedRefName) return null;
-      if (expectedCommitSha !== undefined) {
-        const head = await execFileAsync("git", ["-C", worktreePath, "rev-parse", "HEAD"], {
-          encoding: "utf8",
-        });
-        if (head.stdout.trim() !== expectedCommitSha) return null;
-        if (sourceWorkspaceRoot !== undefined) {
-          const registered = await execFileAsync(
-            "git",
-            ["-C", sourceWorkspaceRoot, "worktree", "list", "--porcelain"],
-            { encoding: "utf8" },
-          );
-          const expectedPath = NodePath.resolve(worktreePath);
-          const isRegistered = registered.stdout.split("\n\n").some((entry) => {
-            const lines = entry.split("\n");
-            return (
-              lines.some((line) => line === `worktree ${expectedPath}`) &&
-              lines.some((line) => line === `HEAD ${expectedCommitSha}`) &&
-              lines.some((line) => line === `branch refs/heads/${expectedRefName}`)
-            );
-          });
-          if (!isRegistered) return null;
-        }
-      }
+      const head = await execFileAsync("git", ["-C", worktreePath, "rev-parse", "HEAD"], {
+        encoding: "utf8",
+      });
+      const actualCommitSha = head.stdout.trim();
+      if (expectedCommitSha !== undefined && actualCommitSha !== expectedCommitSha) return null;
+      if (sourceWorkspaceRoot === undefined) return null;
+      const registered = await execFileAsync(
+        "git",
+        ["-C", sourceWorkspaceRoot, "worktree", "list", "--porcelain"],
+        { encoding: "utf8" },
+      );
+      const expectedPath = NodePath.resolve(worktreePath);
+      const isRegistered = registered.stdout.split("\n\n").some((entry) => {
+        const lines = entry.split("\n");
+        return (
+          lines.some((line) => line === `worktree ${expectedPath}`) &&
+          lines.some((line) => line === `HEAD ${actualCommitSha}`) &&
+          lines.some((line) => line === `branch refs/heads/${expectedRefName}`)
+        );
+      });
+      if (!isRegistered) return null;
       const status = await execFileAsync("git", ["-C", worktreePath, "status", "--porcelain=v2"], {
         encoding: "utf8",
       });
@@ -1274,7 +1273,8 @@ export const make = Effect.gen(function* () {
       const task = [...taskById.values()].find(
         (candidate) =>
           candidate.environmentId === input.environmentId &&
-          candidate.preferences.modelSelection?.instanceId === input.providerInstanceId,
+          (candidate.bootstrap?.reservedThreadId === input.threadId ||
+            candidate.occurrences.some((occurrence) => occurrence.threadId === input.threadId)),
       );
       if (!task) {
         return yield* new TaskWorkspaceError({
@@ -1284,6 +1284,36 @@ export const make = Effect.gen(function* () {
         });
       }
       const run = currentRun(task);
+      if (run.preset !== "guided") {
+        return yield* new TaskWorkspaceError({
+          message: `Task '${task.id}' does not use the Guided workflow.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      if (task.preferences.modelSelection?.instanceId !== input.providerInstanceId) {
+        return yield* new TaskWorkspaceError({
+          message: `Provider instance '${input.providerInstanceId}' is not authorized for task '${task.id}'.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      if (Option.isSome(providerInstanceRegistry)) {
+        const providerInstance = yield* providerInstanceRegistry.value.getInstance(
+          ProviderInstanceId.make(input.providerInstanceId),
+        );
+        if (
+          !providerInstance ||
+          !providerInstance.enabled ||
+          providerInstance.adapter.capabilities.supportsTaskStage !== true
+        ) {
+          return yield* new TaskWorkspaceError({
+            message: `Provider instance '${input.providerInstanceId}' is not task-stage capable.`,
+            commandType: "task.internal",
+            taskId: task.id,
+          });
+        }
+      }
       const occurrence = task.occurrences
         .filter((candidate) => candidate.stage === run.currentStage)
         .toSorted((left, right) => right.ordinal - left.ordinal)[0];
@@ -3799,16 +3829,20 @@ export const make = Effect.gen(function* () {
         const started = yield* orchestrationEngine.readEvents(fromSequenceExclusive).pipe(
           Stream.filter(
             (event) =>
-              event.type === "thread.session-set" &&
-              event.payload.threadId === threadId &&
-              event.payload.session.status === "running" &&
-              event.payload.session.activeTurnId !== null,
+              (event.type === "thread.session-set" &&
+                event.payload.threadId === threadId &&
+                event.payload.session.status === "running" &&
+                event.payload.session.activeTurnId !== null) ||
+              (event.type === "thread.activity-appended" &&
+                event.payload.threadId === threadId &&
+                event.payload.activity.kind === "provider-turn-terminal" &&
+                event.payload.activity.turnId !== null),
           ),
           Stream.runHead,
           Effect.mapError(
             (cause) =>
               new TaskWorkspaceError({
-                message: "Failed to observe the provider kickoff turn.",
+                message: "Failed to observe the provider kickoff turn readiness.",
                 commandType: "task.internal",
                 taskId,
                 cause,
@@ -3819,7 +3853,7 @@ export const make = Effect.gen(function* () {
         yield* Effect.sleep("50 millis");
       }
       return yield* new TaskWorkspaceError({
-        message: "The provider kickoff turn did not reach a running state.",
+        message: "The provider kickoff turn did not start or reach a terminal state.",
         commandType: "task.internal",
         taskId,
       });

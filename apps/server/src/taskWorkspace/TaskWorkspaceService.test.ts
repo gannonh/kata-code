@@ -117,11 +117,14 @@ function makeGitWorkflow(baseDir: string, createCount: { value: number }): GitWo
 
 const dispatchedOrchestration: unknown[] = [];
 let failNextOrchestrationDispatch = false;
+type BootstrapObservationMode = "running" | "terminal";
+type BootstrapObservation = { mode: BootstrapObservationMode };
 
 const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* (
   repoRoot: string,
   baseDir: string,
   createCount: { value: number },
+  observation: BootstrapObservation = { mode: "running" },
 ) {
   const environmentId = EnvironmentId.make("environment-local");
   const environmentLayer = Layer.succeed(ServerEnvironment, {
@@ -170,15 +173,30 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
         .find((entry) => (entry as { type?: string }).type === "thread.turn.start") as
         | { readonly threadId: string }
         | undefined;
-      return turnStart
-        ? Stream.succeed({
-            type: "thread.session-set",
+      if (!turnStart) return Stream.empty;
+      const running = {
+        type: "thread.session-set",
+        payload: {
+          threadId: turnStart.threadId,
+          session: { status: "running", activeTurnId: "bootstrap-turn" },
+        },
+      } as never;
+      if (observation.mode === "terminal") {
+        return Stream.fromIterable([
+          running,
+          {
+            type: "thread.activity-appended",
             payload: {
               threadId: turnStart.threadId,
-              session: { status: "running", activeTurnId: "bootstrap-turn" },
+              activity: {
+                kind: "provider-turn-terminal",
+                turnId: "bootstrap-turn",
+              },
             },
-          } as never)
-        : Stream.empty;
+          } as never,
+        ]);
+      }
+      return Stream.succeed(running);
     },
   } as OrchestrationEngineShape);
   const taskLayer = TaskWorkspaceServiceLive.pipe(
@@ -202,7 +220,10 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
   };
 });
 
-const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function* (prefix: string) {
+const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function* (
+  prefix: string,
+  observation: BootstrapObservation = { mode: "running" },
+) {
   const root = yield* Effect.tryPromise(() =>
     NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), prefix)),
   );
@@ -218,7 +239,7 @@ const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function
   );
   yield* Effect.tryPromise(() => git(repoRoot, ["add", "README.md"]));
   yield* Effect.tryPromise(() => git(repoRoot, ["commit", "-m", "chore: seed fixture repository"]));
-  const runtime = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+  const runtime = yield* makeRuntime(repoRoot, baseDir, { value: 0 }, observation);
   yield* Effect.addFinalizer(() => runtime.dispose);
   return { runtime, repoRoot, baseDir };
 });
@@ -2906,6 +2927,55 @@ describe("TaskWorkspaceService bootstrap saga", () => {
     }),
   );
 
+  it.effect("reconciles a terminal kickoff on bootstrap retry", () =>
+    Effect.gen(function* () {
+      const observation: BootstrapObservation = { mode: "terminal" };
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-bootstrap-terminal-retry-",
+        observation,
+      );
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("bs-create-terminal-retry"),
+            operationKey: "op-bs-create-terminal-retry",
+          }),
+        ),
+      );
+
+      // Leave the same deterministic operation retryable, then make its
+      // provider history terminal before the retry reaches readiness.
+      failNextOrchestrationDispatch = true;
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const failed = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      expect(failed.bootstrap?.status).toBe("failed");
+
+      // A restart sees the provider's durable terminal activity and reuses the
+      // same thread/turn identities instead of waiting for a new running event.
+      const retried = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.operation.retry",
+            commandId: CommandId.make("bs-retry-terminal"),
+            taskId: failed.id,
+            createdAt: now(2),
+            expectedTaskRevision: failed.taskRevision,
+            targetOperationKey: failed.bootstrap!.operationKey,
+          }),
+        ),
+      );
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(retried.task, baseDir, repoRoot)),
+      );
+      const ready = yield* runtime.runPromise(service.getTask(created.task.id));
+      expect(ready?.bootstrap?.status).toBe("ready");
+      expect(ready?.sessions).toHaveLength(1);
+    }),
+  );
+
   it.effect("provisions the worktree first when the policy is Now", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-bootstrap-now-");
@@ -3426,6 +3496,54 @@ describe("TaskWorkspaceService guided flow", () => {
         branch: "katacode/task-guided-task",
       });
       expect(provisioned.workspace.repositories[0]?.worktreePath).toBeTruthy();
+    }),
+  );
+
+  it.effect("authorizes the exact task thread when provider instances are shared", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-stage-auth-shared-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const first = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("auth-shared-create-1"),
+            taskId: TaskWorkspaceId.make("guided-task-one"),
+            operationKey: "op-auth-shared-1",
+          }),
+        ),
+      );
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(first.task, baseDir, repoRoot)),
+      );
+      const second = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("auth-shared-create-2"),
+            taskId: TaskWorkspaceId.make("guided-task-two"),
+            operationKey: "op-auth-shared-2",
+          }),
+        ),
+      );
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(second.task, baseDir, repoRoot)),
+      );
+
+      const firstThread = (yield* runtime.runPromise(service.getTask(first.task.id)))!.bootstrap!
+        .reservedThreadId!;
+      const secondThread = (yield* runtime.runPromise(service.getTask(second.task.id)))!.bootstrap!
+        .reservedThreadId!;
+      const authorization = (threadId: ThreadId) =>
+        service.authorizeTaskStage({
+          environmentId: EnvironmentId.make("environment-local"),
+          threadId,
+          providerInstanceId: "instance-1",
+        });
+      expect((yield* runtime.runPromise(Effect.exit(authorization(firstThread))))._tag).toBe(
+        "Success",
+      );
+      expect((yield* runtime.runPromise(Effect.exit(authorization(secondThread))))._tag).toBe(
+        "Success",
+      );
     }),
   );
 

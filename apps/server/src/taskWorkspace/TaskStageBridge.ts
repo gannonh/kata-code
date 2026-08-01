@@ -108,6 +108,13 @@ const make = Effect.gen(function* () {
         );
       }
       yield* taskWorkspaces
+        .authorizeTaskStage({
+          environmentId: scope.environmentId,
+          threadId: scope.threadId,
+          providerInstanceId: scope.providerInstanceId,
+        })
+        .pipe(Effect.mapError((cause) => error("unauthorized", cause.message)));
+      yield* taskWorkspaces
         .validatePlanningRoot(task.id)
         .pipe(Effect.mapError((cause) => error("source-drift", cause.message)));
       const stage = currentStage(task);
