@@ -64,7 +64,6 @@ export class TaskStageBridge extends Context.Service<TaskStageBridge, TaskStageB
 
 const make = Effect.gen(function* () {
   const taskWorkspaces = yield* TaskWorkspaceService;
-  const sessionDirectory = yield* Effect.serviceOption(ProviderSessionDirectory);
 
   const error = (code: typeof TaskStageToolError.Type.code, message: string): TaskStageToolError =>
     new TaskStageToolError({ code, message });
@@ -137,6 +136,7 @@ const make = Effect.gen(function* () {
           `Provider instance '${scope.providerInstanceId}' is not authorized for task '${task.id}'.`,
         );
       }
+      const sessionDirectory = yield* Effect.serviceOption(ProviderSessionDirectory);
       if (Option.isNone(sessionDirectory)) {
         return yield* error("not-active", "The provider session directory is unavailable.");
       }
