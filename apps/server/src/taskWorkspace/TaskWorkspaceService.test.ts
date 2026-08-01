@@ -30,6 +30,10 @@ import {
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../git/GitWorkflowService.ts";
 import { layerConfig as SqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
 import { TaskWorkspaceStoreLive } from "../persistence/Layers/TaskWorkspaceStore.ts";
+import {
+  TaskWorkspaceSourceResolver,
+  type TaskWorkspaceSourceResolution,
+} from "./Services/TaskWorkspaceSourceResolver.ts";
 import { TaskWorkspaceService, layer as TaskWorkspaceServiceLive } from "./TaskWorkspaceService.ts";
 
 const execFileAsync = promisify(execFile);
@@ -112,9 +116,22 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
     }),
   } satisfies ServerEnvironmentShape);
   const gitLayer = Layer.succeed(GitWorkflowService, makeGitWorkflow(baseDir, createCount));
+  const sourceResolverLayer = Layer.succeed(TaskWorkspaceSourceResolver, {
+    resolve: ({
+      projectId,
+      baseRef,
+      worktreePolicy,
+    }): Effect.Effect<TaskWorkspaceSourceResolution, never> =>
+      Effect.succeed({
+        workspaceRoot: repoRoot,
+        baseCommitSha: "base-commit-sha",
+        planningRootFingerprint: worktreePolicy === "now" ? null : "planning-fingerprint",
+      }),
+  });
   const taskLayer = TaskWorkspaceServiceLive.pipe(
     Layer.provide(gitLayer),
     Layer.provide(environmentLayer),
+    Layer.provide(sourceResolverLayer),
     Layer.provide(TaskWorkspaceStoreLive),
     Layer.provide(SqlitePersistenceLive),
     Layer.provide(ServerConfig.layerTest(repoRoot, baseDir)),
@@ -2497,7 +2514,10 @@ describe("TaskWorkspaceService first-slice workflow", () => {
         status: "starting",
       });
       expect(result.task.workspace.repositories[0]?.provisioningStatus).toBe("not-requested");
-      expect(result.task.workspace.repositories[0]?.baseCommitSha).toBeNull();
+      expect(result.task.workspace.repositories[0]?.baseCommitSha).toBe("base-commit-sha");
+      expect(result.task.workspace.repositories[0]?.planningRootFingerprint).toBe(
+        "planning-fingerprint",
+      );
       expect(result.taskRoute).toEqual({
         environmentId: "environment-local",
         taskId: "guided-task",

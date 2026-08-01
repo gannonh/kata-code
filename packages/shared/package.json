@@ -179,6 +179,10 @@
       "types": "./src/taskWorkspaceBuild.ts",
       "import": "./src/taskWorkspaceBuild.ts"
     },
+    "./taskWorkspaceCatalog": {
+      "types": "./src/taskWorkspaceCatalog.ts",
+      "import": "./src/taskWorkspaceCatalog.ts"
+    },
     "./taskWorkspaceDigest": {
       "types": "./src/taskWorkspaceDigest.ts",
       "import": "./src/taskWorkspaceDigest.ts"

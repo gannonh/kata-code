@@ -67,6 +67,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as TaskWorkspaceService from "./taskWorkspace/TaskWorkspaceService.ts";
+import { TaskWorkspaceSourceResolverLive } from "./taskWorkspace/Layers/TaskWorkspaceSourceResolver.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -227,6 +228,7 @@ const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
 const TaskWorkspaceLayerLive = TaskWorkspaceService.layer.pipe(
   Layer.provideMerge(GitWorkflowLayerLive),
   Layer.provideMerge(TaskWorkspaceStoreLive),
+  Layer.provideMerge(TaskWorkspaceSourceResolverLive),
 );
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(

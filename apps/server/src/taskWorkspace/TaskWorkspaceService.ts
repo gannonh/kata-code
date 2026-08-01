@@ -52,6 +52,11 @@ import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
+import { TaskWorkspaceSourceResolverLive } from "./Layers/TaskWorkspaceSourceResolver.ts";
+import {
+  TaskWorkspaceSourceResolver,
+  type TaskWorkspaceSourceResolution,
+} from "./Services/TaskWorkspaceSourceResolver.ts";
 import {
   TASK_ARTIFACT_CONTRACT_VERSION_0_3_0,
   TASK_WORKSPACE_CONTRACT_VERSION_0_3_0,
@@ -61,6 +66,7 @@ import {
   allowsExplicitEntry,
   artifactKindForStage,
   currentVersionForPreset,
+  legacyVersionForPreset,
   resolveWorkflowDefinition,
   transitionFor,
   type WorkflowDefinition,
@@ -651,12 +657,18 @@ function upsertArtifact(
 function initialTask(
   command: Extract<TaskWorkspaceCommand, { type: "task.create" }>,
   environmentId: EnvironmentId,
+  source?: TaskWorkspaceSourceResolution,
 ): TaskWorkspace {
   // Pin the definition the task will resolve for the rest of its life. Later
   // versions of the same preset are registered alongside, never in place, so a
-  // task created today keeps its original workflow shape.
-  const definition = resolveWorkflowDefinition(currentVersionForPreset(command.preset));
+  // task created today keeps its original workflow shape. First-slice creates
+  // pin the current catalog version; legacy creates keep the @0.1.0 shape.
   const isFirstSliceCreate = command.operationKey !== undefined;
+  const definition = resolveWorkflowDefinition(
+    isFirstSliceCreate
+      ? currentVersionForPreset(command.preset)
+      : legacyVersionForPreset(command.preset),
+  );
   const worktreePolicy = command.worktreePolicy ?? "later";
   const brief = command.brief?.trim() ?? command.title;
   const provisioningStatus =
@@ -713,13 +725,13 @@ function initialTask(
         {
           id: "primary",
           projectId: command.projectId,
-          workspaceRoot: command.workspaceRoot ?? "",
+          workspaceRoot: source?.workspaceRoot ?? command.workspaceRoot ?? "",
           baseRef: command.baseRef,
           branch: null,
           worktreePath: null,
           provisioningStatus: isFirstSliceCreate ? provisioningStatus : "pending",
-          baseCommitSha: null,
-          planningRootFingerprint: null,
+          baseCommitSha: source?.baseCommitSha ?? null,
+          planningRootFingerprint: source?.planningRootFingerprint ?? null,
         },
       ],
     },
@@ -966,6 +978,7 @@ export const make = Effect.gen(function* () {
   const gitWorkflow = yield* GitWorkflowService;
   const crypto = yield* Crypto.Crypto;
   const store = yield* TaskWorkspaceStore;
+  const sourceResolver = yield* TaskWorkspaceSourceResolver;
   const serverEnvironment = yield* ServerEnvironment;
   const environmentId = yield* serverEnvironment.getEnvironmentId;
   const semaphore = yield* Semaphore.make(1);
@@ -1272,6 +1285,16 @@ export const make = Effect.gen(function* () {
         if (command.operationKey !== undefined) {
           validateCreateV2(command);
         }
+        const source =
+          command.operationKey !== undefined
+            ? yield* sourceResolver
+                .resolve({
+                  projectId: command.projectId,
+                  baseRef: command.baseRef,
+                  worktreePolicy: command.worktreePolicy ?? "later",
+                })
+                .pipe(Effect.mapError((cause) => taskError(command, cause.message, cause)))
+            : undefined;
         const operationReceipt =
           command.operationKey !== undefined
             ? makeOperationReceipt(
@@ -1287,7 +1310,7 @@ export const make = Effect.gen(function* () {
                 command.createdAt,
               )
             : undefined;
-        return yield* append(command, initialTask(command, environmentId), {
+        return yield* append(command, initialTask(command, environmentId, source), {
           ...(operationReceipt ? { operationReceipt } : {}),
         });
       }
