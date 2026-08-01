@@ -178,6 +178,10 @@
     "./taskWorkspaceBuild": {
       "types": "./src/taskWorkspaceBuild.ts",
       "import": "./src/taskWorkspaceBuild.ts"
+    },
+    "./taskWorkspaceDigest": {
+      "types": "./src/taskWorkspaceDigest.ts",
+      "import": "./src/taskWorkspaceDigest.ts"
     }
   },
   "scripts": {

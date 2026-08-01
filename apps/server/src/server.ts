@@ -17,6 +17,7 @@ import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
+import { TaskWorkspaceStoreLive } from "./persistence/Layers/TaskWorkspaceStore.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -225,6 +226,7 @@ const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
 
 const TaskWorkspaceLayerLive = TaskWorkspaceService.layer.pipe(
   Layer.provideMerge(GitWorkflowLayerLive),
+  Layer.provideMerge(TaskWorkspaceStoreLive),
 );
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(

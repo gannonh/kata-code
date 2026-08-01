@@ -44,6 +44,7 @@ vi.mock("../../store", () => ({
 
 const baseTask: TaskWorkspace = {
   id: "task-browser",
+  environmentId: null,
   title: "Browser task workspace",
   versions: {
     taskContract: "task-workspace@0.1.0",
@@ -51,6 +52,13 @@ const baseTask: TaskWorkspace = {
     workflowDefinition: "standard@0.1.0",
     prompt: "task-workspace-slice-1@0.1.0",
   },
+  intake: { brief: "", source: { kind: "inline", body: "" } },
+  preferences: { worktreePolicy: "later", modelSelection: null, executionProfile: "planning" },
+  bootstrap: null,
+  occurrences: [],
+  planGate: null,
+  gateHistory: [],
+  taskRevision: 0,
   workspace: {
     repositories: [
       {
@@ -61,6 +69,8 @@ const baseTask: TaskWorkspace = {
         branch: null,
         worktreePath: null,
         provisioningStatus: "pending",
+        baseCommitSha: null,
+        planningRootFingerprint: null,
       },
     ],
   },

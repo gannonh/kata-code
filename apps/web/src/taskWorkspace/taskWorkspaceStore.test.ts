@@ -6,6 +6,7 @@ import { useTaskWorkspaceStore } from "./taskWorkspaceStore";
 function makeTask(id: string, updatedAt: string): TaskWorkspace {
   return {
     id,
+    environmentId: null,
     title: id,
     versions: {
       taskContract: "task-workspace@0.1.0",
@@ -13,6 +14,13 @@ function makeTask(id: string, updatedAt: string): TaskWorkspace {
       workflowDefinition: "standard@0.1.0",
       prompt: "task-workspace-slice-1@0.1.0",
     },
+    intake: { brief: "", source: { kind: "inline", body: "" } },
+    preferences: { worktreePolicy: "later", modelSelection: null, executionProfile: "planning" },
+    bootstrap: null,
+    occurrences: [],
+    planGate: null,
+    gateHistory: [],
+    taskRevision: 0,
     workspace: { repositories: [] },
     workflowRuns: [
       {

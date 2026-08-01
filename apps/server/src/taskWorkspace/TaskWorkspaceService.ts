@@ -10,7 +10,9 @@ import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 
 import {
+  TASK_BRIEF_MAX_CHARS,
   TaskWorkspaceError,
+  type CommandId,
   type TaskWorkspace,
   type TaskWorkspaceArtifact,
   type TaskWorkspaceArtifactKind,
@@ -21,18 +23,25 @@ import {
   type TaskWorkspaceBuildPhase,
   type TaskWorkspaceCommand,
   type TaskWorkspaceCommentThread,
+  type TaskWorkspaceCompletionProposal,
   type TaskWorkspaceDispatchResult,
+  type TaskWorkspaceOperationReceipt,
+  type TaskWorkspaceOutboxEntry,
   TaskWorkspaceEvent as TaskWorkspaceEventSchema,
   type TaskWorkspaceEvent as TaskWorkspaceEventValue,
   type TaskWorkspaceId,
   type TaskWorkspaceSnapshot,
   type TaskWorkspaceStreamItem,
+  type EnvironmentId,
 } from "@kata-sh/code-contracts";
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
+import { canonicalTaskCommandDigest } from "@kata-sh/code-shared/taskWorkspaceDigest";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -40,7 +49,14 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../config.ts";
+import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
+import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
+import {
+  TASK_ARTIFACT_CONTRACT_VERSION_0_3_0,
+  TASK_WORKSPACE_CONTRACT_VERSION_0_3_0,
+  deriveImportedEvents,
+} from "./taskWorkspaceNormalizer.ts";
 import {
   allowsExplicitEntry,
   artifactKindForStage,
@@ -86,6 +102,61 @@ function taskError(
     taskId: command.taskId,
     ...(cause === undefined ? {} : { cause }),
   });
+}
+
+/**
+ * Semantic operation key for a command, or `null` for legacy commands that
+ * predate operation receipts.
+ */
+function operationKeyFor(command: TaskWorkspaceCommand): string | null {
+  switch (command.type) {
+    case "task.create":
+    case "task.stage.request-changes":
+    case "task.worktree.policy.set":
+    case "task.session.recover-primary":
+    case "task.environment.repair":
+    case "task.plan.approve":
+      return command.operationKey ?? null;
+    default:
+      return null;
+  }
+}
+
+const TASK_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+
+function validateTaskSlug(slug: string): void {
+  if (slug.length === 0 || slug.length > 80) {
+    throw new Error("The task slug must be between 1 and 80 characters.");
+  }
+  if (!TASK_SLUG_PATTERN.test(slug)) {
+    throw new Error(
+      "The task slug must use lowercase letters, digits, and single dashes, and must start and end with an alphanumeric character.",
+    );
+  }
+}
+
+/**
+ * First-slice create validation. Runs before any task state is written; every
+ * failure rejects the command before creation.
+ */
+function validateCreateV2(command: Extract<TaskWorkspaceCommand, { type: "task.create" }>): void {
+  const brief = command.brief?.trim() ?? "";
+  if (brief.length === 0) {
+    throw new Error("A task brief is required.");
+  }
+  if (brief.length > TASK_BRIEF_MAX_CHARS) {
+    throw new Error(`The task brief exceeds the ${TASK_BRIEF_MAX_CHARS}-character limit.`);
+  }
+  if (command.source === undefined || command.source.body !== brief) {
+    throw new Error("The task source must match the brief.");
+  }
+  if (command.worktreePolicy === undefined) {
+    throw new Error("A worktree policy is required.");
+  }
+  if (command.modelSelection === undefined) {
+    throw new Error("A model selection is required.");
+  }
+  validateTaskSlug(command.taskId);
 }
 
 function currentRun(task: TaskWorkspace) {
@@ -579,30 +650,76 @@ function upsertArtifact(
 
 function initialTask(
   command: Extract<TaskWorkspaceCommand, { type: "task.create" }>,
+  environmentId: EnvironmentId,
 ): TaskWorkspace {
   // Pin the definition the task will resolve for the rest of its life. Later
   // versions of the same preset are registered alongside, never in place, so a
   // task created today keeps its original workflow shape.
   const definition = resolveWorkflowDefinition(currentVersionForPreset(command.preset));
+  const isFirstSliceCreate = command.operationKey !== undefined;
+  const worktreePolicy = command.worktreePolicy ?? "later";
+  const brief = command.brief?.trim() ?? command.title;
+  const provisioningStatus =
+    isFirstSliceCreate && worktreePolicy === "now" ? "pending" : "not-requested";
   return {
     id: command.taskId,
+    environmentId,
     title: command.title,
     versions: {
-      taskContract: TASK_CONTRACT_VERSION,
-      artifactContract: ARTIFACT_CONTRACT_VERSION,
+      taskContract: isFirstSliceCreate
+        ? TASK_WORKSPACE_CONTRACT_VERSION_0_3_0
+        : TASK_CONTRACT_VERSION,
+      artifactContract: isFirstSliceCreate
+        ? TASK_ARTIFACT_CONTRACT_VERSION_0_3_0
+        : ARTIFACT_CONTRACT_VERSION,
       workflowDefinition: definition.version,
       prompt: definition.promptBundleRef,
     },
+    intake: {
+      brief,
+      source: { kind: "inline", body: brief },
+    },
+    preferences: {
+      worktreePolicy,
+      modelSelection: command.modelSelection ?? null,
+      executionProfile: "planning",
+    },
+    bootstrap: null,
+    occurrences: isFirstSliceCreate
+      ? [
+          {
+            id: `occurrence-${definition.initialStage}-0`,
+            stage: definition.initialStage,
+            ordinal: 0,
+            status: "starting" as const,
+            sessionId: null,
+            threadId: null,
+            contextManifestId: null,
+            artifactRevisionId: null,
+            completionProposalId: null,
+            gateOutcome: null,
+            feedback: null,
+            supersedesOccurrenceId: null,
+            createdAt: command.createdAt,
+            completedAt: null,
+          },
+        ]
+      : [],
+    planGate: null,
+    gateHistory: [],
+    taskRevision: 0,
     workspace: {
       repositories: [
         {
           id: "primary",
           projectId: command.projectId,
-          workspaceRoot: command.workspaceRoot,
+          workspaceRoot: command.workspaceRoot ?? "",
           baseRef: command.baseRef,
           branch: null,
           worktreePath: null,
-          provisioningStatus: "pending",
+          provisioningStatus: isFirstSliceCreate ? provisioningStatus : "pending",
+          baseCommitSha: null,
+          planningRootFingerprint: null,
         },
       ],
     },
@@ -611,6 +728,7 @@ function initialTask(
         id: `${command.preset}-run-1`,
         preset: command.preset,
         definitionVersion: definition.version,
+        promptBundleVersion: definition.promptBundleRef,
         currentStage: definition.initialStage,
         approvalPolicy: command.approvalPolicy,
         createdAt: command.createdAt,
@@ -847,14 +965,55 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const gitWorkflow = yield* GitWorkflowService;
   const crypto = yield* Crypto.Crypto;
+  const store = yield* TaskWorkspaceStore;
+  const serverEnvironment = yield* ServerEnvironment;
+  const environmentId = yield* serverEnvironment.getEnvironmentId;
   const semaphore = yield* Semaphore.make(1);
   const eventPubSub = yield* PubSub.unbounded<TaskWorkspaceEventValue>();
   const eventLogPath = NodePath.join(config.stateDir, "task-workspace-events.ndjson");
-  const loadedEvents = yield* readPersistedEvents(eventLogPath).pipe(
+
+  // One-time transactional NDJSON import. The legacy file is retained read-only
+  // after a successful import; the store's marker row makes the import idempotent.
+  const legacyEvents = yield* readPersistedEvents(eventLogPath).pipe(
     Effect.mapError(
       (cause) =>
         new TaskWorkspaceError({
-          message: "Failed to replay the task workspace event log.",
+          message:
+            "The legacy task workspace event log contains a record that cannot be decoded. Repair the record or remove the file before starting the server.",
+          commandType: "task.replay",
+          cause,
+        }),
+    ),
+  );
+  if (legacyEvents.length > 0) {
+    const imported = deriveImportedEvents(
+      legacyEvents,
+      environmentId,
+      DateTime.formatIso(yield* DateTime.now),
+    );
+    yield* store
+      .importLegacy({
+        environmentId,
+        events: imported.events,
+        migratedEvents: imported.migratedEvents,
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: "Failed to import the legacy task workspace event log.",
+              commandType: "task.replay",
+              cause,
+            }),
+        ),
+      );
+  }
+
+  const persistedEvents = yield* store.replayAll().pipe(
+    Effect.mapError(
+      (cause) =>
+        new TaskWorkspaceError({
+          message: "Failed to replay the task workspace event store.",
           commandType: "task.replay",
           cause,
         }),
@@ -863,58 +1022,274 @@ export const make = Effect.gen(function* () {
 
   let sequence = 0;
   const taskById = new Map<TaskWorkspaceId, TaskWorkspace>();
-  const receiptByCommandId = new Map<string, TaskWorkspaceDispatchResult>();
-  for (const event of loadedEvents) {
+  const receiptByCommandId = new Map<
+    CommandId,
+    { readonly sequence: number; readonly task: TaskWorkspace }
+  >();
+  for (const event of persistedEvents) {
     sequence = Math.max(sequence, event.sequence);
     taskById.set(event.taskId, event.task);
     receiptByCommandId.set(event.commandId, { sequence: event.sequence, task: event.task });
   }
 
-  const append = (command: TaskWorkspaceCommand, task: TaskWorkspace) =>
+  const makeOperationReceipt = (
+    command: TaskWorkspaceCommand,
+    input: {
+      readonly operationType: string;
+      readonly operationKey: string;
+      readonly payloadDigest: string;
+      readonly status: "pending" | "completed" | "failed";
+      readonly attemptCount: number;
+      readonly sourceCommandIds: ReadonlyArray<CommandId>;
+      readonly error?: string | null;
+    },
+    now: string,
+  ): TaskWorkspaceOperationReceipt => ({
+    environmentId,
+    taskId: command.taskId,
+    operationType: input.operationType,
+    operationKey: input.operationKey,
+    payloadDigest: input.payloadDigest,
+    status: input.status,
+    attemptCount: input.attemptCount,
+    sourceCommandIds: [...input.sourceCommandIds],
+    resultEventId: null,
+    resultTaskRevision: null,
+    error: input.error ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const append = (
+    command: TaskWorkspaceCommand,
+    task: TaskWorkspace,
+    input?: {
+      readonly operationReceipt?: TaskWorkspaceOperationReceipt;
+      readonly proposal?: TaskWorkspaceCompletionProposal;
+      readonly outbox?: ReadonlyArray<{
+        readonly target: TaskWorkspaceOutboxEntry["target"];
+        readonly operationKey: string;
+        readonly payload: unknown;
+      }>;
+    },
+  ) =>
     Effect.gen(function* () {
       const eventId = yield* crypto.randomUUIDv4.pipe(
         Effect.mapError((cause) =>
           taskError(command, "Failed to generate a task event identifier.", cause),
         ),
       );
+      const now = DateTime.formatIso(yield* DateTime.now);
+      const nextRevision = (taskById.get(command.taskId)?.taskRevision ?? 0) + 1;
+      const taskWithRevision: TaskWorkspace = { ...task, taskRevision: nextRevision };
       const event: TaskWorkspaceEventValue = {
-        sequence: sequence + 1,
+        sequence: 0,
         eventId,
         commandId: command.commandId,
         taskId: command.taskId,
         type: command.type,
         occurredAt: command.createdAt,
-        task,
+        task: taskWithRevision,
       };
-      yield* Effect.tryPromise({
-        try: async () => {
-          await NodeFs.mkdir(NodePath.dirname(eventLogPath), { recursive: true });
-          await NodeFs.appendFile(eventLogPath, `${JSON.stringify(event)}\n`, "utf8");
-        },
-        catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-      }).pipe(
-        Effect.mapError((cause) => taskError(command, "Failed to persist task event.", cause)),
+      const operationReceipt = input?.operationReceipt
+        ? {
+            ...input.operationReceipt,
+            resultEventId: eventId,
+            resultTaskRevision: nextRevision,
+            updatedAt: now,
+          }
+        : undefined;
+      const outbox = input?.outbox?.map(
+        (entry): TaskWorkspaceOutboxEntry => ({
+          id: `outbox-${eventId}-${entry.operationKey.slice(-12)}`,
+          environmentId,
+          taskId: command.taskId,
+          operationKey: entry.operationKey,
+          target: entry.target,
+          status: "pending",
+          payload: entry.payload,
+          attemptCount: 0,
+          createdAt: now,
+          updatedAt: now,
+          completedAt: null,
+        }),
       );
-      sequence = event.sequence;
-      taskById.set(command.taskId, task);
-      const result = { sequence: event.sequence, task };
-      receiptByCommandId.set(command.commandId, result);
-      yield* PubSub.publish(eventPubSub, event);
+      const stored = yield* store
+        .commit({
+          environmentId,
+          events: [event],
+          commandReceipt: {
+            environmentId,
+            commandId: command.commandId,
+            taskId: command.taskId,
+            commandType: command.type,
+            commandDigest: canonicalTaskCommandDigest(command),
+            operationKey: operationKeyFor(command),
+            status: "accepted",
+            resultEventId: eventId,
+            error: null,
+            createdAt: command.createdAt,
+          },
+          ...(operationReceipt ? { operationReceipt } : {}),
+          ...(input?.proposal ? { proposal: input.proposal } : {}),
+          ...(outbox && outbox.length > 0 ? { outbox } : {}),
+        })
+        .pipe(
+          Effect.mapError((cause) => taskError(command, "Failed to persist task event.", cause)),
+        );
+      const storedEvent = stored[0]!;
+      sequence = storedEvent.sequence;
+      taskById.set(command.taskId, taskWithRevision);
+      const result: TaskWorkspaceDispatchResult = {
+        sequence: storedEvent.sequence,
+        task: taskWithRevision,
+        operation: operationReceipt
+          ? {
+              key: operationReceipt.operationKey,
+              status:
+                operationReceipt.status === "completed"
+                  ? "completed"
+                  : operationReceipt.status === "failed"
+                    ? "failed"
+                    : "pending",
+              attempt: operationReceipt.attemptCount,
+              error: operationReceipt.error,
+            }
+          : { key: command.type, status: "completed", attempt: 0, error: null },
+        taskRoute: { environmentId, taskId: taskWithRevision.id },
+        conversationTarget: taskWithRevision.bootstrap?.conversationTarget ?? null,
+      };
+      receiptByCommandId.set(command.commandId, {
+        sequence: result.sequence,
+        task: taskWithRevision,
+      });
+      yield* PubSub.publish(eventPubSub, storedEvent);
       return result;
     });
 
   const dispatchUnlocked = Effect.fn("TaskWorkspaceService.dispatch")(function* (
     command: TaskWorkspaceCommand,
   ) {
-    const prior = receiptByCommandId.get(command.commandId);
-    if (prior) return prior;
+    const commandDigest = canonicalTaskCommandDigest(command);
+    const storedReceipt = yield* store
+      .getCommandReceipt({ environmentId, commandId: command.commandId })
+      .pipe(
+        Effect.mapError((cause) =>
+          taskError(command, "Failed to read the command receipt.", cause),
+        ),
+      );
+    if (Option.isSome(storedReceipt)) {
+      const receipt = storedReceipt.value;
+      if (receipt.commandDigest !== commandDigest) {
+        return yield* taskError(
+          command,
+          `Command '${command.commandId}' was already used with a different payload.`,
+        );
+      }
+      if (receipt.status === "rejected") {
+        return yield* taskError(
+          command,
+          receipt.error ?? `Command '${command.commandId}' was rejected earlier.`,
+        );
+      }
+      const prior = receiptByCommandId.get(command.commandId);
+      const currentTask = taskById.get(command.taskId) ?? prior?.task;
+      if (!currentTask) {
+        return yield* taskError(command, `Task '${command.taskId}' was not found.`);
+      }
+      return {
+        sequence: prior?.sequence ?? sequence,
+        task: currentTask,
+        operation: receipt.operationKey
+          ? { key: receipt.operationKey, status: "completed" as const, attempt: 0, error: null }
+          : { key: command.type, status: "completed" as const, attempt: 0, error: null },
+        taskRoute: { environmentId, taskId: command.taskId },
+        conversationTarget: currentTask.bootstrap?.conversationTarget ?? null,
+      };
+    }
+
+    const operationKey = operationKeyFor(command);
+    if (operationKey !== null && command.type !== "task.operation.retry") {
+      const priorOperation = yield* store
+        .getOperationReceipt({ environmentId, taskId: command.taskId, operationKey })
+        .pipe(
+          Effect.mapError((cause) =>
+            taskError(command, "Failed to read the operation receipt.", cause),
+          ),
+        );
+      if (Option.isSome(priorOperation)) {
+        const prior = priorOperation.value;
+        if (prior.payloadDigest !== commandDigest) {
+          return yield* taskError(
+            command,
+            `Operation '${operationKey}' was already used with a different payload.`,
+          );
+        }
+        const currentTask = taskById.get(command.taskId);
+        if (currentTask === undefined) {
+          return yield* taskError(command, `Task '${command.taskId}' was not found.`);
+        }
+        if (prior.status === "completed") {
+          return {
+            sequence,
+            task: currentTask,
+            operation: {
+              key: operationKey,
+              status: "completed" as const,
+              attempt: prior.attemptCount,
+              error: prior.error,
+            },
+            taskRoute: { environmentId, taskId: command.taskId },
+            conversationTarget: currentTask.bootstrap?.conversationTarget ?? null,
+          };
+        }
+        if (prior.status === "pending") {
+          return {
+            sequence,
+            task: currentTask,
+            operation: {
+              key: operationKey,
+              status: "pending" as const,
+              attempt: prior.attemptCount,
+              error: prior.error,
+            },
+            taskRoute: { environmentId, taskId: command.taskId },
+            conversationTarget: currentTask.bootstrap?.conversationTarget ?? null,
+          };
+        }
+        return yield* taskError(
+          command,
+          `Operation '${operationKey}' failed and requires 'task.operation.retry'.`,
+        );
+      }
+    }
 
     try {
       if (command.type === "task.create") {
         if (taskById.has(command.taskId)) {
           return yield* taskError(command, `Task '${command.taskId}' already exists.`);
         }
-        return yield* append(command, initialTask(command));
+        if (command.operationKey !== undefined) {
+          validateCreateV2(command);
+        }
+        const operationReceipt =
+          command.operationKey !== undefined
+            ? makeOperationReceipt(
+                command,
+                {
+                  operationType: "task.create",
+                  operationKey: command.operationKey,
+                  payloadDigest: commandDigest,
+                  status: "completed",
+                  attemptCount: 1,
+                  sourceCommandIds: [command.commandId],
+                },
+                command.createdAt,
+              )
+            : undefined;
+        return yield* append(command, initialTask(command, environmentId), {
+          ...(operationReceipt ? { operationReceipt } : {}),
+        });
       }
 
       const task = taskById.get(command.taskId);
@@ -2188,12 +2563,32 @@ export const make = Effect.gen(function* () {
         }
       }
     } catch (cause) {
-      if (isTaskWorkspaceError(cause)) return yield* cause;
-      return yield* taskError(
-        command,
-        cause instanceof Error ? cause.message : "Task command failed.",
-        cause,
-      );
+      const error = isTaskWorkspaceError(cause)
+        ? cause
+        : taskError(
+            command,
+            cause instanceof Error ? cause.message : "Task command failed.",
+            cause,
+          );
+      yield* store
+        .commit({
+          environmentId,
+          events: [],
+          commandReceipt: {
+            environmentId,
+            commandId: command.commandId,
+            taskId: command.taskId,
+            commandType: command.type,
+            commandDigest: canonicalTaskCommandDigest(command),
+            operationKey: operationKeyFor(command),
+            status: "rejected",
+            resultEventId: null,
+            error: error.message,
+            createdAt: command.createdAt,
+          },
+        })
+        .pipe(Effect.catch(() => Effect.void));
+      return yield* error;
     }
   });
 

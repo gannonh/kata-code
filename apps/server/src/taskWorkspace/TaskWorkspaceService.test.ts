@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  EnvironmentId,
   ProjectId,
   TaskWorkspaceId,
   ThreadId,
@@ -20,7 +21,13 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 
 import { ServerConfig } from "../config.ts";
+import {
+  ServerEnvironment,
+  type ServerEnvironmentShape,
+} from "../environment/Services/ServerEnvironment.ts";
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../git/GitWorkflowService.ts";
+import { layerConfig as SqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
+import { TaskWorkspaceStoreLive } from "../persistence/Layers/TaskWorkspaceStore.ts";
 import { TaskWorkspaceService, layer as TaskWorkspaceServiceLive } from "./TaskWorkspaceService.ts";
 
 const execFileAsync = promisify(execFile);
@@ -91,9 +98,23 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
   baseDir: string,
   createCount: { value: number },
 ) {
+  const environmentId = EnvironmentId.make("environment-local");
+  const environmentLayer = Layer.succeed(ServerEnvironment, {
+    getEnvironmentId: Effect.succeed(environmentId),
+    getDescriptor: Effect.succeed({
+      environmentId,
+      label: "test",
+      platform: { os: "darwin", arch: "arm64" },
+      serverVersion: "0.0.0",
+      capabilities: { repositoryIdentity: true },
+    }),
+  } satisfies ServerEnvironmentShape);
   const gitLayer = Layer.succeed(GitWorkflowService, makeGitWorkflow(baseDir, createCount));
   const taskLayer = TaskWorkspaceServiceLive.pipe(
     Layer.provide(gitLayer),
+    Layer.provide(environmentLayer),
+    Layer.provide(TaskWorkspaceStoreLive),
+    Layer.provide(SqlitePersistenceLive),
     Layer.provide(ServerConfig.layerTest(repoRoot, baseDir)),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -103,7 +124,7 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
     runPromise: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provide(effect, context),
     runPromiseExit: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.exit(Effect.provide(effect, context)),
-    dispose: Scope.close(scope, Exit.void),
+    dispose: Effect.provide(Scope.close(scope, Exit.void), context),
   };
 });
 

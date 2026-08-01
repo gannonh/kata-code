@@ -3,12 +3,21 @@ import * as Schema from "effect/Schema";
 
 import {
   CommandId,
+  EnvironmentId,
   IsoDateTime,
+  MessageId,
   NonNegativeInt,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
+import { ModelSelection } from "./orchestration.ts";
+
+/**
+ * Hard ceiling for an inline task brief. The server enforces this below the
+ * existing 120,000-character turn limit so the first kickoff turn always fits.
+ */
+export const TASK_BRIEF_MAX_CHARS = 100_000;
 
 export const TASK_WORKSPACE_WS_METHODS = {
   dispatchCommand: "taskWorkspace.dispatchCommand",
@@ -45,6 +54,187 @@ export type TaskWorkspaceArtifactKind = typeof TaskWorkspaceArtifactKind.Type;
 
 export const TaskWorkspacePreset = Schema.Literals(["standard", "guided", "freeform"]);
 export type TaskWorkspacePreset = typeof TaskWorkspacePreset.Type;
+
+/**
+ * Worktree timing preference captured at creation and applied after Plan
+ * approval. `never` keeps the planning slice in the source repository.
+ */
+export const TaskWorkspaceWorktreePolicy = Schema.Literals(["now", "later", "never"]);
+export type TaskWorkspaceWorktreePolicy = typeof TaskWorkspaceWorktreePolicy.Type;
+
+/**
+ * Enforced execution profile for pre-Implement stages. Only `planning` exists
+ * in this slice; it forbids write effects during Clarify, Research, Design, and
+ * Plan.
+ */
+export const TaskWorkspaceExecutionProfile = Schema.Literal("planning");
+export type TaskWorkspaceExecutionProfile = typeof TaskWorkspaceExecutionProfile.Type;
+
+/** Canonical repository provisioning status; `provisioned` stays decode-only. */
+export const TaskWorkspaceProvisioningStatus = Schema.Literals([
+  "not-requested",
+  "pending",
+  "running",
+  "ready",
+  "failed",
+  "provisioned",
+]);
+export type TaskWorkspaceProvisioningStatus = typeof TaskWorkspaceProvisioningStatus.Type;
+
+export const TaskWorkspaceIntakeSource = Schema.Struct({
+  kind: Schema.Literal("inline"),
+  body: Schema.String,
+});
+export type TaskWorkspaceIntakeSource = typeof TaskWorkspaceIntakeSource.Type;
+
+export const TaskWorkspaceIntake = Schema.Struct({
+  brief: Schema.String,
+  source: TaskWorkspaceIntakeSource,
+});
+export type TaskWorkspaceIntake = typeof TaskWorkspaceIntake.Type;
+
+export const TaskWorkspacePreferences = Schema.Struct({
+  worktreePolicy: TaskWorkspaceWorktreePolicy.pipe(
+    Schema.withDecodingDefault(Effect.succeed("later")),
+  ),
+  modelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  executionProfile: TaskWorkspaceExecutionProfile.pipe(
+    Schema.withDecodingDefault(Effect.succeed("planning")),
+  ),
+});
+export type TaskWorkspacePreferences = typeof TaskWorkspacePreferences.Type;
+
+export const TaskWorkspaceBootstrapStatus = Schema.Literals([
+  "pending",
+  "running",
+  "ready",
+  "failed",
+]);
+export type TaskWorkspaceBootstrapStatus = typeof TaskWorkspaceBootstrapStatus.Type;
+
+export const TaskWorkspaceBootstrapFailure = Schema.Struct({
+  step: TrimmedNonEmptyString,
+  message: Schema.String,
+  occurredAt: IsoDateTime,
+});
+export type TaskWorkspaceBootstrapFailure = typeof TaskWorkspaceBootstrapFailure.Type;
+
+export const TaskWorkspaceBootstrapConversationTarget = Schema.Struct({
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+});
+export type TaskWorkspaceBootstrapConversationTarget =
+  typeof TaskWorkspaceBootstrapConversationTarget.Type;
+
+/**
+ * Durable bootstrap state for the current primary session. Reserved external
+ * identities live here so a restart worker can reconcile each target before
+ * retrying without allocating a second session or occurrence.
+ */
+export const TaskWorkspaceBootstrapState = Schema.Struct({
+  operationKey: TrimmedNonEmptyString,
+  status: TaskWorkspaceBootstrapStatus,
+  currentStep: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  reservedSessionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  reservedThreadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  threadCreateCommandId: Schema.NullOr(CommandId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  turnStartCommandId: Schema.NullOr(CommandId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  kickoffMessageId: Schema.NullOr(MessageId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  conversationTarget: Schema.NullOr(TaskWorkspaceBootstrapConversationTarget).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  attemptCount: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  failure: Schema.NullOr(TaskWorkspaceBootstrapFailure).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  updatedAt: IsoDateTime,
+});
+export type TaskWorkspaceBootstrapState = typeof TaskWorkspaceBootstrapState.Type;
+
+/**
+ * Stage occurrence status. `changes-requested` is a Plan gate outcome, not an
+ * occurrence status.
+ */
+export const TaskWorkspaceOccurrenceStatus = Schema.Literals([
+  "starting",
+  "running",
+  "finalizing",
+  "awaiting-approval",
+  "blocked",
+  "completed",
+  "failed",
+]);
+export type TaskWorkspaceOccurrenceStatus = typeof TaskWorkspaceOccurrenceStatus.Type;
+
+/**
+ * One repeatable occurrence of a workflow stage. Ordinals start at zero and
+ * every new occurrence allocates `1 + max(recorded occurrences for that stage)`.
+ */
+export const TaskWorkspaceStageOccurrence = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  stage: TaskWorkspaceStage,
+  ordinal: NonNegativeInt,
+  status: TaskWorkspaceOccurrenceStatus,
+  sessionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  threadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  contextManifestId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  artifactRevisionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  completionProposalId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  gateOutcome: Schema.NullOr(Schema.Literals(["approved", "changes-requested"])).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  feedback: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  supersedesOccurrenceId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  createdAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type TaskWorkspaceStageOccurrence = typeof TaskWorkspaceStageOccurrence.Type;
+
+export const TaskWorkspaceGateOutcome = Schema.Struct({
+  occurrence: NonNegativeInt,
+  revision: NonNegativeInt,
+  outcome: Schema.Literals(["approved", "changes-requested"]),
+  feedback: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  actor: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  resolvedAt: IsoDateTime,
+});
+export type TaskWorkspaceGateOutcome = typeof TaskWorkspaceGateOutcome.Type;
+
+/**
+ * Active Plan approval gate. Repeatable across requested revisions; approval
+ * succeeds only for the current open occurrence and revision.
+ */
+export const TaskWorkspacePlanGate = Schema.Struct({
+  occurrence: NonNegativeInt,
+  revision: NonNegativeInt,
+  status: Schema.Literals(["open", "approved", "changes-requested"]),
+  feedback: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  openedAt: IsoDateTime,
+  resolvedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type TaskWorkspacePlanGate = typeof TaskWorkspacePlanGate.Type;
 
 export const TaskWorkspaceWorkStatus = Schema.Literals([
   "pending",
@@ -170,7 +360,16 @@ export const TaskWorkspaceRepository = Schema.Struct({
   baseRef: TrimmedNonEmptyString,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
-  provisioningStatus: Schema.Literals(["pending", "provisioned", "failed"]),
+  provisioningStatus: TaskWorkspaceProvisioningStatus,
+  // Server-resolved pinned base commit. `planningRootFingerprint` covers the
+  // planning root (HEAD SHA + canonical status) and is revalidated before every
+  // task-bound turn, at proposal acceptance, and at Plan approval.
+  baseCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  planningRootFingerprint: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type TaskWorkspaceRepository = typeof TaskWorkspaceRepository.Type;
 
@@ -183,7 +382,7 @@ export const TaskWorkspaceSessionRole = Schema.Literals([
 ]);
 export type TaskWorkspaceSessionRole = typeof TaskWorkspaceSessionRole.Type;
 
-export const TaskWorkspaceSessionStatus = Schema.Literals(["active", "completed"]);
+export const TaskWorkspaceSessionStatus = Schema.Literals(["active", "completed", "superseded"]);
 export type TaskWorkspaceSessionStatus = typeof TaskWorkspaceSessionStatus.Type;
 
 export const TaskWorkspaceSession = Schema.Struct({
@@ -376,6 +575,9 @@ export const TaskWorkspaceWorkflowRun = Schema.Struct({
   // Pre-Slice-3b runs predate the preset union and are all Standard.
   preset: TaskWorkspacePreset.pipe(Schema.withDecodingDefault(Effect.succeed("standard"))),
   definitionVersion: TrimmedNonEmptyString,
+  // Run-level prompt pin; legacy runs populate it from `versions.prompt` at
+  // import. Prompt resolution uses this pin, never the mirror alone.
+  promptBundleVersion: Schema.optional(TrimmedNonEmptyString),
   currentStage: TaskWorkspaceStage,
   approvalPolicy: Schema.Literal("before-build"),
   createdAt: IsoDateTime,
@@ -385,6 +587,11 @@ export type TaskWorkspaceWorkflowRun = typeof TaskWorkspaceWorkflowRun.Type;
 
 export const TaskWorkspace = Schema.Struct({
   id: TaskWorkspaceId,
+  // Stamped by the owning server environment at creation or import. `null`
+  // means the record predates environment scoping and needs the repair path.
+  environmentId: Schema.NullOr(EnvironmentId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   title: TrimmedNonEmptyString,
   versions: Schema.Struct({
     taskContract: TrimmedNonEmptyString,
@@ -392,6 +599,36 @@ export const TaskWorkspace = Schema.Struct({
     workflowDefinition: TrimmedNonEmptyString,
     prompt: TrimmedNonEmptyString,
   }),
+  intake: TaskWorkspaceIntake.pipe(
+    Schema.withDecodingDefault(Effect.succeed({ brief: "", source: { kind: "inline", body: "" } })),
+  ),
+  preferences: TaskWorkspacePreferences.pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        worktreePolicy: "later",
+        modelSelection: null,
+        executionProfile: "planning",
+      }),
+    ),
+  ),
+  // Durable bootstrap state for the current primary session, or `null` for
+  // legacy tasks whose sessions were linked manually.
+  bootstrap: Schema.NullOr(TaskWorkspaceBootstrapState).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  // Append-only repeatable stage occurrences.
+  occurrences: Schema.Array(TaskWorkspaceStageOccurrence).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  // Active Plan gate plus append-only gate history.
+  planGate: Schema.NullOr(TaskWorkspacePlanGate).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  gateHistory: Schema.Array(TaskWorkspaceGateOutcome).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  // Incremented for every persisted task event; the compare-and-set anchor.
+  taskRevision: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
   workspace: Schema.Struct({
     repositories: Schema.Array(TaskWorkspaceRepository),
   }),
@@ -455,10 +692,20 @@ const TaskCreateCommand = Schema.Struct({
   type: Schema.Literal("task.create"),
   title: TrimmedNonEmptyString,
   projectId: ProjectId,
-  workspaceRoot: TrimmedNonEmptyString,
+  // Slice 1/2 clients sent the repository path directly; the server now derives
+  // the workspace root from the project. Legacy commands keep decoding.
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   baseRef: TrimmedNonEmptyString,
   preset: TaskWorkspacePreset.pipe(Schema.withDecodingDefault(Effect.succeed("standard"))),
   approvalPolicy: Schema.Literal("before-build"),
+  // First-slice create fields. `operationKey` is a stable client-generated
+  // semantic key; `brief`/`source`/`worktreePolicy`/`modelSelection` are
+  // required for new creates and absent on legacy commands.
+  operationKey: Schema.optional(TrimmedNonEmptyString),
+  brief: Schema.optional(Schema.String),
+  source: Schema.optional(TaskWorkspaceIntakeSource),
+  worktreePolicy: Schema.optional(TaskWorkspaceWorktreePolicy),
+  modelSelection: Schema.optional(ModelSelection),
 });
 
 const TaskSessionLinkCommand = Schema.Struct({
@@ -556,6 +803,8 @@ const TaskDesignCompleteCommand = Schema.Struct({
 const TaskPlanApproveCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.plan.approve"),
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
 });
 
 /**
@@ -565,6 +814,70 @@ const TaskPlanApproveCommand = Schema.Struct({
  * Freeform task reaches Plan or Verify. Guided and Standard reject it for any
  * stage their own transitions already cover.
  */
+/**
+ * Record Plan feedback and allocate a continuation occurrence. The previous
+ * Plan occurrence and its session complete with the `changes-requested` gate
+ * outcome; a new occurrence starts and reopens the gate.
+ */
+const TaskStageRequestChangesCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.stage.request-changes"),
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
+  feedback: TrimmedNonEmptyString,
+});
+
+/**
+ * Change worktree timing after Plan approval. In this slice only a Never task
+ * may call it; changing to Now or Later enqueues deterministic provisioning.
+ */
+const TaskWorktreePolicySetCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.worktree.policy.set"),
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
+  policy: TaskWorkspaceWorktreePolicy,
+});
+
+/**
+ * Deterministic primary-session recovery. `existing` preserves the selected
+ * occurrence and supersedes other active primaries; `new` allocates the next
+ * occurrence and creates new work.
+ */
+const TaskSessionRecoverPrimaryCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.session.recover-primary"),
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
+  selection: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("existing"), sessionId: TrimmedNonEmptyString }),
+    Schema.Struct({ kind: Schema.Literal("new") }),
+  ]),
+});
+
+/** User-authorized repair of a legacy project/repository binding. */
+const TaskEnvironmentRepairCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.environment.repair"),
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
+  projectId: ProjectId,
+  workspaceRoot: TrimmedNonEmptyString,
+  baseRef: TrimmedNonEmptyString,
+});
+
+/**
+ * Reopen a failed operation receipt for retry. Carries the latest expected
+ * revision and the target semantic operation key; it never creates a second
+ * semantic operation.
+ */
+const TaskOperationRetryCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.operation.retry"),
+  expectedTaskRevision: NonNegativeInt,
+  targetOperationKey: TrimmedNonEmptyString,
+});
+
 const TaskStageStartCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.stage.start"),
@@ -667,6 +980,11 @@ export const TaskWorkspaceCommand = Schema.Union([
   TaskResearchCompleteCommand,
   TaskDesignCompleteCommand,
   TaskPlanApproveCommand,
+  TaskStageRequestChangesCommand,
+  TaskWorktreePolicySetCommand,
+  TaskSessionRecoverPrimaryCommand,
+  TaskEnvironmentRepairCommand,
+  TaskOperationRetryCommand,
   TaskStageStartCommand,
   TaskBuildPhaseStartCommand,
   TaskBuildWorkItemSetStatusCommand,
@@ -696,6 +1014,11 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.research.complete",
   "task.design.complete",
   "task.plan.approve",
+  "task.stage.request-changes",
+  "task.worktree.policy.set",
+  "task.session.recover-primary",
+  "task.environment.repair",
+  "task.operation.retry",
   "task.stage.start",
   "task.build.phase.start",
   "task.build.work-item.set-status",
@@ -708,6 +1031,25 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.fixture.apply",
   "task.verification.run",
   "task.verification.signoff",
+  // Lifecycle event types. Event type is independent from command type: one
+  // semantic operation may emit requested, step-completed, ready, or failed
+  // lifecycle events.
+  "task.bootstrap.requested",
+  "task.bootstrap.step-completed",
+  "task.bootstrap.ready",
+  "task.bootstrap.failed",
+  "task.occurrence.completed",
+  "task.occurrence.starting",
+  "task.occurrence.failed",
+  "task.gate.opened",
+  "task.gate.approved",
+  "task.gate.changes-requested",
+  "task.proposal.proposed",
+  "task.proposal.committed",
+  "task.proposal.rejected",
+  "task.worktree.ready",
+  "task.worktree.failed",
+  "task.migrated",
 ]);
 export type TaskWorkspaceEventType = typeof TaskWorkspaceEventType.Type;
 
@@ -741,9 +1083,42 @@ export const TaskWorkspaceStreamItem = Schema.Union([
 ]);
 export type TaskWorkspaceStreamItem = typeof TaskWorkspaceStreamItem.Type;
 
+export const TaskWorkspaceDispatchOperationStatus = Schema.Literals([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+]);
+export type TaskWorkspaceDispatchOperationStatus = typeof TaskWorkspaceDispatchOperationStatus.Type;
+
+export const TaskWorkspaceDispatchOperation = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  status: TaskWorkspaceDispatchOperationStatus,
+  attempt: NonNegativeInt,
+  error: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type TaskWorkspaceDispatchOperation = typeof TaskWorkspaceDispatchOperation.Type;
+
+export const TaskWorkspaceTaskRoute = Schema.Struct({
+  environmentId: EnvironmentId,
+  taskId: TaskWorkspaceId,
+});
+export type TaskWorkspaceTaskRoute = typeof TaskWorkspaceTaskRoute.Type;
+
+export const TaskWorkspaceConversationTarget = Schema.Struct({
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+});
+export type TaskWorkspaceConversationTarget = typeof TaskWorkspaceConversationTarget.Type;
+
 export const TaskWorkspaceDispatchResult = Schema.Struct({
   sequence: NonNegativeInt,
   task: TaskWorkspace,
+  operation: TaskWorkspaceDispatchOperation,
+  taskRoute: TaskWorkspaceTaskRoute,
+  conversationTarget: Schema.NullOr(TaskWorkspaceConversationTarget).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type TaskWorkspaceDispatchResult = typeof TaskWorkspaceDispatchResult.Type;
 
@@ -756,3 +1131,161 @@ export class TaskWorkspaceError extends Schema.TaggedErrorClass<TaskWorkspaceErr
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
+
+// ---------------------------------------------------------------------------
+// Durable service records
+//
+// These persist inside the task store's transactional boundary. They are
+// contract-level schemas so tests can pin their shapes, but only the server
+// writes them.
+// ---------------------------------------------------------------------------
+
+export const TaskWorkspaceCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
+export type TaskWorkspaceCommandReceiptStatus = typeof TaskWorkspaceCommandReceiptStatus.Type;
+
+/**
+ * Durable receipt for one transport request. Prevents a replayed retry command
+ * from incrementing the target operation attempt twice.
+ */
+export const TaskWorkspaceCommandReceipt = Schema.Struct({
+  environmentId: EnvironmentId,
+  commandId: CommandId,
+  taskId: TaskWorkspaceId,
+  commandType: TrimmedNonEmptyString,
+  commandDigest: TrimmedNonEmptyString,
+  operationKey: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  status: TaskWorkspaceCommandReceiptStatus,
+  // Immutable result identity: the event id of the terminal event, or null for
+  // rejected receipts.
+  resultEventId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  error: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  createdAt: IsoDateTime,
+});
+export type TaskWorkspaceCommandReceipt = typeof TaskWorkspaceCommandReceipt.Type;
+
+export const TaskWorkspaceOperationStatus = Schema.Literals(["pending", "completed", "failed"]);
+export type TaskWorkspaceOperationStatus = typeof TaskWorkspaceOperationStatus.Type;
+
+/**
+ * Durable service record for one semantic operation across retries. Distinct
+ * from the task-local replay cache: a receipt binds environment, task, operation
+ * type, semantic key, payload digest, status, attempts, and result identity.
+ */
+export const TaskWorkspaceOperationReceipt = Schema.Struct({
+  environmentId: EnvironmentId,
+  taskId: TaskWorkspaceId,
+  operationType: TrimmedNonEmptyString,
+  operationKey: TrimmedNonEmptyString,
+  payloadDigest: TrimmedNonEmptyString,
+  status: TaskWorkspaceOperationStatus,
+  attemptCount: NonNegativeInt,
+  sourceCommandIds: Schema.Array(CommandId),
+  resultEventId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  resultTaskRevision: Schema.NullOr(NonNegativeInt).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  error: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type TaskWorkspaceOperationReceipt = typeof TaskWorkspaceOperationReceipt.Type;
+
+export const TaskWorkspaceProposalStatus = Schema.Literals(["proposed", "committed", "rejected"]);
+export type TaskWorkspaceProposalStatus = typeof TaskWorkspaceProposalStatus.Type;
+
+export const TaskWorkspaceProposalTurnOutcome = Schema.Literals(["completed", "aborted", "failed"]);
+export type TaskWorkspaceProposalTurnOutcome = typeof TaskWorkspaceProposalTurnOutcome.Type;
+
+/**
+ * Durable completion proposal bound to a task occurrence, session, thread, and
+ * provider turn. One proposal per occurrence and provider turn; a different
+ * payload on the same key conflicts.
+ */
+export const TaskWorkspaceCompletionProposal = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  environmentId: EnvironmentId,
+  taskId: TaskWorkspaceId,
+  stage: TaskWorkspaceStage,
+  occurrence: NonNegativeInt,
+  sessionId: TrimmedNonEmptyString,
+  threadId: ThreadId,
+  providerTurnId: TrimmedNonEmptyString,
+  payloadDigest: TrimmedNonEmptyString,
+  summary: Schema.String,
+  markdown: Schema.String,
+  status: TaskWorkspaceProposalStatus,
+  terminalTurnOutcome: Schema.NullOr(TaskWorkspaceProposalTurnOutcome).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  committedArtifactRevisionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  rejectionReason: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  createdAt: IsoDateTime,
+  settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type TaskWorkspaceCompletionProposal = typeof TaskWorkspaceCompletionProposal.Type;
+
+export const TaskWorkspaceOutboxTarget = Schema.Literals([
+  "worktree",
+  "bootstrap",
+  "proposal-commit",
+]);
+export type TaskWorkspaceOutboxTarget = typeof TaskWorkspaceOutboxTarget.Type;
+
+export const TaskWorkspaceOutboxStatus = Schema.Literals([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+]);
+export type TaskWorkspaceOutboxStatus = typeof TaskWorkspaceOutboxStatus.Type;
+
+/**
+ * One outbox row persisting deterministic external identities before side
+ * effects run. A restart worker reconciles each target before retrying.
+ */
+export const TaskWorkspaceOutboxEntry = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  environmentId: EnvironmentId,
+  taskId: TaskWorkspaceId,
+  operationKey: TrimmedNonEmptyString,
+  target: TaskWorkspaceOutboxTarget,
+  status: TaskWorkspaceOutboxStatus,
+  payload: Schema.Unknown,
+  attemptCount: NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type TaskWorkspaceOutboxEntry = typeof TaskWorkspaceOutboxEntry.Type;
+
+/**
+ * Deterministic external identities for a bootstrap outbox row. Persisted
+ * before thread-create/turn-start side effects run so a restart worker can
+ * reconcile the same targets.
+ */
+export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
+  stage: TaskWorkspaceStage,
+  occurrence: NonNegativeInt,
+  sessionId: TrimmedNonEmptyString,
+  threadId: ThreadId,
+  threadCreateCommandId: CommandId,
+  turnStartCommandId: CommandId,
+  kickoffMessageId: MessageId,
+  worktreeBranch: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+});
+export type TaskWorkspaceBootstrapOutboxPayload = typeof TaskWorkspaceBootstrapOutboxPayload.Type;
