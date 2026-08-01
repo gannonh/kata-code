@@ -1,11 +1,13 @@
 import {
   ThreadId,
+  type EnvironmentId,
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
   type TaskWorkspaceCommentAuthor,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
+import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import {
   TASK_WORKSPACE_STAGE_LABELS,
   taskWorkspaceCatalogEntryForVersion,
@@ -14,12 +16,13 @@ import {
 import { useClerk } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
 import { CheckCircle2Icon, CircleIcon, GitBranchIcon, Loader2Icon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
+import { createThreadSelectorByRef } from "../../storeSelectors";
 import {
   currentTaskStage,
   selectTaskRefsById,
@@ -34,6 +37,7 @@ import { Textarea } from "../ui/textarea";
 import { ArtifactsPanel } from "./ArtifactsPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { ContextManifestPanel } from "./ContextManifestPanel";
+import { GuidedTaskPanel } from "./GuidedTaskPanel";
 import { SessionsPanel } from "./SessionsPanel";
 
 /**
@@ -42,6 +46,7 @@ import { SessionsPanel } from "./SessionsPanel";
  * stage the task is actually in is honest.
  */
 const UNKNOWN_DEFINITION_STAGES: ReadonlyArray<TaskWorkspaceStage> = [];
+const TaskChatView = lazy(() => import("../ChatView"));
 
 /** Reasoning stages that write their own artifact and complete with their own command. */
 const REASONING_STAGES = [
@@ -892,6 +897,114 @@ function ClerkTaskWorkspaceView({ taskId }: { taskId: string }) {
   return <TaskWorkspaceViewContent taskId={taskId} currentUser={currentUser} />;
 }
 
+function PreviewTaskPanel({ task }: { readonly task: TaskWorkspace }) {
+  return (
+    <aside
+      data-testid="task-preview-shell"
+      className="border-t border-border bg-card p-5 lg:border-t-0 lg:border-l"
+    >
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Workflow preview
+      </p>
+      <h2 className="mt-1 text-base font-semibold">
+        {taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition)?.label ?? "Task"}
+      </h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        This workflow is available as a conversation shell. Automatic stage controls arrive in a
+        later slice.
+      </p>
+    </aside>
+  );
+}
+
+function TaskFirstSliceView({
+  task,
+  commands,
+  threadRef,
+  hasActiveThread,
+}: {
+  readonly task: TaskWorkspace;
+  readonly commands: ReturnType<typeof useTaskWorkspaceCommands>;
+  readonly threadRef: { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null;
+  readonly hasActiveThread: boolean;
+}) {
+  const catalogEntry = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
+  const stage = currentTaskStage(task);
+  const stageLabel = TASK_WORKSPACE_STAGE_PRESENTATION[stage];
+  const planOccurrence = task.occurrences
+    .filter((candidate) => candidate.stage === "plan")
+    .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+  const approvedPlan =
+    stage === "plan" &&
+    planOccurrence?.status === "completed" &&
+    planOccurrence.gateOutcome === "approved";
+  const planArtifact = latestArtifact(task, "plan");
+
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+      <header className="flex items-center gap-3 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
+        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">{task.title}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {catalogEntry?.label ?? "Task"} · {stageLabel}
+          </p>
+        </div>
+        <Badge variant={approvedPlan ? "success" : "secondary"}>
+          {approvedPlan ? "Plan approved" : stageLabel}
+        </Badge>
+      </header>
+      <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <section className="min-h-0 min-w-0 overflow-hidden">
+          {approvedPlan && planArtifact ? (
+            <div
+              data-testid="task-approved-plan-readonly"
+              className="h-full overflow-auto p-5 sm:p-8"
+            >
+              <div className="mx-auto max-w-3xl rounded-xl border border-success/30 bg-card p-5">
+                <p className="text-xs font-medium uppercase tracking-wide text-success-foreground">
+                  Approved Plan
+                </p>
+                <h1 className="mt-2 text-xl font-semibold">{planArtifact.title}</h1>
+                <pre className="mt-5 whitespace-pre-wrap text-sm text-muted-foreground">
+                  {planArtifact.markdown}
+                </pre>
+              </div>
+            </div>
+          ) : threadRef && hasActiveThread ? (
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Loading conversation…
+                </div>
+              }
+            >
+              <TaskChatView
+                environmentId={threadRef.environmentId}
+                threadId={threadRef.threadId}
+                routeKind="server"
+                reserveTitleBarControlInset
+              />
+            </Suspense>
+          ) : (
+            <div
+              data-testid="task-conversation-starting"
+              className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
+            >
+              Preparing the {stageLabel} conversation…
+            </div>
+          )}
+        </section>
+        {catalogEntry?.availableInFirstSlice ? (
+          <GuidedTaskPanel task={task} commands={commands} />
+        ) : (
+          <PreviewTaskPanel task={task} />
+        )}
+      </main>
+    </SidebarInset>
+  );
+}
+
 function TaskWorkspaceViewContent({
   taskId,
   currentUser,
@@ -922,6 +1035,26 @@ function TaskWorkspaceViewContent({
     : null;
   const railStages = catalogEntry?.stages ?? UNKNOWN_DEFINITION_STAGES;
   const isFreeform = (catalogEntry?.explicitEntryStages.length ?? 0) > 0;
+  const currentOccurrence = task
+    ? task.occurrences
+        .filter((candidate) => candidate.stage === stage)
+        .toSorted((left, right) => right.ordinal - left.ordinal)[0]
+    : undefined;
+  const currentSession =
+    task && currentOccurrence?.sessionId
+      ? (task.sessions.find((session) => session.id === currentOccurrence.sessionId) ?? null)
+      : null;
+  const activeThreadRef = useMemo(
+    () =>
+      task?.environmentId && currentSession
+        ? { environmentId: task.environmentId, threadId: currentSession.threadId }
+        : null,
+    [currentSession, task?.environmentId],
+  );
+  const activeThread = useStore(
+    useMemo(() => createThreadSelectorByRef(activeThreadRef), [activeThreadRef]),
+  );
+  const isFirstSliceTask = task?.versions.taskContract === "task-workspace@0.3.0";
   const availableThreads = useMemo(
     () =>
       task && repository
@@ -950,6 +1083,17 @@ function TaskWorkspaceViewContent({
           Loading task workspace…
         </div>
       </SidebarInset>
+    );
+  }
+
+  if (isFirstSliceTask) {
+    return (
+      <TaskFirstSliceView
+        task={task}
+        commands={commands}
+        threadRef={activeThreadRef}
+        hasActiveThread={activeThread !== undefined && "id" in activeThread}
+      />
     );
   }
 

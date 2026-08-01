@@ -97,6 +97,21 @@ export function TaskWorkspaceNewView() {
   const [modelSlug, setModelSlug] = useState("");
   const [optionValues, setOptionValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const selectableInstanceEntries = useMemo(
+    () =>
+      preset === "guided"
+        ? instanceEntries.filter(
+            (entry) =>
+              entry.driverKind !== "pi" &&
+              entry.enabled &&
+              entry.installed &&
+              entry.isAvailable &&
+              entry.status !== "disabled" &&
+              entry.status !== "error",
+          )
+        : instanceEntries,
+    [instanceEntries, preset],
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -109,11 +124,11 @@ export function TaskWorkspaceNewView() {
 
   useEffect(() => {
     setInstanceId((currentInstanceId) =>
-      instanceEntries.some((entry) => entry.instanceId === currentInstanceId)
+      selectableInstanceEntries.some((entry) => entry.instanceId === currentInstanceId)
         ? currentInstanceId
-        : (instanceEntries[0]?.instanceId ?? ""),
+        : (selectableInstanceEntries[0]?.instanceId ?? ""),
     );
-  }, [instanceEntries]);
+  }, [selectableInstanceEntries]);
 
   const selectedProject = availableProjects.find((project) => project.id === projectId) ?? null;
   const catalogEntry = currentCatalogEntryForPreset(preset);
@@ -387,16 +402,16 @@ export function TaskWorkspaceNewView() {
                   data-testid="task-agent-select"
                   className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
                   value={instanceId}
+                  disabled={selectableInstanceEntries.length === 0}
                   onChange={(event) => {
                     setInstanceId(event.currentTarget.value);
                     setModelSlug("");
                     setOptionValues({});
                   }}
                 >
-                  {instanceEntries.map((entry) => (
+                  {selectableInstanceEntries.map((entry) => (
                     <option key={entry.instanceId} value={entry.instanceId}>
                       {entry.displayName}
-                      {entry.enabled ? "" : " (disabled)"}
                     </option>
                   ))}
                 </select>

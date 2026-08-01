@@ -1,6 +1,14 @@
 import "../../index.css";
 
-import { EnvironmentId, ProjectId, type TaskWorkspace, ThreadId } from "@kata-sh/code-contracts";
+import {
+  CommandId,
+  EnvironmentId,
+  MessageId,
+  ProjectId,
+  ProviderInstanceId,
+  type TaskWorkspace,
+  ThreadId,
+} from "@kata-sh/code-contracts";
 import { page } from "vite-plus/test/browser";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -28,6 +36,7 @@ vi.mock("../../cloud/publicConfig", () => ({
 }));
 
 vi.mock("../../environments/runtime", () => ({
+  readEnvironmentConnection: () => null,
   getPrimaryEnvironmentConnection: () => ({
     client: {
       taskWorkspaces: {
@@ -45,6 +54,7 @@ vi.mock("../../environments/runtime", () => ({
 }));
 
 vi.mock("../../store", () => ({
+  selectEnvironmentState: () => ({ threadShellById: {} }),
   selectSidebarThreadsAcrossEnvironments: () => [],
   useStore: () => [],
 }));
@@ -705,5 +715,98 @@ describe("TaskWorkspaceView", () => {
     await expect
       .element(page.getByTestId("task-context-manifest-manifest-1-budget"))
       .toHaveTextContent("unbudgeted");
+  });
+
+  it("uses the conversation-first Guided surface without manual stage controls", async () => {
+    const threadId = ThreadId.make("guided-thread-1");
+    await renderTask({
+      ...baseTask,
+      title: "Guided browser task",
+      versions: {
+        taskContract: "task-workspace@0.3.0",
+        artifactContract: "task-artifact@0.3.0",
+        workflowDefinition: "guided@0.2.0",
+        prompt: "task-workspace-guided@0.2.0",
+      },
+      intake: {
+        brief: "Clarify the browser task.",
+        source: { kind: "inline", body: "Clarify the browser task." },
+      },
+      preferences: {
+        worktreePolicy: "later",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("instance-1"),
+          model: "claude-sonnet-4",
+          options: [],
+        },
+        executionProfile: "planning",
+      },
+      bootstrap: {
+        operationKey: "task-browser:bootstrap:questions:0:primary",
+        status: "ready",
+        currentStep: null,
+        reservedSessionId: "task-browser-session-questions-0",
+        reservedThreadId: threadId,
+        threadCreateCommandId: CommandId.make("thread-create-1"),
+        turnStartCommandId: CommandId.make("turn-start-1"),
+        kickoffMessageId: MessageId.make("kickoff-1"),
+        conversationTarget: { environmentId: EnvironmentId.make("environment-local"), threadId },
+        attemptCount: 1,
+        failure: null,
+        updatedAt: "2026-07-28T17:00:00.000Z",
+      },
+      occurrences: [
+        {
+          id: "occurrence-questions-0",
+          stage: "questions",
+          ordinal: 0,
+          status: "running",
+          sessionId: "task-browser-session-questions-0",
+          threadId,
+          contextManifestId: null,
+          artifactRevisionId: null,
+          completionProposalId: null,
+          gateOutcome: null,
+          feedback: null,
+          supersedesOccurrenceId: null,
+          createdAt: "2026-07-28T17:00:00.000Z",
+          completedAt: null,
+        },
+      ],
+      sessions: [
+        {
+          id: "task-browser-session-questions-0",
+          stage: "questions",
+          threadId,
+          role: "primary",
+          provider: "claudeAgent",
+          status: "active",
+          parentSessionId: null,
+          forkPoint: null,
+          contextManifestId: null,
+          createdAt: "2026-07-28T17:00:00.000Z",
+        },
+      ],
+      workflowRuns: [
+        {
+          ...baseTask.workflowRuns[0]!,
+          id: "guided-run-1",
+          preset: "guided",
+          definitionVersion: "guided@0.2.0",
+          promptBundleVersion: "task-workspace-guided@0.2.0",
+          currentStage: "questions",
+        },
+      ],
+    });
+
+    await expect.element(page.getByTestId("guided-task-panel")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-questions")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-research")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-design")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-plan")).toBeVisible();
+    await expect.element(page.getByTestId("task-conversation-starting")).toBeVisible();
+    expect(page.getByTestId("task-questions-editor").query()).toBeNull();
+    expect(page.getByText(/Link an existing repository thread/).query()).toBeNull();
+    expect(page.getByTestId("task-context-manifests-panel").query()).toBeNull();
   });
 });

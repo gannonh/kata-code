@@ -1,3 +1,4 @@
+import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import { Link, useLocation } from "@tanstack/react-router";
 import { CheckCircle2Icon, ClipboardListIcon, PlusIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
@@ -74,7 +75,7 @@ export function TaskWorkspaceSidebar() {
                     variant={stage === "verified" ? "success" : "outline"}
                     className="max-w-20 truncate"
                   >
-                    {stage}
+                    {TASK_WORKSPACE_STAGE_PRESENTATION[stage]}
                   </Badge>
                 </SidebarMenuButton>
               </SidebarMenuItem>
