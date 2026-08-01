@@ -313,6 +313,25 @@ const makeStore = Effect.gen(function* () {
       `,
   });
 
+  const findOutboxByOperationKey = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      environmentId: EnvironmentId,
+      taskId: TaskWorkspaceId,
+      operationKey: Schema.String,
+    }),
+    Result: OutboxRow,
+    execute: (request) =>
+      sql`
+        SELECT outbox_id AS "outboxId", environment_id AS "environmentId",
+          task_id AS "taskId", operation_key AS "operationKey", target, status,
+          payload_json AS "payloadJson", attempt_count AS "attemptCount",
+          created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt"
+        FROM task_workspace_outbox
+        WHERE environment_id = ${request.environmentId} AND task_id = ${request.taskId}
+          AND operation_key = ${request.operationKey}
+      `,
+  });
+
   const readPendingOutboxRows = SqlSchema.findAll({
     Request: Schema.Struct({ limit: Schema.Number }),
     Result: OutboxRow,
@@ -646,6 +665,27 @@ const makeStore = Effect.gen(function* () {
       ),
     importLegacy,
     readPendingOutbox,
+    getOutboxByOperationKey: (input) =>
+      findOutboxByOperationKey(input).pipe(
+        Effect.mapError(toSqlError("TaskWorkspaceStore.getOutboxByOperationKey:query")),
+        Effect.map((option) =>
+          Option.map(option, (row) =>
+            Schema.decodeUnknownSync(TaskWorkspaceOutboxEntry)({
+              id: row.outboxId,
+              environmentId: row.environmentId,
+              taskId: row.taskId,
+              operationKey: row.operationKey,
+              target: row.target,
+              status: row.status,
+              payload: JSON.parse(row.payloadJson) as unknown,
+              attemptCount: row.attemptCount,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+              completedAt: row.completedAt,
+            }),
+          ),
+        ),
+      ),
     upsertOutbox,
     upsertProposal,
     getProposal: (input) =>

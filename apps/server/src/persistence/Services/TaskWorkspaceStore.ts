@@ -80,6 +80,11 @@ export interface TaskWorkspaceStoreShape {
   readonly readPendingOutbox: (
     limit: number,
   ) => Effect.Effect<ReadonlyArray<TaskWorkspaceOutboxEntry>, TaskWorkspaceStoreError>;
+  readonly getOutboxByOperationKey: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly taskId: TaskWorkspaceId;
+    readonly operationKey: string;
+  }) => Effect.Effect<Option.Option<TaskWorkspaceOutboxEntry>, TaskWorkspaceStoreError>;
   readonly upsertOutbox: (
     entry: TaskWorkspaceOutboxEntry,
   ) => Effect.Effect<void, TaskWorkspaceStoreError>;

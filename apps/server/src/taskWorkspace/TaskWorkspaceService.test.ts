@@ -14,13 +14,16 @@ import {
   ProviderInstanceId,
   TaskWorkspaceId,
   ThreadId,
+  type TaskWorkspace,
   type TaskWorkspaceCommand,
 } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../config.ts";
 import {
@@ -30,7 +33,14 @@ import {
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../git/GitWorkflowService.ts";
 import { layerConfig as SqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
 import { TaskWorkspaceStoreLive } from "../persistence/Layers/TaskWorkspaceStore.ts";
+import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 import {
+  OrchestrationEngineService,
+  type OrchestrationEngineShape,
+} from "../orchestration/Services/OrchestrationEngine.ts";
+import {
+  TaskWorkspaceSourceError,
+  TaskWorkspaceSourceErrorKind,
   TaskWorkspaceSourceResolver,
   type TaskWorkspaceSourceResolution,
 } from "./Services/TaskWorkspaceSourceResolver.ts";
@@ -99,6 +109,9 @@ function makeGitWorkflow(baseDir: string, createCount: { value: number }): GitWo
   };
 }
 
+const dispatchedOrchestration: unknown[] = [];
+let failNextOrchestrationDispatch = false;
+
 const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* (
   repoRoot: string,
   baseDir: string,
@@ -117,21 +130,34 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
   } satisfies ServerEnvironmentShape);
   const gitLayer = Layer.succeed(GitWorkflowService, makeGitWorkflow(baseDir, createCount));
   const sourceResolverLayer = Layer.succeed(TaskWorkspaceSourceResolver, {
-    resolve: ({
-      projectId,
-      baseRef,
-      worktreePolicy,
-    }): Effect.Effect<TaskWorkspaceSourceResolution, never> =>
-      Effect.succeed({
-        workspaceRoot: repoRoot,
-        baseCommitSha: "base-commit-sha",
-        planningRootFingerprint: worktreePolicy === "now" ? null : "planning-fingerprint",
+    resolve: ({ worktreePolicy }) =>
+      Effect.tryPromise({
+        try: async () => ({
+          workspaceRoot: repoRoot,
+          baseCommitSha: await git(repoRoot, ["rev-parse", "HEAD"]),
+          planningRootFingerprint: worktreePolicy === "now" ? null : "planning-fingerprint",
+        }),
+        catch: (cause) =>
+          new TaskWorkspaceSourceError(TaskWorkspaceSourceErrorKind.NotARepository, String(cause)),
       }),
   });
+  const orchestrationLayer = Layer.succeed(OrchestrationEngineService, {
+    dispatch: (command: unknown) => {
+      dispatchedOrchestration.push(command as never);
+      if (failNextOrchestrationDispatch) {
+        failNextOrchestrationDispatch = false;
+        return Effect.fail(new Error("injected orchestration failure") as never);
+      }
+      return Effect.succeed({ sequence: dispatchedOrchestration.length });
+    },
+    streamDomainEvents: Stream.empty,
+    readEvents: () => Stream.empty,
+  } as OrchestrationEngineShape);
   const taskLayer = TaskWorkspaceServiceLive.pipe(
     Layer.provide(gitLayer),
     Layer.provide(environmentLayer),
     Layer.provide(sourceResolverLayer),
+    Layer.provide(orchestrationLayer),
     Layer.provide(TaskWorkspaceStoreLive),
     Layer.provide(SqlitePersistenceLive),
     Layer.provide(ServerConfig.layerTest(repoRoot, baseDir)),
@@ -143,6 +169,7 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
     runPromise: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provide(effect, context),
     runPromiseExit: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.exit(Effect.provide(effect, context)),
+    runContext: context as unknown as Context.Context<TaskWorkspaceService | TaskWorkspaceStore>,
     dispose: Effect.provide(Scope.close(scope, Exit.void), context),
   };
 });
@@ -157,6 +184,12 @@ const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function
   const repoRoot = NodePath.join(root, "repo");
   const baseDir = NodePath.join(root, "state");
   yield* Effect.tryPromise(() => NodeFs.mkdir(repoRoot, { recursive: true }));
+  yield* Effect.tryPromise(() => git(repoRoot, ["init", "-b", "main"]));
+  yield* Effect.tryPromise(() =>
+    NodeFs.writeFile(NodePath.join(repoRoot, "README.md"), "# fixture\n", "utf8"),
+  );
+  yield* Effect.tryPromise(() => git(repoRoot, ["add", "README.md"]));
+  yield* Effect.tryPromise(() => git(repoRoot, ["commit", "-m", "chore: seed fixture repository"]));
   const runtime = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
   yield* Effect.addFinalizer(() => runtime.dispose);
   return { runtime, repoRoot, baseDir };
@@ -1740,14 +1773,6 @@ describe("TaskWorkspaceService", () => {
     () =>
       Effect.gen(function* () {
         const { runtime, repoRoot } = yield* setupRuntime("kata-task-freeform-");
-        yield* Effect.tryPromise(() => git(repoRoot, ["init", "-b", "main"]));
-        yield* Effect.tryPromise(() =>
-          NodeFs.writeFile(NodePath.join(repoRoot, "README.md"), "# fixture\n", "utf8"),
-        );
-        yield* Effect.tryPromise(() => git(repoRoot, ["add", "README.md"]));
-        yield* Effect.tryPromise(() =>
-          git(repoRoot, ["commit", "-m", "chore: seed freeform repository"]),
-        );
         const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
 
         const created = yield* runtime.runPromise(
@@ -2024,13 +2049,6 @@ describe("TaskWorkspaceService", () => {
         const dispatch = <T extends TaskWorkspaceCommand>(value: T) =>
           runtime.runPromise(service.dispatch(value));
         const slice4TaskId = TaskWorkspaceId.make("slice-4-integration");
-
-        yield* Effect.tryPromise(() => git(repoRoot, ["init", "-b", "main"]));
-        yield* Effect.tryPromise(() =>
-          NodeFs.writeFile(NodePath.join(repoRoot, "README.md"), "# Slice 4\n", "utf8"),
-        );
-        yield* Effect.tryPromise(() => git(repoRoot, ["add", "README.md"]));
-        yield* Effect.tryPromise(() => git(repoRoot, ["commit", "-m", "chore: seed slice 4"]));
 
         yield* dispatch(
           command({
@@ -2460,30 +2478,30 @@ describe("TaskWorkspaceService", () => {
   );
 });
 
-describe("TaskWorkspaceService first-slice workflow", () => {
-  const guidedCreate = (overrides: Record<string, unknown> = {}) =>
-    command({
-      type: "task.create",
-      commandId: CommandId.make("wf-create-1"),
-      taskId: TaskWorkspaceId.make("guided-task"),
-      createdAt: now(1),
-      title: "Guided onboarding",
-      projectId,
-      baseRef: "main",
-      preset: "guided",
-      approvalPolicy: "before-build",
-      operationKey: "op-wf-create-1",
-      brief: "Add a guided onboarding flow.",
-      source: { kind: "inline", body: "Add a guided onboarding flow." },
-      worktreePolicy: "later",
-      modelSelection: {
-        instanceId: ProviderInstanceId.make("instance-1"),
-        model: "claude-sonnet-4",
-        options: [{ id: "reasoningEffort", value: "high" }],
-      },
-      ...overrides,
-    });
+const guidedCreate = (overrides: Record<string, unknown> = {}) =>
+  command({
+    type: "task.create",
+    commandId: CommandId.make("wf-create-1"),
+    taskId: TaskWorkspaceId.make("guided-task"),
+    createdAt: now(1),
+    title: "Guided onboarding",
+    projectId,
+    baseRef: "main",
+    preset: "guided",
+    approvalPolicy: "before-build",
+    operationKey: "op-wf-create-1",
+    brief: "Add a guided onboarding flow.",
+    source: { kind: "inline", body: "Add a guided onboarding flow." },
+    worktreePolicy: "later",
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("instance-1"),
+      model: "claude-sonnet-4",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    },
+    ...overrides,
+  });
 
+describe("TaskWorkspaceService first-slice workflow", () => {
   it.effect("creates a first-slice task with server-stamped identity", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot } = yield* setupRuntime("kata-task-slice5-create-");
@@ -2514,7 +2532,7 @@ describe("TaskWorkspaceService first-slice workflow", () => {
         status: "starting",
       });
       expect(result.task.workspace.repositories[0]?.provisioningStatus).toBe("not-requested");
-      expect(result.task.workspace.repositories[0]?.baseCommitSha).toBe("base-commit-sha");
+      expect(result.task.workspace.repositories[0]?.baseCommitSha).toMatch(/^[0-9a-f]{40}$/u);
       expect(result.task.workspace.repositories[0]?.planningRootFingerprint).toBe(
         "planning-fingerprint",
       );
@@ -2736,6 +2754,256 @@ describe("TaskWorkspaceService first-slice workflow", () => {
       expect(again?.taskRevision).toBe(1);
       expect(again?.occurrences).toHaveLength(0);
       expect(again?.gateHistory).toHaveLength(0);
+    }),
+  );
+});
+
+describe("TaskWorkspaceService bootstrap saga", () => {
+  const bootstrapEntry = (task: TaskWorkspace, baseDir: string, repoRoot: string) => {
+    const bootstrap = task.bootstrap;
+    if (!bootstrap) throw new Error("Expected bootstrap state");
+    const branch = `katacode/task-${task.id.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    const worktreePath = NodePath.join(
+      baseDir,
+      "worktrees",
+      NodePath.basename(repoRoot),
+      branch.replace(/\//g, "-"),
+    );
+    return {
+      id: "outbox-bootstrap-test",
+      environmentId: EnvironmentId.make("environment-local"),
+      taskId: task.id,
+      operationKey: bootstrap.operationKey,
+      target: "bootstrap" as const,
+      status: "pending" as const,
+      payload: {
+        stage: "questions" as const,
+        occurrence: 0,
+        sessionId: bootstrap.reservedSessionId,
+        threadId: bootstrap.reservedThreadId,
+        threadCreateCommandId: bootstrap.threadCreateCommandId,
+        turnStartCommandId: bootstrap.turnStartCommandId,
+        kickoffMessageId: bootstrap.kickoffMessageId,
+        worktreeBranch: task.preferences.worktreePolicy === "now" ? branch : null,
+        worktreePath: task.preferences.worktreePolicy === "now" ? worktreePath : null,
+      },
+      attemptCount: 0,
+      createdAt: "2026-08-01T17:00:00.000Z",
+      updatedAt: "2026-08-01T17:00:00.000Z",
+      completedAt: null,
+    } as const;
+  };
+
+  it.effect("enqueues a bootstrap row with reserved identities on first-slice create", () =>
+    Effect.gen(function* () {
+      const { runtime } = yield* setupRuntime("kata-task-bootstrap-enqueue-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("bs-create-1"),
+            operationKey: "op-bs-create-1",
+          }),
+        ),
+      );
+      expect(created.task.bootstrap?.status).toBe("pending");
+      expect(created.task.bootstrap?.operationKey).toBe(
+        "guided-task:bootstrap:questions:0:primary",
+      );
+      expect(created.task.bootstrap?.reservedSessionId).toBe("guided-task-session-questions-0");
+      expect(created.task.bootstrap?.reservedThreadId).not.toBeNull();
+      expect(created.task.bootstrap?.threadCreateCommandId).not.toBeNull();
+      expect(created.task.bootstrap?.turnStartCommandId).not.toBeNull();
+      expect(created.task.bootstrap?.kickoffMessageId).not.toBeNull();
+      expect(created.task.occurrences[0]).toMatchObject({ stage: "questions", status: "starting" });
+    }),
+  );
+
+  it.effect("bootstraps a Later task to Ready with a linked primary session", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-bootstrap-ready-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("bs-create-2"),
+            operationKey: "op-bs-create-2",
+          }),
+        ),
+      );
+
+      const entry = bootstrapEntry(created.task, baseDir, repoRoot);
+      yield* runtime.runPromise(service.processBootstrap(entry));
+
+      const ready = yield* runtime.runPromise(service.getTask(TaskWorkspaceId.make("guided-task")));
+      expect(ready?.bootstrap?.status).toBe("ready");
+      expect(ready?.bootstrap?.conversationTarget?.threadId).toBe(
+        ready?.bootstrap?.reservedThreadId,
+      );
+      expect(ready?.sessions).toHaveLength(1);
+      expect(ready?.sessions[0]).toMatchObject({
+        id: "guided-task-session-questions-0",
+        stage: "questions",
+        role: "primary",
+        status: "active",
+      });
+      expect(ready?.occurrences[0]).toMatchObject({ status: "running" });
+
+      // The saga dispatched the deterministic thread-create and kickoff commands.
+      const dispatched = dispatchedOrchestration.filter(
+        (command) =>
+          (command as { type?: string }).type === "thread.create" ||
+          (command as { type?: string }).type === "thread.turn.start",
+      );
+      expect(dispatched).toHaveLength(2);
+      const threadCreate = dispatched[0] as {
+        type: string;
+        threadId: string;
+        commandId: string;
+        runtimeMode: string;
+        interactionMode: string;
+      };
+      expect(threadCreate.type).toBe("thread.create");
+      expect(threadCreate.threadId).toBe(ready?.bootstrap?.reservedThreadId);
+      expect(threadCreate.runtimeMode).toBe("approval-required");
+      expect(threadCreate.interactionMode).toBe("plan");
+      const kickoff = dispatched[1] as { type: string; message: { text: string } };
+      expect(kickoff.type).toBe("thread.turn.start");
+      expect(kickoff.message.text).toBe("Add a guided onboarding flow.");
+    }),
+  );
+
+  it.effect("provisions the worktree first when the policy is Now", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-bootstrap-now-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("bs-create-3"),
+            operationKey: "op-bs-create-3",
+            worktreePolicy: "now",
+          }),
+        ),
+      );
+      expect(created.task.workspace.repositories[0]?.provisioningStatus).toBe("pending");
+
+      const entry = bootstrapEntry(created.task, baseDir, repoRoot);
+      const payload = entry.payload as {
+        worktreeBranch: string | null;
+        worktreePath: string | null;
+      };
+      // The reserved worktree identity was persisted at creation.
+      expect(payload.worktreeBranch).toMatch(/^katacode\/task-/u);
+      expect(payload.worktreePath).toContain(baseDir);
+
+      yield* runtime.runPromise(service.processBootstrap(entry));
+
+      const ready = yield* runtime.runPromise(service.getTask(TaskWorkspaceId.make("guided-task")));
+      expect(ready?.bootstrap?.status).toBe("ready");
+      expect(ready?.workspace.repositories[0]?.provisioningStatus).toBe("ready");
+      expect(ready?.workspace.repositories[0]?.worktreePath).toBe(payload.worktreePath);
+    }),
+  );
+
+  it.effect("records a failed bootstrap and retries the same occurrence idempotently", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-bootstrap-fail-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("bs-create-4"),
+            operationKey: "op-bs-create-4",
+          }),
+        ),
+      );
+
+      // Fail the thread-create dispatch on the first attempt.
+      failNextOrchestrationDispatch = true;
+      const entry = bootstrapEntry(created.task, baseDir, repoRoot);
+      yield* runtime.runPromise(service.processBootstrap(entry));
+
+      const failed = yield* runtime.runPromise(
+        service.getTask(TaskWorkspaceId.make("guided-task")),
+      );
+      expect(failed?.bootstrap?.status).toBe("failed");
+      expect(failed?.bootstrap?.failure?.step).toBe("thread");
+      expect(failed?.sessions).toHaveLength(0);
+      expect(failed?.occurrences[0]).toMatchObject({ status: "starting" });
+
+      // Retry with the latest revision reopens the operation and enqueues the
+      // same outbox row; replaying the retry command never double-increments.
+      const retried = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.operation.retry",
+            commandId: CommandId.make("bs-retry-1"),
+            taskId: TaskWorkspaceId.make("guided-task"),
+            createdAt: now(2),
+            expectedTaskRevision: failed!.taskRevision,
+            targetOperationKey: created.task.bootstrap!.operationKey,
+          }),
+        ),
+      );
+      expect(retried.operation).toMatchObject({
+        key: created.task.bootstrap!.operationKey,
+        status: "pending",
+        attempt: 2,
+      });
+      expect(retried.task.bootstrap?.status).toBe("pending");
+
+      const replayedRetry = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.operation.retry",
+            commandId: CommandId.make("bs-retry-1"),
+            taskId: TaskWorkspaceId.make("guided-task"),
+            createdAt: now(2),
+            expectedTaskRevision: failed!.taskRevision,
+            targetOperationKey: created.task.bootstrap!.operationKey,
+          }),
+        ),
+      );
+      expect(replayedRetry.operation.attempt).toBe(2);
+
+      // The retried bootstrap succeeds against the same occurrence.
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const ready = yield* runtime.runPromise(service.getTask(TaskWorkspaceId.make("guided-task")));
+      expect(ready?.bootstrap?.status).toBe("ready");
+      expect(ready?.sessions).toHaveLength(1);
+      expect(ready?.occurrences[0]).toMatchObject({ status: "running" });
+    }),
+  );
+
+  it.effect("rejects a retry with a stale task revision", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-bootstrap-retry-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("bs-create-5"),
+            operationKey: "op-bs-create-5",
+          }),
+        ),
+      );
+
+      const staleRevision = yield* runtime.runPromiseExit(
+        service.dispatch(
+          command({
+            type: "task.operation.retry",
+            commandId: CommandId.make("bs-retry-revision"),
+            taskId: TaskWorkspaceId.make("guided-task"),
+            createdAt: now(2),
+            expectedTaskRevision: created.task.taskRevision + 99,
+            targetOperationKey: "op-bs-create-5",
+          }),
+        ),
+      );
+      expect(staleRevision._tag).toBe("Failure");
     }),
   );
 });

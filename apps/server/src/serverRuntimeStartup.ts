@@ -28,6 +28,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor.ts";
+import { TaskWorkspaceBootstrapWorker } from "./taskWorkspace/TaskWorkspaceBootstrapWorker.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
@@ -285,6 +286,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const keybindings = yield* Keybindings;
   const orchestrationReactor = yield* OrchestrationReactor;
+  const taskWorkspaceBootstrapWorker = yield* TaskWorkspaceBootstrapWorker;
   const providerSessionReaper = yield* ProviderSessionReaper;
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const serverSettings = yield* ServerSettingsService;
@@ -333,6 +335,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
       "reactors.start",
       Effect.gen(function* () {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
+        yield* taskWorkspaceBootstrapWorker.start().pipe(Scope.provide(reactorScope));
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
       }),
     );

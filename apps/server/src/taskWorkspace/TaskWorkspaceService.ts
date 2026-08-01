@@ -11,8 +11,10 @@ import { promisify } from "node:util";
 
 import {
   TASK_BRIEF_MAX_CHARS,
+  TaskWorkspaceBootstrapOutboxPayload,
+  TaskWorkspaceBootstrapState,
   TaskWorkspaceError,
-  type CommandId,
+  CommandId,
   type TaskWorkspace,
   type TaskWorkspaceArtifact,
   type TaskWorkspaceArtifactKind,
@@ -24,6 +26,7 @@ import {
   type TaskWorkspaceCommand,
   type TaskWorkspaceCommentThread,
   type TaskWorkspaceCompletionProposal,
+  type TaskWorkspaceDispatchOperationStatus,
   type TaskWorkspaceDispatchResult,
   type TaskWorkspaceOperationReceipt,
   type TaskWorkspaceOutboxEntry,
@@ -32,6 +35,8 @@ import {
   type TaskWorkspaceId,
   type TaskWorkspaceSnapshot,
   type TaskWorkspaceStreamItem,
+  MessageId,
+  ThreadId,
   type EnvironmentId,
 } from "@kata-sh/code-contracts";
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
@@ -51,6 +56,7 @@ import * as Stream from "effect/Stream";
 import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 import { TaskWorkspaceSourceResolverLive } from "./Layers/TaskWorkspaceSourceResolver.ts";
 import {
@@ -129,6 +135,11 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
 }
 
 const TASK_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+
+function describeFailure(cause: unknown): string {
+  if (cause instanceof Error && cause.message.length > 0) return cause.message.slice(0, 2_000);
+  return String(cause).slice(0, 2_000);
+}
 
 function validateTaskSlug(slug: string): void {
   if (slug.length === 0 || slug.length > 80) {
@@ -658,6 +669,7 @@ function initialTask(
   command: Extract<TaskWorkspaceCommand, { type: "task.create" }>,
   environmentId: EnvironmentId,
   source?: TaskWorkspaceSourceResolution,
+  bootstrap?: TaskWorkspaceBootstrapState,
 ): TaskWorkspace {
   // Pin the definition the task will resolve for the rest of its life. Later
   // versions of the same preset are registered alongside, never in place, so a
@@ -696,7 +708,7 @@ function initialTask(
       modelSelection: command.modelSelection ?? null,
       executionProfile: "planning",
     },
-    bootstrap: null,
+    bootstrap: bootstrap ?? null,
     occurrences: isFirstSliceCreate
       ? [
           {
@@ -966,6 +978,13 @@ export interface TaskWorkspaceServiceShape {
   readonly getTask: (taskId: TaskWorkspaceId) => Effect.Effect<TaskWorkspace | null, never>;
   readonly streamEvents: Stream.Stream<TaskWorkspaceEventValue>;
   readonly subscribe: Effect.Effect<Stream.Stream<TaskWorkspaceStreamItem>, never, Scope.Scope>;
+  /**
+   * Server-owned bootstrap saga for one outbox row. Idempotent across retries
+   * and restart; never allocates a second session or occurrence.
+   */
+  readonly processBootstrap: (
+    entry: TaskWorkspaceOutboxEntry,
+  ) => Effect.Effect<void, TaskWorkspaceError>;
 }
 
 export class TaskWorkspaceService extends Context.Service<
@@ -979,11 +998,33 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const store = yield* TaskWorkspaceStore;
   const sourceResolver = yield* TaskWorkspaceSourceResolver;
+  const orchestrationEngine = yield* OrchestrationEngineService;
   const serverEnvironment = yield* ServerEnvironment;
   const environmentId = yield* serverEnvironment.getEnvironmentId;
   const semaphore = yield* Semaphore.make(1);
   const eventPubSub = yield* PubSub.unbounded<TaskWorkspaceEventValue>();
   const eventLogPath = NodePath.join(config.stateDir, "task-workspace-events.ndjson");
+  const serverNow = DateTime.now.pipe(
+    Effect.mapError(
+      (cause) =>
+        new TaskWorkspaceError({
+          message: "Failed to read server time.",
+          commandType: "task.internal",
+          cause,
+        }),
+    ),
+    Effect.map(DateTime.formatIso),
+  );
+  const serverUuid = crypto.randomUUIDv4.pipe(
+    Effect.mapError(
+      (cause) =>
+        new TaskWorkspaceError({
+          message: "Failed to generate a server identifier.",
+          commandType: "task.internal",
+          cause,
+        }),
+    ),
+  );
 
   // One-time transactional NDJSON import. The legacy file is retained read-only
   // after a successful import; the store's marker row makes the import idempotent.
@@ -1073,6 +1114,64 @@ export const make = Effect.gen(function* () {
     updatedAt: now,
   });
 
+  /**
+   * Allocate deterministic bootstrap identities for a first-slice create.
+   * The reserved session, thread, command, and message ids are persisted with
+   * the create in one transaction so a restart worker reconciles the same
+   * targets.
+   */
+  const allocateBootstrapState = (
+    command: Extract<TaskWorkspaceCommand, { type: "task.create" }>,
+    workspaceRoot: string | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const stage = "questions" as const;
+      const occurrence = 0;
+      const operationKey = `${command.taskId}:bootstrap:${stage}:${occurrence}:primary`;
+      const sessionId = `${command.taskId}-session-${stage}-${occurrence}`;
+      const threadId = ThreadId.make(`thread-task-${yield* serverUuid}`);
+      const threadCreateCommandId = CommandId.make(
+        `server:task-thread-create:${yield* serverUuid}`,
+      );
+      const turnStartCommandId = CommandId.make(`server:task-turn-start:${yield* serverUuid}`);
+      const kickoffMessageId = MessageId.make(`message-task-${yield* serverUuid}`);
+      const now = yield* serverNow;
+      const branch =
+        command.worktreePolicy === "now" && workspaceRoot
+          ? `katacode/task-${safeBranchSegment(command.taskId)}`
+          : null;
+      const worktreePath =
+        branch && workspaceRoot
+          ? expectedTaskWorktreePath(config.worktreesDir, workspaceRoot, branch)
+          : null;
+      const bootstrap: TaskWorkspaceBootstrapState = {
+        operationKey,
+        status: "pending",
+        currentStep: null,
+        reservedSessionId: sessionId,
+        reservedThreadId: threadId,
+        threadCreateCommandId,
+        turnStartCommandId,
+        kickoffMessageId,
+        conversationTarget: null,
+        attemptCount: 0,
+        failure: null,
+        updatedAt: now,
+      };
+      const outboxPayload: TaskWorkspaceBootstrapOutboxPayload = {
+        stage,
+        occurrence,
+        sessionId,
+        threadId,
+        threadCreateCommandId,
+        turnStartCommandId,
+        kickoffMessageId,
+        worktreeBranch: branch,
+        worktreePath,
+      };
+      return { bootstrap, outboxPayload, operationKey };
+    });
+
   const append = (
     command: TaskWorkspaceCommand,
     task: TaskWorkspace,
@@ -1083,6 +1182,7 @@ export const make = Effect.gen(function* () {
         readonly target: TaskWorkspaceOutboxEntry["target"];
         readonly operationKey: string;
         readonly payload: unknown;
+        readonly status?: TaskWorkspaceOutboxEntry["status"];
       }>;
     },
   ) =>
@@ -1119,7 +1219,7 @@ export const make = Effect.gen(function* () {
           taskId: command.taskId,
           operationKey: entry.operationKey,
           target: entry.target,
-          status: "pending",
+          status: entry.status ?? "pending",
           payload: entry.payload,
           attemptCount: 0,
           createdAt: now,
@@ -1180,6 +1280,98 @@ export const make = Effect.gen(function* () {
       return result;
     });
 
+  /**
+   * Server-owned lifecycle append. Event type is independent from command
+   * type: one semantic operation may emit requested, step-completed, ready, or
+   * failed lifecycle events without a client command receipt.
+   */
+  const internalAppend = (
+    eventType: TaskWorkspaceEventValue["type"],
+    task: TaskWorkspace,
+    input?: {
+      readonly operationReceipt?: TaskWorkspaceOperationReceipt;
+      readonly outbox?: ReadonlyArray<{
+        readonly target: TaskWorkspaceOutboxEntry["target"];
+        readonly operationKey: string;
+        readonly payload: unknown;
+        readonly status?: TaskWorkspaceOutboxEntry["status"];
+      }>;
+      readonly occurredAt?: string;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const eventId = yield* crypto.randomUUIDv4.pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: "Failed to generate a task event identifier.",
+              commandType: "task.internal",
+              taskId: task.id,
+              cause,
+            }),
+        ),
+      );
+      const now = input?.occurredAt ?? (yield* serverNow);
+      const commandId = CommandId.make(`server:task:${eventId}`);
+      const nextRevision = (taskById.get(task.id)?.taskRevision ?? 0) + 1;
+      const taskWithRevision: TaskWorkspace = { ...task, taskRevision: nextRevision };
+      const event: TaskWorkspaceEventValue = {
+        sequence: 0,
+        eventId,
+        commandId,
+        taskId: task.id,
+        type: eventType,
+        occurredAt: now,
+        task: taskWithRevision,
+      };
+      const operationReceipt = input?.operationReceipt
+        ? {
+            ...input.operationReceipt,
+            resultEventId: eventId,
+            resultTaskRevision: nextRevision,
+            updatedAt: now,
+          }
+        : undefined;
+      const outbox = input?.outbox?.map(
+        (entry): TaskWorkspaceOutboxEntry => ({
+          id: `outbox-${eventId}-${entry.operationKey.slice(-12)}`,
+          environmentId,
+          taskId: task.id,
+          operationKey: entry.operationKey,
+          target: entry.target,
+          status: entry.status ?? "pending",
+          payload: entry.payload,
+          attemptCount: 0,
+          createdAt: now,
+          updatedAt: now,
+          completedAt: null,
+        }),
+      );
+      const stored = yield* store
+        .commit({
+          environmentId,
+          events: [event],
+          ...(operationReceipt ? { operationReceipt } : {}),
+          ...(outbox && outbox.length > 0 ? { outbox } : {}),
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to persist task event.",
+                commandType: "task.internal",
+                taskId: task.id,
+                cause,
+              }),
+          ),
+        );
+      const storedEvent = stored[0]!;
+      sequence = storedEvent.sequence;
+      taskById.set(task.id, taskWithRevision);
+      yield* PubSub.publish(eventPubSub, storedEvent);
+      return taskWithRevision;
+    });
+
   const dispatchUnlocked = Effect.fn("TaskWorkspaceService.dispatch")(function* (
     command: TaskWorkspaceCommand,
   ) {
@@ -1210,12 +1402,37 @@ export const make = Effect.gen(function* () {
       if (!currentTask) {
         return yield* taskError(command, `Task '${command.taskId}' was not found.`);
       }
+      // The immutable outcome for a replayed retry reflects the reopened target
+      // operation, so a replayed retry never reports a stale attempt count.
+      const retryKey = command.type === "task.operation.retry" ? command.targetOperationKey : null;
+      const operationKey = receipt.operationKey ?? retryKey;
+      const targetReceipt = operationKey
+        ? yield* store
+            .getOperationReceipt({ environmentId, taskId: command.taskId, operationKey })
+            .pipe(
+              Effect.mapError((cause) =>
+                taskError(command, "Failed to read the operation receipt.", cause),
+              ),
+            )
+        : Option.none();
+      const target = Option.isSome(targetReceipt) ? targetReceipt.value : null;
       return {
         sequence: prior?.sequence ?? sequence,
         task: currentTask,
-        operation: receipt.operationKey
-          ? { key: receipt.operationKey, status: "completed" as const, attempt: 0, error: null }
-          : { key: command.type, status: "completed" as const, attempt: 0, error: null },
+        operation:
+          operationKey && target
+            ? {
+                key: operationKey,
+                status: target.status as TaskWorkspaceDispatchOperationStatus,
+                attempt: target.attemptCount,
+                error: target.error,
+              }
+            : {
+                key: operationKey ?? command.type,
+                status: "completed" as const,
+                attempt: 0,
+                error: null,
+              },
         taskRoute: { environmentId, taskId: command.taskId },
         conversationTarget: currentTask.bootstrap?.conversationTarget ?? null,
       };
@@ -1295,6 +1512,10 @@ export const make = Effect.gen(function* () {
                 })
                 .pipe(Effect.mapError((cause) => taskError(command, cause.message, cause)))
             : undefined;
+        const bootstrapState =
+          command.operationKey !== undefined
+            ? yield* allocateBootstrapState(command, source?.workspaceRoot)
+            : null;
         const operationReceipt =
           command.operationKey !== undefined
             ? makeOperationReceipt(
@@ -1310,9 +1531,24 @@ export const make = Effect.gen(function* () {
                 command.createdAt,
               )
             : undefined;
-        return yield* append(command, initialTask(command, environmentId, source), {
-          ...(operationReceipt ? { operationReceipt } : {}),
-        });
+        return yield* append(
+          command,
+          initialTask(command, environmentId, source, bootstrapState?.bootstrap),
+          {
+            ...(operationReceipt ? { operationReceipt } : {}),
+            ...(bootstrapState
+              ? {
+                  outbox: [
+                    {
+                      target: "bootstrap" as const,
+                      operationKey: bootstrapState.operationKey,
+                      payload: bootstrapState.outboxPayload,
+                    },
+                  ],
+                }
+              : {}),
+          },
+        );
       }
 
       const task = taskById.get(command.taskId);
@@ -1664,6 +1900,92 @@ export const make = Effect.gen(function* () {
               updatedAt: command.createdAt,
             }),
             updatedAt: command.createdAt,
+          });
+        }
+        case "task.operation.retry": {
+          // Reopen a failed operation receipt for retry. Carries the latest
+          // expected revision and never creates a second semantic operation.
+          const taskForRetry = taskById.get(command.taskId);
+          if (!taskForRetry) {
+            return yield* taskError(command, `Task '${command.taskId}' was not found.`);
+          }
+          if (command.expectedTaskRevision !== taskForRetry.taskRevision) {
+            return yield* taskError(
+              command,
+              `Task revision ${taskForRetry.taskRevision} does not match the expected revision ${command.expectedTaskRevision}.`,
+            );
+          }
+          const priorOperation = yield* store
+            .getOperationReceipt({
+              environmentId,
+              taskId: command.taskId,
+              operationKey: command.targetOperationKey,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                taskError(command, "Failed to read the operation receipt.", cause),
+              ),
+            );
+          if (Option.isNone(priorOperation)) {
+            return yield* taskError(
+              command,
+              `Operation '${command.targetOperationKey}' has no receipt to retry.`,
+            );
+          }
+          const target = priorOperation.value;
+          if (target.status !== "failed") {
+            return yield* taskError(
+              command,
+              `Operation '${command.targetOperationKey}' is '${target.status}' and cannot be retried.`,
+            );
+          }
+          const priorOutbox = yield* store
+            .getOutboxByOperationKey({
+              environmentId,
+              taskId: command.taskId,
+              operationKey: command.targetOperationKey,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                taskError(command, "Failed to read the outbox row.", cause),
+              ),
+            );
+          const now = yield* serverNow;
+          const retriedReceipt: TaskWorkspaceOperationReceipt = {
+            ...target,
+            status: "pending",
+            attemptCount: target.attemptCount + 1,
+            sourceCommandIds: [...target.sourceCommandIds, command.commandId],
+            error: null,
+            updatedAt: now,
+          };
+          const reopenedTask: TaskWorkspace = taskForRetry.bootstrap
+            ? {
+                ...taskForRetry,
+                bootstrap: {
+                  ...taskForRetry.bootstrap,
+                  status: "pending",
+                  currentStep: null,
+                  failure: null,
+                  attemptCount: taskForRetry.bootstrap.attemptCount + 1,
+                  updatedAt: now,
+                },
+              }
+            : taskForRetry;
+          return yield* append(command, reopenedTask, {
+            operationReceipt: retriedReceipt,
+            ...(Option.isSome(priorOutbox)
+              ? {
+                  outbox: [
+                    {
+                      target: priorOutbox.value.target,
+                      operationKey: priorOutbox.value.operationKey,
+                      payload: priorOutbox.value.payload,
+                      status: "pending" as const,
+                    },
+                  ],
+                }
+              : {}),
           });
         }
         case "task.plan.approve": {
@@ -2618,8 +2940,312 @@ export const make = Effect.gen(function* () {
   const dispatch: TaskWorkspaceServiceShape["dispatch"] = (command) =>
     semaphore.withPermits(1)(dispatchUnlocked(command));
 
+  const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
+
+  /**
+   * Server-owned bootstrap saga for one outbox row. Runs under the dispatch
+   * semaphore; every step reconciles deterministic identities before side
+   * effects run, so a restart worker retries the same targets without
+   * allocating a second session or occurrence.
+   */
+  const processBootstrap = (
+    entry: TaskWorkspaceOutboxEntry,
+  ): Effect.Effect<void, TaskWorkspaceError> => {
+    const failure = (step: string, cause: unknown): Effect.Effect<void, TaskWorkspaceError> =>
+      Effect.gen(function* () {
+        const now = yield* serverNow;
+        const failedTask: TaskWorkspace = {
+          ...taskById.get(entry.taskId)!,
+          bootstrap: {
+            ...taskById.get(entry.taskId)!.bootstrap!,
+            status: "failed",
+            currentStep: step,
+            attemptCount: (taskById.get(entry.taskId)!.bootstrap!.attemptCount ?? 0) + 1,
+            failure: {
+              step,
+              message: describeFailure(cause),
+              occurredAt: now,
+            },
+            updatedAt: now,
+          },
+        };
+        yield* internalAppend("task.bootstrap.failed", failedTask, {
+          occurredAt: now,
+          operationReceipt: {
+            environmentId,
+            taskId: entry.taskId,
+            operationType: "task.bootstrap",
+            operationKey: entry.operationKey,
+            payloadDigest: "server-internal",
+            status: "failed",
+            attemptCount: entry.attemptCount + 1,
+            sourceCommandIds: [],
+            resultEventId: null,
+            resultTaskRevision: null,
+            error: describeFailure(cause),
+            createdAt: now,
+            updatedAt: now,
+          },
+          outbox: [{ ...entry, status: "failed" }],
+        });
+      });
+    return semaphore
+      .withPermits(1)(
+        Effect.gen(function* () {
+          const task = taskById.get(entry.taskId);
+          if (!task || task.bootstrap?.operationKey !== entry.operationKey) {
+            // Stale outbox row for a task that no longer owns this operation.
+            yield* store.upsertOutbox({ ...entry, status: "failed" }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TaskWorkspaceError({
+                    message: "Failed to mark a stale bootstrap row failed.",
+                    commandType: "task.internal",
+                    taskId: entry.taskId,
+                    cause,
+                  }),
+              ),
+            );
+            return;
+          }
+          const payload = yield* decodeBootstrapPayload(entry.payload).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TaskWorkspaceError({
+                  message: "Failed to decode the bootstrap outbox payload.",
+                  commandType: "task.internal",
+                  taskId: entry.taskId,
+                  cause,
+                }),
+            ),
+          );
+          // Step 1: provision or reconcile the worktree when policy requires it.
+          let working = task;
+          const repository = working.workspace.repositories[0]!;
+          if (working.preferences.worktreePolicy === "now" && repository.worktreePath === null) {
+            const branch = payload.worktreeBranch;
+            const worktreePath = payload.worktreePath;
+            if (!branch || !worktreePath) {
+              return yield* failure("worktree", new Error("Missing reserved worktree identity."));
+            }
+            const baseCommit = repository.baseCommitSha;
+            if (!baseCommit) {
+              return yield* failure("worktree", new Error("The base commit is not pinned."));
+            }
+            const existing = yield* tryAdoptExistingWorktree(worktreePath, branch).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TaskWorkspaceError({
+                    message: "Failed to reconcile the task worktree.",
+                    commandType: "task.internal",
+                    taskId: entry.taskId,
+                    cause,
+                  }),
+              ),
+            );
+            const worktree =
+              existing ??
+              (yield* gitWorkflow
+                .createWorktree({
+                  cwd: repository.workspaceRoot,
+                  refName: baseCommit,
+                  newRefName: branch,
+                  path: worktreePath,
+                })
+                .pipe(
+                  Effect.catch((cause) =>
+                    tryAdoptExistingWorktree(worktreePath, branch).pipe(
+                      Effect.flatMap((adopted) =>
+                        adopted
+                          ? Effect.succeed(adopted)
+                          : Effect.fail(
+                              new TaskWorkspaceError({
+                                message: "Failed to provision the task worktree.",
+                                commandType: "task.internal",
+                                taskId: entry.taskId,
+                                cause,
+                              }),
+                            ),
+                      ),
+                    ),
+                  ),
+                ));
+            working = {
+              ...working,
+              workspace: {
+                repositories: working.workspace.repositories.map((candidate) =>
+                  candidate.id === repository.id
+                    ? {
+                        ...candidate,
+                        branch: worktree.worktree.refName,
+                        worktreePath: worktree.worktree.path,
+                        provisioningStatus: "ready" as const,
+                      }
+                    : candidate,
+                ),
+              },
+            };
+          }
+
+          // Step 2: create or reconcile the reserved thread through orchestration.
+          const now = yield* serverNow;
+          const projectId = working.workspace.repositories[0]!.projectId;
+          const modelSelection = working.preferences.modelSelection;
+          if (!modelSelection) {
+            return yield* failure("thread", new Error("The task has no model selection."));
+          }
+          yield* orchestrationEngine
+            .dispatch({
+              type: "thread.create",
+              commandId: payload.threadCreateCommandId,
+              threadId: payload.threadId,
+              projectId,
+              title: `Task: ${working.title}`,
+              modelSelection,
+              runtimeMode: "approval-required",
+              interactionMode: "plan",
+              branch: working.workspace.repositories[0]!.branch,
+              worktreePath: working.workspace.repositories[0]!.worktreePath,
+              createdAt: now,
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TaskWorkspaceError({
+                    message: "Failed to create the task thread.",
+                    commandType: "task.internal",
+                    taskId: entry.taskId,
+                    cause,
+                  }),
+              ),
+            );
+
+          // Step 3: dispatch the deterministic kickoff message.
+          yield* orchestrationEngine
+            .dispatch({
+              type: "thread.turn.start",
+              commandId: payload.turnStartCommandId,
+              threadId: payload.threadId,
+              message: {
+                messageId: payload.kickoffMessageId,
+                role: "user",
+                text: working.intake.brief,
+                attachments: [],
+              },
+              modelSelection,
+              runtimeMode: "approval-required",
+              interactionMode: "plan",
+              createdAt: now,
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TaskWorkspaceError({
+                    message: "Failed to start the task kickoff turn.",
+                    commandType: "task.internal",
+                    taskId: entry.taskId,
+                    cause,
+                  }),
+              ),
+            );
+
+          // Step 4: record Ready. The session is created and linked by Kata;
+          // there is no manual thread linking in this workflow.
+          const readyTask: TaskWorkspace = {
+            ...working,
+            bootstrap: {
+              operationKey: working.bootstrap!.operationKey,
+              status: "ready",
+              currentStep: null,
+              reservedSessionId: working.bootstrap!.reservedSessionId,
+              reservedThreadId: working.bootstrap!.reservedThreadId,
+              threadCreateCommandId: working.bootstrap!.threadCreateCommandId,
+              turnStartCommandId: working.bootstrap!.turnStartCommandId,
+              kickoffMessageId: working.bootstrap!.kickoffMessageId,
+              conversationTarget: { environmentId, threadId: payload.threadId },
+              attemptCount: working.bootstrap!.attemptCount ?? 0,
+              failure: null,
+              updatedAt: now,
+            },
+            sessions: [
+              ...working.sessions,
+              {
+                id: payload.sessionId,
+                stage: payload.stage,
+                threadId: payload.threadId,
+                role: "primary" as const,
+                provider: modelSelection.instanceId,
+                status: "active" as const,
+                parentSessionId: null,
+                forkPoint: null,
+                contextManifestId: null,
+                createdAt: now,
+              },
+            ],
+            occurrences: working.occurrences.map((occurrence) =>
+              occurrence.stage === payload.stage && occurrence.ordinal === payload.occurrence
+                ? {
+                    ...occurrence,
+                    status: "running" as const,
+                    sessionId: payload.sessionId,
+                    threadId: payload.threadId,
+                  }
+                : occurrence,
+            ),
+          };
+          yield* internalAppend("task.bootstrap.ready", readyTask, {
+            occurredAt: now,
+            operationReceipt: {
+              environmentId,
+              taskId: entry.taskId,
+              operationType: "task.bootstrap",
+              operationKey: entry.operationKey,
+              payloadDigest: "server-internal",
+              status: "completed",
+              attemptCount: entry.attemptCount + 1,
+              sourceCommandIds: [payload.threadCreateCommandId, payload.turnStartCommandId],
+              resultEventId: null,
+              resultTaskRevision: null,
+              error: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+            outbox: [{ ...entry, status: "completed" }],
+          });
+        }),
+      )
+      .pipe(
+        Effect.catch((cause) => {
+          if (isTaskWorkspaceError(cause)) {
+            return failure(
+              cause.message.includes("worktree")
+                ? "worktree"
+                : cause.message.includes("thread")
+                  ? "thread"
+                  : "bootstrap",
+              cause,
+            );
+          }
+          return failure("bootstrap", cause);
+        }),
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          isTaskWorkspaceError(cause)
+            ? cause
+            : new TaskWorkspaceError({
+                message: describeFailure(cause),
+                commandType: "task.internal",
+                taskId: entry.taskId,
+                cause,
+              }),
+        ),
+      );
+  };
+
   return TaskWorkspaceService.of({
     dispatch,
+    processBootstrap,
     getSnapshot: Effect.sync(() => ({
       sequence,
       tasks: [...taskById.values()].toSorted((left, right) =>
