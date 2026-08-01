@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - integration test creates a real temporary Git repository.
 // @effect-diagnostics preferSchemaOverJson:off - legacy NDJSON fixture is written with JSON.stringify to mirror the historical on-disk format.
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as NodeFs from "node:fs/promises";
 import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
@@ -16,6 +17,7 @@ import {
   ThreadId,
   type TaskWorkspace,
   type TaskWorkspaceCommand,
+  type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
@@ -132,11 +134,18 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
   const sourceResolverLayer = Layer.succeed(TaskWorkspaceSourceResolver, {
     resolve: ({ worktreePolicy }) =>
       Effect.tryPromise({
-        try: async () => ({
-          workspaceRoot: repoRoot,
-          baseCommitSha: await git(repoRoot, ["rev-parse", "HEAD"]),
-          planningRootFingerprint: worktreePolicy === "now" ? null : "planning-fingerprint",
-        }),
+        try: async () => {
+          const headSha = await git(repoRoot, ["rev-parse", "HEAD"]);
+          const status = await git(repoRoot, ["status", "--porcelain=v2"]);
+          const planningRootFingerprint = createHash("sha256")
+            .update(`${headSha}\n${status}`)
+            .digest("hex");
+          return {
+            workspaceRoot: repoRoot,
+            baseCommitSha: headSha,
+            planningRootFingerprint: worktreePolicy === "now" ? null : planningRootFingerprint,
+          };
+        },
         catch: (cause) =>
           new TaskWorkspaceSourceError(TaskWorkspaceSourceErrorKind.NotARepository, String(cause)),
       }),
@@ -2533,8 +2542,8 @@ describe("TaskWorkspaceService first-slice workflow", () => {
       });
       expect(result.task.workspace.repositories[0]?.provisioningStatus).toBe("not-requested");
       expect(result.task.workspace.repositories[0]?.baseCommitSha).toMatch(/^[0-9a-f]{40}$/u);
-      expect(result.task.workspace.repositories[0]?.planningRootFingerprint).toBe(
-        "planning-fingerprint",
+      expect(result.task.workspace.repositories[0]?.planningRootFingerprint).toMatch(
+        /^[0-9a-f]{64}$/u,
       );
       expect(result.taskRoute).toEqual({
         environmentId: "environment-local",
@@ -2758,42 +2767,46 @@ describe("TaskWorkspaceService first-slice workflow", () => {
   );
 });
 
-describe("TaskWorkspaceService bootstrap saga", () => {
-  const bootstrapEntry = (task: TaskWorkspace, baseDir: string, repoRoot: string) => {
-    const bootstrap = task.bootstrap;
-    if (!bootstrap) throw new Error("Expected bootstrap state");
-    const branch = `katacode/task-${task.id.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-    const worktreePath = NodePath.join(
-      baseDir,
-      "worktrees",
-      NodePath.basename(repoRoot),
-      branch.replace(/\//g, "-"),
-    );
-    return {
-      id: "outbox-bootstrap-test",
-      environmentId: EnvironmentId.make("environment-local"),
-      taskId: task.id,
-      operationKey: bootstrap.operationKey,
-      target: "bootstrap" as const,
-      status: "pending" as const,
-      payload: {
-        stage: "questions" as const,
-        occurrence: 0,
-        sessionId: bootstrap.reservedSessionId,
-        threadId: bootstrap.reservedThreadId,
-        threadCreateCommandId: bootstrap.threadCreateCommandId,
-        turnStartCommandId: bootstrap.turnStartCommandId,
-        kickoffMessageId: bootstrap.kickoffMessageId,
-        worktreeBranch: task.preferences.worktreePolicy === "now" ? branch : null,
-        worktreePath: task.preferences.worktreePolicy === "now" ? worktreePath : null,
-      },
-      attemptCount: 0,
-      createdAt: "2026-08-01T17:00:00.000Z",
-      updatedAt: "2026-08-01T17:00:00.000Z",
-      completedAt: null,
-    } as const;
-  };
+const bootstrapEntry = (task: TaskWorkspace, baseDir: string, repoRoot: string) => {
+  const bootstrap = task.bootstrap;
+  if (!bootstrap) throw new Error("Expected bootstrap state");
+  const parsed = /:bootstrap:([^:]+):(\d+):primary$/u.exec(bootstrap.operationKey);
+  if (!parsed) throw new Error(`Invalid bootstrap operation key '${bootstrap.operationKey}'.`);
+  const stage = parsed[1] as TaskWorkspaceStage;
+  const occurrence = Number(parsed[2]);
+  const branch = `katacode/task-${task.id.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const worktreePath = NodePath.join(
+    baseDir,
+    "worktrees",
+    NodePath.basename(repoRoot),
+    branch.replace(/\//g, "-"),
+  );
+  return {
+    id: "outbox-bootstrap-test",
+    environmentId: EnvironmentId.make("environment-local"),
+    taskId: task.id,
+    operationKey: bootstrap.operationKey,
+    target: "bootstrap" as const,
+    status: "pending" as const,
+    payload: {
+      stage,
+      occurrence,
+      sessionId: bootstrap.reservedSessionId,
+      threadId: bootstrap.reservedThreadId,
+      threadCreateCommandId: bootstrap.threadCreateCommandId,
+      turnStartCommandId: bootstrap.turnStartCommandId,
+      kickoffMessageId: bootstrap.kickoffMessageId,
+      worktreeBranch: task.preferences.worktreePolicy === "now" ? branch : null,
+      worktreePath: task.preferences.worktreePolicy === "now" ? worktreePath : null,
+    },
+    attemptCount: 0,
+    createdAt: "2026-08-01T17:00:00.000Z",
+    updatedAt: "2026-08-01T17:00:00.000Z",
+    completedAt: null,
+  } as const;
+};
 
+describe("TaskWorkspaceService bootstrap saga", () => {
   it.effect("enqueues a bootstrap row with reserved identities on first-slice create", () =>
     Effect.gen(function* () {
       const { runtime } = yield* setupRuntime("kata-task-bootstrap-enqueue-");
@@ -3004,6 +3017,399 @@ describe("TaskWorkspaceService bootstrap saga", () => {
         ),
       );
       expect(staleRevision._tag).toBe("Failure");
+    }),
+  );
+});
+
+describe("TaskWorkspaceService guided flow", () => {
+  const flowCreate = (overrides: Record<string, unknown> = {}) =>
+    guidedCreate({
+      commandId: CommandId.make("flow-create-1"),
+      operationKey: "op-flow-create-1",
+      ...overrides,
+    });
+
+  it.effect("runs Clarify, Research, Design, and Plan to an open gate with atomic handoffs", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-guided-flow-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+      const created = yield* runtime.runPromise(service.dispatch(flowCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+
+      const proposeAndSettle = (
+        task: TaskWorkspace,
+        stage: string,
+        summary: string,
+        markdown: string,
+      ) =>
+        Effect.gen(function* () {
+          const occurrence = task.occurrences.find(
+            (candidate) => candidate.stage === stage && candidate.status === "running",
+          )!;
+          const session = task.sessions.find((candidate) => candidate.stage === stage);
+          if (!session) {
+            throw new Error(
+              `Missing session for ${stage}; sessions=${task.sessions.map((candidate) => `${candidate.stage}:${candidate.id}`).join(",")}; occurrences=${task.occurrences.map((candidate) => `${candidate.stage}:${candidate.ordinal}:${candidate.status}`).join(",")}`,
+            );
+          }
+          const proposing = yield* runtime.runPromise(
+            service.proposeStageCompletion({
+              taskId: task.id,
+              sessionId: session.id,
+              providerTurnId: `turn-${stage}`,
+              payloadDigest: `digest-${stage}`,
+              summary,
+              markdown,
+            }),
+          );
+          expect(proposing.occurrences.find((o) => o.id === occurrence.id)?.status).toBe(
+            "finalizing",
+          );
+          return yield* runtime.runPromise(
+            service.settleProposal({
+              taskId: task.id,
+              occurrence: occurrence.ordinal,
+              providerTurnId: `turn-${stage}`,
+              outcome: "completed",
+            }),
+          );
+        });
+
+      // Clarify completes and hands off to Research.
+      let task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      task = yield* proposeAndSettle(
+        task,
+        "questions",
+        "Goal, constraints, and success conditions are clear.",
+        "# Clarified\n\nScope is onboarding.\n",
+      );
+      expect(task.workflowRuns.at(-1)?.currentStage).toBe("research");
+      expect(task.occurrences.find((o) => o.stage === "questions")?.status).toBe("completed");
+      expect(task.occurrences.some((o) => o.stage === "research" && o.status === "starting")).toBe(
+        true,
+      );
+      expect(task.artifacts.find((artifact) => artifact.kind === "questions")).toBeDefined();
+      expect(task.bootstrap?.operationKey).toContain(":bootstrap:research:0:primary");
+
+      yield* runtime.runPromise(service.processBootstrap(bootstrapEntry(task, baseDir, repoRoot)));
+      task = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(task?.bootstrap?.status).toBe("ready");
+      expect(task?.occurrences.find((o) => o.stage === "research")?.status).toBe("running");
+
+      // Research completes and hands off to Design.
+      task = yield* proposeAndSettle(
+        task!,
+        "research",
+        "Codebase facts and conventions recorded.",
+        "# Research\n\nUses the onboarding module.\n",
+      );
+      expect(task.workflowRuns.at(-1)?.currentStage).toBe("design");
+      expect(task.artifacts.find((artifact) => artifact.kind === "research")).toBeDefined();
+
+      yield* runtime.runPromise(service.processBootstrap(bootstrapEntry(task, baseDir, repoRoot)));
+      task = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(task?.occurrences.find((o) => o.stage === "design")?.status).toBe("running");
+
+      // Design completes and hands off to Plan.
+      task = yield* proposeAndSettle(
+        task!,
+        "design",
+        "Approach and boundaries recorded.",
+        "# Design\n\nFollow the onboarding module.\n",
+      );
+      expect(task.workflowRuns.at(-1)?.currentStage).toBe("plan");
+      expect(task.artifacts.find((artifact) => artifact.kind === "design")).toBeDefined();
+
+      yield* runtime.runPromise(service.processBootstrap(bootstrapEntry(task, baseDir, repoRoot)));
+      task = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(task?.occurrences.find((o) => o.stage === "plan")?.status).toBe("running");
+
+      // Plan output opens the approval gate.
+      task = yield* proposeAndSettle(
+        task!,
+        "plan",
+        "Plan ready for review.",
+        "# Plan\n\n## Phase 1\nImplement onboarding.\n",
+      );
+      expect(task.planGate).toMatchObject({ status: "open", occurrence: 0 });
+      expect(task.occurrences.find((o) => o.stage === "plan")?.status).toBe("awaiting-approval");
+      expect(task.artifacts.find((artifact) => artifact.kind === "plan")).toBeDefined();
+
+      // A second Plan proposal is rejected while the gate is open.
+      const planSession = task.sessions.find((candidate) => candidate.stage === "plan")!;
+      const secondProposal = yield* runtime.runPromiseExit(
+        service.proposeStageCompletion({
+          taskId: task.id,
+          sessionId: planSession.id,
+          providerTurnId: "turn-plan-2",
+          payloadDigest: "digest-plan-2",
+          summary: "Replacement plan.",
+          markdown: "# Replacement\n",
+        }),
+      );
+      expect(secondProposal._tag).toBe("Failure");
+    }),
+  );
+
+  it.effect("request changes opens a continuation occurrence and reopens the gate", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-gate-changes-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+      const created = yield* runtime.runPromise(service.dispatch(flowCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      let task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+
+      // Drive straight to Plan: Clarify -> Research -> Design -> Plan.
+      for (const stage of ["questions", "research", "design"] as const) {
+        const occurrence = task!.occurrences.find(
+          (candidate) => candidate.stage === stage && candidate.status === "running",
+        )!;
+        const session = task!.sessions.find((candidate) => candidate.stage === stage)!;
+        yield* runtime.runPromise(
+          service.proposeStageCompletion({
+            taskId: task!.id,
+            sessionId: session.id,
+            providerTurnId: `turn-${stage}`,
+            payloadDigest: `digest-${stage}`,
+            summary: `${stage} done`,
+            markdown: `# ${stage}\n`,
+          }),
+        );
+        task = yield* runtime.runPromise(
+          service.settleProposal({
+            taskId: task!.id,
+            occurrence: occurrence.ordinal,
+            providerTurnId: `turn-${stage}`,
+            outcome: "completed",
+          }),
+        );
+        yield* runtime.runPromise(
+          service.processBootstrap(bootstrapEntry(task, baseDir, repoRoot)),
+        );
+        task = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      }
+      const planOccurrence = task!.occurrences.find(
+        (candidate) => candidate.stage === "plan" && candidate.status === "running",
+      )!;
+      const planSession = task!.sessions.find((candidate) => candidate.stage === "plan")!;
+      yield* runtime.runPromise(
+        service.proposeStageCompletion({
+          taskId: task!.id,
+          sessionId: planSession.id,
+          providerTurnId: "turn-plan",
+          payloadDigest: "digest-plan",
+          summary: "First plan.",
+          markdown: "# Plan v1\n",
+        }),
+      );
+      task = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task!.id,
+          occurrence: planOccurrence.ordinal,
+          providerTurnId: "turn-plan",
+          outcome: "completed",
+        }),
+      );
+      expect(task.planGate?.status).toBe("open");
+
+      // Request changes allocates occurrence 1 and reopens the gate after a new plan.
+      const changed = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.stage.request-changes",
+            commandId: CommandId.make("flow-changes-1"),
+            taskId: task.id,
+            createdAt: now(10),
+            expectedTaskRevision: task.taskRevision,
+            operationKey: "op-flow-changes-1",
+            feedback: "Add rollback handling.",
+          }),
+        ),
+      );
+      expect(changed.task.planGate).toBeNull();
+      expect(changed.task.gateHistory.at(-1)).toMatchObject({
+        outcome: "changes-requested",
+        feedback: "Add rollback handling.",
+        occurrence: 0,
+      });
+      expect(
+        changed.task.occurrences.filter((o) => o.stage === "plan" && o.ordinal === 0)[0]?.status,
+      ).toBe("completed");
+      expect(
+        changed.task.occurrences.some(
+          (o) => o.stage === "plan" && o.ordinal === 1 && o.status === "starting",
+        ),
+      ).toBe(true);
+      expect(changed.task.bootstrap?.operationKey).toContain(":bootstrap:plan:1:primary");
+      expect(changed.task.artifacts.find((a) => a.kind === "plan")).toBeDefined();
+
+      // The continuation bootstraps and a new plan reopens the gate.
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(changed.task, baseDir, repoRoot)),
+      );
+      const continued = yield* runtime.runPromise(service.getTask(task.id));
+      const occurrence1 = continued!.occurrences.find(
+        (candidate) => candidate.stage === "plan" && candidate.ordinal === 1,
+      )!;
+      const sessionId = continued!.bootstrap?.reservedSessionId ?? continued!.sessions.at(-1)!.id;
+      yield* runtime.runPromise(
+        service.proposeStageCompletion({
+          taskId: continued!.id,
+          sessionId,
+          providerTurnId: "turn-plan-2",
+          payloadDigest: "digest-plan-2",
+          summary: "Revised plan.",
+          markdown: "# Plan v2\n",
+        }),
+      );
+      const reopened = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: continued!.id,
+          occurrence: occurrence1.ordinal,
+          providerTurnId: "turn-plan-2",
+          outcome: "completed",
+        }),
+      );
+      expect(reopened.planGate?.status).toBe("open");
+      expect(reopened.planGate?.occurrence).toBe(1);
+      expect(reopened.planGate?.revision).toBeGreaterThan(0);
+    }),
+  );
+
+  it.effect("approval completes the Plan occurrence without Implement work", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-gate-approve-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+      const created = yield* runtime.runPromise(service.dispatch(flowCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      let task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+
+      for (const stage of ["questions", "research", "design"] as const) {
+        const occurrence = task!.occurrences.find(
+          (candidate) => candidate.stage === stage && candidate.status === "running",
+        )!;
+        const session = task!.sessions.find((candidate) => candidate.stage === stage)!;
+        yield* runtime.runPromise(
+          service.proposeStageCompletion({
+            taskId: task!.id,
+            sessionId: session.id,
+            providerTurnId: `turn-${stage}`,
+            payloadDigest: `digest-${stage}`,
+            summary: `${stage} done`,
+            markdown: `# ${stage}\n`,
+          }),
+        );
+        task = yield* runtime.runPromise(
+          service.settleProposal({
+            taskId: task!.id,
+            occurrence: occurrence.ordinal,
+            providerTurnId: `turn-${stage}`,
+            outcome: "completed",
+          }),
+        );
+        yield* runtime.runPromise(
+          service.processBootstrap(bootstrapEntry(task, baseDir, repoRoot)),
+        );
+        task = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      }
+      const planOccurrence = task!.occurrences.find(
+        (candidate) => candidate.stage === "plan" && candidate.status === "running",
+      )!;
+      const planSession = task!.sessions.find((candidate) => candidate.stage === "plan")!;
+      yield* runtime.runPromise(
+        service.proposeStageCompletion({
+          taskId: task!.id,
+          sessionId: planSession.id,
+          providerTurnId: "turn-plan",
+          payloadDigest: "digest-plan",
+          summary: "Plan ready.",
+          markdown: "# Plan\n\n## Phase 1\n",
+        }),
+      );
+      task = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task!.id,
+          occurrence: planOccurrence.ordinal,
+          providerTurnId: "turn-plan",
+          outcome: "completed",
+        }),
+      );
+      expect(task.planGate?.status).toBe("open");
+
+      const approved = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.plan.approve",
+            commandId: CommandId.make("flow-approve-1"),
+            taskId: task.id,
+            createdAt: now(20),
+            expectedTaskRevision: task.taskRevision,
+            operationKey: "op-flow-approve-1",
+          }),
+        ),
+      );
+      expect(approved.task.planGate).toBeNull();
+      expect(approved.task.gateHistory.at(-1)).toMatchObject({
+        outcome: "approved",
+        actor: "local-user",
+      });
+      expect(
+        approved.task.occurrences.find((o) => o.stage === "plan" && o.ordinal === 0)?.status,
+      ).toBe("completed");
+      // Stage stays `plan` and no Implement occurrence or session exists.
+      expect(approved.task.workflowRuns.at(-1)?.currentStage).toBe("plan");
+      expect(approved.task.occurrences.some((o) => o.stage === "build")).toBe(false);
+      expect(approved.task.sessions.some((s) => s.stage === "build")).toBe(false);
+      // Later policy enqueues deterministic worktree provisioning.
+      expect(approved.task.taskRevision).toBeGreaterThan(task.taskRevision);
+    }),
+  );
+
+  it.effect("an aborted turn rejects the proposal and returns the stage to Running", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-proposal-abort-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+
+      const created = yield* runtime.runPromise(service.dispatch(flowCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      let task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const occurrence = task!.occurrences.find(
+        (candidate) => candidate.stage === "questions" && candidate.status === "running",
+      )!;
+      const session = task!.sessions.find((candidate) => candidate.stage === "questions")!;
+
+      yield* runtime.runPromise(
+        service.proposeStageCompletion({
+          taskId: task!.id,
+          sessionId: session.id,
+          providerTurnId: "turn-abort",
+          payloadDigest: "digest-abort",
+          summary: "Draft.",
+          markdown: "# Draft\n",
+        }),
+      );
+      task = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task!.id,
+          occurrence: occurrence.ordinal,
+          providerTurnId: "turn-abort",
+          outcome: "aborted",
+        }),
+      );
+      expect(task.occurrences.find((o) => o.id === occurrence.id)?.status).toBe("running");
+      expect(task.workflowRuns.at(-1)?.currentStage).toBe("questions");
+      expect(task.artifacts.find((a) => a.kind === "questions")).toBeUndefined();
     }),
   );
 });

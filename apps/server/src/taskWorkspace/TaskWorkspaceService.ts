@@ -34,6 +34,8 @@ import {
   type TaskWorkspaceEvent as TaskWorkspaceEventValue,
   type TaskWorkspaceId,
   type TaskWorkspaceSnapshot,
+  type TaskWorkspaceStage,
+  type TaskWorkspaceStageOccurrence,
   type TaskWorkspaceStreamItem,
   MessageId,
   ThreadId,
@@ -985,6 +987,30 @@ export interface TaskWorkspaceServiceShape {
   readonly processBootstrap: (
     entry: TaskWorkspaceOutboxEntry,
   ) => Effect.Effect<void, TaskWorkspaceError>;
+  /**
+   * Persist a typed completion proposal for the active stage occurrence and
+   * provider turn (the task-stage bridge entry point). One proposal per
+   * occurrence and turn; a different payload on the same key conflicts.
+   */
+  readonly proposeStageCompletion: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly sessionId: string;
+    readonly providerTurnId: string;
+    readonly payloadDigest: string;
+    readonly summary: string;
+    readonly markdown: string;
+  }) => Effect.Effect<TaskWorkspace, TaskWorkspaceError>;
+  /**
+   * Settle a proposal once the provider turn reaches a terminal state.
+   * Completed turns commit the artifact and handoff atomically; aborted or
+   * failed turns reject the proposal and return the occurrence to Running.
+   */
+  readonly settleProposal: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly occurrence: number;
+    readonly providerTurnId: string;
+    readonly outcome: "completed" | "aborted" | "failed";
+  }) => Effect.Effect<TaskWorkspace, TaskWorkspaceError>;
 }
 
 export class TaskWorkspaceService extends Context.Service<
@@ -1290,6 +1316,7 @@ export const make = Effect.gen(function* () {
     task: TaskWorkspace,
     input?: {
       readonly operationReceipt?: TaskWorkspaceOperationReceipt;
+      readonly proposal?: TaskWorkspaceCompletionProposal;
       readonly outbox?: ReadonlyArray<{
         readonly target: TaskWorkspaceOutboxEntry["target"];
         readonly operationKey: string;
@@ -1352,6 +1379,7 @@ export const make = Effect.gen(function* () {
           environmentId,
           events: [event],
           ...(operationReceipt ? { operationReceipt } : {}),
+          ...(input?.proposal ? { proposal: input.proposal } : {}),
           ...(outbox && outbox.length > 0 ? { outbox } : {}),
         })
         .pipe(
@@ -1989,8 +2017,170 @@ export const make = Effect.gen(function* () {
           });
         }
         case "task.plan.approve": {
-          // Resolve the transition before provisioning: an illegal stage or a
-          // missing plan artifact must fail before any worktree is created.
+          const definition = definitionFor(task);
+          if (definition.availableInFirstSlice === true && task.planGate) {
+            // First-slice approval: keep the stage `plan`, complete the open
+            // occurrence, and apply the worktree policy. No Implement
+            // occurrence or session starts in this slice.
+            if (
+              command.expectedTaskRevision !== undefined &&
+              command.expectedTaskRevision !== task.taskRevision
+            ) {
+              return yield* taskError(
+                command,
+                `Task revision ${task.taskRevision} does not match the expected revision ${command.expectedTaskRevision}.`,
+              );
+            }
+            const gate = task.planGate;
+            if (gate.status !== "open") {
+              return yield* taskError(
+                command,
+                `The Plan gate is '${gate.status}' and cannot be approved.`,
+              );
+            }
+            const occurrence = task.occurrences.find(
+              (candidate) => candidate.stage === "plan" && candidate.ordinal === gate.occurrence,
+            );
+            if (!occurrence || occurrence.status !== "awaiting-approval") {
+              return yield* taskError(
+                command,
+                `Plan occurrence ${gate.occurrence} is not awaiting approval.`,
+              );
+            }
+            const now = yield* serverNow;
+            const planArtifact = latestArtifact(task, "plan");
+            if (!planArtifact || planArtifact.revision !== gate.revision) {
+              return yield* taskError(
+                command,
+                `The open Plan gate references revision ${gate.revision}, which is not current.`,
+              );
+            }
+            const actor = "local-user";
+            const approvedTask: TaskWorkspace = {
+              ...task,
+              planGate: null,
+              gateHistory: [
+                ...task.gateHistory,
+                {
+                  occurrence: gate.occurrence,
+                  revision: gate.revision,
+                  outcome: "approved",
+                  feedback: null,
+                  actor,
+                  resolvedAt: now,
+                },
+              ],
+              occurrences: task.occurrences.map((candidate) =>
+                candidate.id === occurrence.id
+                  ? {
+                      ...candidate,
+                      status: "completed" as const,
+                      gateOutcome: "approved" as const,
+                      completedAt: now,
+                    }
+                  : candidate,
+              ),
+              sessions: task.sessions.map((candidate) =>
+                candidate.id === occurrence.sessionId
+                  ? { ...candidate, status: "completed" as const }
+                  : candidate,
+              ),
+            };
+            const worktreePolicy = task.preferences.worktreePolicy;
+            if (worktreePolicy === "later") {
+              // Revalidate the pinned source state and enqueue provisioning;
+              // failure preserves the approved Plan and exposes Retry.
+              const repository = task.workspace.repositories[0]!;
+              const headSha = yield* runGit(repository.workspaceRoot, ["rev-parse", "HEAD"]).pipe(
+                Effect.mapError((cause) =>
+                  taskError(command, "Failed to revalidate the source checkout.", cause),
+                ),
+              );
+              const statusPorcelain = yield* runGit(repository.workspaceRoot, [
+                "status",
+                "--porcelain=v2",
+              ]).pipe(
+                Effect.mapError((cause) =>
+                  taskError(command, "Failed to revalidate the source checkout.", cause),
+                ),
+              );
+              const fingerprint = createHash("sha256")
+                .update(`${headSha}\n${statusPorcelain}`)
+                .digest("hex");
+              if (
+                repository.planningRootFingerprint !== null &&
+                fingerprint !== repository.planningRootFingerprint
+              ) {
+                return yield* taskError(
+                  command,
+                  "The planning root drifted since creation; restore the pinned source state before provisioning.",
+                );
+              }
+              const worktreeBranch = `katacode/task-${safeBranchSegment(task.id)}`;
+              const worktreePath = expectedTaskWorktreePath(
+                config.worktreesDir,
+                repository.workspaceRoot,
+                worktreeBranch,
+              );
+              const worktreeOperationKey = `${task.id}:worktree:${repository.baseCommitSha}:${worktreePolicy}`;
+              return yield* append(command, approvedTask, {
+                ...(command.operationKey
+                  ? {
+                      operationReceipt: {
+                        environmentId,
+                        taskId: task.id,
+                        operationType: "task.plan.approve",
+                        operationKey: command.operationKey,
+                        payloadDigest: canonicalTaskCommandDigest(command),
+                        status: "completed",
+                        attemptCount: 1,
+                        sourceCommandIds: [command.commandId],
+                        resultEventId: null,
+                        resultTaskRevision: null,
+                        error: null,
+                        createdAt: now,
+                        updatedAt: now,
+                      },
+                    }
+                  : {}),
+                outbox: [
+                  {
+                    target: "worktree",
+                    operationKey: worktreeOperationKey,
+                    payload: {
+                      branch: worktreeBranch,
+                      path: worktreePath,
+                      baseCommitSha: repository.baseCommitSha,
+                      sourceWorkspaceRoot: repository.workspaceRoot,
+                    },
+                    status: "pending",
+                  },
+                ],
+              });
+            }
+            return yield* append(command, approvedTask, {
+              ...(command.operationKey
+                ? {
+                    operationReceipt: {
+                      environmentId,
+                      taskId: task.id,
+                      operationType: "task.plan.approve",
+                      operationKey: command.operationKey,
+                      payloadDigest: canonicalTaskCommandDigest(command),
+                      status: "completed",
+                      attemptCount: 1,
+                      sourceCommandIds: [command.commandId],
+                      resultEventId: null,
+                      resultTaskRevision: null,
+                      error: null,
+                      createdAt: now,
+                      updatedAt: now,
+                    },
+                  }
+                : {}),
+            });
+          }
+          // Legacy approval: resolve the transition before provisioning.
           const workflowRuns = applyTransition(task, command.type, command.createdAt);
           const repository = task.workspace.repositories[0];
           if (!repository) throw new Error("The task has no repository binding.");
@@ -2900,6 +3090,110 @@ export const make = Effect.gen(function* () {
             updatedAt: command.createdAt,
           });
         }
+        case "task.stage.request-changes": {
+          const definition = definitionFor(task);
+          if (definition.availableInFirstSlice !== true || !task.planGate) {
+            return yield* taskError(
+              command,
+              `Workflow '${definition.version}' has no open Plan gate to request changes on.`,
+            );
+          }
+          if (command.expectedTaskRevision !== task.taskRevision) {
+            return yield* taskError(
+              command,
+              `Task revision ${task.taskRevision} does not match the expected revision ${command.expectedTaskRevision}.`,
+            );
+          }
+          const gate = task.planGate;
+          if (gate.status !== "open") {
+            return yield* taskError(
+              command,
+              `The Plan gate is '${gate.status}' and cannot accept changes.`,
+            );
+          }
+          const occurrence = task.occurrences.find(
+            (candidate) => candidate.stage === "plan" && candidate.ordinal === gate.occurrence,
+          );
+          if (!occurrence || occurrence.status !== "awaiting-approval") {
+            return yield* taskError(
+              command,
+              `Plan occurrence ${gate.occurrence} is not awaiting approval.`,
+            );
+          }
+          const now = yield* serverNow;
+          const nextOccurrence = allocateOccurrence(task, "plan", now);
+          const bootstrap = yield* allocateStageBootstrap(task, "plan", nextOccurrence.ordinal);
+          const continuationTask: TaskWorkspace = {
+            ...task,
+            planGate: null,
+            gateHistory: [
+              ...task.gateHistory,
+              {
+                occurrence: gate.occurrence,
+                revision: gate.revision,
+                outcome: "changes-requested",
+                feedback: command.feedback,
+                actor: "local-user",
+                resolvedAt: now,
+              },
+            ],
+            bootstrap: bootstrapStateFor(
+              {
+                operationKey: bootstrap.operationKey,
+                sessionId: bootstrap.outboxPayload.sessionId,
+                threadId: bootstrap.outboxPayload.threadId,
+                threadCreateCommandId: bootstrap.outboxPayload.threadCreateCommandId,
+                turnStartCommandId: bootstrap.outboxPayload.turnStartCommandId,
+                kickoffMessageId: bootstrap.outboxPayload.kickoffMessageId,
+              },
+              bootstrap.now,
+            ),
+            occurrences: [
+              ...task.occurrences.map((candidate) =>
+                candidate.id === occurrence.id
+                  ? {
+                      ...candidate,
+                      status: "completed" as const,
+                      gateOutcome: "changes-requested" as const,
+                      feedback: command.feedback,
+                      completedAt: now,
+                    }
+                  : candidate,
+              ),
+              nextOccurrence,
+            ],
+            sessions: task.sessions.map((candidate) =>
+              candidate.id === occurrence.sessionId
+                ? { ...candidate, status: "completed" as const }
+                : candidate,
+            ),
+          };
+          return yield* append(command, continuationTask, {
+            operationReceipt: {
+              environmentId,
+              taskId: task.id,
+              operationType: "task.stage.request-changes",
+              operationKey: command.operationKey,
+              payloadDigest: canonicalTaskCommandDigest(command),
+              status: "completed",
+              attemptCount: 1,
+              sourceCommandIds: [command.commandId],
+              resultEventId: null,
+              resultTaskRevision: null,
+              error: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+            outbox: [
+              {
+                target: "bootstrap" as const,
+                operationKey: bootstrap.operationKey,
+                payload: bootstrap.outboxPayload,
+                status: "pending" as const,
+              },
+            ],
+          });
+        }
         default: {
           return yield* taskError(
             command,
@@ -2940,6 +3234,115 @@ export const make = Effect.gen(function* () {
   const dispatch: TaskWorkspaceServiceShape["dispatch"] = (command) =>
     semaphore.withPermits(1)(dispatchUnlocked(command));
 
+  const latestOccurrence = (
+    task: TaskWorkspace,
+    stage: TaskWorkspaceStage,
+  ): TaskWorkspaceStageOccurrence | null =>
+    task.occurrences
+      .filter((occurrence) => occurrence.stage === stage)
+      .toSorted((left, right) => right.ordinal - left.ordinal)[0] ?? null;
+
+  const activeOccurrence = (
+    task: TaskWorkspace,
+    stage: TaskWorkspaceStage,
+  ): TaskWorkspaceStageOccurrence | null => {
+    const latest = latestOccurrence(task, stage);
+    if (!latest) return null;
+    if (latest.status === "completed" || latest.status === "failed") return null;
+    return latest;
+  };
+
+  const allocateOccurrence = (
+    task: TaskWorkspace,
+    stage: TaskWorkspaceStage,
+    createdAt: string,
+  ): TaskWorkspaceStageOccurrence => {
+    const maxOrdinal = task.occurrences
+      .filter((occurrence) => occurrence.stage === stage)
+      .reduce((max, occurrence) => Math.max(max, occurrence.ordinal), -1);
+    const ordinal = maxOrdinal + 1;
+    return {
+      id: `occurrence-${stage}-${ordinal}`,
+      stage,
+      ordinal,
+      status: "starting",
+      sessionId: null,
+      threadId: null,
+      contextManifestId: null,
+      artifactRevisionId: null,
+      completionProposalId: null,
+      gateOutcome: null,
+      feedback: null,
+      supersedesOccurrenceId: null,
+      createdAt,
+      completedAt: null,
+    };
+  };
+
+  /** Allocate deterministic bootstrap identities for a stage occurrence. */
+  const allocateStageBootstrap = (
+    task: TaskWorkspace,
+    stage: TaskWorkspaceStage,
+    occurrence: number,
+  ) =>
+    Effect.gen(function* () {
+      const operationKey = `${task.id}:bootstrap:${stage}:${occurrence}:primary`;
+      const sessionId = `${task.id}-session-${stage}-${occurrence}`;
+      const threadId = ThreadId.make(`thread-task-${yield* serverUuid}`);
+      const threadCreateCommandId = CommandId.make(
+        `server:task-thread-create:${yield* serverUuid}`,
+      );
+      const turnStartCommandId = CommandId.make(`server:task-turn-start:${yield* serverUuid}`);
+      const kickoffMessageId = MessageId.make(`message-task-${yield* serverUuid}`);
+      const now = yield* serverNow;
+      const repository = task.workspace.repositories[0];
+      const branch =
+        task.preferences.worktreePolicy === "now" && repository
+          ? `katacode/task-${safeBranchSegment(task.id)}`
+          : null;
+      const worktreePath =
+        branch && repository
+          ? expectedTaskWorktreePath(config.worktreesDir, repository.workspaceRoot, branch)
+          : null;
+      const outboxPayload: TaskWorkspaceBootstrapOutboxPayload = {
+        stage,
+        occurrence,
+        sessionId,
+        threadId,
+        threadCreateCommandId,
+        turnStartCommandId,
+        kickoffMessageId,
+        worktreeBranch: branch,
+        worktreePath,
+      };
+      return { operationKey, sessionId, threadId, now, outboxPayload };
+    });
+
+  const bootstrapStateFor = (
+    input: {
+      readonly operationKey: string;
+      readonly sessionId: string;
+      readonly threadId: ThreadId;
+      readonly threadCreateCommandId: CommandId;
+      readonly turnStartCommandId: CommandId;
+      readonly kickoffMessageId: MessageId;
+    },
+    now: string,
+  ): TaskWorkspaceBootstrapState => ({
+    operationKey: input.operationKey,
+    status: "pending",
+    currentStep: null,
+    reservedSessionId: input.sessionId,
+    reservedThreadId: input.threadId,
+    threadCreateCommandId: input.threadCreateCommandId,
+    turnStartCommandId: input.turnStartCommandId,
+    kickoffMessageId: input.kickoffMessageId,
+    conversationTarget: null,
+    attemptCount: 0,
+    failure: null,
+    updatedAt: now,
+  });
+
   const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
 
   /**
@@ -2948,6 +3351,389 @@ export const make = Effect.gen(function* () {
    * effects run, so a restart worker retries the same targets without
    * allocating a second session or occurrence.
    */
+  const proposeStageCompletion: TaskWorkspaceServiceShape["proposeStageCompletion"] = (input) =>
+    semaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const task = taskById.get(input.taskId);
+        if (!task) {
+          return yield* new TaskWorkspaceError({
+            message: `Task '${input.taskId}' was not found.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        if (!task.bootstrap || task.occurrences.length === 0) {
+          return yield* new TaskWorkspaceError({
+            message: `Task '${input.taskId}' has no automatic stage flow.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        const definition = definitionFor(task);
+        const stage = currentRun(task).currentStage;
+        const occurrence = activeOccurrence(task, stage);
+        if (!occurrence) {
+          return yield* new TaskWorkspaceError({
+            message: `Stage '${stage}' has no active occurrence.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        if (occurrence.sessionId !== input.sessionId) {
+          return yield* new TaskWorkspaceError({
+            message: `Session '${input.sessionId}' is not the active primary for stage '${stage}'.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        if (occurrence.status !== "running" && occurrence.status !== "finalizing") {
+          return yield* new TaskWorkspaceError({
+            message: `Occurrence ${occurrence.ordinal} of '${stage}' is '${occurrence.status}' and cannot accept a proposal.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        if (definition.availableInFirstSlice !== true) {
+          return yield* new TaskWorkspaceError({
+            message: `Workflow '${definition.version}' does not support typed completion.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        // A gate-open Plan occurrence rejects replacement proposals until
+        // Request changes allocates a continuation.
+        if (stage === "plan" && task.planGate?.status === "open") {
+          return yield* new TaskWorkspaceError({
+            message: "The Plan gate is open; request changes before proposing another Plan.",
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        const prior = yield* store
+          .getProposal({
+            taskId: input.taskId,
+            occurrence: occurrence.ordinal,
+            providerTurnId: input.providerTurnId,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new TaskWorkspaceError({
+                  message: "Failed to read the completion proposal.",
+                  commandType: "task.internal",
+                  taskId: input.taskId,
+                  cause,
+                }),
+            ),
+          );
+        if (Option.isSome(prior) && prior.value.payloadDigest !== input.payloadDigest) {
+          return yield* new TaskWorkspaceError({
+            message: `A different completion proposal already exists for turn '${input.providerTurnId}'.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        const now = yield* serverNow;
+        const proposalId = `proposal-${input.taskId}-${occurrence.ordinal}-${input.providerTurnId}`;
+        const proposal: TaskWorkspaceCompletionProposal = {
+          id: proposalId,
+          environmentId,
+          taskId: input.taskId,
+          stage,
+          occurrence: occurrence.ordinal,
+          sessionId: input.sessionId,
+          threadId: occurrence.threadId ?? ThreadId.make(`thread-${input.sessionId}`),
+          providerTurnId: input.providerTurnId,
+          payloadDigest: input.payloadDigest,
+          summary: input.summary,
+          markdown: input.markdown,
+          status: "proposed",
+          terminalTurnOutcome: null,
+          committedArtifactRevisionId: null,
+          rejectionReason: null,
+          createdAt: now,
+          settledAt: null,
+        };
+        const finalizingTask: TaskWorkspace = {
+          ...task,
+          occurrences: task.occurrences.map((candidate) =>
+            candidate.id === occurrence.id
+              ? {
+                  ...candidate,
+                  status: "finalizing" as const,
+                  completionProposalId: proposalId,
+                }
+              : candidate,
+          ),
+        };
+        const persistedTask = yield* internalAppend("task.proposal.proposed", finalizingTask, {
+          occurredAt: now,
+          proposal,
+        });
+        return persistedTask;
+      }),
+    );
+
+  const commitStageCompletion = (
+    task: TaskWorkspace,
+    proposal: TaskWorkspaceCompletionProposal,
+    now: string,
+  ): Effect.Effect<
+    {
+      readonly task: TaskWorkspace;
+      readonly bootstrap: {
+        readonly operationKey: string;
+        readonly sessionId: string;
+        readonly threadId: ThreadId;
+        readonly now: string;
+        readonly outboxPayload: TaskWorkspaceBootstrapOutboxPayload;
+      } | null;
+    },
+    TaskWorkspaceError
+  > =>
+    Effect.gen(function* () {
+      const definition = definitionFor(task);
+      const artifactKind = artifactKindForStage(definition, proposal.stage);
+      if (!artifactKind) {
+        return yield* new TaskWorkspaceError({
+          message: `Stage '${proposal.stage}' produces no artifact.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      const withArtifact = upsertArtifact(task, {
+        type: "task.artifact.upsert",
+        commandId: CommandId.make(`server:task-proposal:${proposal.id}`),
+        taskId: task.id,
+        createdAt: now,
+        kind: artifactKind,
+        title: `${definition.stages.find((s) => s === proposal.stage) ?? proposal.stage} artifact`,
+        markdown: proposal.markdown,
+        sourceSessionId: proposal.sessionId,
+      });
+      const artifact = latestArtifact(withArtifact, artifactKind);
+      if (!artifact) {
+        return yield* new TaskWorkspaceError({
+          message: "Failed to persist the stage artifact.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      const occurrence = task.occurrences.find(
+        (candidate) =>
+          candidate.ordinal === proposal.occurrence && candidate.stage === proposal.stage,
+      );
+      if (!occurrence) {
+        return yield* new TaskWorkspaceError({
+          message: `Occurrence ${proposal.occurrence} of '${proposal.stage}' was not found.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+
+      if (proposal.stage === "plan") {
+        // Plan output opens a human approval gate for this exact revision.
+        const planRevision = artifact.revision;
+        const awaitingTask: TaskWorkspace = {
+          ...withArtifact,
+          occurrences: withArtifact.occurrences.map((candidate) =>
+            candidate.id === occurrence.id
+              ? {
+                  ...candidate,
+                  status: "awaiting-approval" as const,
+                  artifactRevisionId: artifact.id,
+                }
+              : candidate,
+          ),
+          planGate: {
+            occurrence: occurrence.ordinal,
+            revision: planRevision,
+            status: "open",
+            feedback: null,
+            openedAt: now,
+            resolvedAt: null,
+          },
+        };
+        return { task: awaitingTask, bootstrap: null };
+      }
+
+      // Early stages: complete the source occurrence and queue the next handoff.
+      const transition = definition.transitions.find(
+        (candidate) =>
+          candidate.from === proposal.stage &&
+          candidate.command ===
+            (proposal.stage === "questions"
+              ? "task.questions.complete"
+              : proposal.stage === "research"
+                ? "task.research.complete"
+                : "task.design.complete"),
+      );
+      if (!transition) {
+        return yield* new TaskWorkspaceError({
+          message: `Workflow '${definition.version}' has no transition out of '${proposal.stage}'.`,
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      const targetStage = transition.to;
+      const nextOccurrence = allocateOccurrence(withArtifact, targetStage, now);
+      const bootstrap = yield* allocateStageBootstrap(
+        withArtifact,
+        targetStage,
+        nextOccurrence.ordinal,
+      );
+      const handoffTask: TaskWorkspace = {
+        ...withArtifact,
+        bootstrap: bootstrapStateFor(
+          {
+            operationKey: bootstrap.operationKey,
+            sessionId: bootstrap.outboxPayload.sessionId,
+            threadId: bootstrap.outboxPayload.threadId,
+            threadCreateCommandId: bootstrap.outboxPayload.threadCreateCommandId,
+            turnStartCommandId: bootstrap.outboxPayload.turnStartCommandId,
+            kickoffMessageId: bootstrap.outboxPayload.kickoffMessageId,
+          },
+          bootstrap.now,
+        ),
+        workflowRuns: replaceCurrentRun(withArtifact, {
+          currentStage: targetStage,
+          updatedAt: now,
+        }),
+        occurrences: [
+          ...withArtifact.occurrences.map((candidate) =>
+            candidate.id === occurrence.id
+              ? {
+                  ...candidate,
+                  status: "completed" as const,
+                  artifactRevisionId: artifact.id,
+                  completedAt: now,
+                }
+              : candidate,
+          ),
+          nextOccurrence,
+        ],
+        sessions: withArtifact.sessions.map((candidate) =>
+          candidate.id === proposal.sessionId
+            ? { ...candidate, status: "completed" as const }
+            : candidate,
+        ),
+      };
+      return { task: handoffTask, bootstrap };
+    });
+
+  const settleProposal: TaskWorkspaceServiceShape["settleProposal"] = (input) =>
+    semaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const task = taskById.get(input.taskId);
+        if (!task) {
+          return yield* new TaskWorkspaceError({
+            message: `Task '${input.taskId}' was not found.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        const proposal = yield* store
+          .getProposal({
+            taskId: input.taskId,
+            occurrence: input.occurrence,
+            providerTurnId: input.providerTurnId,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new TaskWorkspaceError({
+                  message: "Failed to read the completion proposal.",
+                  commandType: "task.internal",
+                  taskId: input.taskId,
+                  cause,
+                }),
+            ),
+          );
+        if (Option.isNone(proposal)) {
+          return yield* new TaskWorkspaceError({
+            message: `No proposal exists for turn '${input.providerTurnId}'.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        const pending = proposal.value;
+        if (pending.status !== "proposed") {
+          // Already settled; return the current task unchanged.
+          return task;
+        }
+        const now = yield* serverNow;
+        if (input.outcome !== "completed") {
+          // Aborted or failed turn: reject the proposal and return to Running.
+          const rejectedTask: TaskWorkspace = {
+            ...task,
+            occurrences: task.occurrences.map((candidate) =>
+              candidate.id ===
+              task.occurrences.find(
+                (o) => o.ordinal === input.occurrence && o.stage === pending.stage,
+              )?.id
+                ? {
+                    ...candidate,
+                    status: "running" as const,
+                    completionProposalId: null,
+                  }
+                : candidate,
+            ),
+          };
+          const persistedTask = yield* internalAppend("task.proposal.rejected", rejectedTask, {
+            occurredAt: now,
+            proposal: {
+              ...pending,
+              status: "rejected",
+              terminalTurnOutcome: input.outcome,
+              rejectionReason:
+                input.outcome === "aborted"
+                  ? "The provider turn was aborted."
+                  : "The provider turn failed.",
+              settledAt: now,
+            },
+          });
+          return persistedTask;
+        }
+        // Completed turn: commit the artifact and handoff atomically.
+        const committed = yield* commitStageCompletion(task, pending, now);
+        const settledTask: TaskWorkspace = {
+          ...committed.task,
+          occurrences: committed.task.occurrences.map((candidate) =>
+            candidate.ordinal === pending.occurrence && candidate.stage === pending.stage
+              ? { ...candidate, completionProposalId: null }
+              : candidate,
+          ),
+        };
+        const committedArtifact = committed.task.artifacts
+          .find((artifact) => artifact.kind === pending.stage)
+          ?.revisions.at(-1);
+        const eventType =
+          pending.stage === "plan" ? "task.gate.opened" : "task.occurrence.completed";
+        const persistedTask = yield* internalAppend(eventType, settledTask, {
+          occurredAt: now,
+          proposal: {
+            ...pending,
+            status: "committed",
+            terminalTurnOutcome: "completed",
+            committedArtifactRevisionId: committedArtifact?.id ?? null,
+            settledAt: now,
+          },
+          ...(pending.stage !== "plan" && committed.bootstrap
+            ? {
+                outbox: [
+                  {
+                    target: "bootstrap" as const,
+                    operationKey: committed.bootstrap.operationKey,
+                    payload: committed.bootstrap.outboxPayload,
+                  },
+                ],
+              }
+            : {}),
+        });
+        return persistedTask;
+      }),
+    );
+
   const processBootstrap = (
     entry: TaskWorkspaceOutboxEntry,
   ): Effect.Effect<void, TaskWorkspaceError> => {
@@ -3246,6 +4032,8 @@ export const make = Effect.gen(function* () {
   return TaskWorkspaceService.of({
     dispatch,
     processBootstrap,
+    proposeStageCompletion,
+    settleProposal,
     getSnapshot: Effect.sync(() => ({
       sequence,
       tasks: [...taskById.values()].toSorted((left, right) =>
