@@ -34,6 +34,11 @@ async function seedWorkspace(
 
 async function selectTaskProvider(page: Page, provider: string, model: string): Promise<void> {
   const agentSelect = page.getByTestId("task-agent-select");
+  if ((await agentSelect.locator("option").count()) === 0) {
+    throw new Error(
+      `No provider with task-stage capability is available for Guided E2E '${provider}'. Configure an eligible provider instance and rerun.`,
+    );
+  }
   await expect(agentSelect).toBeEnabled();
   const providerOption = await agentSelect
     .locator("option")
@@ -86,9 +91,10 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
   test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
 
   test("creates through the form, advances conversations, and approves Plan", async ({
-    appWindow,
+    authenticatedAppWindow,
     runContext,
   }) => {
+    const appWindow = authenticatedAppWindow;
     const turn = assertAgentProviderConfigured("Guided task workspace E2E");
     const workspaceRoot = await seedWorkspace(runContext, "task-workspace-guided-approved-plan");
     await createOrOpenProject(appWindow, workspaceRoot);

@@ -305,7 +305,7 @@ registerFileSessionSeed(fileURLToPath(import.meta.url), async (context) => {
 });
 
 async function openTask(page: Page, id: string): Promise<void> {
-  const taskLink = page.locator(`a[href$="/tasks/${id}"]`).first();
+  const taskLink = page.locator(`a[href$="/${id}"]`).first();
   await expect(taskLink).toBeVisible();
   const href = await taskLink.getAttribute("href");
   expect(href).not.toBeNull();
@@ -318,7 +318,7 @@ async function openTask(page: Page, id: string): Promise<void> {
     window.history.pushState({}, "", routeHref);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, href!);
-  await expect(page).toHaveURL(new RegExp(`/tasks/${id}$`));
+  await expect(page).toHaveURL(new RegExp(`/tasks/(?:[^/]+/)?${id}$`));
   try {
     await expect(page.getByTestId("task-artifacts-panel")).toBeVisible();
   } catch (error) {
