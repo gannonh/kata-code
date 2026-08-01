@@ -96,6 +96,10 @@ export interface TaskWorkspaceStoreShape {
     readonly occurrence: number;
     readonly providerTurnId: string;
   }) => Effect.Effect<Option.Option<TaskWorkspaceCompletionProposal>, TaskWorkspaceStoreError>;
+  readonly readPendingProposals: () => Effect.Effect<
+    ReadonlyArray<TaskWorkspaceCompletionProposal>,
+    TaskWorkspaceStoreError
+  >;
 }
 
 export class TaskWorkspaceStore extends Context.Service<

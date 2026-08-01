@@ -23,6 +23,7 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const provider = yield* ProviderService;
     const taskWorkspaces = yield* TaskWorkspaceService;
+    yield* taskWorkspaces.reconcilePendingProposals;
     yield* Effect.forkScoped(
       Stream.runForEach(provider.streamEvents, (event) => {
         const outcome = terminalOutcome(event);

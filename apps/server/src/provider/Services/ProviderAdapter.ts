@@ -30,6 +30,8 @@ export interface ProviderAdapterCapabilities {
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+  /** The provider can load Kata's task-stage MCP tools for Guided workflows. */
+  readonly supportsTaskStage?: boolean;
 }
 
 export interface ProviderThreadTurnSnapshot {

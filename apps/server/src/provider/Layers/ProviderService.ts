@@ -28,6 +28,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
@@ -57,7 +58,10 @@ import {
 import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
-import { validateActiveTaskTurn } from "../../taskWorkspace/TaskWorkspaceService.ts";
+import {
+  isActiveTaskThread,
+  validateActiveTaskTurn,
+} from "../../taskWorkspace/TaskWorkspaceService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
@@ -215,6 +219,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  const taskTurnWatchdogs = new Map<ThreadId, Fiber.Fiber<void, never>>();
+  yield* Effect.addFinalizer(() =>
+    Effect.forEach(taskTurnWatchdogs.values(), Fiber.interrupt, {
+      concurrency: "unbounded",
+      discard: true,
+    }),
+  );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     McpSessionRegistry.issueActiveMcpCredential({ threadId, providerInstanceId }).pipe(
@@ -230,15 +241,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
 
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Effect.succeed(event).pipe(
-      Effect.tap((canonicalEvent) =>
-        canonicalEventLogger
-          ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
-          : Effect.void,
-      ),
-      Effect.flatMap((canonicalEvent) => PubSub.publish(runtimeEventPubSub, canonicalEvent)),
-      Effect.asVoid,
-    );
+    Effect.gen(function* () {
+      if (event.type === "turn.completed" || event.type === "turn.aborted") {
+        const watchdog = taskTurnWatchdogs.get(event.threadId);
+        if (watchdog !== undefined) {
+          taskTurnWatchdogs.delete(event.threadId);
+          yield* Fiber.interrupt(watchdog);
+        }
+      }
+      yield* Effect.succeed(event).pipe(
+        Effect.tap((canonicalEvent) =>
+          canonicalEventLogger
+            ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
+            : Effect.void,
+        ),
+        Effect.flatMap((canonicalEvent) => PubSub.publish(runtimeEventPubSub, canonicalEvent)),
+      );
+    });
 
   const requireBindingInstanceId = (
     operation: string,
@@ -688,6 +707,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // Rotate the thread-bound MCP lease before every provider turn. The
       // registry adds task-stage capability only for the current task primary.
       yield* prepareMcpSession(input.threadId, routed.instanceId);
+      const isTaskTurn = yield* isActiveTaskThread(input.threadId);
       yield* Effect.annotateCurrentSpan({
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
@@ -706,6 +726,34 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           lastRuntimeEventAt: yield* nowIso,
         },
       });
+      if (isTaskTurn) {
+        const previous = taskTurnWatchdogs.get(input.threadId);
+        if (previous !== undefined) {
+          yield* Fiber.interrupt(previous);
+        }
+        const watchdog = yield* Effect.forkDetach(
+          Effect.sleep("2 hours").pipe(
+            Effect.andThen(
+              routed.adapter.interruptTurn(input.threadId, turn.turnId).pipe(
+                Effect.tap(() =>
+                  Effect.logWarning("task provider turn exceeded the two-hour timeout", {
+                    threadId: input.threadId,
+                    turnId: turn.turnId,
+                  }),
+                ),
+              ),
+            ),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("task provider turn timeout recovery failed", {
+                threadId: input.threadId,
+                turnId: turn.turnId,
+                cause,
+              }),
+            ),
+          ),
+        );
+        taskTurnWatchdogs.set(input.threadId, watchdog);
+      }
       yield* analytics.record("provider.turn.sent", {
         provider: routed.adapter.provider,
         model: input.modelSelection?.model,

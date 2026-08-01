@@ -102,7 +102,7 @@ export function TaskWorkspaceNewView() {
       preset === "guided"
         ? instanceEntries.filter(
             (entry) =>
-              entry.driverKind !== "pi" &&
+              entry.snapshot.supportsTaskStage === true &&
               entry.enabled &&
               entry.installed &&
               entry.isAvailable &&

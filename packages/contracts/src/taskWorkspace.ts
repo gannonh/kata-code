@@ -1281,6 +1281,7 @@ export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   threadCreateCommandId: CommandId,
   turnStartCommandId: CommandId,
   kickoffMessageId: MessageId,
+  trustedInstructions: Schema.optional(Schema.String),
   worktreeBranch: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),

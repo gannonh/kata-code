@@ -164,7 +164,22 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
       return Effect.succeed({ sequence: dispatchedOrchestration.length });
     },
     streamDomainEvents: Stream.empty,
-    readEvents: () => Stream.empty,
+    readEvents: () => {
+      const turnStart = [...dispatchedOrchestration]
+        .toReversed()
+        .find((entry) => (entry as { type?: string }).type === "thread.turn.start") as
+        | { readonly threadId: string }
+        | undefined;
+      return turnStart
+        ? Stream.succeed({
+            type: "thread.session-set",
+            payload: {
+              threadId: turnStart.threadId,
+              session: { status: "running", activeTurnId: "bootstrap-turn" },
+            },
+          } as never)
+        : Stream.empty;
+    },
   } as OrchestrationEngineShape);
   const taskLayer = TaskWorkspaceServiceLive.pipe(
     Layer.provide(gitLayer),
@@ -2886,7 +2901,8 @@ describe("TaskWorkspaceService bootstrap saga", () => {
       expect(threadCreate.interactionMode).toBe("plan");
       const kickoff = dispatched[1] as { type: string; message: { text: string } };
       expect(kickoff.type).toBe("thread.turn.start");
-      expect(kickoff.message.text).toBe("Add a guided onboarding flow.");
+      expect(kickoff.message.text).toContain("You are running the Clarify stage");
+      expect(kickoff.message.text).toContain("Task brief:\nAdd a guided onboarding flow.");
     }),
   );
 
@@ -2920,6 +2936,7 @@ describe("TaskWorkspaceService bootstrap saga", () => {
       expect(ready?.bootstrap?.status).toBe("ready");
       expect(ready?.workspace.repositories[0]?.provisioningStatus).toBe("ready");
       expect(ready?.workspace.repositories[0]?.worktreePath).toBe(payload.worktreePath);
+      expect(ready?.workspace.repositories[0]?.planningRootFingerprint).toMatch(/^[a-f0-9]{64}$/u);
     }),
   );
 

@@ -64,6 +64,7 @@ export class TaskStageBridge extends Context.Service<TaskStageBridge, TaskStageB
 
 const make = Effect.gen(function* () {
   const taskWorkspaces = yield* TaskWorkspaceService;
+  const sessionDirectory = yield* Effect.serviceOption(ProviderSessionDirectory);
 
   const error = (code: typeof TaskStageToolError.Type.code, message: string): TaskStageToolError =>
     new TaskStageToolError({ code, message });
@@ -110,23 +111,39 @@ const make = Effect.gen(function* () {
         .pipe(Effect.mapError((cause) => error("source-drift", cause.message)));
       const stage = currentStage(task);
       const occurrence = latestOccurrence(task, stage);
-      if (!occurrence || (occurrence.status !== "running" && occurrence.status !== "finalizing")) {
+      const isBootstrapPrimary =
+        occurrence?.status === "starting" &&
+        task.bootstrap?.status === "running" &&
+        task.bootstrap.reservedThreadId === scope.threadId;
+      if (
+        !occurrence ||
+        (!isBootstrapPrimary &&
+          occurrence.status !== "running" &&
+          occurrence.status !== "finalizing")
+      ) {
         return yield* error(
           "not-active",
-          `Task '${task.id}' has no running occurrence for stage '${stage}'.`,
+          `Task '${task.id}' has no active occurrence for stage '${stage}'.`,
         );
       }
-      if (occurrence.threadId !== scope.threadId || !occurrence.sessionId) {
+      if (!isBootstrapPrimary && occurrence.threadId !== scope.threadId) {
         return yield* error(
           "unauthorized",
           `Thread '${scope.threadId}' is not the active primary conversation for task '${task.id}'.`,
         );
       }
-      const session = task.sessions.find((candidate) => candidate.id === occurrence.sessionId);
-      if (!session || session.role !== "primary" || session.status !== "active") {
+      const sessionId = occurrence.sessionId ?? task.bootstrap?.reservedSessionId;
+      if (!sessionId) {
+        return yield* error("not-active", "The task primary session is not ready.");
+      }
+      const session = task.sessions.find((candidate) => candidate.id === sessionId);
+      if (
+        !isBootstrapPrimary &&
+        (!session || session.role !== "primary" || session.status !== "active")
+      ) {
         return yield* error(
           "not-active",
-          `Session '${occurrence.sessionId}' is no longer the active task primary.`,
+          `Session '${sessionId}' is no longer the active task primary.`,
         );
       }
       const modelSelection = task.preferences.modelSelection;
@@ -136,7 +153,6 @@ const make = Effect.gen(function* () {
           `Provider instance '${scope.providerInstanceId}' is not authorized for task '${task.id}'.`,
         );
       }
-      const sessionDirectory = yield* Effect.serviceOption(ProviderSessionDirectory);
       if (Option.isNone(sessionDirectory)) {
         return yield* error("not-active", "The provider session directory is unavailable.");
       }
@@ -167,7 +183,7 @@ const make = Effect.gen(function* () {
         task,
         stage,
         occurrence,
-        sessionId: occurrence.sessionId,
+        sessionId,
         providerTurnId,
       } satisfies TaskStageBridgeInvocation;
     },
@@ -192,19 +208,37 @@ const make = Effect.gen(function* () {
                 ? ["questions", "research", "design"]
                 : [],
       );
+      const manifest = invocation.occurrence.contextManifestId
+        ? invocation.task.contextManifests.find(
+            (candidate) => candidate.id === invocation.occurrence.contextManifestId,
+          )
+        : undefined;
+      const manifestRefs = new Map(
+        manifest?.artifactRefs.map((reference) => [reference.kind, reference.revision]) ?? [],
+      );
+      let remainingContextChars = (manifest?.budget ?? 12_000) * 4;
       const artifacts = invocation.task.artifacts
         .filter((artifact) => contextKinds.has(artifact.kind))
-        .map((artifact) => {
-          const revision = latestArtifact(invocation.task, artifact.kind);
-          if (!revision) return undefined;
-          return {
-            kind: artifact.kind,
-            revision: revision.revision,
-            title: revision.title,
-            markdown: revision.markdown,
-          } satisfies TaskStageContextArtifact;
-        })
-        .filter((artifact): artifact is TaskStageContextArtifact => artifact !== undefined);
+        .flatMap((artifact) => {
+          const manifestRevision = manifestRefs.get(artifact.kind);
+          if (manifest !== undefined && manifestRevision === undefined) return [];
+          const revision =
+            (manifestRevision === undefined
+              ? latestArtifact(invocation.task, artifact.kind)
+              : artifact.revisions.find((candidate) => candidate.revision === manifestRevision)) ??
+            null;
+          if (!revision || remainingContextChars <= 0) return [];
+          const markdown = revision.markdown.slice(0, remainingContextChars);
+          remainingContextChars -= markdown.length;
+          return [
+            {
+              kind: artifact.kind,
+              revision: revision.revision,
+              title: revision.title,
+              markdown,
+            } satisfies TaskStageContextArtifact,
+          ];
+        });
       const feedback = invocation.occurrence.feedback ?? invocation.task.planGate?.feedback ?? null;
       return {
         stage: invocation.stage,

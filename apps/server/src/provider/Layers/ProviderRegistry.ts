@@ -62,6 +62,11 @@ const loadProviders = (
     providerSources,
     (providerSource) =>
       providerSource.getSnapshot.pipe(
+        Effect.map((snapshot) =>
+          providerSource.supportsTaskStage === undefined
+            ? snapshot
+            : { ...snapshot, supportsTaskStage: providerSource.supportsTaskStage },
+        ),
         Effect.flatMap((snapshot) => correlateSnapshotWithSource(providerSource, snapshot)),
       ),
     {
@@ -176,14 +181,20 @@ const snapshotInstanceKey = (provider: ServerProvider): ProviderInstanceId => {
 // after `ProviderInstanceRegistry` rebuilds an instance (e.g. because
 // its settings changed), a fresh source rides the new PubSub instead
 // of a closed one.
-const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => ({
-  instanceId: instance.instanceId,
-  driverKind: instance.driverKind,
-  getSnapshot: instance.snapshot.getSnapshot,
-  refresh: instance.snapshot.refresh,
-  streamChanges: instance.snapshot.streamChanges,
-  subscribeChanges: instance.snapshot.subscribeChanges,
-});
+const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => {
+  const supportsTaskStage = instance.adapter.capabilities.supportsTaskStage;
+  const augment = (snapshot: ServerProvider): ServerProvider =>
+    supportsTaskStage === undefined ? snapshot : { ...snapshot, supportsTaskStage };
+  return {
+    instanceId: instance.instanceId,
+    driverKind: instance.driverKind,
+    ...(supportsTaskStage === undefined ? {} : { supportsTaskStage }),
+    getSnapshot: instance.snapshot.getSnapshot.pipe(Effect.map(augment)),
+    refresh: instance.snapshot.refresh.pipe(Effect.map(augment)),
+    streamChanges: instance.snapshot.streamChanges.pipe(Stream.map(augment)),
+    subscribeChanges: instance.snapshot.subscribeChanges,
+  };
+};
 
 export const ProviderRegistryLive = Layer.effect(
   ProviderRegistry,

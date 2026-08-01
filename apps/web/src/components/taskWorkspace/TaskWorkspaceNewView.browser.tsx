@@ -51,6 +51,7 @@ vi.mock("../../rpc/serverState", () => ({
       version: null,
       status: "ready",
       availability: "available",
+      supportsTaskStage: true,
       auth: { status: "authenticated" },
       checkedAt: "2026-08-01T00:00:00.000Z",
       models: [

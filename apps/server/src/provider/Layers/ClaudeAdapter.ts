@@ -3869,6 +3869,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      supportsTaskStage: true,
     },
     startSession,
     sendTurn,

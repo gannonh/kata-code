@@ -1463,6 +1463,7 @@ export function makeOpenCodeAdapter(
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        supportsTaskStage: true,
       },
       startSession,
       sendTurn,
