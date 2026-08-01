@@ -51,6 +51,7 @@ import Migration0035 from "./Migrations/035_TaskWorkspaceOperationReceipts.ts";
 import Migration0036 from "./Migrations/036_TaskWorkspaceCompletionProposals.ts";
 import Migration0037 from "./Migrations/037_TaskWorkspaceOutbox.ts";
 import Migration0038 from "./Migrations/038_TaskWorkspaceImportMeta.ts";
+import Migration0039 from "./Migrations/039_RepairTaskWorkspaceTables.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -101,6 +102,7 @@ export const migrationEntries = [
   [36, "TaskWorkspaceCompletionProposals", Migration0036],
   [37, "TaskWorkspaceOutbox", Migration0037],
   [38, "TaskWorkspaceImportMeta", Migration0038],
+  [39, "RepairTaskWorkspaceTables", Migration0039],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
