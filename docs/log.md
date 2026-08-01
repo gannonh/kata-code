@@ -7,7 +7,9 @@ to re-baseline task onboarding around Kata-owned Standard, Guided, and Freeform 
 first Guided-to-Plan slice uses an inline brief, automatic stage sessions and artifact handoffs,
 and a Plan approval gate while keeping context-manifest and session-linking mechanics internal.
 Updated the [specs roadmap](/specs/index.md); Slice 4 product integration and PR #63 are paused
-pending review of this reset.
+pending review of this reset. The subsequent correctness pass defined transactional recovery,
+provider task-stage tooling, environment-scoped routing, exact Plan approval behavior, and
+historical migration boundaries.
 
 ## 2026-07-31 (Task workspaces Slice 4 review hardening)
 

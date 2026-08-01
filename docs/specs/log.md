@@ -8,7 +8,9 @@ Kata-owned **Standard**, **Guided**, and **Freeform** templates, uses an inline 
 first slice, automatically manages stage conversations and artifact handoffs, pauses Guided
 before Plan approval, and hides session/context-manifest plumbing from the default UI. The
 existing Slice 4 Build infrastructure and PR #63 are paused as implementation substrate pending
-this UX reset's review and approval.
+this UX reset's review and approval. A codebase-grounded correctness pass then added transactional
+command/operation receipts and outbox recovery, trusted provider task tools, exact Plan-gate and
+post-approval states, environment-scoped routing, historical import rules, and AC-to-E2E coverage.
 
 ## 2026-07-30 (Task workspaces Slice 4 implementation verified)
 

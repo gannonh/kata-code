@@ -1,48 +1,84 @@
 ---
 type: Spec
-title: "Task workflow UX reset — product-first Standard, Guided, and Freeform flows"
-description: "Re-baseline task onboarding and stage navigation around automatic conversations and human-readable artifacts while preserving the durable task-workspace infrastructure."
+title: "Task workflow UX reset: product-first Standard, Guided, and Freeform flows"
+description: "Re-baseline task onboarding and stage navigation around automatic conversations and human-readable artifacts while preserving durable task-workspace infrastructure."
 status: Draft
 tags: [specs, task-workspaces, ux, onboarding, workflows, standard, guided, freeform]
-timestamp: 2026-08-01T00:53:02Z
+timestamp: 2026-08-01T16:29:19Z
 parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
 ---
 
-# Task workflow UX reset — product-first Standard, Guided, and Freeform flows
+# Task workflow UX reset: product-first Standard, Guided, and Freeform flows
 
 ## Status
 
-**Draft.** This spec records the agreed product reset after review of the current task screen
-and the maintainer-provided reference interaction. It is not approved for implementation yet.
+**Draft.** This revision incorporates a codebase-grounded correctness review. It is not approved
+for implementation. Build remains blocked until the maintainer approves this written spec.
 
 ## Goal
 
-Make Tasks understandable as a user-facing workflow for starting and reviewing agent work.
-The first product slice is a Guided task from creation through Plan approval. The user enters a
-brief, chooses a workflow, and enters a normal agent conversation. The application manages
-stage sessions and artifact handoffs automatically. Internal persistence and context machinery
-remain available to the runtime without becoming onboarding controls.
+Make Tasks a user-facing workflow for starting and reviewing agent work. The first complete
+product slice is a Guided task from creation through approved Plan. The user enters a brief,
+chooses a workflow, and enters a normal agent conversation. Kata manages stage sessions,
+provider-scoped task tools, artifact handoffs, and recovery.
 
 Success means a maintainer can create a Guided task, watch it move through Clarify, Research,
-and Design, review a readable Plan, approve it, restart the app, and return to the same stage
-with the same conversation and artifacts.
+Design, and Plan, approve or revise the Plan, restart the app during any transition, and return to
+the same task state with the same conversations and artifacts.
+
+## Relationship to the parent design
+
+This spec amends the [task-workspaces vertical-slices design](/specs/2026-07-28-task-workspaces-vertical-slices-design.md).
+It supersedes the parent document's default UI shape, built-in-template presentation, and slice
+sequencing for the normal task experience:
+
+- The conversation becomes the primary task surface.
+- The session navigator, context-manifest editor, and tabbed database-style workspace leave the
+  default surface.
+- Guided through approved Plan becomes the next product slice.
+- Existing Slice 4 Build work remains implementation infrastructure for a later Implement slice.
+
+The parent document remains authoritative for durable task ownership, append-only workflow
+versions, repeatable stage occurrences, artifact revisions, context provenance, recovery,
+security, and eventual Build, Verify, and Deliver behavior. Approval of this spec requires a
+follow-up parent-spec and roadmap status update before Build starts.
+
+## Verified current-state constraints
+
+The Build plan must account for these repository facts:
+
+- `TaskWorkspaceService` currently writes one full-snapshot NDJSON event per command and treats a
+  recorded command id as terminal. A multi-step bootstrap saga needs transactional event,
+  receipt, and outbox persistence before external worktree or orchestration effects run.
+- Task-workspace RPC currently exposes dispatch and subscription on one server environment. The
+  web bootstrap currently subscribes only to the primary environment. Multi-environment task
+  routes require environment-scoped query and subscription management.
+- `thread.create` requires `runtimeMode`, `interactionMode`, and `ModelSelection`. Pre-Implement
+  stages need a server-owned planning execution profile with enforced write protection.
+- Kata already issues provider-scoped, thread-bound MCP credentials to supported adapters. The
+  task workflow can extend that boundary with task-stage tools. Providers without that MCP path,
+  including an in-process provider, need an equivalent native adapter bridge before the Guided
+  flow may offer them.
+- Workflow definitions are already pinned and registered append-only. Historical definitions and
+  task contracts must remain decodable.
 
 ## Product decisions
 
 - Kata owns the workflow templates and terminology.
-- The product keeps three templates: **Standard**, **Guided**, and **Freeform**.
-- Guided automatically advances through Clarify, Research, and Design, then starts Plan and
-  pauses at the Plan approval gate.
-- The first slice accepts an inline task brief. GitHub, Linear, Jira, and other source adapters
-  are a separate source-intake slice.
-- The conversation is the primary work surface. The task panel provides stage context and the
-  current artifact.
-- The application creates and links primary stage sessions. Users do not link threads manually
-  during the normal workflow.
-- Artifacts are human-readable stage outputs. Context manifests, session roles, fork points,
-  token budgets, and thread identifiers are runtime details.
-- The existing task aggregate, event log, worktree service, artifact revisions, session records,
-  and Build reducer remain reusable infrastructure.
+- The product keeps **Standard**, **Guided**, and **Freeform**.
+- Guided is the creation default while it is the only complete first-slice path. Standard becomes
+  the general default after its full path ships.
+- Guided automatically advances through Clarify, Research, and Design, then starts Plan and pauses
+  for Plan approval.
+- The first slice accepts an inline brief. External source adapters are separate work.
+- The conversation is the primary surface. The task panel shows stage context, artifacts, and the
+  current user action.
+- Kata creates and links primary stage sessions. The normal workflow contains no manual thread
+  linking.
+- Kata task-stage tools provide agent context and accept typed stage output. Users work through the
+  normal composer.
+- Clarify, Research, Design, and Plan sessions run under an enforced planning execution profile.
+- Plan approval ends this slice. No Implement occurrence or session starts in this slice.
 - PR #63 and the next verification slice remain paused until this UX reset is implemented and
   accepted.
 
@@ -50,721 +86,915 @@ with the same conversation and artifacts.
 
 ### Standard
 
-Standard is the default for well-understood work:
+Standard is the intended default for well-understood work:
 
 ```text
 Clarify → Plan → Implement → Verify
 ```
 
-Deliver is a post-Verify task action, not a stored workflow stage in this contract.
-
-Clarify uses the task brief and one conversation to resolve material ambiguity. It does not
-expose a blank Questions artifact editor. Plan is the first durable planning artifact and has a
-human approval gate.
+Clarify resolves material ambiguity through conversation. Plan is the first durable planning
+artifact and has a human approval gate. The first slice exposes Standard as a clearly labeled
+conversation-shell preview. Automatic Clarify completion and later stages arrive with the
+Standard slice.
 
 ### Guided
 
-Guided is for work that benefits from explicit discovery and design:
+Guided supports explicit discovery and design:
 
 ```text
 Clarify → Research → Design → Plan → Implement → Verify
 ```
 
-Deliver is a post-Verify task action, not a stored workflow stage in this contract.
-
-The first slice implements Clarify through Plan. After each early stage completes, the server
-creates the next primary session and carries forward the relevant artifact context. Plan is
-started automatically after Design output is accepted, and the task pauses after the Plan
-artifact is ready for human review and approval.
-
-The user-facing labels describe the work. Existing stored stage values may remain compatible
-with `questions`, `research`, `design`, `plan`, `build`, and `verify`; the presentation maps
-`questions` to **Clarify** and `build` to **Implement** where appropriate.
+The first slice implements Clarify through approved Plan. Every early stage has a fresh primary
+conversation and a readable artifact. A completed artifact transaction queues the next handoff.
+Plan output opens a human approval gate.
 
 ### Freeform
 
-Freeform is a task workspace without a required stage rail. The user can hold conversations and create artifacts without a required stage sequence. Explicit
-planning, implementation, or verification entry is a later Freeform slice. The first Freeform
-shell only guarantees the active conversation and task context. The application does not require
-the user to understand session roles or context selection.
+Freeform is a task-owned conversation without a required stage rail. The first slice exposes a
+clearly labeled conversation-shell preview. Explicit stage entry and structured artifact actions
+arrive with the Freeform slice.
+
+### Deliver boundary
+
+Deliver is a post-Verify task action. It is outside the stored `TaskWorkspaceStage` union and the
+first-slice rail.
 
 ### First-slice availability
 
-The first slice exposes all three templates in the creation form with honest behavior:
+The creation form exposes all three templates with capability labels:
 
-- Guided implements the complete Clarify → Research → Design → Plan path and is the acceptance
-  path for this spec.
-- Standard creates the same conversation-first shell and initial Clarify session. Its complete
-  Implement and Verify path is a later slice.
-- Freeform creates a conversation-first task with no automatic rail. Explicit stage entry and
-  artifact workflows are later-slice behavior.
+- **Guided:** available through approved Plan and selected by default.
+- **Standard preview:** creates the conversation-first shell and initial Clarify conversation.
+- **Freeform preview:** creates one task conversation without automatic stage progression.
 
-The creation form does not present a template as complete when only its shell is available. The
-server workflow registry carries the same capability metadata and rejects unsupported stage-entry
-or completion commands with a typed error; hiding a button is not the enforcement boundary.
+Standard and Freeform previews identify deferred behavior before creation. Their task panels show
+only available actions. The server workflow catalog enforces the same capabilities and returns a
+typed error for unsupported completion or stage-entry operations.
+
+Stored stage values remain `questions`, `research`, `design`, `plan`, `build`, `verify`, and
+`verified`. Presentation maps `questions` to **Clarify**, `build` to **Implement**, and `verified`
+to **Done**.
 
 ## Reference interaction
 
-The maintainer-provided task-creation reference establishes the interaction contract:
+The maintainer-provided task-creation reference establishes these interaction requirements:
 
 - repository or directory selection;
-- inline task description as the initial source;
+- inline task description;
 - task name and editable URL-safe slug;
-- workflow template selection with plain-language descriptions;
-- worktree timing selection: Now, Later, or Never;
-- agent, model, and effort selection using existing provider settings;
-- a visible workflow preview;
+- workflow selection with plain-language descriptions;
+- worktree timing: Now, Later, or Never;
+- coding agent, model, and model-owned effort selection;
+- visible workflow preview;
 - one Create task action.
 
-The first slice implements the inline source path and the three worktree timing choices. Source
-integration tabs are excluded until their adapters exist. The form uses Kata terminology and
-styling rather than copying HumanLayer product names or branding.
+The first slice implements the inline source path. Source integration tabs appear only after their
+adapters exist. Kata uses its own terminology and styling.
 
 ## User journey
 
 ### Create task
 
 1. The user opens **Create task**.
-2. The form collects the inline brief, task name, slug, repository, base ref, workflow, worktree
-   timing, coding agent, model, and effort.
-3. The form explains each workflow in terms of the work it performs. It does not expose contract
-   versions, approval-policy literals, or schema names.
-4. Creating a Guided task creates the durable task and its initial Clarify session. The user is
-   navigated to the normal conversation surface in the task workspace.
-5. Worktree behavior follows the selected timing:
-   - **Now:** provision before the initial session starts.
-   - **Later:** keep the task on the source repository until Plan approval, then provision before
-     Implement.
-   - **Never:** keep the task in the current repository context and leave implementation actions
-     unavailable until the user selects a supported worktree policy.
+2. The form collects the inline brief, task name, editable slug, repository, base ref, workflow,
+   worktree timing, coding agent, model, and available model options.
+3. The slug is the new task's immutable `taskId`. It is environment-scoped and appears in the
+   canonical task URL. Historical opaque task ids remain valid.
+4. Selecting a repository chooses the target environment connection. The server resolves the
+   repository path and pinned base commit from the selected project.
+5. Creating the task writes the task, create receipt, bootstrap intent, and reserved identifiers
+   in one transaction. Navigation proceeds immediately to the canonical task route.
+6. The route shows Starting until the initial conversation is ready, then renders that
+   conversation without a manual session-link action.
+
+### Worktree timing
+
+- **Now:** provision the task worktree from the pinned base commit before Clarify starts. Planning
+  sessions use that worktree.
+- **Later:** run pre-Implement sessions against the selected source repository under the enforced
+  planning profile. Provision from the pinned base commit after Plan approval.
+- **Never:** run the planning slice in the source repository under the enforced planning profile.
+  Future Implement remains unavailable until the user changes the policy to Now or Later.
+
+The form describes Never as planning-only for this slice.
 
 ### Clarify
 
-The agent uses the brief and the conversation to identify ambiguity, goals, constraints, and
-success conditions. The user answers through the normal composer. The resulting Clarification
-artifact is generated and rendered as a readable summary. The screen does not ask the user to
-write a generic Questions document.
+The agent reads the brief and stage context through the task-stage bridge. The user answers through
+the normal composer. When the goal, constraints, open decisions, and success conditions are clear,
+the agent submits a typed Clarification proposal. Kata commits it after the provider turn
+completes and starts Research.
 
 ### Research and Design
 
-Guided starts a fresh primary conversation for each stage after the prior stage completes.
-Research records relevant codebase facts, conventions, and evidence. Design records the chosen
-approach, boundaries, and important decisions. Each artifact is visible in the task panel as a
-stage output. The user can steer the active conversation and can inspect prior artifacts without
-managing thread links.
+Guided creates a fresh primary conversation for each stage. Research records codebase facts,
+conventions, and evidence. Design records the chosen approach, boundaries, and decisions. The
+route stays stable while the conversation target changes. The surface shows explicit Finalizing,
+Starting next stage, and Failed transition states.
 
-The server creates the handoff context from the previous stage artifacts. The normal UI does not
-show or require a context-manifest form.
+The user can steer the active conversation and inspect prior artifacts. Runtime manifest and
+session identifiers stay internal.
 
 ### Plan
 
-After Design output is accepted, Guided automatically starts the Plan session and generates the
-Plan artifact. The task then pauses at the approval gate. The Plan artifact contains the proposed
-scope, implementation slices, acceptance criteria, risks, and verification approach. The task
-panel provides:
+Design completion queues the Plan handoff. Plan produces a readable artifact containing scope,
+implementation phases, acceptance criteria, risks, and verification. The task then pauses with:
 
 - the current Plan artifact;
 - a short stage summary;
 - **Approve plan**;
-- **Request changes**, which returns feedback to the Plan conversation.
+- **Request changes**.
 
-Plan approval is the first required human gate in the Guided-to-Plan slice. Implement controls do
-not appear before approval.
+Request changes records feedback and starts a new Plan continuation occurrence. The route retargets
+to the continuation conversation after bootstrap becomes ready.
 
-### Implement and Verify
+### Approved Plan
 
-These stages are represented in the template but remain later delivery slices for this spec. The
-existing hierarchical Build/checkpoint implementation becomes the internal engine for Implement
-after the product-first task flow is accepted. Verify evidence follows as a separate vertical
-slice.
+Approval records an approved gate outcome and completes the current Plan occurrence. The route
+continues to show the approved Plan conversation read-only. The task panel shows **Plan approved**
+and the worktree status. This slice creates no Implement occurrence or session.
 
-Deliver is a post-Verify task action. It may render a final action such as **Open draft PR**, but
-it is not part of the stored `TaskWorkspaceStage` union or the first-slice stage rail.
+A later Implement slice adds a new append-only workflow version and an explicit workflow-run
+upgrade for eligible approved-Plan tasks. Existing pinned definitions never gain behavior
+silently.
 
 ## Surface model
 
-### Task creation surface
+### Canonical task route
 
-`TaskWorkspaceNewView` becomes a focused creation form. It owns user choices and validates them
-before dispatching task creation. It does not display internal workflow-definition versions or an
-approval-policy literal.
+`/tasks/$environmentId/$taskId` is canonical. It composes the existing `ChatView` with a compact,
+task-keyed panel. The URL stays stable across stage handoffs because the task route resolves the
+current conversation target from durable state.
 
-### Conversation surface and routes
+The route renders:
 
-`/tasks/$environmentId/$taskId` is the canonical task route. It resolves the task's current
-primary session and composes the existing `ChatView` with a task-keyed workspace panel. The task
-repository and primary session persist `environmentId` alongside the thread id, so the route can
-construct the environment-scoped chat target required by `ChatView`. The task route has three
-explicit bootstrap states:
+- **Starting:** durable bootstrap or handoff work is pending;
+- **Ready:** the selected current or last approved conversation is available;
+- **Failed:** the transition failed and exposes an idempotent Retry action;
+- **Needs repair:** repository or legacy association needs explicit user repair.
 
-- **Starting:** the task was persisted and the primary session is being created;
-- **Ready:** the primary session exists and the conversation is rendered;
-- **Failed:** session/worktree bootstrap failed, with the error and an idempotent Retry action.
+The create result always returns `taskRoute: { environmentId, taskId }`. It may also return
+`conversationTarget: { environmentId, threadId }` after bootstrap is ready.
 
-Reloading `/tasks/$environmentId/$taskId` repeats the lookup from durable task state. It never
-asks the user to select a thread. `TaskWorkspaceBootstrap` and `useTaskWorkspaceCommands` resolve
-the route environment before subscribing or dispatching; they do not hard-code the primary
-connection. If an existing task has no current primary session, the route shows the bootstrap
-state and invokes the server-owned recovery path. The existing chat route remains usable for
-ordinary non-task conversations; the task route owns task-panel composition. Legacy tasks may use
-the primary connection only after repository/project mapping confirms that it is the task
-environment.
+### Environment-scoped discovery and subscription
 
-### Environment lookup and subscription
+Each task server owns tasks for its own `ServerEnvironment`. The client never supplies an
+authoritative environment id or repository path in `task.create`.
 
-New task links use the canonical route `/tasks/$environmentId/$taskId`. `TaskWorkspaceSidebar`
-and the create response construct that route from the task repository environment. The existing
-`/tasks/$taskId` route remains a compatibility resolver only; it redirects after an environment
-lookup or shows a repair state when the lookup is ambiguous.
+The web task subscription manager follows authenticated environment connections:
 
-The client task store is keyed by `(environmentId, taskId)`. `TaskWorkspaceBootstrap` receives the
-environment id, subscribes through that environment's task-workspace RPC connection, and records
-bootstrap state under that scoped key. `useTaskWorkspaceCommands` receives the same environment id
-and dispatches through that connection. `TaskWorkspaceView` derives its ChatView target from the
-persisted session `{ environmentId, threadId }`; it never substitutes the primary environment.
+- subscribe once per connected environment;
+- key snapshots and sequences by `(environmentId, taskId)`;
+- retain disconnected environment entries as offline until reconnect or explicit removal;
+- reset and resubscribe only the affected environment partition;
+- dispatch commands through the task's environment connection.
 
-For legacy tasks without an environment id, the server returns the repository/project mapping as
-part of the task lookup. One matching environment is repaired into the task snapshot. Zero or
-multiple matches produce an explicit recovery state and no automatic fallback.
+The compatibility route `/tasks/$taskId` performs a read-only `getTask` fanout across authenticated
+connected environments. One match redirects to the canonical route. Multiple matches show an
+environment chooser. Zero matches show Not found plus unavailable-environment guidance. Lookup
+never mutates a task.
 
 ### Task panel
 
-The default panel contains only:
+The default panel contains:
 
-- the workflow rail or Freeform task status;
-- the current stage and next user action;
-- the current stage artifact or a clear empty/loading state;
-- prior stage artifacts in a compact history;
-- repository/worktree status;
-- the relevant approval or continuation control.
+- the Guided rail or a preview-template task status;
+- current stage, transition status, and next user action;
+- current artifact with a clear loading or failure state;
+- compact prior-artifact history;
+- repository, pinned base, and worktree status;
+- Plan approval, request-changes, Retry, or policy-change controls when applicable.
 
-The default panel does not contain:
-
-- manual session linking;
-- session role or fork controls;
-- context-manifest creation;
-- token-budget fields;
-- raw thread identifiers;
-- empty Comments, Deliver, or Implement panels for stages that have not started.
-
-Advanced inspection may expose runtime provenance later, but it is outside the first slice.
+Manual session linking, session roles, fork controls, raw thread ids, manifest editing, token
+budgets, fixture controls, and empty future-stage panels remain outside the default surface.
 
 ### Artifact presentation
 
-Stage artifacts render as documents with title, summary, revision, and source stage. The default
-interaction is conversation-driven feedback. A raw Markdown editor is not the primary Clarify,
-Research, Design, or Plan experience. Artifact revision and comment infrastructure remains
-available to later review surfaces.
+A stage artifact revision persists:
 
-## Presentation vocabulary
+- server-derived artifact kind and title;
+- model-provided short summary and Markdown body;
+- source stage, occurrence, session, and provider turn;
+- revision identity and stable block index;
+- creation time and superseded revision identity.
 
-The stored contract remains compatible while every user-facing surface uses one presentation map:
+The task panel renders title, summary, body, revision, and source stage. Conversation is the
+feedback path. A raw Markdown editor is outside the first slice.
+
+## Presentation vocabulary and workflow catalog
+
+A single versioned built-in workflow catalog under `packages/shared` supplies server and web
+consumers with preset identity, stages, presentation labels, prompt bundle, and first-slice
+capabilities. Server-only validators compile transitions from that catalog. Tests reject catalog
+entries whose server and web projections differ.
+
+Each versioned entry declares:
+
+- `availableInFirstSlice`;
+- `autoAdvanceStages`;
+- `humanGateStages`;
+- `explicitEntryStages`;
+- `completionTransportRequired`;
+- visible capability status for each stage.
+
+The `@0.2.0` entries describe Guided through approved Plan and the Standard/Freeform preview
+shells. All `@0.1.0` entries remain registered.
+
+Every user-facing surface consumes this presentation map:
 
 - stage `questions` → **Clarify**;
 - artifact kind `questions` → **Clarification**;
 - stage `build` → **Implement**;
 - stage `verified` → **Done**;
 - artifact kind `verification` → **Verification**;
-- artifact kind `summary` remains internal handoff output.
+- artifact kind `summary` stays internal.
 
-`taskWorkspacePresets.ts` is the authoritative source for workflow descriptions, stage labels,
-workflow previews, versioned catalog entries, and first-slice capabilities. Entries are keyed by
-`preset@version`, not only by the current preset. Each entry declares `availableInFirstSlice`,
-`autoAdvanceStages`, `humanGateStages`, and `explicitEntryStages`. The new `@0.2.0` entries
-therefore describe Guided through Plan, Standard's conversation shell, and Freeform's
-conversation shell without implying full Implement/Verify behavior. The older `@0.1.0` entries
-remain available for historical tasks.
+## Runtime architecture
 
-Sidebar, task panel, artifact history, browser fixtures, and E2E assertions consume that
-presentation map rather than rendering stored literals. A catalog test fails when a user-facing
-stage has no label, when a surface bypasses the map, or when a first-slice capability is shown as
-implemented without an acceptance path.
+### Environment and repository authority
 
-## Runtime contracts
+The client dispatches `task.create` through the selected environment connection with `projectId`
+and `baseRef`. The server:
 
-### Aggregate additions
+1. stamps its own `environmentId`;
+2. resolves `projectId` through the environment's project projection;
+3. derives `workspaceRoot` and repository identity server-side;
+4. verifies repository authorization;
+5. resolves and persists `baseRef` to `baseCommitSha`;
+6. for Later and Never, requires the source checkout to be clean and at the pinned base commit;
+7. rejects missing projects, path mismatches, invalid refs, unsafe source state, and unauthorized
+   repositories before task creation.
 
-The task aggregate needs explicit persisted state for the new user flow:
+Later Git operations use only the persisted server-resolved repository binding. The client cannot
+choose an arbitrary filesystem path. Plan approval revalidates the pinned source state before
+Later provisioning; drift blocks provisioning visibly and preserves the approved Plan.
 
-- `intake`: `title`, editable `slug`, `brief`, and `sourceKind: "inline"`;
-- `preferences`: `worktreePolicy: "now" | "later" | "never"` and a `ModelSelection` value
-  containing the provider instance, model, and provider option selections;
-- `bootstrap`: `state: "pending" | "starting" | "ready" | "failed"`, stable operation key,
-  current primary session id, route target, and a redacted error string;
-- repository `environmentId` and `provisioningStatus: "pending" | "running" | "ready" | "failed"`;
-- workflow-run `currentStageOccurrence`, `stageStatus: "starting" | "running" |
-"awaiting-approval" | "awaiting-worktree" | "completed" | "failed"`, and an optional Plan
-  gate containing `status: "open" | "approved" | "changes-requested"`, artifact revision,
-  opening time, approver, and latest request-changes note;
-- session `environmentId`, `ModelSelection`, stage occurrence, bootstrap operation key, and
-  optional source session id;
-- session status `superseded` in addition to `active` and `completed`, so a conflicting primary
-  session can be resolved without deleting history;
-- `taskRevision`, a per-task compare-and-set counter incremented on every task event;
-- operation receipts keyed by operation key, with `pending`, `completed`, or `failed` status,
-  source command id, result task revision, and redacted error. Receipts are part of the task
-  snapshot, so replay can return an earlier result without repeating a side effect.
+### Task identity and aggregate additions
 
-The current `provisioned` repository value decodes to the new user-facing `ready` state. Existing
-fields remain readable through additive defaults. Existing `stageStatus` values default to
-`running` for the current stage and `gate: null`.
+For new tasks, the submitted slug is `TaskWorkspace.id`. The server validates lowercase letters,
+digits, and single dashes; requires an alphanumeric start and end; limits the value to 80
+characters; and enforces uniqueness within the environment.
 
-### Task creation payload
+The aggregate adds:
 
-The first-slice creation command extends the existing `task.create` payload with a typed intake
-record and task preferences:
+- `environmentId`;
+- `intake: { brief, source: { kind: "inline", body } }`;
+- `preferences: { worktreePolicy, modelSelection, executionProfile: "planning" }`;
+- repository `baseCommitSha`, planning-root fingerprint, and
+  `provisioningStatus: "not-requested" | "pending" | "running" | "ready" | "failed"`;
+- bootstrap state with semantic operation key, current step, reserved session/thread ids,
+  conversation target, attempt count, and redacted failure;
+- active workflow-run `definitionVersion` and `promptBundleVersion` pins, plus occurrence history with
+  stage, ordinal, status, session ids, artifact revision ids, current completion-proposal id,
+  timestamps, gate outcome, and supersession;
+- active Plan gate plus append-only gate and feedback history;
+- session environment, model selection, occurrence, bootstrap key, source session, and status;
+- session status `superseded` in addition to `active` and `completed`;
+- `taskRevision`, incremented for every persisted task event.
 
-- `title`: required display name;
-- `slug`: required URL-safe identifier, generated from title and editable before submission;
-  it uses lowercase letters, digits, and single dashes, begins and ends with an alphanumeric
-  character, and is limited to 80 characters;
-- `brief`: required inline task description;
-- `source`: `{ kind: "inline", body: brief }` for this slice;
-- `operationKey`: client-generated stable create key reused when the create request is retried;
-- `environmentId`, `projectId`, `workspaceRoot`, and `baseRef`: selected repository context;
-- `preset`: `standard | guided | freeform`;
-- `worktreePolicy`: `now | later | never`;
-- `modelSelection`: the existing `ModelSelection` shape (`instanceId`, `model`, and optional
-  provider `options`). Effort is represented by the provider option with id `effort` when that
-  option exists; it is not a second task-specific model field.
+Stage occurrence status is one of `starting`, `running`, `finalizing`, `awaiting-approval`,
+`blocked`, `completed`, or `failed`. Changes requested is a Plan gate outcome, not an occurrence
+status.
 
-`approvalPolicy` remains a server policy field and is not a user-facing literal. The server
-validates the slug pattern and uniqueness within the environment, requires a non-empty brief
-within the existing provider input limit, requires `source.kind === "inline"` and
-`source.body === brief`, verifies that `environmentId` owns `projectId`, checks repository
-authorization, and validates supported model selections and provider option values before
-persisting the task.
+### Transactional task store, receipts, and outbox
 
-New task versions use additive contract versions: `task-workspace@0.3.0` and
-`task-artifact@0.3.0`. Existing `@0.2.0` events remain readable. The selected workflow versions
-are append-only: `standard@0.2.0`, `guided@0.2.0`, and `freeform@0.2.0` describe the new
-presentation and automatic stage behavior while `@0.1.0` definitions remain registered for
-historical tasks. Prompt bundle versions advance with the corresponding workflow definition.
+The current one-event-per-command NDJSON append path cannot provide the required multi-step crash
+contract. Before bootstrap orchestration ships, task events move to transactional storage using
+the repository's SQLite persistence infrastructure.
 
-### Command and event transport
+One transaction may append task events, update the task snapshot, update command and operation
+receipts, persist a completion proposal, and enqueue outbox work. The store provides unique
+indexes for environment-scoped task ids, operation keys, command ids, and completion proposals.
+Event type is independent from command type, so one semantic operation may emit requested,
+step-completed, ready, or failed lifecycle events.
 
-All task mutations carry the existing `commandId`, `taskId`, and `createdAt`. Every stage,
-bootstrap, policy, gate, or recovery mutation additionally carries `expectedTaskRevision` and a
-unique `operationKey`. `taskRevision` is a per-task compare-and-set counter; the existing global
-NDJSON sequence remains an event-log position only. The operation receipt is written to the task
-snapshot before any external side effect is retried. The first slice adds these exact typed
-operations:
+A command receipt binds environment, `commandId`, canonical command digest, terminal accepted or
+rejected outcome, semantic operation key when present, and immutable result identity. It prevents
+a replayed retry command from incrementing the target operation attempt twice.
 
-- `task.session.bootstrap` (server-owned): `{ stage, occurrence, sourceSessionId?, operationKey,
-expectedTaskRevision }`; starts or resumes a primary session using the persisted `ModelSelection`.
-- `task.stage.output.commit` (provider-neutral): `{ stage, sessionId, occurrence, artifactKind,
-artifactTitle, markdown, operationKey, expectedTaskRevision }`.
-- `task.stage.request-changes`: `{ stage: "plan", sessionId, occurrence, baseRevisionId,
-feedback, operationKey, expectedTaskRevision }`.
-- `task.plan.approve`: `{ planRevisionId, approvedBy, operationKey, expectedTaskRevision }`.
-- `task.worktree.policy.set`: `{ policy: "now" | "later", operationKey, expectedTaskRevision }`;
-  only a `never` task before Implement may use it.
-- `task.session.recover-primary`: `{ stage, selection: { kind: "existing", sessionId } |
-{ kind: "new" }, operationKey, expectedTaskRevision }`.
+Operation receipts are durable service records rather than task-local replay caches. A receipt
+binds:
 
-`task.create` includes `operationKey` and returns `{ sequence, task, routeTarget: null | { taskId,
-environmentId, threadId }, bootstrapState }`. The create event stores that operation key on the
-new task. A duplicate create request first looks up the operation receipt and returns the original
-task; it never creates a second task. Bootstrap retries and stage operations return the existing
-`TaskWorkspaceDispatchResult` when their operation receipt is already completed. A pending receipt
-returns the current task and bootstrap state without starting a second side effect. A failed receipt
-can be retried with the same operation key; the service records a new attempt and either completes
-the original operation or leaves the same failure visible. A stale
-`expectedTaskRevision`, wrong task/session, wrong environment, duplicate active occurrence,
-invalid artifact kind, or invalid gate produces a typed `TaskWorkspaceError` and no partial
-snapshot mutation.
+- environment id and task id;
+- operation type and semantic operation key;
+- canonical payload digest;
+- status `pending | completed | failed`;
+- attempt count and source command ids;
+- immutable result identity;
+- latest result task revision and redacted failure.
 
-The matching event types are `task.session.bootstrap.started`, `.ready`, and `.failed`,
-`task.stage.output.committed`, `task.stage.gate.opened`, `task.stage.request-changes`,
-`task.plan.approved`, `task.worktree.policy.changed`, and `task.session.primary.recovered`.
-Each event uses the existing full-task snapshot envelope; operation key, command id, gate outcome,
-receipt, session, artifact, and route state are persisted in that snapshot. These operations are
-server validated and task/session scoped; the normal UI invokes only user actions for Plan approval,
-request changes, retry, and worktree policy changes.
+A durable completion proposal binds task, stage occurrence, session, thread, provider turn,
+payload digest, summary, Markdown, and status `proposed | committed | rejected`. Terminal turn
+outcome, committed artifact revision, timestamps, and redacted rejection reason are recorded when
+known.
 
-### Worktree policy
+Outbox rows persist deterministic external identities before side effects run:
 
-Worktree timing is persisted separately from Plan approval:
+- worktree branch and path;
+- task session id and orchestration thread id;
+- thread-create command id;
+- turn-start command id and message id;
+- source and target stage occurrences.
 
-- `now` maps to immediate provisioning before the initial session;
-- `later` maps to provisioning after Plan approval and before Implement;
-- `never` maps to no task worktree and leaves Implement unavailable.
+A restart worker reconciles each target before retrying. Worktree adoption verifies the reserved
+path, branch, pinned base, and task ownership. Orchestration replay uses the persisted thread,
+command, and message ids. The task becomes Ready only after canonical provider runtime events
+confirm thread and turn start. Runtime failure marks the same operation Failed.
 
-Provisioning has durable `pending`, `running`, `ready`, and `failed` states. A failed provision
-or session bootstrap preserves the task and exposes Retry. Retrying the same operation is
-idempotent by task and operation key. `never` tasks may complete the Guided-to-Plan slice and
-remain reviewable; they cannot enter Implement until `task.worktree.policy.set` changes the policy
-to `now` or `later` and provisioning reaches `ready`. A policy change is rejected after Implement
-starts.
+The legacy NDJSON file is imported transactionally once and then retained read-only. Malformed
+legacy records fail with an explicit repair error. No historical file is rewritten in place.
 
-For replay compatibility, the decoder maps the existing repository `provisioned` value to
-`ready`; the persisted compatibility encoder may continue accepting `provisioned` until all
-writers use the new vocabulary.
+### Command idempotency and compare-and-set order
 
-Plan approval and worktree state follow this table:
+`commandId` identifies one transport request. `operationKey` identifies one semantic operation
+across retries. Reusing either key with a different canonical payload digest returns a typed
+conflict.
 
-| Policy  | After task creation                                                        | After Plan approval                                                                                 | Implement eligibility                                                    |
-| ------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `now`   | Provisioning runs before the initial session; task waits or fails visibly. | Plan gate closes after approval and Implement bootstrap may start.                                  | Worktree must be `ready`.                                                |
-| `later` | Initial sessions use the source repository; worktree is `pending`.         | Plan gate closes, provisioning starts, and the task enters `awaiting-worktree`.                     | Implement bootstrap starts only after provisioning reaches `ready`.      |
-| `never` | No worktree is requested; task remains in the source context.              | Plan gate records `approved`, then workflow remains `awaiting-worktree` with Implement unavailable. | Requires `task.worktree.policy.set` followed by successful provisioning. |
+The service linearizes a request in this order:
 
-A `later` or `never` task never claims to have entered Implement when no worktree is ready. A
-provisioning failure after approval preserves the approved Plan and exposes Retry or a policy
-change; it does not reopen the Plan gate or silently create a source-repository session.
+1. Look up the environment-scoped command receipt and validate the command digest. A match returns
+   current task state plus the command's immutable outcome without processing the command again.
+2. For a new command, look up the semantic operation receipt and validate its operation type and
+   payload digest.
+3. Return current task state plus the immutable stored result for a completed operation.
+4. Return current task and operation status for pending work.
+5. Require an explicit `task.operation.retry` request naming failed work and carrying the latest
+   `expectedTaskRevision`, then increment the target receipt's attempt count.
+6. For an absent operation, validate `expectedTaskRevision`, append pending intent, enqueue side
+   effects, and persist the terminal command receipt in one transaction.
+
+Accepted and rejected retry commands receive terminal command receipts. Replaying an accepted
+retry after the target fails again returns the original retry outcome and never increments the
+attempt count a second time.
+
+Create has no prior task revision. Its operation key, task id, task event, receipt, and bootstrap
+intent are written in one transaction. A duplicate create returns the current task and original
+route identity. Concurrent create requests for the same task id or operation key resolve through
+unique constraints.
+
+Public semantic mutations other than create carry `expectedTaskRevision`, `operationKey`, and a
+unique request `commandId`:
+
+- `task.stage.request-changes`;
+- `task.plan.approve`;
+- `task.worktree.policy.set`;
+- `task.session.recover-primary`;
+- `task.environment.repair` for explicit legacy repair.
+
+`task.operation.retry` carries a unique `commandId`, the latest `expectedTaskRevision`, and
+`targetOperationKey`. It reopens the existing target receipt and does not create a second semantic
+operation.
+
+Server workers and the authenticated task-stage bridge derive the current revision inside the
+task service's serialized transaction. They validate the active task, stage, occurrence, session,
+and operation state rather than trusting a provider-authored revision.
+
+Server audit time and resolved actor identity are authoritative. Remote environments use the
+authenticated connection principal; the embedded local environment uses a stable `local-user`
+actor. Plan approval does not accept an arbitrary `approvedBy` value from the client or agent.
+
+### Task creation payload and result
+
+The first-slice `task.create` payload contains:
+
+- existing transport `commandId` and `createdAt`;
+- stable client-generated `operationKey`;
+- `taskId`, populated from the edited slug;
+- `title` and required inline `brief`;
+- `source: { kind: "inline", body: brief }`;
+- `projectId` and `baseRef`;
+- `preset: "standard" | "guided" | "freeform"`;
+- `worktreePolicy: "now" | "later" | "never"`;
+- the existing `ModelSelection` shape.
+
+The server requires trimmed non-empty brief text, enforces a shared
+`TASK_BRIEF_MAX_CHARS = 100_000` limit below the existing 120,000-character turn limit, and
+requires `source.body === brief`. It derives environment id, workspace root, repository identity,
+base commit, workflow version, prompt version, approval policy, planning profile, actor, and audit
+timestamps. Client `createdAt` remains transport metadata; server time drives audit state.
+
+`TaskWorkspaceDispatchResult` adds:
+
+```text
+operation: { key, status, attempt, error? }
+taskRoute: { environmentId, taskId }
+conversationTarget?: { environmentId, threadId }
+```
+
+The result retains global event `sequence` and current `task`. Clients use `taskRevision` for task
+compare-and-set and `sequence` only for stream ordering.
 
 ### Primary-session bootstrap
 
-Task creation persists the task before invoking side effects. A server-owned bootstrap service
-then performs the following idempotent saga:
+Bootstrap uses semantic key `<task-id>:bootstrap:<stage>:<occurrence>:primary`. The initial
+occurrence of a stage is zero. Every new occurrence allocates
+`1 + max(recorded occurrences for that stage)`. Failed retries retain the same occurrence.
+Request changes and recovery that create new work allocate a new occurrence atomically. Recovery
+that adopts an existing session preserves its recorded occurrence.
 
-1. record bootstrap `pending`;
-2. provision according to `worktreePolicy` when required;
-3. create the primary session for the workflow's initial stage using the selected `ModelSelection`;
-4. start the existing `thread.turn.start` flow in that session with the brief, stage prompt, and
-   generated initial handoff context. Derive deterministic `commandId = <operationKey>:turn` and
-   `messageId = <operationKey>:message`, persist both in the bootstrap receipt, and reuse them on
-   restart. The turn-start operation cannot be duplicated after a completed receipt;
-5. persist the session id, environment id, stage, model selection, and bootstrap `ready` state;
-6. return the route target `{ taskId, environmentId, threadId }` used by
-   `/tasks/$environmentId/$taskId` to compose `ChatView`.
+The outbox worker:
 
-Bootstrap uses the stable operation key
-`<task-id>:bootstrap:<stage>:<occurrence>:primary`. The initial occurrence for every stage is `0`;
-a transition to a new stage starts occurrence `0`, while request changes or recovery that creates
-new work increments the current stage occurrence. Recovery that selects an existing session
-preserves that session's recorded occurrence. Handoff uses a separate key:
-`<task-id>:handoff:<source-session-id>:<target-stage>:<artifact-revision-id>`. Restart recovery
-resumes `pending` or `running` bootstrap work. A duplicate request with the same operation key
-returns the receipt result. A Retry reuses the same operation key and increments only the receipt
-attempt count after a failed external operation; it never creates a second session for the same
-stage occurrence. A task never receives two active primary sessions for the same stage occurrence.
-Plan request-changes sessions therefore receive a new occurrence rather than colliding with the
-original Plan bootstrap. The service records `failed` with a user-visible error when a provider,
-worktree, or route target cannot be prepared.
+1. provisions or reconciles the worktree when policy requires it;
+2. creates or reconciles the reserved task session and orchestration thread;
+3. resolves the pinned prompt bundle and attaches it through the provider adapter's trusted
+   system/developer-instruction channel;
+4. dispatches the deterministic thread-create command with persisted `ModelSelection`,
+   `runtimeMode: "approval-required"`, and `interactionMode: "plan"`;
+5. dispatches a deterministic visible kickoff message;
+6. waits for provider thread/turn start or a terminal runtime failure;
+7. records the conversation target and Ready state.
 
-### Guided stage output and transitions
+Trusted task instructions are server-only input. Public orchestration commands cannot provide or
+override them. The task session persists their prompt-bundle reference, and restart resolves the
+same append-only version. Provider adapters without a trusted instruction channel are ineligible
+for Guided.
 
-Stage completion is a server-owned operation, not a manual UI button. The active primary session
-submits `task.stage.output.commit` with `stage`, `sessionId`, `occurrence`, `artifactKind`,
-`artifactTitle`, `markdown`, `expectedTaskRevision`, and `operationKey`. The server:
+The Clarify kickoff message is the user's brief. Later stages use concise product language such as
+“Research this task using the approved Clarification.” The task-stage context tool returns selected
+untrusted task data. Manifests, token budgets, trusted instructions, and runtime prompts never
+appear as synthetic user prose.
 
-1. authorizes the session against the task, environment, current stage, and stage occurrence;
-2. validates the artifact schema and persists its revision and stable block index;
-3. marks the stage session complete;
-4. emits `task.stage.output.committed` once by command id;
-5. creates the next handoff manifest and primary session when the workflow allows it.
+Retry sends `task.operation.retry` with the failed bootstrap operation key and latest task
+revision. It reclaims the same outbox identities and increments the target receipt's attempt. It
+does not allocate a second session or occurrence.
 
-For Guided, Clarify → Research → Design transitions auto-start the next stage. Design completion
-starts a new Plan occurrence, and Plan output opens a durable `plan-approval` gate containing the
-Plan revision id. The workflow run remains `awaiting-approval` until `task.plan.approve` or
-`task.stage.request-changes` is accepted. A stage output failure leaves the current stage visible
-with Retry; it never silently advances.
+### Provider-neutral task-stage bridge
 
-`task.plan.approve` requires the current Plan revision id, approver identity, operation key, and
-expected task revision. It records the gate outcome before starting the next operation, and it
-rejects stale revision or task-revision values. `task.stage.request-changes` requires the Plan
-session id, current Plan revision, feedback, operation key, and expected task revision. It
-preserves the prior revision, starts a new Plan occurrence with a distinct bootstrap key, and
-leaves the gate open until a new Plan revision is accepted and explicitly approved.
+A `TaskStageBridge` owns trusted instruction attachment and two provider tools with one shared
+schema:
+
+- trusted instructions tell the provider how to run the pinned stage, treat task content as
+  untrusted data, use the context tool, and propose completion;
+- `task_stage_context` is read-only and returns only the brief snapshot, selected artifact content,
+  stage and occurrence, and current request-changes feedback as untrusted data;
+- `task_stage_complete` accepts `{ summary, markdown }` and proposes completion of the caller's
+  current stage.
+
+MCP-capable providers receive these tools through the existing thread-bound Kata MCP credential.
+The credential adds a `task-stage` capability only when its thread is the active primary session
+for a task occurrence. The handler derives environment, task, session, stage, occurrence, and
+active provider turn from the invocation scope. An in-process or non-MCP provider must implement
+the same `TaskStageBridge` contract as a native tool before it is selectable for Guided.
+
+Task-stage tool activities use an internal projection class. The normal conversation renders
+concise states such as **Loaded task context** and **Completed Clarify**; it does not render raw
+tool arguments, Markdown payloads, prompt instructions, or context results. Authorized server
+audit records retain the tool provenance with normal redaction.
+
+Task-stage MCP credentials use a separate three-hour idle lease and the existing eight-hour
+maximum lifetime. Before every task-bound turn, the provider service ensures a fresh lease with at
+least three hours remaining; a task-stage turn has a two-hour hard timeout. Rotation resumes or recreates the provider session with the same
+orchestration thread and provider resume cursor before the turn starts. Stage completion,
+supersession, or thread deletion revokes the lease. Every invocation still revalidates the active
+primary session, occurrence, gate, and turn. Lease expiry or rotation failure leaves the occurrence
+Running and exposes Retry; it never authorizes a stale session.
+
+`task_stage_complete` is valid only while its occurrence is Running or is Finalizing the same
+proposal. It persists a proposal linked to the active provider turn and returns an acknowledgement
+to the agent. The task remains Finalizing until the canonical provider event marks that turn
+completed. The completion reactor then commits the artifact and transition atomically. A gate-open
+Plan occurrence rejects replacement proposals until Request changes allocates a continuation.
+
+An aborted or failed turn rejects the proposal and returns the stage to Running with a visible
+failure. Malformed tool input returns a typed tool error and leaves task state unchanged. A turn
+that completes without a proposal leaves the stage Running and shows a completion-needed notice;
+the UI can send a normal “Finish this stage” message through the composer. On startup, a proposal
+reconciler reads canonical turn state: completed proposals commit, aborted or failed proposals
+reject, active proposals wait, and missing terminal state becomes a visible recoverable failure.
+
+The internal operation key derives from task, session, occurrence, provider turn, and canonical
+payload digest. Repeated delivery of the same tool call is idempotent. A unique constraint permits
+one proposal per task occurrence and provider turn; a different second payload conflicts. Any
+proposal after the occurrence completes is rejected.
+
+### Guided output and handoff transaction
+
+On successful completion of Clarify, Research, or Design, one task transaction:
+
+1. validates active task, environment, stage, occurrence, session, provider turn, artifact schema,
+   and payload digest;
+2. persists the artifact revision and block index;
+3. marks the source occurrence and session completed;
+4. allocates the next stage occurrence in Starting;
+5. persists its handoff manifest and reserved identifiers;
+6. enqueues target bootstrap work.
+
+The source occurrence remains completed if target bootstrap later fails. The task displays the
+target stage as Failed with Retry. It never reruns the completed source occurrence implicitly.
+
+Design completion allocates Plan. Plan output persists the Plan revision, sets the Plan occurrence
+to Awaiting approval, and opens a gate for that exact revision. The Plan session remains the
+conversation target while the gate is open.
+
+### Plan gate state machine
+
+The gate is repeatable across any number of requested revisions:
+
+```text
+open(occurrence K, revision N)
+  → approved(occurrence K, revision N)
+  or
+  → changes-requested(occurrence K, revision N, feedback)
+  → continuation-starting(occurrence K+1)
+  → open(occurrence K+1, revision N+1)
+  → ...
+```
+
+While a gate is open, occurrence K is `awaiting-approval`. Request changes atomically appends the
+`changes-requested` gate outcome, marks occurrence K and its session completed with that outcome,
+allocates occurrence K+1 in `starting`, persists continuation context, and queues bootstrap. A
+bootstrap failure marks K+1 `failed`, keeps the active gate outcome `changes-requested`, and
+retries the same K+1. Successful bootstrap moves K+1 to `running`; accepted output moves it through
+`finalizing` to `awaiting-approval` and appends a new open gate for revision N+1. The loop may
+repeat. Approval succeeds only for the current open occurrence and revision.
+
+Approval atomically records resolved actor and server time, appends the approved gate outcome,
+marks the Plan occurrence and session completed, and applies worktree policy. Post-approval
+provisioning uses operation key `<task-id>:worktree:<base-commit>:<policy>`; its failure never
+changes the approved gate. The first-slice post-state is:
+
+| Policy  | Current stage after approval | Plan state | Worktree action                                              | Conversation target      | Visible next action                                      |
+| ------- | ---------------------------- | ---------- | ------------------------------------------------------------ | ------------------------ | -------------------------------------------------------- |
+| `now`   | `plan`                       | completed  | already `ready`                                              | approved Plan, read-only | Plan approved; Implement deferred                        |
+| `later` | `plan`                       | completed  | revalidate source, then enqueue; show `running/failed/ready` | approved Plan, read-only | Resolve drift or retry failure; Implement deferred       |
+| `never` | `plan`                       | completed  | remain `not-requested`                                       | approved Plan, read-only | Choose Now or Later before a future Implement occurrence |
+
+No row creates an Implement occurrence or session in this slice.
+
+### Planning-root checks and worktree policy changes
+
+`planningRootFingerprint` is SHA-256 over the planning root's resolved HEAD SHA, a newline, and
+canonical `git status --porcelain=v2` output. Now records it after clean worktree provisioning.
+Later and Never record it from the source checkout, which must be clean at creation. The server
+revalidates it before every task-bound turn, when accepting a completion proposal, and at Plan
+approval; Later also revalidates the source immediately before provisioning.
+
+A server-side `TaskTurnGuard` resolves task ownership by thread, so the check applies from task and
+ordinary chat routes. It also rejects turns for completed or superseded task sessions. Drift blocks
+the occurrence before artifact acceptance and exposes the expected and observed state. Restoring
+the planning root permits Retry on the same occurrence; changing the baseline or accepting drift
+is outside this slice.
+
+In this slice, `task.worktree.policy.set` is available for a Never task only after Plan approval.
+Changing to Now or Later then records the policy and immediately enqueues deterministic
+provisioning because the approval boundary has already passed. Provisioning failure preserves the
+approved Plan and exposes Retry. The canonical writer persists `ready`; `provisioned` remains
+decode-only compatibility vocabulary.
+
+Generated refs use the Kata branch prefix and task id. Existing refs or paths are adopted only when
+they match the task's persisted reservation and pinned base. Any ownership conflict fails visibly.
 
 ### Automatic handoff context
 
-The server creates handoff context. The caller does not supply artifact references or token
-budgets during ordinary stage progression. The persisted manifest has this logical shape:
+The server creates versioned, immutable manifests. A manifest records:
 
 ```text
 ContextManifest
-├─ id, taskId
-├─ taskContractVersion, artifactContractVersion, workflowDefinitionVersion, promptBundleVersion
-├─ sourceSessionId?, targetSessionId?
+├─ id, taskId, environmentId
+├─ taskContractVersion, artifactContractVersion
+├─ workflowDefinitionVersion, promptBundleVersion
+├─ sourceSessionId?, targetSessionId
+├─ sourceStageOccurrence?, targetStageOccurrence
+├─ reason: initial | stage-handoff | request-changes | recovery
 ├─ operationKey
 ├─ briefSnapshot: { sourceKind: "inline", body }
-├─ artifactRefs: [{ kind, revision, selection: full | blocks | summary, blockIds[] }]
+├─ feedbackSnapshot?
+├─ artifactRefs: [{
+│    artifactId, revisionId, kind, revision,
+│    selection: full | blocks | summary,
+│    blockIds[]
+│  }]
 ├─ tokenEstimate, budget
 ├─ summaryArtifactRef?
 └─ createdAt
 ```
 
-Each artifact reference includes `selection: "full" | "blocks" | "summary"`; `selection: "full"`
-removes the ambiguity of an empty block-id array and is required for a whole-artifact handoff.
-Legacy manifests retain their existing interpretation.
+The default handoff includes the brief and complete immediately preceding stage artifact. Request
+changes also snapshots feedback and the reviewed Plan revision. The task-stage context tool reads
+only the target session's authorized manifest and returns stage/occurrence metadata plus its
+untrusted brief, feedback, and selected artifact data. Trusted instructions remain exclusively in
+the provider-native system/developer channel.
 
-- The persisted manifest includes a brief snapshot with `sourceKind: "inline"` and the complete
-  immediately preceding artifact by default.
-- If the configured budget would be exceeded, the server selects stable artifact blocks or creates
-  a summary artifact using the existing budgeting service. A full selection uses `selection: "full"`
-  and `blockIds: []`; block selection always names its selected ids.
-- The server derives stable block ids from headings when the artifact has no explicit markers. A
-  collision fails loudly and does not advance the stage.
-- The persisted manifest records the brief snapshot, selected revisions, block ids, token estimate,
-  budget, and any summary artifact for recovery and advanced inspection.
-- The active session id, target environment, and task id are authorized at creation; a manifest
-  cannot be attached to a session or task from another aggregate.
-- Automatic handoff uses the task's expected task revision and the handoff operation key
-  `<task-id>:handoff:<source-session-id>:<target-stage>:<artifact-revision-id>`. Retries return the
-  existing manifest/session association.
+Full selection uses `selection: "full"` and an empty block list. Block selection requires explicit
+stable `<!-- kata:block:... -->` markers. When an artifact lacks markers or selected content exceeds
+the budget, the server creates a summary artifact through a dedicated context-budgeting service
+extracted from the current helpers. Heading text alone never defines durable block identity.
 
-The default UI shows a human-readable artifact history. A future advanced inspector may expose
-manifest provenance, but the first slice has no create/edit manifest controls.
+Manifest creation authorizes task, environment, source session, target session, artifact revision,
+and occurrence. Retries return the existing manifest/session association. The first slice exposes
+manifest provenance only through human-readable artifact history.
 
-### Agent selection
+### Agent and model selection
 
-`modelSelection` reuses the existing `ModelSelection` contract: `instanceId`, `model`, and
-optional provider `options`. Provider option ids remain provider-owned, such as `reasoningEffort`
-for Codex or `effort` for Claude. The creation form renders descriptors from the selected provider
-instance; unsupported options are hidden, and submitted values are validated against the provider
-registry before persistence. A schema-valid but temporarily unavailable provider instance creates
-the task with bootstrap `failed` so the user can repair or retry; an invalid model or option is
-rejected before task creation.
+`modelSelection` reuses the existing contract: `instanceId`, `model`, and provider-owned option
+selections. The form renders option descriptors from the selected model. Effort remains a provider
+option such as `reasoningEffort` or `effort`, based on the descriptor.
 
-The selection is persisted on the task and copied onto every automatic stage session. A stage may
-only change provider/model through a later explicit user action, not as an accidental bootstrap
-fallback. Legacy tasks with no selection use the existing primary provider/model defaults and
-record that resolved `ModelSelection` in the first recovered session. The task service receives a
-provider-registry capability resolver for validation; it does not duplicate provider option
-schemas.
+The server validates:
 
-## Current-state migration
+- configured provider instance and driver;
+- selected model from that instance's catalog;
+- unique option ids, option types, and select choices;
+- cached capability support for enforced Plan mode and the task-stage bridge.
 
-The current implementation is preserved as a compatibility base while its default presentation
-changes:
+An unknown instance, model, option, or missing Guided capability fails before task creation. A
+known configured instance with cached capabilities may create a task while temporarily
+unavailable; bootstrap then records a visible, retryable failure. No provider, model, or option
+falls back silently.
 
-- `TaskWorkspaceNewView.tsx` gains the product creation fields and removes the visible definition
-  version and `before-build` literal.
-- `TaskWorkspaceView.tsx` becomes the task-route composition of `ChatView` and a compact panel.
-- `SessionsPanel.tsx` and `ContextManifestPanel.tsx` leave the default task surface. Their runtime
-  data remains available to automatic orchestration and future advanced inspection.
-- `TaskWorkspaceView.tsx` no longer renders a blank Questions textarea as the primary onboarding
-  action. The existing fixture placeholder is test-only and must not appear in product copy.
-- `taskWorkspacePresets.ts` remains the catalog source but receives the new user-facing stage
-  labels, descriptions, and append-only workflow versions.
-- `TaskWorkspaceCommand` and the task aggregate gain the intake, preferences, worktree policy,
-  bootstrap state, and primary-session association needed for automatic startup. Existing events
-  decode with deterministic defaults.
-- Existing tasks with `task-workspace@0.2.0` use `worktreePolicy: later` to preserve the current
-  Plan-before-provision behavior. Missing brief/source values are displayed as legacy intake
-  derived from the task title; no fake clarification artifact is generated.
-- Existing workflow definitions remain registered. The client catalog becomes a versioned map keyed
-  by `preset@version`, so an old pinned definition never falls through to the unknown-definition
-  rail when the new `@0.2.0` entries are added.
-- Existing manually linked sessions remain readable. Adoption rules are deterministic: exactly one
-  active primary session for the current stage is adopted; zero sessions enters recoverable
-  bootstrap; multiple active primary sessions produces a visible conflict. The advanced recovery
-  action `task.session.recover-primary` with `selection.kind: "existing"` preserves the selected
-  session's occurrence and marks the other active primaries `superseded`; `selection.kind: "new"`
-  increments the current occurrence and creates a fresh session. No session is silently discarded.
-- Existing tasks with no `environmentId` resolve it from their persisted repository/project mapping;
-  if that mapping is unavailable, the task route stays in Failed bootstrap with an explicit repair
-  action rather than opening a thread in the wrong environment.
-- `task.fixture.apply` remains a test adapter and is removed from normal Implement controls. Slice
-  4 Build controls are integrated later under Implement rather than exposed as a task database
-  panel.
-- No existing task event log is deleted or rewritten in place. Replay tests cover old snapshots,
-  old workflow versions, zero-session tasks, and conflicting primary-session tasks.
+The resolved selection is copied to every automatic stage session. Provider changes require a
+later explicit task action. Legacy tasks resolve the existing project/provider default during
+recovery and persist that resolved selection on the recovered session.
 
-## Approaches considered
+### Workflow version upgrades
 
-### Surgical panel cleanup
+A shipped capability never changes a pinned definition. Phase 4 introduces `standard@0.3.0` and
+`freeform@0.3.0`; Phase 5 introduces `guided@0.3.0`. Each new version pins a matching prompt bundle.
 
-Hide the worst internal panels, rename a few labels, and keep the current task page and manual
-session-link flow. This is the smallest code change, but the task lifecycle would still be
-conversation-disconnected and users would still encounter architecture concepts during normal
-work.
+A later `task.workflow.upgrade` command carries source version, target version,
+`expectedTaskRevision`, and operation key. The server accepts only a catalog-declared upgrade edge
+whose eligibility predicate matches the task:
 
-### Product-first shell over the existing domain — selected
+- a Standard or Freeform preview task has no structured occurrence beyond its initial shell;
+- a Guided task has an approved current Plan and no Implement occurrence;
+- no bootstrap, proposal, gate mutation, or repair operation is pending.
 
-Keep the durable task/workspace domain and Build infrastructure, then replace creation, session
-bootstrap, task routing, and default panel presentation around one real Guided path. This keeps
-useful persistence work and provides a clear vertical slice for validation.
+The upgrade transaction appends `task.workflow.upgraded` with source/target workflow and prompt
+versions, actor, time, and occurrence mapping. It atomically updates the active run's
+`definitionVersion` and `promptBundleVersion` plus compatibility mirrors
+`versions.workflowDefinition` and `versions.prompt`. It starts no stage implicitly and retains
+append-only upgrade history. Prompt resolution uses the active run's prompt pin; tests reject
+inconsistent workflow or prompt mirrors.
 
-### Restart task mode from the earlier design
+## Contract versions and migration
 
-Discard the current task-workspace contracts and rebuild the original task mode from scratch.
-This gives a clean UX boundary but duplicates durable infrastructure and loses the useful artifact
-and recovery work already present.
+New records use `task-workspace@0.3.0` and `task-artifact@0.3.0`. New built-in definitions use
+`standard@0.2.0`, `guided@0.2.0`, and `freeform@0.2.0`, with matching prompt bundle versions.
+Historical definitions stay registered.
 
-The selected approach preserves the runtime substrate while changing the user-facing boundary
-and slice sequencing.
+Migration covers both existing contract generations:
+
+- `task-workspace@0.1.0` and `task-artifact@0.1.0`;
+- `task-workspace@0.2.0` and `task-artifact@0.2.0`;
+- all `@0.1.0` workflow definitions.
+
+A version-aware whole-aggregate normalizer handles defaults that a field decoder cannot derive:
+
+- preserve historical opaque task ids; display them as the legacy slug;
+- create legacy intake from the existing title without generating a fake artifact;
+- default missing worktree policy to Later;
+- map `provisioned` to canonical `ready`;
+- preserve old workflow and prompt pins, populating a missing run-level prompt pin from
+  `versions.prompt`;
+- derive historical `taskRevision` from the imported per-task event order;
+- set missing stage occurrence to zero;
+- resolve missing model selection only when a recovery session starts.
+
+During transactional import, each server stamps its own environment id through an explicit
+migration event and validates the persisted project binding. Missing projects enter Needs repair.
+A user-authorized repair command records the replacement project and repository binding. Read-only
+route lookup performs no repair.
+
+Existing manually linked sessions remain readable. Recovery rules are deterministic:
+
+- exactly one active primary for the current occurrence is adopted;
+- zero primaries enters failed/recoverable bootstrap;
+- multiple primaries enters conflict;
+- `selection.kind: "existing"` preserves the selected occurrence and marks other active primaries
+  superseded;
+- `selection.kind: "new"` allocates the next occurrence and creates new work.
+
+No historical event log is deleted or rewritten.
 
 ## Implementation phases
 
-### Phase 1 — UX contract and creation shell
+### Phase 0: persistence and contract foundation
 
-- Update the workflow catalog descriptions, append-only versions, and presentation labels.
-- Rebuild `TaskWorkspaceNewView` around inline brief, title, slug, repository, base ref, worktree
-  timing, template, and existing agent/model/effort settings.
-- Add a workflow preview that shows the selected template's user-facing stages.
-- Add typed task intake/preferences fields and legacy defaults.
-- Remove internal version and schema terminology from the creation surface.
+- Add version-aware aggregate normalization and NDJSON import.
+- Add transactional task events, snapshots, receipts, indexes, and outbox.
+- Separate event types from command types.
+- Add task revision, occurrence, gate, bootstrap, artifact provenance, and canonical repository
+  states.
+- Add crash-boundary and historical replay tests before external orchestration work.
 
-### Phase 2 — Bootstrap saga and conversation routing
+### Phase 1: workflow catalog, creation, and environment routing
 
-- Add the server-owned bootstrap service and durable pending/running/ready/failed state.
-- Create the initial primary session with the selected agent/model and deterministic operation key.
-- Compose `/tasks/$environmentId/$taskId` from `ChatView` and the task-keyed panel after bootstrap
-  is ready; retain `/tasks/$taskId` only as a compatibility resolver.
-- Implement starting, ready, failed, retry, reload, and reconnect states.
-- Preserve idempotency and restart recovery for task creation, worktree provisioning, and session
-  bootstrap.
+- Create one shared versioned workflow catalog and server/web parity tests.
+- Rebuild `TaskWorkspaceNewView` around the specified fields and template capability labels.
+- Dispatch create through the selected environment and resolve repositories server-side.
+- Add environment-scoped task query, subscription manager, store partitions, canonical route, and
+  compatibility fanout.
+- Implement Starting, Ready, Failed, offline, and Needs repair surfaces.
 
-### Phase 3 — Guided Clarify → Research → Design → Plan
+### Phase 2: task-stage bridge and bootstrap saga
 
-- Replace manual stage textareas and completion buttons with conversation-led stage output.
-- Add typed stage-output completion, artifact validation, block indexing, and automatic handoff
-  selection.
-- Persist Clarification, Research, Design, and Plan revisions from stage outputs.
-- Auto-start the next primary session through Design and automatically start Plan.
-- Pause at Plan approval and implement Approve plan / Request changes with durable gate state.
-- Display only the current artifact and compact prior-stage history.
+- Add task-stage MCP tools and the provider-neutral native bridge interface.
+- Advertise Guided only for provider instances with enforced Plan mode and completion transport.
+- Implement deterministic worktree, thread, turn, and provider-runtime reconciliation.
+- Compose `ChatView` and the compact task panel at `/tasks/$environmentId/$taskId`.
+- Verify retry, reload, reconnect, process restart, and crash injection.
 
-### Phase 4 — Standard and Freeform variants
+### Phase 3: Guided Clarify through approved Plan
 
-- Standard uses the same creation and conversation shell with the shorter Clarify → Plan →
-  Implement → Verify sequence.
-- Freeform hides the fixed rail and supports user-directed stage entry without exposing session or
-  manifest construction.
-- Add regression coverage proving the three catalogs retain distinct behavior and historical
-  workflow versions remain readable.
+- Implement typed completion proposals and turn-settlement reactor.
+- Commit stage artifacts and queue atomic handoffs.
+- Implement Plan gate state machine, continuation conversations, and post-approval worktree states.
+- Remove manual stage editors, session-link forms, and manifest controls from the default surface.
+- Complete browser, E2E, and manual acceptance for the Guided path.
 
-### Phase 5 — Implement integration and later delivery slices
+### Phase 4: Standard and Freeform
 
-- Move the Slice 4 Build/checkpoint engine behind the Implement stage.
-- Add commit-specific Verify evidence.
-- Add draft PR delivery and external source integrations in later approved slices.
+- Add `standard@0.3.0` and `freeform@0.3.0` with matching prompt bundles.
+- Ship Standard's shorter automatic path and Freeform explicit stage/artifact actions.
+- Implement the catalog-declared `task.workflow.upgrade` edges and eligibility checks for preview
+  tasks.
+- Change the general creation default to Standard after its acceptance criteria pass.
+
+### Phase 5: Implement, Verify, and Deliver
+
+- Add `guided@0.3.0` and its explicit approved-Plan upgrade edge.
+- Place the Slice 4 Build/checkpoint engine behind Implement.
+- Add Verify evidence and post-Verify draft PR delivery in separately approved slices.
 
 ## Acceptance criteria
 
-The first Guided-to-Plan product slice passes when all of the following are observable:
+The first Guided-to-approved-Plan slice passes when every criterion has E2E coverage and the
+required manual evidence:
 
-1. **Creation form:** A user can enter an inline task brief, title, editable slug, repository,
-   base ref, worktree timing, workflow, coding agent, model, and effort, then create the task.
-2. **Template language:** The form describes Standard, Guided, and Freeform in user-facing terms
-   and shows the selected workflow preview without exposing contract versions or schema literals.
-3. **Typed intake:** The server persists the brief, inline source, slug, environment, worktree
-   policy, and `ModelSelection`; invalid slugs, unsupported selections, and unauthorized
-   repositories fail before task creation. Stage output, request-changes, approval, bootstrap,
-   and recovery commands carry session/operation identity plus expected task revision.
-4. **Automatic start:** Creating a Guided task persists the task, performs the selected worktree
-   policy, creates its initial primary Clarify session with the persisted `ModelSelection`, starts
-   the initial turn with the brief and stage prompt, and opens the associated environment-scoped
-   conversation without a manual session-link action.
-5. **Bootstrap recovery:** A failed or interrupted worktree/session bootstrap is visible with a
-   Retry action; retrying the same task operation does not create duplicate worktrees or sessions.
-6. **Conversation-first layout:** The active conversation is the primary task surface and the
-   task panel shows current stage context beside it. A new task does not open to a page of empty
-   Sessions, Context manifests, Comments, or Deliver panels.
-7. **Clarify artifact:** Completing Clarify through the conversation produces a readable artifact
-   summarizing the task goal, constraints, open decisions, and success conditions. The user never
-   has to fill a generic Questions textarea to proceed.
-8. **Guided handoffs:** Research and Design sessions and artifacts start automatically after the
-   prior stage completes. The user can inspect each artifact and send feedback through the active
-   conversation without linking threads or choosing context records.
-9. **Plan generation and gate:** Design completion automatically starts Plan and persists a readable
-   Plan artifact. The task pauses at Approve plan / Request changes, and it cannot enter Implement
-   before explicit approval.
-10. **Request changes:** Request changes records the user's note, preserves the prior Plan
-    revision, and starts a Plan continuation session automatically. A new Plan revision is required
-    before approval can succeed.
-11. **Internal context:** The server records authorized handoff context with deterministic
-    artifact blocks, budget/compression metadata, and task/session association, but the default UI
-    contains no context-manifest editor, token-budget field, raw thread ID, fork form, or
-    session-role selector.
-12. **Worktree policy:** Now, Later, and Never produce the documented worktree behavior and show
-    clear repository/worktree status in the task panel. Plan approval leaves `now` eligible for
-    Implement, `later` in `awaiting-worktree` until provisioning is ready, and `never` in
-    `awaiting-worktree` with Implement unavailable. A policy change and retry are explicit,
-    idempotent actions.
-13. **Recovery:** Restarting the server or reconnecting the client during Clarify, Research,
-    Design, or the Plan gate restores the same task stage, primary session, artifact revisions,
-    bootstrap state, and approval state.
-14. **Presentation vocabulary:** The creation form, sidebar, task panel, artifact history, and
-    browser/E2E surfaces use the shared Clarify/Implement/Done presentation map and contain no
-    raw Questions/Build literals where the user-facing map applies.
-15. **No fixture leakage:** Fixture-only text such as `What should the fixture prove?`, `Apply
-fixture build`, and raw task-control terminology is absent from the normal creation and
-    Guided-to-Plan surfaces.
-16. **Historical compatibility:** Existing `task-workspace@0.2.0` tasks and `@0.1.0` workflow
-    definitions decode, render a known historical catalog entry, and follow the documented
-    zero/one/multiple-primary-session adoption rules without event-log rewriting.
-17. **Evidence:** A headed browser/UAT walkthrough captures task creation, automatic conversation
-    start, each Guided artifact handoff, Plan review, approval/request-changes behavior, bootstrap
-    failure/retry, and restart recovery. A Playwright test covers the primary path under the
-    task-workspaces feature tag.
-
-### Later template acceptance
-
-These criteria are Phase 4 gates and are not required to pass the first Guided-to-Plan slice.
-The first slice still makes the options honest:
-
-- Standard can be selected, creates the conversation-first shell, and starts Clarify. Its full
-  Implement and Verify path is unavailable until its Phase 4 slice is shipped.
-- Freeform can be selected, creates a conversation-first task without a mandatory rail, and does
-  not claim automatic stage progression. Explicit stage entry arrives in Phase 4.
-- Neither preview shell exposes a control that implies its deferred stages are complete.
+1. **AC-01, creation:** A user can enter an inline brief, title, editable slug, repository, base
+   ref, worktree timing, workflow, eligible coding agent, model, and available model options, then
+   create a task.
+2. **AC-02, template honesty:** Guided is the default and is labeled available through approved
+   Plan. Standard and Freeform are labeled preview shells before creation and expose no deferred
+   controls afterward. Direct unsupported completion or stage-entry commands receive a typed
+   server rejection.
+3. **AC-03, stable identity:** The edited slug becomes the new task id and canonical
+   `/tasks/$environmentId/$taskId` URL. Reload and every stage handoff preserve that URL.
+4. **AC-04, authoritative intake:** The persisted task contains the server environment,
+   server-resolved repository path, pinned base commit, inline brief, worktree policy, and exact
+   `ModelSelection`. Invalid slugs, oversized briefs, refs, model options, unsupported Guided
+   providers, unsafe source state, and unauthorized repositories fail before task creation.
+5. **AC-05, idempotent commands:** Repeated submission of one create operation returns one task and
+   one canonical route. Replaying one accepted retry command after its target fails again leaves
+   the attempt count unchanged. Reusing a command or operation key with different payload fails
+   visibly.
+6. **AC-06, automatic start and planning-root safety:** Guided creation reaches a Clarify
+   conversation automatically. Now provisions first; Later and Never require a clean pinned source.
+   Every policy blocks turns and completion on planning-root drift and resumes the same occurrence
+   after the root is restored.
+7. **AC-07, planning and tool safety:** Clarify, Research, Design, and Plan run with trusted
+   versioned instructions, enforced Plan mode, and approval-required runtime policy. A provider
+   missing any capability cannot be selected for Guided. Forced task-tool lease expiry renews or
+   recovers before the next turn, and a superseded session cannot invoke task-stage tools.
+8. **AC-08, conversation-first layout:** The active conversation is the primary surface. The task
+   panel shows stage, artifact, repository, and next action without session, manifest, token,
+   thread-id, fork, fixture, or empty future-stage controls.
+9. **AC-09, typed stage completion:** The task-stage bridge accepts one valid proposal per active
+   turn, waits for provider turn completion, and reconciles an unsettled proposal after restart. It
+   shows a recoverable error or completion-needed notice for conflicting or malformed output,
+   missing completion, aborted turns, tool failure, or a stale thread.
+10. **AC-10, atomic handoffs:** Clarify, Research, Design, and Plan each produce a readable artifact.
+    The Plan artifact includes scope, implementation phases, acceptance criteria, risks, and
+    verification. Successful early-stage completion changes the active conversation automatically.
+    A failed target bootstrap preserves the completed source artifact and retries the same target
+    occurrence.
+11. **AC-11, Plan gate:** Plan output opens approval for its exact occurrence and revision. A second
+    Plan proposal is rejected while that gate is open. Implement controls and sessions remain
+    absent before and after approval in this slice.
+12. **AC-12, request changes:** Request changes records feedback, preserves each reviewed Plan,
+    starts one continuation occurrence, and rejects approval until a new revision reopens the gate.
+    Two consecutive Request changes cycles allocate distinct occurrences and remain recoverable.
+13. **AC-13, approved post-state:** Approval records server time and resolved actor, keeps current
+    stage `plan` with a completed occurrence, renders the approved Plan conversation read-only, and
+    applies the documented Now/Later/Never worktree action without creating Implement work. A Never
+    task can change policy only after approval; either allowed value provisions immediately. Direct
+    navigation to the underlying chat route cannot send another turn to the completed Plan session.
+14. **AC-14, context privacy and provenance:** Each handoff uses trusted versioned instructions and
+    the authorized untrusted brief, feedback, and artifact selection. The visible conversation and
+    task-tool work log contain concise states with no manifest serialization, context payload,
+    token budget, trusted prompt, or cross-task content.
+15. **AC-15, environment routing:** Tasks from two connected environments coexist in the sidebar,
+    dispatch through their own connections, and open the correct conversation. The compatibility
+    route redirects on one match and shows an environment chooser on duplicate ids.
+16. **AC-16, recovery:** Reload, reconnect, server restart, and injected failure during worktree,
+    thread, or turn bootstrap restore the same task, operation, occurrence, gate, and artifact
+    state without duplicate worktrees, sessions, turns, or stage artifacts.
+17. **AC-17, historical compatibility:** Imported `@0.1.0` and `@0.2.0` tasks decode and render with
+    historical workflow pins. Zero, one, and multiple-primary cases follow the documented recovery
+    rules. Missing repositories show Needs repair.
+18. **AC-18, presentation:** Creation, sidebar, task panel, artifacts, browser tests, and E2E use
+    Clarify, Implement, and Done presentation labels. Fixture text and raw Questions/Build control
+    copy stay absent from the normal Guided surface.
+19. **AC-19, race safety:** Concurrent approval and Request changes accept exactly one command.
+    Stale task revisions, stale Plan revisions, superseded task-stage credentials, and altered
+    command replays fail visibly without partial task, gate, worktree, session, or artifact state.
 
 ## Testing and verification
 
-- Contract tests cover task brief, slug, inline source, worktree policy, agent selection,
-  bootstrap state, stage-output commands, request-changes commands, and legacy decoding defaults.
-- Server tests cover automatic primary-session creation, idempotent task creation, all worktree
-  policies, stage completion handoffs, artifact block indexing, handoff authorization, Plan gating,
-  request-changes routing, bootstrap failure/retry, and restart/reconnect recovery.
-- Web browser tests cover creation fields, workflow previews, conversation-first routing, hidden
-  internal panels, stage/artifact rendering, Plan gates, and the presentation vocabulary map.
-- Existing lower-level session, manifest, comment, and Build tests remain as runtime regression
-  coverage. Tests for manual UI construction of those records are removed or moved to an advanced
-  inspection suite.
-- The current task-workspace browser/E2E tests that assert manual Questions/Research editors,
-  version literals, session-link forms, or manifest creation are replaced by the Guided-to-Plan
-  path. Their persistence assertions remain in server tests where they still describe runtime
-  behavior.
-- Desktop E2E covers the Guided-to-Plan path through the normal product surface, using the existing
-  task-workspaces feature tag.
-- Manual UAT captures the reference creation form, Clarify/Research/Design handoffs, Plan gate,
-  bootstrap failure/retry, restart recovery, and the absence of internal controls.
-- Required repository gates remain `vp check` and `vp run typecheck`; the task-workspace E2E and
-  release smoke paths run when the environment supports them.
+### Acceptance coverage matrix
+
+| E2E scenario                                      | Acceptance criteria               |
+| ------------------------------------------------- | --------------------------------- |
+| Guided creation and bootstrap                     | AC-01 through AC-08               |
+| Guided completion and automatic handoffs          | AC-03, AC-07 through AC-10, AC-14 |
+| Plan approval and repeated changes                | AC-11 through AC-14, AC-19        |
+| Worktree policy, source drift, and restart        | AC-05, AC-06, AC-13, AC-16, AC-19 |
+| Credential expiry and stale task-stage controls   | AC-07, AC-09, AC-16, AC-19        |
+| Multi-environment routing and compatibility route | AC-03, AC-15                      |
+| Historical import and recovery                    | AC-16, AC-17                      |
+| Preview enforcement, vocabulary, hidden internals | AC-02, AC-08, AC-14, AC-18        |
+
+The scenarios live under `e2e/tests/task-workspaces/`, compose reusable helpers from
+`e2e/src/flows/`, use the `@task-workspaces` tag, and exercise real application services. The
+provider-backed Guided scenario uses the E2E agent-provider prerequisites and fails loudly when
+credentials are absent.
+
+### Lower-level verification
+
+- Contract tests cover all new schemas, canonical payload hashing, result shapes, version-aware
+  normalization, and historical `@0.1.0`/`@0.2.0` decoding.
+- Transaction-store tests cover unique indexes, event/receipt/outbox atomicity, command and
+  operation payload conflicts, retry-command replay after repeated target failure, per-task CAS,
+  and global sequence independence.
+- Crash-injection integration tests stop after pending persistence, each external success, proposal
+  persistence, provider turn settlement, terminal persistence, and response loss. Startup
+  reconciliation verifies deterministic worktree, thread, turn, proposal, and artifact identities.
+- Server tests cover repository authority, planning-root drift at turn/proposal/approval
+  boundaries, base-ref pinning, provider capability validation, credential renewal/revocation,
+  stale task-stage
+  rejection, occurrence allocation, repeated gate cycles, concurrent gate commands, context
+  selection, preview-shell enforcement, and cross-task rejection.
+- Web browser tests cover template capabilities, route states, responsive conversation/panel
+  composition, task retargeting, approved read-only state, and presentation vocabulary.
+- Existing lower-level session, manifest, comment, Build, and artifact tests remain runtime
+  regression coverage. UI tests for manual construction move to an advanced-inspection suite or
+  are removed when the surface disappears.
+
+### Manual acceptance and repository gates
+
+Manual validation uses the running app and `playwright-cli` to capture snapshots for creation,
+each Guided handoff, malformed completion recovery, Plan request changes, approval, each worktree
+policy, multi-environment routing, restart recovery, and hidden internal controls.
+
+Required commands before Build completion:
+
+```bash
+vp check
+vp run typecheck
+vp run check:okf
+vp run test
+vp run release:smoke
+vp run e2e --project desktop-dev --grep @task-workspaces
+```
+
+Run the focused Guided flow headed during UAT.
 
 ## Out of scope
 
-- GitHub, Linear, Jira, or other external source adapters.
+- GitHub, Linear, Jira, and other external source adapters.
 - Slack notifications.
-- Full Implement, Verify evidence, or draft PR delivery behavior.
+- Standard automatic progression and Freeform explicit stage entry.
+- Implement sessions, Build UI integration, Verify evidence, and draft PR delivery.
 - User-authored workflow definitions.
-- Advanced session forking, reviewer/debugging roles, or manual context selection.
-- Automatic Plan amendment and Build checkpoint UI beyond keeping the existing runtime substrate.
+- Advanced session forking, reviewer/debugging roles, and manual context selection.
 - Mobile-native task workspace UI.
 
 ## Risks and mitigations
 
-- **Automatic session bootstrap touches orchestration boundaries.** Reuse the existing provider
-  thread-start path and add a task-owned service boundary with idempotent creation tests.
-- **Old tasks have manual sessions and older stage labels.** Preserve stored enums, historical
-  workflow descriptors, deterministic defaults, and explicit adoption outcomes rather than
-  rewriting event history.
-- **Artifact completion remains ambiguous.** Require a typed stage-output result from the active
-  primary session, validate the expected stage/session/version, and surface a visible failure when
-  the agent does not produce the required artifact.
-- **Automatic handoff can leak or misattribute context.** Select references server-side, authorize
-  task/session ownership, record budget/compression metadata, and reject cross-task manifests.
-- **Provider settings differ by agent.** Store a neutral selection with provider-specific validation
-  and inherit the resolved selection across automatic stage sessions.
-- **Worktree timing can blur task state.** Keep repository readiness visible and make each policy's
-  next action explicit in the creation form and task header.
-- **The Build PR contains useful work but wrong presentation.** Keep its reducer and contracts as
-  internal infrastructure and defer user-facing integration until the new task shell is proven.
+- **Transactional migration expands the foundation.** Complete Phase 0 and crash tests before any
+  provider or UI automation.
+- **Provider task tools differ by runtime.** Use one `TaskStageBridge` schema, advertise explicit
+  adapter capabilities, and keep unsupported providers out of Guided selection.
+- **Task-tool credentials can expire during long work.** Renew before task turns, bound turn
+  duration below the lease, revalidate every invocation, and recover the same occurrence on
+  rotation failure.
+- **Plan mode support differs by provider.** Require trusted instruction and enforced planning
+  capabilities, then pair Plan interaction mode with approval-required runtime policy.
+- **Automatic handoffs cross event stores.** Persist deterministic outbox identities and reconcile
+  orchestration/provider projections before retrying.
+- **Old tasks contain partial associations.** Import version-aware, preserve history, and expose
+  explicit repair and conflict states.
+- **Context selection can leak or misattribute content.** Keep trusted instructions in
+  provider-native channels, classify task content as untrusted, and authorize every manifest
+  reference to the target task, environment, session, occurrence, and artifact revision.
+- **Planning roots can drift during planning.** Revalidate before turns, completion, and Later
+  provisioning; accept no artifact produced against a changed fingerprint.
+- **The Build PR contains useful work with an internal-facing surface.** Keep its reducer and
+  contracts as infrastructure and integrate them only through the later Implement slice.
 
 ## Build handoff
 
-- Implement only the product-first creation and Guided-to-Plan slice described here.
-- Keep Standard and Freeform catalog compatibility, but defer their complete paths to Phase 4.
-- Preserve durable task/workspace/artifact/session events and add the specified additive decoding
-  defaults for new fields.
-- Use the existing `ChatView` and task route composition rather than a standalone task database
-  page.
-- Do not expose manual session linking, context-manifest creation, fork controls, or raw task
-  control commands in the default UI.
-- Do not begin Slice 5 or merge the existing Slice 4 PR as a product milestone until this slice
-  passes its browser/UAT acceptance criteria.
-- The spec remains Draft until adversarial review and explicit maintainer approval are complete.
+- Implement only Phases 0 through 3 after explicit approval.
+- Treat transactional task persistence, command-first replay, durable completion proposals,
+  trusted task instructions, renewable task-tool credentials, enforced planning mode, source-state
+  checks, exact post-approval state, and environment-scoped routing as Build blockers.
+- Preserve historical task/workspace/artifact/session data and append-only workflow pins.
+- Use the existing `ChatView`, environment connection runtime, orchestration command receipts,
+  provider runtime events, and Kata MCP credential boundary.
+- Keep Standard and Freeform as visibly limited preview shells until Phase 4.
+- Keep manual session, manifest, fork, raw task-control, and fixture controls outside the default
+  UI.
+- Keep PR #63 and Slice 5 paused as product milestones until Guided passes all acceptance criteria
+  and manual UAT.
+- Update the parent spec and roadmap after this spec is approved and before Build begins.
