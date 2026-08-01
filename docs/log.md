@@ -1,5 +1,15 @@
 # OKF bundle log
 
+## 2026-08-01 (Task workflow UX reset Phases 0–3)
+
+Implemented the [task workflow UX reset](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+through approved Plan: transactional bootstrap and proposal recovery, pinned source/worktree
+validation, provider-scoped task-stage capabilities, atomic artifact handoffs, explicit provider
+terminal activities, renewable task-turn leases, bounded handoff manifests, and conversation-first
+Guided UI. Added the [Guided approved-Plan E2E entry](/guides/e2e-test-catalog.md). Full unit,
+typecheck, OKF, and release-smoke gates pass; provider-backed desktop UAT requires an eligible
+configured task-stage provider.
+
 ## 2026-08-01 (Task workflow UX reset draft)
 
 Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-workflow-ux-reset-design.md)

@@ -2,7 +2,7 @@
 type: Spec
 title: "Task workflow UX reset: product-first Standard, Guided, and Freeform flows"
 description: "Re-baseline task onboarding and stage navigation around automatic conversations and human-readable artifacts while preserving durable task-workspace infrastructure."
-status: Draft
+status: Implemented
 tags: [specs, task-workspaces, ux, onboarding, workflows, standard, guided, freeform]
 timestamp: 2026-08-01T16:29:19Z
 parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
@@ -12,8 +12,10 @@ parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
 
 ## Status
 
-**Draft.** This revision incorporates a codebase-grounded correctness review. It is not approved
-for implementation. Build remains blocked until the maintainer approves this written spec.
+**Implemented for Phases 0–3.** Guided creation, bootstrap/recovery, typed completion, atomic
+handoffs, Plan approval, worktree policy, provider capability enforcement, and the
+conversation-first surface are implemented. Provider-backed desktop UAT remains dependent on an
+eligible configured task-stage provider.
 
 ## Goal
 
@@ -983,12 +985,12 @@ Run the focused Guided flow headed during UAT.
 - **The Build PR contains useful work with an internal-facing surface.** Keep its reducer and
   contracts as infrastructure and integrate them only through the later Implement slice.
 
-## Build handoff
+## Implementation outcome
 
-- Implement only Phases 0 through 3 after explicit approval.
-- Treat transactional task persistence, command-first replay, durable completion proposals,
-  trusted task instructions, renewable task-tool credentials, enforced planning mode, source-state
-  checks, exact post-approval state, and environment-scoped routing as Build blockers.
+- Phases 0 through 3 are implemented on the task-workspaces slice branch.
+- Transactional task persistence, command-first replay, durable completion proposals, trusted task
+  instructions, renewable task-tool credentials, enforced planning mode, source-state checks, exact
+  post-approval state, and environment-scoped routing are included.
 - Preserve historical task/workspace/artifact/session data and append-only workflow pins.
 - Use the existing `ChatView`, environment connection runtime, orchestration command receipts,
   provider runtime events, and Kata MCP credential boundary.

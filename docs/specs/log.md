@@ -1,5 +1,13 @@
 # Specs log
 
+## 2026-08-01 (Task workflow UX reset Phases 0–3)
+
+Implemented [Task workflow UX reset](/specs/2026-08-01-task-workflow-ux-reset-design.md) through
+Phases 0–3: Guided creation, bootstrap and proposal recovery, typed terminal settlement, atomic
+handoffs, Plan approval, worktree policy, explicit provider task-stage capabilities, and the
+conversation-first surface. Full unit, typecheck, OKF, and release-smoke gates pass; provider-backed
+desktop UAT requires an eligible configured task-stage provider.
+
 ## 2026-08-01 (Task workflow UX reset draft)
 
 Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-workflow-ux-reset-design.md)
