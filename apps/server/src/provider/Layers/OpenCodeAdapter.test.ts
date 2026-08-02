@@ -498,6 +498,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       yield* adapter.sendTurn({
         threadId: asThreadId("thread-custom-instance"),
         input: "Fix it",
+        developerInstructions: "Use task_stage_context before task data.",
         modelSelection: createModelSelection(
           ProviderInstanceId.make("opencode_zen"),
           "anthropic/claude-sonnet-4-5",
@@ -516,6 +517,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         },
         agent: "github-copilot",
         variant: "high",
+        system: "Use task_stage_context before task data.",
         parts: [{ type: "text", text: "Fix it" }],
       });
     }).pipe(Effect.provide(adapterLayer));

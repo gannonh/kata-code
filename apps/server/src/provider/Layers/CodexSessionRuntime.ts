@@ -106,6 +106,7 @@ export interface CodexSessionRuntimeOptions {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
+  readonly developerInstructions?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly appServerArgs?: ReadonlyArray<string>;
@@ -120,6 +121,7 @@ export interface CodexSessionRuntimeSendTurnInput {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
+  readonly developerInstructions?: string;
   readonly interactionMode?: ProviderInteractionMode;
 }
 
@@ -292,6 +294,7 @@ function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
+  readonly developerInstructions?: string;
   readonly serviceTier: CodexServiceTier | undefined;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
@@ -300,6 +303,7 @@ function buildThreadStartParams(input: {
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     ...(input.model ? { model: input.model } : {}),
+    ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
 }
@@ -328,20 +332,24 @@ function buildCodexCollaborationMode(input: {
   readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
+  readonly developerInstructions?: string;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
   }
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
+  const modeInstructions =
+    input.interactionMode === "plan"
+      ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
+      : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
   return {
     mode: input.interactionMode,
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",
-      developer_instructions:
-        input.interactionMode === "plan"
-          ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+      developer_instructions: input.developerInstructions
+        ? `${modeInstructions}\n\n${input.developerInstructions}`
+        : modeInstructions,
     },
   };
 }
@@ -357,6 +365,7 @@ export function buildTurnStartParams(input: {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
+  readonly developerInstructions?: string;
   readonly interactionMode?: ProviderInteractionMode;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
@@ -378,6 +387,7 @@ export function buildTurnStartParams(input: {
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
+    ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -441,6 +451,7 @@ export const openCodexThread = (input: {
   readonly runtimeMode: RuntimeMode;
   readonly cwd: string;
   readonly requestedModel: string | undefined;
+  readonly developerInstructions?: string;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
@@ -449,6 +460,7 @@ export const openCodexThread = (input: {
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
+    ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     serviceTier: input.serviceTier,
   });
 
@@ -1213,6 +1225,9 @@ export const makeCodexSessionRuntime = (
         runtimeMode: options.runtimeMode,
         cwd: options.cwd,
         requestedModel,
+        ...(options.developerInstructions
+          ? { developerInstructions: options.developerInstructions }
+          : {}),
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
       });
@@ -1288,6 +1303,9 @@ export const makeCodexSessionRuntime = (
             ...(normalizedModel ? { model: normalizedModel } : {}),
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),
+            ...(input.developerInstructions
+              ? { developerInstructions: input.developerInstructions }
+              : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);

@@ -2920,10 +2920,14 @@ describe("TaskWorkspaceService bootstrap saga", () => {
       expect(threadCreate.threadId).toBe(ready?.bootstrap?.reservedThreadId);
       expect(threadCreate.runtimeMode).toBe("approval-required");
       expect(threadCreate.interactionMode).toBe("plan");
-      const kickoff = dispatched[1] as { type: string; message: { text: string } };
+      const kickoff = dispatched[1] as {
+        type: string;
+        message: { text: string };
+        developerInstructions: string;
+      };
       expect(kickoff.type).toBe("thread.turn.start");
-      expect(kickoff.message.text).toContain("You are running the Clarify stage");
-      expect(kickoff.message.text).toContain("Task brief:\nAdd a guided onboarding flow.");
+      expect(kickoff.message.text).toBe("Add a guided onboarding flow.");
+      expect(kickoff.developerInstructions).toContain("You are running the Clarify stage");
     }),
   );
 

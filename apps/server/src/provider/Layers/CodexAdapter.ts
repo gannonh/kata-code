@@ -1414,6 +1414,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(input.modelSelection?.instanceId === boundInstanceId
             ? { model: input.modelSelection.model }
             : {}),
+          ...(input.developerInstructions
+            ? { developerInstructions: input.developerInstructions }
+            : {}),
           ...(serviceTier ? { serviceTier } : {}),
           ...(mcpSession
             ? {
@@ -1563,6 +1566,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }
           : {}),
         ...(serviceTier ? { serviceTier } : {}),
+        ...(input.developerInstructions
+          ? { developerInstructions: input.developerInstructions }
+          : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })

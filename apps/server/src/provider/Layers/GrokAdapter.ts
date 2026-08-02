@@ -1000,7 +1000,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session", supportsTaskStage: true },
+      capabilities: { sessionModelSwitch: "in-session", supportsTaskStage: false },
       startSession,
       sendTurn,
       interruptTurn,

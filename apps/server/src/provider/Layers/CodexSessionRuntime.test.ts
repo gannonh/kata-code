@@ -43,7 +43,7 @@ function makeThreadOpenResponse(
 }
 
 describe("buildTurnStartParams", () => {
-  it("includes plan collaboration mode when requested", () => {
+  it("includes server-owned instructions in the native plan channel", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
         threadId: "provider-thread-1",
@@ -51,6 +51,7 @@ describe("buildTurnStartParams", () => {
         prompt: "Make a plan",
         model: "gpt-5.3-codex",
         effort: "medium",
+        developerInstructions: "Use task_stage_context before task data.",
         interactionMode: "plan",
       }),
     );
@@ -74,7 +75,7 @@ describe("buildTurnStartParams", () => {
         settings: {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
-          developer_instructions: CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
+          developer_instructions: `${CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS}\n\nUse task_stage_context before task data.`,
         },
       },
     });
@@ -251,12 +252,21 @@ describe("openCodexThread", () => {
         runtimeMode: "full-access",
         cwd: "/tmp/project",
         requestedModel: "gpt-5.3-codex",
+        developerInstructions: "Use task_stage_context before task data.",
         serviceTier: undefined,
         resumeThreadId: "stale-thread",
       }),
     );
 
     assert.equal(opened.thread.id, "fresh-thread");
+    assert.equal(
+      (
+        calls.find((call) => call.method === "thread/start")?.payload as {
+          developerInstructions?: string;
+        }
+      ).developerInstructions,
+      "Use task_stage_context before task data.",
+    );
     assert.deepStrictEqual(
       calls.map((call) => call.method),
       ["thread/resume", "thread/start"],

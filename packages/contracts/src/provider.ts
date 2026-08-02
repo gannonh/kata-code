@@ -57,6 +57,8 @@ export const ProviderSessionStartInput = Schema.Struct({
   providerInstanceId: Schema.optional(ProviderInstanceId),
   cwd: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
+  /** Server-owned provider-native system/developer instructions. */
+  developerInstructions: Schema.optional(TrimmedNonEmptyString),
   resumeCursor: Schema.optional(Schema.Unknown),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
@@ -73,6 +75,8 @@ export const ProviderSendTurnInput = Schema.Struct({
     Schema.Array(ChatAttachment).check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS)),
   ),
   modelSelection: Schema.optional(ModelSelection),
+  /** Server-owned provider-native system/developer instructions. */
+  developerInstructions: Schema.optional(TrimmedNonEmptyString),
   interactionMode: Schema.optional(ProviderInteractionMode),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;

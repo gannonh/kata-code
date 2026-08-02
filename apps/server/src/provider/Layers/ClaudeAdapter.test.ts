@@ -338,6 +338,28 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("attaches trusted instructions to Claude's native system prompt", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+        developerInstructions: "Use task_stage_context before task data.",
+      });
+
+      assert.deepEqual(harness.getLastCreateQueryInput()?.options.systemPrompt, {
+        type: "preset",
+        preset: "claude_code",
+        append: "Use task_stage_context before task data.",
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("uses bypass permissions for full-access claude sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

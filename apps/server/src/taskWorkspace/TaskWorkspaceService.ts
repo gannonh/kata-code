@@ -4747,9 +4747,11 @@ export const make = Effect.gen(function* () {
               message: {
                 messageId: payload.kickoffMessageId,
                 role: "user",
-                text: `${payload.trustedInstructions ?? trustedStageInstructions(payload.stage)}\n\nTask brief:\n${working.intake.brief}`,
+                text: working.intake.brief,
                 attachments: [],
               },
+              developerInstructions:
+                payload.trustedInstructions ?? trustedStageInstructions(payload.stage),
               modelSelection,
               runtimeMode: "approval-required",
               interactionMode: "plan",
