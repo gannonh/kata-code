@@ -1417,6 +1417,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(input.developerInstructions
             ? { developerInstructions: input.developerInstructions }
             : {}),
+          ...(input.taskStage === true ? { taskStage: true } : {}),
           ...(serviceTier ? { serviceTier } : {}),
           ...(mcpSession
             ? {
@@ -1569,6 +1570,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ...(input.developerInstructions
           ? { developerInstructions: input.developerInstructions }
           : {}),
+        ...(input.taskStage === true ? { taskStage: true } : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
