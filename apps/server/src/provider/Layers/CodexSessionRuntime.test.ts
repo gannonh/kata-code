@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { describe, it } from "vite-plus/test";
 import { ThreadId } from "@kata-sh/code-contracts";
+import { it as effectIt } from "@effect/vitest";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 
@@ -336,7 +337,7 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
-  it("falls back to thread/start when resume fails recoverably", async () => {
+  effectIt.effect("falls back to thread/start when resume fails recoverably", () => {
     const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
     const started = makeThreadOpenResponse("fresh-thread");
     const client = {
@@ -357,8 +358,8 @@ describe("openCodexThread", () => {
       },
     };
 
-    const opened = await Effect.runPromise(
-      openCodexThread({
+    return Effect.gen(function* () {
+      const opened = yield* openCodexThread({
         client,
         threadId: ThreadId.make("thread-1"),
         runtimeMode: "full-access",
@@ -367,22 +368,20 @@ describe("openCodexThread", () => {
         developerInstructions: "Use task_stage_context before task data.",
         serviceTier: undefined,
         resumeThreadId: "stale-thread",
-      }),
-    );
+      });
 
-    assert.equal(opened.thread.id, "fresh-thread");
-    assert.equal(
-      (
-        calls.find((call) => call.method === "thread/start")?.payload as {
-          developerInstructions?: string;
-        }
-      ).developerInstructions,
-      "Use task_stage_context before task data.",
-    );
-    assert.deepStrictEqual(
-      calls.map((call) => call.method),
-      ["thread/resume", "thread/start"],
-    );
+      assert.equal(opened.thread.id, "fresh-thread");
+      const startCall = calls.find((call) => call.method === "thread/start");
+      assert.ok(startCall);
+      assert.equal(
+        (startCall.payload as { developerInstructions?: string }).developerInstructions,
+        "Use task_stage_context before task data.",
+      );
+      assert.deepStrictEqual(
+        calls.map((call) => call.method),
+        ["thread/resume", "thread/start"],
+      );
+    });
   });
 
   it("propagates non-recoverable resume failures", async () => {
