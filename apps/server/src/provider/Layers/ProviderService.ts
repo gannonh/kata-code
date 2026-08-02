@@ -140,6 +140,7 @@ function toRuntimePayloadFromSession(
   session: ProviderSession,
   extra?: {
     readonly modelSelection?: unknown;
+    readonly developerInstructions?: string;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
   },
@@ -150,6 +151,9 @@ function toRuntimePayloadFromSession(
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
+    ...(extra?.developerInstructions !== undefined
+      ? { developerInstructions: extra.developerInstructions }
+      : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
@@ -176,6 +180,19 @@ function readPersistedCwd(
   const rawCwd = "cwd" in runtimePayload ? runtimePayload.cwd : undefined;
   if (typeof rawCwd !== "string") return undefined;
   const trimmed = rawCwd.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readPersistedDeveloperInstructions(
+  runtimePayload: ProviderRuntimeBinding["runtimePayload"],
+): string | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const rawInstructions =
+    "developerInstructions" in runtimePayload ? runtimePayload.developerInstructions : undefined;
+  if (typeof rawInstructions !== "string") return undefined;
+  const trimmed = rawInstructions.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -256,7 +273,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     }),
   );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-  const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
+  const prepareMcpSession = (
+    threadId: ThreadId,
+    providerInstanceId: ProviderInstanceId,
+    taskStage: boolean,
+  ) =>
     Effect.gen(function* () {
       // Native provider runtimes capture the MCP authorization header when a
       // session starts. Reuse a live thread-bound lease and rotate an expired
@@ -270,7 +291,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const scope = yield* McpSessionRegistry.resolveActiveMcpCredential(
           existing.authorizationHeader,
         );
-        if (scope?.threadId === threadId && scope.providerInstanceId === providerInstanceId) {
+        if (
+          scope?.threadId === threadId &&
+          scope.providerInstanceId === providerInstanceId &&
+          (!taskStage || scope.capabilities.has("task-stage"))
+        ) {
           return { rotated: false } as const;
         }
       }
@@ -334,6 +359,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     threadId: ThreadId,
     extra?: {
       readonly modelSelection?: unknown;
+      readonly developerInstructions?: string;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
     },
@@ -358,6 +384,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     function* (input: {
       readonly threadId: ThreadId;
       readonly providerInstanceId: ProviderInstanceId;
+      readonly developerInstructions?: string;
       readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
     }) {
       const bindingOption = yield* directory.getBinding(input.threadId);
@@ -374,28 +401,30 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
       const modelSelection = readPersistedModelSelection(binding.runtimePayload);
       const cwd = readPersistedCwd(binding.runtimePayload);
+      const persistedDeveloperInstructions = readPersistedDeveloperInstructions(
+        binding.runtimePayload,
+      );
       const activeTaskStage = yield* activeTaskStageForThread(input.threadId);
-      const taskInstructions = activeTaskStage
+      const developerInstructions = activeTaskStage
         ? trustedStageInstructions(activeTaskStage)
-        : undefined;
+        : (input.developerInstructions ?? persistedDeveloperInstructions);
       const restarted = yield* input.adapter.startSession({
         threadId: input.threadId,
         provider: binding.provider,
         providerInstanceId: input.providerInstanceId,
         ...(cwd ? { cwd } : {}),
         ...(modelSelection ? { modelSelection } : {}),
-        ...(taskInstructions ? { developerInstructions: taskInstructions } : {}),
+        ...(developerInstructions ? { developerInstructions } : {}),
         taskStage: activeTaskStage !== undefined,
         ...(binding.resumeCursor !== null && binding.resumeCursor !== undefined
           ? { resumeCursor: binding.resumeCursor }
           : {}),
         runtimeMode: binding.runtimeMode ?? "full-access",
       });
-      yield* upsertSessionBinding(
-        restarted,
-        input.threadId,
-        modelSelection ? { modelSelection } : {},
-      );
+      yield* upsertSessionBinding(restarted, input.threadId, {
+        ...(modelSelection ? { modelSelection } : {}),
+        ...(developerInstructions ? { developerInstructions } : {}),
+      });
       return restarted;
     },
   );
@@ -515,12 +544,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const persistedDeveloperInstructions = readPersistedDeveloperInstructions(
+        input.binding.runtimePayload,
+      );
       const activeTaskStage = yield* activeTaskStageForThread(input.binding.threadId);
-      const taskInstructions = activeTaskStage
+      const developerInstructions = activeTaskStage
         ? trustedStageInstructions(activeTaskStage)
-        : undefined;
+        : persistedDeveloperInstructions;
 
-      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
+      yield* prepareMcpSession(
+        input.binding.threadId,
+        bindingInstanceId,
+        activeTaskStage !== undefined,
+      );
       const resumed = yield* adapter
         .startSession({
           threadId: input.binding.threadId,
@@ -528,7 +564,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: bindingInstanceId,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
-          ...(taskInstructions ? { developerInstructions: taskInstructions } : {}),
+          ...(developerInstructions ? { developerInstructions } : {}),
           taskStage: activeTaskStage !== undefined,
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
@@ -545,6 +581,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       yield* upsertSessionBinding(
         { ...resumed, providerInstanceId: bindingInstanceId },
         input.binding.threadId,
+        developerInstructions ? { developerInstructions } : {},
       );
       yield* analytics.record("provider.session.recovered", {
         provider: resumed.provider,
@@ -597,10 +634,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       } as const;
     }
 
-    const recovered = yield* recoverSessionForThread({
-      binding,
-      operation: input.operation,
-    });
+    const recovered = yield* withMcpRotationLock(
+      input.threadId,
+      recoverSessionForThread({
+        binding,
+        operation: input.operation,
+      }),
+    );
     return {
       adapter: recovered.adapter,
       instanceId,
@@ -716,41 +756,49 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         const activeTaskStage = yield* activeTaskStageForThread(threadId);
-        const taskInstructions =
-          input.developerInstructions === undefined && activeTaskStage !== undefined
-            ? trustedStageInstructions(activeTaskStage)
-            : undefined;
-        yield* prepareMcpSession(threadId, resolvedInstanceId);
-        const session = yield* adapter
-          .startSession({
-            ...input,
-            providerInstanceId: resolvedInstanceId,
-            ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
-            ...(taskInstructions ? { developerInstructions: taskInstructions } : {}),
-            taskStage: activeTaskStage !== undefined,
-            ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
-          })
-          .pipe(Effect.onError(() => clearMcpSession(threadId)));
-
-        if (session.provider !== adapter.provider) {
-          yield* clearMcpSession(threadId);
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,
-          );
-        }
-        const sessionWithInstance = {
-          ...session,
-          providerInstanceId: resolvedInstanceId,
-        };
-
-        yield* stopStaleSessionsForThread({
+        const developerInstructions =
+          input.developerInstructions ??
+          (activeTaskStage !== undefined ? trustedStageInstructions(activeTaskStage) : undefined);
+        const sessionWithInstance = yield* withMcpRotationLock(
           threadId,
-          currentInstanceId: resolvedInstanceId,
-        });
-        yield* upsertSessionBinding(sessionWithInstance, threadId, {
-          modelSelection: input.modelSelection,
-        });
+          Effect.gen(function* () {
+            yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage !== undefined);
+            const session = yield* adapter
+              .startSession({
+                ...input,
+                providerInstanceId: resolvedInstanceId,
+                ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
+                ...(developerInstructions ? { developerInstructions } : {}),
+                taskStage: activeTaskStage !== undefined,
+                ...(effectiveResumeCursor !== undefined
+                  ? { resumeCursor: effectiveResumeCursor }
+                  : {}),
+              })
+              .pipe(Effect.onError(() => clearMcpSession(threadId)));
+
+            if (session.provider !== adapter.provider) {
+              yield* clearMcpSession(threadId);
+              return yield* toValidationError(
+                "ProviderService.startSession",
+                `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,
+              );
+            }
+            const sessionWithInstance = {
+              ...session,
+              providerInstanceId: resolvedInstanceId,
+            };
+
+            yield* stopStaleSessionsForThread({
+              threadId,
+              currentInstanceId: resolvedInstanceId,
+            });
+            yield* upsertSessionBinding(sessionWithInstance, threadId, {
+              modelSelection: input.modelSelection,
+              ...(developerInstructions ? { developerInstructions } : {}),
+            });
+            return sessionWithInstance;
+          }),
+        );
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
           runtimeMode: input.runtimeMode,
@@ -834,11 +882,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       yield* withMcpRotationLock(
         input.threadId,
         Effect.gen(function* () {
-          const mcpPreparation = yield* prepareMcpSession(input.threadId, routed.instanceId);
+          const mcpPreparation = yield* prepareMcpSession(
+            input.threadId,
+            routed.instanceId,
+            activeTaskStage !== undefined,
+          );
           if (mcpPreparation.rotated) {
             yield* restartSessionForMcpCredential({
               threadId: input.threadId,
               providerInstanceId: routed.instanceId,
+              ...(input.developerInstructions !== undefined
+                ? { developerInstructions: input.developerInstructions }
+                : {}),
               adapter: routed.adapter,
             });
           }
@@ -850,6 +905,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
       const turn = yield* routed.adapter.sendTurn(providerInput);
+      const persistedBindingAfterTurn = Option.getOrUndefined(
+        yield* directory.getBinding(input.threadId),
+      );
+      const developerInstructions =
+        input.developerInstructions ??
+        readPersistedDeveloperInstructions(persistedBindingAfterTurn?.runtimePayload);
       yield* directory.upsert({
         threadId: input.threadId,
         provider: routed.adapter.provider,
@@ -858,6 +919,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
         runtimePayload: {
           ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+          ...(developerInstructions ? { developerInstructions } : {}),
           activeTurnId: turn.turnId,
           lastRuntimeEvent: "provider.sendTurn",
           lastRuntimeEventAt: yield* nowIso,

@@ -1186,6 +1186,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           "claude-opus-4-6",
           [{ id: "effort", value: "max" }],
         ),
+        developerInstructions: "Preserve this ordinary server-owned instruction.",
         runtimeMode: "full-access",
       });
 
@@ -1207,6 +1208,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           provider?: string;
           cwd?: string;
           modelSelection?: unknown;
+          developerInstructions?: string;
           resumeCursor?: unknown;
           threadId?: string;
         };
@@ -1217,6 +1219,10 @@ routing.layer("ProviderServiceLive routing", (it) => {
           createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-4-6", [
             { id: "effort", value: "max" },
           ]),
+        );
+        assert.equal(
+          startPayload.developerInstructions,
+          "Preserve this ordinary server-owned instruction.",
         );
         assert.deepEqual(startPayload.resumeCursor, initial.resumeCursor);
         assert.equal(startPayload.threadId, initial.threadId);
