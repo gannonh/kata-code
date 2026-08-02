@@ -756,9 +756,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         const activeTaskStage = yield* activeTaskStageForThread(threadId);
+        const persistedDeveloperInstructions =
+          persistedBinding?.providerInstanceId === resolvedInstanceId
+            ? readPersistedDeveloperInstructions(persistedBinding.runtimePayload)
+            : undefined;
         const developerInstructions =
           input.developerInstructions ??
-          (activeTaskStage !== undefined ? trustedStageInstructions(activeTaskStage) : undefined);
+          (activeTaskStage !== undefined
+            ? trustedStageInstructions(activeTaskStage)
+            : persistedDeveloperInstructions);
         const sessionWithInstance = yield* withMcpRotationLock(
           threadId,
           Effect.gen(function* () {

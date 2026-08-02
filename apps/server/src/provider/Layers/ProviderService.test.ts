@@ -1192,6 +1192,25 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       yield* routing.claude.stopAll();
       routing.claude.startSession.mockClear();
+
+      yield* provider.startSession(initial.threadId, {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: claudeAgentInstanceId,
+        threadId: initial.threadId,
+        runtimeMode: "full-access",
+      });
+
+      const directRestartInput = routing.claude.startSession.mock.calls[0]?.[0];
+      assert.equal(typeof directRestartInput === "object" && directRestartInput !== null, true);
+      if (directRestartInput && typeof directRestartInput === "object") {
+        assert.equal(
+          (directRestartInput as { developerInstructions?: string }).developerInstructions,
+          "Preserve this ordinary server-owned instruction.",
+        );
+      }
+
+      yield* routing.claude.stopAll();
+      routing.claude.startSession.mockClear();
       routing.claude.sendTurn.mockClear();
 
       yield* provider.sendTurn({
