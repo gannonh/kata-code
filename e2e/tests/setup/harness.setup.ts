@@ -25,5 +25,7 @@ setup("configure Clerk testing when credentials are present", async () => {
     return;
   }
 
-  await clerkSetup();
+  // `loadEnv.ts` has already applied the repository `.env`; keep Clerk from
+  // loading `.env.local` behind the harness's back.
+  await clerkSetup({ dotenv: false });
 });
