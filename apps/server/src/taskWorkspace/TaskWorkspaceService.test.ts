@@ -2919,7 +2919,7 @@ describe("TaskWorkspaceService bootstrap saga", () => {
       expect(threadCreate.type).toBe("thread.create");
       expect(threadCreate.threadId).toBe(ready?.bootstrap?.reservedThreadId);
       expect(threadCreate.runtimeMode).toBe("approval-required");
-      expect(threadCreate.interactionMode).toBe("plan");
+      expect(threadCreate.interactionMode).toBe("default");
       const kickoff = dispatched[1] as {
         type: string;
         message: { text: string };
@@ -3548,6 +3548,8 @@ describe("TaskWorkspaceService guided flow", () => {
       expect((yield* runtime.runPromise(Effect.exit(authorization(secondThread))))._tag).toBe(
         "Success",
       );
+      expect(yield* runtime.runPromise(service.getActiveTaskStage(firstThread))).toBe("questions");
+      expect(yield* runtime.runPromise(service.getActiveTaskStage(secondThread))).toBe("questions");
     }),
   );
 

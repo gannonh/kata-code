@@ -205,6 +205,18 @@ export const layer: Layer.Layer<
   Crypto.Crypto | ServerEnvironment | HttpServer.HttpServer
 > = Layer.effect(McpSessionRegistry, make);
 
+export const hasActiveMcpSessionRegistry = (): boolean => activeMcpSessionRegistry !== undefined;
+
+export const resolveActiveMcpCredential = (
+  authorizationHeader: string,
+): Effect.Effect<McpInvocationContext.McpInvocationScope | undefined> => {
+  const rawToken = authorizationHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!activeMcpSessionRegistry || rawToken.length === 0) {
+    return Effect.succeed(undefined);
+  }
+  return activeMcpSessionRegistry.resolve(rawToken);
+};
+
 export const issueActiveMcpCredential = (
   request: McpCredentialRequest,
 ): Effect.Effect<McpIssuedCredential | undefined> =>

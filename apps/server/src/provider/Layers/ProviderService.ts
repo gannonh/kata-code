@@ -35,7 +35,9 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import {
   increment,
@@ -59,9 +61,11 @@ import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import {
+  activeTaskStageForThread,
   isActiveTaskThread,
   validateActiveTaskTurn,
 } from "../../taskWorkspace/TaskWorkspaceService.ts";
+import { trustedStageInstructions } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
@@ -109,6 +113,13 @@ const decodeInputOrValidationError = <S extends Schema.Top>(input: {
     ),
   );
 };
+
+export function normalizeTaskStageInteractionMode(input: {
+  readonly isTaskStage: boolean;
+  readonly interactionMode?: "default" | "plan";
+}): "default" | "plan" | undefined {
+  return input.isTaskStage ? "default" : input.interactionMode;
+}
 
 function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "stopped" | "error" {
   switch (session.status) {
@@ -220,6 +231,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const taskTurnWatchdogs = new Map<ThreadId, Fiber.Fiber<void, never>>();
+  const mcpRotationLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+  const getMcpRotationLock = (threadId: ThreadId) =>
+    SynchronizedRef.modifyEffect(mcpRotationLocksRef, (current) => {
+      const key = String(threadId);
+      const existing = current.get(key);
+      if (existing) {
+        return Effect.succeed([existing, current] as const);
+      }
+      return Semaphore.make(1).pipe(
+        Effect.map((semaphore) => {
+          const next = new Map(current);
+          next.set(key, semaphore);
+          return [semaphore, next] as const;
+        }),
+      );
+    });
+  const withMcpRotationLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
+    Effect.flatMap(getMcpRotationLock(threadId), (semaphore) => semaphore.withPermit(effect));
   yield* Effect.addFinalizer(() =>
     Effect.forEach(taskTurnWatchdogs.values(), Fiber.interrupt, {
       concurrency: "unbounded",
@@ -228,18 +257,41 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
-    McpSessionRegistry.issueActiveMcpCredential({ threadId, providerInstanceId }).pipe(
-      Effect.tap((credential) =>
-        credential
-          ? Effect.sync(() => McpProviderSession.setMcpProviderSession(credential.config))
-          : Effect.void,
-      ),
-    );
+    Effect.gen(function* () {
+      // Native provider runtimes capture the MCP authorization header when a
+      // session starts. Reuse a live thread-bound lease and rotate an expired
+      // one so the caller can restart the native session with the new header.
+      const existing = McpProviderSession.readMcpProviderSession(threadId);
+      if (existing?.providerInstanceId === providerInstanceId) {
+        if (!McpSessionRegistry.hasActiveMcpSessionRegistry()) {
+          McpProviderSession.clearMcpProviderSession(threadId);
+          return { rotated: false } as const;
+        }
+        const scope = yield* McpSessionRegistry.resolveActiveMcpCredential(
+          existing.authorizationHeader,
+        );
+        if (scope?.threadId === threadId && scope.providerInstanceId === providerInstanceId) {
+          return { rotated: false } as const;
+        }
+      }
+
+      if (existing) {
+        McpProviderSession.clearMcpProviderSession(threadId);
+      }
+      const credential = yield* McpSessionRegistry.issueActiveMcpCredential({
+        threadId,
+        providerInstanceId,
+      });
+      if (!credential) {
+        return { rotated: false } as const;
+      }
+      McpProviderSession.setMcpProviderSession(credential.config);
+      return { rotated: true } as const;
+    });
   const clearMcpSession = (threadId: ThreadId) =>
     McpSessionRegistry.revokeActiveMcpThread(threadId).pipe(
       Effect.tap(() => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
     );
-
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (event.type === "turn.completed" || event.type === "turn.aborted") {
@@ -301,6 +353,52 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         runtimePayload: toRuntimePayloadFromSession(session, extra),
       });
     });
+
+  const restartSessionForMcpCredential = Effect.fn("restartSessionForMcpCredential")(
+    function* (input: {
+      readonly threadId: ThreadId;
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+    }) {
+      const bindingOption = yield* directory.getBinding(input.threadId);
+      const binding = Option.getOrUndefined(bindingOption);
+      if (!binding) {
+        return yield* toValidationError(
+          "ProviderService.restartSessionForMcpCredential",
+          `Cannot restart thread '${input.threadId}' because no persisted provider binding exists.`,
+        );
+      }
+
+      if (yield* input.adapter.hasSession(input.threadId)) {
+        yield* input.adapter.stopSession(input.threadId);
+      }
+      const modelSelection = readPersistedModelSelection(binding.runtimePayload);
+      const cwd = readPersistedCwd(binding.runtimePayload);
+      const activeTaskStage = yield* activeTaskStageForThread(input.threadId);
+      const taskInstructions = activeTaskStage
+        ? trustedStageInstructions(activeTaskStage)
+        : undefined;
+      const restarted = yield* input.adapter.startSession({
+        threadId: input.threadId,
+        provider: binding.provider,
+        providerInstanceId: input.providerInstanceId,
+        ...(cwd ? { cwd } : {}),
+        ...(modelSelection ? { modelSelection } : {}),
+        ...(taskInstructions ? { developerInstructions: taskInstructions } : {}),
+        taskStage: activeTaskStage !== undefined,
+        ...(binding.resumeCursor !== null && binding.resumeCursor !== undefined
+          ? { resumeCursor: binding.resumeCursor }
+          : {}),
+        runtimeMode: binding.runtimeMode ?? "full-access",
+      });
+      yield* upsertSessionBinding(
+        restarted,
+        input.threadId,
+        modelSelection ? { modelSelection } : {},
+      );
+      return restarted;
+    },
+  );
 
   const processRuntimeEvent = (
     source: {
@@ -417,6 +515,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const activeTaskStage = yield* activeTaskStageForThread(input.binding.threadId);
+      const taskInstructions = activeTaskStage
+        ? trustedStageInstructions(activeTaskStage)
+        : undefined;
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
       const resumed = yield* adapter
@@ -426,6 +528,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: bindingInstanceId,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+          ...(taskInstructions ? { developerInstructions: taskInstructions } : {}),
+          taskStage: activeTaskStage !== undefined,
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
         })
@@ -611,12 +715,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        const activeTaskStage = yield* activeTaskStageForThread(threadId);
+        const taskInstructions =
+          input.developerInstructions === undefined && activeTaskStage !== undefined
+            ? trustedStageInstructions(activeTaskStage)
+            : undefined;
         yield* prepareMcpSession(threadId, resolvedInstanceId);
         const session = yield* adapter
           .startSession({
             ...input,
             providerInstanceId: resolvedInstanceId,
             ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
+            ...(taskInstructions ? { developerInstructions: taskInstructions } : {}),
+            taskStage: activeTaskStage !== undefined,
             ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
           })
           .pipe(Effect.onError(() => clearMcpSession(threadId)));
@@ -704,15 +815,41 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           toValidationError("ProviderService.sendTurn", cause.message, cause),
         ),
       );
-      // Rotate the thread-bound MCP lease before every provider turn. The
-      // registry adds task-stage capability only for the current task primary.
-      yield* prepareMcpSession(input.threadId, routed.instanceId);
+      // Keep the provider's native Plan mode out of Guided task stages. Kata
+      // owns the stage lifecycle and completion tool; provider-native plan
+      // cards cannot complete a task-stage occurrence.
+      const activeTaskStage = yield* activeTaskStageForThread(input.threadId);
+      const providerInteractionMode = normalizeTaskStageInteractionMode({
+        isTaskStage: activeTaskStage !== undefined,
+        ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      });
+      const providerInput =
+        activeTaskStage === undefined
+          ? { ...input, taskStage: false }
+          : {
+              ...input,
+              taskStage: true,
+              interactionMode: providerInteractionMode ?? "default",
+            };
+      yield* withMcpRotationLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const mcpPreparation = yield* prepareMcpSession(input.threadId, routed.instanceId);
+          if (mcpPreparation.rotated) {
+            yield* restartSessionForMcpCredential({
+              threadId: input.threadId,
+              providerInstanceId: routed.instanceId,
+              adapter: routed.adapter,
+            });
+          }
+        }),
+      );
       const isTaskTurn = yield* isActiveTaskThread(input.threadId);
       yield* Effect.annotateCurrentSpan({
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
-      const turn = yield* routed.adapter.sendTurn(input);
+      const turn = yield* routed.adapter.sendTurn(providerInput);
       yield* directory.upsert({
         threadId: input.threadId,
         provider: routed.adapter.provider,

@@ -49,7 +49,7 @@ import {
 } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
-import { makeProviderServiceLive } from "./ProviderService.ts";
+import { makeProviderServiceLive, normalizeTaskStageInteractionMode } from "./ProviderService.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -316,6 +316,20 @@ function makeProviderServiceLayer() {
     layer,
   };
 }
+
+it.effect("keeps provider-native plan cards out of Guided task stages", () =>
+  Effect.sync(() => {
+    assert.equal(
+      normalizeTaskStageInteractionMode({ isTaskStage: true, interactionMode: "plan" }),
+      "default",
+    );
+    assert.equal(normalizeTaskStageInteractionMode({ isTaskStage: true }), "default");
+    assert.equal(
+      normalizeTaskStageInteractionMode({ isTaskStage: false, interactionMode: "plan" }),
+      "plan",
+    );
+  }),
+);
 
 it.effect("ProviderServiceLive catches stopAll failures during shutdown", () =>
   Effect.gen(function* () {

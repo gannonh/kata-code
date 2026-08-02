@@ -87,6 +87,67 @@ async function expectActiveStage(page: Page, stage: string): Promise<void> {
   });
 }
 
+async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
+  const panel = page.getByTestId("pending-user-input-panel");
+  const researchStage = page.getByTestId("guided-stage-research");
+  const deadline = Date.now() + E2E_TIMEOUTS.agentTestMs;
+
+  while (Date.now() < deadline) {
+    if ((await researchStage.getAttribute("data-active")) === "true") {
+      return;
+    }
+    if (!(await panel.isVisible().catch(() => false))) {
+      await page.waitForTimeout(500);
+      continue;
+    }
+
+    const options = panel.getByTestId("pending-user-input-option");
+    const isMultiSelect =
+      (await panel.getByText("Select one or more options.", { exact: true }).count()) > 0;
+    const respondingOptions = panel.locator(
+      '[data-testid="pending-user-input-option"][aria-disabled="true"]',
+    );
+    if ((await respondingOptions.count()) > 0) {
+      await page.waitForTimeout(350);
+      continue;
+    }
+
+    const unselectedOptions = panel.locator(
+      '[data-testid="pending-user-input-option"][aria-pressed="false"]',
+    );
+    if ((await unselectedOptions.count()) > 0) {
+      await unselectedOptions.first().click();
+      // Single-select questions schedule their own advance. Submitting here
+      // would race that timer and can skip the next question.
+      if (!isMultiSelect) {
+        await page.waitForTimeout(350);
+        continue;
+      }
+    } else if ((await options.count()) === 0) {
+      await page.getByTestId("composer-editor").fill("Use the simplest maintainable approach.");
+    } else if (!isMultiSelect) {
+      await page.waitForTimeout(350);
+      continue;
+    }
+
+    const advance = page.getByRole("button", {
+      name: /^(Next|Next question|Submit|Submit answer|Submit answers)$/,
+    });
+    if (
+      (await advance.count()) > 0 &&
+      (await advance
+        .first()
+        .isEnabled()
+        .catch(() => false))
+    ) {
+      await advance.first().click();
+    }
+    await page.waitForTimeout(350);
+  }
+
+  throw new Error("Guided Clarify questions did not settle within the E2E timeout.");
+}
+
 test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
   test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
 
@@ -132,6 +193,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     await expect(appWindow.getByTestId("task-context-manifests-panel")).toHaveCount(0);
     await expect(appWindow.getByTestId("task-sessions-panel")).toHaveCount(0);
 
+    await answerGuidedClarifyQuestions(appWindow);
     await expectActiveStage(appWindow, "research");
     await expectActiveStage(appWindow, "design");
     await expectActiveStage(appWindow, "plan");

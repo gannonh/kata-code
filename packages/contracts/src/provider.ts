@@ -59,6 +59,8 @@ export const ProviderSessionStartInput = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   /** Server-owned provider-native system/developer instructions. */
   developerInstructions: Schema.optional(TrimmedNonEmptyString),
+  /** Server-derived Guided task-stage execution profile. */
+  taskStage: Schema.optional(Schema.Boolean),
   resumeCursor: Schema.optional(Schema.Unknown),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
@@ -77,6 +79,8 @@ export const ProviderSendTurnInput = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   /** Server-owned provider-native system/developer instructions. */
   developerInstructions: Schema.optional(TrimmedNonEmptyString),
+  /** Server-derived Guided task-stage execution profile. */
+  taskStage: Schema.optional(Schema.Boolean),
   interactionMode: Schema.optional(ProviderInteractionMode),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;

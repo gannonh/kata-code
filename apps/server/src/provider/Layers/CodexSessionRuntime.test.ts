@@ -81,6 +81,25 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it("keeps task-stage completion out of Codex native Plan Mode", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-task-stage",
+        runtimeMode: "approval-required",
+        prompt: "Research the task",
+        model: "gpt-5.3-codex",
+        developerInstructions: "Call task_stage_complete when the Research artifact is ready.",
+        interactionMode: "default",
+      }),
+    );
+
+    assert.equal(params.collaborationMode?.mode, "default");
+    assert.equal(
+      params.collaborationMode?.settings.developer_instructions,
+      `${CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS}\n\nCall task_stage_complete when the Research artifact is ready.`,
+    );
+  });
+
   it("includes default collaboration mode and image attachments", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -294,6 +313,7 @@ describe("openCodexThread", () => {
     };
 
     await assert.rejects(
+      // oxlint-disable-next-line kata-code/no-manual-effect-runtime-in-tests -- this test asserts a rejected async boundary.
       Effect.runPromise(
         openCodexThread({
           client,

@@ -398,7 +398,11 @@ test.describe(`Task workspaces Slice 2 ${E2E_TAGS.taskWorkspaces}`, () => {
     await outdatedThread.getByRole("button", { name: "Reply" }).click();
     await outdatedThread.getByLabel("Reply body").fill("Reply survives the real command path");
     await outdatedThread.getByRole("button", { name: "Send reply" }).click();
-    await expect(outdatedThread.getByText("Reply survives the real command path")).toBeVisible();
+    await expect(
+      outdatedThread.locator("li span.text-muted-foreground").filter({
+        hasText: "Reply survives the real command path",
+      }),
+    ).toBeVisible();
     await outdatedThread.getByRole("button", { name: "Resolve" }).click();
     await expect(outdatedThread.getByText("resolved", { exact: true })).toBeVisible();
 

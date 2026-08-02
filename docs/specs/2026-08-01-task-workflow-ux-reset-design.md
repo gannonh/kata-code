@@ -698,7 +698,7 @@ The server validates:
 - configured provider instance and driver;
 - selected model from that instance's catalog;
 - unique option ids, option types, and select choices;
-- cached capability support for enforced Plan mode and the task-stage bridge.
+- cached capability support for the server-owned task-stage execution profile and bridge.
 
 An unknown instance, model, option, or missing Guided capability fails before task creation. A
 known configured instance with cached capabilities may create a task while temporarily
@@ -792,7 +792,7 @@ No historical event log is deleted or rewritten.
 ### Phase 2: task-stage bridge and bootstrap saga
 
 - Add task-stage MCP tools and the provider-neutral native bridge interface.
-- Advertise Guided only for provider instances with enforced Plan mode and completion transport.
+- Advertise Guided only for provider instances with task-stage execution controls and completion transport.
 - Implement deterministic worktree, thread, turn, and provider-runtime reconciliation.
 - Compose `ChatView` and the compact task panel at `/tasks/$environmentId/$taskId`.
 - Verify retry, reload, reconnect, process restart, and crash injection.
@@ -846,9 +846,10 @@ required manual evidence:
    Every policy blocks turns and completion on planning-root drift and resumes the same occurrence
    after the root is restored.
 7. **AC-07, planning and tool safety:** Clarify, Research, Design, and Plan run with trusted
-   versioned instructions, enforced Plan mode, and approval-required runtime policy. A provider
-   missing any capability cannot be selected for Guided. Forced task-tool lease expiry renews or
-   recovers before the next turn, and a superseded session cannot invoke task-stage tools.
+   versioned instructions, the server-owned task-stage execution profile, and approval-required
+   runtime policy. A provider missing any capability cannot be selected for Guided. Forced
+   task-tool lease expiry renews or recovers before the next turn, and a superseded session
+   cannot invoke task-stage tools.
 8. **AC-08, conversation-first layout:** The active conversation is the primary surface. The task
    panel shows stage, artifact, repository, and next action without session, manifest, token,
    thread-id, fork, fixture, or empty future-stage controls.
@@ -989,8 +990,8 @@ Run the focused Guided flow headed during UAT.
 
 - Phases 0 through 3 are implemented on the task-workspaces slice branch.
 - Transactional task persistence, command-first replay, durable completion proposals, trusted task
-  instructions, renewable task-tool credentials, enforced planning mode, source-state checks, exact
-  post-approval state, and environment-scoped routing are included.
+  instructions, renewable task-tool credentials, server-owned task-stage execution, source-state
+  checks, exact post-approval state, and environment-scoped routing are included.
 - Preserve historical task/workspace/artifact/session data and append-only workflow pins.
 - Use the existing `ChatView`, environment connection runtime, orchestration command receipts,
   provider runtime events, and Kata MCP credential boundary.

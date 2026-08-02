@@ -1071,6 +1071,9 @@ export interface TaskWorkspaceServiceShape {
     readonly threadId: ThreadId;
     readonly providerInstanceId: string;
   }) => Effect.Effect<void, TaskWorkspaceError>;
+  readonly getActiveTaskStage: (
+    threadId: ThreadId,
+  ) => Effect.Effect<TaskWorkspaceStage | undefined>;
   readonly isTaskThread: (threadId: ThreadId) => Effect.Effect<boolean>;
 }
 
@@ -1091,6 +1094,13 @@ export const isActiveTaskThread = (threadId: ThreadId): Effect.Effect<boolean> =
   activeTaskWorkspaceService
     ? activeTaskWorkspaceService.isTaskThread(threadId)
     : Effect.succeed(false);
+
+export const activeTaskStageForThread = (
+  threadId: ThreadId,
+): Effect.Effect<TaskWorkspaceStage | undefined> =>
+  activeTaskWorkspaceService
+    ? activeTaskWorkspaceService.getActiveTaskStage(threadId)
+    : Effect.succeed(undefined);
 
 export const authorizeActiveTaskStage = (input: {
   readonly environmentId: EnvironmentId;
@@ -1267,6 +1277,30 @@ export const make = Effect.gen(function* () {
           task.occurrences.some((occurrence) => occurrence.threadId === threadId),
       ),
     );
+
+  const getActiveTaskStage: TaskWorkspaceServiceShape["getActiveTaskStage"] = (threadId) =>
+    Effect.sync(() => {
+      for (const task of taskById.values()) {
+        const run = task.workflowRuns.at(-1);
+        if (!run || run.preset !== "guided") {
+          continue;
+        }
+        const occurrence = task.occurrences
+          .filter((candidate) => candidate.stage === run.currentStage)
+          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+        const isBootstrapThread =
+          task.bootstrap?.status === "running" && task.bootstrap.reservedThreadId === threadId;
+        const isActiveOccurrence =
+          occurrence?.threadId === threadId &&
+          (occurrence.status === "starting" ||
+            occurrence.status === "running" ||
+            occurrence.status === "finalizing");
+        if (isBootstrapThread || isActiveOccurrence) {
+          return run.currentStage;
+        }
+      }
+      return undefined;
+    });
 
   const authorizeTaskStage: TaskWorkspaceServiceShape["authorizeTaskStage"] = (input) =>
     Effect.gen(function* () {
@@ -1828,7 +1862,7 @@ export const make = Effect.gen(function* () {
             ) {
               return yield* taskError(
                 command,
-                "Guided requires an enabled provider with task-stage tools, enforced Plan mode, trusted instructions, and completion transport.",
+                "Guided requires an enabled provider with task-stage tools, trusted instructions, and completion transport.",
               );
             }
           }
@@ -4721,7 +4755,7 @@ export const make = Effect.gen(function* () {
               title: `Task: ${working.title}`,
               modelSelection,
               runtimeMode: "approval-required",
-              interactionMode: "plan",
+              interactionMode: "default",
               branch: working.workspace.repositories[0]!.branch,
               worktreePath: working.workspace.repositories[0]!.worktreePath,
               createdAt: now,
@@ -4754,7 +4788,7 @@ export const make = Effect.gen(function* () {
                 payload.trustedInstructions ?? trustedStageInstructions(payload.stage),
               modelSelection,
               runtimeMode: "approval-required",
-              interactionMode: "plan",
+              interactionMode: "default",
               createdAt: now,
             })
             .pipe(
@@ -4875,6 +4909,7 @@ export const make = Effect.gen(function* () {
     validatePlanningRoot,
     validateProviderTurn,
     authorizeTaskStage,
+    getActiveTaskStage,
     isTaskThread,
     getSnapshot: Effect.sync(() => ({
       sequence,
