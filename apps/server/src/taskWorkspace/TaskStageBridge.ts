@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
 import { TaskWorkspaceService } from "./TaskWorkspaceService.ts";
 import { trustedStageInstructions } from "./taskStageInstructions.ts";
@@ -94,6 +95,19 @@ const make = Effect.gen(function* () {
 
   const resolve: TaskStageBridgeShape["resolve"] = Effect.fn("TaskStageBridge.resolve")(
     function* (scope, options) {
+      const activeMcpSession = McpProviderSession.readMcpProviderSession(scope.threadId);
+      if (
+        !activeMcpSession ||
+        activeMcpSession.environmentId !== scope.environmentId ||
+        activeMcpSession.threadId !== scope.threadId ||
+        activeMcpSession.providerSessionId !== scope.providerSessionId ||
+        activeMcpSession.providerInstanceId !== scope.providerInstanceId
+      ) {
+        return yield* error(
+          "unauthorized",
+          `MCP provider session for thread '${scope.threadId}' is no longer active.`,
+        );
+      }
       const snapshot = yield* taskWorkspaces.getSnapshot;
       const task = snapshot.tasks.find(
         (candidate) =>

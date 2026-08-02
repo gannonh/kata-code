@@ -29,6 +29,7 @@ import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import { ServerConfig } from "../config.ts";
 import {
   ServerEnvironment,
@@ -3636,6 +3637,25 @@ describe("TaskStageBridge", () => {
           providerInstanceId,
           providerSessionId: "provider-session-bridge-1",
         };
+        McpProviderSession.setMcpProviderSession({
+          environmentId: scope.environmentId,
+          threadId: scope.threadId,
+          providerSessionId: scope.providerSessionId,
+          providerInstanceId: scope.providerInstanceId,
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer bridge-test-token",
+        });
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+        );
+
+        const staleCredential = yield* Effect.exit(
+          Effect.provide(
+            bridge.context({ ...scope, providerSessionId: "provider-session-stale" }),
+            bridgeContext,
+          ),
+        );
+        expect(staleCredential._tag).toBe("Failure");
 
         const context = yield* Effect.provide(bridge.context(scope), bridgeContext);
         expect(context).toMatchObject({
