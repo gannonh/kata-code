@@ -78,6 +78,16 @@ describe("loadRepoEnv", () => {
     });
   });
 
+  it("can exclude .env.local for isolated credentialed runs", () => {
+    const repoRoot = makeTemporaryDirectory();
+    writeFileSync(join(repoRoot, ".env"), "KATACODE_E2E_CODEX_PROVIDER=codex\n");
+    writeFileSync(join(repoRoot, ".env.local"), "KATACODE_E2E_CODEX_PROVIDER=stale\n");
+
+    expect(loadRepoEnv({ baseEnv: {}, includeLocal: false, repoRoot })).toMatchObject({
+      KATACODE_E2E_CODEX_PROVIDER: "codex",
+    });
+  });
+
   it("accepts legacy framework aliases as root overrides", () => {
     expect(
       resolvePublicConfig({

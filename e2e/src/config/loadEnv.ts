@@ -11,10 +11,10 @@ const PI_UPDATE_VERIFICATION_VALUES = new Set([
  * Apply repo-root `.env` / `.env.local` into `targetEnv`.
  *
  * Keys present in those files win over ambient shell exports so local E2E
- * configuration in `.env` is authoritative (`.env.local` overrides `.env`).
- * Keys only present in the ambient env are left unchanged. Pi update
- * verification preserves its three ambient Pi values so the maintainer gate
- * controls the credentialed run.
+ * configuration in `.env` is authoritative; `.env.local` is excluded from
+ * isolated runs. Keys only present in the ambient env are left unchanged. Pi
+ * update verification preserves its three ambient Pi values so the maintainer
+ * gate controls the credentialed run.
  *
  * `loadRepoEnv()` alone keeps process/shell last, which makes a stale
  * `export KATACODE_E2E_PI_MODEL=…` override the value in `.env`. E2E must not
@@ -26,6 +26,7 @@ export function applyE2ERepoEnv(
 ): void {
   const fileEnv = loadRepoEnv({
     baseEnv: {},
+    includeLocal: false,
     ...(options?.repoRoot !== undefined ? { repoRoot: options.repoRoot } : {}),
   });
   const isPiUpdateVerification = targetEnv[PI_UPDATE_VERIFICATION_ENV] === "1";
