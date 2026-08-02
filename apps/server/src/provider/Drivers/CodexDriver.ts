@@ -101,6 +101,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   metadata: {
     displayName: "Codex",
     supportsMultipleInstances: true,
+    supportsTaskStage: true,
   },
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => decodeCodexSettings({}),

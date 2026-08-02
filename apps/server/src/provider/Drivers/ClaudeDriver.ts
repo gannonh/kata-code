@@ -92,6 +92,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
   metadata: {
     displayName: "Claude",
     supportsMultipleInstances: true,
+    supportsTaskStage: true,
   },
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => decodeClaudeSettings({}),

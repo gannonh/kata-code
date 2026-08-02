@@ -75,6 +75,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
   metadata: {
     displayName: "Cursor",
     supportsMultipleInstances: true,
+    supportsTaskStage: true,
   },
   configSchema: CursorSettings,
   defaultConfig: (): CursorSettings => decodeCursorSettings({}),
