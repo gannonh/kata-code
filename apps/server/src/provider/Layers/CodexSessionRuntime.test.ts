@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { describe, it } from "vite-plus/test";
 import { ThreadId } from "@kata-sh/code-contracts";
-import { it as effectIt } from "@effect/vitest";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 
@@ -16,11 +21,15 @@ import {
   buildMcpServerElicitationResponse,
   buildPermissionsRequestApprovalResponse,
   buildTurnStartParams,
+  makeCodexSessionRuntime,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+const decodeApprovalResponses = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
 
 function makeThreadOpenResponse(
   threadId: string,
@@ -260,6 +269,97 @@ describe("Codex approval requests", () => {
         permissions: {},
         scope: "turn",
       },
+    );
+  });
+});
+
+describe("Codex server request handlers", () => {
+  const runApprovalProbe = (taskStage: boolean) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const mockPeerPath = path.resolve(
+          import.meta.dirname,
+          "../../../../../packages/effect-codex-app-server/test/fixtures/codex-app-server-mock-peer.ts",
+        );
+        const runtime = yield* makeCodexSessionRuntime({
+          threadId: ThreadId.make("provider-thread-approval-probe"),
+          binaryPath: mockPeerPath,
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          ...(taskStage ? { taskStage: true } : {}),
+          environment: {
+            PATH: process.env.PATH ?? "",
+            CODEX_APP_SERVER_TEST_APPROVALS: "1",
+          },
+        });
+        return yield* Effect.gen(function* () {
+          const marker = "approval-responses:";
+          const approvalEvents = Stream.map(
+            Stream.filter(
+              runtime.events,
+              (event) =>
+                event.kind === "notification" &&
+                event.method === "item/agentMessage/delta" &&
+                typeof event.textDelta === "string" &&
+                event.textDelta.startsWith(marker),
+            ),
+            (event) => event.textDelta!.slice(marker.length),
+          );
+          const markerFiber = yield* Stream.runHead(approvalEvents).pipe(Effect.forkChild);
+          yield* runtime.start();
+          yield* runtime.sendTurn({
+            input: "Exercise the MCP approval handlers.",
+            ...(taskStage ? { taskStage: true } : {}),
+          });
+          const markerValue = Option.getOrThrow(yield* Fiber.join(markerFiber));
+          return decodeApprovalResponses(markerValue);
+        }).pipe(Effect.ensuring(runtime.close));
+      }),
+    );
+
+  effectIt.layer(NodeServices.layer)("runtime dispatch", (it) => {
+    it.effect("handles task-stage MCP approval and permission requests", () =>
+      Effect.gen(function* () {
+        const responses = yield* runApprovalProbe(true);
+        const values = Object.values(responses);
+        assert.equal(values.length, 2);
+        const elicitation = values.find(
+          (value) => typeof value === "object" && value !== null && "action" in value,
+        );
+        const permissions = values.find(
+          (value) => typeof value === "object" && value !== null && "permissions" in value,
+        );
+        assert.deepStrictEqual(elicitation, { action: "accept" });
+        assert.deepStrictEqual(permissions, {
+          permissions: {
+            network: { enabled: true },
+          },
+          scope: "turn",
+        });
+      }),
+    );
+
+    it.effect("keeps non-task-stage MCP requests on their safe response paths", () =>
+      Effect.gen(function* () {
+        const responses = yield* runApprovalProbe(false);
+        const values = Object.values(responses);
+        assert.equal(values.length, 2);
+        const elicitation = values.find(
+          (value) => typeof value === "object" && value !== null && "action" in value,
+        );
+        const permissions = values.find(
+          (value) => typeof value === "object" && value !== null && "permissions" in value,
+        );
+        assert.deepStrictEqual(elicitation, {
+          action: "decline",
+          content: null,
+        });
+        assert.deepStrictEqual(permissions, {
+          permissions: {},
+          scope: "turn",
+        });
+      }),
     );
   });
 });
