@@ -12,6 +12,8 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import {
+  buildMcpServerElicitationResponse,
+  buildPermissionsRequestApprovalResponse,
   buildTurnStartParams,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
@@ -100,6 +102,22 @@ describe("buildTurnStartParams", () => {
     );
   });
 
+  it("allows task-stage MCP calls while retaining read-only execution", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-task-stage",
+        runtimeMode: "approval-required",
+        prompt: "Research the task",
+        taskStage: true,
+      }),
+    );
+
+    assert.deepStrictEqual(params.sandboxPolicy, {
+      networkAccess: true,
+      type: "readOnly",
+    });
+  });
+
   it("includes default collaboration mode and image attachments", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -167,6 +185,81 @@ describe("buildTurnStartParams", () => {
         },
       ],
     });
+  });
+});
+
+describe("Codex approval requests", () => {
+  it("accepts only Kata MCP tool approvals during task stages", () => {
+    assert.deepStrictEqual(
+      buildMcpServerElicitationResponse({
+        taskStage: true,
+        serverName: "kata",
+        meta: { codex_approval_kind: "mcp_tool_call" },
+      }),
+      { action: "accept" },
+    );
+    assert.deepStrictEqual(
+      buildMcpServerElicitationResponse({
+        taskStage: true,
+        serverName: "other",
+        meta: { codex_approval_kind: "mcp_tool_call" },
+      }),
+      { action: "decline", content: null },
+    );
+    assert.deepStrictEqual(
+      buildMcpServerElicitationResponse({
+        taskStage: true,
+        serverName: "kata",
+        meta: { codex_approval_kind: "user_input" },
+      }),
+      { action: "decline", content: null },
+    );
+  });
+
+  it("grants task-stage network access without granting filesystem permissions", () => {
+    assert.deepStrictEqual(
+      buildPermissionsRequestApprovalResponse({
+        taskStage: true,
+        requested: {
+          network: { enabled: true },
+          fileSystem: { write: ["/tmp/task-stage"] },
+        },
+      }),
+      {
+        permissions: {
+          network: { enabled: true },
+        },
+        scope: "turn",
+      },
+    );
+  });
+
+  it("denies permission requests outside task-stage network access", () => {
+    assert.deepStrictEqual(
+      buildPermissionsRequestApprovalResponse({
+        taskStage: false,
+        requested: {
+          network: { enabled: true },
+          fileSystem: { write: ["/tmp/project"] },
+        },
+      }),
+      {
+        permissions: {},
+        scope: "turn",
+      },
+    );
+    assert.deepStrictEqual(
+      buildPermissionsRequestApprovalResponse({
+        taskStage: true,
+        requested: {
+          fileSystem: { write: ["/tmp/project"] },
+        },
+      }),
+      {
+        permissions: {},
+        scope: "turn",
+      },
+    );
   });
 });
 
