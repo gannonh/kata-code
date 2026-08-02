@@ -107,13 +107,42 @@ async function expectActiveStage(page: Page, stage: string): Promise<void> {
 async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
   const panel = page.getByTestId("pending-user-input-panel");
   const researchStage = page.getByTestId("guided-stage-research");
+  const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
+  const assistantMessages = page.locator('[data-message-role="assistant"] .chat-markdown');
+  const clarificationReply =
+    "Use a small web onboarding flow with three ordered steps. Persist progress across refreshes and sessions, and store the readable Plan as repository Markdown.";
   const deadline = Date.now() + E2E_TIMEOUTS.agentTestMs;
+  let lastConversationalQuestion = "";
 
   while (Date.now() < deadline) {
     if ((await researchStage.getAttribute("data-active")) === "true") {
       return;
     }
+    if (await approveOnce.isVisible().catch(() => false)) {
+      await expect(approveOnce).toBeEnabled();
+      await approveOnce.click();
+      await page.waitForTimeout(350);
+      continue;
+    }
     if (!(await panel.isVisible().catch(() => false))) {
+      const latestAssistant = assistantMessages.last();
+      const latestText = (await latestAssistant.innerText().catch(() => "")).trim();
+      const sendButton = page.getByRole("button", { name: "Send message", exact: true });
+      if (
+        latestText.length > 0 &&
+        latestText !== lastConversationalQuestion &&
+        latestText.includes("?")
+      ) {
+        // The send button is disabled while the editor is empty. Fill first,
+        // then let the next poll submit once the provider turn is ready.
+        await page.getByTestId("composer-editor").fill(clarificationReply);
+        if (await sendButton.isEnabled().catch(() => false)) {
+          await sendButton.click();
+          lastConversationalQuestion = latestText;
+          await page.waitForTimeout(350);
+          continue;
+        }
+      }
       await page.waitForTimeout(500);
       continue;
     }

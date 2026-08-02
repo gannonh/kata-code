@@ -294,6 +294,16 @@ const make = Effect.gen(function* () {
                     : "invalid";
             return error(code, message);
           }),
+          Effect.tapError((cause) =>
+            Effect.logWarning("task-stage completion proposal rejected", {
+              taskId: invocation.task.id,
+              stage: invocation.stage,
+              sessionId: invocation.sessionId,
+              providerTurnId,
+              code: cause.code,
+              message: cause.message,
+            }),
+          ),
         );
       const occurrence = latestOccurrence(task, invocation.stage);
       const proposalId = occurrence?.completionProposalId;

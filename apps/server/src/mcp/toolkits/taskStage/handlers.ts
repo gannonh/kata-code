@@ -23,18 +23,29 @@ const requireTaskStageInvocation = Effect.fn("TaskStageToolkit.requireInvocation
   return invocation;
 });
 
+const logTaskStageToolError = (tool: string, cause: TaskStageToolError) =>
+  Effect.logWarning("task-stage MCP tool rejected", {
+    tool,
+    code: cause.code,
+    message: cause.message,
+  });
+
 const handlers = {
   task_stage_context: () =>
     Effect.gen(function* () {
       const invocation = yield* requireTaskStageInvocation();
       const bridge = yield* TaskStageBridge;
-      return yield* bridge.context(scopeFromInvocation(invocation));
+      return yield* bridge
+        .context(scopeFromInvocation(invocation))
+        .pipe(Effect.tapError((cause) => logTaskStageToolError("task_stage_context", cause)));
     }),
   task_stage_complete: (input) =>
     Effect.gen(function* () {
       const invocation = yield* requireTaskStageInvocation();
       const bridge = yield* TaskStageBridge;
-      return yield* bridge.complete(scopeFromInvocation(invocation), input);
+      return yield* bridge
+        .complete(scopeFromInvocation(invocation), input)
+        .pipe(Effect.tapError((cause) => logTaskStageToolError("task_stage_complete", cause)));
     }),
 } satisfies Parameters<typeof TaskStageToolkit.toLayer>[0];
 

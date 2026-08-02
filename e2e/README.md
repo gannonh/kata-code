@@ -33,11 +33,11 @@ Canonical `KATACODE_CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` are al
 
 ### Deterministic agent tests (`@agent`)
 
-| Variable                      | Purpose                                                   |
-| ----------------------------- | --------------------------------------------------------- |
-| `KATACODE_E2E_AGENT_PROVIDER` | Provider driver id configured in the app                  |
-| `KATACODE_E2E_AGENT_MODEL`    | Model id to select in the UI                              |
-| `OPENAI_API_KEY`              | API fallback for `openai-codex` when OAuth is unavailable |
+| Variable                      | Purpose                                            |
+| ----------------------------- | -------------------------------------------------- |
+| `KATACODE_E2E_AGENT_PROVIDER` | Provider driver id configured in the app           |
+| `KATACODE_E2E_AGENT_MODEL`    | Model id to select in the UI                       |
+| `OPENAI_API_KEY`              | API fallback for `codex` when OAuth is unavailable |
 
 The repository `.env` is the source of truth for provider and model selection. Keep the
 provider/model pair aligned with the manual E2E setup. Do not override them on the command line or

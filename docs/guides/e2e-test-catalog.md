@@ -38,7 +38,7 @@ Each spec file shares one Electron session (one dev stack, one Clerk sign-in) ac
 
 The repository `.env` is authoritative for `KATACODE_E2E_AGENT_PROVIDER` and
 `KATACODE_E2E_AGENT_MODEL`; manual runs and Playwright runs use the same pair. The default local
-configuration is `openai-codex` with `gpt-5.6-luna`. `KATACODE_E2E_CODEX_AUTH_MODE=oauth-or-api-key`
+configuration is `codex` with `gpt-5.6-luna`. `KATACODE_E2E_CODEX_AUTH_MODE=oauth-or-api-key`
 stages host Codex OAuth into the isolated HOME first and retains `OPENAI_API_KEY` only when OAuth
 cannot be staged. Anthropic API credentials are removed from E2E child processes.
 
