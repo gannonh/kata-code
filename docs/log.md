@@ -1,5 +1,13 @@
 # OKF bundle log
 
+## 2026-08-02 (E2E provider authentication policy)
+
+Documented the local E2E provider policy: the repository `.env` owns the provider/model pair,
+Codex OAuth is staged into isolated runs before the OpenAI API fallback, Anthropic credentials are
+removed from E2E child processes, and Pi smoke tests use `openrouter/free`. Guided task-workspace
+E2E remains on a task-stage-capable provider because Pi does not yet expose the task-stage MCP
+bridge.
+
 ## 2026-08-01 (Task workflow UX reset Phases 0–3)
 
 Implemented the [task workflow UX reset](/specs/2026-08-01-task-workflow-ux-reset-design.md)

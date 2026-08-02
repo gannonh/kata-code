@@ -33,20 +33,38 @@ Canonical `KATACODE_CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` are al
 
 ### Deterministic agent tests (`@agent`)
 
-| Variable                      | Purpose                                                         |
-| ----------------------------- | --------------------------------------------------------------- |
-| `KATACODE_E2E_AGENT_PROVIDER` | Provider driver id configured in the app (for example `openai`) |
-| `KATACODE_E2E_AGENT_MODEL`    | Model id to select in the UI                                    |
-| `OPENAI_API_KEY`              | Required when provider is OpenAI                                |
-| `ANTHROPIC_API_KEY`           | Required when provider is Anthropic                             |
+| Variable                      | Purpose                                                   |
+| ----------------------------- | --------------------------------------------------------- |
+| `KATACODE_E2E_AGENT_PROVIDER` | Provider driver id configured in the app                  |
+| `KATACODE_E2E_AGENT_MODEL`    | Model id to select in the UI                              |
+| `OPENAI_API_KEY`              | API fallback for `openai-codex` when OAuth is unavailable |
+
+The repository `.env` is the source of truth for provider and model selection. Keep the
+provider/model pair aligned with the manual E2E setup. Do not override them on the command line or
+create a temporary `.env.local` for a run.
+
+### Codex E2E authentication
+
+Set `KATACODE_E2E_CODEX_AUTH_MODE=oauth-or-api-key` in `.env` for the default local policy. The E2E
+harness stages the host `~/.codex/auth.json` into the isolated run HOME, so Codex OAuth is attempted
+first. The inherited `OPENAI_API_KEY` remains available only as Codex's fallback when the OAuth file
+is unavailable. Use `oauth` to fail when the host OAuth file is missing, or `api-key` to force the
+fallback for an intentional diagnostic run.
+
+The harness strips Anthropic API credentials from E2E child processes. Claude E2E requires an
+explicit provider-instance configuration that does not depend on global Anthropic credentials.
 
 ### Pi dependency-update validation
 
 Set `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and
-`KATACODE_E2E_PI_MODEL` to an authenticated built-in model introduced by the
-migration target. `@pi-update` omits the source `models.json` and does not
-register the model as custom, so model selection proves the installed Pi catalog
-discovered it.
+`KATACODE_E2E_PI_MODEL` to an authenticated model. `openrouter/free` uses the staged Pi
+`auth.json` and is the preferred low-cost local smoke model. `@pi-update` omits the source
+`models.json` and does not register the model as custom, so model selection proves the installed Pi
+catalog discovered it.
+
+Pi is not currently eligible for Guided task-workspace E2E because its adapter does not implement
+the task-stage MCP bridge. Use the task-stage-capable provider configured by
+`KATACODE_E2E_AGENT_PROVIDER` for `@task-workspaces`.
 
 ### Cursor skill tests (`@cursor`)
 

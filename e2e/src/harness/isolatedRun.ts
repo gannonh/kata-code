@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import { tmpdir, platform } from "node:os";
+import { copyFile, mkdtemp, mkdir, rm } from "node:fs/promises";
+import { homedir, tmpdir, platform } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
@@ -105,6 +105,42 @@ async function resolveHostGitHubToken(): Promise<string | undefined> {
   }
 }
 
+type CodexE2eAuthMode = "oauth" | "oauth-or-api-key" | "api-key";
+
+function readCodexE2eAuthMode(): CodexE2eAuthMode {
+  const value = process.env.KATACODE_E2E_CODEX_AUTH_MODE?.trim().toLowerCase();
+  if (value === "oauth" || value === "oauth-or-api-key" || value === "api-key") {
+    return value;
+  }
+  return "api-key";
+}
+
+async function stageCodexOAuthAuth(katacodeHome: string): Promise<boolean> {
+  const mode = readCodexE2eAuthMode();
+  if (mode === "api-key") return false;
+
+  const sourceAuthPath = join(
+    process.env.KATACODE_E2E_CODEX_AUTH_SOURCE?.trim() || join(homedir(), ".codex"),
+    "auth.json",
+  );
+  const destinationHome = join(katacodeHome, ".codex");
+  const destinationAuthPath = join(destinationHome, "auth.json");
+
+  try {
+    await mkdir(destinationHome, { recursive: true });
+    await copyFile(sourceAuthPath, destinationAuthPath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" && mode === "oauth-or-api-key") {
+      return false;
+    }
+    throw new Error(
+      `Codex OAuth auth is required for KATACODE_E2E_CODEX_AUTH_MODE=${mode}, but ${sourceAuthPath} could not be staged.`,
+      { cause: error },
+    );
+  }
+}
+
 /** Provision an isolated E2E home, ports, and dev env for one Playwright worker. */
 export async function createIsolatedRun(input: {
   readonly projectName: string;
@@ -176,6 +212,12 @@ export async function createIsolatedRun(input: {
     }
   }
 
+  // Codex OAuth lives in the host user's auth file. Stage only that file into
+  // the isolated HOME when the repository .env requests OAuth-first auth.
+  // Codex itself chooses OAuth before an inherited API key; the API key remains
+  // available only for the explicit oauth-or-api-key fallback mode.
+  const codexOAuthStaged = await stageCodexOAuthAuth(katacodeHome);
+
   // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
   // name. The isolated HOME has no macOS login keychain, so interactive
   // `agent login` token storage is unavailable; the API-key auth path skips
@@ -184,7 +226,19 @@ export async function createIsolatedRun(input: {
   // Forward the host `gh` token so the GitHub source picker stays authenticated
   // under the isolated HOME (see resolveHostGitHubToken).
   const githubToken = await resolveHostGitHubToken();
-  const { CURSOR_API_KEY: _ambientCursorApiKey, ...inheritedEnv } = process.env;
+  const {
+    ANTHROPIC_API_KEY: _ambientAnthropicApiKey,
+    ANTHROPIC_AUTH_TOKEN: _ambientAnthropicAuthToken,
+    CURSOR_API_KEY: _ambientCursorApiKey,
+    OPENAI_API_KEY: ambientOpenAiApiKey,
+    ...envWithoutProviderSecrets
+  } = process.env;
+  const inheritedEnv = codexOAuthStaged
+    ? envWithoutProviderSecrets
+    : {
+        ...envWithoutProviderSecrets,
+        ...(ambientOpenAiApiKey ? { OPENAI_API_KEY: ambientOpenAiApiKey } : {}),
+      };
 
   const baseEnv = {
     ...inheritedEnv,

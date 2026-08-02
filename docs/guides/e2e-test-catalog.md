@@ -34,9 +34,21 @@ Sidebar v2 populated-state UAT uses the DEV fixture route `/playground/sidebar` 
 
 Each spec file shares one Electron session (one dev stack, one Clerk sign-in) across its tests; see [session model](../../e2e/README.md#session-model) in the operator README. Stop `pnpm run dev` / `dev:desktop` before E2E; use `pnpm run e2e:clean` if a run leaves leaked dev servers.
 
+### Local provider policy
+
+The repository `.env` is authoritative for `KATACODE_E2E_AGENT_PROVIDER` and
+`KATACODE_E2E_AGENT_MODEL`; manual runs and Playwright runs use the same pair. The default local
+configuration is `openai-codex` with `gpt-5.6-luna`. `KATACODE_E2E_CODEX_AUTH_MODE=oauth-or-api-key`
+stages host Codex OAuth into the isolated HOME first and retains `OPENAI_API_KEY` only when OAuth
+cannot be staged. Anthropic API credentials are removed from E2E child processes.
+
+Pi smoke tests are independently gated and use the staged Pi auth directory. `openrouter/free` is
+the preferred low-cost Pi model. Pi does not currently implement the task-stage MCP bridge, so the
+Guided task-workspace spec uses the task-stage-capable provider selected by the agent variables.
+
 ### Pi E2E gates
 
-Credentialed `@pi` and `@pi-update` tests require `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and `KATACODE_E2E_PI_MODEL`. Set the model to an authenticated built-in model introduced by the migration target when running `@pi-update`. The gate omits the source `models.json` and leaves custom-model registration disabled, so selection proves the installed Pi catalog discovered the model. Manual walkthrough evidence lives in [`e2e/verify-evidence/`](../../e2e/verify-evidence/README.md).
+Credentialed `@pi` and `@pi-update` tests require `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and `KATACODE_E2E_PI_MODEL`. `openrouter/free` is the preferred local smoke model. The gate omits the source `models.json` and leaves custom-model registration disabled, so selection proves the installed Pi catalog discovered the model. Manual walkthrough evidence lives in [`e2e/verify-evidence/`](../../e2e/verify-evidence/README.md).
 
 ### Cursor E2E gates
 

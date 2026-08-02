@@ -82,8 +82,25 @@ async function selectTaskProvider(page: Page, provider: string, model: string): 
 }
 
 async function expectActiveStage(page: Page, stage: string): Promise<void> {
-  await expect(page.getByTestId(`guided-stage-${stage}`)).toHaveAttribute("data-active", "true", {
-    timeout: E2E_TIMEOUTS.agentReplyMs,
+  const stageItem = page.getByTestId(`guided-stage-${stage}`);
+  const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
+  const deadline = Date.now() + E2E_TIMEOUTS.agentReplyMs;
+
+  while (Date.now() < deadline) {
+    if ((await stageItem.getAttribute("data-active")) === "true") {
+      return;
+    }
+    if (await approveOnce.isVisible().catch(() => false)) {
+      await expect(approveOnce).toBeEnabled();
+      await approveOnce.click();
+      await page.waitForTimeout(350);
+      continue;
+    }
+    await page.waitForTimeout(500);
+  }
+
+  await expect(stageItem).toHaveAttribute("data-active", "true", {
+    timeout: E2E_TIMEOUTS.assertionMs,
   });
 }
 
