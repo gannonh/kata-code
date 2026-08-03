@@ -2,7 +2,8 @@
 type: Spec
 title: "Task workspaces Slice 3 — Workflow presets and guided context boundaries"
 description: "Child implementation plan for the third autonomous vertical slice: replace the hardcoded Standard rail with a data-driven, versioned workflow registry; ship Standard, Guided, and Freeform presets; and make context manifests budget-aware and inspectable."
-status: Approved
+status: Verified
+roadmap_status: Historical
 approved_at: 2026-07-30T00:00:00Z
 tags: [specs, task-workspaces, workflows, presets, context, versioning, orchestration, web, server]
 timestamp: 2026-07-30T00:00:00Z
@@ -14,13 +15,15 @@ base_sha: 6aceff8a85b8a6dfd673ceb9947b7518d8aa9579
 
 ## Status
 
-**Approved, split into 3a / 3b.** Reviewer approved the plan with the recommended split:
+**Historical delivery record; Verified.** Slice 3a and 3b merged through PR #62 at
+`cf95a03c9c658d3677fc85d46d486a4ecfda57ae`. The authoritative current roadmap is
+[Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md).
 
-- **Slice 3a (this branch, Phases A–B):** versioned workflow definition registry and a
-  table-driven reducer, Standard only. Proven by the Slice 1 / Slice 2 regression suite passing
-  unmodified.
-- **Slice 3b (later, Phases C–E):** Guided and Freeform presets, new stages/kinds, context
-  budgeting, and the web surfaces.
+The implementation was delivered in two parts:
+
+- **Slice 3a (Phases A–B):** versioned workflow definition registry and a table-driven reducer.
+- **Slice 3b (Phases C–E):** Guided and Freeform presets, new stages/kinds, context budgeting,
+  and the pre-reset web surfaces.
 
 Resolved review decisions:
 

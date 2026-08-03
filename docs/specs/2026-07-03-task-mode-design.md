@@ -3,7 +3,7 @@ type: Spec
 title: "Task mode — workflow-driven tasks with a live plan artifact panel"
 description: "First-class Task entity that executes a staged workflow (Setup → Questions → Plan → Build → Verify), codifying the plan-build-verify skill into the product with a dynamic right-side artifact panel, anchored comments, approval gates, and thread-per-stage fresh context."
 status: Superseded
-superseded_by: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
+superseded_by: /specs/2026-08-01-task-mode-design.md
 tags: [specs, task-mode, workflow, artifact, orchestration, contracts, web, server]
 timestamp: 2026-07-03T00:00:00Z
 ---
@@ -12,9 +12,9 @@ timestamp: 2026-07-03T00:00:00Z
 
 ## Status
 
-**Superseded** by
-[Task workspaces — artifact-driven workflows delivered as autonomous vertical slices](/specs/2026-07-28-task-workspaces-vertical-slices-design.md)
-(Approved 2026-07-29). Kept as historical context for the earlier Task Mode framing.
+**Superseded** by the authoritative
+[Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) design. Kept as
+historical context for the original Task mode framing.
 
 ## Goal
 

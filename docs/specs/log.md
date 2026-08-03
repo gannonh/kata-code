@@ -1,8 +1,21 @@
 # Specs log
 
+## 2026-08-03 (Task mode roadmap reconciliation)
+
+- Established [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) as the
+  sole authoritative parent design.
+- Added [Vertical Slice 1: Guided planning](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
+  as the implemented baseline with provider-backed manual acceptance still in progress.
+- Declared Vertical Slice 2 Guided implementation as the only next planning target. Guided
+  verification, Standard/Freeform, and Deliver remain explicitly unspecced.
+- Marked the July 3 and July 28 parent designs as superseded and their Slices 1–4 as historical
+  delivery records or implementation substrate.
+- Closed the completed rich-context-manifest and NDJSON-hardening deferrals; retained Build-debug
+  UX as deferred until real Guided implementation acceptance establishes a need.
+
 ## 2026-08-01 (Task workflow UX reset Phases 0–3)
 
-Implemented [Task workflow UX reset](/specs/2026-08-01-task-workflow-ux-reset-design.md) through
+Implemented [Task workflow UX reset](/specs/2026-08-01-task-mode-design.md) through
 Phases 0–3: Guided creation, bootstrap and proposal recovery, typed terminal settlement, atomic
 handoffs, Plan approval, worktree policy, explicit provider task-stage capabilities, and the
 conversation-first surface. Full unit, typecheck, OKF, and release-smoke gates pass; provider-backed
@@ -10,7 +23,7 @@ desktop UAT requires an eligible configured task-stage provider.
 
 ## 2026-08-01 (Task workflow UX reset draft)
 
-Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-mode-design.md)
 following maintainer review of the current task screen. The proposed product-first slice keeps
 Kata-owned **Standard**, **Guided**, and **Freeform** templates, uses an inline brief for the
 first slice, automatically manages stage conversations and artifact handoffs, pauses Guided

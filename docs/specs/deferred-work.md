@@ -3,7 +3,7 @@ type: Reference
 title: "Deferred work registry"
 description: "Review queue for work intentionally deferred from specs so future planning can revisit, promote, or close it."
 tags: [specs, roadmap, deferred-work, planning]
-timestamp: 2026-06-29T00:00:00Z
+timestamp: 2026-08-03T22:00:00Z
 ---
 
 # Deferred work registry
@@ -32,31 +32,35 @@ Each entry should include:
 
 ### Task workspaces rich context manifests (Slice 3+)
 
-- **Status:** deferred
+- **Status:** closed
 - **Tracking issue:** [#55](https://github.com/gannonh/kata-code/issues/55)
 - **Area:** task-workspaces, context
-- **Source:** [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md)
-- **Rationale:** Slice 2 ships minimal manifests (`artifactRefs` + notes).
-- **Revisit trigger:** Slice 3+ context-budget work.
+- **Source:** [Historical Slice 3](/specs/2026-07-30-task-workspaces-slice-3-plan.md)
+- **Rationale:** Slice 3 delivered budgeted context manifests, exact block selection, summary
+  lineage, and visible compression state.
+- **Revisit trigger:** Closed; future context changes belong to the active Task mode child slice.
 
 ### Task workspaces Build-debug UX for `debugging` role
 
 - **Status:** deferred
 - **Tracking issue:** [#56](https://github.com/gannonh/kata-code/issues/56)
 - **Area:** task-workspaces, build
-- **Source:** [Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md)
-- **Rationale:** Role is in schema/navigator; dedicated Build-debug flow deferred.
-- **Revisit trigger:** Product request for Build-debug sessions.
+- **Source:** [Historical Slice 2](/specs/2026-07-29-task-workspaces-slice-2-plan.md)
+- **Rationale:** The current conversation-first surface does not expose role-specific debugging
+  sessions.
+- **Revisit trigger:** After Guided implementation ships, if real Build acceptance identifies a
+  distinct debugging-session need.
 
 ### Task workspaces crash-safe NDJSON event log
 
-- **Status:** deferred
+- **Status:** closed
 - **Tracking issue:** [#53](https://github.com/gannonh/kata-code/issues/53)
 - **Area:** task-workspaces, server, persistence
-- **Source:** [Slice 1](/specs/2026-07-28-task-workspaces-slice-1-plan.md) · [PR #51](https://github.com/gannonh/kata-code/pull/51)
-- **Rationale:** Slice 1 keeps fail-loud startup on corrupt history; fsync + trailing-truncate quarantine is hardening beyond the walking skeleton.
-- **Revisit trigger:** Persistence hardening slice or first production crash that truncates the event log.
-- **Notes:** Mid-file corruption must continue to fail startup rather than silently reset.
+- **Source:** [Task mode parent](/specs/2026-08-01-task-mode-design.md)
+- **Rationale:** Current tasks moved to transactional SQLite events, snapshots, receipts, and
+  outbox rows. Legacy NDJSON data is imported once and retained read-only.
+- **Revisit trigger:** Closed; transactional-store durability issues receive their own defect or
+  child-slice criterion.
 
 ### Live Waiting chip E2E for sidebar state detection
 

@@ -1,5 +1,13 @@
 # OKF bundle log
 
+## 2026-08-03 (Task mode specification reconciliation)
+
+Established [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) as the
+sole parent design and added the delivered [Guided planning child record](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md).
+The roadmap now separates implemented work, active manual acceptance, the next unspecced Guided
+implementation slice, and later unspecced slices. Pre-reset designs and Slices 1–4 remain linked as
+historical implementation records.
+
 ## 2026-08-02 (E2E provider authentication policy)
 
 Documented the local E2E provider policy: the repository `.env` owns the provider/model pair,
@@ -10,7 +18,7 @@ bridge.
 
 ## 2026-08-01 (Task workflow UX reset Phases 0–3)
 
-Implemented the [task workflow UX reset](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+Implemented the [task workflow UX reset](/specs/2026-08-01-task-mode-design.md)
 through approved Plan: transactional bootstrap and proposal recovery, pinned source/worktree
 validation, provider-scoped task-stage capabilities, atomic artifact handoffs, explicit provider
 terminal activities, renewable task-turn leases, bounded handoff manifests, and conversation-first
@@ -20,7 +28,7 @@ configured task-stage provider.
 
 ## 2026-08-01 (Task workflow UX reset draft)
 
-Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-mode-design.md)
 to re-baseline task onboarding around Kata-owned Standard, Guided, and Freeform flows. The
 first Guided-to-Plan slice uses an inline brief, automatic stage sessions and artifact handoffs,
 and a Plan approval gate while keeping context-manifest and session-linking mechanics internal.

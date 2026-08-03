@@ -1,70 +1,87 @@
 ---
 type: Spec
-title: "Task workflow UX reset: product-first Standard, Guided, and Freeform flows"
-description: "Re-baseline task onboarding and stage navigation around automatic conversations and human-readable artifacts while preserving durable task-workspace infrastructure."
-status: Implemented
-tags: [specs, task-workspaces, ux, onboarding, workflows, standard, guided, freeform]
-timestamp: 2026-08-01T16:29:19Z
-parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
+title: "Task mode — product-first workflows"
+description: "Authoritative product and architecture design for taking a task from intake through planning, implementation, verification, and delivery in independently specified vertical slices."
+status: Active
+tags: [specs, task-mode, task-workspaces, ux, onboarding, workflows, standard, guided, freeform]
+timestamp: 2026-08-03T22:00:00Z
+supersedes:
+  - /specs/2026-07-03-task-mode-design.md
+  - /specs/2026-07-28-task-workspaces-vertical-slices-design.md
 ---
 
-# Task workflow UX reset: product-first Standard, Guided, and Freeform flows
+# Task mode — product-first workflows
 
 ## Status
 
-**Implemented for Phases 0–3.** Guided creation, bootstrap/recovery, typed completion, atomic
-handoffs, Plan approval, worktree policy, provider capability enforcement, and the
-conversation-first surface are implemented. Provider-backed desktop UAT remains dependent on an
-eligible configured task-stage provider.
+**Active parent design.** [Vertical Slice 1: Guided planning](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
+is implemented through approved Plan, with provider-backed manual acceptance in progress.
+**Vertical Slice 2: Guided implementation** is next and requires
+its own child spec before product code changes begin. Later slices remain explicitly unspecced.
+
+This document is the sole authoritative Task mode product design and roadmap. Child slice specs
+own implementation scope and acceptance criteria. Earlier Task mode and task-workspace designs are
+historical records.
 
 ## Goal
 
-Make Tasks a user-facing workflow for starting and reviewing agent work. The first complete
-product slice is a Guided task from creation through approved Plan. The user enters a brief,
-chooses a workflow, and enters a normal agent conversation. Kata manages stage sessions,
-provider-scoped task tools, artifact handoffs, and recovery.
+Make Tasks a user-facing workflow that carries real agent work from intake through planning,
+implementation, verification, and delivery. The user enters a brief, chooses a workflow, and works
+through normal agent conversations while Kata manages stage sessions, artifacts, worktrees,
+progress, gates, evidence, and recovery.
 
-Success means a maintainer can create a Guided task, watch it move through Clarify, Research,
-Design, and Plan, approve or revise the Plan, restart the app during any transition, and return to
-the same task state with the same conversations and artifacts.
+Program completion means a maintainer can create a Guided task, move through Clarify, Research,
+Design, and Plan, approve or revise the Plan, execute it in a managed worktree, verify the exact
+resulting commit, reach Done, and explicitly create a draft pull request. Restarting during any
+transition restores the same task state without duplicate work.
 
-## Relationship to the parent design
+Vertical Slice 1 currently implements this path through approved Plan. The roadmap extends that same
+conversation-first experience to completion without an intervening UI redesign.
 
-This spec amends the [task-workspaces vertical-slices design](/specs/2026-07-28-task-workspaces-vertical-slices-design.md).
-It supersedes the parent document's default UI shape, built-in-template presentation, and slice
-sequencing for the normal task experience:
+## Authority and historical relationship
 
-- The conversation becomes the primary task surface.
-- The session navigator, context-manifest editor, and tabbed database-style workspace leave the
-  default surface.
-- Guided through approved Plan becomes the next product slice.
-- Existing Slice 4 Build work remains implementation infrastructure for a later Implement slice.
+This design supersedes both the [July 3 Task mode design](/specs/2026-07-03-task-mode-design.md)
+and the [July 28 task-workspaces design](/specs/2026-07-28-task-workspaces-vertical-slices-design.md).
+Those documents and their four child plans remain available as implementation history only.
 
-The parent document remains authoritative for durable task ownership, append-only workflow
-versions, repeatable stage occurrences, artifact revisions, context provenance, recovery,
-security, and eventual Build, Verify, and Deliver behavior. Approval of this spec requires a
-follow-up parent-spec and roadmap status update before Build starts.
+The current product direction is:
 
-## Verified current-state constraints
+- The conversation is the primary task surface.
+- Kata automatically manages stage sessions and artifact handoffs.
+- Guided is the implemented workflow through approved Plan.
+- Implement, Verify, and Deliver extend this same product path through new child slice specs.
+- Existing Build/checkpoint code is reusable substrate; its earlier fixture-driven product path is
+  not the current Task mode workflow.
 
-The Build plan must account for these repository facts:
+Durable task ownership, append-only workflow versions, repeatable stage occurrences, artifact
+revisions, context provenance, recovery, and provider-neutral controls remain governing
+architecture constraints.
 
-- `TaskWorkspaceService` currently writes one full-snapshot NDJSON event per command and treats a
-  recorded command id as terminal. A multi-step bootstrap saga needs transactional event,
-  receipt, and outbox persistence before external worktree or orchestration effects run.
-- Task-workspace RPC currently exposes dispatch and subscription on one server environment. The
-  web bootstrap currently subscribes only to the primary environment. Multi-environment task
-  routes require environment-scoped query and subscription management.
-- `thread.create` requires `runtimeMode`, `interactionMode`, and `ModelSelection`. Pre-Implement
-  stages need a server-owned planning execution profile with enforced write protection.
-- Kata already issues provider-scoped, thread-bound MCP credentials to supported adapters. The
-  task workflow can extend that boundary with task-stage tools. Providers without that MCP path,
-  including an in-process provider, need an equivalent native adapter bridge before the Guided
-  flow may offer them.
-- Workflow definitions are already pinned and registered append-only. Historical definitions and
-  task contracts must remain decodable.
+## Verified current state
+
+- Tasks created through the current New task form use the transactional `task-workspace@0.3.0`
+  aggregate, environment-scoped routing,
+  command and operation receipts, outbox recovery, and pinned workflow definitions.
+- The current Guided `guided@0.2.0` path automatically manages Clarify, Research, Design, and Plan
+  conversations and intentionally stops at approved Plan.
+- Task-stage provider tooling currently exposes authorized context and typed stage completion for
+  planning stages. It does not expose Implement progress, checkpoint, amendment, or verification
+  controls to a real agent session.
+- Plan approval applies worktree policy but creates no Implement occurrence or write-enabled
+  session for current tasks.
+- Hierarchical Build phases, checks, checkpoints, amendments, and a shared panel exist from the
+  pre-reset implementation. Their active path uses older task records and deterministic fixture
+  commands; they require integration with the current aggregate and conversation-first surface.
+- Automated Build checks currently use a small server-owned fixture allowlist rather than the
+  repository's real verification commands.
+- Historical workflow definitions and task contracts remain append-only and decodable.
+- Provider-backed manual acceptance of Vertical Slice 1 is in progress; findings are resolved
+  before Guided implementation begins.
 
 ## Product decisions
+
+These decisions govern the current product path. Child slice specs may extend them but must not
+silently replace them.
 
 - Kata owns the workflow templates and terminology.
 - The product keeps **Standard**, **Guided**, and **Freeform**.
@@ -80,9 +97,9 @@ The Build plan must account for these repository facts:
 - Kata task-stage tools provide agent context and accept typed stage output. Users work through the
   normal composer.
 - Clarify, Research, Design, and Plan sessions run under an enforced planning execution profile.
-- Plan approval ends this slice. No Implement occurrence or session starts in this slice.
-- PR #63 and the next verification slice remain paused until this UX reset is implemented and
-  accepted.
+- Plan approval ends Vertical Slice 1. No Implement occurrence or session starts in that slice.
+- The pre-reset Build/checkpoint implementation remains substrate until Vertical Slice 2 integrates
+  it with a real agent-driven Implement occurrence and the current UI.
 
 ## Workflow templates
 
@@ -711,8 +728,10 @@ recovery and persist that resolved selection on the recovered session.
 
 ### Workflow version upgrades
 
-A shipped capability never changes a pinned definition. Phase 4 introduces `standard@0.3.0` and
-`freeform@0.3.0`; Phase 5 introduces `guided@0.3.0`. Each new version pins a matching prompt bundle.
+An implemented capability never changes a pinned definition. Vertical Slice 2 introduces the next
+Guided definition for Implement. Vertical Slice 4 introduces the next Standard and Freeform
+definitions. Each new version pins a matching prompt bundle; child specs select the exact version
+numbers after compatibility review.
 
 A later `task.workflow.upgrade` command carries source version, target version,
 `expectedTaskRevision`, and operation key. The server accepts only a catalog-declared upgrade edge
@@ -731,7 +750,7 @@ inconsistent workflow or prompt mirrors.
 
 ## Contract versions and migration
 
-New records use `task-workspace@0.3.0` and `task-artifact@0.3.0`. New built-in definitions use
+Current form-created records use `task-workspace@0.3.0` and `task-artifact@0.3.0`. Current built-in definitions use
 `standard@0.2.0`, `guided@0.2.0`, and `freeform@0.2.0`, with matching prompt bundle versions.
 Historical definitions stay registered.
 
@@ -769,149 +788,75 @@ Existing manually linked sessions remain readable. Recovery rules are determinis
 
 No historical event log is deleted or rewritten.
 
-## Implementation phases
+## Vertical slice roadmap
 
-### Phase 0: persistence and contract foundation
+| Slice                    | Product outcome                                                                                                                                                                | Status                                                                   | Child plan                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| 1. Guided planning       | Create a Guided task and move through Clarify, Research, Design, and approved Plan in the conversation-first UI.                                                               | **Implemented on `main`; provider-backed manual acceptance in progress** | [Guided planning plan](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md) |
+| 2. Guided implementation | Start a write-enabled Implement session from the approved Plan, execute work in the task worktree, and expose durable progress, checkpoints, and amendments in the current UI. | **Next — needs spec**                                                    | Not written                                                                         |
+| 3. Guided verification   | Verify the resulting commit against explicit acceptance criteria, preserve evidence, and reach Done.                                                                           | **Upcoming — needs spec**                                                | Not written                                                                         |
+| 4. Standard and Freeform | Complete the shorter Standard path and intentional Freeform path using the same runtime and recovery model.                                                                    | **Upcoming — needs spec**                                                | Not written                                                                         |
+| 5. Deliver               | Create and track a draft pull request from a verified task with explicit user approval.                                                                                        | **Upcoming — needs spec**                                                | Not written                                                                         |
 
-- Add version-aware aggregate normalization and NDJSON import.
-- Add transactional task events, snapshots, receipts, indexes, and outbox.
-- Separate event types from command types.
-- Add task revision, occurrence, gate, bootstrap, artifact provenance, and canonical repository
-  states.
-- Add crash-boundary and historical replay tests before external orchestration work.
+Only Slice 1 is implemented in the current product path. Finish its provider-backed acceptance
+and fixes before Slice 2 begins. Slice 2 is the sole next planning target.
+Each remaining row requires a dated, approved child spec with its own acceptance criteria before
+implementation begins.
 
-### Phase 1: workflow catalog, creation, and environment routing
-
-- Create one shared versioned workflow catalog and server/web parity tests.
-- Rebuild `TaskWorkspaceNewView` around the specified fields and template capability labels.
-- Dispatch create through the selected environment and resolve repositories server-side.
-- Add environment-scoped task query, subscription manager, store partitions, canonical route, and
-  compatibility fanout.
-- Implement Starting, Ready, Failed, offline, and Needs repair surfaces.
-
-### Phase 2: task-stage bridge and bootstrap saga
-
-- Add task-stage MCP tools and the provider-neutral native bridge interface.
-- Advertise Guided only for provider instances with task-stage execution controls and completion transport.
-- Implement deterministic worktree, thread, turn, and provider-runtime reconciliation.
-- Compose `ChatView` and the compact task panel at `/tasks/$environmentId/$taskId`.
-- Verify retry, reload, reconnect, process restart, and crash injection.
-
-### Phase 3: Guided Clarify through approved Plan
-
-- Implement typed completion proposals and turn-settlement reactor.
-- Commit stage artifacts and queue atomic handoffs.
-- Implement Plan gate state machine, continuation conversations, and post-approval worktree states.
-- Remove manual stage editors, session-link forms, and manifest controls from the default surface.
-- Complete browser, E2E, and manual acceptance for the Guided path.
-
-### Phase 4: Standard and Freeform
-
-- Add `standard@0.3.0` and `freeform@0.3.0` with matching prompt bundles.
-- Ship Standard's shorter automatic path and Freeform explicit stage/artifact actions.
-- Implement the catalog-declared `task.workflow.upgrade` edges and eligibility checks for preview
-  tasks.
-- Change the general creation default to Standard after its acceptance criteria pass.
-
-### Phase 5: Implement, Verify, and Deliver
-
-- Add `guided@0.3.0` and its explicit approved-Plan upgrade edge.
-- Place the Slice 4 Build/checkpoint engine behind Implement.
-- Add Verify evidence and post-Verify draft PR delivery in separately approved slices.
+The pre-reset [Slices 1–4](/specs/2026-07-28-task-workspaces-vertical-slices-design.md) delivered
+useful persistence, artifact, workflow, and Build/checkpoint substrate. They do not define current
+product sequencing.
 
 ## Acceptance criteria
 
-The first Guided-to-approved-Plan slice passes when every criterion has E2E coverage and the
-required manual evidence:
+Task mode is complete when the cumulative vertical slices satisfy these program-level criteria.
+Each child spec selects a bounded subset and adds slice-specific checks.
 
-1. **AC-01, creation:** A user can enter an inline brief, title, editable slug, repository, base
-   ref, worktree timing, workflow, eligible coding agent, model, and available model options, then
-   create a task.
-2. **AC-02, template honesty:** Guided is the default and is labeled available through approved
-   Plan. Standard and Freeform are labeled preview shells before creation and expose no deferred
-   controls afterward. Direct unsupported completion or stage-entry commands receive a typed
-   server rejection.
-3. **AC-03, stable identity:** The edited slug becomes the new task id and canonical
-   `/tasks/$environmentId/$taskId` URL. Reload and every stage handoff preserve that URL.
-4. **AC-04, authoritative intake:** The persisted task contains the server environment,
-   server-resolved repository path, pinned base commit, inline brief, worktree policy, and exact
-   `ModelSelection`. Invalid slugs, oversized briefs, refs, model options, unsupported Guided
-   providers, unsafe source state, and unauthorized repositories fail before task creation.
-5. **AC-05, idempotent commands:** Repeated submission of one create operation returns one task and
-   one canonical route. Replaying one accepted retry command after its target fails again leaves
-   the attempt count unchanged. Reusing a command or operation key with different payload fails
-   visibly.
-6. **AC-06, automatic start and planning-root safety:** Guided creation reaches a Clarify
-   conversation automatically. Now provisions first; Later and Never require a clean pinned source.
-   Every policy blocks turns and completion on planning-root drift and resumes the same occurrence
-   after the root is restored.
-7. **AC-07, planning and tool safety:** Clarify, Research, Design, and Plan run with trusted
-   versioned instructions, the server-owned task-stage execution profile, and approval-required
-   runtime policy. A provider missing any capability cannot be selected for Guided. Forced
-   task-tool lease expiry renews or recovers before the next turn, and a superseded session
-   cannot invoke task-stage tools.
-8. **AC-08, conversation-first layout:** The active conversation is the primary surface. The task
-   panel shows stage, artifact, repository, and next action without session, manifest, token,
-   thread-id, fork, fixture, or empty future-stage controls.
-9. **AC-09, typed stage completion:** The task-stage bridge accepts one valid proposal per active
-   turn, waits for provider turn completion, and reconciles an unsettled proposal after restart. It
-   shows a recoverable error or completion-needed notice for conflicting or malformed output,
-   missing completion, aborted turns, tool failure, or a stale thread.
-10. **AC-10, atomic handoffs:** Clarify, Research, Design, and Plan each produce a readable artifact.
-    The Plan artifact includes scope, implementation phases, acceptance criteria, risks, and
-    verification. Successful early-stage completion changes the active conversation automatically.
-    A failed target bootstrap preserves the completed source artifact and retries the same target
-    occurrence.
-11. **AC-11, Plan gate:** Plan output opens approval for its exact occurrence and revision. A second
-    Plan proposal is rejected while that gate is open. Implement controls and sessions remain
-    absent before and after approval in this slice.
-12. **AC-12, request changes:** Request changes records feedback, preserves each reviewed Plan,
-    starts one continuation occurrence, and rejects approval until a new revision reopens the gate.
-    Two consecutive Request changes cycles allocate distinct occurrences and remain recoverable.
-13. **AC-13, approved post-state:** Approval records server time and resolved actor, keeps current
-    stage `plan` with a completed occurrence, renders the approved Plan conversation read-only, and
-    applies the documented Now/Later/Never worktree action without creating Implement work. A Never
-    task can change policy only after approval; either allowed value provisions immediately. Direct
-    navigation to the underlying chat route cannot send another turn to the completed Plan session.
-14. **AC-14, context privacy and provenance:** Each handoff uses trusted versioned instructions and
-    the authorized untrusted brief, feedback, and artifact selection. The visible conversation and
-    task-tool work log contain concise states with no manifest serialization, context payload,
-    token budget, trusted prompt, or cross-task content.
-15. **AC-15, environment routing:** Tasks from two connected environments coexist in the sidebar,
-    dispatch through their own connections, and open the correct conversation. The compatibility
-    route redirects on one match and shows an environment chooser on duplicate ids.
-16. **AC-16, recovery:** Reload, reconnect, server restart, and injected failure during worktree,
-    thread, or turn bootstrap restore the same task, operation, occurrence, gate, and artifact
-    state without duplicate worktrees, sessions, turns, or stage artifacts.
-17. **AC-17, historical compatibility:** Imported `@0.1.0` and `@0.2.0` tasks decode and render with
-    historical workflow pins. Zero, one, and multiple-primary cases follow the documented recovery
-    rules. Missing repositories show Needs repair.
-18. **AC-18, presentation:** Creation, sidebar, task panel, artifacts, browser tests, and E2E use
-    Clarify, Implement, and Done presentation labels. Fixture text and raw Questions/Build control
-    copy stay absent from the normal Guided surface.
-19. **AC-19, race safety:** Concurrent approval and Request changes accept exactly one command.
-    Stale task revisions, stale Plan revisions, superseded task-stage credentials, and altered
-    command replays fail visibly without partial task, gate, worktree, session, or artifact state.
+1. **Creation and identity:** A user can create a task through the product form with an inline
+   brief, editable slug, repository, base ref, worktree policy, workflow, eligible provider, model,
+   and model options. The canonical task URL remains stable for the task lifetime.
+2. **Guided planning:** Guided automatically manages Clarify, Research, Design, and Plan
+   conversations, persists readable stage artifacts, and carries authorized context between stages.
+3. **Plan gate:** Plan approval and repeated Request changes cycles preserve reviewed revisions,
+   reject stale actions, and recover without duplicate occurrences or sessions.
+4. **Guided implementation:** Plan approval can start one write-enabled Implement occurrence in the
+   managed task worktree. A real provider executes the approved Plan and records durable progress.
+5. **Implementation control:** The current product surface exposes phase and work-item progress,
+   checks, checkpoints, failures, reviewed Plan amendments, targeted invalidation, and resume state
+   without requiring fixture-only commands or the pre-reset workspace UI.
+6. **Guided verification:** Verify evaluates explicit acceptance criteria against the exact resulting
+   commit, retains inspectable evidence, supports affected-result reruns, and marks stale evidence
+   when the commit changes.
+7. **Done:** A task reaches Done only after required verification passes or an authorized human
+   records an explicit blocked or waived outcome with evidence.
+8. **Workflow completion:** Standard and Freeform provide their documented paths using the same
+   task, provider, worktree, artifact, recovery, and verification model as Guided.
+9. **Delivery:** A verified task can create and track a draft pull request only after explicit user
+   approval; delivery failure preserves the verified task and exposes retry.
+10. **Recovery and idempotency:** Reload, reconnect, process restart, response loss, and retried
+    commands preserve task, operation, stage, session, artifact, worktree, gate, and evidence
+    identity without duplicate side effects.
+11. **Safety and authority:** The server owns repository resolution, execution policy, task-tool
+    authorization, workflow transitions, actor identity, and audit time. Unsupported providers,
+    stale sessions, source drift, and malformed or conflicting commands fail visibly.
+12. **Compatibility and proof:** Historical task records remain decodable, and one form-driven
+    desktop E2E scenario accumulates coverage from creation through Done and Deliver as slices ship.
 
 ## Testing and verification
 
-### Acceptance coverage matrix
+### Vertical slice coverage
 
-| E2E scenario                                      | Acceptance criteria               |
-| ------------------------------------------------- | --------------------------------- |
-| Guided creation and bootstrap                     | AC-01 through AC-08               |
-| Guided completion and automatic handoffs          | AC-03, AC-07 through AC-10, AC-14 |
-| Plan approval and repeated changes                | AC-11 through AC-14, AC-19        |
-| Worktree policy, source drift, and restart        | AC-05, AC-06, AC-13, AC-16, AC-19 |
-| Credential expiry and stale task-stage controls   | AC-07, AC-09, AC-16, AC-19        |
-| Multi-environment routing and compatibility route | AC-03, AC-15                      |
-| Historical import and recovery                    | AC-16, AC-17                      |
-| Preview enforcement, vocabulary, hidden internals | AC-02, AC-08, AC-14, AC-18        |
+| Vertical slice           | Required product proof                                                                                                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Guided planning       | Form-created task reaches approved Plan through real provider conversations; reload and Plan revision cycles preserve identity.                                        |
+| 2. Guided implementation | Approved Plan starts a real write-enabled Implement session; progress, checkpoints, failures, amendments, and restart recovery operate through the current task route. |
+| 3. Guided verification   | The exact resulting commit is verified against task acceptance criteria and reaches Done with inspectable evidence.                                                    |
+| 4. Standard and Freeform | Both workflows complete their documented paths through the same current contracts and UI.                                                                              |
+| 5. Deliver               | A Done task creates and tracks a draft pull request after explicit approval and recovers from delivery failure.                                                        |
 
-The scenarios live under `e2e/tests/task-workspaces/`, compose reusable helpers from
-`e2e/src/flows/`, use the `@task-workspaces` tag, and exercise real application services. The
-provider-backed Guided scenario uses the E2E agent-provider prerequisites and fails loudly when
-credentials are absent.
+The cumulative scenario lives under `e2e/tests/task-workspaces/`, uses the `@task-workspaces` tag,
+starts through the New task form, and exercises real application services. Direct-dispatch tests
+for historical records remain compatibility tests and do not count as current product-path proof.
 
 ### Lower-level verification
 
@@ -930,9 +875,8 @@ credentials are absent.
   selection, preview-shell enforcement, and cross-task rejection.
 - Web browser tests cover template capabilities, route states, responsive conversation/panel
   composition, task retargeting, approved read-only state, and presentation vocabulary.
-- Existing lower-level session, manifest, comment, Build, and artifact tests remain runtime
-  regression coverage. UI tests for manual construction move to an advanced-inspection suite or
-  are removed when the surface disappears.
+- Existing lower-level session, manifest, comment, Build, and artifact tests remain compatibility
+  and substrate coverage. They do not substitute for form-driven current-product E2E proof.
 
 ### Manual acceptance and repository gates
 
@@ -940,7 +884,7 @@ Manual validation uses the running app and `playwright-cli` to capture snapshots
 each Guided handoff, malformed completion recovery, Plan request changes, approval, each worktree
 policy, multi-environment routing, restart recovery, and hidden internal controls.
 
-Required commands before Build completion:
+Required commands before completing each child slice:
 
 ```bash
 vp check
@@ -955,49 +899,49 @@ Run the focused Guided flow headed during UAT.
 
 ## Out of scope
 
-- GitHub, Linear, Jira, and other external source adapters.
+- GitHub, Linear, Jira, and other external source adapters beyond the Deliver slice.
 - Slack notifications.
-- Standard automatic progression and Freeform explicit stage entry.
-- Implement sessions, Build UI integration, Verify evidence, and draft PR delivery.
 - User-authored workflow definitions.
 - Advanced session forking, reviewer/debugging roles, and manual context selection.
-- Mobile-native task workspace UI.
+- Native mobile Task mode UI.
+- A visual redesign before the current conversation-first workflow reaches Done end to end.
 
 ## Risks and mitigations
 
-- **Transactional migration expands the foundation.** Complete Phase 0 and crash tests before any
-  provider or UI automation.
-- **Provider task tools differ by runtime.** Use one `TaskStageBridge` schema, advertise explicit
-  adapter capabilities, and keep unsupported providers out of Guided selection.
-- **Task-tool credentials can expire during long work.** Renew before task turns, bound turn
-  duration below the lease, revalidate every invocation, and recover the same occurrence on
-  rotation failure.
-- **Plan mode support differs by provider.** Require trusted instruction and enforced planning
-  capabilities, then pair Plan interaction mode with approval-required runtime policy.
-- **Automatic handoffs cross event stores.** Persist deterministic outbox identities and reconcile
-  orchestration/provider projections before retrying.
-- **Old tasks contain partial associations.** Import version-aware, preserve history, and expose
-  explicit repair and conflict states.
-- **Context selection can leak or misattribute content.** Keep trusted instructions in
-  provider-native channels, classify task content as untrusted, and authorize every manifest
-  reference to the target task, environment, session, occurrence, and artifact revision.
-- **Planning roots can drift during planning.** Revalidate before turns, completion, and Later
-  provisioning; accept no artifact produced against a changed fingerprint.
-- **The Build PR contains useful work with an internal-facing surface.** Keep its reducer and
-  contracts as infrastructure and integrate them only through the later Implement slice.
+- **Historical infrastructure can be mistaken for shipped behavior.** The roadmap and acceptance
+  evidence distinguish current form-created tasks from direct-dispatch compatibility fixtures.
+- **The old Build projection does not match the current occurrence model.** Guided implementation
+  receives a new child spec and integrates substrate through current transactional operations,
+  sessions, and recovery boundaries.
+- **A real Implement agent needs more authority than planning stages.** The child spec defines a
+  least-privilege write-enabled execution profile and typed progress/control tools before enabling
+  the transition.
+- **Repository checks may execute unsafe or ambiguous commands.** Verification policy remains
+  server-owned, allowlisted or explicitly approved, observable, and bound to the task worktree.
+- **Long implementation turns can outlive credentials or connections.** Renew leases before turns,
+  persist deterministic identities, and reconcile provider state before retrying.
+- **Source or worktree drift can invalidate Plan assumptions.** Revalidate at stage boundaries and
+  fail visibly without accepting artifacts or progress against an unexpected root.
+- **Evidence can refer to the wrong code.** Build and Verify records bind to observed commit SHAs;
+  later changes mark prior results stale.
+- **UI redesign can obscure functional gaps.** Keep the current conversation-first shell until the
+  cumulative Guided path reaches Done and passes provider-backed acceptance.
 
-## Implementation outcome
+## Delivery status
 
-- Phases 0 through 3 are implemented on the task-workspaces slice branch.
-- Transactional task persistence, command-first replay, durable completion proposals, trusted task
-  instructions, renewable task-tool credentials, server-owned task-stage execution, source-state
-  checks, exact post-approval state, and environment-scoped routing are included.
-- Preserve historical task/workspace/artifact/session data and append-only workflow pins.
-- Use the existing `ChatView`, environment connection runtime, orchestration command receipts,
-  provider runtime events, and Kata MCP credential boundary.
-- Keep Standard and Freeform as visibly limited preview shells until Phase 4.
-- Keep manual session, manifest, fork, raw task-control, and fixture controls outside the default
-  UI.
-- Keep PR #63 and Slice 5 paused as product milestones until Guided passes all acceptance criteria
-  and manual UAT.
-- Update the parent spec and roadmap after this spec is approved and before Build begins.
+Implemented in Vertical Slice 1:
+
+- transactional task persistence, command and operation receipts, and outbox recovery;
+- environment-scoped creation and canonical task routing;
+- Guided Clarify, Research, Design, Plan, request-changes, and approval occurrences;
+- trusted provider task-stage instructions and typed stage completion;
+- worktree timing and planning-root safety;
+- the conversation-first task surface.
+
+Retained as substrate for later slices:
+
+- hierarchical Build phases, work items, checks, checkpoints, amendments, and restart projection;
+- artifact/session/context-manifest infrastructure from the pre-reset implementation.
+
+The current product path ends at approved Plan. Vertical Slice 2 must connect that path to a real
+agent-driven Implement occurrence without restoring the pre-reset UI architecture.

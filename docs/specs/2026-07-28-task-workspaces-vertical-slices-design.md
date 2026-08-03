@@ -2,7 +2,8 @@
 type: Spec
 title: "Task workspaces — artifact-driven workflows delivered as autonomous vertical slices"
 description: "Replacement architecture for Task Mode: tasks are versioned workspaces containing repository bindings, sessions, artifacts, comments, workflow runs, verification evidence, source context, and delivery state; implementation proceeds through independently specified vertical slices."
-status: Approved
+status: Superseded
+superseded_by: /specs/2026-08-01-task-mode-design.md
 tags:
   [
     specs,
@@ -16,27 +17,20 @@ tags:
     web,
     desktop,
   ]
-timestamp: 2026-07-28T00:00:00-07:00
-supersedes_on_approval: /specs/2026-07-03-task-mode-design.md
+timestamp: 2026-08-03T22:00:00Z
+superseded: /specs/2026-07-03-task-mode-design.md
 ---
 
 # Task workspaces — artifact-driven workflows delivered as autonomous vertical slices
 
 ## Status
 
-**Approved.**
+**Superseded** by the authoritative
+[Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) design.
 
-This spec supersedes
-[Task mode — workflow-driven tasks with a live plan artifact panel](/specs/2026-07-03-task-mode-design.md).
-
-This document is the parent architecture and delivery roadmap. It does **not** authorize a
-single large implementation. Every vertical slice defined below must receive its own dated
-child spec before code changes begin. Approval of this parent spec delegates child-spec
-approval to an autonomous agent only under the rules in
-[Autonomous slice delivery contract](#autonomous-slice-delivery-contract).
-
-Slice 1 is merged (`a660027c` / PR #51). Task-workspace contracts from Slice 1 are no longer
-provisional; later slices extend them through child specs.
+This document and its Slices 1–4 remain historical implementation records for persistence,
+artifacts, workflow definitions, and Build/checkpoint substrate. They do not define current
+product behavior, sequencing, or the next slice.
 
 ## Goal
 

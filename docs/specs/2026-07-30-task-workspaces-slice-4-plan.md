@@ -2,7 +2,8 @@
 type: Spec
 title: "Task workspaces Slice 4 — Hierarchical Build, checkpoints, and plan amendments"
 description: "Child implementation plan for the fourth autonomous vertical slice: make Build hierarchical, resumable, checkpointed, and explicit about reviewed plan amendments when implementation reality diverges from the approved plan."
-status: Approved
+status: Implemented
+roadmap_status: Historical substrate
 approved_at: 2026-07-30T00:00:00Z
 tags: [specs, task-workspaces, build, checkpoints, amendments, recovery, web, desktop]
 timestamp: 2026-07-30T00:00:00Z
@@ -14,13 +15,14 @@ base_sha: cf95a03c9c658d3677fc85d46d486a4ecfda57ae
 
 ## Status
 
-**Approved.** This child spec is based on the stabilized Slice 3 result. Delegated approval
-applies under the parent autonomous-slice contract: the scope stays inside Slice 4, no locked
-parent decision changes, and no unresolved product decision remains.
+**Historical substrate; Implemented.** PR [#63](https://github.com/gannonh/kata-code/pull/63)
+merged the Build/checkpoint implementation. The later conversation-first Task mode reset replaced
+its product path before current-task integration, so this document no longer defines roadmap
+sequence or current UI behavior.
 
-The parent spec delegates child-slice planning through a draft PR, but does not authorize
-merging or human acceptance. This plan stays inside the parent Slice 4 boundary and does not
-revise a locked parent decision.
+The authoritative roadmap is [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md).
+Its upcoming Guided implementation slice may reuse this work only through a newly approved child
+spec aligned with the current transactional task model and conversation-first surface.
 
 ### Delegated approval record
 
