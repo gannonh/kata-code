@@ -2,7 +2,8 @@
 type: Spec
 title: "Marketing task workflow screenshots"
 description: "Generate repeatable desktop E2E screenshots that present Kata Code's task-driven workflow as publishable marketing frames."
-status: Draft
+status: Approved
+approved_at: 2026-08-03T02:03:44Z
 tags: [marketing, screenshots, task-workspaces, e2e, playwright]
 timestamp: 2026-08-02T00:00:00Z
 ---
@@ -11,7 +12,7 @@ timestamp: 2026-08-02T00:00:00Z
 
 ## Status
 
-Draft
+Approved
 
 ## Goal
 
