@@ -21,6 +21,7 @@ import {
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -410,13 +411,25 @@ describe("TaskWorkspaceService", () => {
             }),
           ),
         );
+        yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.build.work-item.set-status",
+              commandId: CommandId.make("command-build-complete"),
+              taskId,
+              createdAt: now(10),
+              workItemId: "work-item-1",
+              status: "completed",
+            }),
+          ),
+        );
         const built = yield* runtime.runPromise(
           service.dispatch(
             command({
               type: "task.fixture.apply",
               commandId: CommandId.make("command-fixture"),
               taskId,
-              createdAt: now(10),
+              createdAt: now(11),
             }),
           ),
         );
@@ -2192,6 +2205,48 @@ describe("TaskWorkspaceService", () => {
         const duplicateStart = yield* dispatch(phaseStart);
         expect(duplicateStart.sequence).toBe(started.sequence);
 
+        // A work item whose dependencies are unmet cannot start: phase-1
+        // work-item-2 depends on work-item-1, which is still pending here.
+        const dependencyGatedStart = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.build.work-item.set-status",
+              commandId: CommandId.make("s4-dependency-gated-start"),
+              taskId: slice4TaskId,
+              createdAt: now(6),
+              workItemId: "work-item-2",
+              status: "running",
+            }),
+          ),
+        );
+        expect(dependencyGatedStart._tag).toBe("Failure");
+        if (dependencyGatedStart._tag === "Failure") {
+          expect((Cause.squash(dependencyGatedStart.cause) as Error).message).toContain(
+            "has incomplete dependencies",
+          );
+        }
+
+        // A work item in a later phase cannot start while an earlier phase is
+        // still active: the predecessor-phase gate must reject it.
+        const predecessorGatedStart = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.build.work-item.set-status",
+              commandId: CommandId.make("s4-predecessor-gated-start"),
+              taskId: slice4TaskId,
+              createdAt: now(6),
+              workItemId: "phase-2-work-item-1",
+              status: "running",
+            }),
+          ),
+        );
+        expect(predecessorGatedStart._tag).toBe("Failure");
+        if (predecessorGatedStart._tag === "Failure") {
+          expect((Cause.squash(predecessorGatedStart.cause) as Error).message).toContain(
+            "is active; finish it before starting",
+          );
+        }
+
         yield* dispatch(
           command({
             type: "task.build.work-item.set-status",
@@ -2323,6 +2378,13 @@ describe("TaskWorkspaceService", () => {
           ),
         );
         expect(failureContinue._tag).toBe("Failure");
+        if (failureContinue._tag === "Failure") {
+          // Invalid checkpoint continuation must be rejected by the completed-phase
+          // guard, not just by the later checkpoint-status check.
+          expect((Cause.squash(failureContinue.cause) as Error).message).toContain(
+            "can continue only after its phase completes successfully",
+          );
+        }
         const unrelatedDependentCheck = yield* runtime.runPromiseExit(
           service.dispatch(
             command({
@@ -2339,11 +2401,18 @@ describe("TaskWorkspaceService", () => {
               proposedChanges: "Use the corrected fixture content.",
               affectedPhaseIds: ["phase-2"],
               affectedWorkItemIds: ["phase-2-work-item-1"],
-              dependentCheckIds: ["phase-1-check-1"],
+              dependentCheckIds: ["phase-2-check-1", "phase-1-check-1"],
             }),
           ),
         );
         expect(unrelatedDependentCheck._tag).toBe("Failure");
+        if (unrelatedDependentCheck._tag === "Failure") {
+          // Cross-phase dependent checks must be rejected by the amendment
+          // validator, not accepted silently.
+          expect((Cause.squash(unrelatedDependentCheck.cause) as Error).message).toContain(
+            "must belong to an affected phase and work item",
+          );
+        }
         const fixtureBypass = yield* runtime.runPromiseExit(
           service.dispatch(
             command({
@@ -2494,6 +2563,260 @@ describe("TaskWorkspaceService", () => {
         expect(completed.task.build.checks.at(-1)?.status).toBe("pass");
         expect(completed.task.build.phases[1]?.status).toBe("completed");
         yield* restarted.dispose;
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "recovers an approved amendment even when no failure checkpoint ever existed",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-s4-recovery-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const dispatch = <T extends TaskWorkspaceCommand>(value: T) =>
+          runtime.runPromise(service.dispatch(value));
+        const recoveryTaskId = TaskWorkspaceId.make("slice-4-recovery");
+
+        yield* dispatch(
+          command({
+            type: "task.create",
+            commandId: CommandId.make("rec-create"),
+            taskId: recoveryTaskId,
+            createdAt: now(1),
+            title: "Recovery Build",
+            projectId,
+            workspaceRoot: repoRoot,
+            baseRef: "main",
+            preset: "standard",
+            approvalPolicy: "before-build",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.artifact.upsert",
+            commandId: CommandId.make("rec-questions"),
+            taskId: recoveryTaskId,
+            createdAt: now(2),
+            kind: "questions",
+            title: "Questions",
+            markdown: "# Questions\n\nNo blockers.",
+            sourceSessionId: null,
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.questions.complete",
+            commandId: CommandId.make("rec-questions-complete"),
+            taskId: recoveryTaskId,
+            createdAt: now(3),
+          }),
+        );
+        // Both phases use `Checkpoint policy: never`, so a failed automated
+        // check creates no waiting checkpoint at all (Greptile P1 repro).
+        const planMarkdown = [
+          "# Plan",
+          "",
+          "## Phase First",
+          "Checkpoint policy: never",
+          "",
+          "### Work item First item",
+          "- Check: fixture.mismatch",
+          "",
+          "## Phase Second",
+          "Checkpoint policy: never",
+          "",
+          "### Work item Second item",
+          "- Check: fixture.pass",
+        ].join("\n");
+        yield* dispatch(
+          command({
+            type: "task.artifact.upsert",
+            commandId: CommandId.make("rec-plan"),
+            taskId: recoveryTaskId,
+            createdAt: now(4),
+            kind: "plan",
+            title: "Plan",
+            markdown: planMarkdown,
+            sourceSessionId: null,
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.plan.approve",
+            commandId: CommandId.make("rec-plan-approve"),
+            taskId: recoveryTaskId,
+            createdAt: now(5),
+          }),
+        );
+
+        yield* dispatch(
+          command({
+            type: "task.build.phase.start",
+            commandId: CommandId.make("rec-phase-start"),
+            taskId: recoveryTaskId,
+            createdAt: now(6),
+            phaseId: "phase-1",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("rec-work-running"),
+            taskId: recoveryTaskId,
+            createdAt: now(7),
+            workItemId: "work-item-1",
+            status: "running",
+          }),
+        );
+        const failed = yield* dispatch(
+          command({
+            type: "task.build.check.run",
+            commandId: CommandId.make("rec-check-fail"),
+            taskId: recoveryTaskId,
+            createdAt: now(8),
+            checkId: "phase-1-check-1",
+          }),
+        );
+        expect(failed.task.build.phases[0]?.status).toBe("blocked");
+        // `Checkpoint policy: never` must not fabricate a failure checkpoint.
+        expect(failed.task.build.checkpoints).toHaveLength(0);
+
+        // Request an amendment that invalidates the triggering phase AND the
+        // downstream phase; resume must restore every invalidated phase.
+        yield* dispatch(
+          command({
+            type: "task.amendment.request",
+            commandId: CommandId.make("rec-amendment-request"),
+            taskId: recoveryTaskId,
+            createdAt: now(9),
+            phaseId: "phase-1",
+            workItemId: "work-item-1",
+            checkId: "phase-1-check-1",
+            expected: "fixture content",
+            found: "mismatched content",
+            impact: "The implementation fixture cannot pass.",
+            proposedChanges: "Use the corrected fixture content.",
+            affectedPhaseIds: ["phase-1", "phase-2"],
+            affectedWorkItemIds: ["work-item-1", "phase-2-work-item-1"],
+            dependentCheckIds: ["phase-1-check-1", "phase-2-check-1"],
+          }),
+        );
+        const approved = yield* dispatch(
+          command({
+            type: "task.amendment.approve",
+            commandId: CommandId.make("rec-amendment-approve"),
+            taskId: recoveryTaskId,
+            createdAt: now(10),
+            amendmentId: "amendment-1",
+            approvedBy: "operator",
+          }),
+        );
+        expect(approved.task.build.phases.map((phase) => phase.status)).toEqual([
+          "invalidated",
+          "invalidated",
+        ]);
+        // Approval materializes a waiting recovery checkpoint per affected
+        // phase so the build is never left without a resume path.
+        expect(approved.task.build.checkpoints.map((c) => [c.phaseId, c.status])).toEqual([
+          ["phase-1", "waiting"],
+          ["phase-2", "waiting"],
+        ]);
+
+        // The recovery manifest selects the whole unmarked Plan revision
+        // (whole-revision semantics) instead of an empty block selection.
+        const manifest = yield* dispatch(
+          command({
+            type: "task.context-manifest.create",
+            commandId: CommandId.make("rec-manifest"),
+            taskId: recoveryTaskId,
+            createdAt: now(10),
+            checkpointId: "checkpoint-1",
+            artifactRefs: [{ kind: "plan", revision: 2, blockIds: [] }],
+            notes: "Recovery context for the amended Plan.",
+            sessionId: null,
+            budget: null,
+          }),
+        );
+        expect(manifest.task.contextManifests.at(-1)?.tokenEstimate).toBeGreaterThan(0);
+
+        const resumed = yield* dispatch(
+          command({
+            type: "task.build.resume",
+            commandId: CommandId.make("rec-resume"),
+            taskId: recoveryTaskId,
+            createdAt: now(11),
+            checkpointId: "checkpoint-1",
+            threadId: ThreadId.make("thread-rec-resumed"),
+            contextManifestId: manifest.task.contextManifests.at(-1)!.id,
+          }),
+        );
+        // The resumed phase runs again and the downstream invalidated phase is
+        // restored to pending so startNextPhase can activate it.
+        expect(resumed.task.build.phases[0]?.status).toBe("running");
+        expect(resumed.task.build.phases[1]?.status).toBe("pending");
+        expect(resumed.task.build.phases[0]?.workItems[0]?.status).toBe("pending");
+
+        yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("rec-work-running-2"),
+            taskId: recoveryTaskId,
+            createdAt: now(12),
+            workItemId: "work-item-1",
+            status: "running",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.build.check.run",
+            commandId: CommandId.make("rec-check-pass"),
+            taskId: recoveryTaskId,
+            createdAt: now(13),
+            checkId: "phase-1-check-1",
+          }),
+        );
+        const firstDone = yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("rec-work-complete"),
+            taskId: recoveryTaskId,
+            createdAt: now(14),
+            workItemId: "work-item-1",
+            status: "completed",
+          }),
+        );
+        expect(firstDone.task.build.phases[0]?.status).toBe("completed");
+        expect(firstDone.task.build.phases[1]?.status).toBe("running");
+        yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("rec-work-2-running"),
+            taskId: recoveryTaskId,
+            createdAt: now(15),
+            workItemId: "phase-2-work-item-1",
+            status: "running",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.build.check.run",
+            commandId: CommandId.make("rec-check-2-pass"),
+            taskId: recoveryTaskId,
+            createdAt: now(16),
+            checkId: "phase-2-check-1",
+          }),
+        );
+        const secondDone = yield* dispatch(
+          command({
+            type: "task.build.work-item.set-status",
+            commandId: CommandId.make("rec-work-2-complete"),
+            taskId: recoveryTaskId,
+            createdAt: now(17),
+            workItemId: "phase-2-work-item-1",
+            status: "completed",
+          }),
+        );
+        expect(secondDone.task.build.phases[1]?.status).toBe("completed");
       }).pipe(Effect.scoped),
     30_000,
   );

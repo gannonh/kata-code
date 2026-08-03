@@ -493,6 +493,11 @@ test.describe(`Task workspaces Slice 2 ${E2E_TAGS.taskWorkspaces}`, () => {
     await appWindow.getByTestId("task-complete-questions").click();
     await appWindow.getByTestId("task-save-plan").click();
     await appWindow.getByTestId("task-approve-plan").click();
+    // The fixture adapter no longer bypasses phase completion: complete the
+    // default phase tree first.
+    await appWindow.getByTestId("task-build-phase-start-phase-1").click();
+    await appWindow.getByTestId("task-build-work-start-work-item-1").click();
+    await appWindow.getByTestId("task-build-work-complete-work-item-1").click();
     await appWindow.getByTestId("task-apply-fixture").click();
     await appWindow.getByTestId("task-run-verification").click();
     await appWindow.getByTestId("task-signoff").click();

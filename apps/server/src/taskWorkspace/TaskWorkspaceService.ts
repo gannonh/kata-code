@@ -274,6 +274,13 @@ function selectedBlockTexts(
     const artifact = task.artifacts.find((candidate) => candidate.kind === ref.kind);
     const revision = artifact?.revisions.find((candidate) => candidate.revision === ref.revision);
     if (!revision) continue;
+    if (ref.blockIds.length === 0) {
+      // Whole-revision selection: an artifact revision with no `kata:block`
+      // markers (e.g. DEFAULT_PLAN or a fixture E2E plan) still contributes
+      // its full text so continuation sessions never link to an empty manifest.
+      texts.push(revision.markdown);
+      continue;
+    }
     for (const blockId of ref.blockIds) {
       const entry = revision.blockIndex.find((candidate) => candidate.id === blockId);
       if (!entry) continue;
@@ -297,7 +304,9 @@ function summaryMarkdown(
   budget: number,
 ): string {
   const provenance = refs.flatMap((ref) =>
-    ref.blockIds.map((blockId) => `${ref.kind}@${ref.revision}#${blockId}`),
+    ref.blockIds.length === 0
+      ? [`${ref.kind}@${ref.revision} (whole revision)`]
+      : ref.blockIds.map((blockId) => `${ref.kind}@${ref.revision}#${blockId}`),
   );
   const lines = [
     `Compressed ${blockTexts.length} block(s) for ${manifestId}: ${provenance.join(", ")}.`,
@@ -306,7 +315,8 @@ function summaryMarkdown(
   let cursor = 0;
   for (const ref of refs) {
     lines.push(`## ${ref.kind} revision ${ref.revision}`, "");
-    for (const blockId of ref.blockIds) {
+    const blockIds = ref.blockIds.length === 0 ? ["(whole revision)"] : ref.blockIds;
+    for (const blockId of blockIds) {
       const text = (blockTexts[cursor] ?? "").trim().replace(/\s+/gu, " ");
       cursor += 1;
       lines.push(`- \`${blockId}\`: ${text.slice(0, 200)}${text.length > 200 ? "…" : ""}`);
@@ -894,6 +904,7 @@ function appendCheckpoint(
   build: TaskWorkspace["build"],
   phase: TaskWorkspaceBuildPhase,
   now: string,
+  reasonOverride?: string,
 ): TaskWorkspace["build"] {
   if (
     build.checkpoints.some(
@@ -905,7 +916,7 @@ function appendCheckpoint(
   const checkpoint: TaskWorkspaceBuildCheckpoint = {
     id: `checkpoint-${build.checkpoints.length + 1}`,
     phaseId: phase.id,
-    reason: checkpointReason(phase.checkpointPolicy),
+    reason: reasonOverride ?? checkpointReason(phase.checkpointPolicy),
     status: "waiting",
     checkIds: phase.checkIds,
     continuationSessionId: null,
@@ -3205,9 +3216,31 @@ export const make = Effect.gen(function* () {
                 : check,
             ),
           };
+          // Every invalidated phase must expose a waiting checkpoint so the
+          // approved amendment can be recovered. A failed check in a phase with
+          // `Checkpoint policy: never` never created one, so approve materializes
+          // an amendment recovery checkpoint for any affected phase without one.
+          let recoveryBuild: TaskWorkspace["build"] = invalidatedBuild;
+          for (const phaseId of amendment.affectedPhaseIds) {
+            const affectedPhase = recoveryBuild.phases.find((phase) => phase.id === phaseId);
+            if (!affectedPhase) continue;
+            if (
+              recoveryBuild.checkpoints.some(
+                (checkpoint) => checkpoint.phaseId === phaseId && checkpoint.status === "waiting",
+              )
+            ) {
+              continue;
+            }
+            recoveryBuild = appendCheckpoint(
+              recoveryBuild,
+              affectedPhase,
+              command.createdAt,
+              "Recovery after approved amendment.",
+            );
+          }
           return yield* append(command, {
             ...amendedTask,
-            build: invalidatedBuild,
+            build: recoveryBuild,
             updatedAt: command.createdAt,
           });
         }
@@ -3276,7 +3309,17 @@ export const make = Effect.gen(function* () {
                         : item,
                     ),
                   }
-                : candidate,
+                : candidate.status === "invalidated"
+                  ? {
+                      ...candidate,
+                      status: "pending" as const,
+                      workItems: candidate.workItems.map((item) =>
+                        item.status === "invalidated" || item.status === "blocked"
+                          ? { ...item, status: "pending" as const, invalidationReason: null }
+                          : item,
+                      ),
+                    }
+                  : candidate,
             ),
           };
           const sessions = [
@@ -3303,18 +3346,18 @@ export const make = Effect.gen(function* () {
         case "task.fixture.apply": {
           const workflowRuns = applyTransition(task, command.type, command.createdAt);
           if (
+            task.build.phases.some((phase) => phase.status !== "completed") ||
             task.build.phases.some((phase) =>
-              phase.workItems.some(
-                (item) => item.status === "blocked" || item.status === "invalidated",
-              ),
+              phase.workItems.some((item) => item.status !== "completed"),
             ) ||
+            task.build.checkpoints.some((checkpoint) => checkpoint.status === "waiting") ||
             !requiredChecksPass(
               task.build,
               task.build.checks.map((check) => check.id),
             )
           ) {
             throw new Error(
-              "The fixture adapter cannot bypass blocked work or checks that have not passed.",
+              "The fixture adapter cannot bypass incomplete phases, waiting checkpoints, or checks that have not passed.",
             );
           }
           const repository = task.workspace.repositories[0];
