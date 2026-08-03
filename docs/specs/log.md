@@ -1,5 +1,13 @@
 # Specs log
 
+## 2026-08-03 (Guided implementation approved)
+
+- Marked the [Vertical Slice 2 Guided implementation plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+  **Approved**.
+- Approved the execution boundary, workflow upgrade, approved-check policy, recovery model, and
+  cumulative acceptance criteria after independent blocker/high review.
+- Kept product implementation gated on provider-backed Guided planning acceptance.
+
 ## 2026-08-03 (Guided implementation Draft)
 
 - Added the [Vertical Slice 2 Guided implementation plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)

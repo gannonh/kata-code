@@ -99,5 +99,5 @@ product behavior and sequencing.
 ## Next slice
 
 [Vertical Slice 2: Guided implementation](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
-is the next implementation target. Its Draft child spec requires explicit approval before product
-changes begin.
+is the next implementation target. Its approved child spec remains gated on provider-backed
+acceptance of this slice before product changes begin.

@@ -1,11 +1,12 @@
 ---
 type: Spec
 title: "Task mode Vertical Slice 2 — Guided implementation"
-description: "Draft child slice for starting a write-enabled Implement occurrence from an approved Guided Plan and exposing durable agent progress, checks, checkpoints, amendments, and recovery in the conversation-first Task mode UI."
-status: Draft
+description: "Approved child slice for starting a write-enabled Implement occurrence from an approved Guided Plan and exposing durable agent progress, checks, checkpoints, amendments, and recovery in the conversation-first Task mode UI."
+status: Approved
+approved_at: 2026-08-03T22:45:20Z
 acceptance_status: Not started
 tags: [specs, task-mode, task-workspaces, guided, implementation, agents, recovery]
-timestamp: 2026-08-03T23:00:00Z
+timestamp: 2026-08-03T22:45:20Z
 parent: /specs/2026-08-01-task-mode-design.md
 ---
 
@@ -13,9 +14,9 @@ parent: /specs/2026-08-01-task-mode-design.md
 
 ## Status
 
-**Draft. Awaiting maintainer approval.** Implementation must not begin until provider-backed
+**Approved on 2026-08-03.** Product implementation remains gated until provider-backed
 acceptance for [Vertical Slice 1: Guided planning](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
-is complete and this child spec is approved.
+is complete. This approval authorizes the Slice 2 design, scope, and sequencing.
 
 This is the sole next Task mode slice. It extends the current conversation-first Guided path from
 approved Plan through completed Implement. It does not start Verify or redesign the Task mode shell.
@@ -498,12 +499,11 @@ vp run e2e --project desktop-dev --grep @task-workspaces
 No new durable work is deferred by this child spec. Guided verification, Standard and Freeform,
 and Deliver remain assigned to Vertical Slices 3 through 5 in the parent design.
 
-## Approval checklist
+## Approval record
 
-Before changing product code:
-
-- [ ] Provider-backed Vertical Slice 1 acceptance is complete and findings are resolved.
-- [ ] Maintainer approves the execution profile and approved-check policy.
-- [ ] Maintainer approves the `guided@0.3.0` workflow and prompt pins.
-- [ ] Maintainer approves the `guided@0.2.0` compatibility projection and upgrade UX.
-- [ ] Independent review finds no blocking contract, recovery, security, or acceptance gaps.
+- **Approved at:** 2026-08-03T22:45:20Z
+- **Decision:** The execution profile, approved-check policy, `guided@0.3.0` workflow, compatibility
+  projection, upgrade UX, recovery model, and acceptance criteria are approved.
+- **Independent review:** No blocking or high findings remain.
+- **Implementation gate:** Provider-backed Vertical Slice 1 acceptance must complete before product
+  code changes begin.

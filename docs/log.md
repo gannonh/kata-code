@@ -1,5 +1,12 @@
 # OKF bundle log
 
+## 2026-08-03 (Guided implementation approved)
+
+Approved the [Guided implementation child spec](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md).
+The design, execution boundary, check policy, workflow upgrade, recovery model, and acceptance
+criteria are approved. Product implementation remains gated on provider-backed Guided planning
+acceptance.
+
 ## 2026-08-03 (Guided implementation Draft)
 
 Added the [Guided implementation child spec](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)

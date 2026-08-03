@@ -10,7 +10,7 @@ authoritative parent design. Current product sequencing:
 | Vertical slice           | Status                                                                   | Plan                                                                                    |
 | ------------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | 1. Guided planning       | **Implemented on `main`; provider-backed manual acceptance in progress** | [Plan and delivery record](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md) |
-| 2. Guided implementation | **Next — Draft child spec awaiting approval**                            | [Draft plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)         |
+| 2. Guided implementation | **Next — Approved; implementation gated on Slice 1 acceptance**          | [Approved plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)      |
 | 3. Guided verification   | **Upcoming — child spec required**                                       | Not written                                                                             |
 | 4. Standard and Freeform | **Upcoming — child spec required**                                       | Not written                                                                             |
 | 5. Deliver               | **Upcoming — child spec required**                                       | Not written                                                                             |
