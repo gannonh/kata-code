@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 
 import { TaskWorkspaceService } from "./TaskWorkspaceService.ts";
+import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 
 export interface TaskWorkspaceBootstrapWorkerShape {
@@ -27,12 +28,14 @@ const BATCH_SIZE = 4;
 const makeWorker = Effect.gen(function* () {
   const taskWorkspaces = yield* TaskWorkspaceService;
   const store = yield* TaskWorkspaceStore;
+  const serverEnvironment = yield* ServerEnvironment;
+  const environmentId = yield* serverEnvironment.getEnvironmentId;
 
   // Failures are recorded on the outbox row by the saga itself; the poll loop
   // must never crash the worker, so batch errors are logged and swallowed.
   const processPending: Effect.Effect<void, never> = Effect.gen(function* () {
     const pending = yield* store
-      .readPendingOutbox(BATCH_SIZE)
+      .readPendingOutbox({ environmentId, limit: BATCH_SIZE })
       .pipe(Effect.mapError(() => "task-outbox-read-failed" as const))
       .pipe(Effect.catch(() => Effect.succeed([])));
     for (const entry of pending) {

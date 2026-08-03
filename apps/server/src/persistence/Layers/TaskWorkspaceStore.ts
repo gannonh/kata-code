@@ -333,7 +333,7 @@ const makeStore = Effect.gen(function* () {
   });
 
   const readPendingOutboxRows = SqlSchema.findAll({
-    Request: Schema.Struct({ limit: Schema.Number }),
+    Request: Schema.Struct({ environmentId: EnvironmentId, limit: Schema.Number }),
     Result: OutboxRow,
     execute: (request) =>
       sql`
@@ -342,7 +342,7 @@ const makeStore = Effect.gen(function* () {
           payload_json AS "payloadJson", attempt_count AS "attemptCount",
           created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt"
         FROM task_workspace_outbox
-        WHERE status IN ('pending', 'failed')
+        WHERE environment_id = ${request.environmentId} AND status IN ('pending', 'failed')
         ORDER BY created_at ASC
         LIMIT ${request.limit}
       `,
@@ -578,8 +578,11 @@ const makeStore = Effect.gen(function* () {
         ),
       );
 
-  const readPendingOutbox: TaskWorkspaceStoreShape["readPendingOutbox"] = (limit) =>
-    readPendingOutboxRows({ limit }).pipe(
+  const readPendingOutbox: TaskWorkspaceStoreShape["readPendingOutbox"] = ({
+    environmentId,
+    limit,
+  }) =>
+    readPendingOutboxRows({ environmentId, limit }).pipe(
       Effect.mapError(toSqlError("TaskWorkspaceStore.readPendingOutbox:query")),
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>

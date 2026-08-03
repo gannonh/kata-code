@@ -77,9 +77,10 @@ export interface TaskWorkspaceStoreShape {
   readonly importLegacy: (
     input: TaskWorkspaceImportInput,
   ) => Effect.Effect<{ readonly importedEventCount: number }, TaskWorkspaceStoreError>;
-  readonly readPendingOutbox: (
-    limit: number,
-  ) => Effect.Effect<ReadonlyArray<TaskWorkspaceOutboxEntry>, TaskWorkspaceStoreError>;
+  readonly readPendingOutbox: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<TaskWorkspaceOutboxEntry>, TaskWorkspaceStoreError>;
   readonly getOutboxByOperationKey: (input: {
     readonly environmentId: EnvironmentId;
     readonly taskId: TaskWorkspaceId;

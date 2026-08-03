@@ -273,10 +273,62 @@ describe("TaskWorkspaceStore", () => {
           },
         ],
       });
-      const pending = yield* store.readPendingOutbox(10);
+      const pending = yield* store.readPendingOutbox({ environmentId, limit: 10 });
       expect(pending).toHaveLength(1);
       expect(pending[0]?.target).toBe("bootstrap");
       expect(pending[0]?.payload).toEqual({ sessionId: "session-1", threadId: "thread-1" });
+    }),
+  );
+
+  it.effect("reads only outbox rows for the active environment", () =>
+    Effect.gen(function* () {
+      const store = yield* makeStore;
+      const foreignEnvironmentId = EnvironmentId.make("environment-foreign");
+      yield* store.commit({
+        environmentId,
+        events: [
+          {
+            eventId: "event-1",
+            commandId: CommandId.make("command-1"),
+            taskId,
+            type: "task.create",
+            occurredAt: now,
+            task: task(1),
+          },
+        ],
+        outbox: [
+          {
+            id: "outbox-own",
+            environmentId,
+            taskId,
+            operationKey: "op-bootstrap-1",
+            target: "bootstrap",
+            status: "pending",
+            payload: { sessionId: "session-1", threadId: "thread-1" },
+            attemptCount: 0,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+          },
+          {
+            id: "outbox-foreign",
+            environmentId: foreignEnvironmentId,
+            taskId,
+            operationKey: "op-bootstrap-foreign",
+            target: "bootstrap",
+            status: "pending",
+            payload: { sessionId: "session-foreign", threadId: "thread-foreign" },
+            attemptCount: 0,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+          },
+        ],
+      });
+      const pending = yield* store.readPendingOutbox({ environmentId, limit: 10 });
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.id).toBe("outbox-own");
+      expect(pending[0]?.environmentId).toBe(environmentId);
     }),
   );
 

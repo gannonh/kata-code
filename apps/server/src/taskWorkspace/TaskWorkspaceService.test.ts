@@ -2821,6 +2821,171 @@ describe("TaskWorkspaceService", () => {
     30_000,
   );
 
+  it.effect(
+    "rejects automated check labels outside the allowlist at plan approval",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-s4-allowlist-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const dispatch = <T extends TaskWorkspaceCommand>(value: T) =>
+          runtime.runPromise(service.dispatch(value));
+        const allowlistTaskId = TaskWorkspaceId.make("slice-4-allowlist");
+
+        yield* dispatch(
+          command({
+            type: "task.create",
+            commandId: CommandId.make("al-create"),
+            taskId: allowlistTaskId,
+            createdAt: now(1),
+            title: "Slice 4 allowlist",
+            projectId,
+            workspaceRoot: repoRoot,
+            baseRef: "main",
+            preset: "standard",
+            approvalPolicy: "before-build",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.artifact.upsert",
+            commandId: CommandId.make("al-questions"),
+            taskId: allowlistTaskId,
+            createdAt: now(2),
+            kind: "questions",
+            title: "Questions",
+            markdown: "# Questions\n\nNo blockers.",
+            sourceSessionId: null,
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.questions.complete",
+            commandId: CommandId.make("al-questions-complete"),
+            taskId: allowlistTaskId,
+            createdAt: now(3),
+          }),
+        );
+        // An unknown label (e.g. `pnpm test`) must not be treated as a passing
+        // fixture check: approval fails loudly instead of fabricating a pass.
+        const planMarkdown = [
+          "# Plan",
+          "",
+          "## Phase Prepare",
+          "",
+          "### Work item Prepare fixture",
+          "- Check: pnpm test",
+        ].join("\n");
+        yield* dispatch(
+          command({
+            type: "task.artifact.upsert",
+            commandId: CommandId.make("al-plan"),
+            taskId: allowlistTaskId,
+            createdAt: now(4),
+            kind: "plan",
+            title: "Plan",
+            markdown: planMarkdown,
+            sourceSessionId: null,
+          }),
+        );
+        const rejected = yield* runtime.runPromiseExit(
+          service.dispatch(
+            command({
+              type: "task.plan.approve",
+              commandId: CommandId.make("al-plan-approve"),
+              taskId: allowlistTaskId,
+              createdAt: now(5),
+            }),
+          ),
+        );
+        expect(rejected._tag).toBe("Failure");
+        if (rejected._tag === "Failure") {
+          expect((Cause.squash(rejected.cause) as Error).message).toContain("is not allowlisted");
+        }
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "parses allowlisted fixture labels into automated checks at plan approval",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot } = yield* setupRuntime("kata-task-s4-allowlist-ok-");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const dispatch = <T extends TaskWorkspaceCommand>(value: T) =>
+          runtime.runPromise(service.dispatch(value));
+        const allowlistTaskId = TaskWorkspaceId.make("slice-4-allowlist-ok");
+
+        yield* dispatch(
+          command({
+            type: "task.create",
+            commandId: CommandId.make("alok-create"),
+            taskId: allowlistTaskId,
+            createdAt: now(1),
+            title: "Slice 4 allowlist ok",
+            projectId,
+            workspaceRoot: repoRoot,
+            baseRef: "main",
+            preset: "standard",
+            approvalPolicy: "before-build",
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.artifact.upsert",
+            commandId: CommandId.make("alok-questions"),
+            taskId: allowlistTaskId,
+            createdAt: now(2),
+            kind: "questions",
+            title: "Questions",
+            markdown: "# Questions\n\nNo blockers.",
+            sourceSessionId: null,
+          }),
+        );
+        yield* dispatch(
+          command({
+            type: "task.questions.complete",
+            commandId: CommandId.make("alok-questions-complete"),
+            taskId: allowlistTaskId,
+            createdAt: now(3),
+          }),
+        );
+        const planMarkdownOk = [
+          "# Plan",
+          "",
+          "## Phase Prepare",
+          "",
+          "### Work item Prepare fixture",
+          "- Check: fixture.pass",
+          "- Check: fixture.mismatch",
+        ].join("\n");
+        yield* dispatch(
+          command({
+            type: "task.artifact.upsert",
+            commandId: CommandId.make("alok-plan"),
+            taskId: allowlistTaskId,
+            createdAt: now(4),
+            kind: "plan",
+            title: "Plan",
+            markdown: planMarkdownOk,
+            sourceSessionId: null,
+          }),
+        );
+        const approved = yield* dispatch(
+          command({
+            type: "task.plan.approve",
+            commandId: CommandId.make("alok-plan-approve"),
+            taskId: allowlistTaskId,
+            createdAt: now(5),
+          }),
+        );
+        expect(approved.task.build.checks.map((check) => check.command)).toEqual([
+          "fixture.pass",
+          "fixture.mismatch",
+        ]);
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
   it.effect("fails startup when persisted task history is corrupt", () =>
     Effect.gen(function* () {
       const root = yield* Effect.tryPromise(() =>
