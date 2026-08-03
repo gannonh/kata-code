@@ -135,6 +135,10 @@ export type TaskWorkspaceBootstrapConversationTarget =
  */
 export const TaskWorkspaceBootstrapState = Schema.Struct({
   operationKey: TrimmedNonEmptyString,
+  executionProfile: TaskWorkspaceExecutionProfile.pipe(
+    Schema.withDecodingDefault(Effect.succeed("planning")),
+  ),
+  presentation: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(Effect.succeed("stage"))),
   status: TaskWorkspaceBootstrapStatus,
   currentStep: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -1411,6 +1415,10 @@ export type TaskWorkspaceOutboxEntry = typeof TaskWorkspaceOutboxEntry.Type;
 export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   stage: TaskWorkspaceStage,
   occurrence: NonNegativeInt,
+  executionProfile: TaskWorkspaceExecutionProfile.pipe(
+    Schema.withDecodingDefault(Effect.succeed("planning")),
+  ),
+  presentation: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(Effect.succeed("stage"))),
   sessionId: TrimmedNonEmptyString,
   threadId: ThreadId,
   threadCreateCommandId: CommandId,

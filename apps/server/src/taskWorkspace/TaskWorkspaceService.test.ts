@@ -3916,7 +3916,13 @@ describe("TaskWorkspaceService guided flow", () => {
           providerTurnId: "turn-plan",
           payloadDigest: "digest-plan",
           summary: "Plan ready.",
-          markdown: "# Plan\n\n## Phase 1\n",
+          markdown: [
+            "## Phase [phase:foundation] Foundation",
+            "Checkpoint: never",
+            "",
+            "### Work item [work:implement] Implement approved Plan",
+            "",
+          ].join("\n"),
         }),
       );
       task = yield* runtime.runPromise(
@@ -3989,6 +3995,9 @@ describe("TaskWorkspaceService guided flow", () => {
         branch: "katacode/task-guided-task",
       });
       expect(provisioned.workspace.repositories[0]?.worktreePath).toBeTruthy();
+      expect(provisioned.workflowRuns.at(-1)?.currentStage).toBe("build");
+      expect(provisioned.occurrences.filter((o) => o.stage === "build")).toHaveLength(1);
+      expect(provisioned.bootstrap?.presentation).toBe("implementation");
     }),
   );
 

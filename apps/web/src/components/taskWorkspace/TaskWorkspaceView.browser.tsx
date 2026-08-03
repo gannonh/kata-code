@@ -745,6 +745,8 @@ describe("TaskWorkspaceView", () => {
       },
       bootstrap: {
         operationKey: "task-browser:bootstrap:questions:0:primary",
+        executionProfile: "planning",
+        presentation: "stage",
         status: "ready",
         currentStep: null,
         reservedSessionId: "task-browser-session-questions-0",
