@@ -28,7 +28,6 @@ const workspaceFiles = [
   "apps/mobile/deps/react-native-nitro-markdown-0.5.0.tgz",
   "apps/mobile/modules/t3-review-diff/package.json",
   "apps/mobile/modules/t3-terminal/package.json",
-  "apps/marketing/package.json",
   "infra/relay/package.json",
   "oxlint-plugin-kata-code/package.json",
   "packages/client-runtime/package.json",

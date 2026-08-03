@@ -21,10 +21,6 @@
       "entry": ["app.config.ts", "src/**/*.{ts,tsx}"],
       "project": ["src/**/*.{ts,tsx}", "app.config.ts"]
     },
-    "apps/marketing": {
-      "entry": ["src/**/*.{ts,tsx,astro,md,mdx}", "astro.config.*"],
-      "project": ["src/**/*.{ts,tsx,astro,md,mdx}", "astro.config.*"]
-    },
     "packages/*": {
       "entry": ["src/**/*.ts"],
       "project": ["src/**/*.{ts,tsx}"]

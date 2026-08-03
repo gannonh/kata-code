@@ -35,7 +35,6 @@ WORKDIR /repo
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY patches/ patches/
 COPY apps/desktop/package.json apps/desktop/
-COPY apps/marketing/package.json apps/marketing/
 COPY apps/mobile/package.json apps/mobile/
 COPY apps/mobile/modules/t3-review-diff/package.json apps/mobile/modules/t3-review-diff/
 COPY apps/mobile/modules/t3-terminal/package.json apps/mobile/modules/t3-terminal/
