@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  compileLegacyTaskWorkspacePlan,
   compileTaskWorkspacePlan,
   reverseDependencyInvalidation,
   structuralDiff,
@@ -33,14 +34,38 @@ describe("task workspace Plan compiler", () => {
     ]);
   });
 
-  it("projects an older unstructured Plan without inventing executable checks", () => {
-    const compiled = compileTaskWorkspacePlan({
+  it("projects an older unstructured Plan only through the explicit compatibility API", () => {
+    const compiled = compileLegacyTaskWorkspacePlan({
       markdown: "## Phase Legacy\n\n- Check: typecheck",
       planRevisionId: "legacy",
     });
     expect(compiled.phases).toHaveLength(1);
     expect(compiled.phases[0]?.workItems[0]?.title).toBe("Implement approved Plan");
     expect(compiled.checks).toEqual([]);
+    expect(() =>
+      compileTaskWorkspacePlan({ markdown: "## Phase Legacy", planRevisionId: "legacy" }),
+    ).toThrow("Invalid implementation Plan");
+  });
+
+  it.each([
+    "## Phase foundation Foundation",
+    "## Phase [phase:foundation] Foundation\n\n### Work item broken",
+    "## Phase [phase:foundation] Foundation\n\nCheckpoint: always\n\n### Work item [work:one] One\n\n### Work item Notes\n\n- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+  ])("rejects malformed headings and ambiguous checks", (invalid) => {
+    expect(() => compileTaskWorkspacePlan(invalid)).toThrow("Invalid implementation Plan");
+  });
+
+  it("requires Checkpoint in the phase preamble", () => {
+    expect(() =>
+      compileTaskWorkspacePlan(
+        plan
+          .replace("Checkpoint: always\n\n", "")
+          .replace(
+            "\n\n### Work item [work:service]",
+            "\n\nCheckpoint: always\n\n### Work item [work:service]",
+          ),
+      ),
+    ).toThrow("Invalid implementation Plan");
   });
 
   it.each([
@@ -50,6 +75,58 @@ describe("task workspace Plan compiler", () => {
     ["empty command", plan.replace("| vp run typecheck", "|")],
   ])("rejects %s before approval", (_name, invalid) => {
     expect(() => compileTaskWorkspacePlan(invalid)).toThrow("Invalid implementation Plan");
+  });
+
+  it("includes dependent checks in the reverse invalidation closure", () => {
+    const next = compileTaskWorkspacePlan(plan.replace("Add the contract", "Change the contract"));
+    const previous = compileTaskWorkspacePlan(plan);
+    const invalidation = reverseDependencyInvalidation(previous, next);
+    expect(invalidation.workItemIds).toEqual(["work:contract", "work:service"]);
+    expect(invalidation.checkIds).toEqual(["check:review", "check:typecheck"]);
+  });
+
+  it("invalidates work and checks when phases move", () => {
+    const first = `## Phase [phase:one] One
+
+Checkpoint: always
+
+### Work item [work:one] One
+
+- Automated check [check:one]: One | one
+
+## Phase [phase:two] Two
+
+Checkpoint: always
+
+### Work item [work:two] Two
+
+- Automated check [check:two]: Two | two
+`;
+    const second = `## Phase [phase:two] Two
+
+Checkpoint: always
+
+### Work item [work:two] Two
+
+- Automated check [check:two]: Two | two
+
+## Phase [phase:one] One
+
+Checkpoint: always
+
+### Work item [work:one] One
+
+- Automated check [check:one]: One | one
+`;
+    const previous = compileTaskWorkspacePlan(first);
+    const next = compileTaskWorkspacePlan(second);
+    const diff = structuralDiff(previous, next);
+    expect(diff.changedPhaseIds).toEqual(["phase:one", "phase:two"]);
+    expect(diff.changedWorkItemIds).toEqual(["work:one", "work:two"]);
+    expect(reverseDependencyInvalidation(previous, next, diff).checkIds).toEqual([
+      "check:one",
+      "check:two",
+    ]);
   });
 
   it("derives stable structural changes and reverse invalidation", () => {

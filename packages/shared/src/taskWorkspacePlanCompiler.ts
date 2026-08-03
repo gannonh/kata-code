@@ -25,12 +25,35 @@ export type TaskWorkspaceCompiledPlan = BuildProjection & {
 };
 
 const ID = "[a-z][a-z0-9-]{0,63}";
-const PHASE_HEADER = new RegExp(`^##\\s+Phase\\s+\\[phase:(${ID})\\]\\s+(.+?)\\s*$`, "gm");
-const WORK_HEADER = new RegExp(`^###\\s+Work item\\s+\\[work:(${ID})\\]\\s+(.+?)\\s*$`, "gm");
+const PHASE_HEADER = new RegExp(`^## Phase \\[phase:(${ID})\\] (.+?)\\s*$`, "gm");
+const WORK_HEADER = new RegExp(`^### Work item \\[work:(${ID})\\] (.+?)\\s*$`, "gm");
 const CHECK_LINE =
   /^\s*[-*]\s+(Automated|Manual) check\s+\[check:([a-z][a-z0-9-]{0,63})\]:\s*(.+?)\s*$/i;
 const DEPENDENCIES = /^\s*Dependencies:\s*(.*?)\s*$/im;
-const CHECKPOINT = /^\s*Checkpoint:\s*(.*?)\s*$/im;
+const CHECK_PHRASE = /\b(?:Automated|Manual)\s+check\b/i;
+const CHECKPOINT_LINE = /^\s*Checkpoint:\s*(.*?)\s*$/im;
+
+type HeadingToken = {
+  readonly level: number;
+  readonly text: string;
+  readonly index: number;
+  readonly end: number;
+};
+
+function headings(markdown: string): HeadingToken[] {
+  const tokens: HeadingToken[] = [];
+  const headingPattern = /^(#{1,6})[ \t]+(.*?)\s*$/gm;
+  for (const match of markdown.matchAll(headingPattern)) {
+    const index = match.index ?? 0;
+    tokens.push({
+      level: match[1]!.length,
+      text: match[2]!,
+      index,
+      end: index + match[0]!.length,
+    });
+  }
+  return tokens;
+}
 
 function fail(message: string): never {
   throw new Error(`Invalid implementation Plan: ${message}`);
@@ -81,7 +104,32 @@ function baseProjection(planRevisionId: string): TaskWorkspaceCompiledPlan {
   };
 }
 
-/** Compile the reviewed Plan Markdown into the durable Build graph. */
+/** Project a legacy or upgraded Plan that has no guided@0.3 structure. */
+export function compileLegacyTaskWorkspacePlan(
+  input: TaskWorkspacePlanCompilerInput,
+  planRevisionId?: string,
+): TaskWorkspaceCompiledPlan {
+  const resolvedInput =
+    typeof input === "string" && planRevisionId !== undefined
+      ? { markdown: input, planRevisionId }
+      : input;
+  const { planRevisionId: resolvedPlanRevisionId } = revisionOf(resolvedInput);
+  const phase = emptyPhase("phase:compatibility", "Implement approved Plan", "never");
+  phase.workItems = [
+    {
+      id: "work:implement-approved-plan",
+      title: "Implement approved Plan",
+      status: "pending",
+      summary: null,
+      dependsOn: [],
+      checkIds: [],
+      invalidationReason: null,
+    },
+  ];
+  return { ...baseProjection(resolvedPlanRevisionId), phases: [phase] };
+}
+
+/** Compile the reviewed guided@0.3 Plan Markdown into the durable Build graph. */
 export function compileTaskWorkspacePlan(
   input: TaskWorkspacePlanCompilerInput,
   planRevisionId?: string,
@@ -91,28 +139,67 @@ export function compileTaskWorkspacePlan(
       ? { markdown: input, planRevisionId }
       : input;
   const { markdown, planRevisionId: resolvedPlanRevisionId } = revisionOf(resolvedInput);
-  // Plans from earlier contract versions used prose headings. They receive the
-  // compatibility projection; once the explicit id syntax is present, parsing
-  // is strict and malformed sections are rejected.
-  const hasExplicitPhaseSyntax = /^##\s+Phase\b.*\[phase:/im.test(markdown);
-  if (!hasExplicitPhaseSyntax) {
-    const phase = emptyPhase("phase:compatibility", "Implement approved Plan", "never");
-    phase.workItems = [
-      {
-        id: "work:implement-approved-plan",
-        title: "Implement approved Plan",
-        status: "pending",
-        summary: null,
-        dependsOn: [],
-        checkIds: [],
-        invalidationReason: null,
-      },
-    ];
-    return { ...baseProjection(resolvedPlanRevisionId), phases: [phase] };
+  const tokens = headings(markdown);
+  const exactPhaseHeading = new RegExp(`^Phase \\[phase:(${ID})\\] (.+?)$`);
+  const exactWorkHeading = new RegExp(`^Work item \\[work:(${ID})\\] (.+?)$`);
+  for (const token of tokens) {
+    if (
+      token.level === 2 &&
+      (token.text === "Phase" || token.text.startsWith("Phase ")) &&
+      !exactPhaseHeading.test(token.text)
+    )
+      fail("phase headings must use '## Phase [phase:id] Title'.");
+    if (
+      token.level === 3 &&
+      (token.text === "Work item" || token.text.startsWith("Work item ")) &&
+      !exactWorkHeading.test(token.text)
+    )
+      fail("work item headings must use '### Work item [work:id] Title'.");
   }
 
   const phaseMatches = [...markdown.matchAll(PHASE_HEADER)];
   if (phaseMatches.length === 0) fail("phase headings must use '## Phase [phase:id] Title'.");
+  const allWorkMatches = [...markdown.matchAll(WORK_HEADER)];
+  const firstPhaseStart = phaseMatches[0]!.index ?? 0;
+  if (allWorkMatches.some((match) => (match.index ?? 0) < firstPhaseStart))
+    fail("work items must belong to a phase.");
+  const lines = markdown.split("\n");
+  const lineOffsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineOffsets.push(offset);
+    offset += line.length + 1;
+  }
+  for (let lineIndex = 0; lineIndex < lineOffsets.length; lineIndex += 1) {
+    const line = lines[lineIndex]!;
+    if (!CHECK_PHRASE.test(line)) continue;
+    const lineOffset = lineOffsets[lineIndex]!;
+    const phaseIndex = phaseMatches.findIndex(
+      (match, index) =>
+        lineOffset >= (match.index ?? 0) &&
+        lineOffset < (phaseMatches[index + 1]?.index ?? markdown.length),
+    );
+    const phaseMatch = phaseIndex < 0 ? undefined : phaseMatches[phaseIndex];
+    const workMatches = phaseMatch
+      ? allWorkMatches.filter(
+          (match) =>
+            (match.index ?? 0) >= (phaseMatch.index ?? 0) &&
+            (match.index ?? 0) < (phaseMatches[phaseIndex + 1]?.index ?? markdown.length) &&
+            (match.index ?? 0) <= lineOffset,
+        )
+      : [];
+    const owner = workMatches.at(-1);
+    if (!phaseMatch || !owner) fail("checks must belong to a work-item section.");
+    const unknownSibling = tokens.some(
+      (token) =>
+        token.index > (owner.index ?? 0) &&
+        token.index < lineOffset &&
+        token.level >= 2 &&
+        !(token.level === 3 && exactWorkHeading.test(token.text)),
+    );
+    if (unknownSibling) fail("checks under unknown sibling headings are ambiguous.");
+    if (!CHECK_LINE.test(line)) fail("checks must use '[check:id]: Label | command' syntax.");
+  }
   const ids = new Set<string>();
   const workItems: Array<{ item: TaskWorkspaceWorkItem; phaseIndex: number }> = [];
   const phases: MutablePhase[] = [];
@@ -128,19 +215,17 @@ export function compileTaskWorkspacePlan(
     const start = phaseMatch.index ?? 0;
     const end = phaseMatches[phaseIndex + 1]?.index ?? markdown.length;
     const section = markdown.slice(start, end);
-    const checkpointMatch = section.match(CHECKPOINT);
+    const workMatches = [...section.matchAll(WORK_HEADER)];
+    if (workMatches.length === 0) fail(`phase '${phaseId}' must contain a work item.`);
+    const preamble = section.slice(0, workMatches[0]!.index ?? 0);
+    const checkpointMatch = preamble.match(CHECKPOINT_LINE);
     if (
       !checkpointMatch ||
       !["always", "manual-only", "on-failure", "never"].includes(checkpointMatch[1]!)
     ) {
-      fail(`phase '${phaseId}' must declare a valid Checkpoint policy.`);
+      fail(`phase '${phaseId}' must declare a valid Checkpoint policy before its first work item.`);
     }
     const phase = emptyPhase(phaseId, title, checkpointMatch[1] as TaskWorkspaceCheckpointPolicy);
-    const workMatches = [...section.matchAll(WORK_HEADER)];
-    if (workMatches.length === 0) fail(`phase '${phaseId}' must contain a work item.`);
-    if (/^###\s+Work item\b/im.test(section) && workMatches.length === 0) {
-      fail(`work item headings in phase '${phaseId}' are malformed.`);
-    }
 
     for (let workIndex = 0; workIndex < workMatches.length; workIndex += 1) {
       const workMatch = workMatches[workIndex]!;
@@ -245,24 +330,6 @@ export function compileTaskWorkspacePlan(
   };
   for (const { item } of workItems) visit(item.id);
 
-  // A check outside a work-item section has no deterministic owner.
-  const firstWorkStartByPhase = phases.map((_phase, index) => {
-    const match = phaseMatches[index]!;
-    return match.index ?? 0;
-  });
-  for (const [index, phaseMatch] of phaseMatches.entries()) {
-    const section = markdown.slice(
-      phaseMatch.index ?? 0,
-      phaseMatches[index + 1]?.index ?? markdown.length,
-    );
-    const firstWork = section.search(/^###\s+Work item\b/im);
-    const prefix = firstWork < 0 ? section : section.slice(0, firstWork);
-    if (/^\s*[-*].*\b(?:Automated|Manual) check\b/im.test(prefix)) {
-      fail(`check ownership in phase '${phases[index]!.id}' is ambiguous.`);
-    }
-  }
-  // Referencing this local keeps phase positions explicit for future parser changes.
-  void firstWorkStartByPhase;
   return { ...baseProjection(resolvedPlanRevisionId), phases, checks };
 }
 
@@ -302,6 +369,19 @@ export function structuralDiff(
   const afterWork = mapWork(next);
   const beforeChecks = mapChecks(previous);
   const afterChecks = mapChecks(next);
+  const beforePhaseOrder = new Map(previous.phases.map((phase, index) => [phase.id, index]));
+  const afterPhaseOrder = new Map(next.phases.map((phase, index) => [phase.id, index]));
+  const workPosition = (plan: TaskWorkspaceCompiledPlan) => {
+    const positions = new Map<string, { phaseId: string; phaseIndex: number; workIndex: number }>();
+    plan.phases.forEach((phase, phaseIndex) =>
+      phase.workItems.forEach((item, workIndex) =>
+        positions.set(item.id, { phaseId: phase.id, phaseIndex, workIndex }),
+      ),
+    );
+    return positions;
+  };
+  const beforeWorkPosition = workPosition(previous);
+  const afterWorkPosition = workPosition(next);
   const sorted = (values: string[]) => values.sort();
   return {
     addedPhaseIds: sorted([...afterPhases.keys()].filter((id) => !beforePhases.has(id))),
@@ -309,17 +389,18 @@ export function structuralDiff(
     changedPhaseIds: sorted(
       [...afterPhases.keys()].filter(
         (id) =>
-          beforePhases.has(id) &&
-          changed(
-            {
-              title: afterPhases.get(id)!.title,
-              checkpointPolicy: afterPhases.get(id)!.checkpointPolicy,
-            },
-            {
-              title: beforePhases.get(id)!.title,
-              checkpointPolicy: beforePhases.get(id)!.checkpointPolicy,
-            },
-          ),
+          (beforePhases.has(id) &&
+            changed(
+              {
+                title: afterPhases.get(id)!.title,
+                checkpointPolicy: afterPhases.get(id)!.checkpointPolicy,
+              },
+              {
+                title: beforePhases.get(id)!.title,
+                checkpointPolicy: beforePhases.get(id)!.checkpointPolicy,
+              },
+            )) ||
+          beforePhaseOrder.get(id) !== afterPhaseOrder.get(id),
       ),
     ),
     addedWorkItemIds: sorted([...afterWork.keys()].filter((id) => !beforeWork.has(id))),
@@ -333,11 +414,13 @@ export function structuralDiff(
               title: afterWork.get(id)!.title,
               dependsOn: afterWork.get(id)!.dependsOn,
               checkIds: afterWork.get(id)!.checkIds,
+              position: afterWorkPosition.get(id),
             },
             {
               title: beforeWork.get(id)!.title,
               dependsOn: beforeWork.get(id)!.dependsOn,
               checkIds: beforeWork.get(id)!.checkIds,
+              position: beforeWorkPosition.get(id),
             },
           ),
       ),
@@ -381,6 +464,11 @@ export function reverseDependencyInvalidation(
 } {
   const beforeWork = mapWork(previous);
   const afterWork = mapWork(next);
+  const phaseSeeds = new Set([
+    ...diff.addedPhaseIds,
+    ...diff.removedPhaseIds,
+    ...diff.changedPhaseIds,
+  ]);
   const seeds = new Set([
     ...diff.addedWorkItemIds,
     ...diff.removedWorkItemIds,
@@ -388,10 +476,12 @@ export function reverseDependencyInvalidation(
     ...diff.addedCheckIds,
     ...diff.removedCheckIds,
     ...diff.changedCheckIds,
-    ...diff.addedPhaseIds,
-    ...diff.removedPhaseIds,
-    ...diff.changedPhaseIds,
   ]);
+  for (const phase of [...previous.phases, ...next.phases]) {
+    if (phaseSeeds.has(phase.id)) {
+      for (const item of phase.workItems) seeds.add(item.id);
+    }
+  }
   const invalidated = new Set<string>();
   let changedSomething = true;
   while (changedSomething) {
@@ -408,11 +498,23 @@ export function reverseDependencyInvalidation(
       }
     }
   }
-  const phaseByWork = new Map<string, string>();
-  for (const phase of [...previous.phases, ...next.phases])
-    for (const item of phase.workItems) phaseByWork.set(item.id, phase.id);
+  const phaseByWork = new Map<string, Set<string>>();
+  for (const phase of [...previous.phases, ...next.phases]) {
+    for (const item of phase.workItems) {
+      const phaseIds = phaseByWork.get(item.id) ?? new Set<string>();
+      phaseIds.add(phase.id);
+      phaseByWork.set(item.id, phaseIds);
+    }
+  }
   const checkIds = [
-    ...new Set([...diff.addedCheckIds, ...diff.removedCheckIds, ...diff.changedCheckIds]),
+    ...new Set([
+      ...diff.addedCheckIds,
+      ...diff.removedCheckIds,
+      ...diff.changedCheckIds,
+      ...[...previous.checks, ...next.checks]
+        .filter((check) => check.workItemId !== null && invalidated.has(check.workItemId))
+        .map((check) => check.id),
+    ]),
   ].sort();
   return {
     workItemIds: [...invalidated].sort(),
@@ -421,9 +523,7 @@ export function reverseDependencyInvalidation(
         ...diff.addedPhaseIds,
         ...diff.removedPhaseIds,
         ...diff.changedPhaseIds,
-        ...[...invalidated]
-          .map((id) => phaseByWork.get(id))
-          .filter((id): id is string => id !== undefined),
+        ...[...invalidated].flatMap((id) => [...(phaseByWork.get(id) ?? [])]),
       ]),
     ].sort(),
     checkIds,
@@ -435,6 +535,13 @@ export function compilePlanToBuild(
   planRevisionId?: string,
 ): TaskWorkspaceCompiledPlan {
   return compileTaskWorkspacePlan(input, planRevisionId);
+}
+
+export function compileLegacyPlanToBuild(
+  input: TaskWorkspacePlanCompilerInput,
+  planRevisionId?: string,
+): TaskWorkspaceCompiledPlan {
+  return compileLegacyTaskWorkspacePlan(input, planRevisionId);
 }
 
 export const deriveStructuralDiff = structuralDiff;

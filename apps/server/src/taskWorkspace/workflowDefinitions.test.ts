@@ -3,7 +3,10 @@ import {
   TASK_WORKSPACE_PRESET_CATALOG,
   taskWorkspacePresetCatalogEntry,
 } from "@kata-sh/code-shared/taskWorkspacePresets";
-import { TASK_WORKSPACE_WORKFLOW_CATALOG } from "@kata-sh/code-shared/taskWorkspaceCatalog";
+import {
+  currentCatalogEntryForPreset,
+  TASK_WORKSPACE_WORKFLOW_CATALOG,
+} from "@kata-sh/code-shared/taskWorkspaceCatalog";
 
 import {
   allowsExplicitEntry,
@@ -383,9 +386,9 @@ describe("workflowDefinitions", () => {
         entry.stages.filter((stage) => stage.explicitEntry).map((stage) => stage.stage),
       );
       expect(definition.transitions).toEqual(entry.transitions);
-      if (entry.version === currentVersionForPreset(entry.preset)) {
-        expect(currentVersionForPreset(entry.preset)).toBe(entry.version);
-      }
+    }
+    for (const preset of ["standard", "guided", "freeform"] as const) {
+      expect(currentCatalogEntryForPreset(preset).version).toBe(currentVersionForPreset(preset));
     }
 
     // Every @0.1.0 definition remains registered and unmodified.
