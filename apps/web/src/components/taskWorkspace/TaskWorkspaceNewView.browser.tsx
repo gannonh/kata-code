@@ -139,6 +139,24 @@ describe("TaskWorkspaceNewView", () => {
       .toHaveTextContent("Freeform · freeform@0.2.0");
   });
 
+  it("preserves a selected model option while creating a task", async () => {
+    await renderNewView();
+
+    const reasoningSelect = page.getByTestId("task-model-option-reasoningEffort");
+    await reasoningSelect.selectOptions("high");
+    await expect.element(reasoningSelect).toHaveValue("high");
+
+    await page.getByTestId("task-brief-input").fill("Add a guided onboarding flow.");
+    await page.getByTestId("task-create-submit").click();
+
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      modelSelection: {
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+    });
+  });
+
   it("creates a first-slice task and navigates to the canonical route", async () => {
     await renderNewView();
 

@@ -445,12 +445,13 @@ export function TaskWorkspaceNewView() {
                             data-testid={`task-model-option-${descriptor.id}`}
                             className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
                             value={optionValues[descriptor.id] ?? descriptor.options[0]?.id}
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
                               setOptionValues((current) => ({
                                 ...current,
-                                [descriptor.id]: event.currentTarget.value,
-                              }))
-                            }
+                                [descriptor.id]: value,
+                              }));
+                            }}
                           >
                             {descriptor.options.map((option) => (
                               <option key={option.id} value={option.id}>
