@@ -1,5 +1,13 @@
 # OKF bundle log
 
+## 2026-08-03 (Guided implementation Draft)
+
+Added the [Guided implementation child spec](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+for the sole next Task mode slice. It defines the append-only Guided workflow upgrade, write-enabled
+Implement occurrence, approved real checks, typed provider progress tools, checkpoints, reviewed
+Plan amendments, server-observed completion commit, recovery boundaries, and cumulative product-path
+acceptance. Implementation remains gated on Guided planning acceptance and explicit spec approval.
+
 ## 2026-08-03 (Task mode specification reconciliation)
 
 Established [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) as the

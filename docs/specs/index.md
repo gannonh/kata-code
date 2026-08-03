@@ -10,14 +10,14 @@ authoritative parent design. Current product sequencing:
 | Vertical slice           | Status                                                                   | Plan                                                                                    |
 | ------------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | 1. Guided planning       | **Implemented on `main`; provider-backed manual acceptance in progress** | [Plan and delivery record](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md) |
-| 2. Guided implementation | **Next — child spec required**                                           | Not written                                                                             |
+| 2. Guided implementation | **Next — Draft child spec awaiting approval**                            | [Draft plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)         |
 | 3. Guided verification   | **Upcoming — child spec required**                                       | Not written                                                                             |
 | 4. Standard and Freeform | **Upcoming — child spec required**                                       | Not written                                                                             |
 | 5. Deliver               | **Upcoming — child spec required**                                       | Not written                                                                             |
 
 Historical pre-reset designs and Slices 1–4 are retained as delivery records and implementation
 substrate. They do not define current product behavior or roadmap order. Start with the parent
-design and follow only the child plan for the active slice.
+design and follow only an approved child plan for implementation.
 
 ## Active / next
 

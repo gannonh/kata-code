@@ -16,8 +16,8 @@ supersedes:
 
 **Active parent design.** [Vertical Slice 1: Guided planning](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
 is implemented through approved Plan, with provider-backed manual acceptance in progress.
-**Vertical Slice 2: Guided implementation** is next and requires
-its own child spec before product code changes begin. Later slices remain explicitly unspecced.
+**Vertical Slice 2: Guided implementation** is next. Its [Draft child spec](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+awaits approval before product code changes begin. Later slices remain explicitly unspecced.
 
 This document is the sole authoritative Task mode product design and roadmap. Child slice specs
 own implementation scope and acceptance criteria. Earlier Task mode and task-workspace designs are
@@ -790,18 +790,18 @@ No historical event log is deleted or rewritten.
 
 ## Vertical slice roadmap
 
-| Slice                    | Product outcome                                                                                                                                                                | Status                                                                   | Child plan                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| 1. Guided planning       | Create a Guided task and move through Clarify, Research, Design, and approved Plan in the conversation-first UI.                                                               | **Implemented on `main`; provider-backed manual acceptance in progress** | [Guided planning plan](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md) |
-| 2. Guided implementation | Start a write-enabled Implement session from the approved Plan, execute work in the task worktree, and expose durable progress, checkpoints, and amendments in the current UI. | **Next — needs spec**                                                    | Not written                                                                         |
-| 3. Guided verification   | Verify the resulting commit against explicit acceptance criteria, preserve evidence, and reach Done.                                                                           | **Upcoming — needs spec**                                                | Not written                                                                         |
-| 4. Standard and Freeform | Complete the shorter Standard path and intentional Freeform path using the same runtime and recovery model.                                                                    | **Upcoming — needs spec**                                                | Not written                                                                         |
-| 5. Deliver               | Create and track a draft pull request from a verified task with explicit user approval.                                                                                        | **Upcoming — needs spec**                                                | Not written                                                                         |
+| Slice                    | Product outcome                                                                                                                                                                | Status                                                                   | Child plan                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| 1. Guided planning       | Create a Guided task and move through Clarify, Research, Design, and approved Plan in the conversation-first UI.                                                               | **Implemented on `main`; provider-backed manual acceptance in progress** | [Guided planning plan](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)             |
+| 2. Guided implementation | Start a write-enabled Implement session from the approved Plan, execute work in the task worktree, and expose durable progress, checkpoints, and amendments in the current UI. | **Next — Draft spec awaiting approval**                                  | [Guided implementation plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md) |
+| 3. Guided verification   | Verify the resulting commit against explicit acceptance criteria, preserve evidence, and reach Done.                                                                           | **Upcoming — needs spec**                                                | Not written                                                                                     |
+| 4. Standard and Freeform | Complete the shorter Standard path and intentional Freeform path using the same runtime and recovery model.                                                                    | **Upcoming — needs spec**                                                | Not written                                                                                     |
+| 5. Deliver               | Create and track a draft pull request from a verified task with explicit user approval.                                                                                        | **Upcoming — needs spec**                                                | Not written                                                                                     |
 
 Only Slice 1 is implemented in the current product path. Finish its provider-backed acceptance
-and fixes before Slice 2 begins. Slice 2 is the sole next planning target.
-Each remaining row requires a dated, approved child spec with its own acceptance criteria before
-implementation begins.
+and fixes before Slice 2 begins. Slice 2 is the sole next implementation target after its Draft
+child spec is approved. Each unimplemented row requires a dated, approved child spec with its own
+acceptance criteria before implementation begins.
 
 The pre-reset [Slices 1–4](/specs/2026-07-28-task-workspaces-vertical-slices-design.md) delivered
 useful persistence, artifact, workflow, and Build/checkpoint substrate. They do not define current

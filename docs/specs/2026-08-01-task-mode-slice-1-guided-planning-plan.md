@@ -98,6 +98,6 @@ product behavior and sequencing.
 
 ## Next slice
 
-[Vertical Slice 2: Guided implementation](/specs/2026-08-01-task-mode-design.md#vertical-slice-roadmap)
-is the next planning target. It requires a separate Draft child spec and explicit approval before
-implementation.
+[Vertical Slice 2: Guided implementation](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+is the next implementation target. Its Draft child spec requires explicit approval before product
+changes begin.

@@ -1,5 +1,15 @@
 # Specs log
 
+## 2026-08-03 (Guided implementation Draft)
+
+- Added the [Vertical Slice 2 Guided implementation plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+  as the sole next Task mode child spec.
+- Defined `guided@0.3.0`, explicit `guided@0.2.0` upgrade eligibility, a write-enabled Implement
+  occurrence, deterministic Plan compilation, approved repository checks, typed implementation
+  tools, checkpoints, amendment review, server-observed completion, and restart recovery.
+- Kept implementation blocked until provider-backed Guided planning acceptance completes and the
+  maintainer approves the Draft.
+
 ## 2026-08-03 (Task mode roadmap reconciliation)
 
 - Established [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) as the
