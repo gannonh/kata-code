@@ -1,17 +1,15 @@
 import { useEffect } from "react";
 
 import { getPrimaryEnvironmentConnection } from "../environments/runtime";
-import { useTaskWorkspaceStore } from "./taskWorkspaceStore";
+import { startTaskWorkspaceSubscriptionService } from "./taskWorkspaceSubscription";
 
 export function TaskWorkspaceBootstrap() {
   useEffect(() => {
-    const connection = getPrimaryEnvironmentConnection();
-    return connection.client.taskWorkspaces.subscribe(
-      (item) => useTaskWorkspaceStore.getState().applyStreamItem(item),
-      {
-        onResubscribe: () => useTaskWorkspaceStore.getState().reset(),
-      },
-    );
+    // Ensure the primary connection exists before the subscription manager
+    // reconciles connected environments.
+    getPrimaryEnvironmentConnection();
+    const stop = startTaskWorkspaceSubscriptionService();
+    return stop;
   }, []);
 
   return null;

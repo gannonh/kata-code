@@ -25,6 +25,7 @@ import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagn
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as PlaygroundSidebarRouteImport } from './routes/playground.sidebar'
+import { Route as TasksEnvironmentIdTaskIdRouteImport } from './routes/tasks.$environmentId.$taskId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -107,6 +108,12 @@ const PlaygroundSidebarRoute = PlaygroundSidebarRouteImport.update({
   path: '/sidebar',
   getParentRoute: () => PlaygroundRoute,
 } as any)
+const TasksEnvironmentIdTaskIdRoute =
+  TasksEnvironmentIdTaskIdRouteImport.update({
+    id: '/tasks/$environmentId/$taskId',
+    path: '/tasks/$environmentId/$taskId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -137,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/playground/': typeof PlaygroundIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/tasks/$environmentId/$taskId': typeof TasksEnvironmentIdTaskIdRoute
 }
 export interface FileRoutesByTo {
   '/pair': typeof PairRoute
@@ -155,6 +163,7 @@ export interface FileRoutesByTo {
   '/playground': typeof PlaygroundIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/tasks/$environmentId/$taskId': typeof TasksEnvironmentIdTaskIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -176,6 +185,7 @@ export interface FileRoutesById {
   '/playground/': typeof PlaygroundIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/tasks/$environmentId/$taskId': typeof TasksEnvironmentIdTaskIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -197,6 +207,7 @@ export interface FileRouteTypes {
     | '/playground/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/tasks/$environmentId/$taskId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/pair'
@@ -215,6 +226,7 @@ export interface FileRouteTypes {
     | '/playground'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/tasks/$environmentId/$taskId'
   id:
     | '__root__'
     | '/_chat'
@@ -235,6 +247,7 @@ export interface FileRouteTypes {
     | '/playground/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/tasks/$environmentId/$taskId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -244,6 +257,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRouteWithChildren
   TasksTaskIdRoute: typeof TasksTaskIdRoute
   TasksNewRoute: typeof TasksNewRoute
+  TasksEnvironmentIdTaskIdRoute: typeof TasksEnvironmentIdTaskIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -360,6 +374,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlaygroundSidebarRouteImport
       parentRoute: typeof PlaygroundRoute
     }
+    '/tasks/$environmentId/$taskId': {
+      id: '/tasks/$environmentId/$taskId'
+      path: '/tasks/$environmentId/$taskId'
+      fullPath: '/tasks/$environmentId/$taskId'
+      preLoaderRoute: typeof TasksEnvironmentIdTaskIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -436,6 +457,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRouteWithChildren,
   TasksTaskIdRoute: TasksTaskIdRoute,
   TasksNewRoute: TasksNewRoute,
+  TasksEnvironmentIdTaskIdRoute: TasksEnvironmentIdTaskIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,4 +1,8 @@
 import type { TaskWorkspacePreset, TaskWorkspaceStage } from "@kata-sh/code-contracts";
+import {
+  taskWorkspaceCatalogEntryForVersion as taskWorkspaceResetCatalogEntryForVersion,
+  type TaskWorkspaceCatalogEntry,
+} from "./taskWorkspaceCatalog.ts";
 
 export const TASK_WORKSPACE_STAGE_LABELS: Readonly<Record<TaskWorkspaceStage, string>> = {
   questions: "Questions",
@@ -18,6 +22,7 @@ export type TaskWorkspacePresetCatalogEntry = {
   readonly stages: ReadonlyArray<TaskWorkspaceStage>;
   readonly explicitEntryStages: ReadonlyArray<TaskWorkspaceStage>;
   readonly automaticCompletionStages: ReadonlyArray<TaskWorkspaceStage>;
+  readonly availableInFirstSlice?: boolean;
 };
 
 /**
@@ -67,12 +72,32 @@ export function taskWorkspacePresetCatalogEntry(
   return entry;
 }
 
+function projectResetCatalogEntry(
+  entry: TaskWorkspaceCatalogEntry,
+): TaskWorkspacePresetCatalogEntry {
+  return {
+    preset: entry.preset,
+    label: entry.label,
+    description: entry.description,
+    currentVersion: entry.version,
+    stages: entry.stages.map((stage) => stage.stage),
+    explicitEntryStages: entry.stages
+      .filter((stage) => stage.explicitEntry)
+      .map((stage) => stage.stage),
+    automaticCompletionStages: entry.stages
+      .filter((stage) => stage.autoAdvance)
+      .map((stage) => stage.stage),
+    availableInFirstSlice: entry.availableInFirstSlice,
+  };
+}
+
 export function taskWorkspaceCatalogEntryForVersion(
   definitionVersion: string,
 ): TaskWorkspacePresetCatalogEntry | null {
-  return (
-    TASK_WORKSPACE_PRESET_CATALOG.find(
-      (candidate) => candidate.currentVersion === definitionVersion,
-    ) ?? null
+  const legacyEntry = TASK_WORKSPACE_PRESET_CATALOG.find(
+    (candidate) => candidate.currentVersion === definitionVersion,
   );
+  if (legacyEntry) return legacyEntry;
+  const resetEntry = taskWorkspaceResetCatalogEntryForVersion(definitionVersion);
+  return resetEntry ? projectResetCatalogEntry(resetEntry) : null;
 }

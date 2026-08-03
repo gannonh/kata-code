@@ -1,5 +1,53 @@
 # Specs log
 
+## 2026-08-01 (Task workflow UX reset Phases 0–3)
+
+Implemented [Task workflow UX reset](/specs/2026-08-01-task-workflow-ux-reset-design.md) through
+Phases 0–3: Guided creation, bootstrap and proposal recovery, typed terminal settlement, atomic
+handoffs, Plan approval, worktree policy, explicit provider task-stage capabilities, and the
+conversation-first surface. Full unit, typecheck, OKF, and release-smoke gates pass; provider-backed
+desktop UAT requires an eligible configured task-stage provider.
+
+## 2026-08-01 (Task workflow UX reset draft)
+
+Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+following maintainer review of the current task screen. The proposed product-first slice keeps
+Kata-owned **Standard**, **Guided**, and **Freeform** templates, uses an inline brief for the
+first slice, automatically manages stage conversations and artifact handoffs, pauses Guided
+before Plan approval, and hides session/context-manifest plumbing from the default UI. The
+existing Slice 4 Build infrastructure and PR #63 are paused as implementation substrate pending
+this UX reset's review and approval. A codebase-grounded correctness pass then added transactional
+command/operation receipts and outbox recovery, trusted provider task tools, exact Plan-gate and
+post-approval states, environment-scoped routing, historical import rules, and AC-to-E2E coverage.
+
+## 2026-07-30 (Task workspaces Slice 4 implementation verified)
+
+- Completed the approved Slice 4 implementation on [PR #63](https://github.com/gannonh/kata-code/pull/63).
+- Remote CI run 334 and CodeQL run 130 are green, including the cumulative nine-test desktop
+  `@task-workspaces` E2E path; local contract, reducer, web, formatting, and quality gates also pass.
+- Preserved the waiting failure checkpoint through amendment invalidation so the Build panel exposes
+  the explicit Resume action after approval. Final merge remains pending user sign-off.
+
+## 2026-07-30 (Task workspaces Slice 4 approved; implementation started)
+
+- Marked the [Slice 4 child plan](/specs/2026-07-30-task-workspaces-slice-4-plan.md) **Approved**
+  after delegated adversarial review. Implementation is proceeding on [PR #63](https://github.com/gannonh/kata-code/pull/63)
+  from the stabilized Slice 3 base.
+- Added durable hierarchical Build contracts and reducer controls for phase/work-item state,
+  automated and manual checks, checkpoint continuation, amendment artifacts and Plan diffs,
+  targeted invalidation, resume sessions, and legacy replay defaults.
+- Added the shared web/desktop Build panel and browser assertions for phase trees, failed checks,
+  amendment gates, and explicit approval controls. Contracts, server task-workspace tests, and
+  web unit tests pass; browser execution awaits the unavailable local Playwright Chromium binary.
+
+- Squash-merged [PR #62](https://github.com/gannonh/kata-code/pull/62) at
+  `cf95a03c9c658d3677fc85d46d486a4ecfda57ae` after CI and CodeQL passed; all five delayed Slice 3
+  review findings were fixed, replied to, and resolved.
+- Drafted the [Slice 4 child plan](/specs/2026-07-30-task-workspaces-slice-4-plan.md) from the
+  stabilized main SHA. It defines hierarchical Build phases, check records, checkpoint policies,
+  amendment artifacts and Plan diffs, targeted invalidation, continuation sessions, restart
+  recovery, and the negative proof against silent Plan mutation or work-item completion.
+
 ## 2026-07-30 (Task workspaces Slice 3 post-merge stabilization)
 
 - Added [PR #62](https://github.com/gannonh/kata-code/pull/62) for delayed review findings on

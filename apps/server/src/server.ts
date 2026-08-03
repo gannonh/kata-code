@@ -17,6 +17,7 @@ import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
+import { TaskWorkspaceStoreLive } from "./persistence/Layers/TaskWorkspaceStore.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -66,6 +67,9 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as TaskWorkspaceService from "./taskWorkspace/TaskWorkspaceService.ts";
+import { TaskWorkspaceSourceResolverLive } from "./taskWorkspace/Layers/TaskWorkspaceSourceResolver.ts";
+import { TaskWorkspaceBootstrapWorkerLive } from "./taskWorkspace/TaskWorkspaceBootstrapWorker.ts";
+import { TaskWorkspaceCompletionReactorLive } from "./taskWorkspace/TaskWorkspaceCompletionReactor.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -168,6 +172,8 @@ const PlatformServicesLive = Layer.unwrap(
 );
 
 const ReactorLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(TaskWorkspaceBootstrapWorkerLive),
+  Layer.provideMerge(TaskWorkspaceCompletionReactorLive),
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
@@ -225,6 +231,8 @@ const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
 
 const TaskWorkspaceLayerLive = TaskWorkspaceService.layer.pipe(
   Layer.provideMerge(GitWorkflowLayerLive),
+  Layer.provideMerge(TaskWorkspaceStoreLive),
+  Layer.provideMerge(TaskWorkspaceSourceResolverLive),
 );
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(

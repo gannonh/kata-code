@@ -25,6 +25,11 @@ Kata Code gives coding agents a single, consistent UI. It wraps provider CLIs an
 - **Workspace-aware** — sessions operate against real local repositories and worktrees.
 - **Typed end to end** — Effect/Schema contracts shared between server and clients.
 
+## Attribution
+
+Kata Code is an independent fork of [T3 Code](https://github.com/pingdotgg/t3code). Portions
+of this repository derive from T3 Code, Copyright (c) 2026 T3 Tools Inc., under the MIT License.
+
 ## Requirements
 
 - [Node.js](https://nodejs.org) `^24.13.1`
@@ -74,7 +79,6 @@ This is a pnpm + Vite+ monorepo.
 | `apps/web`                | React/Vite UI — session UX, conversation and event rendering, client state.                         |
 | `apps/desktop`            | Electron shell; spawns the embedded server in dev.                                                  |
 | `apps/mobile`             | Expo/React Native client.                                                                           |
-| `apps/marketing`          | Marketing site.                                                                                     |
 | `packages/contracts`      | Effect/Schema schemas for provider events, the WebSocket protocol, and session types.               |
 | `packages/shared`         | Shared runtime utilities (git, branding, …) via explicit subpath exports.                           |
 | `packages/client-runtime` | Client code shared across web and mobile.                                                           |

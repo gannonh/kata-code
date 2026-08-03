@@ -1,9 +1,13 @@
 import {
+  ThreadId,
+  type EnvironmentId,
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
   type TaskWorkspaceCommentAuthor,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
+import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
+import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import {
   TASK_WORKSPACE_STAGE_LABELS,
   taskWorkspaceCatalogEntryForVersion,
@@ -12,13 +16,19 @@ import {
 import { useClerk } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
 import { CheckCircle2Icon, CircleIcon, GitBranchIcon, Loader2Icon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
-import { currentTaskStage, useTaskWorkspaceStore } from "../../taskWorkspace/taskWorkspaceStore";
+import { createThreadSelectorByRef } from "../../storeSelectors";
+import {
+  currentTaskStage,
+  selectTaskRefsById,
+  taskWorkspaceKey,
+  useTaskWorkspaceStore,
+} from "../../taskWorkspace/taskWorkspaceStore";
 import { useTaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -27,6 +37,7 @@ import { Textarea } from "../ui/textarea";
 import { ArtifactsPanel } from "./ArtifactsPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { ContextManifestPanel } from "./ContextManifestPanel";
+import { GuidedTaskPanel } from "./GuidedTaskPanel";
 import { SessionsPanel } from "./SessionsPanel";
 
 /**
@@ -35,6 +46,7 @@ import { SessionsPanel } from "./SessionsPanel";
  * stage the task is actually in is honest.
  */
 const UNKNOWN_DEFINITION_STAGES: ReadonlyArray<TaskWorkspaceStage> = [];
+const TaskChatView = lazy(() => import("../ChatView"));
 
 /** Reasoning stages that write their own artifact and complete with their own command. */
 const REASONING_STAGES = [
@@ -277,6 +289,588 @@ function ReasoningStageSection({
   );
 }
 
+function buildStatusVariant(
+  status: TaskWorkspace["build"]["phases"][number]["status"],
+): "success" | "error" | "warning" | "secondary" | "outline" {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "blocked":
+      return "error";
+    case "invalidated":
+      return "warning";
+    case "running":
+      return "secondary";
+    default:
+      return "outline";
+  }
+}
+
+function BuildPanel({
+  task,
+  commands,
+  currentUser,
+}: {
+  task: TaskWorkspace;
+  commands: ReturnType<typeof useTaskWorkspaceCommands>;
+  currentUser: TaskWorkspaceCommentAuthor;
+}) {
+  const [manualNotes, setManualNotes] = useState<Record<string, string>>({});
+  const gate = task.build.amendmentGateId
+    ? task.build.amendments.find((amendment) => amendment.id === task.build.amendmentGateId)
+    : null;
+
+  return (
+    <section
+      data-testid="task-build-panel"
+      className="space-y-4 rounded-xl border border-border bg-card p-4"
+    >
+      <div>
+        <h2 className="font-semibold">Build progress</h2>
+        <p className="text-sm text-muted-foreground">
+          Ordered phases, work items, checks, and durable recovery state are owned by the task
+          service.
+        </p>
+      </div>
+
+      {gate ? (
+        <div
+          data-testid="task-build-amendment-gate"
+          className="space-y-3 rounded-lg border border-warning/40 bg-warning/5 p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="font-medium">Plan amendment required</p>
+              <p className="text-xs text-muted-foreground">
+                Build is blocked until this proposed Plan diff is approved.
+              </p>
+            </div>
+            <Badge variant="warning">{gate.status}</Badge>
+          </div>
+          <dl className="grid gap-2 text-xs sm:grid-cols-2">
+            <div>
+              <dt className="font-medium">Expected</dt>
+              <dd data-testid="task-build-amendment-expected" className="text-muted-foreground">
+                {gate.expected}
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium">Found</dt>
+              <dd data-testid="task-build-amendment-found" className="text-muted-foreground">
+                {gate.found}
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium">Impact</dt>
+              <dd className="text-muted-foreground">{gate.impact}</dd>
+            </div>
+            <div>
+              <dt className="font-medium">Proposed changes</dt>
+              <dd className="text-muted-foreground">{gate.proposedChanges}</dd>
+            </div>
+          </dl>
+          {gate.planDiff ? (
+            <div
+              data-testid="task-build-plan-diff"
+              className="rounded-md border border-border/70 bg-background p-3 text-xs"
+            >
+              <p className="font-medium">Plan revision diff</p>
+              <p className="mt-1 text-muted-foreground">{gate.planDiff.summary}</p>
+              <p className="mt-1 font-mono text-muted-foreground">
+                {gate.planDiff.baseRevisionId} → {gate.planDiff.proposedRevisionId}
+              </p>
+            </div>
+          ) : null}
+          {gate.status === "requested" ? (
+            <Button
+              data-testid={`task-build-amendment-approve-${gate.id}`}
+              size="sm"
+              disabled={commands.isBusy}
+              onClick={() =>
+                void commands.dispatch(
+                  {
+                    ...commands.commandBase("task.amendment.approve"),
+                    amendmentId: gate.id,
+                    approvedBy: currentUser.id,
+                  },
+                  "approve-amendment",
+                )
+              }
+            >
+              Approve amendment
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div data-testid="task-build-phase-tree" className="space-y-3">
+        {task.build.phases.map((phase, phaseIndex) => {
+          const previousComplete = task.build.phases
+            .slice(0, phaseIndex)
+            .every((candidate) => candidate.status === "completed");
+          const phaseChecks = phase.checkIds
+            .map((checkId) => task.build.checks.find((check) => check.id === checkId))
+            .filter((check): check is NonNullable<typeof check> => check !== undefined);
+          const waitingCheckpoint = phase.checkpointId
+            ? (task.build.checkpoints.find(
+                (checkpoint) =>
+                  checkpoint.id === phase.checkpointId && checkpoint.status === "waiting",
+              ) ?? null)
+            : null;
+          const checkpointManifest = waitingCheckpoint?.contextManifestId
+            ? (task.contextManifests.find(
+                (manifest) => manifest.id === waitingCheckpoint.contextManifestId,
+              ) ?? null)
+            : null;
+          const planRevision = latestArtifact(task, "plan");
+          const checkpointCanContinue =
+            phase.status === "completed" &&
+            phase.workItems.every((item) => item.status === "completed") &&
+            phaseChecks.every((check) => check.status === "pass");
+          return (
+            <div
+              key={phase.id}
+              data-testid={`task-build-phase-${phase.id}`}
+              className="rounded-lg border border-border/70 p-3"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-medium">{phase.title}</p>
+                    {task.build.activePhaseId === phase.id ? (
+                      <Badge size="sm" variant="info">
+                        current
+                      </Badge>
+                    ) : null}
+                    <Badge size="sm" variant={buildStatusVariant(phase.status)}>
+                      {phase.status}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Checkpoint: {phase.checkpointPolicy} · {phase.workItems.length} work item
+                    {phase.workItems.length === 1 ? "" : "s"} · {phaseChecks.length} check
+                    {phaseChecks.length === 1 ? "" : "s"}
+                  </p>
+                  {phase.phaseCommitSha ? (
+                    <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                      Commit {phase.phaseCommitSha}
+                    </p>
+                  ) : null}
+                </div>
+                {phase.status !== "completed" ? (
+                  <Button
+                    data-testid={`task-build-phase-start-${phase.id}`}
+                    size="xs"
+                    variant="outline"
+                    disabled={
+                      commands.isBusy ||
+                      Boolean(task.build.amendmentGateId) ||
+                      phase.status !== "pending" ||
+                      !previousComplete
+                    }
+                    title={!previousComplete ? "Complete predecessor phases first." : undefined}
+                    onClick={() =>
+                      void commands.dispatch(
+                        { ...commands.commandBase("task.build.phase.start"), phaseId: phase.id },
+                        `start-phase-${phase.id}`,
+                      )
+                    }
+                  >
+                    Start phase
+                  </Button>
+                ) : null}
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {phase.workItems.map((item) => {
+                  const itemChecks = item.checkIds
+                    .map((checkId) => task.build.checks.find((check) => check.id === checkId))
+                    .filter((check): check is NonNullable<typeof check> => check !== undefined);
+                  const checksPass = itemChecks.every((check) => check.status === "pass");
+                  const itemDependenciesPass = dependenciesPass(phase, item);
+                  const phaseActive =
+                    phase.status === "running" && task.build.activePhaseId === phase.id;
+                  const canComplete =
+                    item.status === "running" &&
+                    checksPass &&
+                    itemDependenciesPass &&
+                    phaseActive &&
+                    !gate;
+                  return (
+                    <div
+                      key={item.id}
+                      data-testid={`task-build-work-item-${item.id}`}
+                      className="space-y-2 rounded-md border border-border/60 bg-background p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{item.title}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {item.summary ??
+                              (item.dependsOn.length > 0
+                                ? `Depends on ${item.dependsOn.join(", ")}`
+                                : "No dependencies")}
+                          </p>
+                          {item.invalidationReason ? (
+                            <p
+                              data-testid={`task-build-invalidation-${item.id}`}
+                              className="mt-1 text-xs text-warning-foreground"
+                            >
+                              {item.invalidationReason}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge size="sm" variant={buildStatusVariant(item.status)}>
+                            {item.status}
+                          </Badge>
+                          {item.status === "pending" ? (
+                            <Button
+                              data-testid={`task-build-work-start-${item.id}`}
+                              size="xs"
+                              variant="outline"
+                              disabled={
+                                commands.isBusy ||
+                                Boolean(gate) ||
+                                !itemDependenciesPass ||
+                                !phaseActive
+                              }
+                              title={
+                                !itemDependenciesPass
+                                  ? "Complete dependency work items first."
+                                  : !phaseActive
+                                    ? "Start this phase first."
+                                    : undefined
+                              }
+                              onClick={() =>
+                                void commands.dispatch(
+                                  {
+                                    ...commands.commandBase("task.build.work-item.set-status"),
+                                    workItemId: item.id,
+                                    status: "running",
+                                  },
+                                  `start-work-${item.id}`,
+                                )
+                              }
+                            >
+                              Start
+                            </Button>
+                          ) : null}
+                          {item.status === "running" ? (
+                            <Button
+                              data-testid={`task-build-work-complete-${item.id}`}
+                              size="xs"
+                              disabled={commands.isBusy || !canComplete}
+                              title={
+                                !checksPass
+                                  ? "Required checks must pass first."
+                                  : !itemDependenciesPass
+                                    ? "Complete dependency work items first."
+                                    : !phaseActive
+                                      ? "Start this phase first."
+                                      : undefined
+                              }
+                              onClick={() =>
+                                void commands.dispatch(
+                                  {
+                                    ...commands.commandBase("task.build.work-item.set-status"),
+                                    workItemId: item.id,
+                                    status: "completed",
+                                  },
+                                  `complete-work-${item.id}`,
+                                )
+                              }
+                            >
+                              Complete
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {itemChecks.length > 0 ? (
+                        <div className="space-y-2 border-t border-border/50 pt-2">
+                          {itemChecks.map((check) => (
+                            <div
+                              key={check.id}
+                              data-testid={`task-build-check-${check.id}`}
+                              className="rounded-md border border-border/50 p-2"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-xs font-medium">{check.label}</p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {check.kind} check · {check.status}
+                                  </p>
+                                </div>
+                                {check.kind === "automated" && check.status !== "pass" ? (
+                                  <Button
+                                    data-testid={`task-build-check-run-${check.id}`}
+                                    size="xs"
+                                    variant="outline"
+                                    disabled={
+                                      commands.isBusy || item.status !== "running" || Boolean(gate)
+                                    }
+                                    onClick={() =>
+                                      void commands.dispatch(
+                                        {
+                                          ...commands.commandBase("task.build.check.run"),
+                                          checkId: check.id,
+                                        },
+                                        `run-check-${check.id}`,
+                                      )
+                                    }
+                                  >
+                                    Run check
+                                  </Button>
+                                ) : null}
+                              </div>
+                              {check.kind === "manual" && check.status !== "pass" ? (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <input
+                                    aria-label={`Note for ${check.label}`}
+                                    className="min-w-48 flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    placeholder="Short review note"
+                                    value={manualNotes[check.id] ?? ""}
+                                    onChange={(event) => {
+                                      const value =
+                                        (event.target as HTMLInputElement | null)?.value ?? "";
+                                      setManualNotes((current) => ({
+                                        ...current,
+                                        [check.id]: value,
+                                      }));
+                                    }}
+                                  />
+                                  <Button
+                                    data-testid={`task-build-check-record-${check.id}`}
+                                    size="xs"
+                                    disabled={
+                                      commands.isBusy ||
+                                      !manualNotes[check.id]?.trim() ||
+                                      Boolean(gate)
+                                    }
+                                    onClick={() => {
+                                      void commands.dispatch(
+                                        {
+                                          ...commands.commandBase("task.build.check.record-manual"),
+                                          checkId: check.id,
+                                          status: "pass",
+                                          note: manualNotes[check.id]!.trim(),
+                                        },
+                                        `record-check-${check.id}-pass`,
+                                      );
+                                    }}
+                                  >
+                                    Record pass
+                                  </Button>
+                                  {(["fail", "blocked"] as const).map((status) => (
+                                    <Button
+                                      key={status}
+                                      data-testid={`task-build-check-record-${check.id}-${status}`}
+                                      size="xs"
+                                      variant="outline"
+                                      disabled={
+                                        commands.isBusy ||
+                                        !manualNotes[check.id]?.trim() ||
+                                        Boolean(gate)
+                                      }
+                                      onClick={() => {
+                                        void commands.dispatch(
+                                          {
+                                            ...commands.commandBase(
+                                              "task.build.check.record-manual",
+                                            ),
+                                            checkId: check.id,
+                                            status,
+                                            note: manualNotes[check.id]!.trim(),
+                                          },
+                                          `record-check-${check.id}-${status}`,
+                                        );
+                                      }}
+                                    >
+                                      {status === "fail" ? "Record fail" : "Block check"}
+                                    </Button>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {check.output ? (
+                                <pre className="mt-2 overflow-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                                  {check.output}
+                                </pre>
+                              ) : null}
+                              {check.note ? (
+                                <p className="mt-2 text-[11px] text-muted-foreground">
+                                  {check.note}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {waitingCheckpoint ? (
+                <div
+                  data-testid={`task-build-checkpoint-${waitingCheckpoint.id}`}
+                  className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-info/40 bg-info/5 p-3"
+                >
+                  <div>
+                    <p className="text-xs font-medium">Checkpoint waiting</p>
+                    <p className="text-[11px] text-muted-foreground">{waitingCheckpoint.reason}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {!checkpointManifest ? (
+                      <Button
+                        data-testid={`task-build-context-create-${waitingCheckpoint.id}`}
+                        size="xs"
+                        variant="outline"
+                        disabled={commands.isBusy || !planRevision}
+                        onClick={() =>
+                          void commands.dispatch(
+                            {
+                              ...commands.commandBase("task.context-manifest.create"),
+                              checkpointId: waitingCheckpoint.id,
+                              artifactRefs: planRevision
+                                ? [
+                                    {
+                                      kind: "plan" as const,
+                                      revision: planRevision.revision,
+                                      blockIds: planRevision.blockIndex.map((block) => block.id),
+                                    },
+                                  ]
+                                : [],
+                              notes: "Build checkpoint continuation context",
+                              sessionId: null,
+                              budget: null,
+                            },
+                            `create-context-${waitingCheckpoint.id}`,
+                          )
+                        }
+                      >
+                        Create context
+                      </Button>
+                    ) : null}
+                    {checkpointCanContinue ? (
+                      <Button
+                        data-testid={`task-build-checkpoint-continue-${waitingCheckpoint.id}`}
+                        size="xs"
+                        disabled={commands.isBusy || !checkpointManifest || Boolean(gate)}
+                        title={!checkpointManifest ? "Create a context manifest first." : undefined}
+                        onClick={() =>
+                          void commands.dispatch(
+                            {
+                              ...commands.commandBase("task.build.checkpoint.continue"),
+                              checkpointId: waitingCheckpoint.id,
+                              threadId: ThreadId.make(`task-${task.id}-${waitingCheckpoint.id}`),
+                              contextManifestId: checkpointManifest!.id,
+                            },
+                            `continue-checkpoint-${waitingCheckpoint.id}`,
+                          )
+                        }
+                      >
+                        Continue
+                      </Button>
+                    ) : null}
+                    <Button
+                      data-testid={`task-build-checkpoint-resume-${waitingCheckpoint.id}`}
+                      size="xs"
+                      variant="outline"
+                      disabled={commands.isBusy || !checkpointManifest || Boolean(gate)}
+                      title={!checkpointManifest ? "Create a context manifest first." : undefined}
+                      onClick={() =>
+                        void commands.dispatch(
+                          {
+                            ...commands.commandBase("task.build.resume"),
+                            checkpointId: waitingCheckpoint.id,
+                            threadId: ThreadId.make(
+                              `task-${task.id}-resume-${waitingCheckpoint.id}`,
+                            ),
+                            contextManifestId: checkpointManifest!.id,
+                          },
+                          `resume-checkpoint-${waitingCheckpoint.id}`,
+                        )
+                      }
+                    >
+                      Resume
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {task.build.checks.some((check) => check.status === "fail" || check.status === "blocked") &&
+      !gate ? (
+        <div
+          data-testid="task-build-amendment-actions"
+          className="space-y-2 rounded-lg border border-border/70 p-3"
+        >
+          <p className="text-xs text-muted-foreground">
+            A failed check blocks completion. Request a reviewed amendment to change the approved
+            Plan.
+          </p>
+          {task.build.checks
+            .filter((check) => check.status === "fail" || check.status === "blocked")
+            .map((check) => {
+              const phase = task.build.phases.find((candidate) => candidate.id === check.phaseId);
+              const item = phase?.workItems.find((candidate) => candidate.id === check.workItemId);
+              if (!phase || !item) return null;
+              return (
+                <Button
+                  key={check.id}
+                  data-testid={`task-build-amendment-request-${check.id}`}
+                  size="sm"
+                  variant="outline"
+                  disabled={commands.isBusy}
+                  onClick={() =>
+                    void commands.dispatch(
+                      {
+                        ...commands.commandBase("task.amendment.request"),
+                        phaseId: phase.id,
+                        workItemId: item.id,
+                        checkId: check.id,
+                        expected: "the approved Plan fixture",
+                        found: check.output ?? "the codebase differs from the approved Plan",
+                        impact: "The work item cannot complete against the approved Plan.",
+                        proposedChanges: "Update the Plan fixture to match the implementation.",
+                        affectedPhaseIds: [phase.id],
+                        affectedWorkItemIds: [item.id],
+                        dependentCheckIds: [check.id],
+                      },
+                      `request-amendment-${check.id}`,
+                    )
+                  }
+                >
+                  Request amendment for {item.title}
+                </Button>
+              );
+            })}
+        </div>
+      ) : null}
+
+      <div className="flex justify-end gap-2">
+        <Button
+          data-testid="task-apply-fixture"
+          size="sm"
+          disabled={commands.isBusy || Boolean(gate)}
+          onClick={() =>
+            void commands.dispatch(
+              { ...commands.commandBase("task.fixture.apply") },
+              "apply-fixture",
+            )
+          }
+        >
+          {commands.pendingAction === "apply-fixture" ? "Committing…" : "Apply fixture build"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function TaskWorkspaceView({ taskId }: { taskId: string }) {
   return hasCloudPublicConfig() ? (
     <ClerkTaskWorkspaceView taskId={taskId} />
@@ -303,6 +897,114 @@ function ClerkTaskWorkspaceView({ taskId }: { taskId: string }) {
   return <TaskWorkspaceViewContent taskId={taskId} currentUser={currentUser} />;
 }
 
+function PreviewTaskPanel({ task }: { readonly task: TaskWorkspace }) {
+  return (
+    <aside
+      data-testid="task-preview-shell"
+      className="border-t border-border bg-card p-5 lg:border-t-0 lg:border-l"
+    >
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Workflow preview
+      </p>
+      <h2 className="mt-1 text-base font-semibold">
+        {taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition)?.label ?? "Task"}
+      </h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        This workflow is available as a conversation shell. Automatic stage controls arrive in a
+        later slice.
+      </p>
+    </aside>
+  );
+}
+
+function TaskFirstSliceView({
+  task,
+  commands,
+  threadRef,
+  hasActiveThread,
+}: {
+  readonly task: TaskWorkspace;
+  readonly commands: ReturnType<typeof useTaskWorkspaceCommands>;
+  readonly threadRef: { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null;
+  readonly hasActiveThread: boolean;
+}) {
+  const catalogEntry = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
+  const stage = currentTaskStage(task);
+  const stageLabel = TASK_WORKSPACE_STAGE_PRESENTATION[stage];
+  const planOccurrence = task.occurrences
+    .filter((candidate) => candidate.stage === "plan")
+    .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+  const approvedPlan =
+    stage === "plan" &&
+    planOccurrence?.status === "completed" &&
+    planOccurrence.gateOutcome === "approved";
+  const planArtifact = latestArtifact(task, "plan");
+
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+      <header className="flex items-center gap-3 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
+        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">{task.title}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {catalogEntry?.label ?? "Task"} · {stageLabel}
+          </p>
+        </div>
+        <Badge variant={approvedPlan ? "success" : "secondary"}>
+          {approvedPlan ? "Plan approved" : stageLabel}
+        </Badge>
+      </header>
+      <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <section className="min-h-0 min-w-0 overflow-hidden">
+          {approvedPlan && planArtifact ? (
+            <div
+              data-testid="task-approved-plan-readonly"
+              className="h-full overflow-auto p-5 sm:p-8"
+            >
+              <div className="mx-auto max-w-3xl rounded-xl border border-success/30 bg-card p-5">
+                <p className="text-xs font-medium uppercase tracking-wide text-success-foreground">
+                  Approved Plan
+                </p>
+                <h1 className="mt-2 text-xl font-semibold">{planArtifact.title}</h1>
+                <pre className="mt-5 whitespace-pre-wrap text-sm text-muted-foreground">
+                  {planArtifact.markdown}
+                </pre>
+              </div>
+            </div>
+          ) : threadRef && hasActiveThread ? (
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Loading conversation…
+                </div>
+              }
+            >
+              <TaskChatView
+                environmentId={threadRef.environmentId}
+                threadId={threadRef.threadId}
+                routeKind="server"
+                reserveTitleBarControlInset
+              />
+            </Suspense>
+          ) : (
+            <div
+              data-testid="task-conversation-starting"
+              className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
+            >
+              Preparing the {stageLabel} conversation…
+            </div>
+          )}
+        </section>
+        {catalogEntry?.availableInFirstSlice ? (
+          <GuidedTaskPanel task={task} commands={commands} />
+        ) : (
+          <PreviewTaskPanel task={task} />
+        )}
+      </main>
+    </SidebarInset>
+  );
+}
+
 function TaskWorkspaceViewContent({
   taskId,
   currentUser,
@@ -310,7 +1012,10 @@ function TaskWorkspaceViewContent({
   taskId: string;
   currentUser: TaskWorkspaceCommentAuthor;
 }) {
-  const task = useTaskWorkspaceStore((state) => state.taskById[taskId] ?? null);
+  const task = useTaskWorkspaceStore((state) => {
+    const ref = selectTaskRefsById(state, taskId)[0];
+    return ref ? (state.taskByRef[taskWorkspaceKey(ref.environmentId, ref.taskId)] ?? null) : null;
+  });
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const [questionsMarkdown, setQuestionsMarkdown] = useState("");
@@ -330,6 +1035,26 @@ function TaskWorkspaceViewContent({
     : null;
   const railStages = catalogEntry?.stages ?? UNKNOWN_DEFINITION_STAGES;
   const isFreeform = (catalogEntry?.explicitEntryStages.length ?? 0) > 0;
+  const currentOccurrence = task
+    ? task.occurrences
+        .filter((candidate) => candidate.stage === stage)
+        .toSorted((left, right) => right.ordinal - left.ordinal)[0]
+    : undefined;
+  const currentSession =
+    task && currentOccurrence?.sessionId
+      ? (task.sessions.find((session) => session.id === currentOccurrence.sessionId) ?? null)
+      : null;
+  const activeThreadRef = useMemo(
+    () =>
+      task?.environmentId && currentSession
+        ? { environmentId: task.environmentId, threadId: currentSession.threadId }
+        : null,
+    [currentSession, task?.environmentId],
+  );
+  const activeThread = useStore(
+    useMemo(() => createThreadSelectorByRef(activeThreadRef), [activeThreadRef]),
+  );
+  const isFirstSliceTask = task?.versions.taskContract === "task-workspace@0.3.0";
   const availableThreads = useMemo(
     () =>
       task && repository
@@ -361,9 +1086,19 @@ function TaskWorkspaceViewContent({
     );
   }
 
+  if (isFirstSliceTask) {
+    return (
+      <TaskFirstSliceView
+        task={task}
+        commands={commands}
+        threadRef={activeThreadRef}
+        hasActiveThread={activeThread !== undefined && "id" in activeThread}
+      />
+    );
+  }
+
   const linkedSession =
     task.sessions.find((session) => session.stage === stage && session.role === "primary") ?? null;
-  const buildItem = task.build.phases[0]?.workItems[0] ?? null;
   const verificationResult = task.verification.results.find(
     (result) => result.criterionId === task.verification.criteria[0]?.id,
   );
@@ -588,57 +1323,7 @@ function TaskWorkspaceViewContent({
             ) : null}
 
             {stage === "build" ? (
-              <section className="space-y-4 rounded-xl border border-border bg-card p-4">
-                <div>
-                  <h2 className="font-semibold">Build progress</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Work-item status is owned by the task service. The fixture action writes and
-                    commits the planned change.
-                  </p>
-                </div>
-                <div className="rounded-lg border border-border/70 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium">{buildItem?.title}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {buildItem?.summary ?? "Not started"}
-                      </p>
-                    </div>
-                    <Badge variant={buildItem?.status === "completed" ? "success" : "outline"}>
-                      {buildItem?.status}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={buildItem?.status === "running" || isBusy}
-                    onClick={() =>
-                      void dispatch(
-                        {
-                          ...commandBase("task.build.work-item.set-status"),
-                          workItemId: buildItem?.id ?? "work-item-1",
-                          status: "running",
-                        },
-                        "start-build",
-                      )
-                    }
-                  >
-                    Start work
-                  </Button>
-                  <Button
-                    data-testid="task-apply-fixture"
-                    size="sm"
-                    disabled={isBusy}
-                    onClick={() =>
-                      void dispatch({ ...commandBase("task.fixture.apply") }, "apply-fixture")
-                    }
-                  >
-                    {pendingAction === "apply-fixture" ? "Committing…" : "Apply fixture build"}
-                  </Button>
-                </div>
-              </section>
+              <BuildPanel task={task} commands={commands} currentUser={currentUser} />
             ) : null}
 
             {stage === "verify" ? (

@@ -78,3 +78,4 @@ SCRATCH.md
 session*.jsonl
 .pi-subagents/artifacts
 .pi/tmp/
+sessions/

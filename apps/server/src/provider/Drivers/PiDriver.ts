@@ -48,6 +48,7 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
   metadata: {
     displayName: "Pi",
     supportsMultipleInstances: true,
+    supportsTaskStage: false,
   },
   configSchema: PiSettings,
   defaultConfig: (): PiSettings => decodePiSettings({}),

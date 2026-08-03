@@ -49,7 +49,7 @@ import {
 } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
-import { makeProviderServiceLive } from "./ProviderService.ts";
+import { makeProviderServiceLive, normalizeTaskStageInteractionMode } from "./ProviderService.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -316,6 +316,20 @@ function makeProviderServiceLayer() {
     layer,
   };
 }
+
+it.effect("keeps provider-native plan cards out of Guided task stages", () =>
+  Effect.sync(() => {
+    assert.equal(
+      normalizeTaskStageInteractionMode({ isTaskStage: true, interactionMode: "plan" }),
+      "default",
+    );
+    assert.equal(normalizeTaskStageInteractionMode({ isTaskStage: true }), "default");
+    assert.equal(
+      normalizeTaskStageInteractionMode({ isTaskStage: false, interactionMode: "plan" }),
+      "plan",
+    );
+  }),
+);
 
 it.effect("ProviderServiceLive catches stopAll failures during shutdown", () =>
   Effect.gen(function* () {
@@ -1172,8 +1186,28 @@ routing.layer("ProviderServiceLive routing", (it) => {
           "claude-opus-4-6",
           [{ id: "effort", value: "max" }],
         ),
+        developerInstructions: "Preserve this ordinary server-owned instruction.",
         runtimeMode: "full-access",
       });
+
+      yield* routing.claude.stopAll();
+      routing.claude.startSession.mockClear();
+
+      yield* provider.startSession(initial.threadId, {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: claudeAgentInstanceId,
+        threadId: initial.threadId,
+        runtimeMode: "full-access",
+      });
+
+      const directRestartInput = routing.claude.startSession.mock.calls[0]?.[0];
+      assert.equal(typeof directRestartInput === "object" && directRestartInput !== null, true);
+      if (directRestartInput && typeof directRestartInput === "object") {
+        assert.equal(
+          (directRestartInput as { developerInstructions?: string }).developerInstructions,
+          "Preserve this ordinary server-owned instruction.",
+        );
+      }
 
       yield* routing.claude.stopAll();
       routing.claude.startSession.mockClear();
@@ -1193,6 +1227,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           provider?: string;
           cwd?: string;
           modelSelection?: unknown;
+          developerInstructions?: string;
           resumeCursor?: unknown;
           threadId?: string;
         };
@@ -1203,6 +1238,10 @@ routing.layer("ProviderServiceLive routing", (it) => {
           createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-4-6", [
             { id: "effort", value: "max" },
           ]),
+        );
+        assert.equal(
+          startPayload.developerInstructions,
+          "Preserve this ordinary server-owned instruction.",
         );
         assert.deepEqual(startPayload.resumeCursor, initial.resumeCursor);
         assert.equal(startPayload.threadId, initial.threadId);

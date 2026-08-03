@@ -45,6 +45,13 @@ import Migration0029 from "./Migrations/029_ProjectionThreadDetailOrderingIndexe
 import Migration0030 from "./Migrations/030_ProjectionThreadShellArchiveIndexes.ts";
 import Migration0031 from "./Migrations/031_AuthAuthorizationScopes.ts";
 import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
+import Migration0033 from "./Migrations/033_TaskWorkspaceEvents.ts";
+import Migration0034 from "./Migrations/034_TaskWorkspaceCommandReceipts.ts";
+import Migration0035 from "./Migrations/035_TaskWorkspaceOperationReceipts.ts";
+import Migration0036 from "./Migrations/036_TaskWorkspaceCompletionProposals.ts";
+import Migration0037 from "./Migrations/037_TaskWorkspaceOutbox.ts";
+import Migration0038 from "./Migrations/038_TaskWorkspaceImportMeta.ts";
+import Migration0039 from "./Migrations/039_RepairTaskWorkspaceTables.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -89,6 +96,13 @@ export const migrationEntries = [
   [30, "ProjectionThreadShellArchiveIndexes", Migration0030],
   [31, "AuthAuthorizationScopes", Migration0031],
   [32, "AuthPairingProofKeyThumbprint", Migration0032],
+  [33, "TaskWorkspaceEvents", Migration0033],
+  [34, "TaskWorkspaceCommandReceipts", Migration0034],
+  [35, "TaskWorkspaceOperationReceipts", Migration0035],
+  [36, "TaskWorkspaceCompletionProposals", Migration0036],
+  [37, "TaskWorkspaceOutbox", Migration0037],
+  [38, "TaskWorkspaceImportMeta", Migration0038],
+  [39, "RepairTaskWorkspaceTables", Migration0039],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

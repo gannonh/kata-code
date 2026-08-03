@@ -51,3 +51,10 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   CursorDriver,
   PiDriver,
 ];
+
+export function declaredTaskStageSupport(
+  driverKind: AnyProviderDriver["driverKind"],
+): boolean | undefined {
+  return BUILT_IN_DRIVERS.find((driver) => driver.driverKind === driverKind)?.metadata
+    .supportsTaskStage;
+}

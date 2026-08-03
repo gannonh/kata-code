@@ -101,6 +101,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   metadata: {
     displayName: "Codex",
     supportsMultipleInstances: true,
+    supportsTaskStage: true,
   },
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => decodeCodexSettings({}),
@@ -117,6 +118,10 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         displayName,
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
+      });
+      const stampTaskStageSnapshot = (snapshot: Parameters<typeof stampIdentity>[0]) => ({
+        ...stampIdentity(snapshot),
+        supportsTaskStage: true,
       });
       yield* materializeCodexShadowHome(homeLayout).pipe(
         Effect.mapError(
@@ -157,7 +162,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // updates. Pre-provide `ChildProcessSpawner` so the check fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
       const checkProvider = checkCodexProviderStatus(effectiveConfig, undefined, processEnv).pipe(
-        Effect.map(stampIdentity),
+        Effect.map(stampTaskStageSnapshot),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
       const snapshot = yield* makeManagedServerProvider<CodexSettings>({
@@ -166,7 +171,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) =>
-          makePendingCodexProvider(settings).pipe(Effect.map(stampIdentity)),
+          makePendingCodexProvider(settings).pipe(Effect.map(stampTaskStageSnapshot)),
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities).pipe(

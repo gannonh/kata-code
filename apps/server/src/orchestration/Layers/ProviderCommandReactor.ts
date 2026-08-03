@@ -354,6 +354,7 @@ const make = Effect.gen(function* () {
     createdAt: string,
     options?: {
       readonly modelSelection?: ModelSelection;
+      readonly developerInstructions?: string;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -481,6 +482,9 @@ const make = Effect.gen(function* () {
         providerInstanceId: desiredInstanceId,
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         modelSelection: desiredModelSelection,
+        ...(options?.developerInstructions !== undefined
+          ? { developerInstructions: options.developerInstructions }
+          : {}),
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: desiredRuntimeMode,
       });
@@ -588,6 +592,7 @@ const make = Effect.gen(function* () {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
+    readonly developerInstructions?: string;
     readonly interactionMode?: "default" | "plan";
     readonly createdAt: string;
   }) {
@@ -600,7 +605,14 @@ const make = Effect.gen(function* () {
     yield* ensureSessionForThread(
       input.threadId,
       input.createdAt,
-      input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
+      input.modelSelection !== undefined || input.developerInstructions !== undefined
+        ? {
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+            ...(input.developerInstructions !== undefined
+              ? { developerInstructions: input.developerInstructions }
+              : {}),
+          }
+        : {},
     );
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
@@ -640,6 +652,9 @@ const make = Effect.gen(function* () {
       ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
+      ...(input.developerInstructions !== undefined
+        ? { developerInstructions: input.developerInstructions }
+        : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     };
   });
@@ -843,6 +858,9 @@ const make = Effect.gen(function* () {
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
+        : {}),
+      ...(event.payload.developerInstructions !== undefined
+        ? { developerInstructions: event.payload.developerInstructions }
         : {}),
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,

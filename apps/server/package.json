@@ -11,7 +11,9 @@
     "katacode": "./dist/bin.mjs"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE"
   ],
   "type": "module",
   "scripts": {

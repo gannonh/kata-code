@@ -17,6 +17,7 @@ const ARTIFACT_KIND_LABELS: Record<TaskWorkspaceArtifactKind, string> = {
   plan: "Plan",
   verification: "Verification",
   summary: "Context summary",
+  amendment: "Amendment",
 };
 
 function revisionMarkdown(artifact: TaskWorkspaceArtifact, revision: number): string {

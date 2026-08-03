@@ -1,3 +1,4 @@
+import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import { Link, useLocation } from "@tanstack/react-router";
 import { CheckCircle2Icon, ClipboardListIcon, PlusIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
@@ -45,14 +46,23 @@ export function TaskWorkspaceSidebar() {
         ) : (
           tasks.map((task) => {
             const stage = currentTaskStage(task);
-            const active = pathname === `/tasks/${task.id}`;
+            const environmentId = task.environmentId;
+            const active =
+              environmentId !== null && pathname === `/tasks/${environmentId}/${task.id}`;
             return (
-              <SidebarMenuItem key={task.id}>
+              <SidebarMenuItem key={`${environmentId}:${task.id}`}>
                 <SidebarMenuButton
                   size="sm"
                   isActive={active}
                   className="gap-2"
-                  render={<Link to="/tasks/$taskId" params={{ taskId: task.id }} />}
+                  render={
+                    environmentId !== null ? (
+                      <Link
+                        to="/tasks/$environmentId/$taskId"
+                        params={{ environmentId, taskId: task.id }}
+                      />
+                    ) : undefined
+                  }
                 >
                   {stage === "verified" ? (
                     <CheckCircle2Icon className="size-3.5 text-success-foreground" />
@@ -65,7 +75,7 @@ export function TaskWorkspaceSidebar() {
                     variant={stage === "verified" ? "success" : "outline"}
                     className="max-w-20 truncate"
                   >
-                    {stage}
+                    {TASK_WORKSPACE_STAGE_PRESENTATION[stage]}
                   </Badge>
                 </SidebarMenuButton>
               </SidebarMenuItem>

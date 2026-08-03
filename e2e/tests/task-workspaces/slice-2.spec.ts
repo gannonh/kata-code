@@ -305,7 +305,7 @@ registerFileSessionSeed(fileURLToPath(import.meta.url), async (context) => {
 });
 
 async function openTask(page: Page, id: string): Promise<void> {
-  const taskLink = page.locator(`a[href$="/tasks/${id}"]`).first();
+  const taskLink = page.locator(`a[href$="/${id}"]`).first();
   await expect(taskLink).toBeVisible();
   const href = await taskLink.getAttribute("href");
   expect(href).not.toBeNull();
@@ -318,7 +318,7 @@ async function openTask(page: Page, id: string): Promise<void> {
     window.history.pushState({}, "", routeHref);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, href!);
-  await expect(page).toHaveURL(new RegExp(`/tasks/${id}$`));
+  await expect(page).toHaveURL(new RegExp(`/tasks/(?:[^/]+/)?${id}$`));
   try {
     await expect(page.getByTestId("task-artifacts-panel")).toBeVisible();
   } catch (error) {
@@ -398,7 +398,11 @@ test.describe(`Task workspaces Slice 2 ${E2E_TAGS.taskWorkspaces}`, () => {
     await outdatedThread.getByRole("button", { name: "Reply" }).click();
     await outdatedThread.getByLabel("Reply body").fill("Reply survives the real command path");
     await outdatedThread.getByRole("button", { name: "Send reply" }).click();
-    await expect(outdatedThread.getByText("Reply survives the real command path")).toBeVisible();
+    await expect(
+      outdatedThread.locator("li span.text-muted-foreground").filter({
+        hasText: "Reply survives the real command path",
+      }),
+    ).toBeVisible();
     await outdatedThread.getByRole("button", { name: "Resolve" }).click();
     await expect(outdatedThread.getByText("resolved", { exact: true })).toBeVisible();
 
@@ -489,6 +493,11 @@ test.describe(`Task workspaces Slice 2 ${E2E_TAGS.taskWorkspaces}`, () => {
     await appWindow.getByTestId("task-complete-questions").click();
     await appWindow.getByTestId("task-save-plan").click();
     await appWindow.getByTestId("task-approve-plan").click();
+    // The fixture adapter no longer bypasses phase completion: complete the
+    // default phase tree first.
+    await appWindow.getByTestId("task-build-phase-start-phase-1").click();
+    await appWindow.getByTestId("task-build-work-start-work-item-1").click();
+    await appWindow.getByTestId("task-build-work-complete-work-item-1").click();
     await appWindow.getByTestId("task-apply-fixture").click();
     await appWindow.getByTestId("task-run-verification").click();
     await appWindow.getByTestId("task-signoff").click();

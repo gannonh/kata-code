@@ -746,11 +746,21 @@ const buildAppUnderTest = (options?: {
                 task: {
                   id: command.taskId,
                 } as never,
+                operation: {
+                  key: command.type,
+                  status: "completed" as const,
+                  attempt: 0,
+                  error: null,
+                },
+                taskRoute: { environmentId: "environment-test" as never, taskId: command.taskId },
+                conversationTarget: null,
               }),
             getSnapshot: Effect.succeed({ sequence: 0, tasks: [] }),
             getTask: () => Effect.succeed(null),
             streamEvents: Stream.empty,
             subscribe: Effect.succeed(Stream.empty),
+            processBootstrap: () => Effect.void,
+            processWorktree: () => Effect.void,
             ...options?.layers?.taskWorkspace,
           }),
           Layer.mock(CheckpointDiffQuery)({

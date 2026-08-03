@@ -3,6 +3,7 @@ import {
   TASK_WORKSPACE_PRESET_CATALOG,
   taskWorkspacePresetCatalogEntry,
 } from "@kata-sh/code-shared/taskWorkspacePresets";
+import { TASK_WORKSPACE_WORKFLOW_CATALOG } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 
 import {
   allowsExplicitEntry,
@@ -12,6 +13,7 @@ import {
   CURRENT_STANDARD_WORKFLOW_VERSION,
   FREEFORM_WORKFLOW_V0_1_0,
   GUIDED_WORKFLOW_V0_1_0,
+  legacyVersionForPreset,
   makeWorkflowDefinitionRegistry,
   resolveWorkflowDefinition,
   STANDARD_WORKFLOW_V0_1_0,
@@ -34,12 +36,13 @@ const STANDARD_WORKFLOW_V0_2_0: WorkflowDefinition = {
 };
 
 describe("workflowDefinitions", () => {
-  it("ships Standard 0.1.0 as the version new tasks pin", () => {
+  it("ships Standard 0.1.0 as the legacy definition and Standard 0.2.0 as the first-slice shell", () => {
     expect(CURRENT_STANDARD_WORKFLOW_VERSION).toBe("standard@0.1.0");
     expect(resolveWorkflowDefinition(CURRENT_STANDARD_WORKFLOW_VERSION)).toBe(
       STANDARD_WORKFLOW_V0_1_0,
     );
     expect(BUILT_IN_WORKFLOW_DEFINITIONS.get("standard@0.1.0")).toBe(STANDARD_WORKFLOW_V0_1_0);
+    expect(BUILT_IN_WORKFLOW_DEFINITIONS.get("standard@0.2.0")?.availableInFirstSlice).toBe(false);
   });
 
   it("reproduces the Slice 1 / Slice 2 Standard rail exactly", () => {
@@ -303,18 +306,35 @@ describe("workflowDefinitions", () => {
   });
 
   it("pins the matching current version for every preset", () => {
-    expect(currentVersionForPreset("standard")).toBe("standard@0.1.0");
-    expect(currentVersionForPreset("guided")).toBe("guided@0.1.0");
-    expect(currentVersionForPreset("freeform")).toBe("freeform@0.1.0");
+    expect(currentVersionForPreset("standard")).toBe("standard@0.2.0");
+    expect(currentVersionForPreset("guided")).toBe("guided@0.2.0");
+    expect(currentVersionForPreset("freeform")).toBe("freeform@0.2.0");
     for (const preset of ["standard", "guided", "freeform"] as const) {
       expect(resolveWorkflowDefinition(currentVersionForPreset(preset)).preset).toBe(preset);
     }
   });
 
-  // Clients cannot execute a workflow, but they do render its rail. The catalog
-  // in contracts is that display projection; this is what stops it drifting away
-  // from the definitions it claims to describe.
-  it("keeps the shared preset catalog in sync with the built-in definitions", () => {
+  it("compiles first-slice definitions from the shared workflow catalog", () => {
+    expect(resolveWorkflowDefinition("guided@0.2.0").availableInFirstSlice).toBe(true);
+    expect(resolveWorkflowDefinition("guided@0.2.0").completionTransportRequired).toBe(true);
+    expect(resolveWorkflowDefinition("guided@0.2.0").autoAdvanceStages).toEqual([
+      "questions",
+      "research",
+      "design",
+    ]);
+    expect(resolveWorkflowDefinition("guided@0.2.0").humanGateStages).toEqual(["plan"]);
+    expect(
+      resolveWorkflowDefinition("guided@0.2.0").transitions.map((transition) => transition.command),
+    ).toEqual(["task.questions.complete", "task.research.complete", "task.design.complete"]);
+    expect(resolveWorkflowDefinition("guided@0.2.0").explicitEntryStages).toEqual([]);
+    expect(resolveWorkflowDefinition("standard@0.2.0").transitions).toEqual([]);
+    expect(resolveWorkflowDefinition("freeform@0.2.0").transitions).toEqual([]);
+  });
+
+  // Clients cannot execute a workflow, but they do render its rail. The legacy
+  // preset catalog in shared is that display projection for @0.1.0 tasks; this
+  // stops it drifting away from the definitions it claims to describe.
+  it("keeps the shared legacy preset catalog in sync with the @0.1.0 definitions", () => {
     expect(TASK_WORKSPACE_PRESET_CATALOG.map((entry) => entry.preset)).toEqual([
       "standard",
       "guided",
@@ -323,7 +343,7 @@ describe("workflowDefinitions", () => {
 
     for (const entry of TASK_WORKSPACE_PRESET_CATALOG) {
       const definition = resolveWorkflowDefinition(entry.currentVersion);
-      expect(entry.currentVersion).toBe(currentVersionForPreset(entry.preset));
+      expect(entry.currentVersion).toBe(legacyVersionForPreset(entry.preset));
       expect(definition.preset).toBe(entry.preset);
       expect(entry.stages).toEqual(definition.stages);
       expect(entry.explicitEntryStages).toEqual(definition.explicitEntryStages);
@@ -338,12 +358,37 @@ describe("workflowDefinitions", () => {
       );
       expect(taskWorkspacePresetCatalogEntry(entry.preset)).toBe(entry);
     }
+  });
 
-    // Every registered built-in is projected; a new preset cannot ship unlisted.
-    for (const definition of BUILT_IN_WORKFLOW_DEFINITIONS.values()) {
-      expect(
-        TASK_WORKSPACE_PRESET_CATALOG.some((entry) => entry.currentVersion === definition.version),
-      ).toBe(true);
+  // The first-slice workflow catalog is the single source for @0.2.0+: every
+  // catalog entry must project identically to its server definition and to the
+  // version new tasks pin.
+  it("keeps the first-slice workflow catalog in sync with server definitions and new creates", () => {
+    for (const entry of TASK_WORKSPACE_WORKFLOW_CATALOG) {
+      const definition = resolveWorkflowDefinition(entry.version);
+      expect(definition.version).toBe(entry.version);
+      expect(definition.promptBundleRef).toBe(entry.promptBundleVersion);
+      expect(definition.initialStage).toBe(entry.initialStage);
+      expect(definition.terminalStage).toBe(entry.terminalStage);
+      expect(definition.availableInFirstSlice).toBe(entry.availableInFirstSlice);
+      expect(definition.completionTransportRequired).toBe(entry.completionTransportRequired);
+      expect(definition.stages).toEqual(entry.stages.map((stage) => stage.stage));
+      expect(definition.autoAdvanceStages).toEqual(
+        entry.stages.filter((stage) => stage.autoAdvance).map((stage) => stage.stage),
+      );
+      expect(definition.humanGateStages).toEqual(
+        entry.stages.filter((stage) => stage.humanGate).map((stage) => stage.stage),
+      );
+      expect(definition.explicitEntryStages).toEqual(
+        entry.stages.filter((stage) => stage.explicitEntry).map((stage) => stage.stage),
+      );
+      expect(definition.transitions).toEqual(entry.transitions);
+      expect(currentVersionForPreset(entry.preset)).toBe(entry.version);
+    }
+
+    // Every @0.1.0 definition remains registered and unmodified.
+    for (const version of ["standard@0.1.0", "guided@0.1.0", "freeform@0.1.0"]) {
+      expect(BUILT_IN_WORKFLOW_DEFINITIONS.get(version)).toBeDefined();
     }
   });
 });

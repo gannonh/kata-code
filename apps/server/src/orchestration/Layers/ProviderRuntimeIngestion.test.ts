@@ -359,6 +359,14 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+    expect(
+      thread.activities.some(
+        (activity) =>
+          activity.kind === "provider-turn-terminal" &&
+          activity.turnId === "turn-1" &&
+          (activity.payload as { readonly outcome?: string }).outcome === "failed",
+      ),
+    ).toBe(true);
   });
 
   it("clears lastError when a later turn completes successfully", async () => {

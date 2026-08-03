@@ -55,6 +55,7 @@ The harness forwards `KATACODE_DESKTOP_REMOTE_DEBUGGING_PORT` as `--remote-debug
 - Tag every spec with at least one feature tag, e.g., `@smoke`, `@auth`, `@settings`, `@agent`.
 - For new features, create new tags.
 - Fail loudly with the missing env var or prerequisite when credentials are absent — never skip assertions silently.
+- Keep provider configuration in the repository `.env`; manual command-line overrides create runs that maintainers cannot reproduce.
 - Prefer user-visible locators (role, label, text). Add `data-testid` in product code only when no durable accessible locator exists and the attribute is a deliberate test contract.
 - Default to one worker for authenticated mutable flows unless additional isolated test accounts exist.
 - Use reasonable timeouts from `e2e/src/config/timeouts.ts` — tests should fail fast, not hang.
@@ -101,7 +102,10 @@ Do not run `dev:desktop` inside E2E — it would spawn a second Electron and cau
 
 - Before `sendAgentInstruction`, call `**selectComposerModel(page, turn.model)**` so the test uses the `KATACODE_E2E_AGENT_MODEL` slug, not whatever default the composer had.
 - Flow: click `[data-chat-provider-model-picker="true"]` → fill `Search models…` with slug tokens (hyphens → spaces) → click matching `[role="option"]`.
-- `@agent` tests need `KATACODE_E2E_AGENT_PROVIDER`, `KATACODE_E2E_AGENT_MODEL`, and the matching provider API key.
+- The repository `.env` is authoritative for `KATACODE_E2E_AGENT_PROVIDER` and `KATACODE_E2E_AGENT_MODEL`. Keep those values identical for manual E2E runs and Playwright runs. Do not inject provider/model overrides on a command line or create a temporary `.env.local`.
+- The default local Codex policy is `KATACODE_E2E_CODEX_AUTH_MODE=oauth-or-api-key`: the harness stages host `~/.codex/auth.json` into the isolated HOME and removes `OPENAI_API_KEY` from the child process when OAuth was staged. Anthropic API credentials are stripped from E2E child processes.
+- `KATACODE_E2E_ENABLE_PI=1` gates Pi-specific tests and `KATACODE_E2E_PI_MODEL=openrouter/free` is the preferred low-cost Pi smoke model. Pi is not eligible for Guided task-workspace tests until its task-stage MCP bridge exists.
+- `@agent` tests need the configured provider/model pair and its matching authentication path. Codex OAuth is preferred; OpenAI API access is fallback only.
 
 ## Reusable building blocks
 

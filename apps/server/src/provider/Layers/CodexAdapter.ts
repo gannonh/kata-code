@@ -1414,6 +1414,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(input.modelSelection?.instanceId === boundInstanceId
             ? { model: input.modelSelection.model }
             : {}),
+          ...(input.developerInstructions
+            ? { developerInstructions: input.developerInstructions }
+            : {}),
+          ...(input.taskStage === true ? { taskStage: true } : {}),
           ...(serviceTier ? { serviceTier } : {}),
           ...(mcpSession
             ? {
@@ -1563,6 +1567,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }
           : {}),
         ...(serviceTier ? { serviceTier } : {}),
+        ...(input.developerInstructions
+          ? { developerInstructions: input.developerInstructions }
+          : {}),
+        ...(input.taskStage === true ? { taskStage: true } : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
@@ -1719,6 +1727,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      supportsTaskStage: true,
     },
     startSession,
     sendTurn,

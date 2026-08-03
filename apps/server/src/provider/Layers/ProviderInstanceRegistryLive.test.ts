@@ -160,6 +160,8 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       expect(personal).toBeDefined();
       expect(work).toBeDefined();
       expect(personal!.adapter).not.toBe(work!.adapter);
+      expect(personal!.supportsTaskStage).toBe(true);
+      expect(work!.supportsTaskStage).toBe(true);
       expect(personal!.textGeneration).not.toBe(work!.textGeneration);
       expect(personal!.snapshot).not.toBe(work!.snapshot);
 

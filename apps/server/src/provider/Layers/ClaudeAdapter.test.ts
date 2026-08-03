@@ -338,6 +338,56 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("attaches trusted instructions to Claude's native system prompt", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+        developerInstructions: "Use task_stage_context before task data.",
+        taskStage: true,
+      });
+
+      assert.deepEqual(harness.getLastCreateQueryInput()?.options.systemPrompt, {
+        type: "preset",
+        preset: "claude_code",
+        append: "Use task_stage_context before task data.",
+      });
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.equal(options?.permissionMode, undefined);
+      assert.deepEqual(options?.disallowedTools, ["EnterPlanMode", "ExitPlanMode"]);
+      assert.equal(
+        ((options?.tools ?? []) as ReadonlyArray<string>).includes("ExitPlanMode"),
+        false,
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("keeps ordinary developer instructions on the normal Claude profile", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        developerInstructions: "Keep the response concise.",
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.equal(options?.permissionMode, "bypassPermissions");
+      assert.equal(options?.disallowedTools, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("uses bypass permissions for full-access claude sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

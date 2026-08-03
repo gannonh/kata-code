@@ -78,7 +78,6 @@ Scope is `@kata-sh`; workspace packages use the `code-*` suffix:
 | `@t3tools/monorepo`                  | `@kata-sh/code-monorepo`                  |
 | `@t3tools/web`                       | `@kata-sh/code-web`                       |
 | `@t3tools/desktop`                   | `@kata-sh/code-desktop`                   |
-| `@t3tools/marketing`                 | `@kata-sh/code-marketing`                 |
 | `@t3tools/mobile`                    | `@kata-sh/code-mobile`                    |
 | `@t3tools/contracts`                 | `@kata-sh/code-contracts`                 |
 | `@t3tools/shared`                    | `@kata-sh/code-shared`                    |

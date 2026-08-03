@@ -143,8 +143,10 @@ jobs:
       - name: Build desktop pipeline
         run: vp run build:desktop
 
-      - name: Run task-workspaces E2E
-        run: vp exec playwright test --config e2e/playwright.config.ts --project desktop-dev --grep @task-workspaces
+      # The @agent task-workspace scenario requires maintainer-only Clerk and provider
+      # credentials. Keep the credential-free task-workspace coverage in PR CI.
+      - name: Run credential-free task-workspaces E2E
+        run: vp exec playwright test --config e2e/playwright.config.ts --project desktop-dev --grep @task-workspaces --grep-invert @agent
 
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis

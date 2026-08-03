@@ -1,6 +1,14 @@
 import "../../index.css";
 
-import { ProjectId, type TaskWorkspace, ThreadId } from "@kata-sh/code-contracts";
+import {
+  CommandId,
+  EnvironmentId,
+  MessageId,
+  ProjectId,
+  ProviderInstanceId,
+  type TaskWorkspace,
+  ThreadId,
+} from "@kata-sh/code-contracts";
 import { page } from "vite-plus/test/browser";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -28,7 +36,15 @@ vi.mock("../../cloud/publicConfig", () => ({
 }));
 
 vi.mock("../../environments/runtime", () => ({
+  readEnvironmentConnection: () => null,
   getPrimaryEnvironmentConnection: () => ({
+    client: {
+      taskWorkspaces: {
+        dispatchCommand: mocks.dispatchCommand,
+      },
+    },
+  }),
+  requireEnvironmentConnection: () => ({
     client: {
       taskWorkspaces: {
         dispatchCommand: mocks.dispatchCommand,
@@ -38,12 +54,14 @@ vi.mock("../../environments/runtime", () => ({
 }));
 
 vi.mock("../../store", () => ({
+  selectEnvironmentState: () => ({ threadShellById: {} }),
   selectSidebarThreadsAcrossEnvironments: () => [],
   useStore: () => [],
 }));
 
 const baseTask: TaskWorkspace = {
   id: "task-browser",
+  environmentId: EnvironmentId.make("environment-local"),
   title: "Browser task workspace",
   versions: {
     taskContract: "task-workspace@0.1.0",
@@ -51,6 +69,13 @@ const baseTask: TaskWorkspace = {
     workflowDefinition: "standard@0.1.0",
     prompt: "task-workspace-slice-1@0.1.0",
   },
+  intake: { brief: "", source: { kind: "inline", body: "" } },
+  preferences: { worktreePolicy: "later", modelSelection: null, executionProfile: "planning" },
+  bootstrap: null,
+  occurrences: [],
+  planGate: null,
+  gateHistory: [],
+  taskRevision: 0,
   workspace: {
     repositories: [
       {
@@ -61,6 +86,8 @@ const baseTask: TaskWorkspace = {
         branch: null,
         worktreePath: null,
         provisioningStatus: "pending",
+        baseCommitSha: null,
+        planningRootFingerprint: null,
       },
     ],
   },
@@ -91,11 +118,28 @@ const baseTask: TaskWorkspace = {
             title: "Create and commit task-workspace-slice-1.txt",
             status: "pending",
             summary: null,
+            dependsOn: [],
+            checkIds: [],
+            invalidationReason: null,
           },
         ],
+        checkpointPolicy: "never",
+        checkIds: [],
+        checkpointId: null,
+        phaseCommitSha: null,
+        startedAt: null,
+        completedAt: null,
       },
     ],
     resultingCommitSha: null,
+    activePhaseId: null,
+    activeWorkItemId: null,
+    checks: [],
+    checkpoints: [],
+    amendments: [],
+    currentPlanRevisionId: null,
+    amendmentGateId: null,
+    continuationSessionIds: [],
   },
   verification: {
     criteria: [
@@ -114,7 +158,7 @@ const baseTask: TaskWorkspace = {
 };
 
 async function renderTask(task: TaskWorkspace) {
-  useTaskWorkspaceStore.getState().applyStreamItem({
+  useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
     kind: "snapshot",
     snapshot: { sequence: 1, tasks: [task] },
   });
@@ -133,6 +177,110 @@ beforeEach(() => {
 });
 
 describe("TaskWorkspaceView", () => {
+  it("renders the hierarchical Build panel and amendment gate states", async () => {
+    const firstPhase = baseTask.build.phases[0]!;
+    await renderTask({
+      ...baseTask,
+      workflowRuns: [{ ...baseTask.workflowRuns[0]!, currentStage: "build" }],
+      build: {
+        ...baseTask.build,
+        activePhaseId: "phase-2",
+        activeWorkItemId: "phase-2-work-item-1",
+        phases: [
+          {
+            ...firstPhase,
+            title: "Prepare",
+            status: "completed",
+            completedAt: "2026-07-30T17:00:00.000Z",
+            workItems: [
+              {
+                ...firstPhase.workItems[0]!,
+                status: "completed",
+                summary: "Prepare completed.",
+              },
+            ],
+          },
+          {
+            ...firstPhase,
+            id: "phase-2",
+            title: "Implement",
+            status: "blocked",
+            checkpointPolicy: "on-failure",
+            checkIds: ["phase-2-check-1"],
+            workItems: [
+              {
+                ...firstPhase.workItems[0]!,
+                id: "phase-2-work-item-1",
+                title: "Implement fixture",
+                status: "blocked",
+                checkIds: ["phase-2-check-1"],
+                invalidationReason: "The approved fixture does not match the codebase.",
+              },
+            ],
+          },
+        ],
+        checks: [
+          {
+            id: "phase-2-check-1",
+            phaseId: "phase-2",
+            workItemId: "phase-2-work-item-1",
+            kind: "automated",
+            status: "fail",
+            label: "fixture.mismatch",
+            command: "fixture.mismatch",
+            output: "Expected the approved fixture, found a mismatch.",
+            note: null,
+            exitCode: 1,
+            commitSha: null,
+            startedAt: "2026-07-30T17:01:00.000Z",
+            completedAt: "2026-07-30T17:01:01.000Z",
+          },
+        ],
+        amendments: [
+          {
+            id: "amendment-1",
+            basePlanRevisionId: "plan-revision-1",
+            triggeringPhaseId: "phase-2",
+            triggeringWorkItemId: "phase-2-work-item-1",
+            triggeringCheckId: "phase-2-check-1",
+            expected: "approved fixture",
+            found: "mismatched fixture",
+            impact: "The work item cannot complete.",
+            proposedChanges: "Update the approved fixture.",
+            affectedPhaseIds: ["phase-2"],
+            affectedWorkItemIds: ["phase-2-work-item-1"],
+            dependentCheckIds: ["phase-2-check-1"],
+            status: "requested",
+            artifactRevisionId: "amendment-revision-1",
+            planDiff: null,
+            requestedAt: "2026-07-30T17:02:00.000Z",
+            approvedAt: null,
+            approvedBy: null,
+          },
+        ],
+        amendmentGateId: "amendment-1",
+      },
+    });
+
+    await expect.element(page.getByTestId("task-build-panel")).toBeVisible();
+    await expect.element(page.getByTestId("task-build-phase-phase-2")).toBeVisible();
+    await expect.element(page.getByTestId("task-build-amendment-gate")).toBeVisible();
+    await expect
+      .element(page.getByTestId("task-build-amendment-expected"))
+      .toHaveTextContent("approved fixture");
+    await expect
+      .element(page.getByText("Expected the approved fixture, found a mismatch."))
+      .toBeVisible();
+    await page.getByTestId("task-build-amendment-approve-amendment-1").click();
+
+    expect(mocks.dispatchCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "task.amendment.approve",
+        amendmentId: "amendment-1",
+      }),
+    );
+  });
+
   it("renders the Questions stage and dispatches a versioned artifact command", async () => {
     await renderTask(baseTask);
 
@@ -374,6 +522,7 @@ describe("TaskWorkspaceView", () => {
         },
       ],
       build: {
+        ...baseTask.build,
         phases: [
           {
             ...baseTask.build.phases[0]!,
@@ -566,5 +715,98 @@ describe("TaskWorkspaceView", () => {
     await expect
       .element(page.getByTestId("task-context-manifest-manifest-1-budget"))
       .toHaveTextContent("unbudgeted");
+  });
+
+  it("uses the conversation-first Guided surface without manual stage controls", async () => {
+    const threadId = ThreadId.make("guided-thread-1");
+    await renderTask({
+      ...baseTask,
+      title: "Guided browser task",
+      versions: {
+        taskContract: "task-workspace@0.3.0",
+        artifactContract: "task-artifact@0.3.0",
+        workflowDefinition: "guided@0.2.0",
+        prompt: "task-workspace-guided@0.2.0",
+      },
+      intake: {
+        brief: "Clarify the browser task.",
+        source: { kind: "inline", body: "Clarify the browser task." },
+      },
+      preferences: {
+        worktreePolicy: "later",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("instance-1"),
+          model: "claude-sonnet-4",
+          options: [],
+        },
+        executionProfile: "planning",
+      },
+      bootstrap: {
+        operationKey: "task-browser:bootstrap:questions:0:primary",
+        status: "ready",
+        currentStep: null,
+        reservedSessionId: "task-browser-session-questions-0",
+        reservedThreadId: threadId,
+        threadCreateCommandId: CommandId.make("thread-create-1"),
+        turnStartCommandId: CommandId.make("turn-start-1"),
+        kickoffMessageId: MessageId.make("kickoff-1"),
+        conversationTarget: { environmentId: EnvironmentId.make("environment-local"), threadId },
+        attemptCount: 1,
+        failure: null,
+        updatedAt: "2026-07-28T17:00:00.000Z",
+      },
+      occurrences: [
+        {
+          id: "occurrence-questions-0",
+          stage: "questions",
+          ordinal: 0,
+          status: "running",
+          sessionId: "task-browser-session-questions-0",
+          threadId,
+          contextManifestId: null,
+          artifactRevisionId: null,
+          completionProposalId: null,
+          gateOutcome: null,
+          feedback: null,
+          supersedesOccurrenceId: null,
+          createdAt: "2026-07-28T17:00:00.000Z",
+          completedAt: null,
+        },
+      ],
+      sessions: [
+        {
+          id: "task-browser-session-questions-0",
+          stage: "questions",
+          threadId,
+          role: "primary",
+          provider: "claudeAgent",
+          status: "active",
+          parentSessionId: null,
+          forkPoint: null,
+          contextManifestId: null,
+          createdAt: "2026-07-28T17:00:00.000Z",
+        },
+      ],
+      workflowRuns: [
+        {
+          ...baseTask.workflowRuns[0]!,
+          id: "guided-run-1",
+          preset: "guided",
+          definitionVersion: "guided@0.2.0",
+          promptBundleVersion: "task-workspace-guided@0.2.0",
+          currentStage: "questions",
+        },
+      ],
+    });
+
+    await expect.element(page.getByTestId("guided-task-panel")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-questions")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-research")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-design")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-plan")).toBeVisible();
+    await expect.element(page.getByTestId("task-conversation-starting")).toBeVisible();
+    expect(page.getByTestId("task-questions-editor").query()).toBeNull();
+    expect(page.getByText(/Link an existing repository thread/).query()).toBeNull();
+    expect(page.getByTestId("task-context-manifests-panel").query()).toBeNull();
   });
 });

@@ -3,6 +3,13 @@ import type {
   TaskWorkspacePreset,
   TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
+import {
+  currentCatalogEntryForPreset,
+  TASK_WORKSPACE_FREEFORM_CATALOG_ENTRY_V0_2_0,
+  TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0,
+  TASK_WORKSPACE_STANDARD_CATALOG_ENTRY_V0_2_0,
+  type TaskWorkspaceCatalogEntry,
+} from "@kata-sh/code-shared/taskWorkspaceCatalog";
 
 /** Budget applied to a context manifest when the command does not name one. */
 export const DEFAULT_CONTEXT_TOKEN_BUDGET = 32_000;
@@ -54,6 +61,14 @@ export type WorkflowDefinition = {
   readonly promptBundleRef: string;
   /** Default token budget for context manifests created under this workflow. */
   readonly contextTokenBudget: number;
+  /**
+   * First-slice capability projection. Present only on catalog-compiled
+   * definitions (@0.2.0+); helpers return safe defaults for legacy definitions.
+   */
+  readonly availableInFirstSlice?: boolean;
+  readonly autoAdvanceStages?: ReadonlyArray<TaskWorkspaceStage>;
+  readonly humanGateStages?: ReadonlyArray<TaskWorkspaceStage>;
+  readonly completionTransportRequired?: boolean;
 };
 
 /**
@@ -256,6 +271,9 @@ export const BUILT_IN_WORKFLOW_DEFINITIONS: WorkflowDefinitionRegistry =
     STANDARD_WORKFLOW_V0_1_0,
     GUIDED_WORKFLOW_V0_1_0,
     FREEFORM_WORKFLOW_V0_1_0,
+    compileDefinitionFromCatalog(TASK_WORKSPACE_STANDARD_CATALOG_ENTRY_V0_2_0),
+    compileDefinitionFromCatalog(TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0),
+    compileDefinitionFromCatalog(TASK_WORKSPACE_FREEFORM_CATALOG_ENTRY_V0_2_0),
   ]);
 
 /** The version new tasks pin when they select the Standard preset. */
@@ -263,13 +281,59 @@ export const CURRENT_STANDARD_WORKFLOW_VERSION = STANDARD_WORKFLOW_V0_1_0.versio
 
 /** Version a newly created task pins for each preset. */
 const CURRENT_VERSION_BY_PRESET: Readonly<Record<TaskWorkspacePreset, string>> = {
+  standard: TASK_WORKSPACE_STANDARD_CATALOG_ENTRY_V0_2_0.version,
+  guided: TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0.version,
+  freeform: TASK_WORKSPACE_FREEFORM_CATALOG_ENTRY_V0_2_0.version,
+};
+
+export function currentVersionForPreset(preset: TaskWorkspacePreset): string {
+  return CURRENT_VERSION_BY_PRESET[preset];
+}
+
+/** Version a legacy (pre-0.3.0-contract) create pins for each preset. */
+const LEGACY_VERSION_BY_PRESET: Readonly<Record<TaskWorkspacePreset, string>> = {
   standard: STANDARD_WORKFLOW_V0_1_0.version,
   guided: GUIDED_WORKFLOW_V0_1_0.version,
   freeform: FREEFORM_WORKFLOW_V0_1_0.version,
 };
 
-export function currentVersionForPreset(preset: TaskWorkspacePreset): string {
-  return CURRENT_VERSION_BY_PRESET[preset];
+export function legacyVersionForPreset(preset: TaskWorkspacePreset): string {
+  return LEGACY_VERSION_BY_PRESET[preset];
+}
+
+/**
+ * Compile a server `WorkflowDefinition` from a shared catalog entry. The
+ * catalog is the single source for @0.2.0+ definitions; the parity tests reject
+ * any server projection that drifts from it.
+ */
+export function compileDefinitionFromCatalog(entry: TaskWorkspaceCatalogEntry): WorkflowDefinition {
+  const stages = entry.stages.map((stage) => stage.stage);
+  const stageArtifactKinds = Object.fromEntries(
+    entry.stages
+      .filter((stage) => stage.artifactKind !== null)
+      .map((stage) => [stage.stage, stage.artifactKind]),
+  ) as Partial<Record<TaskWorkspaceStage, TaskWorkspaceArtifactKind>>;
+  return {
+    preset: entry.preset,
+    version: entry.version,
+    initialStage: entry.initialStage,
+    terminalStage: entry.terminalStage,
+    stages,
+    stageArtifactKinds,
+    transitions: entry.transitions,
+    explicitEntryStages: entry.stages
+      .filter((stage) => stage.explicitEntry)
+      .map((stage) => stage.stage),
+    approvalPolicy: "before-build",
+    promptBundleRef: entry.promptBundleVersion,
+    contextTokenBudget: entry.contextTokenBudget,
+    availableInFirstSlice: entry.availableInFirstSlice,
+    autoAdvanceStages: entry.stages
+      .filter((stage) => stage.autoAdvance)
+      .map((stage) => stage.stage),
+    humanGateStages: entry.stages.filter((stage) => stage.humanGate).map((stage) => stage.stage),
+    completionTransportRequired: entry.completionTransportRequired,
+  };
 }
 
 export function allowsExplicitEntry(

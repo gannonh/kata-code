@@ -92,6 +92,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
   metadata: {
     displayName: "Claude",
     supportsMultipleInstances: true,
+    supportsTaskStage: true,
   },
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => decodeClaudeSettings({}),
@@ -117,6 +118,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         displayName,
         accentColor,
         continuationGroupKey,
+      });
+      const stampTaskStageSnapshot = (snapshot: Parameters<typeof stampIdentity>[0]) => ({
+        ...stampIdentity(snapshot),
+        supportsTaskStage: true,
       });
 
       const adapterOptions = {
@@ -144,7 +149,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         () => Cache.get(capabilitiesProbeCache, capabilitiesCacheKey),
         processEnv,
       ).pipe(
-        Effect.map(stampIdentity),
+        Effect.map(stampTaskStageSnapshot),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(Path.Path, path),
       );
@@ -155,7 +160,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) =>
-          makePendingClaudeProvider(settings).pipe(Effect.map(stampIdentity)),
+          makePendingClaudeProvider(settings).pipe(Effect.map(stampTaskStageSnapshot)),
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities).pipe(

@@ -1,5 +1,44 @@
 # OKF bundle log
 
+## 2026-08-02 (E2E provider authentication policy)
+
+Documented the local E2E provider policy: the repository `.env` owns the provider/model pair,
+Codex OAuth is staged into isolated runs before the OpenAI API fallback, Anthropic credentials are
+removed from E2E child processes, and Pi smoke tests use `openrouter/free`. Guided task-workspace
+E2E remains on a task-stage-capable provider because Pi does not yet expose the task-stage MCP
+bridge.
+
+## 2026-08-01 (Task workflow UX reset Phases 0–3)
+
+Implemented the [task workflow UX reset](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+through approved Plan: transactional bootstrap and proposal recovery, pinned source/worktree
+validation, provider-scoped task-stage capabilities, atomic artifact handoffs, explicit provider
+terminal activities, renewable task-turn leases, bounded handoff manifests, and conversation-first
+Guided UI. Added the [Guided approved-Plan E2E entry](/guides/e2e-test-catalog.md). Full unit,
+typecheck, OKF, and release-smoke gates pass; provider-backed desktop UAT requires an eligible
+configured task-stage provider.
+
+## 2026-08-01 (Task workflow UX reset draft)
+
+Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-workflow-ux-reset-design.md)
+to re-baseline task onboarding around Kata-owned Standard, Guided, and Freeform flows. The
+first Guided-to-Plan slice uses an inline brief, automatic stage sessions and artifact handoffs,
+and a Plan approval gate while keeping context-manifest and session-linking mechanics internal.
+Updated the [specs roadmap](/specs/index.md); Slice 4 product integration and PR #63 are paused
+pending review of this reset. The subsequent correctness pass defined transactional recovery,
+provider task-stage tooling, environment-scoped routing, exact Plan approval behavior, and
+historical migration boundaries.
+
+## 2026-07-31 (Task workspaces Slice 4 review hardening)
+
+Addressed the actionable PR #63 review findings: Build checks now use a server-owned allowlist;
+phase, work-item, dependency, checkpoint, and amendment invariants are enforced in the reducer;
+checkpoint context manifests reference the approved Plan revision; continuation sessions are
+durable; the shared dependency predicate keeps web and server controls aligned; and the Build
+panel exposes manual pass/fail/blocked outcomes with the current approving user. Contracts,
+shared, and task-workspace server suites pass locally. Browser execution and full-workspace
+tooling remain environment-blocked by the missing Playwright binary and filtered-install gaps.
+
 ## 2026-07-30 (Task workspaces Slice 3a workflow engine)
 
 Approved the [Slice 3 plan](/specs/2026-07-30-task-workspaces-slice-3-plan.md) split into 3a (engine) and 3b (presets + context budgeting), and built 3a: a versioned workflow definition registry with the reducer reading stage transitions and artifact-kind gating from each task's pinned definition. Slice 1 / Slice 2 Standard behavior is unchanged and its tests pass unmodified.

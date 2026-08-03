@@ -30,6 +30,9 @@ import { stringify as stringifyYaml } from "yaml";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 
+/** Legal notices included in the staged desktop application. */
+export const DESKTOP_LEGAL_FILES = ["LICENSE", "NOTICE"] as const;
+
 /** Native bindings used by @ff-labs/fff-node (via ffi-rs) must install and unpack from asar. */
 export const DESKTOP_NATIVE_ASAR_UNPACK = [
   "**/*.node",
@@ -1224,6 +1227,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  for (const legalFile of DESKTOP_LEGAL_FILES) {
+    yield* fs.copyFile(path.join(repoRoot, legalFile), path.join(stageAppDir, legalFile));
+  }
 
   yield* assertPlatformBuildResources(
     options.platform,

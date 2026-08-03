@@ -8,6 +8,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import { HttpServer } from "effect/unstable/http";
 
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
+import { authorizeActiveTaskStage } from "../taskWorkspace/TaskWorkspaceService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 
@@ -47,12 +48,16 @@ interface RegistryState {
 }
 
 export interface McpSessionRegistryOptions {
+  /** Preview credential idle lease. */
   readonly idleTimeoutMs?: number;
+  /** Task-stage credential idle lease. */
+  readonly taskStageIdleTimeoutMs?: number;
   readonly maximumLifetimeMs?: number;
   readonly now?: () => number;
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1_000;
+const DEFAULT_TASK_STAGE_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1_000;
 const DEFAULT_MAXIMUM_LIFETIME_MS = 8 * 60 * 60 * 1_000;
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -70,6 +75,8 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const state = yield* SynchronizedRef.make<RegistryState>({ records: new Map() });
   const currentTimeMillis = options.now ? Effect.sync(options.now) : Clock.currentTimeMillis;
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const taskStageIdleTimeoutMs =
+    options.taskStageIdleTimeoutMs ?? DEFAULT_TASK_STAGE_IDLE_TIMEOUT_MS;
   const maximumLifetimeMs = options.maximumLifetimeMs ?? DEFAULT_MAXIMUM_LIFETIME_MS;
   const endpoint =
     httpServer.address._tag === "TcpAddress"
@@ -83,10 +90,12 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
 
   const pruneExpired = (records: ReadonlyMap<string, CredentialRecord>, timestamp: number) => {
     const next = new Map(
-      Array.from(records).filter(
-        ([, record]) =>
-          timestamp <= record.scope.expiresAt && timestamp - record.lastUsedAt <= idleTimeoutMs,
-      ),
+      Array.from(records).filter(([, record]) => {
+        const lease = record.scope.capabilities.has("task-stage")
+          ? taskStageIdleTimeoutMs
+          : idleTimeoutMs;
+        return timestamp <= record.scope.expiresAt && timestamp - record.lastUsedAt <= lease;
+      }),
     );
     return next.size === records.size ? records : next;
   };
@@ -98,12 +107,22 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       const rawToken = yield* crypto.randomBytes(32).pipe(Effect.map(tokenFromBytes), Effect.orDie);
       const tokenHash = yield* hashToken(rawToken);
       const expiresAt = issuedAt + maximumLifetimeMs;
+      const threadId = ThreadId.make(request.threadId);
+      const providerInstanceId = ProviderInstanceId.make(request.providerInstanceId);
+      const taskStageAuthorized = yield* authorizeActiveTaskStage({
+        environmentId,
+        threadId,
+        providerInstanceId,
+      });
+      const capabilities: ReadonlySet<McpInvocationContext.McpCapability> = new Set(
+        taskStageAuthorized ? ["preview", "task-stage"] : ["preview"],
+      );
       const scope: McpInvocationContext.McpInvocationScope = {
         environmentId,
-        threadId: ThreadId.make(request.threadId),
+        threadId,
         providerSessionId,
-        providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
-        capabilities: new Set(["preview"]),
+        providerInstanceId,
+        capabilities,
         issuedAt,
         expiresAt,
       };
@@ -185,6 +204,18 @@ export const layer: Layer.Layer<
   never,
   Crypto.Crypto | ServerEnvironment | HttpServer.HttpServer
 > = Layer.effect(McpSessionRegistry, make);
+
+export const hasActiveMcpSessionRegistry = (): boolean => activeMcpSessionRegistry !== undefined;
+
+export const resolveActiveMcpCredential = (
+  authorizationHeader: string,
+): Effect.Effect<McpInvocationContext.McpInvocationScope | undefined> => {
+  const rawToken = authorizationHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!activeMcpSessionRegistry || rawToken.length === 0) {
+    return Effect.succeed(undefined);
+  }
+  return activeMcpSessionRegistry.resolve(rawToken);
+};
 
 export const issueActiveMcpCredential = (
   request: McpCredentialRequest,
