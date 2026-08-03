@@ -57,9 +57,9 @@ The capture sequence is:
 
 1. `01-guided-create.png`: the Guided workflow picker with an inline brief, task identity, and
    resolved capability asserted in the form state.
-2. `02-guided-plan-review.png`: the conversation-first Guided task panel with the Clarify,
-   Research, Design, and Plan rail plus an open Plan review gate. This frame captures the panel
-   locator so an unavailable seeded conversation cannot leave a blank left pane in the asset.
+2. `02-guided-plan-review.png`: the full desktop app with the conversation-first Guided task panel,
+   the Clarify, Research, Design, and Plan rail, and an open Plan review gate. The seeded route
+   keeps provider output out of the frame while preserving the real app shell.
 3. `03-guided-plan-approved.png`: an approved Plan rendered read-only with the task's approval
    state and deferred next action. This frame uses the `task-workspace@0.3.0` first-slice state.
 4. `04-build-checkpoint.png`: the legacy-compatible `task-workspace@0.2.0` hierarchical Build
@@ -77,12 +77,12 @@ conversation-first view for `@0.3.0` and the Build panel for the legacy-compatib
 asserts its contract version, stage, occurrence status, artifact revision, gate/checkpoint state,
 and amendment state before capture.
 
-The test creates a real fixed-name demo repository at a safe display path and registers cleanup for
-it. It then opens that project through the existing workspace flow, fills the real task creation
-form, navigates through the seeded task routes, and calls `page.screenshot` or a locator screenshot
-after user-visible state assertions pass. The configured provider/model must be present in the
-local provider registry so the creation form can render its selected agent and model; the test
-calls the existing provider prerequisite helper but never starts a provider turn.
+The test creates a real fixed-name demo repository, registers cleanup for it, and opens that project
+through the existing workspace flow. It fills the real task creation form, navigates through the
+seeded task routes, and captures the complete Electron app viewport after user-visible state
+assertions pass. The configured provider/model must be present in the local provider registry so
+the creation form can render its selected agent and model; the test calls the existing provider
+prerequisite helper but never starts a provider turn.
 
 The screenshot destination is resolved from `KATACODE_E2E_MARKETING_OUTPUT`, relative to the
 repository root when the value is relative. When unset, files go to
@@ -92,11 +92,10 @@ the destination directory, removes stale files matching the five managed names, 
 same names on each run. Unmanaged files remain untouched.
 
 Transient provider toasts and loading indicators are dismissed or awaited through existing E2E
-flows. The capture uses a fixed 1600×1200 desktop viewport, disables animations for the capture,
-and captures the app content or the asserted task panel locator only. Assertions remain in the test
-so a missing or stale task state fails before a screenshot is written. The Plan-review frame
-explicitly asserts the rail, open gate, artifact revision, and approval controls; it does not claim
-to include a conversation transcript.
+flows. The harness resizes the native Electron window and captures a fixed 1600×1200 app viewport
+with animations disabled. Assertions remain in the test so a missing or stale task state fails
+before a screenshot is written. The Plan-review frame explicitly asserts the rail, open gate,
+artifact revision, and approval controls; it does not claim to include a conversation transcript.
 
 ## Acceptance criteria
 
@@ -112,10 +111,10 @@ to include a conversation transcript.
    the approved Plan state contains `Plan approved` and no Implement controls; the Build checkpoint
    has a waiting checkpoint and completed checks; and the amendment frame contains a failed check,
    blocked work item, expected/found values, and a Plan revision diff.
-5. The capture uses a 1600×1200 viewport or an asserted task-panel locator, and each PNG contains
-   no browser chrome, diagnostics, credentials, provider transcript, or run-specific paths such as
-   `katacode-e2e-home`, `katacode-e2e-workspace`, or `/var/folders`. The test also scans rendered
-   text for those forbidden patterns before writing assets.
+5. Each PNG is a full 1600×1200 Electron app viewport with no browser chrome, diagnostics,
+   credentials, provider transcript, or run-specific paths such as `katacode-e2e-home`,
+   `katacode-e2e-workspace`, or `/var/folders`. The test scans rendered text for those forbidden
+   patterns before writing assets.
 6. Re-running the same command leaves exactly the same five managed filenames, removes stale
    managed PNGs, and does not create timestamped or duplicate publishable filenames. Unmanaged
    files in the destination are preserved.

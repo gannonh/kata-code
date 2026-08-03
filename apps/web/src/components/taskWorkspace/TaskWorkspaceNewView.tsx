@@ -342,7 +342,7 @@ export function TaskWorkspaceNewView() {
               >
                 {availableProjects.map((project) => (
                   <option key={`${project.environmentId}:${project.id}`} value={project.id}>
-                    {project.name} — {project.cwd}
+                    {project.name}
                   </option>
                 ))}
               </select>

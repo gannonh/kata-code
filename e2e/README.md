@@ -123,6 +123,22 @@ From the repo root:
 > errors that look unrelated to the real cause. If the full suite fails,
 > run `pnpm run e2e:clean` and re-run.
 
+### Marketing task workflow screenshots
+
+Regenerate the five numbered desktop frames with the real Electron harness. The default destination is
+ignored E2E output; set the publishable destination when updating tracked assets:
+
+```bash
+vp run e2e --list --grep @marketing
+vp run e2e --grep @marketing
+KATACODE_E2E_MARKETING_OUTPUT=apps/marketing/public/task-workflow vp run e2e --grep @marketing
+```
+
+The flow resizes the native Electron window to 1600×1200 and captures the complete app viewport.
+It requires the configured task-stage provider/model (`KATACODE_E2E_AGENT_PROVIDER`,
+`KATACODE_E2E_AGENT_MODEL`, and its credential) and writes exactly five managed PNG names. It
+preserves other files in the destination.
+
 ### Cleaning up leaked dev servers
 
 E2E dev stacks are reaped automatically on teardown (process-group kill) and on

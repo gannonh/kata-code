@@ -1,5 +1,13 @@
 # Specs log
 
+## 2026-08-02 (Marketing task workflow screenshots)
+
+Implemented the approved desktop capture flow for five numbered task-workflow frames. The real
+Electron harness now resizes the native window to 1600×1200 and captures complete app viewports
+with seeded task-workspace states, stable output names, and run-specific path checks. Publishable
+frames are generated under `apps/marketing/public/task-workflow/` without changing the marketing
+homepage.
+
 ## 2026-08-01 (Task workflow UX reset Phases 0–3)
 
 Implemented [Task workflow UX reset](/specs/2026-08-01-task-workflow-ux-reset-design.md) through
