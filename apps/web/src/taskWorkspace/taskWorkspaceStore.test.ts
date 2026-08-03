@@ -53,6 +53,7 @@ function makeTask(id: string, updatedAt: string, environmentId: EnvironmentId): 
       checks: [],
       checkpoints: [],
       amendments: [],
+      checkAttempts: [],
       currentPlanRevisionId: null,
       amendmentGateId: null,
       continuationSessionIds: [],

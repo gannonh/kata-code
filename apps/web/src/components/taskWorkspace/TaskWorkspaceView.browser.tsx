@@ -137,6 +137,7 @@ const baseTask: TaskWorkspace = {
     checks: [],
     checkpoints: [],
     amendments: [],
+    checkAttempts: [],
     currentPlanRevisionId: null,
     amendmentGateId: null,
     continuationSessionIds: [],
@@ -234,6 +235,7 @@ describe("TaskWorkspaceView", () => {
             commitSha: null,
             startedAt: "2026-07-30T17:01:00.000Z",
             completedAt: "2026-07-30T17:01:01.000Z",
+            attemptIds: [],
           },
         ],
         amendments: [

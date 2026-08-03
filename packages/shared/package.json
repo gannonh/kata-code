@@ -183,6 +183,10 @@
       "types": "./src/taskWorkspaceCatalog.ts",
       "import": "./src/taskWorkspaceCatalog.ts"
     },
+    "./taskWorkspacePlanCompiler": {
+      "types": "./src/taskWorkspacePlanCompiler.ts",
+      "import": "./src/taskWorkspacePlanCompiler.ts"
+    },
     "./taskWorkspaceDigest": {
       "types": "./src/taskWorkspaceDigest.ts",
       "import": "./src/taskWorkspaceDigest.ts"

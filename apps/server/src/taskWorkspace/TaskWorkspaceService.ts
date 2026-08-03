@@ -46,6 +46,7 @@ import {
 } from "@kata-sh/code-contracts";
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
 import { canonicalTaskCommandDigest } from "@kata-sh/code-shared/taskWorkspaceDigest";
+import { compileTaskWorkspacePlan } from "@kata-sh/code-shared/taskWorkspacePlanCompiler";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -536,6 +537,12 @@ function buildFromPlan(task: TaskWorkspace): TaskWorkspace["build"] {
   const plan = latestPlanRevision(task);
   if (!plan) return task.build;
 
+  // The current Guided definition uses the shared strict compiler. Historical
+  // definitions retain their replay-compatible parser below.
+  if (task.versions.workflowDefinition === "guided@0.3.0") {
+    return compileTaskWorkspacePlan({ markdown: plan.markdown, planRevisionId: plan.id });
+  }
+
   const phaseMatches = [...plan.markdown.matchAll(/^##\s+Phase\s+(.+)$/gim)];
   if (phaseMatches.length === 0) {
     return {
@@ -628,6 +635,7 @@ function buildFromPlan(task: TaskWorkspace): TaskWorkspace["build"] {
         commitSha: null,
         startedAt: null,
         completedAt: null,
+        attemptIds: [],
       });
       if (workItem) workItem.checkIds.push(checkId);
     }
@@ -837,6 +845,7 @@ function initialTask(
       checks: [],
       checkpoints: [],
       amendments: [],
+      checkAttempts: [],
       currentPlanRevisionId: null,
       amendmentGateId: null,
       continuationSessionIds: [],
@@ -2973,6 +2982,9 @@ export const make = Effect.gen(function* () {
           const stage = currentRun(task).currentStage;
           if (stage !== "build" && stage !== "verify") {
             throw new Error(`Amendments are not available while the task is in '${stage}'.`);
+          }
+          if (!command.checkId) {
+            throw new Error("A failed check is required for this amendment command.");
           }
           const check = checkForBuild(task, command.checkId);
           if (check.status !== "fail" && check.status !== "blocked") {

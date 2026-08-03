@@ -13,6 +13,7 @@ import {
 const decodeCommand = Schema.decodeUnknownEffect(TaskWorkspaceCommand);
 const decodeStreamItem = Schema.decodeUnknownEffect(TaskWorkspaceStreamItem);
 const decodeEvent = Schema.decodeUnknownEffect(TaskWorkspaceEvent);
+const decodeTask = Schema.decodeUnknownEffect(TaskWorkspace);
 
 function slice1Task(overrides: Record<string, unknown>) {
   return {
@@ -38,6 +39,40 @@ function slice1Task(overrides: Record<string, unknown>) {
     ...overrides,
   };
 }
+
+it.effect("decodes Slice 2 workflow and implementation contracts additively", () =>
+  Effect.gen(function* () {
+    const upgrade = yield* decodeCommand({
+      type: "task.workflow.upgrade",
+      commandId: "command-upgrade",
+      taskId: "task-1",
+      createdAt: "2026-08-03T17:00:00.000Z",
+      sourceVersion: "guided@0.2.0",
+      targetVersion: "guided@0.3.0",
+      expectedTaskRevision: 4,
+      operationKey: "upgrade-1",
+    });
+    const progress = yield* decodeCommand({
+      type: "task.implementation.progress",
+      commandId: "command-progress",
+      taskId: "task-1",
+      createdAt: "2026-08-03T17:00:01.000Z",
+      expectedTaskRevision: 5,
+      phaseId: "phase:foundation",
+      status: "completed",
+      summary: "Done",
+    });
+    assert.strictEqual(upgrade.type, "task.workflow.upgrade");
+    assert.strictEqual(progress.type, "task.implementation.progress");
+
+    const amendment = yield* decodeTask(
+      slice1Task({
+        build: { phases: [], resultingCommitSha: null },
+      }),
+    );
+    assert.deepStrictEqual([...amendment.build.checkAttempts], []);
+  }),
+);
 
 it.effect("decodes the Standard task creation contract", () =>
   Effect.gen(function* () {
