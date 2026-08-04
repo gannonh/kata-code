@@ -110,7 +110,23 @@ function realPath(path: string): string {
   }
 }
 
-function macSandboxProfile(worktreePath: string): string {
+export function taskCheckTempPath(worktreePath: string): string {
+  return NodePath.join(worktreePath, ".kata-check-tmp");
+}
+
+export function taskCheckEnvironment(worktreePath: string): NodeJS.ProcessEnv {
+  const tempPath = taskCheckTempPath(worktreePath);
+  return {
+    ...scrubEnvironment(),
+    HOME: tempPath,
+    TMPDIR: tempPath,
+    TMP: tempPath,
+    TEMP: tempPath,
+    KATA_TASK_WORKTREE: worktreePath,
+  };
+}
+
+export function macSandboxProfile(worktreePath: string): string {
   const home = NodeOs.homedir();
   const worktreePaths = Array.from(new Set([worktreePath, realPath(worktreePath)]));
   const runtimeReadPaths = existingReadablePaths([
@@ -127,7 +143,6 @@ function macSandboxProfile(worktreePath: string): string {
     NodePath.join(home, ".nvm"),
     NodePath.join(home, "Library", "pnpm"),
   ]);
-  const tempPaths = existingReadablePaths([NodeOs.tmpdir(), "/private/tmp", "/tmp"]);
   return [
     "(version 1)",
     "(deny default)",
@@ -136,10 +151,10 @@ function macSandboxProfile(worktreePath: string): string {
     "(allow process-fork)",
     "(deny network*)",
     `(allow file-read-metadata (subpath ${sandboxString("/")}) (subpath ${sandboxString(home)}))`,
-    `(allow file-read* ${[...runtimeReadPaths, ...tempPaths, ...worktreePaths]
+    `(allow file-read* ${[...runtimeReadPaths, ...worktreePaths]
       .map((path) => `(subpath ${sandboxString(path)}) (literal ${sandboxString(path)})`)
       .join(" ")})`,
-    `(allow file-write* ${[...tempPaths, ...worktreePaths]
+    `(allow file-write* ${worktreePaths
       .map((path) => `(subpath ${sandboxString(path)}) (literal ${sandboxString(path)})`)
       .join(" ")})`,
   ].join("\n");
@@ -257,6 +272,15 @@ const make = Effect.gen(function* () {
           message: "The approved check command is empty.",
         });
       }
+      const tempPath = taskCheckTempPath(input.worktreePath);
+      yield* Effect.tryPromise({
+        try: () => NodeFs.promises.mkdir(tempPath, { recursive: true }),
+        catch: (cause) =>
+          new TaskWorktreeCommandError({
+            message: "Unable to create the task check temp directory.",
+            cause,
+          }),
+      });
       const sandboxed = sandboxApprovedCheckCommand({
         argv,
         worktreePath: input.worktreePath,
@@ -280,11 +304,7 @@ const make = Effect.gen(function* () {
           args: sandboxed.args,
           cwd: input.worktreePath,
           timeout: Duration.millis(input.timeoutMs),
-          env: {
-            ...scrubEnvironment(),
-            HOME: input.worktreePath,
-            KATA_TASK_WORKTREE: input.worktreePath,
-          },
+          env: taskCheckEnvironment(input.worktreePath),
           maxOutputBytes: input.maxOutputBytes ?? 1024 * 1024,
           outputMode: "truncate",
           timeoutBehavior: "timedOutResult",

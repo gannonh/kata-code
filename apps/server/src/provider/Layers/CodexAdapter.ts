@@ -70,6 +70,22 @@ const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 
 const PROVIDER = ProviderDriverKind.make("codex");
+const CODEX_SHELL_ENV_EXCLUDE_PATTERNS = [
+  MCP_BEARER_TOKEN_ENV_VAR,
+  "*MCP*",
+  "*TOKEN*",
+  "*SECRET*",
+  "*KEY*",
+  "*BEARER*",
+  "*AUTH*",
+  "*CREDENTIAL*",
+] as const;
+const CODEX_TASK_SHELL_ENV_POLICY_ARGS = [
+  "-c",
+  'shell_environment_policy.inherit="core"',
+  "-c",
+  `shell_environment_policy.exclude=[${CODEX_SHELL_ENV_EXCLUDE_PATTERNS.map((pattern) => JSON.stringify(pattern)).join(",")}]`,
+] as const;
 
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
@@ -1432,6 +1448,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   ),
                 },
                 appServerArgs: [
+                  ...CODEX_TASK_SHELL_ENV_POLICY_ARGS,
                   "-c",
                   `mcp_servers.${MCP_SERVER_NAME}.url=${mcpSession.endpoint}`,
                   "-c",

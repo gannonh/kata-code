@@ -13,7 +13,10 @@ import { expect } from "vite-plus/test";
 
 import * as ProcessRunner from "../processRunner.ts";
 import {
+  macSandboxProfile,
   sandboxApprovedCheckCommand,
+  taskCheckEnvironment,
+  taskCheckTempPath,
   TaskWorktreeCommandRunner,
   TaskWorktreeCommandRunnerLive,
 } from "./TaskWorktreeCommandRunner.ts";
@@ -207,10 +210,33 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
     }),
   );
 
+  it("keeps macOS sandbox writes inside the task worktree", () => {
+    const worktreePath = "/Users/test/worktrees/katacode-task-1";
+    const profile = macSandboxProfile(worktreePath);
+    const writeRule = profile.split("\n").find((line) => line.startsWith("(allow file-write*"));
+
+    expect(writeRule).toContain(worktreePath);
+    expect(writeRule).not.toContain(NodeOs.tmpdir());
+    expect(writeRule).not.toContain("/private/tmp");
+    expect(writeRule).not.toContain("/tmp");
+  });
+
+  it("uses a task-local temp root for approved check subprocesses", () => {
+    const worktreePath = "/Users/test/worktrees/katacode-task-1";
+    const tempPath = taskCheckTempPath(worktreePath);
+    const env = taskCheckEnvironment(worktreePath);
+
+    expect(tempPath).toBe(NodePath.join(worktreePath, ".kata-check-tmp"));
+    expect(env.HOME).toBe(tempPath);
+    expect(env.TMPDIR).toBe(tempPath);
+    expect(env.TMP).toBe(tempPath);
+    expect(env.TEMP).toBe(tempPath);
+  });
+
   it("wraps approved commands in the OS sandbox command for supported hosts", () => {
     const wrapped = sandboxApprovedCheckCommand({
       argv: ["vp", "run", "typecheck"],
-      worktreePath: "/tmp/kata-check-worktree",
+      worktreePath: "/Users/test/worktrees/katacode-task-1",
       platform: "darwin",
     });
     expect(wrapped?.command).toBe("/usr/bin/sandbox-exec");

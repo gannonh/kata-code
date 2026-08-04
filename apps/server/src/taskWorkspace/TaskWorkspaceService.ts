@@ -1014,11 +1014,116 @@ function boundedImplementationStateForManifest(task: TaskWorkspace): string {
       triggeringWorkItemId: amendment.triggeringWorkItemId,
       triggeringCheckId: amendment.triggeringCheckId,
       status: amendment.status,
-      planDiff: amendment.planDiff,
-      reviewFeedback: amendment.reviewFeedback ?? null,
+      expected: truncateRequiredDiagnosticField(
+        amendment.expected,
+        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+      ),
+      found: truncateRequiredDiagnosticField(
+        amendment.found,
+        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+      ),
+      impact: truncateRequiredDiagnosticField(
+        amendment.impact,
+        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+      ),
+      proposedChanges: truncateRequiredDiagnosticField(
+        amendment.proposedChanges,
+        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+      ),
+      proposedPlanMarkdown: amendment.proposedPlanMarkdown
+        ? truncateRequiredDiagnosticField(
+            amendment.proposedPlanMarkdown,
+            IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+          )
+        : null,
+      planDiff: amendment.planDiff
+        ? {
+            ...amendment.planDiff,
+            summary: truncateRequiredDiagnosticField(
+              amendment.planDiff.summary,
+              IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+            ),
+          }
+        : null,
+      reviewFeedback: truncateDiagnosticField(
+        amendment.reviewFeedback ?? null,
+        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+      ),
     })),
   };
-  return JSON.stringify(state, null, 2).slice(0, 16_000);
+  return truncateRequiredDiagnosticField(
+    JSON.stringify(state, null, 2),
+    IMPLEMENTATION_MANIFEST_MAX_CHARS,
+  );
+}
+
+const IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS = 100_000;
+const IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS = 2_000;
+const IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS = 2_000;
+const IMPLEMENTATION_MANIFEST_MAX_CHARS = 16_000;
+
+function truncateDiagnosticField(value: string | null, maxChars: number): string | null {
+  if (value === null || value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`;
+}
+
+function boundCheckForImplementationContext(
+  check: TaskWorkspaceBuildCheck,
+): TaskWorkspaceBuildCheck {
+  return {
+    ...check,
+    output: truncateDiagnosticField(check.output, IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS),
+    note: truncateDiagnosticField(check.note, IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS),
+  };
+}
+
+function truncateRequiredDiagnosticField(value: string, maxChars: number): string {
+  return truncateDiagnosticField(value, maxChars) ?? value;
+}
+
+function boundAmendmentForImplementationContext(
+  amendment: TaskWorkspace["build"]["amendments"][number],
+): TaskWorkspace["build"]["amendments"][number] {
+  return {
+    ...amendment,
+    expected: truncateRequiredDiagnosticField(
+      amendment.expected,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
+    found: truncateRequiredDiagnosticField(
+      amendment.found,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
+    impact: truncateRequiredDiagnosticField(
+      amendment.impact,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
+    proposedChanges: truncateRequiredDiagnosticField(
+      amendment.proposedChanges,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
+    ...(amendment.proposedPlanMarkdown
+      ? {
+          proposedPlanMarkdown: truncateRequiredDiagnosticField(
+            amendment.proposedPlanMarkdown,
+            IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+          ),
+        }
+      : {}),
+    reviewFeedback: truncateDiagnosticField(
+      amendment.reviewFeedback ?? null,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
+    planDiff: amendment.planDiff
+      ? {
+          ...amendment.planDiff,
+          summary: truncateRequiredDiagnosticField(
+            amendment.planDiff.summary,
+            IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+          ),
+        }
+      : null,
+  };
 }
 
 const RECOVERABLE_CHECK_STATUSES = new Set(["fail", "blocked", "stale", "indeterminate"]);
@@ -3669,7 +3774,7 @@ export const make = Effect.gen(function* () {
             throw new Error("The implementation task revision is stale.");
           if (task.build.amendmentGateId)
             throw new Error("Implementation is paused at an amendment gate.");
-          if (isInternalImplementationCommand(command) && hasWaitingImplementationCheckpoint(task))
+          if (hasWaitingImplementationCheckpoint(task))
             throw new Error("Implementation is paused at a waiting checkpoint.");
           const check = checkForBuild(task, command.checkId);
           if (check.kind !== "automated" || !check.command)
@@ -3697,16 +3802,21 @@ export const make = Effect.gen(function* () {
               }
             }
           }
+          const startingCommitSha = yield* runGit(repository.worktreePath, [
+            "rev-parse",
+            "HEAD",
+          ]).pipe(
+            Effect.mapError((cause) =>
+              taskError(command, "Failed to inspect the task worktree HEAD.", cause),
+            ),
+          );
           const attemptId = `check-attempt-${task.build.checkAttempts.length + 1}`;
           const commandDigest = createHash("sha256").update(check.command).digest("hex");
           const attempt = {
             id: attemptId,
             checkId: check.id,
             planRevisionId: plan.id,
-            startingCommitSha:
-              task.build.resultingCommitSha ??
-              task.workspace.repositories[0]?.baseCommitSha ??
-              "unknown",
+            startingCommitSha,
             commandDigest,
             operationKey: command.operationKey,
             status: "pending" as const,
@@ -5394,6 +5504,12 @@ export const make = Effect.gen(function* () {
           message: "The approved implementation Plan is unavailable.",
         });
       }
+      if (plan.markdown.length > IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS) {
+        return yield* new TaskWorkspaceError({
+          message: `Approved Plan revision '${plan.id}' is too large for implementation context (${plan.markdown.length} chars, max ${IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS}).`,
+          taskId,
+        });
+      }
       const repository = task.workspace.repositories[0];
       const currentCommitSha = repository?.worktreePath
         ? yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
@@ -5413,11 +5529,11 @@ export const make = Effect.gen(function* () {
         occurrence: latestOccurrence(task, "build")?.ordinal ?? 0,
         brief: task.intake.brief,
         planRevisionId: plan.id,
-        planMarkdown: plan.markdown.slice(0, 40_000),
+        planMarkdown: plan.markdown,
         phases: task.build.phases,
-        checks: task.build.checks,
+        checks: task.build.checks.map(boundCheckForImplementationContext),
         checkpoints: task.build.checkpoints,
-        amendments: task.build.amendments,
+        amendments: task.build.amendments.map(boundAmendmentForImplementationContext),
         currentCommitSha,
       } satisfies TaskImplementationContextResult;
     });

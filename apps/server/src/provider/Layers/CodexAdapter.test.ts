@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   ApprovalRequestId,
   CodexSettings,
+  EnvironmentId,
   EventId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -18,6 +19,7 @@ import {
   ThreadId,
   TurnId,
 } from "@kata-sh/code-contracts";
+import { MCP_BEARER_TOKEN_ENV_VAR } from "@kata-sh/code-shared/branding";
 import { createModelSelection } from "@kata-sh/code-shared/model";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, vi } from "@effect/vitest";
@@ -35,6 +37,7 @@ import * as Stream from "effect/Stream";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
@@ -285,6 +288,48 @@ validationLayer("CodexAdapterLive validation", (it) => {
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
       });
+    }),
+  );
+
+  it.effect("isolates the task MCP bearer token from Codex shell subprocesses", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("thread-mcp-isolation");
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-local"),
+        threadId,
+        providerSessionId: "session-mcp-isolation",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        endpoint: "http://127.0.0.1:13773/mcp/session-mcp-isolation",
+        authorizationHeader: "Bearer task-mcp-secret",
+      });
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "auto-accept-edits",
+        taskExecutionProfile: "task-worktree-write",
+      });
+
+      const runtimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      assert.ok(runtimeOptions);
+      assert.equal(runtimeOptions.environment?.[MCP_BEARER_TOKEN_ENV_VAR], "task-mcp-secret");
+      assert.ok(runtimeOptions.appServerArgs?.includes('shell_environment_policy.inherit="core"'));
+      assert.ok(
+        runtimeOptions.appServerArgs?.includes(
+          `mcp_servers.kata.bearer_token_env_var="${MCP_BEARER_TOKEN_ENV_VAR}"`,
+        ),
+      );
+      const excludeArg = runtimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("shell_environment_policy.exclude="),
+      );
+      assert.ok(excludeArg);
+      assert.match(excludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
+      assert.match(excludeArg, /\*TOKEN\*/u);
+      assert.match(excludeArg, /\*SECRET\*/u);
+      assert.match(excludeArg, /\*KEY\*/u);
+      yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
     }),
   );
 });
