@@ -20,6 +20,7 @@ import { TaskWorkspaceView } from "./TaskWorkspaceView";
 const mocks = vi.hoisted(() => ({
   dispatchCommand: vi.fn<(command: unknown) => Promise<void>>(async () => undefined),
   primaryEnvironmentId: "environment-local" as string | null,
+  threadShellById: {} as Record<string, unknown>,
   useClerk: vi.fn(() => ({ user: null })),
 }));
 
@@ -53,10 +54,34 @@ vi.mock("../../environments/runtime", () => ({
   }),
 }));
 
-vi.mock("../../store", () => ({
-  selectEnvironmentState: () => ({ threadShellById: {} }),
-  selectSidebarThreadsAcrossEnvironments: () => [],
-  useStore: () => [],
+vi.mock("../../store", () => {
+  const environmentState = () => ({
+    threadShellById: mocks.threadShellById,
+    threadSessionById: {},
+    threadTurnStateById: {},
+    messageIdsByThreadId: {},
+    messageByThreadId: {},
+    activityIdsByThreadId: {},
+    activityByThreadId: {},
+    proposedPlanIdsByThreadId: {},
+    proposedPlanByThreadId: {},
+    turnDiffIdsByThreadId: {},
+    turnDiffSummaryByThreadId: {},
+  });
+  const appState = () => ({
+    environmentStateById: { "environment-local": environmentState() },
+  });
+  return {
+    selectEnvironmentState: () => environmentState(),
+    selectSidebarThreadsAcrossEnvironments: () => [],
+    useStore: (selector?: unknown) => (typeof selector === "function" ? selector(appState()) : []),
+  };
+});
+
+vi.mock("../ChatView", () => ({
+  default: ({ threadId }: { readonly threadId: string }) => (
+    <div data-testid="mock-task-chat">{threadId}</div>
+  ),
 }));
 
 const baseTask: TaskWorkspace = {
@@ -357,6 +382,7 @@ beforeEach(() => {
   mocks.dispatchCommand.mockClear();
   mocks.useClerk.mockClear();
   mocks.primaryEnvironmentId = "environment-local";
+  mocks.threadShellById = {};
   useTaskWorkspaceStore.getState().reset();
 });
 
@@ -1117,6 +1143,80 @@ describe("TaskWorkspaceView", () => {
     });
     expect(mocks.dispatchCommand.mock.calls[0]?.[0]).not.toHaveProperty("contextManifestId");
     expect(mocks.dispatchCommand.mock.calls[0]?.[0]).not.toHaveProperty("threadId");
+  });
+
+  it("routes Build to the latest active continuation thread", async () => {
+    const originalThread = ThreadId.make("guided-build-thread-1");
+    const continuationThread = ThreadId.make("guided-build-thread-2");
+    mocks.threadShellById = {
+      [continuationThread]: {
+        id: continuationThread,
+        threadId: continuationThread,
+        projectId: ProjectId.make("project-1"),
+        title: "Continuation",
+        archivedAt: null,
+        createdAt: "2026-07-28T17:12:00.000Z",
+        updatedAt: "2026-07-28T17:12:00.000Z",
+      },
+    };
+    await renderTask(
+      guidedTask({
+        occurrences: [
+          {
+            ...guidedTask().occurrences[0]!,
+            sessionId: "session-build-2",
+            threadId: continuationThread,
+          },
+        ],
+        sessions: [
+          {
+            ...guidedTask().sessions[0]!,
+            threadId: originalThread,
+            status: "superseded",
+          },
+          {
+            ...guidedTask().sessions[0]!,
+            id: "session-build-2",
+            threadId: continuationThread,
+            status: "active",
+            contextManifestId: "manifest-2",
+          },
+        ],
+        build: {
+          ...guidedTask().build,
+          continuationSessionIds: ["session-build-2"],
+        },
+      }),
+    );
+
+    await expect.element(page.getByTestId("mock-task-chat")).toHaveTextContent(continuationThread);
+  });
+
+  it("does not route Build to a stale inactive occurrence session", async () => {
+    const originalThread = ThreadId.make("guided-build-thread-1");
+    mocks.threadShellById = {
+      [originalThread]: {
+        id: originalThread,
+        threadId: originalThread,
+        projectId: ProjectId.make("project-1"),
+        title: "Old build",
+        archivedAt: null,
+        createdAt: "2026-07-28T17:08:00.000Z",
+        updatedAt: "2026-07-28T17:08:00.000Z",
+      },
+    };
+    await renderTask(
+      guidedTask({
+        sessions: [{ ...guidedTask().sessions[0]!, status: "superseded" }],
+        build: {
+          ...guidedTask().build,
+          continuationSessionIds: [guidedTask().sessions[0]!.id],
+        },
+      }),
+    );
+
+    expect(page.getByTestId("mock-task-chat").query()).toBeNull();
+    await expect.element(page.getByTestId("task-approved-plan-readonly")).toBeVisible();
   });
 
   it("dispatches Guided amendment request changes with feedback", async () => {

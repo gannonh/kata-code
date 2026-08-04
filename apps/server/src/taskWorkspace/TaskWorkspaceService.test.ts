@@ -4349,15 +4349,59 @@ describe("TaskWorkspaceService guided implementation", () => {
           revision: 1,
         });
         expect(continued.task.build.checkpoints[0]).toMatchObject({
-          status: "continued",
+          status: "waiting",
           contextManifestId: continued.task.contextManifests.at(-1)?.id,
           continuationSessionId: "guided-task-session-build-continuation-1",
         });
         expect(
           continued.task.sessions.find((session) => session.id === running.sessions.at(-1)?.id)
             ?.status,
+        ).toBe("active");
+        expect(continued.task.bootstrap?.operationKey).toBe("op-checkpoint-server-owned");
+        const readyBootstrap = continued.task.bootstrap!;
+        const readyOccurrence = continued.task.occurrences.find((o) => o.stage === "build")!;
+        const readyRepository = continued.task.workspace.repositories[0]!;
+        yield* runtime.runPromise(
+          service.processBootstrap({
+            id: "outbox-checkpoint-ready",
+            environmentId: EnvironmentId.make("environment-local"),
+            taskId: task.id,
+            operationKey: readyBootstrap.operationKey,
+            target: "bootstrap",
+            status: "pending",
+            payload: {
+              stage: "build",
+              occurrence: readyOccurrence.ordinal,
+              executionProfile: "task-worktree-write",
+              presentation: "implementation",
+              sessionId: readyBootstrap.reservedSessionId,
+              threadId: readyBootstrap.reservedThreadId,
+              threadCreateCommandId: readyBootstrap.threadCreateCommandId,
+              turnStartCommandId: readyBootstrap.turnStartCommandId,
+              kickoffMessageId: readyBootstrap.kickoffMessageId,
+              contextManifestId: continued.task.contextManifests.at(-1)!.id,
+              continuationCheckpointId: checkpoint.id,
+              continuationMode: "checkpoint",
+              continuationActivatePhase: false,
+              worktreeBranch: readyRepository.branch,
+              worktreePath: readyRepository.worktreePath,
+            },
+            attemptCount: 0,
+            createdAt: now(24),
+            updatedAt: now(24),
+            completedAt: null,
+          } as never),
+        );
+        const ready = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        expect(ready.build.checkpoints[0]).toMatchObject({ status: "continued" });
+        expect(
+          ready.sessions.find((session) => session.id === running.sessions.at(-1)?.id)?.status,
         ).toBe("superseded");
-        expect(continued.task.bootstrap?.operationKey).toBe("op-checkpoint-server-owned:bootstrap");
+        expect(
+          ready.sessions.find((session) => session.id === readyBootstrap.reservedSessionId),
+        ).toMatchObject({
+          status: "active",
+        });
       }),
   );
 
@@ -4417,8 +4461,12 @@ describe("TaskWorkspaceService guided implementation", () => {
           status: "changes-requested",
           reviewFeedback: "Keep the original public API.",
         });
-        expect(changed.task.bootstrap?.operationKey).toBe("op-amend-request-changes:bootstrap");
-        expect(changed.task.build.continuationSessionIds).toContain(
+        expect(changed.task.bootstrap?.operationKey).toBe("op-amend-request-changes");
+        expect(changed.task.build.checkpoints[0]).toMatchObject({
+          status: "waiting",
+          continuationSessionId: "guided-task-session-build-continuation-1",
+        });
+        expect(changed.task.build.continuationSessionIds).not.toContain(
           "guided-task-session-build-continuation-1",
         );
       }),
@@ -4555,6 +4603,31 @@ describe("TaskWorkspaceService guided implementation", () => {
     }),
   );
 
+  it.effect("rejects a first automated check run before its owning work is running", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-check-order-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const result = yield* runtime.runPromiseExit(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-out-of-order-pending",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+    }),
+  );
+
   it.effect("unblocks the work item and phase when a rerun attempt passes", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-unblock-");
@@ -4661,11 +4734,22 @@ describe("TaskWorkspaceService guided implementation", () => {
       const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
       const worktreePath = task.workspace.repositories[0]!.worktreePath!;
       const head = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "running",
+          summary: "Implementing.",
+        }),
+      );
+      const afterProgress = (yield* runtime.runPromise(service.getTask(task.id)))!;
 
       const older = yield* runtime.runPromise(
         service.implementationCheckRun({
           taskId: task.id,
-          expectedTaskRevision: task.taskRevision,
+          expectedTaskRevision: afterProgress.taskRevision,
           checkId: "check:typecheck",
           operationKey: "op-check-older",
         }),
@@ -4864,11 +4948,22 @@ describe("TaskWorkspaceService guided implementation", () => {
       const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
       const worktreePath = task.workspace.repositories[0]!.worktreePath!;
       const head = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "running",
+          summary: "Implementing.",
+        }),
+      );
+      const afterProgress = (yield* runtime.runPromise(service.getTask(task.id)))!;
 
       const older = yield* runtime.runPromise(
         service.implementationCheckRun({
           taskId: task.id,
-          expectedTaskRevision: task.taskRevision,
+          expectedTaskRevision: afterProgress.taskRevision,
           checkId: "check:typecheck",
           operationKey: "op-check-out-of-order-1",
         }),
@@ -4995,11 +5090,22 @@ describe("TaskWorkspaceService guided implementation", () => {
       const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
       const worktreePath = task.workspace.repositories[0]!.worktreePath!;
       const firstHead = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "running",
+          summary: "Implementing.",
+        }),
+      );
+      const afterProgress = (yield* runtime.runPromise(service.getTask(task.id)))!;
 
       const typecheck = yield* runtime.runPromise(
         service.implementationCheckRun({
           taskId: task.id,
-          expectedTaskRevision: task.taskRevision,
+          expectedTaskRevision: afterProgress.taskRevision,
           checkId: "check:typecheck",
           operationKey: "op-check-typecheck",
         }),
@@ -5230,7 +5336,7 @@ describe("TaskWorkspaceService guided implementation", () => {
       const completedTask = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(completedTask.build.phases[0]?.status).toBe("completed");
 
-      const proposed = yield* runtime.runPromise(
+      yield* runtime.runPromise(
         service.implementationAmendmentPropose({
           taskId: task.id,
           expectedTaskRevision: completedTask.taskRevision,
@@ -5306,12 +5412,23 @@ describe("TaskWorkspaceService guided implementation", () => {
         "",
       ].join("\n");
       const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, basePlan);
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "running",
+          summary: "Implementing.",
+        }),
+      );
+      const afterProgress = (yield* runtime.runPromise(service.getTask(task.id)))!;
 
       // A check attempt is in flight (pending) when the amendment is requested.
       const run = yield* runtime.runPromise(
         service.implementationCheckRun({
           taskId: task.id,
-          expectedTaskRevision: task.taskRevision,
+          expectedTaskRevision: afterProgress.taskRevision,
           checkId: "check:typecheck",
           operationKey: "op-amend-prune-check",
         }),
@@ -5335,18 +5452,21 @@ describe("TaskWorkspaceService guided implementation", () => {
       const gated = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(gated.build.amendmentGateId).toBe("amendment-1");
 
-      const approved = yield* runtime.runPromise(
-        service.dispatch(
-          command({
-            type: "task.amendment.approve",
-            commandId: CommandId.make("impl-amend-prune-approve"),
-            taskId: task.id,
-            createdAt: now(25),
-            amendmentId: "amendment-1",
-            approvedBy: "operator",
-          }),
-        ),
-      );
+      const approveCommand = command({
+        type: "task.amendment.approve",
+        commandId: CommandId.make("impl-amend-prune-approve"),
+        taskId: task.id,
+        createdAt: now(25),
+        amendmentId: "amendment-1",
+        approvedBy: "operator",
+        expectedTaskRevision: gated.taskRevision,
+        operationKey: "op-amend-prune-approve",
+      });
+      const approved = yield* runtime.runPromise(service.dispatch(approveCommand));
+      const replayed = yield* runtime.runPromise(service.dispatch(approveCommand));
+      expect(
+        replayed.task.artifacts.find((artifact) => artifact.kind === "plan")?.revisions,
+      ).toHaveLength(2);
       // The recompiled graph dropped check:typecheck; its in-flight attempt must
       // not survive as a permanently pending attempt that wedges completion.
       expect(approved.task.build.checks.map((check) => check.id)).toEqual(["check:lint"]);

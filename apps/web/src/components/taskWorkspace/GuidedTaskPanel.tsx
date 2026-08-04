@@ -96,11 +96,8 @@ function startImplementDisabledReason(task: TaskWorkspace): string | null {
   if (hasImplementOccurrence(task)) return "Implement has already started.";
   if (task.planGate?.status === "open") return "Resolve the Plan gate first.";
   if (task.preferences.worktreePolicy === "never") return "Choose a worktree policy first.";
-  if (
-    repository?.provisioningStatus !== "ready" &&
-    repository?.provisioningStatus !== "provisioned"
-  )
-    return "Wait for the canonical task worktree to be ready.";
+  if (repository?.provisioningStatus !== "ready")
+    return `Wait for the canonical task worktree to be ready (current status: ${repository?.provisioningStatus ?? "missing"}).`;
   if (!repository.worktreePath || !repository.baseCommitSha) {
     return "The canonical task worktree is not ready.";
   }
@@ -153,6 +150,26 @@ function automatedCheckDisabledReason(
   if (!plan || task.build.currentPlanRevisionId !== plan.id)
     return "The approved implementation Plan is unavailable.";
   if (!repository?.worktreePath) return "The canonical task worktree is unavailable.";
+  const latestAttempt = task.build.checkAttempts
+    .toReversed()
+    .find((attempt) => attempt.checkId === check.id);
+  const isRecoveryRerun =
+    check.status === "fail" ||
+    check.status === "blocked" ||
+    check.status === "stale" ||
+    check.status === "indeterminate" ||
+    latestAttempt?.status === "fail" ||
+    latestAttempt?.status === "stale" ||
+    latestAttempt?.status === "indeterminate";
+  if (isRecoveryRerun) return null;
+  const phase = phaseById(task, check.phaseId);
+  const item = workItemById(task, check.workItemId);
+  if (phase?.status !== "running" || task.build.activePhaseId !== phase.id)
+    return "The owning phase must be running.";
+  if (item && (item.status !== "running" || task.build.activeWorkItemId !== item.id))
+    return "The owning work item must be running.";
+  if (phase && item && !dependenciesPass(phase, item))
+    return `Depends on ${item.dependsOn.join(", ")}.`;
   return null;
 }
 
@@ -591,16 +608,19 @@ export function GuidedTaskPanel(props: {
                         ? "Another task command is running."
                         : undefined
                   }
-                  onClick={() =>
+                  onClick={() => {
+                    const base = commands.commandBase("task.amendment.approve");
                     void commands.dispatch(
                       {
-                        ...commands.commandBase("task.amendment.approve"),
+                        ...base,
+                        expectedTaskRevision: task.taskRevision,
+                        operationKey: operationKey(base.commandId, "amendment-approve"),
                         amendmentId: amendmentGate.id,
                         approvedBy: currentUser.id,
                       },
                       "approve-amendment",
-                    )
-                  }
+                    );
+                  }}
                 >
                   Approve amendment
                 </Button>
@@ -984,38 +1004,20 @@ export function GuidedTaskPanel(props: {
           ) : null}
 
           {!implementationComplete ? (
-            <div className="space-y-1 border-t border-border/50 pt-3">
-              <Button
-                data-testid="guided-implementation-complete-button"
-                size="sm"
-                disabled={completeReason !== null}
-                title={completeReason ?? "The server will confirm the exact clean worktree HEAD."}
-                onClick={() => {
-                  const base = commands.commandBase("task.implementation.complete");
-                  void commands.dispatch(
-                    {
-                      ...base,
-                      expectedTaskRevision: task.taskRevision,
-                      summary: "Implementation complete from the task panel.",
-                      operationKey: operationKey(base.commandId, "implementation-complete"),
-                    },
-                    "complete-implementation",
-                  );
-                }}
-              >
-                Complete Implement
-              </Button>
+            <div
+              data-testid="guided-implementation-completion-note"
+              className="space-y-1 border-t border-border/50 pt-3 text-xs text-muted-foreground"
+            >
+              <p>
+                Completion is provider-owned. The active Implement conversation requests completion
+                after all phases, work items, checks, checkpoints, and amendment gates are clear.
+              </p>
               {completeReason ? (
-                <p
-                  data-testid="guided-complete-disabled-reason"
-                  className="text-xs text-muted-foreground"
-                >
-                  {completeReason}
+                <p data-testid="guided-complete-disabled-reason">
+                  Current blocker: {completeReason}
                 </p>
               ) : (
-                <p className="text-xs text-muted-foreground">
-                  The server verifies a clean worktree, branch, HEAD, ancestry, and passing checks.
-                </p>
+                <p>The server will verify the clean worktree and exact branch HEAD.</p>
               )}
             </div>
           ) : null}

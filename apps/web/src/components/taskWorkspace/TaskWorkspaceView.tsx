@@ -99,12 +99,14 @@ function activeStageSession(
         ),
       );
     if (continuationSessionId) {
-      return task.sessions.find((session) => session.id === continuationSessionId) ?? null;
+      const continuationSession =
+        task.sessions.find((session) => session.id === continuationSessionId) ?? null;
+      if (continuationSession?.status === "active") return continuationSession;
     }
   }
-  return occurrence?.sessionId
-    ? (task.sessions.find((session) => session.id === occurrence.sessionId) ?? null)
-    : null;
+  if (!occurrence?.sessionId) return null;
+  const session = task.sessions.find((candidate) => candidate.id === occurrence.sessionId) ?? null;
+  return session?.status === "active" ? session : null;
 }
 
 /**
@@ -967,15 +969,10 @@ function TaskFirstSliceView({
     planOccurrence?.status === "completed" &&
     planOccurrence.gateOutcome === "approved";
   const planArtifact = latestArtifact(task, "plan");
-  const waitingCheckpoint = task.build.checkpoints.some(
-    (checkpoint) => checkpoint.status === "waiting",
-  );
   const buildReadOnlyPlan =
     stage === "build" &&
     planArtifact !== null &&
-    (task.build.resultingCommitSha !== null ||
-      task.build.amendmentGateId !== null ||
-      waitingCheckpoint);
+    (task.build.resultingCommitSha !== null || !hasActiveThread);
   const showReadOnlyPlan = Boolean((approvedPlan && planArtifact) || buildReadOnlyPlan);
 
   return (

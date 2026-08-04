@@ -402,7 +402,18 @@ const driveToBuild = Effect.fn("TaskWorkspaceBootstrapWorkerTest.driveToBuild")(
   const provisioned = (yield* runtime.runPromise(service.getTask(taskId)))!;
   expect(provisioned.workflowRuns.at(-1)?.currentStage).toBe("build");
   expect(provisioned.build.checks.map((check) => check.id)).toContain("check:typecheck");
-  return { service, task: provisioned };
+  yield* runtime.runPromise(
+    service.implementationProgress({
+      taskId: provisioned.id,
+      expectedTaskRevision: provisioned.taskRevision,
+      phaseId: "phase:foundation",
+      workItemId: "work:implement",
+      status: "running",
+      summary: "Start implementation checks.",
+    }),
+  );
+  const running = (yield* runtime.runPromise(service.getTask(taskId)))!;
+  return { service, task: running };
 });
 
 describe("TaskWorkspaceBootstrapWorker", () => {
@@ -430,6 +441,7 @@ describe("TaskWorkspaceBootstrapWorker", () => {
         id: "check-attempt-1",
         status: "fail",
         observedStatus: "fail",
+        startingCommitSha: "starting-sha",
       });
       expect(settled.build.checks.find((check) => check.id === "check:typecheck")?.status).toBe(
         "fail",

@@ -5,12 +5,14 @@ import * as Schema from "effect/Schema";
 import { CommandId, ProjectId } from "./baseSchemas.ts";
 import {
   TaskWorkspace,
+  TaskWorkspaceBootstrapOutboxPayload,
   TaskWorkspaceCommand,
   TaskWorkspaceEvent,
   TaskWorkspaceStreamItem,
 } from "./taskWorkspace.ts";
 
 const decodeCommand = Schema.decodeUnknownEffect(TaskWorkspaceCommand);
+const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
 const decodeStreamItem = Schema.decodeUnknownEffect(TaskWorkspaceStreamItem);
 const decodeEvent = Schema.decodeUnknownEffect(TaskWorkspaceEvent);
 const decodeTask = Schema.decodeUnknownEffect(TaskWorkspace);
@@ -81,6 +83,16 @@ it.effect("decodes Slice 2 workflow and implementation contracts additively", ()
       expectedTaskRevision: 7,
       operationKey: "amendment-changes-1",
     });
+    const amendmentApprove = yield* decodeCommand({
+      type: "task.amendment.approve",
+      commandId: "command-amendment-approve",
+      taskId: "task-1",
+      createdAt: "2026-08-03T17:00:04.000Z",
+      amendmentId: "amendment-1",
+      approvedBy: "operator",
+      expectedTaskRevision: 8,
+      operationKey: "amendment-approve-1",
+    });
     assert.strictEqual(upgrade.type, "task.workflow.upgrade");
     assert.strictEqual(progress.type, "task.implementation.progress");
     assert.strictEqual(checkpointContinue.type, "task.build.checkpoint.continue");
@@ -89,6 +101,29 @@ it.effect("decodes Slice 2 workflow and implementation contracts additively", ()
     }
     assert.strictEqual(checkpointContinue.contextManifestId, undefined);
     assert.strictEqual(amendmentRequestChanges.type, "task.amendment.request-changes");
+    assert.strictEqual(amendmentApprove.type, "task.amendment.approve");
+    if (amendmentApprove.type !== "task.amendment.approve") {
+      return assert.fail("Expected task.amendment.approve command");
+    }
+    assert.strictEqual(amendmentApprove.expectedTaskRevision, 8);
+    assert.strictEqual(amendmentApprove.operationKey, "amendment-approve-1");
+
+    const continuationPayload = yield* decodeBootstrapPayload({
+      stage: "build",
+      occurrence: 0,
+      executionProfile: "task-worktree-write",
+      sessionId: "session-1",
+      threadId: "thread-1",
+      threadCreateCommandId: "command-thread-1",
+      turnStartCommandId: "command-turn-1",
+      kickoffMessageId: "message-kickoff-1",
+      contextManifestId: "manifest-1",
+      continuationCheckpointId: "checkpoint-1",
+      continuationMode: "checkpoint",
+      continuationActivatePhase: true,
+    });
+    assert.strictEqual(continuationPayload.continuationCheckpointId, "checkpoint-1");
+    assert.strictEqual(continuationPayload.continuationActivatePhase, true);
 
     const amendment = yield* decodeTask(
       slice1Task({

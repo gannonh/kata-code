@@ -1089,6 +1089,8 @@ const TaskAmendmentApproveCommand = Schema.Struct({
   type: Schema.Literal("task.amendment.approve"),
   amendmentId: TrimmedNonEmptyString,
   approvedBy: TrimmedNonEmptyString,
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
 });
 
 const TaskBuildResumeCommand = Schema.Struct({
@@ -1459,6 +1461,13 @@ export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   contextManifestId: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  continuationCheckpointId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  continuationMode: Schema.NullOr(Schema.Literals(["checkpoint", "amendment"])).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  continuationActivatePhase: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeBranch: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),

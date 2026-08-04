@@ -155,6 +155,7 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
     case "task.implementation.complete":
     case "task.build.checkpoint.continue":
     case "task.amendment.request-changes":
+    case "task.amendment.approve":
       return command.operationKey ?? null;
     default:
       return null;
@@ -365,9 +366,25 @@ function blockContent(markdown: string, blockId: string): string | null {
   return markdown.slice(markers[index]!.contentStart, end);
 }
 
-function requireContextManifest(task: TaskWorkspace, manifestId: string): void {
-  if (!task.contextManifests.some((manifest) => manifest.id === manifestId)) {
+function requireContextManifest(
+  task: TaskWorkspace,
+  manifestId: string,
+): TaskWorkspaceContextManifest {
+  const manifest = task.contextManifests.find((candidate) => candidate.id === manifestId);
+  if (!manifest) {
     throw new Error(`Context manifest '${manifestId}' was not found.`);
+  }
+  return manifest;
+}
+
+function requireContextManifestCurrentPlan(task: TaskWorkspace, manifestId: string): void {
+  const manifest = requireContextManifest(task, manifestId);
+  const plan = latestPlanRevision(task);
+  if (
+    plan &&
+    !manifest.artifactRefs.some((ref) => ref.kind === "plan" && ref.revision === plan.revision)
+  ) {
+    throw new Error("Continuation context must reference the current approved Plan revision.");
   }
 }
 
@@ -925,6 +942,35 @@ function requiredChecksPass(
   );
 }
 
+function requiredChecksPassAtHead(
+  build: TaskWorkspace["build"],
+  checkIds: ReadonlyArray<string>,
+  head: string,
+): boolean {
+  return checkIds.every((checkId) =>
+    build.checks.some(
+      (check) => check.id === checkId && check.status === "pass" && check.commitSha === head,
+    ),
+  );
+}
+
+const RECOVERABLE_CHECK_STATUSES = new Set(["fail", "blocked", "stale", "indeterminate"]);
+
+function isRecoverableCheckRerun(
+  build: TaskWorkspace["build"],
+  check: TaskWorkspaceBuildCheck,
+): boolean {
+  if (RECOVERABLE_CHECK_STATUSES.has(check.status)) return true;
+  const latestAttempt = build.checkAttempts
+    .toReversed()
+    .find((attempt) => attempt.checkId === check.id);
+  return latestAttempt
+    ? latestAttempt.status === "fail" ||
+        latestAttempt.status === "stale" ||
+        latestAttempt.status === "indeterminate"
+    : false;
+}
+
 /**
  * Mark pass checks for another commit `stale` whenever the server observes a
  * new HEAD during check settlement or completion handling. Passes (and their
@@ -1152,6 +1198,7 @@ export interface TaskWorkspaceServiceShape {
     readonly output: string;
     readonly exitCode: number | null;
     readonly endingCommitSha: string | null;
+    readonly startingCommitSha?: string;
   }) => Effect.Effect<void, TaskWorkspaceError>;
   readonly implementationComplete: (input: {
     readonly taskId: TaskWorkspaceId;
@@ -1751,6 +1798,9 @@ export const make = Effect.gen(function* () {
         kickoffMessageId,
         trustedInstructions: trustedStageInstructions(stage),
         contextManifestId: null,
+        continuationCheckpointId: null,
+        continuationMode: null,
+        continuationActivatePhase: false,
         worktreeBranch: branch,
         worktreePath,
       };
@@ -3516,6 +3566,25 @@ export const make = Effect.gen(function* () {
           const repository = task.workspace.repositories[0];
           if (!plan || !repository?.worktreePath)
             throw new Error("The approved Plan or canonical worktree is unavailable.");
+          const phase = phaseForBuild(task, check.phaseId);
+          const item = check.workItemId === null ? null : workItemForBuild(phase, check.workItemId);
+          const isRecoveryRerun = isRecoverableCheckRerun(task.build, check);
+          if (!isRecoveryRerun) {
+            requirePredecessorPhasesComplete(task.build, phase.id);
+            if (phase.status !== "running" || task.build.activePhaseId !== phase.id) {
+              throw new Error(
+                `Build phase '${phase.id}' must be running before its check can run.`,
+              );
+            }
+            if (item) {
+              if (item.status !== "running" || task.build.activeWorkItemId !== item.id) {
+                throw new Error(`Work item '${item.id}' must be running before its check can run.`);
+              }
+              if (!dependenciesPass(phase, item)) {
+                throw new Error(`Work item '${item.id}' has incomplete dependencies.`);
+              }
+            }
+          }
           const attemptId = `check-attempt-${task.build.checkAttempts.length + 1}`;
           const commandDigest = createHash("sha256").update(check.command).digest("hex");
           const attempt = {
@@ -3556,6 +3625,18 @@ export const make = Effect.gen(function* () {
             { ...task, build, updatedAt: command.createdAt },
             {
               eventType: "task.implementation.check.run",
+              operationReceipt: makeOperationReceipt(
+                command,
+                {
+                  operationType: "task.implementation.check.run",
+                  operationKey: command.operationKey,
+                  payloadDigest: canonicalTaskCommandDigest(command),
+                  status: "completed",
+                  attemptCount: 1,
+                  sourceCommandIds: [command.commandId],
+                },
+                command.createdAt,
+              ),
               outbox: [
                 {
                   target: "implementation-check",
@@ -3622,7 +3703,21 @@ export const make = Effect.gen(function* () {
           return yield* append(
             command,
             { ...task, build, updatedAt: command.createdAt },
-            { eventType: "task.implementation.amendment.propose" },
+            {
+              eventType: "task.implementation.amendment.propose",
+              operationReceipt: makeOperationReceipt(
+                command,
+                {
+                  operationType: "task.implementation.amendment.propose",
+                  operationKey: command.operationKey,
+                  payloadDigest: canonicalTaskCommandDigest(command),
+                  status: "completed",
+                  attemptCount: 1,
+                  sourceCommandIds: [command.commandId],
+                },
+                command.createdAt,
+              ),
+            },
           );
         }
         case "task.implementation.complete": {
@@ -3671,7 +3766,22 @@ export const make = Effect.gen(function* () {
               ),
               updatedAt: command.createdAt,
             },
-            { eventType: "task.implementation.complete", proposal },
+            {
+              eventType: "task.implementation.complete",
+              operationReceipt: makeOperationReceipt(
+                command,
+                {
+                  operationType: "task.implementation.complete",
+                  operationKey: command.operationKey,
+                  payloadDigest: canonicalTaskCommandDigest(command),
+                  status: "completed",
+                  attemptCount: 1,
+                  sourceCommandIds: [command.commandId],
+                },
+                command.createdAt,
+              ),
+              proposal,
+            },
           );
         }
         case "task.build.phase.start": {
@@ -3993,15 +4103,38 @@ export const make = Effect.gen(function* () {
           ) {
             throw new Error(`Thread '${command.threadId}' is already linked to this task.`);
           }
-          const phase = phaseForBuild(task, checkpoint.phaseId);
-          requirePredecessorPhasesComplete(task.build, phase.id);
+          const repository = task.workspace.repositories[0];
+          if (!repository?.worktreePath)
+            throw new Error("The canonical task worktree is unavailable.");
+          const observedHead = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+            Effect.mapError((cause) =>
+              taskError(command, "Failed to inspect the task worktree HEAD.", cause),
+            ),
+          );
+          let observedBuild = markStalePassesForHead(task.build, observedHead);
+          observedBuild = {
+            ...observedBuild,
+            checkpoints: observedBuild.checkpoints.map((candidate) =>
+              candidate.id === checkpoint.id
+                ? { ...candidate, observedCommitSha: observedHead }
+                : candidate,
+            ),
+          };
+          const observedTask = { ...task, build: observedBuild };
+          const observedCheckpoint = observedBuild.checkpoints.find(
+            (candidate) => candidate.id === checkpoint.id,
+          )!;
+          const phase = phaseForBuild(observedTask, checkpoint.phaseId);
+          requirePredecessorPhasesComplete(observedBuild, phase.id);
           if (
             phase.status !== "completed" ||
             !phase.workItems.every((item) => item.status === "completed") ||
-            !requiredChecksPass(task.build, checkpoint.checkIds)
+            !(command.operationKey
+              ? requiredChecksPassAtHead(observedBuild, checkpoint.checkIds, observedHead)
+              : requiredChecksPass(observedBuild, checkpoint.checkIds))
           ) {
             throw new Error(
-              `Checkpoint '${checkpoint.id}' can continue only after its phase completes successfully.`,
+              `Checkpoint '${checkpoint.id}' can continue only after its phase completes successfully at the current commit.`,
             );
           }
           if (
@@ -4009,11 +4142,11 @@ export const make = Effect.gen(function* () {
             command.threadId !== undefined &&
             command.contextManifestId !== undefined
           ) {
-            requireContextManifest(task, command.contextManifestId);
+            requireContextManifestCurrentPlan(observedTask, command.contextManifestId);
             const sessionId = `session-${task.sessions.length + 1}`;
             let build: TaskWorkspace["build"] = {
-              ...task.build,
-              checkpoints: task.build.checkpoints.map((candidate) =>
+              ...observedBuild,
+              checkpoints: observedBuild.checkpoints.map((candidate) =>
                 candidate.id === checkpoint.id
                   ? {
                       ...candidate,
@@ -4023,7 +4156,7 @@ export const make = Effect.gen(function* () {
                     }
                   : candidate,
               ),
-              continuationSessionIds: [...task.build.continuationSessionIds, sessionId],
+              continuationSessionIds: [...observedBuild.continuationSessionIds, sessionId],
             };
             build = startNextPhase(build, phase.id, command.createdAt);
             return yield* append(command, {
@@ -4048,8 +4181,8 @@ export const make = Effect.gen(function* () {
             });
           }
           const continuation = yield* implementationContinuation({
-            task,
-            checkpoint,
+            task: observedTask,
+            checkpoint: observedCheckpoint,
             createdAt: command.createdAt,
             ...(command.contextManifestId !== undefined
               ? { contextManifestId: command.contextManifestId }
@@ -4290,6 +4423,12 @@ export const make = Effect.gen(function* () {
           const stage = currentRun(task).currentStage;
           if (stage !== "build" && stage !== "verify") {
             throw new Error(`Amendments are not available while the task is in '${stage}'.`);
+          }
+          if (
+            command.expectedTaskRevision !== undefined &&
+            command.expectedTaskRevision !== task.taskRevision
+          ) {
+            throw new Error("The implementation task revision is stale.");
           }
           const amendment = task.build.amendments.find(
             (candidate) => candidate.id === command.amendmentId,
@@ -4551,11 +4690,30 @@ export const make = Effect.gen(function* () {
             );
           }
           if (task.versions.workflowDefinition !== "guided@0.3.0") {
-            return yield* append(command, {
-              ...amendedTask,
-              build: recoveryBuild,
-              updatedAt: command.createdAt,
-            });
+            return yield* append(
+              command,
+              {
+                ...amendedTask,
+                build: recoveryBuild,
+                updatedAt: command.createdAt,
+              },
+              command.operationKey
+                ? {
+                    operationReceipt: makeOperationReceipt(
+                      command,
+                      {
+                        operationType: "task.amendment.approve",
+                        operationKey: command.operationKey,
+                        payloadDigest: canonicalTaskCommandDigest(command),
+                        status: "completed",
+                        attemptCount: 1,
+                        sourceCommandIds: [command.commandId],
+                      },
+                      command.createdAt,
+                    ),
+                  }
+                : undefined,
+            );
           }
           if (
             !recoveryBuild.checkpoints.some(
@@ -4581,15 +4739,35 @@ export const make = Effect.gen(function* () {
           if (!continuationCheckpoint) {
             throw new Error("Failed to create amendment approval continuation checkpoint.");
           }
+          const approvalOperationKey =
+            command.operationKey ?? `${task.id}:amendment:${amendment.id}:approve`;
           const continuation = yield* implementationContinuation({
             task: { ...amendedTask, build: recoveryBuild },
             checkpoint: continuationCheckpoint,
             createdAt: command.createdAt,
-            operationKey: `${task.id}:amendment:${amendment.id}:approve`,
+            operationKey: approvalOperationKey,
             reason: "amendment",
             activatePhase: true,
           });
-          return yield* append(command, continuation.task, { outbox: [continuation.outbox] });
+          return yield* append(command, continuation.task, {
+            ...(command.operationKey
+              ? {
+                  operationReceipt: makeOperationReceipt(
+                    command,
+                    {
+                      operationType: "task.amendment.approve",
+                      operationKey: command.operationKey,
+                      payloadDigest: canonicalTaskCommandDigest(command),
+                      status: "completed",
+                      attemptCount: 1,
+                      sourceCommandIds: [command.commandId],
+                    },
+                    command.createdAt,
+                  ),
+                }
+              : {}),
+            outbox: [continuation.outbox],
+          });
         }
         case "task.build.resume": {
           requireStage(task, "build");
@@ -5275,6 +5453,7 @@ export const make = Effect.gen(function* () {
                 output: input.output,
                 exitCode: input.exitCode,
                 observedStatus: nextStatus,
+                startingCommitSha: input.startingCommitSha ?? candidate.startingCommitSha,
                 endingCommitSha: input.endingCommitSha,
                 completedAt: now,
               }
@@ -5405,6 +5584,9 @@ export const make = Effect.gen(function* () {
       readonly sessionId?: string;
       readonly threadId?: ThreadId;
       readonly contextManifestId?: string | null;
+      readonly continuationCheckpointId?: string | null;
+      readonly continuationMode?: "checkpoint" | "amendment" | null;
+      readonly continuationActivatePhase?: boolean;
     },
   ) =>
     Effect.gen(function* () {
@@ -5449,6 +5631,9 @@ export const make = Effect.gen(function* () {
             ? trustedImplementationInstructions()
             : trustedStageInstructions(stage),
         contextManifestId: options?.contextManifestId ?? null,
+        continuationCheckpointId: options?.continuationCheckpointId ?? null,
+        continuationMode: options?.continuationMode ?? null,
+        continuationActivatePhase: options?.continuationActivatePhase ?? false,
         worktreeBranch: branch,
         worktreePath,
       };
@@ -5504,6 +5689,9 @@ export const make = Effect.gen(function* () {
       if (existingManifestId && !existingManifest) {
         throw new Error(`Context manifest '${existingManifestId}' was not found.`);
       }
+      if (existingManifestId) {
+        requireContextManifestCurrentPlan(input.task, existingManifestId);
+      }
       const manifestId =
         existingManifestId ?? `manifest-${input.task.id}-${input.checkpoint.id}-${input.reason}`;
       const manifest: TaskWorkspaceContextManifest | null = existingManifest
@@ -5542,69 +5730,29 @@ export const make = Effect.gen(function* () {
           presentation: "implementation",
           worktreeBranch: input.task.workspace.repositories[0]?.branch ?? null,
           worktreePath: input.task.workspace.repositories[0]?.worktreePath ?? null,
-          operationKey: `${input.operationKey}:bootstrap`,
+          operationKey: input.operationKey,
           sessionId,
           ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
           contextManifestId: manifestId,
+          continuationCheckpointId: input.checkpoint.id,
+          continuationMode: input.reason,
+          continuationActivatePhase: input.activatePhase,
         },
       );
-      let build: TaskWorkspace["build"] = {
+      const build: TaskWorkspace["build"] = {
         ...input.task.build,
         checkpoints: input.task.build.checkpoints.map((candidate) =>
           candidate.id === input.checkpoint.id
             ? {
                 ...candidate,
-                status: "continued" as const,
+                status: "waiting" as const,
                 contextManifestId: manifestId,
                 continuationSessionId: bootstrap.outboxPayload.sessionId,
-                continuedAt: input.createdAt,
+                continuedAt: null,
               }
             : candidate,
         ),
-        continuationSessionIds: [
-          ...input.task.build.continuationSessionIds,
-          bootstrap.outboxPayload.sessionId,
-        ],
       };
-      if (input.activatePhase) {
-        build = {
-          ...build,
-          activePhaseId: phase.id,
-          activeWorkItemId:
-            phase.workItems.find(
-              (item) =>
-                item.status === "pending" ||
-                item.status === "blocked" ||
-                item.status === "invalidated",
-            )?.id ?? null,
-          phases: build.phases.map((candidate) =>
-            candidate.id === phase.id
-              ? {
-                  ...candidate,
-                  status: "running" as const,
-                  startedAt: candidate.startedAt ?? input.createdAt,
-                  workItems: candidate.workItems.map((item) =>
-                    item.status === "blocked" || item.status === "invalidated"
-                      ? { ...item, status: "pending" as const, invalidationReason: null }
-                      : item,
-                  ),
-                }
-              : candidate.status === "invalidated"
-                ? {
-                    ...candidate,
-                    status: "pending" as const,
-                    workItems: candidate.workItems.map((item) =>
-                      item.status === "blocked" || item.status === "invalidated"
-                        ? { ...item, status: "pending" as const, invalidationReason: null }
-                        : item,
-                    ),
-                  }
-                : candidate,
-          ),
-        };
-      } else {
-        build = startNextPhase(build, phase.id, input.createdAt);
-      }
       return {
         task: {
           ...input.task,
@@ -5621,22 +5769,6 @@ export const make = Effect.gen(function* () {
             },
             bootstrap.now,
           ),
-          occurrences: input.task.occurrences.map((occurrence) =>
-            occurrence.id === buildOccurrence.id
-              ? {
-                  ...occurrence,
-                  status: "starting" as const,
-                  sessionId: bootstrap.outboxPayload.sessionId,
-                  threadId: bootstrap.outboxPayload.threadId,
-                  contextManifestId: manifestId,
-                }
-              : occurrence,
-          ),
-          sessions: input.task.sessions.map((session) =>
-            session.stage === "build" && session.role === "primary" && session.status === "active"
-              ? { ...session, status: "superseded" as const }
-              : session,
-          ),
           contextManifests: manifest
             ? [...input.task.contextManifests, manifest]
             : input.task.contextManifests,
@@ -5651,6 +5783,87 @@ export const make = Effect.gen(function* () {
         },
       };
     });
+
+  const finalizeBootstrapContinuation = (
+    task: TaskWorkspace,
+    payload: TaskWorkspaceBootstrapOutboxPayload,
+    now: string,
+  ): TaskWorkspace => {
+    if (!payload.continuationCheckpointId) return task;
+    const checkpoint = task.build.checkpoints.find(
+      (candidate) => candidate.id === payload.continuationCheckpointId,
+    );
+    if (!checkpoint) return task;
+    const phase = phaseForBuild(task, checkpoint.phaseId);
+    let build: TaskWorkspace["build"] = {
+      ...task.build,
+      checkpoints: task.build.checkpoints.map((candidate) =>
+        candidate.id === checkpoint.id
+          ? {
+              ...candidate,
+              status: "continued" as const,
+              contextManifestId: payload.contextManifestId ?? candidate.contextManifestId,
+              continuationSessionId: payload.sessionId,
+              continuedAt: now,
+            }
+          : candidate,
+      ),
+      continuationSessionIds: task.build.continuationSessionIds.includes(payload.sessionId)
+        ? task.build.continuationSessionIds
+        : [...task.build.continuationSessionIds, payload.sessionId],
+    };
+    if (payload.continuationActivatePhase) {
+      build = {
+        ...build,
+        activePhaseId: phase.id,
+        activeWorkItemId:
+          phase.workItems.find(
+            (item) =>
+              item.status === "pending" ||
+              item.status === "blocked" ||
+              item.status === "invalidated",
+          )?.id ?? null,
+        phases: build.phases.map((candidate) =>
+          candidate.id === phase.id
+            ? {
+                ...candidate,
+                status: "running" as const,
+                startedAt: candidate.startedAt ?? now,
+                workItems: candidate.workItems.map((item) =>
+                  item.status === "blocked" || item.status === "invalidated"
+                    ? { ...item, status: "pending" as const, invalidationReason: null }
+                    : item,
+                ),
+              }
+            : candidate.status === "invalidated"
+              ? {
+                  ...candidate,
+                  status: "pending" as const,
+                  workItems: candidate.workItems.map((item) =>
+                    item.status === "blocked" || item.status === "invalidated"
+                      ? { ...item, status: "pending" as const, invalidationReason: null }
+                      : item,
+                  ),
+                }
+              : candidate,
+        ),
+      };
+    } else {
+      build = startNextPhase(build, phase.id, now);
+    }
+    return {
+      ...task,
+      sessions: task.sessions.map((session) =>
+        session.stage === "build" &&
+        session.role === "primary" &&
+        session.status === "active" &&
+        session.id !== payload.sessionId
+          ? { ...session, status: "superseded" as const }
+          : session,
+      ),
+      build,
+    };
+  };
 
   const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
 
@@ -6916,8 +7129,9 @@ export const make = Effect.gen(function* () {
 
           // Step 4: record Ready. The session is created and linked by Kata;
           // there is no manual thread linking in this workflow.
+          const readyBase = finalizeBootstrapContinuation(working, payload, now);
           const readyTask: TaskWorkspace = {
-            ...working,
+            ...readyBase,
             bootstrap: {
               operationKey: working.bootstrap!.operationKey,
               executionProfile: payload.executionProfile,
@@ -6935,7 +7149,7 @@ export const make = Effect.gen(function* () {
               updatedAt: now,
             },
             sessions: [
-              ...working.sessions,
+              ...readyBase.sessions,
               {
                 id: payload.sessionId,
                 stage: payload.stage,
@@ -6949,7 +7163,7 @@ export const make = Effect.gen(function* () {
                 createdAt: now,
               },
             ],
-            occurrences: working.occurrences.map((occurrence) =>
+            occurrences: readyBase.occurrences.map((occurrence) =>
               occurrence.stage === payload.stage && occurrence.ordinal === payload.occurrence
                 ? {
                     ...occurrence,
