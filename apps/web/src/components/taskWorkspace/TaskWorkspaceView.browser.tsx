@@ -170,6 +170,189 @@ async function renderTask(task: TaskWorkspace) {
   );
 }
 
+function guidedTask(overrides: Partial<TaskWorkspace> = {}): TaskWorkspace {
+  return {
+    ...baseTask,
+    title: "Guided browser task",
+    versions: {
+      taskContract: "task-workspace@0.3.0",
+      artifactContract: "task-artifact@0.3.0",
+      workflowDefinition: "guided@0.3.0",
+      prompt: "task-workspace-guided@0.3.0",
+    },
+    intake: {
+      brief: "Implement the browser task.",
+      source: { kind: "inline", body: "Implement the browser task." },
+    },
+    preferences: {
+      worktreePolicy: "later",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("instance-1"),
+        model: "claude-sonnet-4",
+        options: [],
+      },
+      executionProfile: "task-worktree-write",
+    },
+    workspace: {
+      repositories: [
+        {
+          ...baseTask.workspace.repositories[0]!,
+          branch: "katacode/task-task-browser",
+          worktreePath: "/repo/worktrees/task-browser",
+          provisioningStatus: "provisioned",
+          baseCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      ],
+    },
+    workflowRuns: [
+      {
+        ...baseTask.workflowRuns[0]!,
+        id: "guided-run-1",
+        preset: "guided",
+        definitionVersion: "guided@0.3.0",
+        promptBundleVersion: "task-workspace-guided@0.3.0",
+        currentStage: "build",
+      },
+    ],
+    artifacts: [
+      {
+        id: "plan-artifact",
+        kind: "plan",
+        currentRevision: 1,
+        revisions: [
+          {
+            id: "plan-revision-1",
+            kind: "plan",
+            title: "Implementation plan",
+            markdown:
+              "## Phase [phase:foundation] Foundation\n\n### Work item [work:implement] Implement",
+            revision: 1,
+            sourceSessionId: null,
+            supersedesRevisionId: null,
+            blockIndex: [],
+            createdAt: "2026-07-28T17:07:00.000Z",
+          },
+        ],
+      },
+    ],
+    occurrences: [
+      {
+        id: "occurrence-build-0",
+        stage: "build",
+        ordinal: 0,
+        status: "running",
+        sessionId: "session-build-1",
+        threadId: ThreadId.make("guided-build-thread-1"),
+        contextManifestId: null,
+        artifactRevisionId: null,
+        completionProposalId: null,
+        gateOutcome: null,
+        feedback: null,
+        supersedesOccurrenceId: null,
+        createdAt: "2026-07-28T17:08:00.000Z",
+        completedAt: null,
+      },
+    ],
+    sessions: [
+      {
+        id: "session-build-1",
+        stage: "build",
+        threadId: ThreadId.make("guided-build-thread-1"),
+        role: "primary",
+        provider: "claudeAgent",
+        status: "active",
+        parentSessionId: null,
+        forkPoint: null,
+        contextManifestId: null,
+        createdAt: "2026-07-28T17:08:00.000Z",
+      },
+    ],
+    build: {
+      ...baseTask.build,
+      currentPlanRevisionId: "plan-revision-1",
+      activePhaseId: "phase:foundation",
+      activeWorkItemId: "work:implement",
+      phases: [
+        {
+          id: "phase:foundation",
+          title: "Foundation",
+          status: "running",
+          workItems: [
+            {
+              id: "work:implement",
+              title: "Implement approved Plan",
+              status: "running",
+              summary: "Working through the approved Plan.",
+              dependsOn: [],
+              checkIds: ["check:typecheck", "check:review"],
+              invalidationReason: null,
+            },
+          ],
+          checkpointPolicy: "never",
+          checkIds: ["check:typecheck", "check:review"],
+          checkpointId: null,
+          phaseCommitSha: null,
+          startedAt: "2026-07-28T17:08:00.000Z",
+          completedAt: null,
+        },
+      ],
+      checks: [
+        {
+          id: "check:typecheck",
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          kind: "automated",
+          status: "fail",
+          label: "Typecheck",
+          command: "vp run typecheck",
+          output: "Typecheck failed before rerun.",
+          note: null,
+          exitCode: 1,
+          commitSha: null,
+          startedAt: "2026-07-28T17:09:00.000Z",
+          completedAt: "2026-07-28T17:09:05.000Z",
+          attemptIds: ["check-attempt-1"],
+        },
+        {
+          id: "check:review",
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          kind: "manual",
+          status: "pending",
+          label: "Review implementation",
+          command: null,
+          output: null,
+          note: null,
+          exitCode: null,
+          commitSha: null,
+          startedAt: null,
+          completedAt: null,
+          attemptIds: [],
+        },
+      ],
+      checkAttempts: [
+        {
+          id: "check-attempt-1",
+          checkId: "check:typecheck",
+          planRevisionId: "plan-revision-1",
+          startingCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          commandDigest: "digest-1",
+          operationKey: "ui-check:typecheck",
+          status: "fail",
+          output: "Typecheck failed before rerun.",
+          exitCode: 1,
+          timeoutMs: 120000,
+          observedStatus: null,
+          startedAt: "2026-07-28T17:09:00.000Z",
+          completedAt: "2026-07-28T17:09:05.000Z",
+          endingCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      ],
+    },
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   mocks.dispatchCommand.mockClear();
   mocks.useClerk.mockClear();
@@ -719,6 +902,207 @@ describe("TaskWorkspaceView", () => {
       .toHaveTextContent("unbudgeted");
   });
 
+  it("shows persisted Guided Implement progress after reload and no fixture controls", async () => {
+    const commitSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const completed = guidedTask({
+      occurrences: [
+        {
+          id: "occurrence-build-0",
+          stage: "build",
+          ordinal: 0,
+          status: "completed",
+          sessionId: "session-build-1",
+          threadId: ThreadId.make("guided-build-thread-1"),
+          contextManifestId: null,
+          artifactRevisionId: null,
+          completionProposalId: null,
+          gateOutcome: null,
+          feedback: null,
+          supersedesOccurrenceId: null,
+          createdAt: "2026-07-28T17:08:00.000Z",
+          completedAt: "2026-07-28T17:12:00.000Z",
+        },
+      ],
+      build: {
+        ...guidedTask().build,
+        resultingCommitSha: commitSha,
+        activePhaseId: null,
+        activeWorkItemId: null,
+        phases: [
+          {
+            ...guidedTask().build.phases[0]!,
+            status: "completed",
+            phaseCommitSha: commitSha,
+            completedAt: "2026-07-28T17:12:00.000Z",
+            workItems: [
+              {
+                ...guidedTask().build.phases[0]!.workItems[0]!,
+                status: "completed",
+                summary: "Implemented at the resulting commit.",
+              },
+            ],
+          },
+        ],
+        checks: [
+          {
+            ...guidedTask().build.checks[0]!,
+            status: "pass",
+            output: "Typecheck passed.",
+            exitCode: 0,
+            commitSha,
+            attemptIds: ["check-attempt-1", "check-attempt-2"],
+          },
+          {
+            ...guidedTask().build.checks[1]!,
+            status: "pass",
+            note: "Reviewed manually.",
+            commitSha,
+            completedAt: "2026-07-28T17:11:00.000Z",
+          },
+        ],
+        checkAttempts: [
+          guidedTask().build.checkAttempts[0]!,
+          {
+            ...guidedTask().build.checkAttempts[0]!,
+            id: "check-attempt-2",
+            status: "pass",
+            output: "Typecheck passed.",
+            exitCode: 0,
+            endingCommitSha: commitSha,
+            completedAt: "2026-07-28T17:10:00.000Z",
+          },
+        ],
+      },
+    });
+
+    await renderTask(completed);
+    await expect.element(page.getByTestId("guided-implementation-panel")).toBeVisible();
+    await expect.element(page.getByTestId("guided-build-phase-phase:foundation")).toBeVisible();
+    await expect
+      .element(page.getByTestId("guided-build-check-check:typecheck"))
+      .toHaveTextContent("Typecheck passed.");
+    await expect.element(page.getByTestId("guided-check-attempt-check-attempt-2")).toBeVisible();
+    await expect.element(page.getByTestId("guided-implementation-complete")).toBeVisible();
+    await expect.element(page.getByTestId("guided-resulting-commit")).toHaveTextContent(commitSha);
+    await expect.element(page.getByText(/Guided verification is deferred/)).toBeVisible();
+    expect(page.getByTestId("task-apply-fixture").query()).toBeNull();
+
+    useTaskWorkspaceStore.getState().reset();
+    useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
+      kind: "snapshot",
+      snapshot: { sequence: 2, tasks: [completed] },
+    });
+    await expect.element(page.getByTestId("guided-implementation-complete")).toBeVisible();
+    await expect.element(page.getByTestId("guided-resulting-commit")).toHaveTextContent(commitSha);
+  });
+
+  it("explains disabled Guided Implement controls", async () => {
+    await renderTask(
+      guidedTask({
+        build: {
+          ...guidedTask().build,
+          activePhaseId: null,
+          activeWorkItemId: null,
+          phases: [
+            {
+              ...guidedTask().build.phases[0]!,
+              status: "pending",
+              workItems: [
+                {
+                  ...guidedTask().build.phases[0]!.workItems[0]!,
+                  status: "pending",
+                },
+              ],
+            },
+          ],
+          checkpoints: [
+            {
+              id: "checkpoint-1",
+              phaseId: "phase:foundation",
+              reason: "Human checkpoint reached.",
+              status: "waiting",
+              checkIds: ["check:typecheck"],
+              continuationSessionId: null,
+              contextManifestId: null,
+              createdAt: "2026-07-28T17:12:00.000Z",
+              continuedAt: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect
+      .element(page.getByTestId("guided-check-run-disabled-reason-check:typecheck"))
+      .toHaveTextContent("The owning phase must be running.");
+    await expect
+      .element(page.getByTestId("guided-check-record-disabled-reason-check:review"))
+      .toHaveTextContent("Add a note before recording a manual result.");
+    await expect
+      .element(page.getByTestId("guided-checkpoint-disabled-reason-checkpoint-1"))
+      .toHaveTextContent("Checkpoint context manifest is not ready.");
+    await expect
+      .element(page.getByTestId("guided-complete-disabled-reason"))
+      .toHaveTextContent("Continue the waiting checkpoint first.");
+  });
+
+  it("dispatches Guided workflow upgrade before explicit Implement start for upgraded tasks", async () => {
+    await renderTask({
+      ...guidedTask(),
+      versions: {
+        taskContract: "task-workspace@0.3.0",
+        artifactContract: "task-artifact@0.3.0",
+        workflowDefinition: "guided@0.2.0",
+        prompt: "task-workspace-guided@0.2.0",
+      },
+      workflowRuns: [
+        {
+          ...guidedTask().workflowRuns[0]!,
+          definitionVersion: "guided@0.2.0",
+          promptBundleVersion: "task-workspace-guided@0.2.0",
+          currentStage: "plan",
+        },
+      ],
+      occurrences: [
+        {
+          id: "occurrence-plan-0",
+          stage: "plan",
+          ordinal: 0,
+          status: "completed",
+          sessionId: "session-plan-1",
+          threadId: ThreadId.make("guided-plan-thread-1"),
+          contextManifestId: null,
+          artifactRevisionId: "plan-revision-1",
+          completionProposalId: null,
+          gateOutcome: "approved",
+          feedback: null,
+          supersedesOccurrenceId: null,
+          createdAt: "2026-07-28T17:08:00.000Z",
+          completedAt: "2026-07-28T17:12:00.000Z",
+        },
+      ],
+      sessions: [],
+      bootstrap: null,
+      build: {
+        ...guidedTask().build,
+        phases: [],
+        checks: [],
+        checkpoints: [],
+        checkAttempts: [],
+      },
+    });
+
+    await expect.element(page.getByTestId("guided-stage-build")).toBeVisible();
+    expect(page.getByTestId("guided-stage-verify").query()).toBeNull();
+    expect(page.getByTestId("guided-stage-verified").query()).toBeNull();
+    await page.getByTestId("guided-start-implement-button").click();
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.workflow.upgrade",
+      sourceVersion: "guided@0.2.0",
+      targetVersion: "guided@0.3.0",
+    });
+  });
+
   it("uses the conversation-first Guided surface without manual stage controls", async () => {
     const threadId = ThreadId.make("guided-thread-1");
     await renderTask({
@@ -808,6 +1192,9 @@ describe("TaskWorkspaceView", () => {
     await expect.element(page.getByTestId("guided-stage-research")).toBeVisible();
     await expect.element(page.getByTestId("guided-stage-design")).toBeVisible();
     await expect.element(page.getByTestId("guided-stage-plan")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-build")).toBeVisible();
+    expect(page.getByTestId("guided-stage-verify").query()).toBeNull();
+    expect(page.getByTestId("guided-stage-verified").query()).toBeNull();
     await expect.element(page.getByTestId("task-conversation-starting")).toBeVisible();
     expect(page.getByTestId("task-questions-editor").query()).toBeNull();
     expect(page.getByText(/Link an existing repository thread/).query()).toBeNull();

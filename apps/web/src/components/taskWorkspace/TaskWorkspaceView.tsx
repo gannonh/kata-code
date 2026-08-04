@@ -922,11 +922,13 @@ function TaskFirstSliceView({
   commands,
   threadRef,
   hasActiveThread,
+  currentUser,
 }: {
   readonly task: TaskWorkspace;
   readonly commands: ReturnType<typeof useTaskWorkspaceCommands>;
   readonly threadRef: { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null;
   readonly hasActiveThread: boolean;
+  readonly currentUser: TaskWorkspaceCommentAuthor;
 }) {
   const catalogEntry = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
   const stage = currentTaskStage(task);
@@ -939,6 +941,16 @@ function TaskFirstSliceView({
     planOccurrence?.status === "completed" &&
     planOccurrence.gateOutcome === "approved";
   const planArtifact = latestArtifact(task, "plan");
+  const waitingCheckpoint = task.build.checkpoints.some(
+    (checkpoint) => checkpoint.status === "waiting",
+  );
+  const buildReadOnlyPlan =
+    stage === "build" &&
+    planArtifact !== null &&
+    (task.build.resultingCommitSha !== null ||
+      task.build.amendmentGateId !== null ||
+      waitingCheckpoint);
+  const showReadOnlyPlan = Boolean((approvedPlan && planArtifact) || buildReadOnlyPlan);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
@@ -956,7 +968,7 @@ function TaskFirstSliceView({
       </header>
       <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="min-h-0 min-w-0 overflow-hidden">
-          {approvedPlan && planArtifact ? (
+          {showReadOnlyPlan && planArtifact ? (
             <div
               data-testid="task-approved-plan-readonly"
               className="h-full overflow-auto p-5 sm:p-8"
@@ -996,7 +1008,7 @@ function TaskFirstSliceView({
           )}
         </section>
         {catalogEntry?.availableInFirstSlice ? (
-          <GuidedTaskPanel task={task} commands={commands} />
+          <GuidedTaskPanel task={task} commands={commands} currentUser={currentUser} />
         ) : (
           <PreviewTaskPanel task={task} />
         )}
@@ -1093,6 +1105,7 @@ function TaskWorkspaceViewContent({
         commands={commands}
         threadRef={activeThreadRef}
         hasActiveThread={activeThread !== undefined && "id" in activeThread}
+        currentUser={currentUser}
       />
     );
   }
