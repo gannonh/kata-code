@@ -76,7 +76,8 @@ const makeWorker = Effect.gen(function* () {
         !settledAttempt ||
         settledAttempt.status === "pass" ||
         settledAttempt.status === "fail" ||
-        settledAttempt.status === "indeterminate"
+        settledAttempt.status === "indeterminate" ||
+        settledAttempt.status === "stale"
       ) {
         yield* store
           .upsertOutbox({

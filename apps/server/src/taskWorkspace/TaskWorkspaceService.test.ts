@@ -17,6 +17,7 @@ import {
   TaskWorkspaceId,
   ThreadId,
   type TaskWorkspace,
+  type TaskWorkspaceCheckAttempt,
   type TaskWorkspaceCommand,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
@@ -52,6 +53,7 @@ import {
 } from "./Services/TaskWorkspaceSourceResolver.ts";
 import { TaskStageBridge, TaskStageBridgeLive } from "./TaskStageBridge.ts";
 import { TaskWorkspaceService, layer as TaskWorkspaceServiceLive } from "./TaskWorkspaceService.ts";
+import { latestAttemptBlocksCompletion } from "./TaskWorkspaceService.ts";
 import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
 
 const execFileAsync = promisify(execFile);
@@ -4485,6 +4487,91 @@ describe("TaskWorkspaceService guided implementation", () => {
     }),
   );
 
+  it.effect("ignores the settlement of an older attempt after a newer attempt settled", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-order-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+      const head = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+
+      const older = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-older",
+        }),
+      );
+      const afterOlder = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const newer = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: afterOlder.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-newer",
+        }),
+      );
+      expect(older.attemptId).toBe("check-attempt-1");
+      expect(newer.attemptId).toBe("check-attempt-2");
+
+      // The newer attempt settles first: the check passes at the current HEAD.
+      yield* runtime.runPromise(
+        service.processImplementationCheck({
+          taskId: task.id,
+          attemptId: newer.attemptId,
+          status: "pass",
+          output: "typecheck passed",
+          exitCode: 0,
+          endingCommitSha: head,
+        }),
+      );
+      const afterNewer = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(afterNewer.build.checks[0]).toMatchObject({
+        id: "check:typecheck",
+        status: "pass",
+        commitSha: head,
+      });
+      expect(afterNewer.build.checkAttempts.at(-1)).toMatchObject({
+        id: "check-attempt-2",
+        status: "pass",
+      });
+
+      // An out-of-order settlement for the older attempt must be ignored: the
+      // check stays green and the newer attempt's evidence is untouched.
+      yield* runtime.runPromise(
+        service.processImplementationCheck({
+          taskId: task.id,
+          attemptId: older.attemptId,
+          status: "fail",
+          output: "stale failure from an old settlement",
+          exitCode: 1,
+          endingCommitSha: null,
+        }),
+      );
+      const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(settled.build.checks[0]).toMatchObject({
+        id: "check:typecheck",
+        status: "pass",
+        commitSha: head,
+      });
+      expect(settled.build.checkAttempts.find((a) => a.id === "check-attempt-2")).toMatchObject({
+        status: "pass",
+      });
+      expect(settled.build.checkAttempts.find((a) => a.id === "check-attempt-1")).toMatchObject({
+        status: "pending",
+      });
+    }),
+  );
+
   it.effect("completion is gated on each check's latest attempt only", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-complete-");
@@ -4603,6 +4690,136 @@ describe("TaskWorkspaceService guided implementation", () => {
     }),
   );
 
+  it.effect("completion is blocked while the newest attempt for a check failed", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-latest-fail-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+      const head = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+
+      const older = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-out-of-order-1",
+        }),
+      );
+      const afterOlder = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const newer = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: afterOlder.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-out-of-order-2",
+        }),
+      );
+      // The newest attempt settles as a fail first.
+      yield* runtime.runPromise(
+        service.processImplementationCheck({
+          taskId: task.id,
+          attemptId: newer.attemptId,
+          status: "fail",
+          output: "typecheck failed",
+          exitCode: 1,
+          endingCommitSha: null,
+        }),
+      );
+      // Then an out-of-order older pass settlement arrives. The newest evidence
+      // must win: the check is not passing for the current HEAD.
+      yield* runtime.runPromise(
+        service.processImplementationCheck({
+          taskId: task.id,
+          attemptId: older.attemptId,
+          status: "pass",
+          output: "out-of-order pass",
+          exitCode: 0,
+          endingCommitSha: head,
+        }),
+      );
+      const afterSettlements = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(afterSettlements.build.checks[0]?.status).not.toBe("pass");
+      expect(afterSettlements.build.checkAttempts.at(-1)).toMatchObject({
+        id: "check-attempt-2",
+        status: "fail",
+      });
+
+      // The build cannot resume or complete while the newest check evidence
+      // failed, even though an older pass exists.
+      const completionOutcome = yield* runtime.runPromiseExit(
+        Effect.gen(function* () {
+          let current = (yield* runtime.runPromise(service.getTask(task.id)))!;
+          yield* service.implementationProgress({
+            taskId: task.id,
+            expectedTaskRevision: current.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:implement",
+            status: "running",
+            summary: "Resuming.",
+          });
+          current = (yield* runtime.runPromise(service.getTask(task.id)))!;
+          yield* service.implementationProgress({
+            taskId: task.id,
+            expectedTaskRevision: current.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:implement",
+            status: "completed",
+            summary: "Implemented.",
+          });
+          current = (yield* runtime.runPromise(service.getTask(task.id)))!;
+          const buildSession = current.sessions.find((candidate) => candidate.stage === "build")!;
+          const proposed = yield* service.proposeStageCompletion({
+            taskId: task.id,
+            sessionId: buildSession.id,
+            providerTurnId: "turn-build-latest-fail",
+            payloadDigest: "digest-build-latest-fail",
+            summary: "Implementation complete.",
+            markdown: "Implemented the approved Plan.",
+          });
+          yield* service.settleProposal({
+            taskId: task.id,
+            occurrence: proposed.occurrences.find((o) => o.stage === "build")!.ordinal,
+            providerTurnId: "turn-build-latest-fail",
+            outcome: "completed",
+          });
+        }),
+      );
+      expect(Exit.isFailure(completionOutcome)).toBe(true);
+    }),
+  );
+
+  it("latest-attempt gate blocks a latest fail but not a superseded one", () => {
+    const attempt = (id: string, checkId: string, status: TaskWorkspaceCheckAttempt["status"]) =>
+      ({ id, checkId, status }) as Pick<TaskWorkspaceCheckAttempt, "checkId" | "status">;
+    // A failed attempt that is the newest evidence for its check blocks.
+    expect(
+      latestAttemptBlocksCompletion([
+        attempt("check-attempt-1", "check:typecheck", "pass"),
+        attempt("check-attempt-2", "check:typecheck", "fail"),
+      ]),
+    ).toBe(true);
+    // A superseded historical fail does not block once a newer attempt passes.
+    expect(
+      latestAttemptBlocksCompletion([
+        attempt("check-attempt-1", "check:typecheck", "fail"),
+        attempt("check-attempt-2", "check:typecheck", "pass"),
+      ]),
+    ).toBe(false);
+    // In-flight and unsettled attempts still block.
+    expect(
+      latestAttemptBlocksCompletion([attempt("check-attempt-1", "check:typecheck", "pending")]),
+    ).toBe(true);
+  });
+
   it.effect("marks passes for another commit stale when the server observes a new HEAD", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-stale-");
@@ -4677,6 +4894,104 @@ describe("TaskWorkspaceService guided implementation", () => {
       expect(
         staled.build.checkAttempts.find((candidate) => candidate.id === lint.attemptId)?.status,
       ).toBe("pass");
+    }),
+  );
+
+  it.effect("persists stale marking when completion observes a new HEAD", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-stale-persist-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+      const firstHead = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+
+      // Pass the check at the current HEAD and complete the phase.
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "running",
+          summary: "Implementing.",
+        }),
+      );
+      const afterRunning = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const run = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: afterRunning.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-stale-persist",
+        }),
+      );
+      yield* runtime.runPromise(
+        service.processImplementationCheck({
+          taskId: task.id,
+          attemptId: run.attemptId,
+          status: "pass",
+          output: "typecheck passed",
+          exitCode: 0,
+          endingCommitSha: firstHead,
+        }),
+      );
+      const afterPass = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: afterPass.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "completed",
+          summary: "Implemented.",
+        }),
+      );
+      const completedTask = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(completedTask.build.phases[0]?.status).toBe("completed");
+
+      // Propose first while the worktree is at its pinned state, then move the
+      // worktree HEAD in the window between propose and settle: completion now
+      // observes a new HEAD.
+      const buildSession = completedTask.sessions.find((candidate) => candidate.stage === "build")!;
+      const proposed = yield* runtime.runPromise(
+        service.proposeStageCompletion({
+          taskId: task.id,
+          sessionId: buildSession.id,
+          providerTurnId: "turn-build-stale-persist",
+          payloadDigest: "digest-build-stale-persist",
+          summary: "Implementation complete.",
+          markdown: "Implemented the approved Plan.",
+        }),
+      );
+      yield* Effect.tryPromise(() =>
+        git(worktreePath, ["commit", "--allow-empty", "-m", "move past stale persist"]),
+      );
+      const secondHead = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+      expect(secondHead).not.toBe(firstHead);
+
+      const settleExit = yield* runtime.runPromiseExit(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: proposed.occurrences.find((o) => o.stage === "build")!.ordinal,
+          providerTurnId: "turn-build-stale-persist",
+          outcome: "completed",
+        }),
+      );
+      // Completion is blocked because the check does not match the new HEAD,
+      // and the stored check for the old commit is now stale.
+      expect(Exit.isFailure(settleExit)).toBe(true);
+      const stored = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(stored.build.checks.find((check) => check.id === "check:typecheck")?.status).toBe(
+        "stale",
+      );
     }),
   );
 
@@ -4807,6 +5122,78 @@ describe("TaskWorkspaceService guided implementation", () => {
       expect(approved.task.build.checks.find((check) => check.id === "check:lint")?.status).toBe(
         "pending",
       );
+    }),
+  );
+
+  it.effect("amendment approval prunes attempts for checks removed by the recompiled plan", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-amend-prune-");
+      const basePlan = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+        "",
+      ].join("\n");
+      const amendedPlan = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Automated check [check:lint]: Lint | vp run lint",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, basePlan);
+
+      // A check attempt is in flight (pending) when the amendment is requested.
+      const run = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-amend-prune-check",
+        }),
+      );
+      expect(run.attemptId).toBe("check-attempt-1");
+      const afterRun = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      yield* runtime.runPromise(
+        service.implementationAmendmentPropose({
+          taskId: task.id,
+          expectedTaskRevision: afterRun.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          triggeringCheckId: null,
+          expected: "The Plan covers the implementation.",
+          found: "The Plan requires a lint check.",
+          impact: "Lint must run before completion.",
+          proposedPlanMarkdown: amendedPlan,
+          operationKey: "op-amend-prune-propose",
+        }),
+      );
+      const gated = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(gated.build.amendmentGateId).toBe("amendment-1");
+
+      const approved = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.amendment.approve",
+            commandId: CommandId.make("impl-amend-prune-approve"),
+            taskId: task.id,
+            createdAt: now(25),
+            amendmentId: "amendment-1",
+            approvedBy: "operator",
+          }),
+        ),
+      );
+      // The recompiled graph dropped check:typecheck; its in-flight attempt must
+      // not survive as a permanently pending attempt that wedges completion.
+      expect(approved.task.build.checks.map((check) => check.id)).toEqual(["check:lint"]);
+      expect(
+        approved.task.build.checkAttempts.some((attempt) => attempt.checkId === "check:typecheck"),
+      ).toBe(false);
     }),
   );
 });

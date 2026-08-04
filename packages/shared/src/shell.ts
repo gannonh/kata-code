@@ -98,6 +98,8 @@ export function tokenizeCommandLine(commandLine: string): ReadonlyArray<string> 
       if (next !== undefined) {
         current += next;
         index += 1;
+      } else {
+        throw new Error(`Unterminated escape in command line: ${commandLine}`);
       }
       tokenStarted = true;
       continue;

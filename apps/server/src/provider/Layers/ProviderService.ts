@@ -68,7 +68,9 @@ import {
   activeTaskStageForThread,
   isActiveTaskThread,
   validateActiveTaskTurn,
+  type ActiveTaskProviderContext,
 } from "../../taskWorkspace/TaskWorkspaceService.ts";
+import type { TaskWorkspaceStage } from "@kata-sh/code-contracts";
 import { trustedStageInstructions } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
@@ -99,6 +101,35 @@ function toValidationError(
     ...(cause !== undefined ? { cause } : {}),
   });
 }
+
+/**
+ * Reject a provider operation on an active Build task when the requested
+ * provider instance is not the instance pinned by the task's model selection.
+ * Non-build task stages and non-task threads pass through unchanged. Exposed
+ * separately so Build-stage entry points share one guard and the rejection is
+ * testable.
+ */
+export const assertPinnedToActiveBuildTask = (input: {
+  readonly operation: string;
+  readonly activeTaskStage: TaskWorkspaceStage | undefined;
+  readonly activeTaskContext: Pick<ActiveTaskProviderContext, "providerInstanceId"> | undefined;
+  readonly providerInstanceId: ProviderInstanceId;
+}): Effect.Effect<void, ProviderValidationError> => {
+  if (input.activeTaskStage !== "build") return Effect.void;
+  if (!input.activeTaskContext) {
+    return toValidationError(
+      input.operation,
+      "The active Build task has no canonical worktree/provider profile.",
+    );
+  }
+  if (input.activeTaskContext.providerInstanceId !== input.providerInstanceId) {
+    return toValidationError(
+      input.operation,
+      "The requested provider instance is not pinned to the active Build task.",
+    );
+  }
+  return Effect.void;
+};
 
 const decodeInputOrValidationError = <S extends Schema.Top>(input: {
   readonly operation: string;
@@ -416,21 +447,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         activeTaskStage === "build"
           ? yield* activeTaskProviderContextForThread(input.threadId)
           : undefined;
-      if (activeTaskStage === "build" && !activeTaskContext) {
-        return yield* toValidationError(
-          "ProviderService.restartSessionForMcpCredential",
-          "The active Build task has no canonical worktree/provider profile.",
-        );
-      }
-      if (
-        activeTaskStage === "build" &&
-        activeTaskContext?.providerInstanceId !== input.providerInstanceId
-      ) {
-        return yield* toValidationError(
-          "ProviderService.restartSessionForMcpCredential",
-          "The requested provider instance is not pinned to the active Build task.",
-        );
-      }
+      yield* assertPinnedToActiveBuildTask({
+        operation: "ProviderService.restartSessionForMcpCredential",
+        activeTaskStage,
+        activeTaskContext,
+        providerInstanceId: input.providerInstanceId,
+      });
       const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
       const developerInstructions = activeTaskStage
         ? trustedStageInstructions(activeTaskStage)
@@ -822,21 +844,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           activeTaskStage === "build"
             ? yield* activeTaskProviderContextForThread(threadId)
             : undefined;
-        if (activeTaskStage === "build" && !activeTaskContext) {
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            "The active Build task has no canonical worktree/provider profile.",
-          );
-        }
-        if (
-          activeTaskStage === "build" &&
-          activeTaskContext?.providerInstanceId !== resolvedInstanceId
-        ) {
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            "The requested provider instance is not pinned to the active Build task.",
-          );
-        }
+        yield* assertPinnedToActiveBuildTask({
+          operation: "ProviderService.startSession",
+          activeTaskStage,
+          activeTaskContext,
+          providerInstanceId: resolvedInstanceId,
+        });
         const activeTaskProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
         if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(adapter.capabilities)) {
           return yield* toValidationError(

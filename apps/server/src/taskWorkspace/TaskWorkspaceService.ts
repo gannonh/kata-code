@@ -956,6 +956,32 @@ function markStalePassesForHead(
   return changed ? { ...build, checks, checkAttempts } : build;
 }
 
+const BLOCKING_ATTEMPT_STATUSES: ReadonlySet<string> = new Set([
+  "pending",
+  "running",
+  "stale",
+  "indeterminate",
+  "blocked",
+  "fail",
+]);
+
+/**
+ * Completion blocking considers only each check's latest attempt. A
+ * historical failed attempt must not block once a newer attempt passes, but a
+ * check whose newest evidence failed, is still in flight, or is not settled
+ * blocks completion. `fail` blocks only when it is the newest attempt for its
+ * check (append order, newest last).
+ */
+export function latestAttemptBlocksCompletion(
+  checkAttempts: ReadonlyArray<Pick<TaskWorkspaceCheckAttempt, "checkId" | "status">>,
+): boolean {
+  const latest = new Map<string, Pick<TaskWorkspaceCheckAttempt, "checkId" | "status">>();
+  for (const attempt of checkAttempts) {
+    latest.set(attempt.checkId, attempt);
+  }
+  return [...latest.values()].some((attempt) => BLOCKING_ATTEMPT_STATUSES.has(attempt.status));
+}
+
 function checkpointReason(policy: TaskWorkspaceBuildPhase["checkpointPolicy"]): string {
   return policy === "on-failure" ? "A required Build check failed." : "Phase checkpoint reached.";
 }
@@ -4266,7 +4292,12 @@ export const make = Effect.gen(function* () {
             phases: projectedPhases,
             checks: projectedChecks,
             checkpoints: task.build.checkpoints,
-            checkAttempts: task.build.checkAttempts,
+            // An in-flight attempt for a check the amended plan removed would
+            // otherwise survive as a permanently pending attempt that blocks
+            // completion with no rerun path. Prune attempts for dropped checks.
+            checkAttempts: task.build.checkAttempts.filter((attempt) =>
+              compiledBuild.checks.some((check) => check.id === attempt.checkId),
+            ),
           };
           const invalidatedBuild = {
             ...projectedBuild,
@@ -4985,9 +5016,17 @@ export const make = Effect.gen(function* () {
         !attempt ||
         attempt.status === "pass" ||
         attempt.status === "fail" ||
-        attempt.status === "indeterminate"
+        attempt.status === "indeterminate" ||
+        attempt.status === "stale"
       )
         return;
+      // Only the newest attempt for a check may settle. An older attempt's
+      // settlement arriving after a newer rerun (concurrent drains, a future
+      // multi-worker deployment) must never clobber the newer evidence.
+      const newestAttempt = task.build.checkAttempts
+        .toReversed()
+        .find((candidate) => candidate.checkId === attempt.checkId);
+      if (!newestAttempt || newestAttempt.id !== attempt.id) return;
       const check = task.build.checks.find((candidate) => candidate.id === attempt.checkId);
       if (!check) throw new Error(`Check '${attempt.checkId}' was not found.`);
       const now = yield* serverNow;
@@ -5441,30 +5480,11 @@ export const make = Effect.gen(function* () {
           taskId: task.id,
         });
       // Completion blocking considers only each check's latest attempt: a
-      // historical failed attempt must not block once a newer attempt passes.
-      // Blocking attempt statuses are pending/running/stale/indeterminate/
-      // blocked; `fail` is not permanently blocking when superseded.
-      const blockingAttemptStatuses: ReadonlySet<string> = new Set([
-        "pending",
-        "running",
-        "stale",
-        "indeterminate",
-        "blocked",
-      ]);
-      const latestAttemptsByCheck = (build: TaskWorkspace["build"]) => {
-        const latest = new Map<string, TaskWorkspaceCheckAttempt>();
-        for (const attempt of build.checkAttempts) {
-          latest.set(attempt.checkId, attempt);
-        }
-        return latest;
-      };
-      const latestBlockingAttempt = (build: TaskWorkspace["build"]) =>
-        [...latestAttemptsByCheck(build).values()].some((attempt) =>
-          blockingAttemptStatuses.has(attempt.status),
-        );
+      // historical failed attempt must not block once a newer attempt passes,
+      // while a check whose newest evidence failed or is unsettled does block.
       if (
         task.build.checks.some((check) => check.status !== "pass" || check.commitSha === null) ||
-        latestBlockingAttempt(task.build)
+        latestAttemptBlocksCompletion(task.build.checkAttempts)
       )
         throw new TaskWorkspaceError({
           message: "Build has checks that are not passing and current.",
@@ -5501,13 +5521,23 @@ export const make = Effect.gen(function* () {
           taskId: task.id,
         });
       // The server observed the current HEAD during completion handling: pass
-      // checks for another commit are stale and block completion.
+      // checks for another commit are stale and block completion. Persist the
+      // stale marking so the stored build stops claiming a pass for a
+      // superseded commit; the gate still fails below when a check is stale.
       const effectiveBuild = markStalePassesForHead(task.build, head);
+      if (effectiveBuild !== task.build) {
+        const observedAt = yield* serverNow;
+        yield* internalAppend(
+          "task.implementation.check.updated",
+          { ...task, build: effectiveBuild, updatedAt: observedAt },
+          { occurredAt: observedAt },
+        );
+      }
       if (
         effectiveBuild.checks.some(
           (check) => check.status !== "pass" || check.commitSha !== head,
         ) ||
-        latestBlockingAttempt(effectiveBuild)
+        latestAttemptBlocksCompletion(effectiveBuild.checkAttempts)
       )
         throw new TaskWorkspaceError({
           message: "A required Build check does not match the current HEAD.",

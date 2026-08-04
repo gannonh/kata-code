@@ -557,4 +557,99 @@ describe("TaskWorkspaceBootstrapWorker", () => {
       expect(replayed.build.checkAttempts.at(-1)?.status).toBe("fail");
     }),
   );
+
+  it.effect("retires a replayed outbox row for a stale attempt without re-running it", () =>
+    Effect.gen(function* () {
+      runnerCalls.length = 0;
+      const { runtime, repoRoot, baseDir } = yield* setup("kata-worker-stale-");
+      const worker = yield* runtime.runPromise(Effect.service(TaskWorkspaceBootstrapWorker));
+      const store = yield* runtime.runPromise(Effect.service(TaskWorkspaceStore));
+      const { service, task } = yield* driveToBuild(runtime, baseDir, repoRoot);
+      const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+      const firstHead = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+
+      // Attempt 1 passes at the first HEAD (settled directly, not via the worker).
+      const run1 = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-stale-1",
+        }),
+      );
+      yield* runtime.runPromise(
+        service.processImplementationCheck({
+          taskId: task.id,
+          attemptId: run1.attemptId,
+          status: "pass",
+          output: "typecheck passed",
+          exitCode: 0,
+          endingCommitSha: firstHead,
+        }),
+      );
+      // Move the worktree HEAD; attempt 2 passes at the new HEAD, which makes
+      // attempt 1's pass stale.
+      yield* Effect.tryPromise(() =>
+        git(worktreePath, ["commit", "--allow-empty", "-m", "move past stale attempt"]),
+      );
+      const secondHead = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+      expect(secondHead).not.toBe(firstHead);
+      const afterRun1 = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const run2 = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: afterRun1.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-stale-2",
+        }),
+      );
+      yield* runtime.runPromise(
+        service.processImplementationCheck({
+          taskId: task.id,
+          attemptId: run2.attemptId,
+          status: "pass",
+          output: "typecheck passed",
+          exitCode: 0,
+          endingCommitSha: secondHead,
+        }),
+      );
+      const staled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(staled.build.checkAttempts.find((a) => a.id === run1.attemptId)?.status).toBe("stale");
+      expect(staled.build.checkAttempts.find((a) => a.id === run2.attemptId)?.status).toBe("pass");
+
+      // Replay the settled row of the stale attempt as `pending`: the worker
+      // must retire it without spawning a command or touching the attempt.
+      const rowOption = yield* runtime.runPromise(
+        store.getOutboxByOperationKey({
+          environmentId,
+          taskId: task.id,
+          operationKey: "op-check-stale-1:check-attempt-1",
+        }),
+      );
+      expect(Option.isSome(rowOption)).toBe(true);
+      if (Option.isSome(rowOption)) {
+        yield* runtime.runPromise(
+          store.upsertOutbox({ ...rowOption.value, status: "pending", updatedAt: now(24) }),
+        );
+      }
+      expect(runnerCalls).toEqual([]);
+      yield* runtime.runPromise(worker.drain());
+      expect(runnerCalls).toEqual([]);
+      const afterDrain = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(afterDrain.build.checkAttempts).toHaveLength(2);
+      expect(afterDrain.build.checkAttempts.find((a) => a.id === run1.attemptId)?.status).toBe(
+        "stale",
+      );
+      const retiredOption = yield* runtime.runPromise(
+        store.getOutboxByOperationKey({
+          environmentId,
+          taskId: task.id,
+          operationKey: "op-check-stale-1:check-attempt-1",
+        }),
+      );
+      if (Option.isSome(retiredOption)) {
+        expect(retiredOption.value.status).toBe("completed");
+      }
+    }),
+  );
 });

@@ -78,6 +78,10 @@ describe("tokenizeCommandLine", () => {
     expect(tokenizeCommandLine("   ")).toEqual([]);
   });
 
+  it("throws on a trailing lone backslash instead of emitting an empty token", () => {
+    expect(() => tokenizeCommandLine("echo \\")).toThrow(/Unterminated escape/u);
+  });
+
   it("throws on an unterminated quote instead of guessing", () => {
     expect(() => tokenizeCommandLine("echo 'unterminated")).toThrow(/Unterminated quote/u);
     expect(() => tokenizeCommandLine('echo "unterminated')).toThrow(/Unterminated quote/u);

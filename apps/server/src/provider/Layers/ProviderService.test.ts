@@ -50,6 +50,7 @@ import {
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import { makeProviderServiceLive, normalizeTaskStageInteractionMode } from "./ProviderService.ts";
+import { assertPinnedToActiveBuildTask } from "./ProviderService.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -328,6 +329,82 @@ it.effect("keeps provider-native plan cards out of Guided task stages", () =>
       normalizeTaskStageInteractionMode({ isTaskStage: false, interactionMode: "plan" }),
       "plan",
     );
+  }),
+);
+
+it.effect("assertPinnedToActiveBuildTask enforces the pinned provider instance", () =>
+  Effect.gen(function* () {
+    const pinnedContext = { providerInstanceId: "instance-1" };
+    // A Build-stage task whose model selection pins instance-1 rejects any
+    // other provider instance (the restartSessionForMcpCredential guard).
+    const mismatch = yield* Effect.result(
+      assertPinnedToActiveBuildTask({
+        operation: "ProviderService.restartSessionForMcpCredential",
+        activeTaskStage: "build",
+        activeTaskContext: pinnedContext,
+        providerInstanceId: ProviderInstanceId.make("instance-other"),
+      }),
+    );
+    assert.equal(mismatch._tag, "Failure");
+    if (mismatch._tag !== "Failure") {
+      return;
+    }
+    assert.equal(mismatch.failure._tag, "ProviderValidationError");
+    if (mismatch.failure._tag !== "ProviderValidationError") {
+      return;
+    }
+    assert.equal(mismatch.failure.operation, "ProviderService.restartSessionForMcpCredential");
+    assert.equal(
+      mismatch.failure.issue,
+      "The requested provider instance is not pinned to the active Build task.",
+    );
+
+    // The pinned instance proceeds.
+    const accepted = yield* Effect.result(
+      assertPinnedToActiveBuildTask({
+        operation: "ProviderService.restartSessionForMcpCredential",
+        activeTaskStage: "build",
+        activeTaskContext: pinnedContext,
+        providerInstanceId: ProviderInstanceId.make("instance-1"),
+      }),
+    );
+    assert.equal(accepted._tag, "Success");
+
+    // A Build-stage thread with no canonical context is rejected before the
+    // instance comparison.
+    const missingContext = yield* Effect.result(
+      assertPinnedToActiveBuildTask({
+        operation: "ProviderService.restartSessionForMcpCredential",
+        activeTaskStage: "build",
+        activeTaskContext: undefined,
+        providerInstanceId: ProviderInstanceId.make("instance-1"),
+      }),
+    );
+    assert.equal(missingContext._tag, "Failure");
+    if (missingContext._tag !== "Failure") {
+      return;
+    }
+    assert.equal(missingContext.failure._tag, "ProviderValidationError");
+    if (missingContext.failure._tag !== "ProviderValidationError") {
+      return;
+    }
+    assert.equal(
+      missingContext.failure.issue,
+      "The active Build task has no canonical worktree/provider profile.",
+    );
+
+    // Non-build stages and non-task threads pass through unchanged.
+    for (const stage of [undefined, "plan"] as const) {
+      const passthrough = yield* Effect.result(
+        assertPinnedToActiveBuildTask({
+          operation: "ProviderService.startSession",
+          activeTaskStage: stage,
+          activeTaskContext: undefined,
+          providerInstanceId: ProviderInstanceId.make("instance-other"),
+        }),
+      );
+      assert.equal(passthrough._tag, "Success");
+    }
   }),
 );
 
