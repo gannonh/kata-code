@@ -99,7 +99,7 @@ describe("TaskWorkspaceNewView", () => {
 
     for (const [preset, label, version] of [
       ["standard", "Standard", "standard@0.2.0"],
-      ["guided", "Guided", "guided@0.2.0"],
+      ["guided", "Guided", "guided@0.3.0"],
       ["freeform", "Freeform", "freeform@0.2.0"],
     ] as const) {
       const option = page.getByTestId(`task-workflow-option-${preset}`);
@@ -122,7 +122,7 @@ describe("TaskWorkspaceNewView", () => {
 
     await expect
       .element(page.getByTestId("task-resolved-definition"))
-      .toHaveTextContent("Guided · guided@0.2.0");
+      .toHaveTextContent("Guided · guided@0.3.0");
   });
 
   it("shows the resolved definition and capability for the selected preset", async () => {
