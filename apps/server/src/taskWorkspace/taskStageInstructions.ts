@@ -20,7 +20,7 @@ export function trustedStageInstructions(stage: TaskWorkspaceStage): string {
         : stage === "design"
           ? "Record the chosen approach, boundaries, and decisions in the Design artifact."
           : stage === "plan"
-            ? "Record the implementation steps, affected areas, verification, and risks in the Plan artifact. For Guided 0.3, use the exact deterministic Markdown shape `## Phase [phase:id] Title`, `Checkpoint: always|manual-only|on-failure|never`, `### Work item [work:id] Title`, optional `Dependencies: work:id`, and check lines `- Automated check [check:id]: Label | exact command` or `- Manual check [check:id]: Label`; use stable lowercase ids, list at least one phase and one approved check when the task requires implementation."
+            ? "Record the implementation steps, affected areas, verification, and risks in the Plan artifact. For Guided 0.3, the Plan MUST use the exact deterministic Markdown shape below. Do not substitute prose headings such as `## Implementation sequence`. Include at least one phase and one work item: `## Phase [phase:foundation] Foundation`, then one policy line such as `Checkpoint: always`, then `### Work item [work:implement] Implement the change`. If needed, use a dependency line such as `Dependencies: work:foundation`. Include at least one check using `- Automated check [check:typecheck]: Typecheck | vp run typecheck` or `- Manual check [check:review]: Review the implementation`. Use stable lowercase ids and keep every Phase, Work item, and check line in this exact syntax."
             : "Record the required output for this stage in its stage artifact.";
   return [
     `You are running the ${stageLabel} stage for a Kata Code task.`,
