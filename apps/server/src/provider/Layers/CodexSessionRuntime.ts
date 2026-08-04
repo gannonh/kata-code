@@ -8,6 +8,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderInteractionMode,
+  type ProviderTaskExecutionProfile,
   type ProviderRequestKind,
   type ProviderSession,
   type ProviderTurnStartResult,
@@ -88,9 +89,13 @@ export function buildMcpServerElicitationResponse(input: {
 
 export function buildPermissionsRequestApprovalResponse(input: {
   readonly taskStage: boolean;
+  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly requested: EffectCodexSchema.PermissionsRequestApprovalParams["permissions"];
 }): EffectCodexSchema.PermissionsRequestApprovalResponse {
-  const grantsNetwork = input.taskStage && input.requested.network?.enabled === true;
+  const grantsNetwork =
+    input.taskStage &&
+    input.taskExecutionProfile !== "task-worktree-write" &&
+    input.requested.network?.enabled === true;
 
   return {
     permissions: grantsNetwork ? { network: { enabled: true } } : {},
@@ -139,6 +144,7 @@ export interface CodexSessionRuntimeOptions {
   readonly model?: string;
   readonly developerInstructions?: string;
   readonly taskStage?: boolean;
+  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly appServerArgs?: ReadonlyArray<string>;
@@ -155,6 +161,7 @@ export interface CodexSessionRuntimeSendTurnInput {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
   readonly developerInstructions?: string;
   readonly taskStage?: boolean;
+  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly interactionMode?: ProviderInteractionMode;
 }
 
@@ -344,7 +351,11 @@ function buildThreadStartParams(input: {
 function runtimeModeToTurnSandboxPolicy(
   input: RuntimeMode,
   taskStage: boolean,
+  taskExecutionProfile?: ProviderTaskExecutionProfile,
 ): EffectCodexSchema.V2TurnStartParams__SandboxPolicy {
+  if (taskExecutionProfile === "task-worktree-write") {
+    return { networkAccess: false, type: "workspaceWrite" };
+  }
   if (taskStage) {
     return {
       networkAccess: true,
@@ -408,6 +419,7 @@ export function buildTurnStartParams(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly developerInstructions?: string;
   readonly taskStage?: boolean;
+  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly interactionMode?: ProviderInteractionMode;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
@@ -436,7 +448,11 @@ export function buildTurnStartParams(input: {
     threadId: input.threadId,
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
-    sandboxPolicy: runtimeModeToTurnSandboxPolicy(input.runtimeMode, input.taskStage === true),
+    sandboxPolicy: runtimeModeToTurnSandboxPolicy(
+      input.runtimeMode,
+      input.taskStage === true,
+      input.taskExecutionProfile,
+    ),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
@@ -1184,6 +1200,9 @@ export const makeCodexSessionRuntime = (
       Effect.succeed(
         buildPermissionsRequestApprovalResponse({
           taskStage: options.taskStage === true,
+          ...(options.taskExecutionProfile
+            ? { taskExecutionProfile: options.taskExecutionProfile }
+            : {}),
           requested: payload.permissions,
         }),
       ),

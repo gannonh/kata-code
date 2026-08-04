@@ -21,6 +21,10 @@ import {
   ProviderUserInputAnswers,
   RuntimeMode,
 } from "./orchestration.ts";
+
+/** Server-owned profile requested for a task-bound provider session. */
+export const ProviderTaskExecutionProfile = Schema.Literals(["planning", "task-worktree-write"]);
+export type ProviderTaskExecutionProfile = typeof ProviderTaskExecutionProfile.Type;
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 
 const ProviderSessionStatus = Schema.Literals([
@@ -61,6 +65,8 @@ export const ProviderSessionStartInput = Schema.Struct({
   developerInstructions: Schema.optional(TrimmedNonEmptyString),
   /** Server-derived Guided task-stage execution profile. */
   taskStage: Schema.optional(Schema.Boolean),
+  /** Additive profile seam; legacy RuntimeMode remains unchanged. */
+  taskExecutionProfile: Schema.optional(ProviderTaskExecutionProfile),
   resumeCursor: Schema.optional(Schema.Unknown),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
@@ -81,6 +87,8 @@ export const ProviderSendTurnInput = Schema.Struct({
   developerInstructions: Schema.optional(TrimmedNonEmptyString),
   /** Server-derived Guided task-stage execution profile. */
   taskStage: Schema.optional(Schema.Boolean),
+  /** Additive profile seam; legacy RuntimeMode remains unchanged. */
+  taskExecutionProfile: Schema.optional(ProviderTaskExecutionProfile),
   interactionMode: Schema.optional(ProviderInteractionMode),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;

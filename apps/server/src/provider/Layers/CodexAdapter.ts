@@ -1418,6 +1418,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { developerInstructions: input.developerInstructions }
             : {}),
           ...(input.taskStage === true ? { taskStage: true } : {}),
+          ...(input.taskExecutionProfile
+            ? { taskExecutionProfile: input.taskExecutionProfile }
+            : {}),
           ...(serviceTier ? { serviceTier } : {}),
           ...(mcpSession
             ? {
@@ -1571,6 +1574,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ? { developerInstructions: input.developerInstructions }
           : {}),
         ...(input.taskStage === true ? { taskStage: true } : {}),
+        ...(input.taskExecutionProfile ? { taskExecutionProfile: input.taskExecutionProfile } : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
@@ -1728,6 +1732,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     capabilities: {
       sessionModelSwitch: "in-session",
       supportsTaskStage: true,
+      taskExecution: {
+        profile: "task-worktree-write",
+        trustedTaskInstructions: true,
+        worktreeOnlyWrites: true,
+        credentialIsolation: true,
+        deterministicResume: true,
+        boundedTurns: true,
+        networkDisabled: true,
+      },
     },
     startSession,
     sendTurn,

@@ -50,7 +50,10 @@ import {
   withMetrics,
 } from "../../observability/Metrics.ts";
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import {
+  supportsTaskWorktreeWrite,
+  type ProviderAdapterShape,
+} from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
@@ -405,6 +408,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         binding.runtimePayload,
       );
       const activeTaskStage = yield* activeTaskStageForThread(input.threadId);
+      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
       const developerInstructions = activeTaskStage
         ? trustedStageInstructions(activeTaskStage)
         : (input.developerInstructions ?? persistedDeveloperInstructions);
@@ -416,6 +420,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(modelSelection ? { modelSelection } : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
         taskStage: activeTaskStage !== undefined,
+        taskExecutionProfile,
         ...(binding.resumeCursor !== null && binding.resumeCursor !== undefined
           ? { resumeCursor: binding.resumeCursor }
           : {}),
@@ -548,6 +553,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         input.binding.runtimePayload,
       );
       const activeTaskStage = yield* activeTaskStageForThread(input.binding.threadId);
+      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
+      if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(adapter.capabilities)) {
+        return yield* toValidationError(
+          input.operation,
+          `Provider '${adapter.provider}' cannot enforce task-worktree-write.`,
+        );
+      }
       const developerInstructions = activeTaskStage
         ? trustedStageInstructions(activeTaskStage)
         : persistedDeveloperInstructions;
@@ -566,6 +578,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
           taskStage: activeTaskStage !== undefined,
+          taskExecutionProfile,
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
         })
@@ -756,6 +769,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         const activeTaskStage = yield* activeTaskStageForThread(threadId);
+        const activeTaskProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
+        if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(adapter.capabilities)) {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            `Provider '${resolvedProvider}' cannot enforce task-worktree-write.`,
+          );
+        }
         const persistedDeveloperInstructions =
           persistedBinding?.providerInstanceId === resolvedInstanceId
             ? readPersistedDeveloperInstructions(persistedBinding.runtimePayload)
@@ -776,6 +796,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
                 ...(developerInstructions ? { developerInstructions } : {}),
                 taskStage: activeTaskStage !== undefined,
+                taskExecutionProfile: activeTaskProfile,
                 ...(effectiveResumeCursor !== undefined
                   ? { resumeCursor: effectiveResumeCursor }
                   : {}),
@@ -877,12 +898,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         isTaskStage: activeTaskStage !== undefined,
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
       });
+      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
+      if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(routed.adapter.capabilities)) {
+        return yield* toValidationError(
+          "ProviderService.sendTurn",
+          `Provider '${routed.adapter.provider}' cannot enforce task-worktree-write.`,
+        );
+      }
       const providerInput =
         activeTaskStage === undefined
           ? { ...input, taskStage: false }
           : {
               ...input,
               taskStage: true,
+              taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
               interactionMode: providerInteractionMode ?? "default",
             };
       yield* withMcpRotationLock(

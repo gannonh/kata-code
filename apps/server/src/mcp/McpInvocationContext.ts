@@ -3,7 +3,7 @@ import { PreviewAutomationUnavailableError } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-export type McpCapability = "preview" | "task-stage";
+export type McpCapability = "preview" | "task-stage" | "task-implementation";
 
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;

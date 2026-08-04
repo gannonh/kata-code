@@ -318,6 +318,10 @@ export const TaskWorkspaceCheckAttempt = Schema.Struct({
   status: TaskWorkspaceCheckAttemptStatus,
   output: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   exitCode: Schema.NullOr(Schema.Int).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  timeoutMs: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  observedStatus: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   startedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   completedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   endingCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
@@ -350,7 +354,11 @@ export const TaskWorkspaceBuildCheckpoint = Schema.Struct({
 });
 export type TaskWorkspaceBuildCheckpoint = typeof TaskWorkspaceBuildCheckpoint.Type;
 
-export const TaskWorkspaceAmendmentStatus = Schema.Literals(["requested", "approved"]);
+export const TaskWorkspaceAmendmentStatus = Schema.Literals([
+  "requested",
+  "approved",
+  "changes-requested",
+]);
 export type TaskWorkspaceAmendmentStatus = typeof TaskWorkspaceAmendmentStatus.Type;
 
 export const TaskWorkspacePlanDiff = Schema.Struct({
@@ -375,6 +383,8 @@ export const TaskWorkspaceAmendment = Schema.Struct({
   found: TrimmedNonEmptyString,
   impact: TrimmedNonEmptyString,
   proposedChanges: TrimmedNonEmptyString,
+  proposedPlanMarkdown: Schema.optional(Schema.String),
+  reviewFeedback: Schema.optional(Schema.NullOr(Schema.String)),
   affectedPhaseIds: Schema.Array(TrimmedNonEmptyString),
   affectedWorkItemIds: Schema.Array(TrimmedNonEmptyString),
   dependentCheckIds: Schema.Array(TrimmedNonEmptyString),
@@ -1001,6 +1011,9 @@ const TaskImplementationCompleteCommand = Schema.Struct({
   expectedTaskRevision: NonNegativeInt,
   summary: TrimmedNonEmptyString,
   operationKey: TrimmedNonEmptyString,
+  /** Provider-bound identity, supplied only by server bridge dispatch. */
+  sessionId: Schema.optional(TrimmedNonEmptyString),
+  providerTurnId: Schema.optional(TrimmedNonEmptyString),
 });
 
 const TaskBuildWorkItemSetStatusCommand = Schema.Struct({
@@ -1518,6 +1531,7 @@ export const TaskImplementationContextResult = Schema.Struct({
   occurrence: NonNegativeInt,
   brief: Schema.String,
   planRevisionId: TrimmedNonEmptyString,
+  planMarkdown: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   phases: Schema.Array(TaskWorkspaceBuildPhase),
   checks: Schema.Array(TaskWorkspaceBuildCheck),
   checkpoints: Schema.Array(TaskWorkspaceBuildCheckpoint),

@@ -30,6 +30,11 @@ import {
   type TaskWorkspaceContextManifest,
   type TaskWorkspaceDispatchOperationStatus,
   type TaskWorkspaceDispatchResult,
+  type TaskImplementationContextResult,
+  type TaskImplementationProgressAck,
+  type TaskImplementationCheckRunAck,
+  type TaskImplementationAmendmentAck,
+  type TaskImplementationCompleteAck,
   type TaskWorkspaceOperationReceipt,
   type TaskWorkspaceOutboxEntry,
   TaskWorkspaceEvent as TaskWorkspaceEventSchema,
@@ -67,6 +72,7 @@ import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts"
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { supportsTaskWorktreeWrite } from "../provider/Services/ProviderAdapter.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 import {
   TaskWorkspaceSourceResolver,
@@ -143,6 +149,9 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
     case "task.plan.approve":
     case "task.workflow.upgrade":
     case "task.implementation.start":
+    case "task.implementation.check.run":
+    case "task.implementation.amendment.propose":
+    case "task.implementation.complete":
       return command.operationKey ?? null;
     default:
       return null;
@@ -1043,6 +1052,43 @@ export interface TaskWorkspaceServiceShape {
   readonly dispatch: (
     command: TaskWorkspaceCommand,
   ) => Effect.Effect<TaskWorkspaceDispatchResult, TaskWorkspaceError>;
+  readonly implementationContext: (
+    taskId: TaskWorkspaceId,
+  ) => Effect.Effect<TaskImplementationContextResult, TaskWorkspaceError>;
+  readonly implementationProgress: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly expectedTaskRevision: number;
+    readonly phaseId: string;
+    readonly workItemId: string | null;
+    readonly status: "running" | "completed" | "blocked";
+    readonly summary: string;
+  }) => Effect.Effect<TaskImplementationProgressAck, TaskWorkspaceError>;
+  readonly implementationCheckRun: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly expectedTaskRevision: number;
+    readonly checkId: string;
+    readonly operationKey: string;
+  }) => Effect.Effect<TaskImplementationCheckRunAck, TaskWorkspaceError>;
+  readonly implementationAmendmentPropose: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly expectedTaskRevision: number;
+    readonly phaseId: string;
+    readonly workItemId: string;
+    readonly triggeringCheckId: string | null;
+    readonly expected: string;
+    readonly found: string;
+    readonly impact: string;
+    readonly proposedPlanMarkdown: string;
+    readonly operationKey: string;
+  }) => Effect.Effect<TaskImplementationAmendmentAck, TaskWorkspaceError>;
+  readonly implementationComplete: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly expectedTaskRevision: number;
+    readonly summary: string;
+    readonly operationKey: string;
+    readonly sessionId: string;
+    readonly providerTurnId: string;
+  }) => Effect.Effect<TaskImplementationCompleteAck, TaskWorkspaceError>;
   readonly getSnapshot: Effect.Effect<TaskWorkspaceSnapshot, never>;
   readonly getTask: (taskId: TaskWorkspaceId) => Effect.Effect<TaskWorkspace | null, never>;
   readonly streamEvents: Stream.Stream<TaskWorkspaceEventValue>;
@@ -1129,6 +1175,19 @@ export const activeTaskStageForThread = (
   activeTaskWorkspaceService
     ? activeTaskWorkspaceService.getActiveTaskStage(threadId)
     : Effect.succeed(undefined);
+
+export const authorizeActiveTaskImplementation = (input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly providerInstanceId: string;
+}): Effect.Effect<boolean> =>
+  activeTaskWorkspaceService
+    ? activeTaskWorkspaceService.authorizeTaskStage(input).pipe(
+        Effect.flatMap(() => activeTaskWorkspaceService!.getActiveTaskStage(input.threadId)),
+        Effect.map((stage) => stage === "build"),
+        Effect.catch(() => Effect.succeed(false)),
+      )
+    : Effect.succeed(false);
 
 export const authorizeActiveTaskStage = (input: {
   readonly environmentId: EnvironmentId;
@@ -2494,9 +2553,10 @@ export const make = Effect.gen(function* () {
             if (
               !provider ||
               !provider.enabled ||
-              provider.adapter.capabilities.supportsTaskStage !== true
+              provider.adapter.capabilities.supportsTaskStage !== true ||
+              !supportsTaskWorktreeWrite(provider.adapter.capabilities)
             ) {
-              throw new Error("The selected provider is not task-stage capable.");
+              throw new Error("The selected provider cannot enforce task-worktree-write.");
             }
           }
           const target = resolveWorkflowDefinition(command.targetVersion);
@@ -2576,8 +2636,17 @@ export const make = Effect.gen(function* () {
             throw new Error("The canonical task worktree is not ready. Choose Now or Later first.");
           }
           const expectedBranch = `katacode/task-${safeBranchSegment(task.id)}`;
-          if (repository.branch !== expectedBranch || !repository.baseCommitSha)
-            throw new Error("The task worktree branch is not the pinned task branch.");
+          const expectedPath = expectedTaskWorktreePath(
+            config.worktreesDir,
+            repository.workspaceRoot,
+            expectedBranch,
+          );
+          if (
+            repository.branch !== expectedBranch ||
+            repository.worktreePath !== expectedPath ||
+            !repository.baseCommitSha
+          )
+            throw new Error("The task worktree reservation is not canonical.");
           const branch = yield* runGit(repository.worktreePath, [
             "symbolic-ref",
             "--short",
@@ -2623,9 +2692,10 @@ export const make = Effect.gen(function* () {
             if (
               !provider ||
               !provider.enabled ||
-              provider.adapter.capabilities.supportsTaskStage !== true
+              provider.adapter.capabilities.supportsTaskStage !== true ||
+              !supportsTaskWorktreeWrite(provider.adapter.capabilities)
             )
-              throw new Error("The selected provider is not task-stage capable.");
+              throw new Error("The selected provider cannot enforce task-worktree-write.");
           }
           const build =
             task.build.currentPlanRevisionId === plan.id
@@ -3186,6 +3256,228 @@ export const make = Effect.gen(function* () {
             workflowRuns,
             updatedAt: command.createdAt,
           });
+        }
+        case "task.implementation.progress": {
+          requireStage(task, "build");
+          if (command.expectedTaskRevision !== task.taskRevision) {
+            throw new Error(
+              `Task revision ${task.taskRevision} does not match the expected revision ${command.expectedTaskRevision}.`,
+            );
+          }
+          if (task.build.amendmentGateId)
+            throw new Error("Implementation is paused at an amendment gate.");
+          const phase = phaseForBuild(task, command.phaseId);
+          if (phase.status === "blocked" || phase.status === "invalidated")
+            throw new Error(`Phase '${phase.id}' is blocked.`);
+          if (command.status === "running") {
+            requirePredecessorPhasesComplete(task.build, phase.id);
+            if (task.build.activePhaseId !== null && task.build.activePhaseId !== phase.id)
+              throw new Error(`Phase '${task.build.activePhaseId}' is already active.`);
+          }
+          let build: TaskWorkspace["build"] = {
+            ...task.build,
+            activePhaseId: phase.id,
+            phases: task.build.phases.map((candidate) =>
+              candidate.id === phase.id
+                ? {
+                    ...candidate,
+                    status:
+                      command.status === "blocked" ? ("blocked" as const) : ("running" as const),
+                    startedAt: candidate.startedAt ?? command.createdAt,
+                    workItems: candidate.workItems.map((item) =>
+                      item.id === command.workItemId
+                        ? { ...item, status: command.status, summary: command.summary }
+                        : item,
+                    ),
+                  }
+                : candidate,
+            ),
+            activeWorkItemId: command.workItemId,
+          };
+          if (command.workItemId !== null) {
+            const item = phase.workItems.find((candidate) => candidate.id === command.workItemId);
+            if (!item) throw new Error(`Work item '${command.workItemId}' was not found.`);
+            if (command.status === "running" && !dependenciesPass(phase, item))
+              throw new Error(`Work item '${item.id}' has incomplete dependencies.`);
+            if (command.status === "completed" && !dependenciesPass(phase, item))
+              throw new Error(`Work item '${item.id}' has incomplete dependencies.`);
+            if (command.status === "completed" && !requiredChecksPass(task.build, item.checkIds))
+              throw new Error(`Work item '${item.id}' has checks that have not passed.`);
+          }
+          return yield* append(
+            command,
+            { ...task, build, updatedAt: command.createdAt },
+            { eventType: "task.implementation.progress" },
+          );
+        }
+        case "task.implementation.check.run": {
+          requireStage(task, "build");
+          if (command.expectedTaskRevision !== task.taskRevision)
+            throw new Error("The implementation task revision is stale.");
+          if (task.build.amendmentGateId)
+            throw new Error("Implementation is paused at an amendment gate.");
+          const check = checkForBuild(task, command.checkId);
+          if (check.kind !== "automated" || !check.command)
+            throw new Error(`Check '${check.id}' is not an approved automated command.`);
+          const plan = latestPlanRevision(task);
+          const repository = task.workspace.repositories[0];
+          if (!plan || !repository?.worktreePath)
+            throw new Error("The approved Plan or canonical worktree is unavailable.");
+          const attemptId = `check-attempt-${task.build.checkAttempts.length + 1}`;
+          const commandDigest = createHash("sha256").update(check.command).digest("hex");
+          const attempt = {
+            id: attemptId,
+            checkId: check.id,
+            planRevisionId: plan.id,
+            startingCommitSha:
+              task.build.resultingCommitSha ??
+              task.workspace.repositories[0]?.baseCommitSha ??
+              "unknown",
+            commandDigest,
+            operationKey: command.operationKey,
+            status: "pending" as const,
+            output: null,
+            exitCode: null,
+            timeoutMs: 120_000,
+            observedStatus: null,
+            startedAt: null,
+            completedAt: null,
+            endingCommitSha: null,
+          };
+          const build: TaskWorkspace["build"] = {
+            ...task.build,
+            checkAttempts: [...task.build.checkAttempts, attempt],
+            checks: task.build.checks.map((candidate) =>
+              candidate.id === check.id
+                ? {
+                    ...candidate,
+                    status: "running" as const,
+                    attemptIds: [...candidate.attemptIds, attemptId],
+                    startedAt: command.createdAt,
+                  }
+                : candidate,
+            ),
+          };
+          return yield* append(
+            command,
+            { ...task, build, updatedAt: command.createdAt },
+            {
+              eventType: "task.implementation.check.run",
+              outbox: [
+                {
+                  target: "implementation-check",
+                  operationKey: command.operationKey,
+                  payload: {
+                    attemptId,
+                    checkId: check.id,
+                    worktreePath: repository.worktreePath,
+                    command: check.command,
+                    commandDigest,
+                    timeoutMs: 120_000,
+                  },
+                },
+              ],
+            },
+          );
+        }
+        case "task.implementation.amendment.propose": {
+          requireStage(task, "build");
+          if (command.expectedTaskRevision !== task.taskRevision)
+            throw new Error("The implementation task revision is stale.");
+          if (task.build.amendmentGateId)
+            throw new Error("An implementation amendment is already open.");
+          const plan = latestPlanRevision(task);
+          const phase = phaseForBuild(task, command.phaseId);
+          const item = workItemForBuild(phase, command.workItemId);
+          if (!plan || task.build.currentPlanRevisionId !== plan.id)
+            throw new Error("An approved current Plan is required.");
+          if (command.triggeringCheckId !== null) {
+            const check = checkForBuild(task, command.triggeringCheckId);
+            if (check.phaseId !== phase.id || check.workItemId !== item.id)
+              throw new Error("The amendment check does not belong to the triggering work item.");
+          }
+          const amendmentId = `amendment-${task.build.amendments.length + 1}`;
+          const amendment = {
+            id: amendmentId,
+            basePlanRevisionId: plan.id,
+            triggeringPhaseId: phase.id,
+            triggeringWorkItemId: item.id,
+            triggeringCheckId: command.triggeringCheckId,
+            expected: command.expected,
+            found: command.found,
+            impact: command.impact,
+            proposedChanges: command.proposedPlanMarkdown,
+            proposedPlanMarkdown: command.proposedPlanMarkdown,
+            reviewFeedback: null,
+            affectedPhaseIds: [phase.id],
+            affectedWorkItemIds: [item.id],
+            dependentCheckIds: command.triggeringCheckId ? [command.triggeringCheckId] : [],
+            status: "requested" as const,
+            artifactRevisionId: null,
+            planDiff: null,
+            requestedAt: command.createdAt,
+            approvedAt: null,
+            approvedBy: null,
+          };
+          const build = {
+            ...task.build,
+            amendmentGateId: amendmentId,
+            amendments: [...task.build.amendments, amendment],
+          };
+          return yield* append(
+            command,
+            { ...task, build, updatedAt: command.createdAt },
+            { eventType: "task.implementation.amendment.propose" },
+          );
+        }
+        case "task.implementation.complete": {
+          requireStage(task, "build");
+          if (command.expectedTaskRevision !== task.taskRevision)
+            throw new Error("The implementation task revision is stale.");
+          const occurrence = activeOccurrence(task, "build");
+          if (!occurrence?.sessionId || !occurrence.threadId)
+            throw new Error("No active implementation occurrence.");
+          if (!command.sessionId || !command.providerTurnId)
+            throw new Error("Completion requires the active session and provider turn.");
+          const proposalId = `proposal-build-${occurrence.ordinal}-${command.operationKey}`;
+          const proposal = {
+            id: proposalId,
+            environmentId,
+            taskId: task.id,
+            stage: "build" as const,
+            occurrence: occurrence.ordinal,
+            sessionId: command.sessionId,
+            threadId: occurrence.threadId,
+            providerTurnId: command.providerTurnId,
+            payloadDigest: createHash("sha256").update(command.summary).digest("hex"),
+            summary: command.summary,
+            markdown: "",
+            status: "proposed" as const,
+            terminalTurnOutcome: null,
+            committedArtifactRevisionId: null,
+            rejectionReason: null,
+            createdAt: command.createdAt,
+            settledAt: null,
+          };
+          if (command.sessionId !== occurrence.sessionId)
+            throw new Error("Completion session is not the active primary session.");
+          return yield* append(
+            command,
+            {
+              ...task,
+              occurrences: task.occurrences.map((candidate) =>
+                candidate.id === occurrence.id
+                  ? {
+                      ...candidate,
+                      status: "finalizing" as const,
+                      completionProposalId: proposalId,
+                    }
+                  : candidate,
+              ),
+              updatedAt: command.createdAt,
+            },
+            { eventType: "task.implementation.complete", proposal },
+          );
         }
         case "task.build.phase.start": {
           requireStage(task, "build");
@@ -4339,6 +4631,89 @@ export const make = Effect.gen(function* () {
   const dispatch: TaskWorkspaceServiceShape["dispatch"] = (command) =>
     semaphore.withPermits(1)(dispatchUnlocked(command));
 
+  const implementationContext: TaskWorkspaceServiceShape["implementationContext"] = (taskId) =>
+    Effect.gen(function* () {
+      const task = taskById.get(taskId);
+      if (!task)
+        return yield* new TaskWorkspaceError({ message: `Task '${taskId}' was not found.` });
+      const plan = latestPlanRevision(task);
+      if (!plan || task.build.currentPlanRevisionId !== plan.id) {
+        return yield* new TaskWorkspaceError({
+          message: "The approved implementation Plan is unavailable.",
+        });
+      }
+      return {
+        stage: "build",
+        occurrence: latestOccurrence(task, "build")?.ordinal ?? 0,
+        brief: task.intake.brief,
+        planRevisionId: plan.id,
+        planMarkdown: plan.markdown.slice(0, 40_000),
+        phases: task.build.phases,
+        checks: task.build.checks,
+        checkpoints: task.build.checkpoints,
+        amendments: task.build.amendments,
+        currentCommitSha: task.build.resultingCommitSha,
+      } satisfies TaskImplementationContextResult;
+    });
+
+  const serverCommand = (taskId: TaskWorkspaceId, type: string, fields: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      const commandId = CommandId.make(`server:implementation:${yield* serverUuid}`);
+      const createdAt = yield* serverNow;
+      return yield* dispatch({
+        commandId,
+        taskId,
+        createdAt,
+        type,
+        ...fields,
+      } as TaskWorkspaceCommand);
+    });
+
+  const implementationProgress: TaskWorkspaceServiceShape["implementationProgress"] = (input) =>
+    serverCommand(input.taskId, "task.implementation.progress", input).pipe(
+      Effect.map((result) => ({
+        accepted: true as const,
+        phaseId: input.phaseId,
+        workItemId: input.workItemId,
+        status: input.status,
+        taskRevision: result.task.taskRevision,
+      })),
+    );
+  const implementationCheckRun: TaskWorkspaceServiceShape["implementationCheckRun"] = (input) =>
+    serverCommand(input.taskId, "task.implementation.check.run", input).pipe(
+      Effect.map((result) => {
+        const check = result.task.build.checks.find((candidate) => candidate.id === input.checkId);
+        const attemptId =
+          result.task.build.checkAttempts.at(-1)?.id ?? `attempt-${input.operationKey}`;
+        return {
+          accepted: true as const,
+          checkId: input.checkId,
+          attemptId,
+          status: check?.status ?? "pending",
+          taskRevision: result.task.taskRevision,
+        };
+      }),
+    );
+  const implementationAmendmentPropose: TaskWorkspaceServiceShape["implementationAmendmentPropose"] =
+    (input) =>
+      serverCommand(input.taskId, "task.implementation.amendment.propose", input).pipe(
+        Effect.map((result) => ({
+          accepted: true as const,
+          amendmentId: result.task.build.amendments.at(-1)!.id,
+          taskRevision: result.task.taskRevision,
+        })),
+      );
+  const implementationComplete: TaskWorkspaceServiceShape["implementationComplete"] = (input) =>
+    serverCommand(input.taskId, "task.implementation.complete", input).pipe(
+      Effect.map((result) => ({
+        accepted: true as const,
+        proposalId:
+          result.task.occurrences.find((candidate) => candidate.stage === "build")
+            ?.completionProposalId ?? `proposal-${input.operationKey}`,
+        providerTurnId: input.providerTurnId,
+      })),
+    );
+
   const latestOccurrence = (
     task: TaskWorkspace,
     stage: TaskWorkspaceStage,
@@ -5073,12 +5448,13 @@ export const make = Effect.gen(function* () {
               new Error("The worktree outbox row does not match the pinned repository state."),
             );
           }
+          const expectedBranch = `katacode/task-${safeBranchSegment(entry.taskId)}`;
           const expectedPath = expectedTaskWorktreePath(
             config.worktreesDir,
             repository.workspaceRoot,
-            payload.branch,
+            expectedBranch,
           );
-          if (expectedPath !== payload.path) {
+          if (payload.branch !== expectedBranch || expectedPath !== payload.path) {
             return yield* failure(new Error("The worktree path is not the persisted reservation."));
           }
           const existing = yield* tryAdoptExistingWorktree(
@@ -5138,7 +5514,17 @@ export const make = Effect.gen(function* () {
           const run = currentRun(readyTask);
           const approvedPlan = latestPlanRevision(readyTask);
           const approvedPlanOccurrence = latestOccurrence(readyTask, "plan");
+          let implementationEligible = Option.isNone(providerInstanceRegistry);
+          if (Option.isSome(providerInstanceRegistry) && readyTask.preferences.modelSelection) {
+            const provider = yield* providerInstanceRegistry.value.getInstance(
+              readyTask.preferences.modelSelection.instanceId,
+            );
+            implementationEligible = Boolean(
+              provider?.enabled && supportsTaskWorktreeWrite(provider.adapter.capabilities),
+            );
+          }
           const shouldStartImplementation =
+            implementationEligible &&
             run.definitionVersion === "guided@0.3.0" &&
             run.currentStage === "plan" &&
             readyTask.planGate === null &&
@@ -5318,6 +5704,23 @@ export const make = Effect.gen(function* () {
           // Step 1: provision or reconcile the worktree when policy requires it.
           let working = task;
           const repository = working.workspace.repositories[0]!;
+          if (payload.executionProfile === "task-worktree-write") {
+            const expectedBranch = `katacode/task-${safeBranchSegment(entry.taskId)}`;
+            const expectedPath = expectedTaskWorktreePath(
+              config.worktreesDir,
+              repository.workspaceRoot,
+              expectedBranch,
+            );
+            if (
+              payload.worktreeBranch !== expectedBranch ||
+              payload.worktreePath !== expectedPath
+            ) {
+              return yield* failure(
+                "worktree",
+                new Error("The implementation bootstrap reservation is not canonical."),
+              );
+            }
+          }
           if (working.preferences.worktreePolicy === "now" && repository.worktreePath === null) {
             const branch = payload.worktreeBranch;
             const worktreePath = payload.worktreePath;
@@ -5607,6 +6010,11 @@ export const make = Effect.gen(function* () {
 
   return TaskWorkspaceService.of({
     dispatch,
+    implementationContext,
+    implementationProgress,
+    implementationCheckRun,
+    implementationAmendmentPropose,
+    implementationComplete,
     processBootstrap,
     processWorktree,
     proposeStageCompletion,
