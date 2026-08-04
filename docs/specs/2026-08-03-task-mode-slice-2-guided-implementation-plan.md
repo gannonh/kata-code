@@ -2,9 +2,9 @@
 type: Spec
 title: "Task mode Vertical Slice 2 — Guided implementation"
 description: "Approved child slice for starting a write-enabled Implement occurrence from an approved Guided Plan and exposing durable agent progress, checks, checkpoints, amendments, and recovery in the conversation-first Task mode UI."
-status: Approved
+status: Implemented
 approved_at: 2026-08-03T22:45:20Z
-acceptance_status: Not started
+acceptance_status: In progress
 tags: [specs, task-mode, task-workspaces, guided, implementation, agents, recovery]
 timestamp: 2026-08-03T22:45:20Z
 parent: /specs/2026-08-01-task-mode-design.md
@@ -14,9 +14,9 @@ parent: /specs/2026-08-01-task-mode-design.md
 
 ## Status
 
-**Approved on 2026-08-03.** Product implementation remains gated until provider-backed
-acceptance for [Vertical Slice 1: Guided planning](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
-is complete. This approval authorizes the Slice 2 design, scope, and sequencing.
+**Implemented on 2026-08-04.** The server, provider adapter, current Task route, browser coverage,
+and repository gates for Guided Implement are complete. Provider-backed acceptance for the
+cumulative desktop path remains in progress pending an authenticated local provider environment.
 
 This is the sole next Task mode slice. It extends the current conversation-first Guided path from
 approved Plan through completed Implement. It does not start Verify or redesign the Task mode shell.
@@ -493,6 +493,21 @@ vp run e2e --project desktop-dev --grep @task-workspaces
 - The feature can be disabled for new tasks by removing `guided@0.3.0` from the current catalog
   pointer while keeping the definition registered for existing tasks.
 - Persisted events, artifacts, sessions, and workflow pins are never rewritten during rollback.
+
+## Delivery record — 2026-08-04
+
+Implemented in commits `c7e4109fb`, `88793ffcc`, `e6adff2da`, `adeeac8cb`, `910285d9a`,
+`db26f0116`, `b746a694c`, `5fee4d9a4`, `a29db891e`, `7efe17e9e`, `03801fae0`, `18fc2bb58`, and
+`b3805832b`. The delivery includes the append-only `guided@0.3.0` workflow, explicit upgrade and
+start, provider-owned write-enabled implementation, bounded context, exact check evidence,
+checkpoint continuation, amendment review, restart recovery, Codex credential isolation, and
+conversation-first Implement presentation.
+
+Automated evidence is recorded in
+[Slice 2 implementation validation](/specs/evidence/2026-08-04-task-mode-slice-2-implementation-validation.md).
+The authenticated desktop E2E path remains open because this environment lacks
+`CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`; no provider-backed acceptance is claimed for that
+criterion.
 
 ## Explicitly deferred work
 
