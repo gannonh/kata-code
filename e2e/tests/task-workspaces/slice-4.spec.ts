@@ -212,7 +212,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       "data-active",
       "true",
     );
-    await expect(appWindow.getByTestId("task-resolved-definition")).toContainText("guided@0.2.0");
+    await expect(appWindow.getByTestId("task-resolved-definition")).toContainText("guided@0.3.0");
 
     const taskId = "task-e2e-guided-approved-plan";
     await appWindow.getByTestId("task-title-input").fill("Guided approved Plan E2E");
@@ -252,7 +252,16 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       timeout: E2E_TIMEOUTS.assertionMs,
     });
     await expect(appWindow.getByText("Plan approved", { exact: true })).toBeVisible();
-    await expect(appWindow.getByTestId("guided-stage-build")).toHaveCount(0);
+    await expect(appWindow.getByTestId("guided-stage-build")).toBeVisible({
+      timeout: E2E_TIMEOUTS.agentReplyMs,
+    });
+    await expect(appWindow.getByTestId("guided-implementation-panel")).toBeVisible({
+      timeout: E2E_TIMEOUTS.agentReplyMs,
+    });
+    await expect(appWindow.getByTestId("guided-stage-build")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
     await expect(appWindow.getByTestId("task-apply-fixture")).toHaveCount(0);
     await expect(appWindow).toHaveURL(new RegExp(`/tasks/[^/]+/${taskId}$`));
   });

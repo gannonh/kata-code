@@ -56,6 +56,7 @@ import {
   compileLegacyTaskWorkspacePlan,
   compileTaskWorkspacePlan,
   reverseDependencyInvalidation,
+  TASK_WORKSPACE_PLAN_MAX_CHARS,
   structuralDiff,
   type TaskWorkspaceCompiledPlan,
 } from "@kata-sh/code-shared/taskWorkspacePlanCompiler";
@@ -964,92 +965,193 @@ function hasWaitingImplementationCheckpoint(task: TaskWorkspace): boolean {
   );
 }
 
+function waitingImplementationCheckpoints(
+  task: TaskWorkspace,
+): ReadonlyArray<TaskWorkspaceBuildCheckpoint> {
+  return task.workflowRuns.at(-1)?.currentStage === "build"
+    ? task.build.checkpoints.filter((checkpoint) => checkpoint.status === "waiting")
+    : [];
+}
+
+function checkpointAllowsRecoveryCheckRun(
+  task: TaskWorkspace,
+  checkpoint: TaskWorkspaceBuildCheckpoint,
+  check: TaskWorkspaceBuildCheck,
+): boolean {
+  return checkpoint.checkIds.includes(check.id) && isRecoverableCheckRerun(task.build, check);
+}
+
+function hasFailedCheckpointTrigger(
+  task: TaskWorkspace,
+  checkpoint: TaskWorkspaceBuildCheckpoint,
+  triggeringCheckId: string | null,
+): boolean {
+  if (!triggeringCheckId || !checkpoint.checkIds.includes(triggeringCheckId)) return false;
+  const check = task.build.checks.find((candidate) => candidate.id === triggeringCheckId);
+  return check ? isRecoverableCheckRerun(task.build, check) : false;
+}
+
+function isRecoveryCheckpointReady(
+  build: TaskWorkspace["build"],
+  checkpoint: TaskWorkspaceBuildCheckpoint,
+  phase: TaskWorkspaceBuildPhase,
+  head: string,
+): boolean {
+  return (
+    phase.status !== "completed" &&
+    (phase.status === "blocked" ||
+      phase.status === "pending" ||
+      phase.status === "running" ||
+      phase.workItems.some(
+        (item) =>
+          item.status === "blocked" || item.status === "pending" || item.status === "running",
+      )) &&
+    requiredChecksPassAtHead(build, checkpoint.checkIds, head)
+  );
+}
+
+function boundedCollection<T>(values: ReadonlyArray<T>, maxEntries: number): ReadonlyArray<T> {
+  if (values.length <= maxEntries) return values;
+  return [...values.slice(0, maxEntries - 1), values.at(-1)!];
+}
+
 function boundedImplementationStateForManifest(task: TaskWorkspace): string {
   const state = {
     currentPlanRevisionId: task.build.currentPlanRevisionId,
     activePhaseId: task.build.activePhaseId,
     activeWorkItemId: task.build.activeWorkItemId,
-    phases: task.build.phases.map((phase) => ({
-      id: phase.id,
-      title: phase.title,
-      status: phase.status,
-      checkpointPolicy: phase.checkpointPolicy,
-      workItems: phase.workItems.map((item) => ({
-        id: item.id,
-        title: item.title,
-        status: item.status,
-        dependsOn: [...item.dependsOn],
-        checkIds: [...item.checkIds],
-        invalidationReason: item.invalidationReason,
-      })),
-      checkIds: [...phase.checkIds],
-      checkpointId: phase.checkpointId,
-      phaseCommitSha: phase.phaseCommitSha,
-    })),
-    checks: task.build.checks.map((check) => ({
-      id: check.id,
-      phaseId: check.phaseId,
-      workItemId: check.workItemId,
-      kind: check.kind,
-      label: check.label,
-      command: check.command,
-      status: check.status,
-      commitSha: check.commitSha,
-      exitCode: check.exitCode,
-      attemptIds: [...check.attemptIds],
-    })),
-    checkpoints: task.build.checkpoints.map((checkpoint) => ({
-      id: checkpoint.id,
-      phaseId: checkpoint.phaseId,
-      status: checkpoint.status,
-      checkIds: [...checkpoint.checkIds],
-      contextManifestId: checkpoint.contextManifestId,
-      continuationSessionId: checkpoint.continuationSessionId,
-      observedCommitSha: checkpoint.observedCommitSha,
-    })),
-    amendments: task.build.amendments.map((amendment) => ({
-      id: amendment.id,
-      basePlanRevisionId: amendment.basePlanRevisionId,
-      triggeringPhaseId: amendment.triggeringPhaseId,
-      triggeringWorkItemId: amendment.triggeringWorkItemId,
-      triggeringCheckId: amendment.triggeringCheckId,
-      status: amendment.status,
-      expected: truncateRequiredDiagnosticField(
-        amendment.expected,
-        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
-      ),
-      found: truncateRequiredDiagnosticField(
-        amendment.found,
-        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
-      ),
-      impact: truncateRequiredDiagnosticField(
-        amendment.impact,
-        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
-      ),
-      proposedChanges: truncateRequiredDiagnosticField(
-        amendment.proposedChanges,
-        IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
-      ),
-      proposedPlanMarkdown: amendment.proposedPlanMarkdown
-        ? truncateRequiredDiagnosticField(
-            amendment.proposedPlanMarkdown,
-            IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
-          )
-        : null,
-      planDiff: amendment.planDiff
-        ? {
-            ...amendment.planDiff,
-            summary: truncateRequiredDiagnosticField(
-              amendment.planDiff.summary,
+    phases: boundedCollection(task.build.phases, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
+      (phase) => ({
+        id: phase.id,
+        title: truncateRequiredDiagnosticField(
+          phase.title,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+        status: phase.status,
+        checkpointPolicy: phase.checkpointPolicy,
+        workItems: boundedCollection(phase.workItems, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
+          (item) => ({
+            id: item.id,
+            title: truncateRequiredDiagnosticField(
+              item.title,
               IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
             ),
-          }
-        : null,
-      reviewFeedback: truncateDiagnosticField(
-        amendment.reviewFeedback ?? null,
+            status: item.status,
+            summary: truncateDiagnosticField(
+              item.summary,
+              IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+            ),
+            dependsOn: item.dependsOn.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+            checkIds: item.checkIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+            invalidationReason: truncateDiagnosticField(
+              item.invalidationReason,
+              IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+            ),
+          }),
+        ),
+
+        checkIds: phase.checkIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+        checkpointId: phase.checkpointId,
+        phaseCommitSha: phase.phaseCommitSha,
+      }),
+    ),
+    checks: boundedCollection(task.build.checks, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
+      (check) => ({
+        id: check.id,
+        phaseId: check.phaseId,
+        workItemId: check.workItemId,
+        kind: check.kind,
+        label: truncateRequiredDiagnosticField(
+          check.label,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+        command: truncateDiagnosticField(
+          check.command,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+        status: check.status,
+        commitSha: check.commitSha,
+        exitCode: check.exitCode,
+        attemptIds: check.attemptIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+      }),
+    ),
+    checkpoints: boundedCollection(task.build.checkpoints, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
+      (checkpoint) => ({
+        id: checkpoint.id,
+        phaseId: checkpoint.phaseId,
+        reason: truncateRequiredDiagnosticField(
+          checkpoint.reason,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+        status: checkpoint.status,
+        checkIds: checkpoint.checkIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+        contextManifestId: checkpoint.contextManifestId,
+        continuationSessionId: checkpoint.continuationSessionId,
+        observedCommitSha: checkpoint.observedCommitSha,
+      }),
+    ),
+    checkAttempts: boundedCollection(
+      task.build.checkAttempts,
+      IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
+    ).map((attempt) => ({
+      ...attempt,
+      output: truncateDiagnosticField(attempt.output, IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS),
+      observedStatus: truncateDiagnosticField(
+        attempt.observedStatus,
         IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
       ),
     })),
+    amendments: boundedCollection(task.build.amendments, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
+      (amendment) => ({
+        id: amendment.id,
+        basePlanRevisionId: amendment.basePlanRevisionId,
+        triggeringPhaseId: amendment.triggeringPhaseId,
+        triggeringWorkItemId: amendment.triggeringWorkItemId,
+        triggeringCheckId: amendment.triggeringCheckId,
+        status: amendment.status,
+        expected: truncateRequiredDiagnosticField(
+          amendment.expected,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+        found: truncateRequiredDiagnosticField(
+          amendment.found,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+        impact: truncateRequiredDiagnosticField(
+          amendment.impact,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+        proposedChanges: truncateRequiredDiagnosticField(
+          amendment.proposedChanges,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+        proposedPlanMarkdown: amendment.proposedPlanMarkdown
+          ? truncateRequiredDiagnosticField(
+              amendment.proposedPlanMarkdown,
+              IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+            )
+          : null,
+        planDiff: amendment.planDiff
+          ? {
+              ...amendment.planDiff,
+              summary: truncateRequiredDiagnosticField(
+                amendment.planDiff.summary,
+                IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+              ),
+            }
+          : null,
+        affectedPhaseIds: amendment.affectedPhaseIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+        affectedWorkItemIds: amendment.affectedWorkItemIds.slice(
+          0,
+          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
+        ),
+        dependentCheckIds: amendment.dependentCheckIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+        reviewFeedback: truncateDiagnosticField(
+          amendment.reviewFeedback ?? null,
+          IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS,
+        ),
+      }),
+    ),
   };
   return truncateRequiredDiagnosticField(
     JSON.stringify(state, null, 2),
@@ -1057,8 +1159,9 @@ function boundedImplementationStateForManifest(task: TaskWorkspace): string {
   );
 }
 
-const IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS = 100_000;
+const IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS = TASK_WORKSPACE_PLAN_MAX_CHARS;
 const IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS = 2_000;
+const IMPLEMENTATION_CONTEXT_MAX_ENTRIES = 128;
 const IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS = 2_000;
 const IMPLEMENTATION_MANIFEST_MAX_CHARS = 16_000;
 
@@ -1067,13 +1170,74 @@ function truncateDiagnosticField(value: string | null, maxChars: number): string
   return `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`;
 }
 
+function boundPhaseForImplementationContext(
+  phase: TaskWorkspaceBuildPhase,
+): TaskWorkspaceBuildPhase {
+  return {
+    ...phase,
+    title: truncateRequiredDiagnosticField(
+      phase.title,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
+    checkIds: phase.checkIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+    workItems: boundedCollection(phase.workItems, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
+      (item) => ({
+        ...item,
+        title: truncateRequiredDiagnosticField(
+          item.title,
+          IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+        ),
+        summary: truncateDiagnosticField(item.summary, IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS),
+        invalidationReason: truncateDiagnosticField(
+          item.invalidationReason,
+          IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+        ),
+        dependsOn: item.dependsOn.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+        checkIds: item.checkIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+      }),
+    ),
+  };
+}
+
 function boundCheckForImplementationContext(
   check: TaskWorkspaceBuildCheck,
 ): TaskWorkspaceBuildCheck {
   return {
     ...check,
+    label: truncateRequiredDiagnosticField(
+      check.label,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
+    command: truncateDiagnosticField(check.command, IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS),
     output: truncateDiagnosticField(check.output, IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS),
     note: truncateDiagnosticField(check.note, IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS),
+    attemptIds: check.attemptIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+  };
+}
+
+function boundCheckpointForImplementationContext(
+  checkpoint: TaskWorkspaceBuildCheckpoint,
+): TaskWorkspaceBuildCheckpoint {
+  return {
+    ...checkpoint,
+    reason: truncateRequiredDiagnosticField(
+      checkpoint.reason,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
+    checkIds: checkpoint.checkIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+  };
+}
+
+function boundAttemptForImplementationContext(
+  attempt: TaskWorkspaceCheckAttempt,
+): TaskWorkspaceCheckAttempt {
+  return {
+    ...attempt,
+    output: truncateDiagnosticField(attempt.output, IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS),
+    observedStatus: truncateDiagnosticField(
+      attempt.observedStatus,
+      IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
+    ),
   };
 }
 
@@ -1086,6 +1250,9 @@ function boundAmendmentForImplementationContext(
 ): TaskWorkspace["build"]["amendments"][number] {
   return {
     ...amendment,
+    affectedPhaseIds: amendment.affectedPhaseIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+    affectedWorkItemIds: amendment.affectedWorkItemIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
+    dependentCheckIds: amendment.dependentCheckIds.slice(0, IMPLEMENTATION_CONTEXT_MAX_ENTRIES),
     expected: truncateRequiredDiagnosticField(
       amendment.expected,
       IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS,
@@ -1204,6 +1371,37 @@ export function latestAttemptBlocksCompletion(
 
 function checkpointReason(policy: TaskWorkspaceBuildPhase["checkpointPolicy"]): string {
   return policy === "on-failure" ? "A required Build check failed." : "Phase checkpoint reached.";
+}
+
+function resumePhaseForContinuation(
+  build: TaskWorkspace["build"],
+  phaseId: string,
+  now: string,
+): TaskWorkspace["build"] {
+  const phase = phaseForBuild({ build } as TaskWorkspace, phaseId);
+  return {
+    ...build,
+    activePhaseId: phase.id,
+    activeWorkItemId:
+      phase.workItems.find(
+        (item) =>
+          item.status === "pending" || item.status === "blocked" || item.status === "invalidated",
+      )?.id ?? null,
+    phases: build.phases.map((candidate) =>
+      candidate.id === phase.id
+        ? {
+            ...candidate,
+            status: "running" as const,
+            startedAt: candidate.startedAt ?? now,
+            workItems: candidate.workItems.map((item) =>
+              item.status === "blocked" || item.status === "invalidated"
+                ? { ...item, status: "pending" as const, invalidationReason: null }
+                : item,
+            ),
+          }
+        : candidate,
+    ),
+  };
 }
 
 function appendCheckpoint(
@@ -1363,6 +1561,10 @@ export interface TaskWorkspaceServiceShape {
     readonly proposedPlanMarkdown: string;
     readonly operationKey: string;
   }) => Effect.Effect<TaskImplementationAmendmentAck, TaskWorkspaceError>;
+  readonly startImplementationCheck: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly attemptId: string;
+  }) => Effect.Effect<void, TaskWorkspaceError>;
   readonly processImplementationCheck: (input: {
     readonly taskId: TaskWorkspaceId;
     readonly attemptId: string;
@@ -3774,18 +3976,27 @@ export const make = Effect.gen(function* () {
             throw new Error("The implementation task revision is stale.");
           if (task.build.amendmentGateId)
             throw new Error("Implementation is paused at an amendment gate.");
-          if (hasWaitingImplementationCheckpoint(task))
-            throw new Error("Implementation is paused at a waiting checkpoint.");
           const check = checkForBuild(task, command.checkId);
           if (check.kind !== "automated" || !check.command)
             throw new Error(`Check '${check.id}' is not an approved automated command.`);
+          const waitingCheckpoints = waitingImplementationCheckpoints(task);
+          const isRecoveryRerun = isRecoverableCheckRerun(task.build, check);
+          if (
+            waitingCheckpoints.length > 0 &&
+            !waitingCheckpoints.some((checkpoint) =>
+              checkpointAllowsRecoveryCheckRun(task, checkpoint, check),
+            )
+          ) {
+            throw new Error(
+              "Implementation is paused at a waiting checkpoint; only its failed check can be rerun.",
+            );
+          }
           const plan = latestPlanRevision(task);
           const repository = task.workspace.repositories[0];
           if (!plan || !repository?.worktreePath)
             throw new Error("The approved Plan or canonical worktree is unavailable.");
           const phase = phaseForBuild(task, check.phaseId);
           const item = check.workItemId === null ? null : workItemForBuild(phase, check.workItemId);
-          const isRecoveryRerun = isRecoverableCheckRerun(task.build, check);
           if (!isRecoveryRerun) {
             requirePredecessorPhasesComplete(task.build, phase.id);
             if (phase.status !== "running" || task.build.activePhaseId !== phase.id) {
@@ -3884,8 +4095,6 @@ export const make = Effect.gen(function* () {
             throw new Error("The implementation task revision is stale.");
           if (task.build.amendmentGateId)
             throw new Error("An implementation amendment is already open.");
-          if (hasWaitingImplementationCheckpoint(task))
-            throw new Error("Implementation is paused at a waiting checkpoint.");
           const plan = latestPlanRevision(task);
           const phase = phaseForBuild(task, command.phaseId);
           const item = workItemForBuild(phase, command.workItemId);
@@ -3895,6 +4104,17 @@ export const make = Effect.gen(function* () {
             const check = checkForBuild(task, command.triggeringCheckId);
             if (check.phaseId !== phase.id || check.workItemId !== item.id)
               throw new Error("The amendment check does not belong to the triggering work item.");
+          }
+          const waitingCheckpoints = waitingImplementationCheckpoints(task);
+          if (
+            waitingCheckpoints.length > 0 &&
+            !waitingCheckpoints.some((checkpoint) =>
+              hasFailedCheckpointTrigger(task, checkpoint, command.triggeringCheckId),
+            )
+          ) {
+            throw new Error(
+              "Implementation is paused at a waiting checkpoint; only a failed check recovery amendment can be proposed.",
+            );
           }
           const amendmentId = `amendment-${task.build.amendments.length + 1}`;
           const amendment = {
@@ -4201,6 +4421,9 @@ export const make = Effect.gen(function* () {
         }
         case "task.build.check.record-manual": {
           requireStage(task, "build");
+          if (hasWaitingImplementationCheckpoint(task)) {
+            throw new Error("Build is paused at a waiting checkpoint.");
+          }
           if (task.build.amendmentGateId) {
             throw new Error("Build is paused at an amendment gate.");
           }
@@ -4349,17 +4572,24 @@ export const make = Effect.gen(function* () {
           )!;
           const phase = phaseForBuild(observedTask, checkpoint.phaseId);
           requirePredecessorPhasesComplete(observedBuild, phase.id);
-          if (
-            phase.status !== "completed" ||
-            !phase.workItems.every((item) => item.status === "completed") ||
-            !(command.operationKey
+          const completedPhaseReady =
+            phase.status === "completed" &&
+            phase.workItems.every((item) => item.status === "completed") &&
+            (command.operationKey
               ? requiredChecksPassAtHead(observedBuild, checkpoint.checkIds, observedHead)
-              : requiredChecksPass(observedBuild, checkpoint.checkIds))
-          ) {
+              : requiredChecksPass(observedBuild, checkpoint.checkIds));
+          const recoveryPhaseReady = isRecoveryCheckpointReady(
+            observedBuild,
+            observedCheckpoint,
+            phase,
+            observedHead,
+          );
+          if (!completedPhaseReady && !recoveryPhaseReady) {
             throw new Error(
-              `Checkpoint '${checkpoint.id}' can continue only after its phase completes successfully at the current commit.`,
+              `Checkpoint '${checkpoint.id}' can continue only after its required checks pass at the current commit.`,
             );
           }
+          const shouldActivatePhase = recoveryPhaseReady && !completedPhaseReady;
           if (
             command.operationKey === undefined &&
             command.threadId !== undefined &&
@@ -4381,7 +4611,9 @@ export const make = Effect.gen(function* () {
               ),
               continuationSessionIds: [...observedBuild.continuationSessionIds, sessionId],
             };
-            build = startNextPhase(build, phase.id, command.createdAt);
+            build = shouldActivatePhase
+              ? resumePhaseForContinuation(build, phase.id, command.createdAt)
+              : startNextPhase(build, phase.id, command.createdAt);
             return yield* append(command, {
               ...task,
               sessions: [
@@ -4413,7 +4645,8 @@ export const make = Effect.gen(function* () {
             ...(command.threadId !== undefined ? { threadId: command.threadId } : {}),
             operationKey: command.operationKey ?? `${task.id}:checkpoint:${checkpoint.id}:continue`,
             reason: "checkpoint",
-            activatePhase: false,
+            activatePhase: shouldActivatePhase,
+            resumePhaseImmediately: shouldActivatePhase,
           });
           return yield* append(command, continuation.task, {
             ...(command.operationKey
@@ -5530,10 +5763,24 @@ export const make = Effect.gen(function* () {
         brief: task.intake.brief,
         planRevisionId: plan.id,
         planMarkdown: plan.markdown,
-        phases: task.build.phases,
-        checks: task.build.checks.map(boundCheckForImplementationContext),
-        checkpoints: task.build.checkpoints,
-        amendments: task.build.amendments.map(boundAmendmentForImplementationContext),
+        phases: boundedCollection(task.build.phases, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
+          boundPhaseForImplementationContext,
+        ),
+        checks: boundedCollection(task.build.checks, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
+          boundCheckForImplementationContext,
+        ),
+        checkpoints: boundedCollection(
+          task.build.checkpoints,
+          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
+        ).map(boundCheckpointForImplementationContext),
+        amendments: boundedCollection(
+          task.build.amendments,
+          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
+        ).map(boundAmendmentForImplementationContext),
+        checkAttempts: boundedCollection(
+          task.build.checkAttempts,
+          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
+        ).map(boundAttemptForImplementationContext),
         currentCommitSha,
       } satisfies TaskImplementationContextResult;
     });
@@ -5584,6 +5831,38 @@ export const make = Effect.gen(function* () {
         };
       }),
     );
+  const startImplementationCheck: TaskWorkspaceServiceShape["startImplementationCheck"] = (input) =>
+    Effect.gen(function* () {
+      const task = taskById.get(input.taskId);
+      if (!task) throw new TaskWorkspaceError({ message: `Task '${input.taskId}' was not found.` });
+      const attempt = task.build.checkAttempts.find(
+        (candidate) => candidate.id === input.attemptId,
+      );
+      if (!attempt || attempt.status !== "pending") return;
+      const newestAttempt = task.build.checkAttempts
+        .toReversed()
+        .find((candidate) => candidate.checkId === attempt.checkId);
+      if (!newestAttempt || newestAttempt.id !== attempt.id) return;
+      const now = yield* serverNow;
+      const build: TaskWorkspace["build"] = {
+        ...task.build,
+        checkAttempts: task.build.checkAttempts.map((candidate) =>
+          candidate.id === attempt.id
+            ? { ...candidate, status: "running" as const, startedAt: now }
+            : candidate,
+        ),
+      };
+      yield* internalAppend(
+        "task.implementation.check.updated",
+        {
+          ...task,
+          build,
+          updatedAt: now,
+        },
+        { occurredAt: now },
+      );
+    });
+
   const processImplementationCheck: TaskWorkspaceServiceShape["processImplementationCheck"] = (
     input,
   ) =>
@@ -5893,6 +6172,7 @@ export const make = Effect.gen(function* () {
     readonly operationKey: string;
     readonly reason: "checkpoint" | "amendment";
     readonly activatePhase: boolean;
+    readonly resumePhaseImmediately?: boolean;
   }) =>
     Effect.gen(function* () {
       const plan = latestPlanRevision(input.task);
@@ -5956,7 +6236,7 @@ export const make = Effect.gen(function* () {
           continuationActivatePhase: input.activatePhase,
         },
       );
-      const build: TaskWorkspace["build"] = {
+      let build: TaskWorkspace["build"] = {
         ...input.task.build,
         checkpoints: input.task.build.checkpoints.map((candidate) =>
           candidate.id === input.checkpoint.id
@@ -5970,6 +6250,9 @@ export const make = Effect.gen(function* () {
             : candidate,
         ),
       };
+      if (input.resumePhaseImmediately) {
+        build = resumePhaseForContinuation(build, phase.id, input.createdAt);
+      }
       return {
         task: {
           ...input.task,
@@ -6030,39 +6313,21 @@ export const make = Effect.gen(function* () {
         : [...task.build.continuationSessionIds, payload.sessionId],
     };
     if (payload.continuationActivatePhase) {
+      const resumedBuild = resumePhaseForContinuation(build, phase.id, now);
       build = {
-        ...build,
-        activePhaseId: phase.id,
-        activeWorkItemId:
-          phase.workItems.find(
-            (item) =>
-              item.status === "pending" ||
-              item.status === "blocked" ||
-              item.status === "invalidated",
-          )?.id ?? null,
-        phases: build.phases.map((candidate) =>
-          candidate.id === phase.id
+        ...resumedBuild,
+        phases: resumedBuild.phases.map((candidate) =>
+          candidate.status === "invalidated"
             ? {
                 ...candidate,
-                status: "running" as const,
-                startedAt: candidate.startedAt ?? now,
+                status: "pending" as const,
                 workItems: candidate.workItems.map((item) =>
                   item.status === "blocked" || item.status === "invalidated"
                     ? { ...item, status: "pending" as const, invalidationReason: null }
                     : item,
                 ),
               }
-            : candidate.status === "invalidated"
-              ? {
-                  ...candidate,
-                  status: "pending" as const,
-                  workItems: candidate.workItems.map((item) =>
-                    item.status === "blocked" || item.status === "invalidated"
-                      ? { ...item, status: "pending" as const, invalidationReason: null }
-                      : item,
-                  ),
-                }
-              : candidate,
+            : candidate,
         ),
       };
     } else {
@@ -7444,6 +7709,7 @@ export const make = Effect.gen(function* () {
     implementationContext,
     implementationProgress,
     implementationCheckRun,
+    startImplementationCheck,
     processImplementationCheck,
     implementationAmendmentPropose,
     implementationComplete,

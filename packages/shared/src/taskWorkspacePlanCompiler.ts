@@ -24,6 +24,9 @@ export type TaskWorkspaceCompiledPlan = BuildProjection & {
   readonly planRevisionId: string;
 };
 
+/** Maximum reviewed Plan size accepted by the strict Guided compiler. */
+export const TASK_WORKSPACE_PLAN_MAX_CHARS = 100_000;
+
 const ID = "[a-z][a-z0-9-]{0,63}";
 const PHASE_HEADER = new RegExp(`^## Phase \\[phase:(${ID})\\] (.+?)\\s*$`, "gm");
 const WORK_HEADER = new RegExp(`^### Work item \\[work:(${ID})\\] (.+?)\\s*$`, "gm");
@@ -139,6 +142,11 @@ export function compileTaskWorkspacePlan(
       ? { markdown: input, planRevisionId }
       : input;
   const { markdown, planRevisionId: resolvedPlanRevisionId } = revisionOf(resolvedInput);
+  if (markdown.length > TASK_WORKSPACE_PLAN_MAX_CHARS) {
+    fail(
+      `Plan Markdown is too large (${markdown.length} chars; maximum is ${TASK_WORKSPACE_PLAN_MAX_CHARS}).`,
+    );
+  }
   const tokens = headings(markdown);
   const exactPhaseHeading = new RegExp(`^Phase \\[phase:(${ID})\\] (.+?)$`);
   const exactWorkHeading = new RegExp(`^Work item \\[work:(${ID})\\] (.+?)$`);

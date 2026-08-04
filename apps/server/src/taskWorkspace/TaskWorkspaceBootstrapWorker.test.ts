@@ -451,6 +451,7 @@ describe("TaskWorkspaceBootstrapWorker", () => {
         observedStatus: "fail",
         startingCommitSha: "starting-sha",
       });
+      expect(settled.build.checkAttempts.at(-1)?.startedAt).not.toBeNull();
       expect(settled.build.checks.find((check) => check.id === "check:typecheck")?.status).toBe(
         "fail",
       );

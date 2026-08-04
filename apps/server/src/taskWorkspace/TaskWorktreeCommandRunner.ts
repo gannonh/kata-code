@@ -134,14 +134,13 @@ export function macSandboxProfile(worktreePath: string): string {
     "/usr",
     "/bin",
     "/sbin",
-    "/private/etc",
     "/private/var/db/timezone",
     "/opt/homebrew",
     "/usr/local",
+    // Vite+ resolves `vp` through rotating version symlinks under this
+    // directory. Keep that toolchain available without exposing other user
+    // package-manager and credential directories to checks.
     NodePath.join(home, ".vite-plus"),
-    NodePath.join(home, ".bun"),
-    NodePath.join(home, ".nvm"),
-    NodePath.join(home, "Library", "pnpm"),
   ]);
   return [
     "(version 1)",
@@ -158,6 +157,20 @@ export function macSandboxProfile(worktreePath: string): string {
       .map((path) => `(subpath ${sandboxString(path)}) (literal ${sandboxString(path)})`)
       .join(" ")})`,
   ].join("\n");
+}
+
+function cleanupTaskCheckTempPath(
+  worktreePath: string,
+): Effect.Effect<void, TaskWorktreeCommandError> {
+  return Effect.tryPromise({
+    try: () =>
+      NodeFs.promises.rm(taskCheckTempPath(worktreePath), { recursive: true, force: true }),
+    catch: (cause) =>
+      new TaskWorktreeCommandError({
+        message: "Unable to clean the task check temp directory.",
+        cause,
+      }),
+  });
 }
 
 function linuxBwrapArgs(worktreePath: string, argv: ReadonlyArray<string>): ReadonlyArray<string> {
@@ -272,9 +285,10 @@ const make = Effect.gen(function* () {
           message: "The approved check command is empty.",
         });
       }
-      const tempPath = taskCheckTempPath(input.worktreePath);
+      yield* cleanupTaskCheckTempPath(input.worktreePath);
       yield* Effect.tryPromise({
-        try: () => NodeFs.promises.mkdir(tempPath, { recursive: true }),
+        try: () =>
+          NodeFs.promises.mkdir(taskCheckTempPath(input.worktreePath), { recursive: true }),
         catch: (cause) =>
           new TaskWorktreeCommandError({
             message: "Unable to create the task check temp directory.",
@@ -287,6 +301,7 @@ const make = Effect.gen(function* () {
         platform: hostPlatform,
       });
       if (!sandboxed) {
+        yield* cleanupTaskCheckTempPath(input.worktreePath);
         return {
           status: "indeterminate" as const,
           output: "No supported OS-enforced task check sandbox is available on this host.",
@@ -314,7 +329,21 @@ const make = Effect.gen(function* () {
             (cause) =>
               new TaskWorktreeCommandError({ message: "Task check execution failed.", cause }),
           ),
+          Effect.catch((error) =>
+            cleanupTaskCheckTempPath(input.worktreePath).pipe(
+              Effect.flatMap(() => Effect.fail(error)),
+              Effect.catch((cleanupError) =>
+                Effect.fail(
+                  new TaskWorktreeCommandError({
+                    message: "Task check execution failed and cleanup also failed.",
+                    cause: { error, cleanupError },
+                  }),
+                ),
+              ),
+            ),
+          ),
         );
+      yield* cleanupTaskCheckTempPath(input.worktreePath);
       const afterHead = yield* git(input.worktreePath, ["rev-parse", "HEAD"]);
       const afterStatus = yield* git(input.worktreePath, ["status", "--porcelain=v2"]);
       const startingCommitSha = beforeHead.stdout.trim();

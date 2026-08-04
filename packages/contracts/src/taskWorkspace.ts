@@ -1566,6 +1566,9 @@ export const TaskImplementationContextResult = Schema.Struct({
   checks: Schema.Array(TaskWorkspaceBuildCheck),
   checkpoints: Schema.Array(TaskWorkspaceBuildCheckpoint),
   amendments: Schema.Array(TaskWorkspaceAmendment),
+  checkAttempts: Schema.Array(TaskWorkspaceCheckAttempt).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   currentCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),

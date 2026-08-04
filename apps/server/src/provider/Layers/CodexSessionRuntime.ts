@@ -333,6 +333,7 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
 function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
+  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly model: string | undefined;
   readonly developerInstructions?: string;
   readonly serviceTier: CodexServiceTier | undefined;
@@ -341,7 +342,7 @@ function buildThreadStartParams(input: {
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
-    sandbox: config.sandbox,
+    ...(input.taskExecutionProfile === "task-worktree-write" ? {} : { sandbox: config.sandbox }),
     ...(input.model ? { model: input.model } : {}),
     ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
@@ -352,9 +353,9 @@ function runtimeModeToTurnSandboxPolicy(
   input: RuntimeMode,
   taskStage: boolean,
   taskExecutionProfile?: ProviderTaskExecutionProfile,
-): EffectCodexSchema.V2TurnStartParams__SandboxPolicy {
+): EffectCodexSchema.V2TurnStartParams__SandboxPolicy | undefined {
   if (taskExecutionProfile === "task-worktree-write") {
-    return { networkAccess: false, type: "workspaceWrite" };
+    return undefined;
   }
   if (taskStage) {
     return {
@@ -437,6 +438,11 @@ export function buildTurnStartParams(input: {
   }
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const sandboxPolicy = runtimeModeToTurnSandboxPolicy(
+    input.runtimeMode,
+    input.taskStage === true,
+    input.taskExecutionProfile,
+  );
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
@@ -448,11 +454,7 @@ export function buildTurnStartParams(input: {
     threadId: input.threadId,
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
-    sandboxPolicy: runtimeModeToTurnSandboxPolicy(
-      input.runtimeMode,
-      input.taskStage === true,
-      input.taskExecutionProfile,
-    ),
+    ...(sandboxPolicy ? { sandboxPolicy } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
@@ -507,6 +509,7 @@ export const openCodexThread = (input: {
   readonly client: CodexThreadOpenClient;
   readonly threadId: ThreadId;
   readonly runtimeMode: RuntimeMode;
+  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly cwd: string;
   readonly requestedModel: string | undefined;
   readonly developerInstructions?: string;
@@ -517,6 +520,7 @@ export const openCodexThread = (input: {
   const startParams = buildThreadStartParams({
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
+    ...(input.taskExecutionProfile ? { taskExecutionProfile: input.taskExecutionProfile } : {}),
     model: input.requestedModel,
     ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     serviceTier: input.serviceTier,
@@ -1303,6 +1307,9 @@ export const makeCodexSessionRuntime = (
         client,
         threadId: options.threadId,
         runtimeMode: options.runtimeMode,
+        ...(options.taskExecutionProfile
+          ? { taskExecutionProfile: options.taskExecutionProfile }
+          : {}),
         cwd: options.cwd,
         requestedModel,
         ...(options.developerInstructions
@@ -1387,6 +1394,9 @@ export const makeCodexSessionRuntime = (
               ? { developerInstructions: input.developerInstructions }
               : {}),
             ...(input.taskStage === true ? { taskStage: true } : {}),
+            ...(options.taskExecutionProfile
+              ? { taskExecutionProfile: options.taskExecutionProfile }
+              : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);

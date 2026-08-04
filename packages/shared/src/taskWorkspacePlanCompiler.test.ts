@@ -55,6 +55,11 @@ describe("task workspace Plan compiler", () => {
     expect(() => compileTaskWorkspacePlan(invalid)).toThrow("Invalid implementation Plan");
   });
 
+  it("rejects an oversized reviewed Plan before parsing", () => {
+    const oversized = `${"x".repeat(100_001)}\n${plan}`;
+    expect(() => compileTaskWorkspacePlan(oversized)).toThrow("Plan Markdown is too large (");
+  });
+
   it("requires Checkpoint in the phase preamble", () => {
     expect(() =>
       compileTaskWorkspacePlan(

@@ -116,11 +116,23 @@ function checkpointCanContinue(
   const checks = checkpoint.checkIds
     .map((checkId) => task.build.checks.find((check) => check.id === checkId))
     .filter((check): check is NonNullable<typeof check> => check !== undefined);
+  if (
+    checkpoint.status !== "waiting" ||
+    !phase ||
+    !checks.every((check) => check.status === "pass")
+  ) {
+    return false;
+  }
+  if (phase.status === "completed") {
+    return phase.workItems.every((item) => item.status === "completed");
+  }
   return (
-    checkpoint.status === "waiting" &&
-    phase?.status === "completed" &&
-    phase.workItems.every((item) => item.status === "completed") &&
-    checks.every((check) => check.status === "pass")
+    phase.status === "blocked" ||
+    phase.status === "pending" ||
+    phase.status === "running" ||
+    phase.workItems.some(
+      (item) => item.status === "blocked" || item.status === "pending" || item.status === "running",
+    )
   );
 }
 
@@ -132,9 +144,40 @@ function checkpointDisabledReason(
   if (checkpoint.status !== "waiting") return "Checkpoint already continued.";
   if (task.build.amendmentGateId) return "Approve the pending amendment first.";
   if (!checkpointCanContinue(task, checkpoint))
-    return "Complete the phase and required checks first.";
+    return "Pass the checkpoint checks and complete finished phases first.";
   if (isBusy) return "Another task command is running.";
   return null;
+}
+
+function checkCanRecover(
+  task: TaskWorkspace,
+  check: TaskWorkspace["build"]["checks"][number],
+): boolean {
+  if (
+    check.status === "fail" ||
+    check.status === "blocked" ||
+    check.status === "stale" ||
+    check.status === "indeterminate"
+  ) {
+    return true;
+  }
+  const latestAttempt = task.build.checkAttempts
+    .toReversed()
+    .find((attempt) => attempt.checkId === check.id);
+  return (
+    latestAttempt?.status === "fail" ||
+    latestAttempt?.status === "stale" ||
+    latestAttempt?.status === "indeterminate"
+  );
+}
+
+function waitingCheckpointAllowsCheckRerun(
+  task: TaskWorkspace,
+  check: TaskWorkspace["build"]["checks"][number],
+): boolean {
+  return task.build.checkpoints.some(
+    (checkpoint) => checkpoint.status === "waiting" && checkpoint.checkIds.includes(check.id),
+  );
 }
 
 function automatedCheckDisabledReason(
@@ -150,18 +193,18 @@ function automatedCheckDisabledReason(
   if (!plan || task.build.currentPlanRevisionId !== plan.id)
     return "The approved implementation Plan is unavailable.";
   if (!repository?.worktreePath) return "The canonical task worktree is unavailable.";
-  const latestAttempt = task.build.checkAttempts
-    .toReversed()
-    .find((attempt) => attempt.checkId === check.id);
-  const isRecoveryRerun =
-    check.status === "fail" ||
-    check.status === "blocked" ||
-    check.status === "stale" ||
-    check.status === "indeterminate" ||
-    latestAttempt?.status === "fail" ||
-    latestAttempt?.status === "stale" ||
-    latestAttempt?.status === "indeterminate";
-  if (isRecoveryRerun) return null;
+  const isRecoveryRerun = checkCanRecover(task, check);
+  if (isRecoveryRerun) {
+    if (task.build.checkpoints.some((checkpoint) => checkpoint.status === "waiting")) {
+      return waitingCheckpointAllowsCheckRerun(task, check)
+        ? null
+        : "Implementation is paused; rerun the failed checkpoint check first.";
+    }
+    return null;
+  }
+  if (task.build.checkpoints.some((checkpoint) => checkpoint.status === "waiting")) {
+    return "Implementation is paused at a waiting checkpoint.";
+  }
   const phase = phaseById(task, check.phaseId);
   const item = workItemById(task, check.workItemId);
   if (phase?.status !== "running" || task.build.activePhaseId !== phase.id)
@@ -182,6 +225,9 @@ function manualCheckDisabledReason(
   const phase = phaseById(task, check.phaseId);
   const item = workItemById(task, check.workItemId);
   if (task.build.amendmentGateId) return "Approve the pending amendment first.";
+  if (task.build.checkpoints.some((checkpoint) => checkpoint.status === "waiting")) {
+    return "Implementation is paused at a waiting checkpoint.";
+  }
   if (isBusy) return "Another task command is running.";
   if (!note.trim()) return "Add a note before recording a manual result.";
   if (phase?.status !== "running") return "The owning phase must be running.";

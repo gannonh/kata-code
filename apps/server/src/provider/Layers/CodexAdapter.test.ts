@@ -326,10 +326,43 @@ validationLayer("CodexAdapterLive validation", (it) => {
       );
       assert.ok(excludeArg);
       assert.match(excludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
+      assert.match(excludeArg, /CODEX_HOME/u);
       assert.match(excludeArg, /\*TOKEN\*/u);
       assert.match(excludeArg, /\*SECRET\*/u);
       assert.match(excludeArg, /\*KEY\*/u);
       yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
+
+      validationRuntimeFactory.factory.mockClear();
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-task-shell-policy-without-mcp"),
+        cwd: "/tmp/task-worktree",
+        runtimeMode: "auto-accept-edits",
+        taskExecutionProfile: "task-worktree-write",
+      });
+      const taskRuntimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      assert.ok(taskRuntimeOptions);
+      assert.equal(taskRuntimeOptions.environment?.HOME, "/tmp/task-worktree");
+      assert.ok(taskRuntimeOptions.appServerArgs?.includes("--strict-config"));
+      const permissionArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("permissions.katacode_task_workspace.filesystem="),
+      );
+      assert.ok(permissionArg);
+      assert.match(permissionArg, /":minimal"="read"/u);
+      assert.match(permissionArg, /\.git\/\*\*.*="deny"/u);
+      assert.doesNotMatch(permissionArg, /":root"="read"/u);
+      assert.ok(
+        taskRuntimeOptions.appServerArgs?.includes(`default_permissions="katacode_task_workspace"`),
+      );
+      const shellPolicyIndex = taskRuntimeOptions.appServerArgs?.findIndex(
+        (argument) => argument === 'shell_environment_policy.inherit="core"',
+      );
+      assert.ok(shellPolicyIndex !== undefined && shellPolicyIndex > 0);
+      const taskExcludeArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("shell_environment_policy.exclude="),
+      );
+      assert.ok(taskExcludeArg);
+      assert.match(taskExcludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
     }),
   );
 });

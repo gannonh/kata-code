@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - the runner executes real git and node processes in a fixture worktree.
 import { execFile } from "node:child_process";
+import * as NodeFileSystem from "node:fs";
 import * as NodeFs from "node:fs/promises";
 import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
@@ -9,7 +10,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { expect } from "vite-plus/test";
+import { expect, vi } from "vite-plus/test";
 
 import * as ProcessRunner from "../processRunner.ts";
 import {
@@ -149,6 +150,56 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
     }),
   );
 
+  it.effect("ignores task-local temp files after cleaning TMPDIR before status observation", () =>
+    Effect.gen(function* () {
+      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
+      const runner = yield* TaskWorktreeCommandRunner;
+      const result = yield* runner.run({
+        worktreePath,
+        expectedBranch,
+        expectedBaseCommitSha,
+        command:
+          "node -e \"require('node:fs').writeFileSync(require('node:path').join(process.env.TMPDIR, 'scratch.txt'), 'x')\"",
+        timeoutMs: 15_000,
+      });
+      expect(result.status).toBe("pass");
+      expect(result.startingStatus).toBe("");
+      expect(result.endingStatus).toBe("");
+      const tempExists = yield* Effect.tryPromise(() =>
+        NodeFs.access(taskCheckTempPath(worktreePath)).then(
+          () => true,
+          () => false,
+        ),
+      );
+      expect(tempExists).toBe(false);
+    }),
+  );
+
+  it.effect("surfaces task temp cleanup failures as handled command errors", () =>
+    Effect.gen(function* () {
+      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
+      const runner = yield* TaskWorktreeCommandRunner;
+      const rmSpy = vi
+        .spyOn(NodeFileSystem.promises, "rm")
+        .mockRejectedValueOnce(new Error("rm denied"));
+      const result = yield* runner
+        .run({
+          worktreePath,
+          expectedBranch,
+          expectedBaseCommitSha,
+          command: "pwd",
+          timeoutMs: 15_000,
+        })
+        .pipe(Effect.exit);
+      expect(result._tag).toBe("Failure");
+      expect(rmSpy).toHaveBeenCalledWith(taskCheckTempPath(worktreePath), {
+        recursive: true,
+        force: true,
+      });
+      rmSpy.mockRestore();
+    }),
+  );
+
   it.effect("rejects a non-canonical branch before running any command", () =>
     Effect.gen(function* () {
       const { worktreePath, expectedBaseCommitSha } = yield* setup;
@@ -219,6 +270,22 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
     expect(writeRule).not.toContain(NodeOs.tmpdir());
     expect(writeRule).not.toContain("/private/tmp");
     expect(writeRule).not.toContain("/tmp");
+  });
+
+  it("limits macOS sandbox reads to runtime/system paths and the task worktree", () => {
+    const worktreePath = "/Users/test/worktrees/katacode-task-1";
+    const profile = macSandboxProfile(worktreePath);
+
+    expect(profile).toContain(worktreePath);
+    expect(profile).toContain(".vite-plus");
+    expect(profile).not.toContain("/private/etc");
+    expect(profile).not.toContain("/private/tmp");
+    expect(profile).not.toContain("/tmp");
+    expect(profile).not.toContain(".nvm");
+    expect(profile).not.toContain(".bun");
+    expect(profile).not.toContain("Library/pnpm");
+    expect(profile).not.toContain(".ssh");
+    expect(profile).not.toContain(".config");
   });
 
   it("uses a task-local temp root for approved check subprocesses", () => {

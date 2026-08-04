@@ -100,7 +100,36 @@ const makeWorker = Effect.gen(function* () {
           .pipe(Effect.catch(() => Effect.void));
         return;
       }
+      // A running attempt paired with a pending outbox row means the worker
+      // lost its durable outbox transition. Treat it as indeterminate rather
+      // than spawning the approved command a second time.
+      if (settledAttempt.status === "running") {
+        yield* taskWorkspaces
+          .processImplementationCheck({
+            taskId: entry.taskId,
+            attemptId: payload.attemptId,
+            status: "indeterminate",
+            output: "The running check could not be reconciled before execution.",
+            exitCode: null,
+            endingCommitSha: null,
+          })
+          .pipe(Effect.catch(() => Effect.void));
+        yield* store
+          .upsertOutbox({
+            ...entry,
+            status: "completed",
+            attemptCount: entry.attemptCount + 1,
+            updatedAt: now,
+            completedAt: now,
+          })
+          .pipe(Effect.catch(() => Effect.void));
+        return;
+      }
 
+      yield* taskWorkspaces.startImplementationCheck({
+        taskId: entry.taskId,
+        attemptId: payload.attemptId,
+      });
       const repository = settledTask.workspace.repositories[0];
       const result = yield* repository?.baseCommitSha
         ? commandRunner

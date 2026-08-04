@@ -128,6 +128,21 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  effectIt.effect(
+    "requires task implementation writes to stay in the worktree and off host temp",
+    () =>
+      Effect.gen(function* () {
+        const params = yield* buildTurnStartParams({
+          threadId: "provider-thread-task-implementation",
+          runtimeMode: "auto-accept-edits",
+          prompt: "Implement the approved Plan",
+          taskExecutionProfile: "task-worktree-write",
+        });
+
+        assert.equal(params.sandboxPolicy, undefined);
+      }),
+  );
+
   it("includes default collaboration mode and image attachments", () => {
     const params = Effect.runSync(
       buildTurnStartParams({

@@ -40,6 +40,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { MCP_BEARER_TOKEN_ENV_VAR, MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { getModelSelectionStringOptionValue } from "@kata-sh/code-shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 
 import {
@@ -72,6 +73,7 @@ const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 const PROVIDER = ProviderDriverKind.make("codex");
 const CODEX_SHELL_ENV_EXCLUDE_PATTERNS = [
   MCP_BEARER_TOKEN_ENV_VAR,
+  "CODEX_HOME",
   "*MCP*",
   "*TOKEN*",
   "*SECRET*",
@@ -80,6 +82,60 @@ const CODEX_SHELL_ENV_EXCLUDE_PATTERNS = [
   "*AUTH*",
   "*CREDENTIAL*",
 ] as const;
+const CODEX_TASK_PERMISSION_PROFILE = "katacode_task_workspace";
+const CODEX_TASK_DENIED_HOME_PATHS = [
+  "~/.codex",
+  "~/.ssh",
+  "~/.gnupg",
+  "~/.aws",
+  "~/.azure",
+  "~/.kube",
+  "~/.config",
+  "~/.katacode",
+  "~/.kata",
+  "~/.netrc",
+  "~/.npmrc",
+  "~/.pypirc",
+  "~/Library/Keychains",
+  "~/Library/Application Support",
+] as const;
+
+function appendDeniedFilesystemPath(entries: Map<string, string>, path: string): void {
+  const normalized = path.endsWith("/") ? path.slice(0, -1) : path;
+  if (normalized.length === 0) return;
+  entries.set(normalized, "deny");
+  entries.set(`${normalized}/**`, "deny");
+}
+
+function codexTaskPermissionProfileArgs(
+  cwd: string,
+  configuredHomePath?: string,
+): ReadonlyArray<string> {
+  const entries = new Map<string, string>([[":minimal", "read"]]);
+  const parent = cwd.slice(0, cwd.lastIndexOf("/"));
+  if (parent.length > 0) appendDeniedFilesystemPath(entries, parent);
+  entries.set(cwd, "write");
+  for (const metadataPath of [".git", ".agents", ".codex"]) {
+    appendDeniedFilesystemPath(entries, `${cwd}/${metadataPath}`);
+  }
+  for (const path of CODEX_TASK_DENIED_HOME_PATHS) {
+    appendDeniedFilesystemPath(entries, expandHomePath(path));
+  }
+  if (configuredHomePath) {
+    appendDeniedFilesystemPath(entries, expandHomePath(configuredHomePath));
+  }
+  const filesystem = [...entries]
+    .map(([path, access]) => `${JSON.stringify(path)}=${JSON.stringify(access)}`)
+    .join(",");
+  return [
+    "--strict-config",
+    "-c",
+    `permissions.${CODEX_TASK_PERMISSION_PROFILE}.filesystem={${filesystem}}`,
+    "-c",
+    `default_permissions=${JSON.stringify(CODEX_TASK_PERMISSION_PROFILE)}`,
+  ];
+}
+
 const CODEX_TASK_SHELL_ENV_POLICY_ARGS = [
   "-c",
   'shell_environment_policy.inherit="core"',
@@ -1416,12 +1472,35 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const taskEnvironment =
+          input.taskExecutionProfile === "task-worktree-write" && input.cwd
+            ? {
+                ...(options?.environment ?? process.env),
+                HOME: input.cwd,
+              }
+            : undefined;
+        const taskPermissionProfileArgs =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? codexTaskPermissionProfileArgs(input.cwd ?? process.cwd(), codexConfig.homePath)
+            : [];
+        const taskShellEnvironmentPolicyArgs =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? CODEX_TASK_SHELL_ENV_POLICY_ARGS
+            : [];
+        const taskExecutionAppServerArgs = [
+          ...taskPermissionProfileArgs,
+          ...taskShellEnvironmentPolicyArgs,
+        ];
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
-          ...(options?.environment ? { environment: options.environment } : {}),
+          ...(taskEnvironment
+            ? { environment: taskEnvironment }
+            : options?.environment
+              ? { environment: options.environment }
+              : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
@@ -1438,17 +1517,20 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { taskExecutionProfile: input.taskExecutionProfile }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(!mcpSession && taskExecutionAppServerArgs.length > 0
+            ? { appServerArgs: taskExecutionAppServerArgs }
+            : {}),
           ...(mcpSession
             ? {
                 environment: {
-                  ...(options?.environment ?? process.env),
+                  ...(taskEnvironment ?? options?.environment ?? process.env),
                   [MCP_BEARER_TOKEN_ENV_VAR]: mcpSession.authorizationHeader.replace(
                     /^Bearer\s+/,
                     "",
                   ),
                 },
                 appServerArgs: [
-                  ...CODEX_TASK_SHELL_ENV_POLICY_ARGS,
+                  ...taskExecutionAppServerArgs,
                   "-c",
                   `mcp_servers.${MCP_SERVER_NAME}.url=${mcpSession.endpoint}`,
                   "-c",
@@ -1753,6 +1835,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         profile: "task-worktree-write",
         trustedTaskInstructions: true,
         worktreeOnlyWrites: true,
+        // task-worktree-write starts Codex with a strict named permission
+        // profile that denies the provider home and standard user credential
+        // stores, then filters credential-bearing environment variables.
         credentialIsolation: true,
         deterministicResume: true,
         boundedTurns: true,

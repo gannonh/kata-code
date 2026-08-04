@@ -1076,16 +1076,71 @@ describe("TaskWorkspaceView", () => {
     expect(runCommands[0]!.operationKey).not.toBe(runCommands[1]!.operationKey);
     await expect
       .element(page.getByTestId("guided-check-record-disabled-reason-check:review"))
-      .toHaveTextContent("Add a note before recording a manual result.");
+      .toHaveTextContent("Implementation is paused at a waiting checkpoint.");
     await expect
       .element(page.getByTestId("guided-checkpoint-observed-checkpoint-1"))
       .toHaveTextContent("Observed aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     await expect
       .element(page.getByTestId("guided-checkpoint-disabled-reason-checkpoint-1"))
-      .toHaveTextContent("Complete the phase and required checks first.");
+      .toHaveTextContent("Pass the checkpoint checks and complete finished phases first.");
     await expect
       .element(page.getByTestId("guided-complete-disabled-reason"))
       .toHaveTextContent("Continue the waiting checkpoint first.");
+  });
+
+  it("enables checkpoint continuation after failed-check recovery passes", async () => {
+    const commitSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    await renderTask(
+      guidedTask({
+        build: {
+          ...guidedTask().build,
+          activePhaseId: "phase:foundation",
+          activeWorkItemId: null,
+          phases: [
+            {
+              ...guidedTask().build.phases[0]!,
+              status: "running",
+              checkpointPolicy: "on-failure",
+              workItems: [
+                {
+                  ...guidedTask().build.phases[0]!.workItems[0]!,
+                  status: "pending",
+                  invalidationReason: null,
+                },
+              ],
+            },
+          ],
+          checks: guidedTask().build.checks.map((check) => ({
+            ...check,
+            status: "pass" as const,
+            commitSha,
+          })),
+          checkpoints: [
+            {
+              id: "checkpoint-1",
+              phaseId: "phase:foundation",
+              reason: "A required Build check failed.",
+              status: "waiting",
+              checkIds: ["check:typecheck"],
+              continuationSessionId: null,
+              contextManifestId: null,
+              observedCommitSha: commitSha,
+              createdAt: "2026-07-28T17:12:00.000Z",
+              continuedAt: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(page.getByTestId("guided-checkpoint-disabled-reason-checkpoint-1").query()).toBeNull();
+    await page.getByTestId("guided-checkpoint-continue-checkpoint-1").click();
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.build.checkpoint.continue",
+      checkpointId: "checkpoint-1",
+      expectedTaskRevision: expect.any(Number),
+      operationKey: expect.any(String),
+    });
   });
 
   it("dispatches server-owned checkpoint continuation without raw manifest controls", async () => {
