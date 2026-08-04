@@ -62,8 +62,33 @@ it.effect("decodes Slice 2 workflow and implementation contracts additively", ()
       status: "completed",
       summary: "Done",
     });
+    const checkpointContinue = yield* decodeCommand({
+      type: "task.build.checkpoint.continue",
+      commandId: "command-checkpoint-continue",
+      taskId: "task-1",
+      createdAt: "2026-08-03T17:00:02.000Z",
+      checkpointId: "checkpoint-1",
+      expectedTaskRevision: 6,
+      operationKey: "checkpoint-continue-1",
+    });
+    const amendmentRequestChanges = yield* decodeCommand({
+      type: "task.amendment.request-changes",
+      commandId: "command-amendment-changes",
+      taskId: "task-1",
+      createdAt: "2026-08-03T17:00:03.000Z",
+      amendmentId: "amendment-1",
+      feedback: "Keep the original API.",
+      expectedTaskRevision: 7,
+      operationKey: "amendment-changes-1",
+    });
     assert.strictEqual(upgrade.type, "task.workflow.upgrade");
     assert.strictEqual(progress.type, "task.implementation.progress");
+    assert.strictEqual(checkpointContinue.type, "task.build.checkpoint.continue");
+    if (checkpointContinue.type !== "task.build.checkpoint.continue") {
+      return assert.fail("Expected task.build.checkpoint.continue command");
+    }
+    assert.strictEqual(checkpointContinue.contextManifestId, undefined);
+    assert.strictEqual(amendmentRequestChanges.type, "task.amendment.request-changes");
 
     const amendment = yield* decodeTask(
       slice1Task({
@@ -141,6 +166,19 @@ it.effect("decodes Slice 4 Build controls and defaults legacy Build snapshots", 
             },
           ],
           resultingCommitSha: null,
+          checkpoints: [
+            {
+              id: "checkpoint-1",
+              phaseId: "phase-1",
+              reason: "Legacy checkpoint",
+              status: "waiting",
+              checkIds: [],
+              continuationSessionId: null,
+              contextManifestId: null,
+              createdAt: "2026-07-30T17:00:02.000Z",
+              continuedAt: null,
+            },
+          ],
         },
       }),
     });
@@ -150,7 +188,7 @@ it.effect("decodes Slice 4 Build controls and defaults legacy Build snapshots", 
     assert.deepStrictEqual([...phase.checkIds], []);
     assert.deepStrictEqual([...phase.workItems[0]!.dependsOn], []);
     assert.strictEqual(event.task.build.activePhaseId, null);
-    assert.deepStrictEqual([...event.task.build.checkpoints], []);
+    assert.strictEqual(event.task.build.checkpoints[0]?.observedCommitSha, null);
     assert.deepStrictEqual([...event.task.build.continuationSessionIds], []);
   }),
 );

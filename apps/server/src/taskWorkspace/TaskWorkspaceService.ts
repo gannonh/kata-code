@@ -153,6 +153,8 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
     case "task.implementation.check.run":
     case "task.implementation.amendment.propose":
     case "task.implementation.complete":
+    case "task.build.checkpoint.continue":
+    case "task.amendment.request-changes":
       return command.operationKey ?? null;
     default:
       return null;
@@ -991,6 +993,7 @@ function appendCheckpoint(
   phase: TaskWorkspaceBuildPhase,
   now: string,
   reasonOverride?: string,
+  observedCommitSha: string | null = null,
 ): TaskWorkspace["build"] {
   if (
     build.checkpoints.some(
@@ -1007,6 +1010,7 @@ function appendCheckpoint(
     checkIds: phase.checkIds,
     continuationSessionId: null,
     contextManifestId: null,
+    observedCommitSha,
     createdAt: now,
     continuedAt: null,
   };
@@ -1746,6 +1750,7 @@ export const make = Effect.gen(function* () {
         turnStartCommandId,
         kickoffMessageId,
         trustedInstructions: trustedStageInstructions(stage),
+        contextManifestId: null,
         worktreeBranch: branch,
         worktreePath,
       };
@@ -3474,13 +3479,23 @@ export const make = Effect.gen(function* () {
               activePhaseId: null,
               activeWorkItemId: null,
             };
-            if (phase.checkpointPolicy === "always" || phase.checkpointPolicy === "manual-only")
+            if (phase.checkpointPolicy === "always" || phase.checkpointPolicy === "manual-only") {
+              const repository = task.workspace.repositories[0];
+              const observedCommitSha = repository?.worktreePath
+                ? yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+                    Effect.mapError((cause) =>
+                      taskError(command, "Failed to inspect the task worktree HEAD.", cause),
+                    ),
+                  )
+                : null;
               build = appendCheckpoint(
                 build,
                 { ...updatedPhase, status: "completed" },
                 command.createdAt,
+                undefined,
+                observedCommitSha,
               );
-            else build = startNextPhase(build, phase.id, command.createdAt);
+            } else build = startNextPhase(build, phase.id, command.createdAt);
           }
           return yield* append(
             command,
@@ -3876,11 +3891,26 @@ export const make = Effect.gen(function* () {
               `Build check '${check.id}' is automated and cannot be recorded manually.`,
             );
           }
+          const repository = task.workspace.repositories[0];
+          const shouldObserveHead =
+            task.versions.workflowDefinition === "guided@0.3.0" &&
+            task.preferences.executionProfile === "task-worktree-write";
+          let observedCommitSha = command.commitSha ?? task.build.resultingCommitSha;
+          if (shouldObserveHead) {
+            if (!repository?.worktreePath) {
+              throw new Error("The canonical task worktree is unavailable.");
+            }
+            observedCommitSha = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+              Effect.mapError((cause) =>
+                taskError(command, "Failed to inspect the task worktree HEAD.", cause),
+              ),
+            );
+          }
           const result: TaskWorkspaceBuildCheck = {
             ...check,
             status: command.status,
             note: command.note,
-            commitSha: command.commitSha ?? task.build.resultingCommitSha,
+            commitSha: observedCommitSha,
             completedAt: command.createdAt,
             startedAt: check.startedAt ?? command.createdAt,
           };
@@ -3890,6 +3920,9 @@ export const make = Effect.gen(function* () {
               candidate.id === check.id ? result : candidate,
             ),
           };
+          if (observedCommitSha !== null) {
+            build = markStalePassesForHead(build, observedCommitSha);
+          }
           if (command.status !== "pass" && check.workItemId) {
             build = {
               ...build,
@@ -3916,13 +3949,25 @@ export const make = Effect.gen(function* () {
               failedPhase.checkpointPolicy === "on-failure" ||
               failedPhase.checkpointPolicy === "always"
             ) {
-              build = appendCheckpoint(build, failedPhase, command.createdAt);
+              build = appendCheckpoint(
+                build,
+                failedPhase,
+                command.createdAt,
+                undefined,
+                observedCommitSha,
+              );
             }
           }
           return yield* append(command, { ...task, build, updatedAt: command.createdAt });
         }
         case "task.build.checkpoint.continue": {
           requireStage(task, "build");
+          if (
+            command.expectedTaskRevision !== undefined &&
+            command.expectedTaskRevision !== task.taskRevision
+          ) {
+            throw new Error("The implementation task revision is stale.");
+          }
           if (task.build.amendmentGateId) {
             throw new Error("Approve the pending amendment before continuing Build.");
           }
@@ -3935,14 +3980,17 @@ export const make = Effect.gen(function* () {
           }
           if (
             checkpoint.contextManifestId !== null &&
+            command.contextManifestId !== undefined &&
             checkpoint.contextManifestId !== command.contextManifestId
           ) {
             throw new Error(
               `Checkpoint '${checkpoint.id}' requires context manifest '${checkpoint.contextManifestId}'.`,
             );
           }
-          requireContextManifest(task, command.contextManifestId);
-          if (task.sessions.some((session) => session.threadId === command.threadId)) {
+          if (
+            command.threadId !== undefined &&
+            task.sessions.some((session) => session.threadId === command.threadId)
+          ) {
             throw new Error(`Thread '${command.threadId}' is already linked to this task.`);
           }
           const phase = phaseForBuild(task, checkpoint.phaseId);
@@ -3956,41 +4004,82 @@ export const make = Effect.gen(function* () {
               `Checkpoint '${checkpoint.id}' can continue only after its phase completes successfully.`,
             );
           }
-          const sessionId = `session-${task.sessions.length + 1}`;
-          let build: TaskWorkspace["build"] = {
-            ...task.build,
-            checkpoints: task.build.checkpoints.map((candidate) =>
-              candidate.id === checkpoint.id
-                ? {
-                    ...candidate,
-                    status: "continued" as const,
-                    continuationSessionId: sessionId,
-                    continuedAt: command.createdAt,
-                  }
-                : candidate,
-            ),
-            continuationSessionIds: [...task.build.continuationSessionIds, sessionId],
-          };
-          build = startNextPhase(build, phase.id, command.createdAt);
-          return yield* append(command, {
-            ...task,
-            sessions: [
-              ...task.sessions,
-              {
-                id: sessionId,
-                stage: "build",
-                threadId: command.threadId,
-                role: "primary" as const,
-                provider: null,
-                status: "active" as const,
-                parentSessionId: null,
-                forkPoint: null,
-                contextManifestId: command.contextManifestId,
-                createdAt: command.createdAt,
-              },
-            ],
-            build,
-            updatedAt: command.createdAt,
+          if (
+            command.operationKey === undefined &&
+            command.threadId !== undefined &&
+            command.contextManifestId !== undefined
+          ) {
+            requireContextManifest(task, command.contextManifestId);
+            const sessionId = `session-${task.sessions.length + 1}`;
+            let build: TaskWorkspace["build"] = {
+              ...task.build,
+              checkpoints: task.build.checkpoints.map((candidate) =>
+                candidate.id === checkpoint.id
+                  ? {
+                      ...candidate,
+                      status: "continued" as const,
+                      continuationSessionId: sessionId,
+                      continuedAt: command.createdAt,
+                    }
+                  : candidate,
+              ),
+              continuationSessionIds: [...task.build.continuationSessionIds, sessionId],
+            };
+            build = startNextPhase(build, phase.id, command.createdAt);
+            return yield* append(command, {
+              ...task,
+              sessions: [
+                ...task.sessions,
+                {
+                  id: sessionId,
+                  stage: "build",
+                  threadId: command.threadId,
+                  role: "primary" as const,
+                  provider: null,
+                  status: "active" as const,
+                  parentSessionId: null,
+                  forkPoint: null,
+                  contextManifestId: command.contextManifestId,
+                  createdAt: command.createdAt,
+                },
+              ],
+              build,
+              updatedAt: command.createdAt,
+            });
+          }
+          const continuation = yield* implementationContinuation({
+            task,
+            checkpoint,
+            createdAt: command.createdAt,
+            ...(command.contextManifestId !== undefined
+              ? { contextManifestId: command.contextManifestId }
+              : {}),
+            ...(command.threadId !== undefined ? { threadId: command.threadId } : {}),
+            operationKey: command.operationKey ?? `${task.id}:checkpoint:${checkpoint.id}:continue`,
+            reason: "checkpoint",
+            activatePhase: false,
+          });
+          return yield* append(command, continuation.task, {
+            ...(command.operationKey
+              ? {
+                  operationReceipt: {
+                    environmentId,
+                    taskId: task.id,
+                    operationType: "task.build.checkpoint.continue",
+                    operationKey: command.operationKey,
+                    payloadDigest: canonicalTaskCommandDigest(command),
+                    status: "completed" as const,
+                    attemptCount: 1,
+                    sourceCommandIds: [command.commandId],
+                    resultEventId: null,
+                    resultTaskRevision: null,
+                    error: null,
+                    createdAt: command.createdAt,
+                    updatedAt: command.createdAt,
+                  },
+                }
+              : {}),
+            outbox: [continuation.outbox],
           });
         }
         case "task.amendment.request": {
@@ -4128,6 +4217,73 @@ export const make = Effect.gen(function* () {
               amendments: [...amendmentArtifactTask.build.amendments, amendment],
             },
             updatedAt: command.createdAt,
+          });
+        }
+        case "task.amendment.request-changes": {
+          requireStage(task, "build");
+          if (command.expectedTaskRevision !== task.taskRevision) {
+            throw new Error("The implementation task revision is stale.");
+          }
+          const amendment = task.build.amendments.find(
+            (candidate) => candidate.id === command.amendmentId,
+          );
+          if (!amendment) throw new Error(`Amendment '${command.amendmentId}' was not found.`);
+          if (amendment.status !== "requested") {
+            throw new Error(`Amendment '${amendment.id}' has already been reviewed.`);
+          }
+          let build: TaskWorkspace["build"] = {
+            ...task.build,
+            amendmentGateId: null,
+            amendments: task.build.amendments.map((candidate) =>
+              candidate.id === amendment.id
+                ? {
+                    ...candidate,
+                    status: "changes-requested" as const,
+                    reviewFeedback: command.feedback,
+                  }
+                : candidate,
+            ),
+          };
+          const phase = phaseForBuild({ ...task, build }, amendment.triggeringPhaseId);
+          let checkpoint = build.checkpoints.find(
+            (candidate) => candidate.phaseId === phase.id && candidate.status === "waiting",
+          );
+          if (!checkpoint) {
+            build = appendCheckpoint(
+              build,
+              phase,
+              command.createdAt,
+              "Recovery after amendment feedback.",
+            );
+            checkpoint = build.checkpoints.at(-1);
+          }
+          if (!checkpoint) throw new Error("Failed to create amendment continuation checkpoint.");
+          const continuation = yield* implementationContinuation({
+            task: { ...task, build },
+            checkpoint,
+            createdAt: command.createdAt,
+            operationKey: command.operationKey,
+            reason: "amendment",
+            activatePhase: true,
+          });
+          return yield* append(command, continuation.task, {
+            eventType: "task.amendment.changes-requested",
+            operationReceipt: {
+              environmentId,
+              taskId: task.id,
+              operationType: "task.amendment.request-changes",
+              operationKey: command.operationKey,
+              payloadDigest: canonicalTaskCommandDigest(command),
+              status: "completed",
+              attemptCount: 1,
+              sourceCommandIds: [command.commandId],
+              resultEventId: null,
+              resultTaskRevision: null,
+              error: null,
+              createdAt: command.createdAt,
+              updatedAt: command.createdAt,
+            },
+            outbox: [continuation.outbox],
           });
         }
         case "task.amendment.approve": {
@@ -4394,11 +4550,46 @@ export const make = Effect.gen(function* () {
               "Recovery after approved amendment.",
             );
           }
-          return yield* append(command, {
-            ...amendedTask,
-            build: recoveryBuild,
-            updatedAt: command.createdAt,
+          if (task.versions.workflowDefinition !== "guided@0.3.0") {
+            return yield* append(command, {
+              ...amendedTask,
+              build: recoveryBuild,
+              updatedAt: command.createdAt,
+            });
+          }
+          if (
+            !recoveryBuild.checkpoints.some(
+              (checkpoint) =>
+                checkpoint.status === "waiting" && derivedAffectedPhaseIds.has(checkpoint.phaseId),
+            )
+          ) {
+            const triggeringPhase = recoveryBuild.phases.find(
+              (phase) => phase.id === amendment.triggeringPhaseId,
+            );
+            if (triggeringPhase) {
+              recoveryBuild = appendCheckpoint(
+                recoveryBuild,
+                triggeringPhase,
+                command.createdAt,
+                "Recovery after approved amendment.",
+              );
+            }
+          }
+          const continuationCheckpoint = recoveryBuild.checkpoints.find(
+            (checkpoint) => checkpoint.status === "waiting",
+          );
+          if (!continuationCheckpoint) {
+            throw new Error("Failed to create amendment approval continuation checkpoint.");
+          }
+          const continuation = yield* implementationContinuation({
+            task: { ...amendedTask, build: recoveryBuild },
+            checkpoint: continuationCheckpoint,
+            createdAt: command.createdAt,
+            operationKey: `${task.id}:amendment:${amendment.id}:approve`,
+            reason: "amendment",
+            activatePhase: true,
           });
+          return yield* append(command, continuation.task, { outbox: [continuation.outbox] });
         }
         case "task.build.resume": {
           requireStage(task, "build");
@@ -5108,6 +5299,15 @@ export const make = Effect.gen(function* () {
       if (input.endingCommitSha !== null) {
         build = markStalePassesForHead(build, input.endingCommitSha);
       }
+      if (nextStatus !== "pass" && phase) {
+        const failedPhase = phaseForBuild({ ...task, build }, phase.id);
+        if (
+          failedPhase.checkpointPolicy === "on-failure" ||
+          failedPhase.checkpointPolicy === "always"
+        ) {
+          build = appendCheckpoint(build, failedPhase, now, undefined, input.endingCommitSha);
+        }
+      }
       yield* internalAppend(
         "task.implementation.check.run",
         { ...task, build, updatedAt: now },
@@ -5201,12 +5401,17 @@ export const make = Effect.gen(function* () {
       readonly presentation?: string;
       readonly worktreeBranch?: string | null;
       readonly worktreePath?: string | null;
+      readonly operationKey?: string;
+      readonly sessionId?: string;
+      readonly threadId?: ThreadId;
+      readonly contextManifestId?: string | null;
     },
   ) =>
     Effect.gen(function* () {
-      const operationKey = `${task.id}:bootstrap:${stage}:${occurrence}:primary`;
-      const sessionId = `${task.id}-session-${stage}-${occurrence}`;
-      const threadId = ThreadId.make(`thread-task-${yield* serverUuid}`);
+      const operationKey =
+        options?.operationKey ?? `${task.id}:bootstrap:${stage}:${occurrence}:primary`;
+      const sessionId = options?.sessionId ?? `${task.id}-session-${stage}-${occurrence}`;
+      const threadId = options?.threadId ?? ThreadId.make(`thread-task-${yield* serverUuid}`);
       const threadCreateCommandId = CommandId.make(
         `server:task-thread-create:${yield* serverUuid}`,
       );
@@ -5243,6 +5448,7 @@ export const make = Effect.gen(function* () {
           executionProfile === "task-worktree-write"
             ? trustedImplementationInstructions()
             : trustedStageInstructions(stage),
+        contextManifestId: options?.contextManifestId ?? null,
         worktreeBranch: branch,
         worktreePath,
       };
@@ -5277,6 +5483,174 @@ export const make = Effect.gen(function* () {
     failure: null,
     updatedAt: now,
   });
+
+  const implementationContinuation = (input: {
+    readonly task: TaskWorkspace;
+    readonly checkpoint: TaskWorkspaceBuildCheckpoint;
+    readonly createdAt: string;
+    readonly contextManifestId?: string;
+    readonly threadId?: ThreadId;
+    readonly operationKey: string;
+    readonly reason: "checkpoint" | "amendment";
+    readonly activatePhase: boolean;
+  }) =>
+    Effect.gen(function* () {
+      const plan = latestPlanRevision(input.task);
+      if (!plan) throw new Error("An approved Plan is required for implementation continuation.");
+      const existingManifestId = input.contextManifestId ?? input.checkpoint.contextManifestId;
+      const existingManifest = existingManifestId
+        ? input.task.contextManifests.find((manifest) => manifest.id === existingManifestId)
+        : null;
+      if (existingManifestId && !existingManifest) {
+        throw new Error(`Context manifest '${existingManifestId}' was not found.`);
+      }
+      const manifestId =
+        existingManifestId ?? `manifest-${input.task.id}-${input.checkpoint.id}-${input.reason}`;
+      const manifest: TaskWorkspaceContextManifest | null = existingManifest
+        ? null
+        : {
+            id: manifestId,
+            taskId: input.task.id,
+            sessionId: null,
+            artifactRefs: [{ kind: "plan" as const, revision: plan.revision, blockIds: [] }],
+            notes: [
+              `Implementation ${input.reason} continuation.`,
+              `Checkpoint ${input.checkpoint.id}: ${input.checkpoint.reason}.`,
+              `Phase ${input.checkpoint.phaseId}.`,
+              input.checkpoint.observedCommitSha
+                ? `Observed commit ${input.checkpoint.observedCommitSha}.`
+                : "Observed commit unavailable.",
+            ].join("\n"),
+            tokenEstimate: 0,
+            budget: definitionFor(input.task).contextTokenBudget,
+            summaryArtifactRef: null,
+            compressedBlockCount: 0,
+            createdAt: input.createdAt,
+          };
+      const phase = phaseForBuild(input.task, input.checkpoint.phaseId);
+      if (input.activatePhase) requirePredecessorPhasesComplete(input.task.build, phase.id);
+      const buildOccurrence = latestOccurrence(input.task, "build");
+      if (!buildOccurrence) throw new Error("Implementation occurrence was not found.");
+      const continuationIndex = input.task.build.continuationSessionIds.length + 1;
+      const sessionId = `${input.task.id}-session-build-continuation-${continuationIndex}`;
+      const bootstrap = yield* allocateStageBootstrap(
+        input.task,
+        "build",
+        buildOccurrence.ordinal,
+        {
+          executionProfile: "task-worktree-write",
+          presentation: "implementation",
+          worktreeBranch: input.task.workspace.repositories[0]?.branch ?? null,
+          worktreePath: input.task.workspace.repositories[0]?.worktreePath ?? null,
+          operationKey: `${input.operationKey}:bootstrap`,
+          sessionId,
+          ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+          contextManifestId: manifestId,
+        },
+      );
+      let build: TaskWorkspace["build"] = {
+        ...input.task.build,
+        checkpoints: input.task.build.checkpoints.map((candidate) =>
+          candidate.id === input.checkpoint.id
+            ? {
+                ...candidate,
+                status: "continued" as const,
+                contextManifestId: manifestId,
+                continuationSessionId: bootstrap.outboxPayload.sessionId,
+                continuedAt: input.createdAt,
+              }
+            : candidate,
+        ),
+        continuationSessionIds: [
+          ...input.task.build.continuationSessionIds,
+          bootstrap.outboxPayload.sessionId,
+        ],
+      };
+      if (input.activatePhase) {
+        build = {
+          ...build,
+          activePhaseId: phase.id,
+          activeWorkItemId:
+            phase.workItems.find(
+              (item) =>
+                item.status === "pending" ||
+                item.status === "blocked" ||
+                item.status === "invalidated",
+            )?.id ?? null,
+          phases: build.phases.map((candidate) =>
+            candidate.id === phase.id
+              ? {
+                  ...candidate,
+                  status: "running" as const,
+                  startedAt: candidate.startedAt ?? input.createdAt,
+                  workItems: candidate.workItems.map((item) =>
+                    item.status === "blocked" || item.status === "invalidated"
+                      ? { ...item, status: "pending" as const, invalidationReason: null }
+                      : item,
+                  ),
+                }
+              : candidate.status === "invalidated"
+                ? {
+                    ...candidate,
+                    status: "pending" as const,
+                    workItems: candidate.workItems.map((item) =>
+                      item.status === "blocked" || item.status === "invalidated"
+                        ? { ...item, status: "pending" as const, invalidationReason: null }
+                        : item,
+                    ),
+                  }
+                : candidate,
+          ),
+        };
+      } else {
+        build = startNextPhase(build, phase.id, input.createdAt);
+      }
+      return {
+        task: {
+          ...input.task,
+          bootstrap: bootstrapStateFor(
+            {
+              operationKey: bootstrap.operationKey,
+              executionProfile: "task-worktree-write",
+              presentation: "implementation",
+              sessionId: bootstrap.outboxPayload.sessionId,
+              threadId: bootstrap.outboxPayload.threadId,
+              threadCreateCommandId: bootstrap.outboxPayload.threadCreateCommandId,
+              turnStartCommandId: bootstrap.outboxPayload.turnStartCommandId,
+              kickoffMessageId: bootstrap.outboxPayload.kickoffMessageId,
+            },
+            bootstrap.now,
+          ),
+          occurrences: input.task.occurrences.map((occurrence) =>
+            occurrence.id === buildOccurrence.id
+              ? {
+                  ...occurrence,
+                  status: "starting" as const,
+                  sessionId: bootstrap.outboxPayload.sessionId,
+                  threadId: bootstrap.outboxPayload.threadId,
+                  contextManifestId: manifestId,
+                }
+              : occurrence,
+          ),
+          sessions: input.task.sessions.map((session) =>
+            session.stage === "build" && session.role === "primary" && session.status === "active"
+              ? { ...session, status: "superseded" as const }
+              : session,
+          ),
+          contextManifests: manifest
+            ? [...input.task.contextManifests, manifest]
+            : input.task.contextManifests,
+          build,
+          updatedAt: input.createdAt,
+        },
+        outbox: {
+          target: "bootstrap" as const,
+          operationKey: bootstrap.operationKey,
+          payload: bootstrap.outboxPayload,
+          status: "pending" as const,
+        },
+      };
+    });
 
   const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
 
@@ -6571,7 +6945,7 @@ export const make = Effect.gen(function* () {
                 status: "active" as const,
                 parentSessionId: null,
                 forkPoint: null,
-                contextManifestId: null,
+                contextManifestId: payload.contextManifestId ?? null,
                 createdAt: now,
               },
             ],
@@ -6582,6 +6956,7 @@ export const make = Effect.gen(function* () {
                     status: "running" as const,
                     sessionId: payload.sessionId,
                     threadId: payload.threadId,
+                    contextManifestId: payload.contextManifestId ?? occurrence.contextManifestId,
                   }
                 : occurrence,
             ),

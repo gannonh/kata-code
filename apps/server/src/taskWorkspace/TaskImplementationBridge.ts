@@ -194,7 +194,7 @@ const make = Effect.gen(function* () {
           taskId: invocation.task.id,
           expectedTaskRevision: invocation.task.taskRevision,
           checkId: input.checkId,
-          operationKey: `implementation-check:${invocation.occurrence.id}:${input.checkId}`,
+          operationKey: `implementation-check:${invocation.occurrence.id}:${input.checkId}:${invocation.task.build.checkAttempts.length + 1}`,
         }),
       ),
       Effect.mapError((cause) => error("check-blocked", cause.message)),

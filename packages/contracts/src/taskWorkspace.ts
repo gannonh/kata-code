@@ -349,6 +349,10 @@ export const TaskWorkspaceBuildCheckpoint = Schema.Struct({
   contextManifestId: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  // Exact worktree commit observed when this checkpoint was created.
+  observedCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   continuedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
@@ -1048,8 +1052,10 @@ const TaskBuildCheckpointContinueCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.build.checkpoint.continue"),
   checkpointId: TrimmedNonEmptyString,
-  threadId: ThreadId,
-  contextManifestId: TrimmedNonEmptyString,
+  threadId: Schema.optional(ThreadId),
+  contextManifestId: Schema.optional(TrimmedNonEmptyString),
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
 });
 
 const TaskAmendmentRequestCommand = Schema.Struct({
@@ -1067,6 +1073,15 @@ const TaskAmendmentRequestCommand = Schema.Struct({
   affectedPhaseIds: Schema.Array(TrimmedNonEmptyString),
   affectedWorkItemIds: Schema.Array(TrimmedNonEmptyString),
   dependentCheckIds: Schema.Array(TrimmedNonEmptyString),
+});
+
+const TaskAmendmentRequestChangesCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.amendment.request-changes"),
+  amendmentId: TrimmedNonEmptyString,
+  feedback: TrimmedNonEmptyString,
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
 });
 
 const TaskAmendmentApproveCommand = Schema.Struct({
@@ -1132,6 +1147,7 @@ export const TaskWorkspaceCommand = Schema.Union([
   TaskBuildCheckRecordManualCommand,
   TaskBuildCheckpointContinueCommand,
   TaskAmendmentRequestCommand,
+  TaskAmendmentRequestChangesCommand,
   TaskAmendmentApproveCommand,
   TaskBuildResumeCommand,
   TaskFixtureApplyCommand,
@@ -1177,6 +1193,8 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.build.check.record-manual",
   "task.build.checkpoint.continue",
   "task.amendment.request",
+  "task.amendment.request-changes",
+  "task.amendment.changes-requested",
   "task.amendment.approve",
   "task.build.resume",
   "task.fixture.apply",
@@ -1438,6 +1456,9 @@ export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   turnStartCommandId: CommandId,
   kickoffMessageId: MessageId,
   trustedInstructions: Schema.optional(Schema.String),
+  contextManifestId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   worktreeBranch: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),

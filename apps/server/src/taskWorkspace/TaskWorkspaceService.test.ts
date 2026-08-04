@@ -4265,6 +4265,165 @@ describe("TaskWorkspaceService guided implementation", () => {
     return { service, task: bootstrapped };
   });
 
+  it.effect(
+    "binds manual checks to the observed HEAD and creates server-owned checkpoint continuation",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-manual-head-");
+        const planMarkdown = [
+          "## Phase [phase:foundation] Foundation",
+          "",
+          "Checkpoint: always",
+          "",
+          "### Work item [work:manual-review] Manual review",
+          "",
+          "- Manual check [check:review]: Review the implementation",
+          "",
+        ].join("\n");
+        const { service, task } = yield* driveToBuildStage(
+          runtime,
+          baseDir,
+          repoRoot,
+          planMarkdown,
+        );
+        const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+        yield* runtime.runPromise(
+          service.implementationProgress({
+            taskId: task.id,
+            expectedTaskRevision: task.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:manual-review",
+            status: "running",
+            summary: "Manual review started.",
+          }),
+        );
+        yield* Effect.tryPromise(() =>
+          git(worktreePath, ["commit", "--allow-empty", "-m", "manual review head"]),
+        );
+        const observedHead = yield* Effect.tryPromise(() =>
+          git(worktreePath, ["rev-parse", "HEAD"]),
+        );
+        const running = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        const recorded = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.build.check.record-manual",
+              commandId: CommandId.make("manual-observed-head"),
+              taskId: task.id,
+              createdAt: now(22),
+              checkId: "check:review",
+              status: "pass",
+              note: "Reviewed at the current HEAD.",
+            }),
+          ),
+        );
+        expect(recorded.task.build.checks[0]?.commitSha).toBe(observedHead);
+        yield* runtime.runPromise(
+          service.implementationProgress({
+            taskId: task.id,
+            expectedTaskRevision: recorded.task.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:manual-review",
+            status: "completed",
+            summary: "Manual review completed.",
+          }),
+        );
+        const completed = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        const checkpoint = completed.build.checkpoints[0]!;
+        expect(checkpoint.observedCommitSha).toBe(observedHead);
+        const continued = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.build.checkpoint.continue",
+              commandId: CommandId.make("checkpoint-server-owned"),
+              taskId: task.id,
+              createdAt: now(23),
+              checkpointId: checkpoint.id,
+              expectedTaskRevision: completed.taskRevision,
+              operationKey: "op-checkpoint-server-owned",
+            }),
+          ),
+        );
+        expect(continued.task.contextManifests.at(-1)?.artifactRefs[0]).toMatchObject({
+          kind: "plan",
+          revision: 1,
+        });
+        expect(continued.task.build.checkpoints[0]).toMatchObject({
+          status: "continued",
+          contextManifestId: continued.task.contextManifests.at(-1)?.id,
+          continuationSessionId: "guided-task-session-build-continuation-1",
+        });
+        expect(
+          continued.task.sessions.find((session) => session.id === running.sessions.at(-1)?.id)
+            ?.status,
+        ).toBe("superseded");
+        expect(continued.task.bootstrap?.operationKey).toBe("op-checkpoint-server-owned:bootstrap");
+      }),
+  );
+
+  it.effect(
+    "requesting amendment changes closes the gate and queues implementation continuation",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-amend-changes-");
+        const planMarkdown = [
+          "## Phase [phase:foundation] Foundation",
+          "",
+          "Checkpoint: never",
+          "",
+          "### Work item [work:implement] Implement",
+          "",
+          "- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+          "",
+        ].join("\n");
+        const { service, task } = yield* driveToBuildStage(
+          runtime,
+          baseDir,
+          repoRoot,
+          planMarkdown,
+        );
+        const proposed = yield* runtime.runPromise(
+          service.implementationAmendmentPropose({
+            taskId: task.id,
+            expectedTaskRevision: task.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:implement",
+            triggeringCheckId: null,
+            expected: "approved Plan",
+            found: "different implementation need",
+            impact: "Implementation needs a replacement proposal.",
+            proposedPlanMarkdown: planMarkdown,
+            operationKey: "op-amend-propose",
+          }),
+        );
+        const gated = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        expect(gated.build.amendmentGateId).toBe(proposed.amendmentId);
+        const changed = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.amendment.request-changes",
+              commandId: CommandId.make("amend-request-changes"),
+              taskId: task.id,
+              createdAt: now(24),
+              amendmentId: proposed.amendmentId,
+              feedback: "Keep the original public API.",
+              expectedTaskRevision: gated.taskRevision,
+              operationKey: "op-amend-request-changes",
+            }),
+          ),
+        );
+        expect(changed.task.build.amendmentGateId).toBeNull();
+        expect(changed.task.build.amendments[0]).toMatchObject({
+          status: "changes-requested",
+          reviewFeedback: "Keep the original public API.",
+        });
+        expect(changed.task.bootstrap?.operationKey).toBe("op-amend-request-changes:bootstrap");
+        expect(changed.task.build.continuationSessionIds).toContain(
+          "guided-task-session-build-continuation-1",
+        );
+      }),
+  );
+
   it.effect("resolves the active Build provider context during the bootstrap window", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime(

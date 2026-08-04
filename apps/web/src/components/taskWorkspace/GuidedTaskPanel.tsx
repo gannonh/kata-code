@@ -1,5 +1,4 @@
 import {
-  ThreadId,
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
   type TaskWorkspaceCommentAuthor,
@@ -97,7 +96,11 @@ function startImplementDisabledReason(task: TaskWorkspace): string | null {
   if (hasImplementOccurrence(task)) return "Implement has already started.";
   if (task.planGate?.status === "open") return "Resolve the Plan gate first.";
   if (task.preferences.worktreePolicy === "never") return "Choose a worktree policy first.";
-  if (repository?.provisioningStatus !== "provisioned") return "Wait for the task worktree.";
+  if (
+    repository?.provisioningStatus !== "ready" &&
+    repository?.provisioningStatus !== "provisioned"
+  )
+    return "Wait for the canonical task worktree to be ready.";
   if (!repository.worktreePath || !repository.baseCommitSha) {
     return "The canonical task worktree is not ready.";
   }
@@ -131,7 +134,6 @@ function checkpointDisabledReason(
 ) {
   if (checkpoint.status !== "waiting") return "Checkpoint already continued.";
   if (task.build.amendmentGateId) return "Approve the pending amendment first.";
-  if (!checkpoint.contextManifestId) return "Checkpoint context manifest is not ready.";
   if (!checkpointCanContinue(task, checkpoint))
     return "Complete the phase and required checks first.";
   if (isBusy) return "Another task command is running.";
@@ -143,13 +145,14 @@ function automatedCheckDisabledReason(
   check: TaskWorkspace["build"]["checks"][number],
   isBusy: boolean,
 ) {
-  const phase = phaseById(task, check.phaseId);
-  const item = workItemById(task, check.workItemId);
   if (task.build.amendmentGateId) return "Approve the pending amendment first.";
   if (isBusy) return "Another task command is running.";
   if (check.status === "running") return "A check attempt is already running.";
-  if (phase?.status !== "running") return "The owning phase must be running.";
-  if (item && item.status !== "running") return "The owning work item must be running.";
+  const plan = latestArtifact(task, "plan");
+  const repository = task.workspace.repositories[0];
+  if (!plan || task.build.currentPlanRevisionId !== plan.id)
+    return "The approved implementation Plan is unavailable.";
+  if (!repository?.worktreePath) return "The canonical task worktree is unavailable.";
   return null;
 }
 
@@ -200,6 +203,7 @@ export function GuidedTaskPanel(props: {
   const { task, commands, currentUser } = props;
   const [feedback, setFeedback] = useState("");
   const [manualNotes, setManualNotes] = useState<Record<string, string>>({});
+  const [amendmentFeedback, setAmendmentFeedback] = useState<Record<string, string>>({});
   const stage = currentStage(task);
   const catalog = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
   const artifact = latestArtifact(
@@ -563,6 +567,18 @@ export function GuidedTaskPanel(props: {
                   {amendmentGate.planDiff.proposedRevisionId}
                 </p>
               ) : null}
+              <Textarea
+                data-testid={`guided-amendment-feedback-${amendmentGate.id}`}
+                value={amendmentFeedback[amendmentGate.id] ?? ""}
+                onChange={(event) =>
+                  setAmendmentFeedback((current) => ({
+                    ...current,
+                    [amendmentGate.id]: event.currentTarget.value,
+                  }))
+                }
+                placeholder="What should the implementer change?"
+                className="min-h-16 text-xs"
+              />
               <div className="flex flex-wrap gap-2">
                 <Button
                   data-testid={`guided-amendment-approve-${amendmentGate.id}`}
@@ -592,16 +608,39 @@ export function GuidedTaskPanel(props: {
                   data-testid={`guided-amendment-request-changes-${amendmentGate.id}`}
                   size="xs"
                   variant="outline"
-                  disabled
-                  title="Amendment change requests require the next amendment-review command."
+                  disabled={
+                    commands.isBusy ||
+                    amendmentGate.status !== "requested" ||
+                    !(amendmentFeedback[amendmentGate.id] ?? "").trim()
+                  }
+                  title={
+                    amendmentGate.status !== "requested"
+                      ? "This amendment has already been reviewed."
+                      : !(amendmentFeedback[amendmentGate.id] ?? "").trim()
+                        ? "Add feedback before requesting changes."
+                        : commands.isBusy
+                          ? "Another task command is running."
+                          : undefined
+                  }
+                  onClick={() => {
+                    const feedback = (amendmentFeedback[amendmentGate.id] ?? "").trim();
+                    if (!feedback) return;
+                    const base = commands.commandBase("task.amendment.request-changes");
+                    void commands.dispatch(
+                      {
+                        ...base,
+                        expectedTaskRevision: task.taskRevision,
+                        operationKey: operationKey(base.commandId, "amendment-request-changes"),
+                        amendmentId: amendmentGate.id,
+                        feedback,
+                      },
+                      "request-amendment-changes",
+                    );
+                  }}
                 >
                   Request changes
                 </Button>
               </div>
-              <p className="text-muted-foreground">
-                Request changes is shown for review visibility; this slice only has the approved
-                amendment command.
-              </p>
             </div>
           ) : null}
 
@@ -714,19 +753,23 @@ export function GuidedTaskPanel(props: {
                                       variant="outline"
                                       disabled={runReason !== null}
                                       title={runReason ?? undefined}
-                                      onClick={() =>
+                                      onClick={() => {
+                                        const base = commands.commandBase(
+                                          "task.implementation.check.run",
+                                        );
                                         void commands.dispatch(
                                           {
-                                            ...commands.commandBase(
-                                              "task.implementation.check.run",
-                                            ),
+                                            ...base,
                                             expectedTaskRevision: task.taskRevision,
                                             checkId: check.id,
-                                            operationKey: `ui-${check.id}`,
+                                            operationKey: operationKey(
+                                              base.commandId,
+                                              `check-${check.id}`,
+                                            ),
                                           },
                                           `run-check-${check.id}`,
-                                        )
-                                      }
+                                        );
+                                      }}
                                     >
                                       {check.status === "pending" ? "Run" : "Rerun"}
                                     </Button>
@@ -773,7 +816,6 @@ export function GuidedTaskPanel(props: {
                                               checkId: check.id,
                                               status,
                                               note: note.trim(),
-                                              commitSha: null,
                                             },
                                             `record-check-${check.id}-${status}`,
                                           );
@@ -868,15 +910,7 @@ export function GuidedTaskPanel(props: {
               <p className="text-xs font-medium">Checkpoints</p>
               {task.build.checkpoints.map((checkpoint) => {
                 const reason = checkpointDisabledReason(task, checkpoint, commands.isBusy);
-                const observedCommit =
-                  checkpoint.checkIds
-                    .map(
-                      (checkId) =>
-                        task.build.checks.find((check) => check.id === checkId)?.commitSha,
-                    )
-                    .find((sha): sha is string => typeof sha === "string") ??
-                  phaseById(task, checkpoint.phaseId)?.phaseCommitSha ??
-                  task.build.resultingCommitSha;
+                const observedCommit = checkpoint.observedCommitSha;
                 return (
                   <div
                     key={checkpoint.id}
@@ -890,28 +924,35 @@ export function GuidedTaskPanel(props: {
                           Phase {checkpoint.phaseId} · checks{" "}
                           {checkpoint.checkIds.join(", ") || "none"}
                         </p>
-                        {observedCommit ? (
-                          <p className="break-all font-mono text-[11px] text-muted-foreground">
-                            Observed {observedCommit}
-                          </p>
-                        ) : null}
+                        <p
+                          data-testid={`guided-checkpoint-observed-${checkpoint.id}`}
+                          className="break-all font-mono text-[11px] text-muted-foreground"
+                        >
+                          {observedCommit
+                            ? `Observed ${observedCommit}`
+                            : "Observed commit not observed yet"}
+                        </p>
                       </div>
                       <Button
                         data-testid={`guided-checkpoint-continue-${checkpoint.id}`}
                         size="xs"
                         disabled={reason !== null}
                         title={reason ?? undefined}
-                        onClick={() =>
+                        onClick={() => {
+                          const base = commands.commandBase("task.build.checkpoint.continue");
                           void commands.dispatch(
                             {
-                              ...commands.commandBase("task.build.checkpoint.continue"),
+                              ...base,
+                              expectedTaskRevision: task.taskRevision,
+                              operationKey: operationKey(
+                                base.commandId,
+                                `checkpoint-${checkpoint.id}`,
+                              ),
                               checkpointId: checkpoint.id,
-                              threadId: ThreadId.make(`task-${task.id}-${checkpoint.id}`),
-                              contextManifestId: checkpoint.contextManifestId!,
                             },
                             `continue-checkpoint-${checkpoint.id}`,
-                          )
-                        }
+                          );
+                        }}
                       >
                         Continue
                       </Button>
@@ -934,52 +975,11 @@ export function GuidedTaskPanel(props: {
             (check) => check.status === "fail" || check.status === "blocked",
           ) && !amendmentGate ? (
             <div
-              data-testid="guided-amendment-actions"
-              className="space-y-2 rounded-md border border-border/60 p-2 text-xs"
+              data-testid="guided-amendment-hint"
+              className="rounded-md border border-border/60 p-2 text-xs text-muted-foreground"
             >
-              <p className="text-muted-foreground">
-                A failed check blocks completion. Request a reviewed Plan amendment when the
-                approved Plan must change.
-              </p>
-              {task.build.checks
-                .filter((check) => check.status === "fail" || check.status === "blocked")
-                .map((check) => {
-                  const phase = phaseById(task, check.phaseId);
-                  const item = workItemById(task, check.workItemId);
-                  if (!phase || !item) return null;
-                  return (
-                    <Button
-                      key={check.id}
-                      data-testid={`guided-amendment-request-${check.id}`}
-                      size="xs"
-                      variant="outline"
-                      disabled={commands.isBusy}
-                      title={commands.isBusy ? "Another task command is running." : undefined}
-                      onClick={() =>
-                        void commands.dispatch(
-                          {
-                            ...commands.commandBase("task.amendment.request"),
-                            phaseId: phase.id,
-                            workItemId: item.id,
-                            checkId: check.id,
-                            expected: "the approved Guided Plan",
-                            found:
-                              check.output ?? "the implementation differs from the approved Plan",
-                            impact: "The work item cannot complete against the approved Plan.",
-                            proposedChanges:
-                              "Update the approved Plan to match the implementation.",
-                            affectedPhaseIds: [phase.id],
-                            affectedWorkItemIds: [item.id],
-                            dependentCheckIds: [check.id],
-                          },
-                          `request-amendment-${check.id}`,
-                        )
-                      }
-                    >
-                      Request amendment
-                    </Button>
-                  );
-                })}
+              A failed check blocks completion. The active Implement conversation can propose a
+              reviewed Plan amendment with the task implementation tools.
             </div>
           ) : null}
 

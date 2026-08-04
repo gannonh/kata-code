@@ -81,6 +81,32 @@ function statusLabel(stage: TaskWorkspaceStage): string {
   return TASK_WORKSPACE_STAGE_LABELS[stage];
 }
 
+function activeStageSession(
+  task: TaskWorkspace,
+  stage: TaskWorkspaceStage,
+  occurrence: TaskWorkspace["occurrences"][number] | undefined,
+) {
+  if (stage === "build") {
+    const continuationSessionId = task.build.continuationSessionIds
+      .toReversed()
+      .find((sessionId) =>
+        task.sessions.some(
+          (session) =>
+            session.id === sessionId &&
+            session.stage === "build" &&
+            session.role === "primary" &&
+            session.status === "active",
+        ),
+      );
+    if (continuationSessionId) {
+      return task.sessions.find((session) => session.id === continuationSessionId) ?? null;
+    }
+  }
+  return occurrence?.sessionId
+    ? (task.sessions.find((session) => session.id === occurrence.sessionId) ?? null)
+    : null;
+}
+
 /**
  * Progress rail for a preset that advances automatically (Standard, Guided).
  *
@@ -1052,10 +1078,7 @@ function TaskWorkspaceViewContent({
         .filter((candidate) => candidate.stage === stage)
         .toSorted((left, right) => right.ordinal - left.ordinal)[0]
     : undefined;
-  const currentSession =
-    task && currentOccurrence?.sessionId
-      ? (task.sessions.find((session) => session.id === currentOccurrence.sessionId) ?? null)
-      : null;
+  const currentSession = task ? activeStageSession(task, stage, currentOccurrence) : null;
   const activeThreadRef = useMemo(
     () =>
       task?.environmentId && currentSession

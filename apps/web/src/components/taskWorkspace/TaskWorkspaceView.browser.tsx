@@ -199,7 +199,7 @@ function guidedTask(overrides: Partial<TaskWorkspace> = {}): TaskWorkspace {
           ...baseTask.workspace.repositories[0]!,
           branch: "katacode/task-task-browser",
           worktreePath: "/repo/worktrees/task-browser",
-          provisioningStatus: "provisioned",
+          provisioningStatus: "ready",
           baseCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         },
       ],
@@ -1024,6 +1024,79 @@ describe("TaskWorkspaceView", () => {
               checkIds: ["check:typecheck"],
               continuationSessionId: null,
               contextManifestId: null,
+              observedCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              createdAt: "2026-07-28T17:12:00.000Z",
+              continuedAt: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(page.getByTestId("guided-check-run-disabled-reason-check:typecheck").query()).toBeNull();
+    await page.getByTestId("guided-check-run-check:typecheck").click();
+    await page.getByTestId("guided-check-run-check:typecheck").click();
+    const runCommands = mocks.dispatchCommand.mock.calls
+      .map((call) => call[0])
+      .filter(
+        (command): command is { type: string; operationKey: string } =>
+          typeof command === "object" &&
+          command !== null &&
+          "type" in command &&
+          command.type === "task.implementation.check.run" &&
+          "operationKey" in command,
+      );
+    expect(runCommands).toHaveLength(2);
+    expect(runCommands[0]!.operationKey).not.toBe(runCommands[1]!.operationKey);
+    await expect
+      .element(page.getByTestId("guided-check-record-disabled-reason-check:review"))
+      .toHaveTextContent("Add a note before recording a manual result.");
+    await expect
+      .element(page.getByTestId("guided-checkpoint-observed-checkpoint-1"))
+      .toHaveTextContent("Observed aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    await expect
+      .element(page.getByTestId("guided-checkpoint-disabled-reason-checkpoint-1"))
+      .toHaveTextContent("Complete the phase and required checks first.");
+    await expect
+      .element(page.getByTestId("guided-complete-disabled-reason"))
+      .toHaveTextContent("Continue the waiting checkpoint first.");
+  });
+
+  it("dispatches server-owned checkpoint continuation without raw manifest controls", async () => {
+    const commitSha = "cccccccccccccccccccccccccccccccccccccccc";
+    await renderTask(
+      guidedTask({
+        build: {
+          ...guidedTask().build,
+          activePhaseId: null,
+          activeWorkItemId: null,
+          phases: [
+            {
+              ...guidedTask().build.phases[0]!,
+              status: "completed",
+              workItems: [
+                {
+                  ...guidedTask().build.phases[0]!.workItems[0]!,
+                  status: "completed",
+                },
+              ],
+            },
+          ],
+          checks: guidedTask().build.checks.map((check) => ({
+            ...check,
+            status: "pass" as const,
+            commitSha,
+          })),
+          checkpoints: [
+            {
+              id: "checkpoint-1",
+              phaseId: "phase:foundation",
+              reason: "Human checkpoint reached.",
+              status: "waiting",
+              checkIds: ["check:typecheck"],
+              continuationSessionId: null,
+              contextManifestId: null,
+              observedCommitSha: commitSha,
               createdAt: "2026-07-28T17:12:00.000Z",
               continuedAt: null,
             },
@@ -1033,17 +1106,62 @@ describe("TaskWorkspaceView", () => {
     );
 
     await expect
-      .element(page.getByTestId("guided-check-run-disabled-reason-check:typecheck"))
-      .toHaveTextContent("The owning phase must be running.");
-    await expect
-      .element(page.getByTestId("guided-check-record-disabled-reason-check:review"))
-      .toHaveTextContent("Add a note before recording a manual result.");
-    await expect
-      .element(page.getByTestId("guided-checkpoint-disabled-reason-checkpoint-1"))
-      .toHaveTextContent("Checkpoint context manifest is not ready.");
-    await expect
-      .element(page.getByTestId("guided-complete-disabled-reason"))
-      .toHaveTextContent("Continue the waiting checkpoint first.");
+      .element(page.getByTestId("guided-checkpoint-observed-checkpoint-1"))
+      .toHaveTextContent(`Observed ${commitSha}`);
+    await page.getByTestId("guided-checkpoint-continue-checkpoint-1").click();
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.build.checkpoint.continue",
+      checkpointId: "checkpoint-1",
+      expectedTaskRevision: expect.any(Number),
+      operationKey: expect.any(String),
+    });
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).not.toHaveProperty("contextManifestId");
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).not.toHaveProperty("threadId");
+  });
+
+  it("dispatches Guided amendment request changes with feedback", async () => {
+    await renderTask(
+      guidedTask({
+        build: {
+          ...guidedTask().build,
+          amendmentGateId: "amendment-1",
+          amendments: [
+            {
+              id: "amendment-1",
+              basePlanRevisionId: "plan-revision-1",
+              triggeringPhaseId: "phase:foundation",
+              triggeringWorkItemId: "work:implement",
+              triggeringCheckId: "check:typecheck",
+              expected: "approved behavior",
+              found: "different behavior",
+              impact: "Plan needs review.",
+              proposedChanges: "Revise the Plan.",
+              proposedPlanMarkdown: "## Phase [phase:foundation] Foundation",
+              reviewFeedback: null,
+              affectedPhaseIds: ["phase:foundation"],
+              affectedWorkItemIds: ["work:implement"],
+              dependentCheckIds: ["check:typecheck"],
+              status: "requested",
+              artifactRevisionId: null,
+              planDiff: null,
+              requestedAt: "2026-07-28T17:12:00.000Z",
+              approvedAt: null,
+              approvedBy: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    await page.getByTestId("guided-amendment-feedback-amendment-1").fill("Keep the original API.");
+    await page.getByTestId("guided-amendment-request-changes-amendment-1").click();
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.amendment.request-changes",
+      amendmentId: "amendment-1",
+      feedback: "Keep the original API.",
+      expectedTaskRevision: expect.any(Number),
+      operationKey: expect.any(String),
+    });
   });
 
   it("dispatches Guided workflow upgrade before explicit Implement start for upgraded tasks", async () => {
