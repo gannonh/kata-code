@@ -63,17 +63,27 @@ const makeWorker = Effect.gen(function* () {
         })
         .pipe(Effect.catch(() => Effect.void));
 
-      // A settled attempt is terminal. A crash between settling the attempt and
-      // writing the terminal outbox row must never re-run the command; the row
-      // is simply retired here. A row whose task or attempt is missing is also
-      // retired without running anything.
       const settledTask = yield* taskWorkspaces.getTask(entry.taskId);
       const settledAttempt = settledTask?.build.checkAttempts.find(
         (candidate) => candidate.id === payload.attemptId,
       );
+      // A settled attempt is terminal. A crash between settling the attempt and
+      // writing the terminal outbox row must never re-run the command; the row
+      // is simply retired here. A row whose task or attempt is missing is also
+      // retired without running anything. A non-newest attempt is superseded: a
+      // newer attempt already settled for the same check, so re-running this
+      // command would only waste work whose evidence is discarded.
+      const isNewestAttempt =
+        settledTask != null &&
+        settledAttempt !== undefined &&
+        settledTask.build.checkAttempts
+          .toReversed()
+          .find((candidate) => candidate.checkId === settledAttempt.checkId)?.id ===
+          settledAttempt.id;
       if (
         !settledTask ||
         !settledAttempt ||
+        !isNewestAttempt ||
         settledAttempt.status === "pass" ||
         settledAttempt.status === "fail" ||
         settledAttempt.status === "indeterminate" ||

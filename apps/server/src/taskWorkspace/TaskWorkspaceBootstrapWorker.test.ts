@@ -558,6 +558,70 @@ describe("TaskWorkspaceBootstrapWorker", () => {
     }),
   );
 
+  it.effect("retires a replayed row of a superseded attempt without re-running its command", () =>
+    Effect.gen(function* () {
+      runnerCalls.length = 0;
+      const { runtime, repoRoot, baseDir } = yield* setup("kata-worker-superseded-");
+      const worker = yield* runtime.runPromise(Effect.service(TaskWorkspaceBootstrapWorker));
+      const store = yield* runtime.runPromise(Effect.service(TaskWorkspaceStore));
+      const { service, task } = yield* driveToBuild(runtime, baseDir, repoRoot);
+
+      // Attempt 1 stays pending while attempt 2 (a rerun) settles first.
+      const run1 = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-sup-1",
+        }),
+      );
+      const afterRun1 = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const run2 = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: afterRun1.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-sup-2",
+        }),
+      );
+      expect(run2.attemptId).not.toBe(run1.attemptId);
+      yield* runtime.runPromise(worker.drain());
+      expect(runnerCalls).toHaveLength(1);
+      const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(settled.build.checkAttempts.find((a) => a.id === run1.attemptId)?.status).toBe(
+        "pending",
+      );
+
+      // Replay attempt 1's row as `pending`: attempt 1 is superseded by attempt
+      // 2, so the worker must retire the row without re-running the command.
+      const rowOption = yield* runtime.runPromise(
+        store.getOutboxByOperationKey({
+          environmentId,
+          taskId: task.id,
+          operationKey: "op-check-sup-1:check-attempt-1",
+        }),
+      );
+      expect(Option.isSome(rowOption)).toBe(true);
+      if (Option.isSome(rowOption)) {
+        yield* runtime.runPromise(
+          store.upsertOutbox({ ...rowOption.value, status: "pending", updatedAt: now(25) }),
+        );
+      }
+      yield* runtime.runPromise(worker.drain());
+      expect(runnerCalls).toHaveLength(1);
+      const retiredOption = yield* runtime.runPromise(
+        store.getOutboxByOperationKey({
+          environmentId,
+          taskId: task.id,
+          operationKey: "op-check-sup-1:check-attempt-1",
+        }),
+      );
+      if (Option.isSome(retiredOption)) {
+        expect(retiredOption.value.status).toBe("completed");
+      }
+    }),
+  );
+
   it.effect("retires a replayed outbox row for a stale attempt without re-running it", () =>
     Effect.gen(function* () {
       runnerCalls.length = 0;

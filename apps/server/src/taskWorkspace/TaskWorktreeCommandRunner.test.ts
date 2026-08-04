@@ -178,4 +178,31 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
       expect(result._tag).toBe("Failure");
     }),
   );
+
+  it.effect("settles a malformed command line as a handled failure, not a defect", () =>
+    Effect.gen(function* () {
+      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
+      const runner = yield* TaskWorktreeCommandRunner;
+      const trailingBackslash = yield* runner
+        .run({
+          worktreePath,
+          expectedBranch,
+          expectedBaseCommitSha,
+          command: "echo \\",
+          timeoutMs: 15_000,
+        })
+        .pipe(Effect.exit);
+      expect(trailingBackslash._tag).toBe("Failure");
+      const unterminatedQuote = yield* runner
+        .run({
+          worktreePath,
+          expectedBranch,
+          expectedBaseCommitSha,
+          command: "echo 'unterminated",
+          timeoutMs: 15_000,
+        })
+        .pipe(Effect.exit);
+      expect(unterminatedQuote._tag).toBe("Failure");
+    }),
+  );
 });

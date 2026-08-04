@@ -95,7 +95,14 @@ const make = Effect.gen(function* () {
           message: "Unable to observe the task worktree.",
         });
       }
-      const argv = tokenizeCommandLine(input.command);
+      // A malformed command line (unterminated quote or escape) throws; keep it
+      // a handled failure so the worker's indeterminate fallback absorbs it
+      // instead of a Die defect killing the poll loop.
+      const argv = yield* Effect.try({
+        try: () => tokenizeCommandLine(input.command),
+        catch: (cause) =>
+          new TaskWorktreeCommandError({ message: "Malformed check command.", cause }),
+      });
       if (argv.length === 0) {
         return yield* new TaskWorktreeCommandError({
           message: "The approved check command is empty.",

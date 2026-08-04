@@ -5026,7 +5026,12 @@ export const make = Effect.gen(function* () {
       const newestAttempt = task.build.checkAttempts
         .toReversed()
         .find((candidate) => candidate.checkId === attempt.checkId);
-      if (!newestAttempt || newestAttempt.id !== attempt.id) return;
+      if (!newestAttempt || newestAttempt.id !== attempt.id) {
+        yield* Effect.logDebug(
+          `Ignoring settlement of superseded attempt '${input.attemptId}' for check '${attempt.checkId}'.`,
+        );
+        return;
+      }
       const check = task.build.checks.find((candidate) => candidate.id === attempt.checkId);
       if (!check) throw new Error(`Check '${attempt.checkId}' was not found.`);
       const now = yield* serverNow;
