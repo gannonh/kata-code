@@ -4303,6 +4303,8 @@ describe("TaskWorkspaceService guided implementation", () => {
         const observedHead = yield* Effect.tryPromise(() =>
           git(worktreePath, ["rev-parse", "HEAD"]),
         );
+        const context = yield* runtime.runPromise(service.implementationContext(task.id));
+        expect(context.currentCommitSha).toBe(observedHead);
         const running = (yield* runtime.runPromise(service.getTask(task.id)))!;
         const recorded = yield* runtime.runPromise(
           service.dispatch(
@@ -4331,6 +4333,17 @@ describe("TaskWorkspaceService guided implementation", () => {
         const completed = (yield* runtime.runPromise(service.getTask(task.id)))!;
         const checkpoint = completed.build.checkpoints[0]!;
         expect(checkpoint.observedCommitSha).toBe(observedHead);
+        const blockedProgress = yield* runtime.runPromiseExit(
+          service.implementationProgress({
+            taskId: task.id,
+            expectedTaskRevision: completed.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:manual-review",
+            status: "running",
+            summary: "Should not advance through a checkpoint.",
+          }),
+        );
+        expect(Exit.isFailure(blockedProgress)).toBe(true);
         const continued = yield* runtime.runPromise(
           service.dispatch(
             command({
@@ -4348,6 +4361,10 @@ describe("TaskWorkspaceService guided implementation", () => {
           kind: "plan",
           revision: 1,
         });
+        expect(continued.task.contextManifests.at(-1)?.notes).toContain(
+          "Current bounded implementation state",
+        );
+        expect(continued.task.contextManifests.at(-1)?.notes).toContain("check:review");
         expect(continued.task.build.checkpoints[0]).toMatchObject({
           status: "waiting",
           contextManifestId: continued.task.contextManifests.at(-1)?.id,
@@ -4469,6 +4486,124 @@ describe("TaskWorkspaceService guided implementation", () => {
         expect(changed.task.build.continuationSessionIds).not.toContain(
           "guided-task-session-build-continuation-1",
         );
+      }),
+  );
+
+  it.effect(
+    "uses structural amendment diffs to invalidate changed checks and checkpoint policy",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-amend-structural-");
+        const originalPlan = [
+          "## Phase [phase:foundation] Foundation",
+          "",
+          "Checkpoint: never",
+          "",
+          "### Work item [work:implement] Implement",
+          "",
+          "- Automated check [check:typecheck]: Old Typecheck | vp run old-typecheck",
+          "",
+        ].join("\n");
+        const amendedPlan = [
+          "## Phase [phase:foundation] Foundation",
+          "",
+          "Checkpoint: always",
+          "",
+          "### Work item [work:implement] Implement",
+          "",
+          "- Automated check [check:typecheck]: New Typecheck | vp run new-typecheck",
+          "",
+        ].join("\n");
+        const { service, task } = yield* driveToBuildStage(
+          runtime,
+          baseDir,
+          repoRoot,
+          originalPlan,
+        );
+        yield* runtime.runPromise(
+          service.implementationProgress({
+            taskId: task.id,
+            expectedTaskRevision: task.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:implement",
+            status: "running",
+            summary: "Implementing.",
+          }),
+        );
+        const afterProgress = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        const run = yield* runtime.runPromise(
+          service.implementationCheckRun({
+            taskId: task.id,
+            expectedTaskRevision: afterProgress.taskRevision,
+            checkId: "check:typecheck",
+            operationKey: "op-old-typecheck",
+          }),
+        );
+        const head = yield* Effect.tryPromise(() =>
+          git(task.workspace.repositories[0]!.worktreePath!, ["rev-parse", "HEAD"]),
+        );
+        yield* runtime.runPromise(
+          service.processImplementationCheck({
+            taskId: task.id,
+            attemptId: run.attemptId,
+            status: "pass",
+            output: "old check passed",
+            exitCode: 0,
+            endingCommitSha: head,
+            startingCommitSha: head,
+          }),
+        );
+        const afterPass = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        const proposed = yield* runtime.runPromise(
+          service.implementationAmendmentPropose({
+            taskId: task.id,
+            expectedTaskRevision: afterPass.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:implement",
+            triggeringCheckId: "check:typecheck",
+            expected: "old approved check",
+            found: "new check command required",
+            impact: "The check definition changed.",
+            proposedPlanMarkdown: amendedPlan,
+            operationKey: "op-structural-amendment",
+          }),
+        );
+        const gated = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        const approved = yield* runtime.runPromise(
+          service.dispatch(
+            command({
+              type: "task.amendment.approve",
+              commandId: CommandId.make("approve-structural-amendment"),
+              taskId: task.id,
+              createdAt: now(26),
+              amendmentId: proposed.amendmentId,
+              approvedBy: "test-user",
+              expectedTaskRevision: gated.taskRevision,
+              operationKey: "op-approve-structural-amendment",
+            }),
+          ),
+        );
+        expect(approved.task.build.phases[0]).toMatchObject({
+          checkpointPolicy: "always",
+          status: "invalidated",
+        });
+        expect(approved.task.build.phases[0]?.workItems[0]).toMatchObject({
+          id: "work:implement",
+          status: "invalidated",
+        });
+        expect(approved.task.build.checks[0]).toMatchObject({
+          id: "check:typecheck",
+          label: "New Typecheck",
+          command: "vp run new-typecheck",
+          status: "pending",
+          output: null,
+          commitSha: null,
+        });
+        expect(approved.task.build.checkAttempts).toEqual([]);
+        expect(approved.task.build.checkpoints[0]).toMatchObject({
+          reason: "Recovery after approved amendment.",
+          status: "waiting",
+        });
       }),
   );
 
@@ -4600,6 +4735,47 @@ describe("TaskWorkspaceService guided implementation", () => {
         runtimeMode: "auto-accept-edits",
       });
       expect(context?.worktreePath).toBe(worktreePath);
+    }),
+  );
+
+  it.effect("rejects forged direct provider-only Guided implementation commands", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-direct-provider-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const direct = yield* runtime.runPromiseExit(
+        service.dispatch(
+          command({
+            type: "task.implementation.progress",
+            commandId: CommandId.make("forged-progress"),
+            taskId: task.id,
+            createdAt: now(25),
+            expectedTaskRevision: task.taskRevision,
+            phaseId: "phase:foundation",
+            workItemId: "work:implement",
+            status: "running",
+            summary: "Forged direct progress.",
+          }),
+        ),
+      );
+      expect(Exit.isFailure(direct)).toBe(true);
+      const bridged = yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "running",
+          summary: "Bridge-authorized progress.",
+        }),
+      );
+      expect(bridged.accepted).toBe(true);
     }),
   );
 

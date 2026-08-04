@@ -1,8 +1,14 @@
+// @effect-diagnostics nodeBuiltinImport:off - Task check sandbox profiles need synchronous host path discovery before execution.
+import * as NodeFs from "node:fs";
+import * as NodeOs from "node:os";
+import * as NodePath from "node:path";
+
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Duration from "effect/Duration";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { tokenizeCommandLine } from "@kata-sh/code-shared/shell";
 import { ProcessRunner } from "../processRunner.ts";
 
@@ -44,14 +50,157 @@ export class TaskWorktreeCommandRunner extends Context.Service<
 
 const scrubEnvironment = (): NodeJS.ProcessEnv => {
   const blocked = /(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY|AUTH|BEARER|MCP|CREDENTIAL|PROVIDER)/iu;
-  const allowed = new Set(["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "CI"]);
-  return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => allowed.has(key) && !blocked.test(key)),
-  );
+  const allowed = new Set([
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "CI",
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+  ]);
+  return {
+    GIT_AUTHOR_NAME: "Kata Code Task Check",
+    GIT_AUTHOR_EMAIL: "tasks@kata.sh",
+    GIT_COMMITTER_NAME: "Kata Code Task Check",
+    GIT_COMMITTER_EMAIL: "tasks@kata.sh",
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => allowed.has(key) && !blocked.test(key)),
+    ),
+  };
 };
+
+function sandboxString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function existingReadablePaths(paths: ReadonlyArray<string>): ReadonlyArray<string> {
+  return paths.filter((path) => {
+    try {
+      return NodeFs.existsSync(path);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function executableOnPath(name: string): string | null {
+  for (const entry of (process.env.PATH ?? "").split(NodePath.delimiter)) {
+    if (!entry) continue;
+    const candidate = NodePath.join(entry, name);
+    try {
+      if (NodeFs.existsSync(candidate)) return candidate;
+    } catch {
+      // Ignore unreadable PATH entries.
+    }
+  }
+  return null;
+}
+
+function realPath(path: string): string {
+  try {
+    return NodeFs.realpathSync.native(path);
+  } catch {
+    return path;
+  }
+}
+
+function macSandboxProfile(worktreePath: string): string {
+  const home = NodeOs.homedir();
+  const worktreePaths = Array.from(new Set([worktreePath, realPath(worktreePath)]));
+  const runtimeReadPaths = existingReadablePaths([
+    "/System",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/private/etc",
+    "/private/var/db/timezone",
+    "/opt/homebrew",
+    "/usr/local",
+    NodePath.join(home, ".vite-plus"),
+    NodePath.join(home, ".bun"),
+    NodePath.join(home, ".nvm"),
+    NodePath.join(home, "Library", "pnpm"),
+  ]);
+  const tempPaths = existingReadablePaths([NodeOs.tmpdir(), "/private/tmp", "/tmp"]);
+  return [
+    "(version 1)",
+    "(deny default)",
+    '(import "system.sb")',
+    "(allow process-exec)",
+    "(allow process-fork)",
+    "(deny network*)",
+    `(allow file-read-metadata (subpath ${sandboxString("/")}) (subpath ${sandboxString(home)}))`,
+    `(allow file-read* ${[...runtimeReadPaths, ...tempPaths, ...worktreePaths]
+      .map((path) => `(subpath ${sandboxString(path)}) (literal ${sandboxString(path)})`)
+      .join(" ")})`,
+    `(allow file-write* ${[...tempPaths, ...worktreePaths]
+      .map((path) => `(subpath ${sandboxString(path)}) (literal ${sandboxString(path)})`)
+      .join(" ")})`,
+  ].join("\n");
+}
+
+function linuxBwrapArgs(worktreePath: string, argv: ReadonlyArray<string>): ReadonlyArray<string> {
+  const readOnlyPaths = existingReadablePaths([
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/etc/alternatives",
+    "/etc/ssl",
+    "/etc/ca-certificates",
+    NodePath.join(NodeOs.homedir(), ".vite-plus"),
+  ]).flatMap((path) => ["--ro-bind", path, path]);
+  return [
+    "--unshare-all",
+    "--unshare-net",
+    "--die-with-parent",
+    "--new-session",
+    "--dev",
+    "/dev",
+    "--proc",
+    "/proc",
+    "--tmpfs",
+    "/tmp",
+    ...readOnlyPaths,
+    "--bind",
+    worktreePath,
+    worktreePath,
+    "--chdir",
+    worktreePath,
+    "--",
+    ...argv,
+  ];
+}
+
+export function sandboxApprovedCheckCommand(input: {
+  readonly argv: ReadonlyArray<string>;
+  readonly worktreePath: string;
+  readonly platform: NodeJS.Platform;
+}): { readonly command: string; readonly args: ReadonlyArray<string> } | null {
+  const platform = input.platform;
+  if (platform === "darwin" && NodeFs.existsSync("/usr/bin/sandbox-exec")) {
+    return {
+      command: "/usr/bin/sandbox-exec",
+      args: ["-p", macSandboxProfile(input.worktreePath), "--", ...input.argv],
+    };
+  }
+  if (platform === "linux") {
+    const bwrap = executableOnPath("bwrap");
+    if (bwrap) return { command: bwrap, args: linuxBwrapArgs(input.worktreePath, input.argv) };
+  }
+  return null;
+}
 
 const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner;
+  const hostPlatform = yield* HostProcessPlatform;
   const git = (cwd: string, args: ReadonlyArray<string>) =>
     processRunner.run({
       command: "git",
@@ -108,13 +257,34 @@ const make = Effect.gen(function* () {
           message: "The approved check command is empty.",
         });
       }
+      const sandboxed = sandboxApprovedCheckCommand({
+        argv,
+        worktreePath: input.worktreePath,
+        platform: hostPlatform,
+      });
+      if (!sandboxed) {
+        return {
+          status: "indeterminate" as const,
+          output: "No supported OS-enforced task check sandbox is available on this host.",
+          exitCode: null,
+          timedOut: false,
+          startingCommitSha: beforeHead.stdout.trim(),
+          endingCommitSha: beforeHead.stdout.trim(),
+          startingStatus: beforeStatus.stdout.trim(),
+          endingStatus: beforeStatus.stdout.trim(),
+        } satisfies TaskWorktreeCommandResult;
+      }
       const result = yield* processRunner
         .run({
-          command: argv[0]!,
-          args: argv.slice(1),
+          command: sandboxed.command,
+          args: sandboxed.args,
           cwd: input.worktreePath,
           timeout: Duration.millis(input.timeoutMs),
-          env: scrubEnvironment(),
+          env: {
+            ...scrubEnvironment(),
+            HOME: input.worktreePath,
+            KATA_TASK_WORKTREE: input.worktreePath,
+          },
           maxOutputBytes: input.maxOutputBytes ?? 1024 * 1024,
           outputMode: "truncate",
           timeoutBehavior: "timedOutResult",

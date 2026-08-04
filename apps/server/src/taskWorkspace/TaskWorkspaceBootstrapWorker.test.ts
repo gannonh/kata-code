@@ -48,6 +48,7 @@ import {
   TaskWorkspaceBootstrapWorkerLive,
 } from "./TaskWorkspaceBootstrapWorker.ts";
 import {
+  TaskWorktreeCommandError,
   TaskWorktreeCommandRunner,
   type TaskWorktreeCommandResult,
 } from "./TaskWorktreeCommandRunner.ts";
@@ -79,10 +80,16 @@ function unsupported(operation: string): never {
 
 const dispatchedOrchestration: unknown[] = [];
 const runnerCalls: string[] = [];
+let runnerFailsBeforeObservation = false;
 
 const fakeCommandRunner = Layer.succeed(TaskWorktreeCommandRunner, {
   run: (input) => {
     runnerCalls.push(input.command);
+    if (runnerFailsBeforeObservation) {
+      return Effect.fail(
+        new TaskWorktreeCommandError({ message: "sandbox unavailable before observation" }),
+      );
+    }
     return Effect.succeed({
       status: "fail" as const,
       output: "fixture failure",
@@ -208,6 +215,7 @@ const makeRuntime = Effect.fn("TaskWorkspaceBootstrapWorkerTest.makeRuntime")(fu
 });
 
 const setup = Effect.fn("TaskWorkspaceBootstrapWorkerTest.setup")(function* (prefix: string) {
+  runnerFailsBeforeObservation = false;
   const root = yield* Effect.tryPromise(() =>
     NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), prefix)),
   );
@@ -467,6 +475,40 @@ describe("TaskWorkspaceBootstrapWorker", () => {
       const afterSecondDrain = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(afterSecondDrain.build.checkAttempts).toHaveLength(1);
     }),
+  );
+
+  it.effect(
+    "keeps the persisted starting commit when sandbox execution fails before observation",
+    () =>
+      Effect.gen(function* () {
+        runnerCalls.length = 0;
+        const { runtime, repoRoot, baseDir } = yield* setup("kata-worker-start-fallback-");
+        const worker = yield* runtime.runPromise(Effect.service(TaskWorkspaceBootstrapWorker));
+        const { service, task } = yield* driveToBuild(runtime, baseDir, repoRoot);
+        const run = yield* runtime.runPromise(
+          service.implementationCheckRun({
+            taskId: task.id,
+            expectedTaskRevision: task.taskRevision,
+            checkId: "check:typecheck",
+            operationKey: "op-check-start-fallback",
+          }),
+        );
+        const pending = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        const fallbackStart = pending.build.checkAttempts.find(
+          (attempt) => attempt.id === run.attemptId,
+        )?.startingCommitSha;
+        expect(fallbackStart).toBeTruthy();
+        expect(fallbackStart).not.toBe("unknown");
+        runnerFailsBeforeObservation = true;
+        yield* runtime.runPromise(worker.drain());
+        const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        expect(
+          settled.build.checkAttempts.find((attempt) => attempt.id === run.attemptId),
+        ).toMatchObject({
+          status: "indeterminate",
+          startingCommitSha: fallbackStart,
+        });
+      }),
   );
 
   it.effect("marks orphaned running rows and pending attempts indeterminate on startup", () =>

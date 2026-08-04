@@ -55,6 +55,9 @@ import { canonicalTaskCommandDigest } from "@kata-sh/code-shared/taskWorkspaceDi
 import {
   compileLegacyTaskWorkspacePlan,
   compileTaskWorkspacePlan,
+  reverseDependencyInvalidation,
+  structuralDiff,
+  type TaskWorkspaceCompiledPlan,
 } from "@kata-sh/code-shared/taskWorkspacePlanCompiler";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -954,6 +957,70 @@ function requiredChecksPassAtHead(
   );
 }
 
+function hasWaitingImplementationCheckpoint(task: TaskWorkspace): boolean {
+  return (
+    task.workflowRuns.at(-1)?.currentStage === "build" &&
+    task.build.checkpoints.some((checkpoint) => checkpoint.status === "waiting")
+  );
+}
+
+function boundedImplementationStateForManifest(task: TaskWorkspace): string {
+  const state = {
+    currentPlanRevisionId: task.build.currentPlanRevisionId,
+    activePhaseId: task.build.activePhaseId,
+    activeWorkItemId: task.build.activeWorkItemId,
+    phases: task.build.phases.map((phase) => ({
+      id: phase.id,
+      title: phase.title,
+      status: phase.status,
+      checkpointPolicy: phase.checkpointPolicy,
+      workItems: phase.workItems.map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        dependsOn: [...item.dependsOn],
+        checkIds: [...item.checkIds],
+        invalidationReason: item.invalidationReason,
+      })),
+      checkIds: [...phase.checkIds],
+      checkpointId: phase.checkpointId,
+      phaseCommitSha: phase.phaseCommitSha,
+    })),
+    checks: task.build.checks.map((check) => ({
+      id: check.id,
+      phaseId: check.phaseId,
+      workItemId: check.workItemId,
+      kind: check.kind,
+      label: check.label,
+      command: check.command,
+      status: check.status,
+      commitSha: check.commitSha,
+      exitCode: check.exitCode,
+      attemptIds: [...check.attemptIds],
+    })),
+    checkpoints: task.build.checkpoints.map((checkpoint) => ({
+      id: checkpoint.id,
+      phaseId: checkpoint.phaseId,
+      status: checkpoint.status,
+      checkIds: [...checkpoint.checkIds],
+      contextManifestId: checkpoint.contextManifestId,
+      continuationSessionId: checkpoint.continuationSessionId,
+      observedCommitSha: checkpoint.observedCommitSha,
+    })),
+    amendments: task.build.amendments.map((amendment) => ({
+      id: amendment.id,
+      basePlanRevisionId: amendment.basePlanRevisionId,
+      triggeringPhaseId: amendment.triggeringPhaseId,
+      triggeringWorkItemId: amendment.triggeringWorkItemId,
+      triggeringCheckId: amendment.triggeringCheckId,
+      status: amendment.status,
+      planDiff: amendment.planDiff,
+      reviewFeedback: amendment.reviewFeedback ?? null,
+    })),
+  };
+  return JSON.stringify(state, null, 2).slice(0, 16_000);
+}
+
 const RECOVERABLE_CHECK_STATUSES = new Set(["fail", "blocked", "stale", "indeterminate"]);
 
 function isRecoverableCheckRerun(
@@ -1277,6 +1344,24 @@ export class TaskWorkspaceService extends Context.Service<
   TaskWorkspaceService,
   TaskWorkspaceServiceShape
 >()("@kata-sh/code-cli/taskWorkspace/TaskWorkspaceService") {}
+
+const INTERNAL_IMPLEMENTATION_COMMAND = Symbol("kata.internalImplementationCommand");
+
+type InternallyDispatchedCommand = TaskWorkspaceCommand & {
+  readonly [INTERNAL_IMPLEMENTATION_COMMAND]?: true;
+};
+
+function markInternalImplementationCommand(command: TaskWorkspaceCommand): TaskWorkspaceCommand {
+  Object.defineProperty(command, INTERNAL_IMPLEMENTATION_COMMAND, {
+    value: true,
+    enumerable: false,
+  });
+  return command;
+}
+
+function isInternalImplementationCommand(command: TaskWorkspaceCommand): boolean {
+  return (command as InternallyDispatchedCommand)[INTERNAL_IMPLEMENTATION_COMMAND] === true;
+}
 
 let activeTaskWorkspaceService: TaskWorkspaceServiceShape | undefined;
 
@@ -2227,6 +2312,20 @@ export const make = Effect.gen(function* () {
         return yield* taskError(
           command,
           "Guided stage work is server-owned; use the task-stage bridge from the active conversation.",
+        );
+      }
+      if (
+        firstSliceGuided &&
+        !isInternalImplementationCommand(command) &&
+        [
+          "task.implementation.progress",
+          "task.implementation.amendment.propose",
+          "task.implementation.complete",
+        ].includes(command.type)
+      ) {
+        return yield* taskError(
+          command,
+          "Guided implementation provider operations are server-owned; use the task implementation bridge from the active conversation.",
         );
       }
 
@@ -3461,6 +3560,8 @@ export const make = Effect.gen(function* () {
             );
           if (task.build.amendmentGateId)
             throw new Error("Implementation is paused at an amendment gate.");
+          if (hasWaitingImplementationCheckpoint(task))
+            throw new Error("Implementation is paused at a waiting checkpoint.");
           const phase = phaseForBuild(task, command.phaseId);
           if (phase.status === "blocked" || phase.status === "invalidated")
             throw new Error(`Phase '${phase.id}' is blocked.`);
@@ -3547,6 +3648,15 @@ export const make = Effect.gen(function* () {
               );
             } else build = startNextPhase(build, phase.id, command.createdAt);
           }
+          const repository = task.workspace.repositories[0];
+          if (repository?.worktreePath) {
+            const observedHead = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+              Effect.mapError((cause) =>
+                taskError(command, "Failed to inspect the task worktree HEAD.", cause),
+              ),
+            );
+            build = markStalePassesForHead(build, observedHead);
+          }
           return yield* append(
             command,
             { ...task, build, updatedAt: command.createdAt },
@@ -3559,6 +3669,8 @@ export const make = Effect.gen(function* () {
             throw new Error("The implementation task revision is stale.");
           if (task.build.amendmentGateId)
             throw new Error("Implementation is paused at an amendment gate.");
+          if (isInternalImplementationCommand(command) && hasWaitingImplementationCheckpoint(task))
+            throw new Error("Implementation is paused at a waiting checkpoint.");
           const check = checkForBuild(task, command.checkId);
           if (check.kind !== "automated" || !check.command)
             throw new Error(`Check '${check.id}' is not an approved automated command.`);
@@ -3662,6 +3774,8 @@ export const make = Effect.gen(function* () {
             throw new Error("The implementation task revision is stale.");
           if (task.build.amendmentGateId)
             throw new Error("An implementation amendment is already open.");
+          if (hasWaitingImplementationCheckpoint(task))
+            throw new Error("Implementation is paused at a waiting checkpoint.");
           const plan = latestPlanRevision(task);
           const phase = phaseForBuild(task, command.phaseId);
           const item = workItemForBuild(phase, command.workItemId);
@@ -3724,6 +3838,8 @@ export const make = Effect.gen(function* () {
           requireStage(task, "build");
           if (command.expectedTaskRevision !== task.taskRevision)
             throw new Error("The implementation task revision is stale.");
+          if (hasWaitingImplementationCheckpoint(task))
+            throw new Error("Implementation is paused at a waiting checkpoint.");
           const occurrence = activeOccurrence(task, "build");
           if (!occurrence?.sessionId || !occurrence.threadId)
             throw new Error("No active implementation occurrence.");
@@ -3827,9 +3943,6 @@ export const make = Effect.gen(function* () {
           );
           if (!owner) throw new Error(`Work item '${command.workItemId}' was not found.`);
           const item = workItemForBuild(owner, command.workItemId);
-          if (item.status === "blocked" || item.status === "invalidated") {
-            throw new Error(`Work item '${item.id}' must be resumed before it can change status.`);
-          }
           if (command.status === "running") {
             if (task.build.activePhaseId !== null && task.build.activePhaseId !== owner.id) {
               throw new Error(
@@ -4473,82 +4586,41 @@ export const make = Effect.gen(function* () {
                   planRevisionId: proposedPlan.id,
                 })
               : { ...task.build, currentPlanRevisionId: proposedPlan.id };
-          const oldPhases = task.build.phases;
-          const changedPhaseIds = new Set(
-            compiledBuild.phases
-              .filter((candidate) => {
-                const old = oldPhases.find((phase) => phase.id === candidate.id);
-                return (
-                  !old ||
-                  old.title !== candidate.title ||
-                  old.workItems.length !== candidate.workItems.length ||
-                  old.workItems.some(
-                    (item, index) =>
-                      item.title !== candidate.workItems[index]?.title ||
-                      item.dependsOn.join(",") !== candidate.workItems[index]?.dependsOn.join(","),
-                  )
-                );
-              })
-              .map((phase) => phase.id),
+          const previousCompiled: TaskWorkspaceCompiledPlan = {
+            ...task.build,
+            planRevisionId: plan.id,
+          };
+          const nextCompiled =
+            task.versions.workflowDefinition === "guided@0.3.0"
+              ? (compiledBuild as TaskWorkspaceCompiledPlan)
+              : null;
+          const diff = nextCompiled ? structuralDiff(previousCompiled, nextCompiled) : null;
+          const invalidation = diff
+            ? reverseDependencyInvalidation(previousCompiled, nextCompiled!, diff)
+            : null;
+          const derivedAffectedPhaseIds = new Set(
+            invalidation?.phaseIds ?? amendment.affectedPhaseIds,
           );
-          const changedWorkItemIds = new Set(
-            compiledBuild.phases.flatMap((phase) =>
-              phase.workItems
-                .filter((item) => {
-                  const old = oldPhases
-                    .flatMap((candidate) => candidate.workItems)
-                    .find((candidate) => candidate.id === item.id);
-                  return (
-                    !old ||
-                    old.title !== item.title ||
-                    old.dependsOn.join(",") !== item.dependsOn.join(",")
-                  );
-                })
-                .map((item) => item.id),
-            ),
+          const derivedAffectedWorkItemIds = new Set(
+            invalidation?.workItemIds ?? amendment.affectedWorkItemIds,
           );
-          for (const phase of compiledBuild.phases)
-            for (const item of phase.workItems)
-              if (item.dependsOn.some((dependency) => changedWorkItemIds.has(dependency)))
-                changedWorkItemIds.add(item.id);
-          const derivedAffectedPhaseIds =
-            task.versions.workflowDefinition === "guided@0.3.0"
-              ? new Set([
-                  ...changedPhaseIds,
-                  ...compiledBuild.phases
-                    .filter((phase) =>
-                      phase.workItems.some((item) => changedWorkItemIds.has(item.id)),
-                    )
-                    .map((phase) => phase.id),
-                ])
-              : new Set(amendment.affectedPhaseIds);
-          const derivedAffectedWorkItemIds =
-            task.versions.workflowDefinition === "guided@0.3.0"
-              ? new Set([
-                  ...changedWorkItemIds,
-                  ...compiledBuild.phases
-                    .filter((phase) => derivedAffectedPhaseIds.has(phase.id))
-                    .flatMap((phase) =>
-                      phase.workItems
-                        .filter((item) => item.status !== "completed")
-                        .map((item) => item.id),
-                    ),
-                ])
-              : new Set(amendment.affectedWorkItemIds);
-          const derivedDependentCheckIds =
-            task.versions.workflowDefinition === "guided@0.3.0"
-              ? new Set(
-                  compiledBuild.checks
-                    .filter(
-                      (check) =>
-                        derivedAffectedPhaseIds.has(check.phaseId) ||
-                        (check.workItemId !== null &&
-                          derivedAffectedWorkItemIds.has(check.workItemId)),
-                    )
-                    .map((check) => check.id),
-                )
-              : new Set(amendment.dependentCheckIds);
-          const changedBlockIds = [`amendment-${amendment.id}`];
+          const derivedDependentCheckIds = new Set(
+            invalidation?.checkIds ?? amendment.dependentCheckIds,
+          );
+          const changedBlockIds = diff
+            ? [
+                `amendment-${amendment.id}`,
+                ...diff.addedPhaseIds,
+                ...diff.removedPhaseIds,
+                ...diff.changedPhaseIds,
+                ...diff.addedWorkItemIds,
+                ...diff.removedWorkItemIds,
+                ...diff.changedWorkItemIds,
+                ...diff.addedCheckIds,
+                ...diff.removedCheckIds,
+                ...diff.changedCheckIds,
+              ]
+            : [`amendment-${amendment.id}`];
           const projectedPhases = compiledBuild.phases.map((phase) => {
             const previous = task.build.phases.find((candidate) => candidate.id === phase.id);
             const sameShape =
@@ -4579,8 +4651,10 @@ export const make = Effect.gen(function* () {
               }),
             };
           });
-          const projectedChecks = compiledBuild.checks.map(
-            (check) => task.build.checks.find((prior) => prior.id === check.id) ?? check,
+          const projectedChecks = compiledBuild.checks.map((check) =>
+            derivedDependentCheckIds.has(check.id)
+              ? check
+              : (task.build.checks.find((prior) => prior.id === check.id) ?? check),
           );
           const projectedBuild: TaskWorkspace["build"] = {
             ...compiledBuild,
@@ -4590,8 +4664,10 @@ export const make = Effect.gen(function* () {
             // An in-flight attempt for a check the amended plan removed would
             // otherwise survive as a permanently pending attempt that blocks
             // completion with no rerun path. Prune attempts for dropped checks.
-            checkAttempts: task.build.checkAttempts.filter((attempt) =>
-              compiledBuild.checks.some((check) => check.id === attempt.checkId),
+            checkAttempts: task.build.checkAttempts.filter(
+              (attempt) =>
+                compiledBuild.checks.some((check) => check.id === attempt.checkId) &&
+                !derivedDependentCheckIds.has(attempt.checkId),
             ),
           };
           const invalidatedBuild = {
@@ -4645,20 +4721,18 @@ export const make = Effect.gen(function* () {
               derivedDependentCheckIds.has(check.id)
                 ? {
                     ...check,
-                    status: "pending" as const,
-                    // Only the check that triggered the reviewed amendment is
-                    // re-projected by the deterministic fixture adapter. Other
-                    // dependent checks keep their original command so an
-                    // amendment cannot silently rewrite unrelated failures.
                     command:
+                      task.versions.workflowDefinition !== "guided@0.3.0" &&
                       check.id === amendment.triggeringCheckId &&
                       check.command === "fixture.mismatch"
                         ? "fixture.pass"
                         : check.command,
                     label:
+                      task.versions.workflowDefinition !== "guided@0.3.0" &&
                       check.id === amendment.triggeringCheckId
                         ? check.label.replace(/mismatch/giu, "amended")
                         : check.label,
+                    status: "pending" as const,
                     output: null,
                     note: null,
                     exitCode: null,
@@ -4875,7 +4949,7 @@ export const make = Effect.gen(function* () {
             task.build.phases.some((phase) =>
               phase.workItems.some((item) => item.status !== "completed"),
             ) ||
-            task.build.checkpoints.some((checkpoint) => checkpoint.status === "waiting") ||
+            hasWaitingImplementationCheckpoint(task) ||
             !requiredChecksPass(
               task.build,
               task.build.checks.map((check) => check.id),
@@ -5320,6 +5394,20 @@ export const make = Effect.gen(function* () {
           message: "The approved implementation Plan is unavailable.",
         });
       }
+      const repository = task.workspace.repositories[0];
+      const currentCommitSha = repository?.worktreePath
+        ? yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TaskWorkspaceError({
+                  message: "Failed to inspect the task worktree HEAD.",
+                  commandType: "task.internal",
+                  taskId,
+                  cause,
+                }),
+            ),
+          )
+        : null;
       return {
         stage: "build",
         occurrence: latestOccurrence(task, "build")?.ordinal ?? 0,
@@ -5330,7 +5418,7 @@ export const make = Effect.gen(function* () {
         checks: task.build.checks,
         checkpoints: task.build.checkpoints,
         amendments: task.build.amendments,
-        currentCommitSha: task.build.resultingCommitSha,
+        currentCommitSha,
       } satisfies TaskImplementationContextResult;
     });
 
@@ -5338,13 +5426,14 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const commandId = CommandId.make(`server:implementation:${yield* serverUuid}`);
       const createdAt = yield* serverNow;
-      return yield* dispatch({
+      const command = {
         commandId,
         taskId,
         createdAt,
         type,
         ...fields,
-      } as TaskWorkspaceCommand);
+      } as TaskWorkspaceCommand;
+      return yield* dispatch(markInternalImplementationCommand(command));
     });
 
   const implementationProgress: TaskWorkspaceServiceShape["implementationProgress"] = (input) =>
@@ -5361,8 +5450,15 @@ export const make = Effect.gen(function* () {
     serverCommand(input.taskId, "task.implementation.check.run", input).pipe(
       Effect.map((result) => {
         const check = result.task.build.checks.find((candidate) => candidate.id === input.checkId);
-        const attemptId =
-          result.task.build.checkAttempts.at(-1)?.id ?? `attempt-${input.operationKey}`;
+        const attempt =
+          result.task.build.checkAttempts.find(
+            (candidate) =>
+              candidate.checkId === input.checkId && candidate.operationKey === input.operationKey,
+          ) ??
+          result.task.build.checkAttempts
+            .toReversed()
+            .find((candidate) => candidate.checkId === input.checkId);
+        const attemptId = attempt?.id ?? `attempt-${input.operationKey}`;
         return {
           accepted: true as const,
           checkId: input.checkId,
@@ -5453,7 +5549,10 @@ export const make = Effect.gen(function* () {
                 output: input.output,
                 exitCode: input.exitCode,
                 observedStatus: nextStatus,
-                startingCommitSha: input.startingCommitSha ?? candidate.startingCommitSha,
+                startingCommitSha:
+                  input.startingCommitSha && input.startingCommitSha !== "unknown"
+                    ? input.startingCommitSha
+                    : candidate.startingCommitSha,
                 endingCommitSha: input.endingCommitSha,
                 completedAt: now,
               }
@@ -5708,6 +5807,8 @@ export const make = Effect.gen(function* () {
               input.checkpoint.observedCommitSha
                 ? `Observed commit ${input.checkpoint.observedCommitSha}.`
                 : "Observed commit unavailable.",
+              "Current bounded implementation state:",
+              boundedImplementationStateForManifest(input.task),
             ].join("\n"),
             tokenEstimate: 0,
             budget: definitionFor(input.task).contextTokenBudget,
@@ -6050,10 +6151,7 @@ export const make = Effect.gen(function* () {
           commandType: "task.internal",
           taskId: task.id,
         });
-      if (
-        task.build.amendmentGateId ||
-        task.build.checkpoints.some((checkpoint) => checkpoint.status === "waiting")
-      )
+      if (task.build.amendmentGateId || hasWaitingImplementationCheckpoint(task))
         throw new TaskWorkspaceError({
           message: "Build has an open checkpoint or amendment gate.",
           commandType: "task.internal",

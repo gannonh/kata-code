@@ -9,10 +9,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { describe, expect } from "vite-plus/test";
+import { expect } from "vite-plus/test";
 
 import * as ProcessRunner from "../processRunner.ts";
 import {
+  sandboxApprovedCheckCommand,
   TaskWorktreeCommandRunner,
   TaskWorktreeCommandRunnerLive,
 } from "./TaskWorktreeCommandRunner.ts";
@@ -205,4 +206,24 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
       expect(unterminatedQuote._tag).toBe("Failure");
     }),
   );
+
+  it("wraps approved commands in the OS sandbox command for supported hosts", () => {
+    const wrapped = sandboxApprovedCheckCommand({
+      argv: ["vp", "run", "typecheck"],
+      worktreePath: "/tmp/kata-check-worktree",
+      platform: "darwin",
+    });
+    expect(wrapped?.command).toBe("/usr/bin/sandbox-exec");
+    expect(wrapped?.args).toContain("vp");
+  });
+
+  it("reports unsupported sandbox capability without a host execution fallback", () => {
+    expect(
+      sandboxApprovedCheckCommand({
+        argv: ["echo", "unsafe"],
+        worktreePath: "/tmp/kata-check-worktree",
+        platform: "freebsd",
+      }),
+    ).toBeNull();
+  });
 });
