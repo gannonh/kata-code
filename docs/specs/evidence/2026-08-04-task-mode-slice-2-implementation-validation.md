@@ -74,12 +74,23 @@ Repository gates:
 | TM-S2-AC11 current surface          | Conversation-first Implement panel and hidden historical controls                          | Implemented                                                 |
 | TM-S2-AC12 cumulative desktop proof | Updated form-driven scenario reaches the current Implement panel                           | Pending authenticated provider-backed completion path       |
 
-## Provider-backed acceptance blocker
+## Desktop E2E result
 
-The local environment does not provide `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. The
-authenticated desktop E2E cannot run to completion without those credentials. The repository keeps
-the scenario under `e2e/tests/task-workspaces/slice-4.spec.ts`, and the current catalog assertion
-pins new tasks to `guided@0.3.0`.
+The command below was executed directly:
+
+```bash
+vp run e2e --project desktop-dev --grep @task-workspaces
+```
+
+```text
+8 passed, 1 failed
+```
+
+The eight unauthenticated task-workspace scenarios passed. The Guided provider scenario failed at
+its Clerk prerequisite before entering the task flow because `CLERK_PUBLISHABLE_KEY` and
+`CLERK_SECRET_KEY` are absent. The repository keeps the scenario under
+`e2e/tests/task-workspaces/slice-4.spec.ts`, and the current catalog assertion pins new tasks to
+`guided@0.3.0`.
 
 No provider-backed completion, checkpoint, amendment, restart, or resulting-commit claim is made
 from the blocked run.
