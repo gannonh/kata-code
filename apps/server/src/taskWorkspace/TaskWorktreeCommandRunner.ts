@@ -3,6 +3,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Duration from "effect/Duration";
+import { tokenizeCommandLine } from "@kata-sh/code-shared/shell";
 import { ProcessRunner } from "../processRunner.ts";
 
 export interface TaskWorktreeCommandInput {
@@ -94,10 +95,16 @@ const make = Effect.gen(function* () {
           message: "Unable to observe the task worktree.",
         });
       }
+      const argv = tokenizeCommandLine(input.command);
+      if (argv.length === 0) {
+        return yield* new TaskWorktreeCommandError({
+          message: "The approved check command is empty.",
+        });
+      }
       const result = yield* processRunner
         .run({
-          command: input.command,
-          args: [],
+          command: argv[0]!,
+          args: argv.slice(1),
           cwd: input.worktreePath,
           timeout: Duration.millis(input.timeoutMs),
           env: scrubEnvironment(),
@@ -113,17 +120,41 @@ const make = Effect.gen(function* () {
         );
       const afterHead = yield* git(input.worktreePath, ["rev-parse", "HEAD"]);
       const afterStatus = yield* git(input.worktreePath, ["status", "--porcelain=v2"]);
-      const output = `${result.stdout}${result.stderr.length > 0 ? `\n${result.stderr}` : ""}`;
+      const startingCommitSha = beforeHead.stdout.trim();
+      const endingCommitSha =
+        afterHead.code === 0 && !afterHead.timedOut ? afterHead.stdout.trim() : null;
+      const startingStatus = beforeStatus.stdout.trim();
+      const endingStatus =
+        afterStatus.code === 0 && !afterStatus.timedOut ? afterStatus.stdout.trim() : null;
+      const worktreeChanged =
+        (endingCommitSha !== null && endingCommitSha !== startingCommitSha) ||
+        (endingStatus !== null && endingStatus !== startingStatus);
+      let output = `${result.stdout}${result.stderr.length > 0 ? `\n${result.stderr}` : ""}`;
+      if (worktreeChanged) {
+        const changeNotes: string[] = [];
+        if (endingCommitSha !== null && endingCommitSha !== startingCommitSha) {
+          changeNotes.push(`HEAD moved from ${startingCommitSha} to ${endingCommitSha}.`);
+        }
+        if (endingStatus !== null && endingStatus !== startingStatus) {
+          changeNotes.push("The canonical worktree status changed.");
+        }
+        output = `${output}${output.length > 0 ? "\n" : ""}[worktree changed: ${changeNotes.join(" ")} The changed state is left visible for recovery.]`;
+      }
       return {
-        status: result.timedOut ? "indeterminate" : result.code === 0 ? "pass" : "fail",
+        status: result.timedOut
+          ? "indeterminate"
+          : worktreeChanged
+            ? "fail"
+            : result.code === 0
+              ? "pass"
+              : "fail",
         output,
         exitCode: result.code === null ? null : Number(result.code),
         timedOut: result.timedOut,
-        startingCommitSha: beforeHead.stdout.trim(),
-        endingCommitSha:
-          afterHead.code === 0 && !afterHead.timedOut ? afterHead.stdout.trim() : null,
-        startingStatus: beforeStatus.stdout,
-        endingStatus: afterStatus.code === 0 && !afterStatus.timedOut ? afterStatus.stdout : null,
+        startingCommitSha,
+        endingCommitSha,
+        startingStatus,
+        endingStatus,
       } satisfies TaskWorktreeCommandResult;
     }).pipe(
       Effect.mapError((cause) =>

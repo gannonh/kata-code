@@ -22,6 +22,7 @@ import {
   type TaskWorkspaceArtifactRevision,
   type TaskWorkspaceBlockIndexEntry,
   type TaskWorkspaceBuildCheck,
+  type TaskWorkspaceCheckAttempt,
   type TaskWorkspaceBuildCheckpoint,
   type TaskWorkspaceBuildPhase,
   type TaskWorkspaceCommand,
@@ -922,6 +923,39 @@ function requiredChecksPass(
   );
 }
 
+/**
+ * Mark pass checks for another commit `stale` whenever the server observes a
+ * new HEAD during check settlement or completion handling. Passes (and their
+ * pass attempts) whose commit differs from `headSha` become `stale`; every
+ * other build field is preserved unchanged.
+ */
+function markStalePassesForHead(
+  build: TaskWorkspace["build"],
+  headSha: string,
+): TaskWorkspace["build"] {
+  if (headSha.length === 0) return build;
+  let changed = false;
+  const checks = build.checks.map((check) => {
+    if (check.status === "pass" && check.commitSha !== null && check.commitSha !== headSha) {
+      changed = true;
+      return { ...check, status: "stale" as const };
+    }
+    return check;
+  });
+  const checkAttempts = build.checkAttempts.map((attempt) => {
+    if (
+      attempt.status === "pass" &&
+      attempt.endingCommitSha !== null &&
+      attempt.endingCommitSha !== headSha
+    ) {
+      changed = true;
+      return { ...attempt, status: "stale" as const };
+    }
+    return attempt;
+  });
+  return changed ? { ...build, checks, checkAttempts } : build;
+}
+
 function checkpointReason(policy: TaskWorkspaceBuildPhase["checkpointPolicy"]): string {
   return policy === "on-failure" ? "A required Build check failed." : "Phase checkpoint reached.";
 }
@@ -1406,7 +1440,8 @@ export const make = Effect.gen(function* () {
           .filter((candidate) => candidate.stage === run.currentStage)
           .toSorted((left, right) => right.ordinal - left.ordinal)[0];
         const isBootstrapThread =
-          task.bootstrap?.status === "running" && task.bootstrap.reservedThreadId === threadId;
+          (task.bootstrap?.status === "pending" || task.bootstrap?.status === "running") &&
+          task.bootstrap.reservedThreadId === threadId;
         const isActiveOccurrence =
           occurrence?.threadId === threadId &&
           (occurrence.status === "starting" ||
@@ -1432,10 +1467,20 @@ export const make = Effect.gen(function* () {
         const repository = task.workspace.repositories[0];
         const modelSelection = task.preferences.modelSelection;
         const expectedBranch = `katacode/task-${safeBranchSegment(task.id)}`;
+        // The initial Implement session is created during the build bootstrap
+        // window: the occurrence is still `starting` and the deterministic
+        // thread id is reserved on the bootstrap state. ProviderService build
+        // guards must resolve the canonical worktree/profile here or the first
+        // session can never start.
+        const bootstrapStatus = task.bootstrap?.status;
+        const isBootstrapThread =
+          task.bootstrap?.reservedThreadId === threadId &&
+          (bootstrapStatus === "pending" || bootstrapStatus === "running");
+        const isActiveOccurrence =
+          occurrence?.threadId === threadId &&
+          (occurrence.status === "running" || occurrence.status === "finalizing");
+        if (!isBootstrapThread && !isActiveOccurrence) continue;
         if (
-          !occurrence ||
-          occurrence.threadId !== threadId ||
-          (occurrence.status !== "running" && occurrence.status !== "finalizing") ||
           !repository?.worktreePath ||
           !repository.baseCommitSha ||
           repository.branch !== expectedBranch ||
@@ -3473,7 +3518,9 @@ export const make = Effect.gen(function* () {
               outbox: [
                 {
                   target: "implementation-check",
-                  operationKey: command.operationKey,
+                  // One unique row per attempt: a slow older attempt must never
+                  // clobber the row of a newer rerun of the same check.
+                  operationKey: `${command.operationKey}:${attemptId}`,
                   payload: {
                     attemptId,
                     checkId: check.id,
@@ -4248,7 +4295,7 @@ export const make = Effect.gen(function* () {
                   }
                 : candidate,
             ),
-            phases: amendedTask.build.phases.map((phase) =>
+            phases: projectedBuild.phases.map((phase) =>
               derivedAffectedPhaseIds.has(phase.id)
                 ? {
                     ...phase,
@@ -4268,7 +4315,7 @@ export const make = Effect.gen(function* () {
                   }
                 : phase,
             ),
-            checks: amendedTask.build.checks.map((check) =>
+            checks: projectedBuild.checks.map((check) =>
               derivedDependentCheckIds.has(check.id)
                 ? {
                     ...check,
@@ -4946,7 +4993,44 @@ export const make = Effect.gen(function* () {
       const now = yield* serverNow;
       const phase = task.build.phases.find((candidate) => candidate.id === check.phaseId);
       const nextStatus = input.status;
-      const build: TaskWorkspace["build"] = {
+      const phases = task.build.phases.map((candidate) => {
+        if (candidate.id !== phase?.id) return candidate;
+        if (nextStatus !== "pass") {
+          return {
+            ...candidate,
+            status: "blocked" as const,
+            workItems: candidate.workItems.map((item) =>
+              item.id === check.workItemId
+                ? {
+                    ...item,
+                    status: "blocked" as const,
+                    invalidationReason: `Check '${check.id}' did not pass.`,
+                  }
+                : item,
+            ),
+          };
+        }
+        // A rerun attempt passed: unblock the phase and work item this check
+        // blocked so implementation progress can continue.
+        const blockedByThisCheck =
+          candidate.status === "blocked" &&
+          candidate.workItems.some(
+            (item) => item.id === check.workItemId && item.status === "blocked",
+          );
+        if (!blockedByThisCheck) return candidate;
+        const resumedPhaseStatus: "running" | "pending" =
+          task.build.activePhaseId === candidate.id ? "running" : "pending";
+        return {
+          ...candidate,
+          status: resumedPhaseStatus,
+          workItems: candidate.workItems.map((item) =>
+            item.id === check.workItemId && item.status === "blocked"
+              ? { ...item, status: "pending" as const, invalidationReason: null }
+              : item,
+          ),
+        };
+      });
+      let build: TaskWorkspace["build"] = {
         ...task.build,
         checkAttempts: task.build.checkAttempts.map((candidate) =>
           candidate.id === attempt.id
@@ -4973,24 +5057,13 @@ export const make = Effect.gen(function* () {
               }
             : candidate,
         ),
-        phases: task.build.phases.map((candidate) =>
-          candidate.id === phase?.id && nextStatus !== "pass"
-            ? {
-                ...candidate,
-                status: "blocked" as const,
-                workItems: candidate.workItems.map((item) =>
-                  item.id === check.workItemId
-                    ? {
-                        ...item,
-                        status: "blocked" as const,
-                        invalidationReason: `Check '${check.id}' did not pass.`,
-                      }
-                    : item,
-                ),
-              }
-            : candidate,
-        ),
+        phases,
       };
+      // The server observed the ending HEAD during check settlement: passes for
+      // any other commit become stale.
+      if (input.endingCommitSha !== null) {
+        build = markStalePassesForHead(build, input.endingCommitSha);
+      }
       yield* internalAppend(
         "task.implementation.check.run",
         { ...task, build, updatedAt: now },
@@ -5367,11 +5440,31 @@ export const make = Effect.gen(function* () {
           commandType: "task.internal",
           taskId: task.id,
         });
+      // Completion blocking considers only each check's latest attempt: a
+      // historical failed attempt must not block once a newer attempt passes.
+      // Blocking attempt statuses are pending/running/stale/indeterminate/
+      // blocked; `fail` is not permanently blocking when superseded.
+      const blockingAttemptStatuses: ReadonlySet<string> = new Set([
+        "pending",
+        "running",
+        "stale",
+        "indeterminate",
+        "blocked",
+      ]);
+      const latestAttemptsByCheck = (build: TaskWorkspace["build"]) => {
+        const latest = new Map<string, TaskWorkspaceCheckAttempt>();
+        for (const attempt of build.checkAttempts) {
+          latest.set(attempt.checkId, attempt);
+        }
+        return latest;
+      };
+      const latestBlockingAttempt = (build: TaskWorkspace["build"]) =>
+        [...latestAttemptsByCheck(build).values()].some((attempt) =>
+          blockingAttemptStatuses.has(attempt.status),
+        );
       if (
         task.build.checks.some((check) => check.status !== "pass" || check.commitSha === null) ||
-        task.build.checkAttempts.some((attempt) =>
-          ["pending", "running", "fail", "stale", "indeterminate"].includes(attempt.status),
-        )
+        latestBlockingAttempt(task.build)
       )
         throw new TaskWorkspaceError({
           message: "Build has checks that are not passing and current.",
@@ -5407,7 +5500,15 @@ export const make = Effect.gen(function* () {
           commandType: "task.internal",
           taskId: task.id,
         });
-      if (task.build.checks.some((check) => check.commitSha !== head))
+      // The server observed the current HEAD during completion handling: pass
+      // checks for another commit are stale and block completion.
+      const effectiveBuild = markStalePassesForHead(task.build, head);
+      if (
+        effectiveBuild.checks.some(
+          (check) => check.status !== "pass" || check.commitSha !== head,
+        ) ||
+        latestBlockingAttempt(effectiveBuild)
+      )
         throw new TaskWorkspaceError({
           message: "A required Build check does not match the current HEAD.",
           commandType: "task.internal",

@@ -422,6 +422,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "The active Build task has no canonical worktree/provider profile.",
         );
       }
+      if (
+        activeTaskStage === "build" &&
+        activeTaskContext?.providerInstanceId !== input.providerInstanceId
+      ) {
+        return yield* toValidationError(
+          "ProviderService.restartSessionForMcpCredential",
+          "The requested provider instance is not pinned to the active Build task.",
+        );
+      }
       const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
       const developerInstructions = activeTaskStage
         ? trustedStageInstructions(activeTaskStage)

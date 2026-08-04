@@ -9,7 +9,7 @@ import {
   type TaskWorkspaceOutboxEntry,
 } from "@kata-sh/code-contracts";
 
-import { TaskWorkspaceService } from "./TaskWorkspaceService.ts";
+import { TaskWorkspaceService, safeBranchSegment } from "./TaskWorkspaceService.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 import { TaskWorktreeCommandRunner } from "./TaskWorktreeCommandRunner.ts";
@@ -22,6 +22,12 @@ export interface TaskWorkspaceBootstrapWorkerShape {
    * path instead of waiting on the poll loop.
    */
   readonly drain: () => Effect.Effect<void, never>;
+  /**
+   * Mark orphaned `running` implementation-check rows and their still-pending
+   * or running attempts indeterminate. Runs once before polling; never reruns
+   * a command.
+   */
+  readonly reconcile: () => Effect.Effect<void, never>;
 }
 
 export class TaskWorkspaceBootstrapWorker extends Context.Service<
@@ -56,19 +62,40 @@ const makeWorker = Effect.gen(function* () {
           updatedAt: now,
         })
         .pipe(Effect.catch(() => Effect.void));
-      const task = yield* taskWorkspaces.getTask(entry.taskId);
-      const repository = task?.workspace.repositories[0];
-      const segment =
-        entry.taskId
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/gu, "-")
-          .replace(/^-|-$/gu, "")
-          .slice(0, 32) || "task";
+
+      // A settled attempt is terminal. A crash between settling the attempt and
+      // writing the terminal outbox row must never re-run the command; the row
+      // is simply retired here. A row whose task or attempt is missing is also
+      // retired without running anything.
+      const settledTask = yield* taskWorkspaces.getTask(entry.taskId);
+      const settledAttempt = settledTask?.build.checkAttempts.find(
+        (candidate) => candidate.id === payload.attemptId,
+      );
+      if (
+        !settledTask ||
+        !settledAttempt ||
+        settledAttempt.status === "pass" ||
+        settledAttempt.status === "fail" ||
+        settledAttempt.status === "indeterminate"
+      ) {
+        yield* store
+          .upsertOutbox({
+            ...entry,
+            status: "completed",
+            attemptCount: entry.attemptCount + 1,
+            updatedAt: now,
+            completedAt: now,
+          })
+          .pipe(Effect.catch(() => Effect.void));
+        return;
+      }
+
+      const repository = settledTask.workspace.repositories[0];
       const result = yield* repository?.baseCommitSha
         ? commandRunner
             .run({
               worktreePath: payload.worktreePath,
-              expectedBranch: `katacode/task-${segment}`,
+              expectedBranch: `katacode/task-${safeBranchSegment(entry.taskId)}`,
               expectedBaseCommitSha: repository.baseCommitSha,
               command: payload.command,
               timeoutMs: payload.timeoutMs,
@@ -102,17 +129,57 @@ const makeWorker = Effect.gen(function* () {
           ...result,
         })
         .pipe(Effect.catch(() => Effect.void));
-      const status = result.status === "pass" ? ("completed" as const) : ("failed" as const);
+      // Any settled attempt (pass, fail, or indeterminate) is terminal: the row
+      // is written `completed` so `readPendingOutbox` never re-queues it. Only a
+      // brand-new explicit check-run request creates a new attempt and row.
       yield* store
         .upsertOutbox({
           ...entry,
-          status,
+          status: "completed",
           attemptCount: entry.attemptCount + 1,
           updatedAt: now,
           completedAt: now,
         })
         .pipe(Effect.catch(() => Effect.void));
     }).pipe(Effect.catch(() => Effect.void));
+
+  // Startup-only crash reconciliation. A `running` row means a previous worker
+  // process died between the pre-spawn write and the terminal write. The attempt
+  // is marked indeterminate (only while it is still pending or running) and the
+  // row is retired; the command is never re-run.
+  const reconcileImplementationChecks: Effect.Effect<void, never> = Effect.gen(function* () {
+    const running = yield* store
+      .readRunningImplementationChecks({ environmentId, limit: 1_000 })
+      .pipe(Effect.mapError(() => "task-outbox-reconcile-read-failed" as const))
+      .pipe(Effect.catch(() => Effect.succeed([])));
+    for (const entry of running) {
+      const payload = yield* Schema.decodeUnknownEffect(
+        TaskWorkspaceImplementationCheckOutboxPayload,
+      )(entry.payload).pipe(Effect.orElseSucceed(() => null));
+      const now = DateTime.formatIso(yield* DateTime.now);
+      if (payload) {
+        yield* taskWorkspaces
+          .processImplementationCheck({
+            taskId: entry.taskId,
+            attemptId: payload.attemptId,
+            status: "indeterminate",
+            output: "The check process result could not be reconciled after restart.",
+            exitCode: null,
+            endingCommitSha: null,
+          })
+          .pipe(Effect.catch(() => Effect.void));
+      }
+      yield* store
+        .upsertOutbox({
+          ...entry,
+          status: "completed",
+          attemptCount: entry.attemptCount + 1,
+          updatedAt: now,
+          completedAt: now,
+        })
+        .pipe(Effect.catch(() => Effect.void));
+    }
+  });
 
   // Failures are recorded on the outbox row by the saga itself; the poll loop
   // must never crash the worker, so batch errors are logged and swallowed.
@@ -144,9 +211,11 @@ const makeWorker = Effect.gen(function* () {
   return {
     start: () =>
       Effect.gen(function* () {
+        yield* reconcileImplementationChecks;
         yield* Effect.forkScoped(loop);
       }).pipe(Effect.asVoid),
     drain: () => processPending,
+    reconcile: () => reconcileImplementationChecks,
   } satisfies TaskWorkspaceBootstrapWorkerShape;
 });
 
