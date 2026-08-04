@@ -349,6 +349,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       );
       assert.ok(permissionArg);
       assert.match(permissionArg, /":minimal"="read"/u);
+      assert.match(permissionArg, /"\/tmp\/task-worktree\/\*\*"="write"/u);
       assert.match(permissionArg, /\.git\/\*\*.*="deny"/u);
       assert.doesNotMatch(permissionArg, /":root"="read"/u);
       assert.ok(

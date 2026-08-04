@@ -33,7 +33,7 @@ const WORK_HEADER = new RegExp(`^### Work item \\[work:(${ID})\\] (.+?)\\s*$`, "
 const CHECK_LINE =
   /^\s*[-*]\s+(Automated|Manual) check\s+\[check:([a-z][a-z0-9-]{0,63})\]:\s*(.+?)\s*$/i;
 const DEPENDENCIES = /^\s*Dependencies:\s*(.*?)\s*$/im;
-const CHECK_PHRASE = /\b(?:Automated|Manual)\s+check\b/i;
+const CHECK_PHRASE = /^\s*[-*]\s+(?:Automated|Manual)\s+check\b/i;
 const CHECKPOINT_LINE = /^\s*Checkpoint:\s*(.*?)\s*$/im;
 
 type HeadingToken = {
@@ -268,7 +268,7 @@ export function compileTaskWorkspacePlan(
       for (const line of lines) {
         const checkMatch = line.match(CHECK_LINE);
         if (!checkMatch) {
-          if (/\b(?:Automated|Manual) check\b/i.test(line)) {
+          if (CHECK_PHRASE.test(line)) {
             fail(`check in '${workId}' must use '[check:id]: Label | command' syntax.`);
           }
           continue;

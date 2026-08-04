@@ -7,6 +7,8 @@
  *
  * @module CodexAdapterLive
  */
+import * as NodePath from "node:path";
+
 import {
   type CanonicalItemType,
   type CanonicalRequestType,
@@ -107,6 +109,18 @@ function appendDeniedFilesystemPath(entries: Map<string, string>, path: string):
   entries.set(`${normalized}/**`, "deny");
 }
 
+function resolveTaskCodexHomePath(
+  configuredHomePath: string | undefined,
+  environment: NodeJS.ProcessEnv | undefined,
+): string | undefined {
+  const configured = configuredHomePath?.trim();
+  if (configured) return configured;
+  const explicit = environment?.CODEX_HOME?.trim();
+  if (explicit) return explicit;
+  const inheritedHome = environment?.HOME?.trim() || process.env.HOME?.trim();
+  return inheritedHome ? NodePath.join(inheritedHome, ".codex") : undefined;
+}
+
 function codexTaskPermissionProfileArgs(
   cwd: string,
   configuredHomePath?: string,
@@ -115,6 +129,7 @@ function codexTaskPermissionProfileArgs(
   const parent = cwd.slice(0, cwd.lastIndexOf("/"));
   if (parent.length > 0) appendDeniedFilesystemPath(entries, parent);
   entries.set(cwd, "write");
+  entries.set(`${cwd}/**`, "write");
   for (const metadataPath of [".git", ".agents", ".codex"]) {
     appendDeniedFilesystemPath(entries, `${cwd}/${metadataPath}`);
   }
@@ -1479,9 +1494,13 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                 HOME: input.cwd,
               }
             : undefined;
+        const taskCodexHomePath =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? resolveTaskCodexHomePath(codexConfig.homePath, options?.environment)
+            : undefined;
         const taskPermissionProfileArgs =
           input.taskExecutionProfile === "task-worktree-write"
-            ? codexTaskPermissionProfileArgs(input.cwd ?? process.cwd(), codexConfig.homePath)
+            ? codexTaskPermissionProfileArgs(input.cwd ?? process.cwd(), taskCodexHomePath)
             : [];
         const taskShellEnvironmentPolicyArgs =
           input.taskExecutionProfile === "task-worktree-write"
@@ -1501,7 +1520,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             : options?.environment
               ? { environment: options.environment }
               : {}),
-          ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+          ...(taskCodexHomePath
+            ? { homePath: taskCodexHomePath }
+            : codexConfig.homePath
+              ? { homePath: codexConfig.homePath }
+              : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),

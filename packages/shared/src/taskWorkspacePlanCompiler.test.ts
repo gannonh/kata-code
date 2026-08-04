@@ -60,6 +60,17 @@ describe("task workspace Plan compiler", () => {
     expect(() => compileTaskWorkspacePlan(oversized)).toThrow("Plan Markdown is too large (");
   });
 
+  it("allows prose mentions of check types outside check bullets", () => {
+    expect(() =>
+      compileTaskWorkspacePlan(
+        plan.replace(
+          "- Manual check [check:review]: Review the service",
+          "The manual check is recorded during the human checkpoint.\n\n- Manual check [check:review]: Review the service",
+        ),
+      ),
+    ).not.toThrow();
+  });
+
   it("requires Checkpoint in the phase preamble", () => {
     expect(() =>
       compileTaskWorkspacePlan(
