@@ -884,7 +884,7 @@ function initialTask(
   };
 }
 
-function safeBranchSegment(taskId: string): string {
+export function safeBranchSegment(taskId: string): string {
   const normalized = taskId
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -1081,6 +1081,14 @@ export interface TaskWorkspaceServiceShape {
     readonly proposedPlanMarkdown: string;
     readonly operationKey: string;
   }) => Effect.Effect<TaskImplementationAmendmentAck, TaskWorkspaceError>;
+  readonly processImplementationCheck: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly attemptId: string;
+    readonly status: "pass" | "fail" | "indeterminate";
+    readonly output: string;
+    readonly exitCode: number | null;
+    readonly endingCommitSha: string | null;
+  }) => Effect.Effect<void, TaskWorkspaceError>;
   readonly implementationComplete: (input: {
     readonly taskId: TaskWorkspaceId;
     readonly expectedTaskRevision: number;
@@ -1148,6 +1156,9 @@ export interface TaskWorkspaceServiceShape {
   readonly getActiveTaskStage: (
     threadId: ThreadId,
   ) => Effect.Effect<TaskWorkspaceStage | undefined>;
+  readonly getActiveTaskProviderContext: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ActiveTaskProviderContext | undefined>;
   readonly isTaskThread: (threadId: ThreadId) => Effect.Effect<boolean>;
 }
 
@@ -1157,6 +1168,25 @@ export class TaskWorkspaceService extends Context.Service<
 >()("@kata-sh/code-cli/taskWorkspace/TaskWorkspaceService") {}
 
 let activeTaskWorkspaceService: TaskWorkspaceServiceShape | undefined;
+
+export interface ActiveTaskProviderContext {
+  readonly taskId: TaskWorkspaceId;
+  readonly stage: TaskWorkspaceStage;
+  readonly providerInstanceId: string;
+  readonly worktreePath: string;
+  readonly branch: string;
+  readonly baseCommitSha: string;
+  readonly executionProfile: "planning" | "task-worktree-write";
+  readonly runtimeMode: "approval-required" | "auto-accept-edits" | "full-access";
+  readonly modelSelection: NonNullable<TaskWorkspace["preferences"]["modelSelection"]>;
+}
+
+export const activeTaskProviderContextForThread = (
+  threadId: ThreadId,
+): Effect.Effect<ActiveTaskProviderContext | undefined> =>
+  activeTaskWorkspaceService
+    ? activeTaskWorkspaceService.getActiveTaskProviderContext(threadId)
+    : Effect.succeed(undefined);
 
 export const validateActiveTaskTurn = (input: {
   readonly threadId: ThreadId;
@@ -1389,6 +1419,44 @@ export const make = Effect.gen(function* () {
       return undefined;
     });
 
+  const getActiveTaskProviderContext: TaskWorkspaceServiceShape["getActiveTaskProviderContext"] = (
+    threadId,
+  ) =>
+    Effect.sync(() => {
+      for (const task of taskById.values()) {
+        const run = currentRun(task);
+        if (run.preset !== "guided" || run.currentStage !== "build") continue;
+        const occurrence = task.occurrences
+          .filter((candidate) => candidate.stage === "build")
+          .toSorted((a, b) => b.ordinal - a.ordinal)[0];
+        const repository = task.workspace.repositories[0];
+        const modelSelection = task.preferences.modelSelection;
+        const expectedBranch = `katacode/task-${safeBranchSegment(task.id)}`;
+        if (
+          !occurrence ||
+          occurrence.threadId !== threadId ||
+          (occurrence.status !== "running" && occurrence.status !== "finalizing") ||
+          !repository?.worktreePath ||
+          !repository.baseCommitSha ||
+          repository.branch !== expectedBranch ||
+          !modelSelection
+        )
+          continue;
+        return {
+          taskId: task.id,
+          stage: "build" as const,
+          providerInstanceId: modelSelection.instanceId,
+          worktreePath: repository.worktreePath,
+          branch: expectedBranch,
+          baseCommitSha: repository.baseCommitSha,
+          executionProfile: "task-worktree-write" as const,
+          runtimeMode: "auto-accept-edits" as const,
+          modelSelection,
+        } satisfies ActiveTaskProviderContext;
+      }
+      return undefined;
+    });
+
   const authorizeTaskStage: TaskWorkspaceServiceShape["authorizeTaskStage"] = (input) =>
     Effect.gen(function* () {
       const task = [...taskById.values()].find(
@@ -1426,7 +1494,9 @@ export const make = Effect.gen(function* () {
         if (
           !providerInstance ||
           !providerInstance.enabled ||
-          providerInstance.adapter.capabilities.supportsTaskStage !== true
+          providerInstance.adapter.capabilities.supportsTaskStage !== true ||
+          (run.currentStage === "build" &&
+            !supportsTaskWorktreeWrite(providerInstance.adapter.capabilities))
         ) {
           return yield* new TaskWorkspaceError({
             message: `Provider instance '${input.providerInstanceId}' is not task-stage capable.`,
@@ -1460,7 +1530,7 @@ export const make = Effect.gen(function* () {
           taskId: task.id,
         });
       }
-      yield* validatePlanningRoot(task.id);
+      if (run.currentStage !== "build") yield* validatePlanningRoot(task.id);
     });
 
   const validateProviderTurn: TaskWorkspaceServiceShape["validateProviderTurn"] = (input) =>
@@ -1517,7 +1587,7 @@ export const make = Effect.gen(function* () {
           taskId: task.id,
         });
       }
-      yield* validatePlanningRoot(task.id);
+      if (run.currentStage !== "build") yield* validatePlanningRoot(task.id);
     });
 
   const makeOperationReceipt = (
@@ -3259,20 +3329,43 @@ export const make = Effect.gen(function* () {
         }
         case "task.implementation.progress": {
           requireStage(task, "build");
-          if (command.expectedTaskRevision !== task.taskRevision) {
+          if (command.expectedTaskRevision !== task.taskRevision)
             throw new Error(
               `Task revision ${task.taskRevision} does not match the expected revision ${command.expectedTaskRevision}.`,
             );
-          }
           if (task.build.amendmentGateId)
             throw new Error("Implementation is paused at an amendment gate.");
           const phase = phaseForBuild(task, command.phaseId);
           if (phase.status === "blocked" || phase.status === "invalidated")
             throw new Error(`Phase '${phase.id}' is blocked.`);
-          if (command.status === "running") {
+          const item =
+            command.workItemId === null ? null : workItemForBuild(phase, command.workItemId);
+          if (command.status === "running" || command.status === "completed") {
             requirePredecessorPhasesComplete(task.build, phase.id);
             if (task.build.activePhaseId !== null && task.build.activePhaseId !== phase.id)
               throw new Error(`Phase '${task.build.activePhaseId}' is already active.`);
+            if (
+              phase.workItems.some(
+                (candidate) =>
+                  candidate.id !== item?.id &&
+                  (candidate.status === "blocked" || candidate.status === "invalidated"),
+              )
+            )
+              throw new Error(`Phase '${phase.id}' has blocked work that must be resumed first.`);
+          }
+          if (item && command.status === "running") {
+            if (item.status !== "pending")
+              throw new Error(`Work item '${item.id}' is not pending.`);
+            if (!dependenciesPass(phase, item))
+              throw new Error(`Work item '${item.id}' has incomplete dependencies.`);
+          }
+          if (item && command.status === "completed") {
+            if (item.status !== "running")
+              throw new Error(`Work item '${item.id}' must be running before completion.`);
+            if (!dependenciesPass(phase, item))
+              throw new Error(`Work item '${item.id}' has incomplete dependencies.`);
+            if (!requiredChecksPass(task.build, item.checkIds))
+              throw new Error(`Work item '${item.id}' has checks that have not passed.`);
           }
           let build: TaskWorkspace["build"] = {
             ...task.build,
@@ -3284,25 +3377,39 @@ export const make = Effect.gen(function* () {
                     status:
                       command.status === "blocked" ? ("blocked" as const) : ("running" as const),
                     startedAt: candidate.startedAt ?? command.createdAt,
-                    workItems: candidate.workItems.map((item) =>
-                      item.id === command.workItemId
-                        ? { ...item, status: command.status, summary: command.summary }
-                        : item,
+                    workItems: candidate.workItems.map((candidateItem) =>
+                      candidateItem.id === item?.id
+                        ? { ...candidateItem, status: command.status, summary: command.summary }
+                        : candidateItem,
                     ),
                   }
                 : candidate,
             ),
-            activeWorkItemId: command.workItemId,
+            activeWorkItemId: item?.id ?? null,
           };
-          if (command.workItemId !== null) {
-            const item = phase.workItems.find((candidate) => candidate.id === command.workItemId);
-            if (!item) throw new Error(`Work item '${command.workItemId}' was not found.`);
-            if (command.status === "running" && !dependenciesPass(phase, item))
-              throw new Error(`Work item '${item.id}' has incomplete dependencies.`);
-            if (command.status === "completed" && !dependenciesPass(phase, item))
-              throw new Error(`Work item '${item.id}' has incomplete dependencies.`);
-            if (command.status === "completed" && !requiredChecksPass(task.build, item.checkIds))
-              throw new Error(`Work item '${item.id}' has checks that have not passed.`);
+          const updatedPhase = phaseForBuild({ ...task, build }, phase.id);
+          if (
+            command.status === "completed" &&
+            updatedPhase.workItems.every((candidate) => candidate.status === "completed") &&
+            requiredChecksPass(build, updatedPhase.checkIds)
+          ) {
+            build = {
+              ...build,
+              phases: build.phases.map((candidate) =>
+                candidate.id === phase.id
+                  ? { ...candidate, status: "completed" as const, completedAt: command.createdAt }
+                  : candidate,
+              ),
+              activePhaseId: null,
+              activeWorkItemId: null,
+            };
+            if (phase.checkpointPolicy === "always" || phase.checkpointPolicy === "manual-only")
+              build = appendCheckpoint(
+                build,
+                { ...updatedPhase, status: "completed" },
+                command.createdAt,
+              );
+            else build = startNextPhase(build, phase.id, command.createdAt);
           }
           return yield* append(
             command,
@@ -3968,15 +4075,17 @@ export const make = Effect.gen(function* () {
               "The approved Plan changed; request a new amendment against its latest revision.",
             );
           }
-          const proposedMarkdown = [
-            plan.markdown.trimEnd(),
-            "",
-            `<!-- kata:block:amendment-${amendment.id} -->`,
-            `## Amendment ${amendment.id}`,
-            "",
-            amendment.proposedChanges,
-            "",
-          ].join("\n");
+          const proposedMarkdown = amendment.proposedPlanMarkdown?.trim()
+            ? amendment.proposedPlanMarkdown
+            : [
+                plan.markdown.trimEnd(),
+                "",
+                `<!-- kata:block:amendment-${amendment.id} -->`,
+                `## Amendment ${amendment.id}`,
+                "",
+                amendment.proposedChanges,
+                "",
+              ].join("\n");
           const amendedTask = upsertArtifact(task, {
             type: "task.artifact.upsert",
             commandId: command.commandId,
@@ -3989,14 +4098,136 @@ export const make = Effect.gen(function* () {
           });
           const proposedPlan = latestPlanRevision(amendedTask);
           if (!proposedPlan) throw new Error("Failed to create the amended Plan revision.");
+          const compiledBuild =
+            task.versions.workflowDefinition === "guided@0.3.0"
+              ? compileTaskWorkspacePlan({
+                  markdown: proposedPlan.markdown,
+                  planRevisionId: proposedPlan.id,
+                })
+              : { ...task.build, currentPlanRevisionId: proposedPlan.id };
+          const oldPhases = task.build.phases;
+          const changedPhaseIds = new Set(
+            compiledBuild.phases
+              .filter((candidate) => {
+                const old = oldPhases.find((phase) => phase.id === candidate.id);
+                return (
+                  !old ||
+                  old.title !== candidate.title ||
+                  old.workItems.length !== candidate.workItems.length ||
+                  old.workItems.some(
+                    (item, index) =>
+                      item.title !== candidate.workItems[index]?.title ||
+                      item.dependsOn.join(",") !== candidate.workItems[index]?.dependsOn.join(","),
+                  )
+                );
+              })
+              .map((phase) => phase.id),
+          );
+          const changedWorkItemIds = new Set(
+            compiledBuild.phases.flatMap((phase) =>
+              phase.workItems
+                .filter((item) => {
+                  const old = oldPhases
+                    .flatMap((candidate) => candidate.workItems)
+                    .find((candidate) => candidate.id === item.id);
+                  return (
+                    !old ||
+                    old.title !== item.title ||
+                    old.dependsOn.join(",") !== item.dependsOn.join(",")
+                  );
+                })
+                .map((item) => item.id),
+            ),
+          );
+          for (const phase of compiledBuild.phases)
+            for (const item of phase.workItems)
+              if (item.dependsOn.some((dependency) => changedWorkItemIds.has(dependency)))
+                changedWorkItemIds.add(item.id);
+          const derivedAffectedPhaseIds =
+            task.versions.workflowDefinition === "guided@0.3.0"
+              ? new Set([
+                  ...changedPhaseIds,
+                  ...compiledBuild.phases
+                    .filter((phase) =>
+                      phase.workItems.some((item) => changedWorkItemIds.has(item.id)),
+                    )
+                    .map((phase) => phase.id),
+                ])
+              : new Set(amendment.affectedPhaseIds);
+          const derivedAffectedWorkItemIds =
+            task.versions.workflowDefinition === "guided@0.3.0"
+              ? new Set([
+                  ...changedWorkItemIds,
+                  ...compiledBuild.phases
+                    .filter((phase) => derivedAffectedPhaseIds.has(phase.id))
+                    .flatMap((phase) =>
+                      phase.workItems
+                        .filter((item) => item.status !== "completed")
+                        .map((item) => item.id),
+                    ),
+                ])
+              : new Set(amendment.affectedWorkItemIds);
+          const derivedDependentCheckIds =
+            task.versions.workflowDefinition === "guided@0.3.0"
+              ? new Set(
+                  compiledBuild.checks
+                    .filter(
+                      (check) =>
+                        derivedAffectedPhaseIds.has(check.phaseId) ||
+                        (check.workItemId !== null &&
+                          derivedAffectedWorkItemIds.has(check.workItemId)),
+                    )
+                    .map((check) => check.id),
+                )
+              : new Set(amendment.dependentCheckIds);
           const changedBlockIds = [`amendment-${amendment.id}`];
+          const projectedPhases = compiledBuild.phases.map((phase) => {
+            const previous = task.build.phases.find((candidate) => candidate.id === phase.id);
+            const sameShape =
+              previous &&
+              previous.title === phase.title &&
+              previous.workItems.length === phase.workItems.length &&
+              previous.workItems.every(
+                (item, index) =>
+                  item.id === phase.workItems[index]?.id &&
+                  item.title === phase.workItems[index]?.title,
+              );
+            if (!sameShape) return phase;
+            return {
+              ...phase,
+              status: previous.status,
+              startedAt: previous.startedAt,
+              completedAt: previous.completedAt,
+              workItems: phase.workItems.map((item) => {
+                const prior = previous.workItems.find((candidate) => candidate.id === item.id);
+                return prior
+                  ? {
+                      ...item,
+                      status: prior.status,
+                      summary: prior.summary,
+                      invalidationReason: prior.invalidationReason,
+                    }
+                  : item;
+              }),
+            };
+          });
+          const projectedChecks = compiledBuild.checks.map(
+            (check) => task.build.checks.find((prior) => prior.id === check.id) ?? check,
+          );
+          const projectedBuild: TaskWorkspace["build"] = {
+            ...compiledBuild,
+            phases: projectedPhases,
+            checks: projectedChecks,
+            checkpoints: task.build.checkpoints,
+            checkAttempts: task.build.checkAttempts,
+          };
           const invalidatedBuild = {
-            ...amendedTask.build,
+            ...projectedBuild,
             currentPlanRevisionId: proposedPlan.id,
             amendmentGateId: null,
             resultingCommitSha: null,
             checkpoints: amendedTask.build.checkpoints.map((checkpoint) =>
-              amendment.affectedPhaseIds.includes(checkpoint.phaseId)
+              derivedAffectedPhaseIds.has(checkpoint.phaseId)
                 ? { ...checkpoint, contextManifestId: null }
                 : checkpoint,
             ),
@@ -4018,7 +4249,7 @@ export const make = Effect.gen(function* () {
                 : candidate,
             ),
             phases: amendedTask.build.phases.map((phase) =>
-              amendment.affectedPhaseIds.includes(phase.id)
+              derivedAffectedPhaseIds.has(phase.id)
                 ? {
                     ...phase,
                     status: "invalidated" as const,
@@ -4026,7 +4257,7 @@ export const make = Effect.gen(function* () {
                     // offer the explicit resume path after the amendment is approved.
                     checkpointId: phase.checkpointId,
                     workItems: phase.workItems.map((item) =>
-                      amendment.affectedWorkItemIds.includes(item.id)
+                      derivedAffectedWorkItemIds.has(item.id)
                         ? {
                             ...item,
                             status: "invalidated" as const,
@@ -4038,7 +4269,7 @@ export const make = Effect.gen(function* () {
                 : phase,
             ),
             checks: amendedTask.build.checks.map((check) =>
-              amendment.dependentCheckIds.includes(check.id)
+              derivedDependentCheckIds.has(check.id)
                 ? {
                     ...check,
                     status: "pending" as const,
@@ -4068,7 +4299,7 @@ export const make = Effect.gen(function* () {
           // `Checkpoint policy: never` never created one, so approve materializes
           // an amendment recovery checkpoint for any affected phase without one.
           let recoveryBuild: TaskWorkspace["build"] = invalidatedBuild;
-          for (const phaseId of amendment.affectedPhaseIds) {
+          for (const phaseId of derivedAffectedPhaseIds) {
             const affectedPhase = recoveryBuild.phases.find((phase) => phase.id === phaseId);
             if (!affectedPhase) continue;
             if (
@@ -4694,6 +4925,90 @@ export const make = Effect.gen(function* () {
         };
       }),
     );
+  const processImplementationCheck: TaskWorkspaceServiceShape["processImplementationCheck"] = (
+    input,
+  ) =>
+    Effect.gen(function* () {
+      const task = taskById.get(input.taskId);
+      if (!task) throw new Error(`Task '${input.taskId}' was not found.`);
+      const attempt = task.build.checkAttempts.find(
+        (candidate) => candidate.id === input.attemptId,
+      );
+      if (
+        !attempt ||
+        attempt.status === "pass" ||
+        attempt.status === "fail" ||
+        attempt.status === "indeterminate"
+      )
+        return;
+      const check = task.build.checks.find((candidate) => candidate.id === attempt.checkId);
+      if (!check) throw new Error(`Check '${attempt.checkId}' was not found.`);
+      const now = yield* serverNow;
+      const phase = task.build.phases.find((candidate) => candidate.id === check.phaseId);
+      const nextStatus = input.status;
+      const build: TaskWorkspace["build"] = {
+        ...task.build,
+        checkAttempts: task.build.checkAttempts.map((candidate) =>
+          candidate.id === attempt.id
+            ? {
+                ...candidate,
+                status: nextStatus,
+                output: input.output,
+                exitCode: input.exitCode,
+                observedStatus: nextStatus,
+                endingCommitSha: input.endingCommitSha,
+                completedAt: now,
+              }
+            : candidate,
+        ),
+        checks: task.build.checks.map((candidate) =>
+          candidate.id === check.id
+            ? {
+                ...candidate,
+                status: nextStatus,
+                output: input.output,
+                exitCode: input.exitCode,
+                commitSha: input.endingCommitSha,
+                completedAt: now,
+              }
+            : candidate,
+        ),
+        phases: task.build.phases.map((candidate) =>
+          candidate.id === phase?.id && nextStatus !== "pass"
+            ? {
+                ...candidate,
+                status: "blocked" as const,
+                workItems: candidate.workItems.map((item) =>
+                  item.id === check.workItemId
+                    ? {
+                        ...item,
+                        status: "blocked" as const,
+                        invalidationReason: `Check '${check.id}' did not pass.`,
+                      }
+                    : item,
+                ),
+              }
+            : candidate,
+        ),
+      };
+      yield* internalAppend(
+        "task.implementation.check.run",
+        { ...task, build, updatedAt: now },
+        { occurredAt: now },
+      );
+    }).pipe(
+      Effect.asVoid,
+      Effect.mapError((cause) =>
+        isTaskWorkspaceError(cause)
+          ? cause
+          : new TaskWorkspaceError({
+              message: describeFailure(cause),
+              commandType: "task.internal",
+              taskId: input.taskId,
+            }),
+      ),
+    );
+
   const implementationAmendmentPropose: TaskWorkspaceServiceShape["implementationAmendmentPropose"] =
     (input) =>
       serverCommand(input.taskId, "task.implementation.amendment.propose", input).pipe(
@@ -5022,6 +5337,110 @@ export const make = Effect.gen(function* () {
       }),
     );
 
+  const validateBuildCompletion = (task: TaskWorkspace): Effect.Effect<void, TaskWorkspaceError> =>
+    Effect.gen(function* () {
+      const run = currentRun(task);
+      if (run.currentStage !== "build")
+        throw new TaskWorkspaceError({
+          message: "Build completion requires the active Build stage.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      if (
+        task.build.amendmentGateId ||
+        task.build.checkpoints.some((checkpoint) => checkpoint.status === "waiting")
+      )
+        throw new TaskWorkspaceError({
+          message: "Build has an open checkpoint or amendment gate.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      if (
+        task.build.phases.some(
+          (phase) =>
+            phase.status !== "completed" ||
+            phase.workItems.some((item) => item.status !== "completed"),
+        )
+      )
+        throw new TaskWorkspaceError({
+          message: "Build has incomplete phases or work items.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      if (
+        task.build.checks.some((check) => check.status !== "pass" || check.commitSha === null) ||
+        task.build.checkAttempts.some((attempt) =>
+          ["pending", "running", "fail", "stale", "indeterminate"].includes(attempt.status),
+        )
+      )
+        throw new TaskWorkspaceError({
+          message: "Build has checks that are not passing and current.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      const repository = task.workspace.repositories[0];
+      if (!repository?.worktreePath || !repository.branch || !repository.baseCommitSha)
+        throw new TaskWorkspaceError({
+          message: "The canonical Build worktree is unavailable.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      const expectedBranch = `katacode/task-${safeBranchSegment(task.id)}`;
+      const expectedPath = expectedTaskWorktreePath(
+        config.worktreesDir,
+        repository.workspaceRoot,
+        expectedBranch,
+      );
+      if (repository.branch !== expectedBranch || repository.worktreePath !== expectedPath)
+        throw new TaskWorkspaceError({
+          message: "The Build worktree reservation is not canonical.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      const branch = yield* runGit(repository.worktreePath, ["symbolic-ref", "--short", "HEAD"]);
+      const head = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]);
+      const branchHead = yield* runGit(repository.worktreePath, ["rev-parse", expectedBranch]);
+      const status = yield* runGit(repository.worktreePath, ["status", "--porcelain=v2"]);
+      if (branch !== expectedBranch || head !== branchHead || status.trim() !== "")
+        throw new TaskWorkspaceError({
+          message: "The canonical Build worktree is dirty or on the wrong branch.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      if (task.build.checks.some((check) => check.commitSha !== head))
+        throw new TaskWorkspaceError({
+          message: "A required Build check does not match the current HEAD.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      yield* runGit(repository.worktreePath, [
+        "merge-base",
+        "--is-ancestor",
+        repository.baseCommitSha,
+        head,
+      ]).pipe(
+        Effect.mapError(
+          () =>
+            new TaskWorkspaceError({
+              message: "The pinned Build base is not an ancestor.",
+              commandType: "task.internal",
+              taskId: task.id,
+            }),
+        ),
+      );
+      return;
+    }).pipe(
+      Effect.mapError((cause) =>
+        isTaskWorkspaceError(cause)
+          ? cause
+          : new TaskWorkspaceError({
+              message: describeFailure(cause),
+              commandType: "task.internal",
+              taskId: task.id,
+            }),
+      ),
+    );
+
   const commitStageCompletion = (
     task: TaskWorkspace,
     proposal: TaskWorkspaceCompletionProposal,
@@ -5041,6 +5460,54 @@ export const make = Effect.gen(function* () {
   > =>
     Effect.gen(function* () {
       const definition = definitionFor(task);
+      if (proposal.stage === "build") {
+        const repository = task.workspace.repositories[0];
+        if (!repository?.worktreePath)
+          return yield* new TaskWorkspaceError({
+            message: "The canonical Build worktree is unavailable.",
+            commandType: "task.internal",
+            taskId: task.id,
+          });
+        const resultingCommitSha = yield* runGit(repository.worktreePath, [
+          "rev-parse",
+          "HEAD",
+        ]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: describeFailure(cause),
+                commandType: "task.internal",
+                taskId: task.id,
+              }),
+          ),
+        );
+        const occurrence = task.occurrences.find(
+          (candidate) => candidate.stage === "build" && candidate.ordinal === proposal.occurrence,
+        );
+        if (!occurrence)
+          return yield* new TaskWorkspaceError({
+            message: "The Build occurrence was not found.",
+            commandType: "task.internal",
+            taskId: task.id,
+          });
+        return {
+          task: {
+            ...task,
+            build: { ...task.build, resultingCommitSha },
+            occurrences: task.occurrences.map((candidate) =>
+              candidate.id === occurrence.id
+                ? { ...candidate, status: "completed" as const, completedAt: now }
+                : candidate,
+            ),
+            sessions: task.sessions.map((session) =>
+              session.id === proposal.sessionId
+                ? { ...session, status: "completed" as const }
+                : session,
+            ),
+          },
+          bootstrap: null,
+        };
+      }
       const artifactKind = artifactKindForStage(definition, proposal.stage);
       if (!artifactKind) {
         return yield* new TaskWorkspaceError({
@@ -5290,7 +5757,32 @@ export const make = Effect.gen(function* () {
           });
           return persistedTask;
         }
-        // Completed turn: commit the artifact and handoff atomically.
+        // Completed Build turns settle only from server-observed canonical state.
+        if (pending.stage === "build") {
+          const occurrence = task.occurrences.find(
+            (candidate) => candidate.stage === "build" && candidate.ordinal === pending.occurrence,
+          );
+          if (
+            !occurrence ||
+            occurrence.status !== "finalizing" ||
+            occurrence.sessionId !== pending.sessionId ||
+            occurrence.threadId !== pending.threadId
+          ) {
+            return yield* new TaskWorkspaceError({
+              message: "The Build completion proposal is no longer active.",
+              commandType: "task.internal",
+              taskId: task.id,
+            });
+          }
+          if (task.build.currentPlanRevisionId !== latestPlanRevision(task)?.id) {
+            return yield* new TaskWorkspaceError({
+              message: "The Build Plan revision changed during completion.",
+              commandType: "task.internal",
+              taskId: task.id,
+            });
+          }
+          yield* validateBuildCompletion(task);
+        }
         const committed = yield* commitStageCompletion(task, pending, now);
         const settledTask: TaskWorkspace = {
           ...committed.task,
@@ -6013,6 +6505,7 @@ export const make = Effect.gen(function* () {
     implementationContext,
     implementationProgress,
     implementationCheckRun,
+    processImplementationCheck,
     implementationAmendmentPropose,
     implementationComplete,
     processBootstrap,
@@ -6025,6 +6518,7 @@ export const make = Effect.gen(function* () {
     validateProviderTurn,
     authorizeTaskStage,
     getActiveTaskStage,
+    getActiveTaskProviderContext,
     isTaskThread,
     getSnapshot: Effect.sync(() => ({
       sequence,

@@ -22,7 +22,7 @@ import * as Schema from "effect/Schema";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
-import { TaskWorkspaceService } from "./TaskWorkspaceService.ts";
+import { safeBranchSegment, TaskWorkspaceService } from "./TaskWorkspaceService.ts";
 
 export interface TaskImplementationBridgeScope {
   readonly environmentId: EnvironmentId;
@@ -142,7 +142,7 @@ const make = Effect.gen(function* () {
         "The provider instance is not pinned to this implementation.",
       );
     const repository = task.workspace.repositories[0];
-    const expectedBranch = `katacode/task-${task.id.replace(/[^a-z0-9-]/gu, "-")}`;
+    const expectedBranch = `katacode/task-${safeBranchSegment(task.id)}`;
     if (!repository?.worktreePath || repository.branch !== expectedBranch)
       return yield* error("worktree-invalid", "The canonical task worktree is unavailable.");
     if (Option.isNone(sessionDirectory))
