@@ -387,6 +387,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       nextCheckpointId = await waitForImplementationCheckpoint(appWindow, continuedCheckpointIds);
     }
     const implementationComplete = appWindow.getByTestId("guided-implementation-complete");
+    let completionAttempted = nextCheckpointId === null && continuedCheckpointIds.length > 0;
     const finishPrompt =
       "Finish the Implement stage now. Verify every work item and approved check, commit the implementation changes on the canonical task branch so the worktree is clean, then call task_implementation_complete with the required session, provider turn, exact resulting HEAD, and a concise summary. Do not only report completion and do not call task_stage_complete.";
     const hasCompletionSubmission = async (): Promise<boolean> => {
@@ -430,9 +431,10 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
           pendingCheckpointId,
           continuedCheckpointIds,
         );
+        completionAttempted = false;
         continue;
       }
-      if (!(await hasCompletionSubmission())) {
+      if (!(await hasCompletionSubmission()) && !completionAttempted) {
         await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
           timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
         });
@@ -441,9 +443,14 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
           approveOnce: true,
         });
       }
+      completionAttempted = true;
       const outcome = await waitForCompletionOrCheckpoint();
       if (outcome === "complete") break;
-      if (outcome === "timeout") break;
+      if (outcome === "checkpoint") {
+        completionAttempted = false;
+        continue;
+      }
+      completionAttempted = false;
     }
     await expect(implementationComplete).toBeVisible({
       timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
