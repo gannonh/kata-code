@@ -3987,7 +3987,6 @@ export const make = Effect.gen(function* () {
           if (check.kind !== "automated" || !check.command)
             throw new Error(`Check '${check.id}' is not an approved automated command.`);
           const waitingCheckpoints = waitingImplementationCheckpoints(task);
-          const isRecoveryRerun = isRecoverableCheckRerun(task.build, check);
           if (
             waitingCheckpoints.length > 0 &&
             !waitingCheckpoints.some((checkpoint) =>
@@ -4002,6 +4001,14 @@ export const make = Effect.gen(function* () {
           const repository = task.workspace.repositories[0];
           if (!plan || !repository?.worktreePath)
             throw new Error("The approved Plan or canonical worktree is unavailable.");
+          const observedHead = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+            Effect.mapError((cause) =>
+              taskError(command, "Failed to inspect the task worktree HEAD.", cause),
+            ),
+          );
+          const isRecoveryRerun =
+            isRecoverableCheckRerun(task.build, check) ||
+            (check.status === "pass" && check.commitSha !== observedHead);
           const phase = phaseForBuild(task, check.phaseId);
           const item = check.workItemId === null ? null : workItemForBuild(phase, check.workItemId);
           if (!isRecoveryRerun) {
@@ -4020,14 +4027,7 @@ export const make = Effect.gen(function* () {
               }
             }
           }
-          const startingCommitSha = yield* runGit(repository.worktreePath, [
-            "rev-parse",
-            "HEAD",
-          ]).pipe(
-            Effect.mapError((cause) =>
-              taskError(command, "Failed to inspect the task worktree HEAD.", cause),
-            ),
-          );
+          const startingCommitSha = observedHead;
           const attemptId = `check-attempt-${task.build.checkAttempts.length + 1}`;
           const commandDigest = createHash("sha256").update(check.command).digest("hex");
           const attempt = {
