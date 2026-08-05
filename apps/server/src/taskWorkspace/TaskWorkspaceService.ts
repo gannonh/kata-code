@@ -1478,6 +1478,42 @@ function startNextPhase(build: TaskWorkspace["build"], completedPhaseId: string,
   };
 }
 
+function normalizeCompletedBuildPhases(
+  build: TaskWorkspace["build"],
+  now: string,
+): TaskWorkspace["build"] {
+  let normalized = build;
+  for (const phase of build.phases) {
+    const current = normalized.phases.find((candidate) => candidate.id === phase.id);
+    if (
+      !current ||
+      current.status === "completed" ||
+      !current.workItems.every((item) => item.status === "completed") ||
+      !requiredChecksPass(normalized, current.checkIds) ||
+      ((current.checkpointPolicy === "always" || current.checkpointPolicy === "manual-only") &&
+        !normalized.checkpoints.some((checkpoint) => checkpoint.phaseId === current.id))
+    ) {
+      continue;
+    }
+    normalized = {
+      ...normalized,
+      phases: normalized.phases.map((candidate) =>
+        candidate.id === current.id
+          ? {
+              ...candidate,
+              status: "completed" as const,
+              completedAt: candidate.completedAt ?? now,
+            }
+          : candidate,
+      ),
+      activePhaseId: null,
+      activeWorkItemId: null,
+    };
+    normalized = startNextPhase(normalized, current.id, now);
+  }
+  return normalized;
+}
+
 function runGit(cwd: string, args: ReadonlyArray<string>): Effect.Effect<string, Error> {
   return Effect.tryPromise({
     try: async () => {
@@ -7063,6 +7099,7 @@ export const make = Effect.gen(function* () {
           });
           return persistedTask;
         }
+        let taskForCompletion = task;
         // Completed Build turns settle only from server-observed canonical state.
         if (pending.stage === "build") {
           const occurrence = task.occurrences.find(
@@ -7087,9 +7124,17 @@ export const make = Effect.gen(function* () {
               taskId: task.id,
             });
           }
-          yield* validateBuildCompletion(task);
+          const normalizedBuild = normalizeCompletedBuildPhases(task.build, now);
+          if (normalizedBuild !== task.build) {
+            taskForCompletion = yield* internalAppend(
+              "task.implementation.progress",
+              { ...task, build: normalizedBuild, updatedAt: now },
+              { occurredAt: now },
+            );
+          }
+          yield* validateBuildCompletion(taskForCompletion);
         }
-        const committed = yield* commitStageCompletion(task, pending, now);
+        const committed = yield* commitStageCompletion(taskForCompletion, pending, now);
         const settledTask: TaskWorkspace = {
           ...committed.task,
           occurrences: committed.task.occurrences.map((candidate) =>
