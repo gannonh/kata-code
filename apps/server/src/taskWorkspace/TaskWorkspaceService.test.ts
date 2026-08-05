@@ -3087,7 +3087,7 @@ describe("TaskWorkspaceService first-slice workflow", () => {
         // A task-stage provider without task-worktree-write enforcement is
         // rejected at create time so the task cannot be created, planned, and
         // then wedged at implementation start with no provider-change path.
-        const { runtime: rejectingRuntime, repoRoot } = yield* setupRuntime(
+        const { runtime: rejectingRuntime } = yield* setupRuntime(
           "kata-task-gate-create-",
           { mode: "running" },
           registry(makeInstance({ supportsTaskStage: true })),
@@ -3101,7 +3101,7 @@ describe("TaskWorkspaceService first-slice workflow", () => {
         yield* rejectingRuntime.dispose;
 
         // The same create succeeds once the provider attests worktree-write.
-        const { runtime: acceptingRuntime, repoRoot: acceptingRoot } = yield* setupRuntime(
+        const { runtime: acceptingRuntime } = yield* setupRuntime(
           "kata-task-gate-create-ok-",
           { mode: "running" },
           registry(
@@ -3128,7 +3128,6 @@ describe("TaskWorkspaceService first-slice workflow", () => {
           ),
         );
         expect(accepted.task.versions.workflowDefinition).toBe("guided@0.3.0");
-        void acceptingRoot;
       }).pipe(Effect.scoped),
     30_000,
   );

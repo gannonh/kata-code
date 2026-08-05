@@ -616,6 +616,9 @@ describe("TaskWorkspaceBootstrapWorker", () => {
           operationKey: "op-check-undecodable:check-attempt-1",
         }),
       );
+      // The row must still exist (a deletion would also satisfy the status
+      // check below) and be retired as completed.
+      expect(Option.isSome(retired)).toBe(true);
       if (Option.isSome(retired)) {
         expect(retired.value.status).toBe("completed");
       }

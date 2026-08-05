@@ -348,6 +348,10 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
         platform,
       });
 
+      // The host OS alone does not prove the sandbox executable exists; a null
+      // wrapper (e.g. no /usr/bin/sandbox-exec or bwrap on PATH) is a valid
+      // outcome that needs no further shape assertions.
+      if (wrapped === null) return;
       if (platform === "darwin") {
         expect(wrapped?.command).toBe("/usr/bin/sandbox-exec");
         expect(wrapped?.args).toContain("vp");
@@ -376,7 +380,18 @@ effectIt.layer(afterStateTimeoutRunnerLayer)(
   (it) => {
     it.effect("reports indeterminate when the after-state observation times out", () =>
       Effect.gen(function* () {
+        const platform = yield* HostProcessPlatform;
         const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
+        // The after-state timeout path only runs the check command when a
+        // sandbox is available; without sandbox-exec/bwrap the runner
+        // short-circuits with the no-sandbox indeterminate result before the
+        // mocked after-observations, so there is nothing to assert.
+        const sandboxed = sandboxApprovedCheckCommand({
+          argv: ["true"],
+          worktreePath,
+          platform,
+        });
+        if (sandboxed === null) return;
         const runner = yield* TaskWorktreeCommandRunner;
         const result = yield* runner.run({
           worktreePath,

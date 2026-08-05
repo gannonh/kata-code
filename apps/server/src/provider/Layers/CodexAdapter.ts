@@ -132,6 +132,12 @@ function resolveTaskCodexHomePath(
   return inheritedHome ? NodePath.join(inheritedHome, ".codex") : undefined;
 }
 
+function isPathWithin(target: string, dir: string): boolean {
+  const normalizedTarget = NodePath.resolve(target) + NodePath.sep;
+  const normalizedDir = NodePath.resolve(dir) + NodePath.sep;
+  return normalizedTarget === normalizedDir || normalizedTarget.startsWith(normalizedDir);
+}
+
 function codexTaskPermissionProfileArgs(
   cwd: string,
   canonicalCwd: string,
@@ -1558,25 +1564,48 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             const commonDirectory = yield* fileSystem
               .realPath(commonDirectoryPath)
               .pipe(Effect.orElseSucceed(() => commonDirectoryPath));
-            const head = yield* fileSystem
-              .readFileString(NodePath.join(gitDirectory, "HEAD"))
-              .pipe(Effect.orElseSucceed(() => ""));
-            const branchRef = head.match(/^ref:\s*(refs\/heads\/.+)$/mu)?.[1]?.trim();
-            taskGitReadablePaths = [commonDirectory];
-            taskGitWritablePaths = [
-              gitDirectory,
-              NodePath.join(commonDirectory, "objects"),
-              ...(branchRef
-                ? [
-                    NodePath.join(commonDirectory, branchRef),
-                    `${NodePath.join(commonDirectory, branchRef)}.lock`,
-                    NodePath.join(commonDirectory, "logs", branchRef),
-                    `${NodePath.join(commonDirectory, "logs", branchRef)}.lock`,
-                    NodePath.join(commonDirectory, "packed-refs"),
-                    `${NodePath.join(commonDirectory, "packed-refs")}.lock`,
-                  ]
-                : []),
-            ];
+            // The worktree's `.git` file is writable by the task implementation.
+            // A gitfile redirect is only legitimate when it points into the
+            // canonical repository's `.git` metadata; anything else would grant
+            // write access to an external host directory through the sandbox
+            // profile. Without an approved workspace root, no git metadata
+            // paths are granted at all (fail closed); with one, paths outside
+            // it reject the session loudly.
+            if (input.taskWorkspaceRoot !== undefined) {
+              const workspaceRoot = input.taskWorkspaceRoot;
+              const approvedGitRoot = yield* fileSystem
+                .realPath(NodePath.join(workspaceRoot, ".git"))
+                .pipe(Effect.orElseSucceed(() => NodePath.join(workspaceRoot, ".git")));
+              if (
+                !isPathWithin(gitDirectory, approvedGitRoot) ||
+                !isPathWithin(commonDirectory, approvedGitRoot)
+              ) {
+                return yield* new ProviderAdapterValidationError({
+                  provider: PROVIDER,
+                  operation: "startSession",
+                  issue: "The task worktree git metadata is not canonical.",
+                });
+              }
+              const head = yield* fileSystem
+                .readFileString(NodePath.join(gitDirectory, "HEAD"))
+                .pipe(Effect.orElseSucceed(() => ""));
+              const branchRef = head.match(/^ref:\s*(refs\/heads\/.+)$/mu)?.[1]?.trim();
+              taskGitReadablePaths = [commonDirectory];
+              taskGitWritablePaths = [
+                gitDirectory,
+                NodePath.join(commonDirectory, "objects"),
+                ...(branchRef
+                  ? [
+                      NodePath.join(commonDirectory, branchRef),
+                      `${NodePath.join(commonDirectory, branchRef)}.lock`,
+                      NodePath.join(commonDirectory, "logs", branchRef),
+                      `${NodePath.join(commonDirectory, "logs", branchRef)}.lock`,
+                      NodePath.join(commonDirectory, "packed-refs"),
+                      `${NodePath.join(commonDirectory, "packed-refs")}.lock`,
+                    ]
+                  : []),
+              ];
+            }
           }
         }
         const taskPermissionProfileArgs =

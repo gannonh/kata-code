@@ -470,6 +470,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(developerInstructions ? { developerInstructions } : {}),
         taskStage: activeTaskStage !== undefined,
         taskExecutionProfile,
+        ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
         ...(binding.resumeCursor !== null && binding.resumeCursor !== undefined
           ? { resumeCursor: binding.resumeCursor }
           : {}),
@@ -648,6 +649,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...(developerInstructions ? { developerInstructions } : {}),
           taskStage: activeTaskStage !== undefined,
           taskExecutionProfile,
+          ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: activeTaskContext
             ? activeTaskContext.runtimeMode
@@ -887,6 +889,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 ...(developerInstructions ? { developerInstructions } : {}),
                 taskStage: activeTaskStage !== undefined,
                 taskExecutionProfile: activeTaskProfile,
+                ...(activeTaskContext
+                  ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot }
+                  : {}),
                 runtimeMode: activeTaskContext ? activeTaskContext.runtimeMode : input.runtimeMode,
                 ...(effectiveResumeCursor !== undefined
                   ? { resumeCursor: effectiveResumeCursor }

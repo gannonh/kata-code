@@ -1714,6 +1714,7 @@ export interface ActiveTaskProviderContext {
   readonly stage: TaskWorkspaceStage;
   readonly providerInstanceId: string;
   readonly worktreePath: string;
+  readonly workspaceRoot: string;
   readonly branch: string;
   readonly baseCommitSha: string;
   readonly executionProfile: "planning" | "task-worktree-write";
@@ -2015,6 +2016,7 @@ export const make = Effect.gen(function* () {
           stage: "build" as const,
           providerInstanceId: modelSelection.instanceId,
           worktreePath: repository.worktreePath,
+          workspaceRoot: repository.workspaceRoot,
           branch: expectedBranch,
           baseCommitSha: repository.baseCommitSha,
           executionProfile: "task-worktree-write" as const,

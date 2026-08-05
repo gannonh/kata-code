@@ -67,6 +67,8 @@ export const ProviderSessionStartInput = Schema.Struct({
   taskStage: Schema.optional(Schema.Boolean),
   /** Additive profile seam; legacy RuntimeMode remains unchanged. */
   taskExecutionProfile: Schema.optional(ProviderTaskExecutionProfile),
+  /** Canonical repository root of the active task-worktree session. */
+  taskWorkspaceRoot: Schema.optional(TrimmedNonEmptyString),
   resumeCursor: Schema.optional(Schema.Unknown),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),

@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -373,6 +374,73 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.ok(taskExcludeArg);
       assert.match(taskExcludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
     }),
+  );
+
+  it.effect(
+    "rejects a task worktree whose git metadata redirects outside the canonical repository",
+    () =>
+      Effect.gen(function* () {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "kata-codex-git-redirect-"));
+        const runGit = (cwd: string, args: ReadonlyArray<string>) => {
+          const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+          assert.equal(result.status, 0, result.stderr);
+        };
+        const mainRepo = path.join(root, "repo");
+        const worktreePath = path.join(root, "worktree");
+        const externalGitDir = path.join(root, "external-host-repo", ".git");
+        fs.mkdirSync(mainRepo, { recursive: true });
+        runGit(mainRepo, ["init", "-b", "main"]);
+        fs.writeFileSync(path.join(mainRepo, "README.md"), "# fixture\n");
+        runGit(mainRepo, ["add", "README.md"]);
+        runGit(mainRepo, ["commit", "-m", "chore: seed"]);
+        runGit(mainRepo, ["worktree", "add", "-b", "katacode/task-1", worktreePath]);
+        const canonicalGitFile = fs.readFileSync(path.join(worktreePath, ".git"), "utf8");
+        assert.match(canonicalGitFile, /^gitdir:/u);
+        fs.mkdirSync(externalGitDir, { recursive: true });
+        fs.mkdirSync(path.join(externalGitDir, "objects"), { recursive: true });
+
+        const adapter = yield* CodexAdapter;
+        // Control: the canonical worktree starts a session with git metadata
+        // writes confined to the main repository's .git.
+        const control = yield* adapter
+          .startSession({
+            provider: ProviderDriverKind.make("codex"),
+            threadId: asThreadId("thread-git-canonical"),
+            cwd: worktreePath,
+            runtimeMode: "auto-accept-edits",
+            taskExecutionProfile: "task-worktree-write",
+            taskWorkspaceRoot: mainRepo,
+          })
+          .pipe(Effect.result);
+        assert.equal(control._tag, "Success");
+        const controlOptions = validationRuntimeFactory.factory.mock.calls.at(-1)?.[0];
+        const controlPermissionArg = controlOptions?.appServerArgs?.find((argument) =>
+          argument.startsWith("permissions.katacode_task_workspace.filesystem="),
+        );
+        assert.ok(controlPermissionArg);
+        assert.match(controlPermissionArg, /worktrees.*="write"/u);
+
+        // Attack: the implementation rewrites the writable .git gitfile to
+        // point at an external host directory. The restarted session must fail
+        // closed instead of widening the writable profile.
+        fs.writeFileSync(path.join(worktreePath, ".git"), `gitdir: ${externalGitDir}\n`);
+        const redirected = yield* adapter
+          .startSession({
+            provider: ProviderDriverKind.make("codex"),
+            threadId: asThreadId("thread-git-redirected"),
+            cwd: worktreePath,
+            runtimeMode: "auto-accept-edits",
+            taskExecutionProfile: "task-worktree-write",
+            taskWorkspaceRoot: mainRepo,
+          })
+          .pipe(Effect.result);
+        assert.equal(redirected._tag, "Failure");
+        if (redirected._tag === "Failure") {
+          assert.equal(redirected.failure._tag, "ProviderAdapterValidationError");
+          assert.match(redirected.failure.issue, /not canonical/u);
+        }
+      }).pipe(Effect.scoped),
+    30_000,
   );
 });
 
