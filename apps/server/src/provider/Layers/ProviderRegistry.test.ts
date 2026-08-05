@@ -871,6 +871,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
 
             assert.deepStrictEqual(cachedProvider, {
               ...refreshedProvider,
+              supportsTaskStage: false,
               models: [...initialProvider.models],
             });
           }).pipe(Effect.provide(runtimeServices));

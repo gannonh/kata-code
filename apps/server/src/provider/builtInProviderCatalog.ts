@@ -15,8 +15,12 @@ export type ProviderSnapshotSource = {
   readonly instanceId: ProviderInstanceId;
   /** Driver implementation kind. */
   readonly driverKind: ProviderDriverKind;
-  readonly supportsTaskStage?: boolean;
-  readonly supportsTaskWorktreeWrite?: boolean;
+  /**
+   * Project driver/adapter-derived capability fields onto a raw snapshot.
+   * `getSnapshot`, `refresh`, and `streamChanges` already apply it; consumers
+   * that read raw values off `subscribeChanges` must apply it themselves.
+   */
+  readonly augment: (snapshot: ServerProvider) => ServerProvider;
   readonly getSnapshot: ServerProviderShape["getSnapshot"];
   readonly refresh: ServerProviderShape["refresh"];
   readonly streamChanges: Stream.Stream<ServerProvider>;

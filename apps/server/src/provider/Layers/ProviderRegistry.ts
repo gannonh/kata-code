@@ -64,11 +64,6 @@ const loadProviders = (
     providerSources,
     (providerSource) =>
       providerSource.getSnapshot.pipe(
-        Effect.map((snapshot) =>
-          providerSource.supportsTaskStage === undefined
-            ? snapshot
-            : { ...snapshot, supportsTaskStage: providerSource.supportsTaskStage },
-        ),
         Effect.flatMap((snapshot) => correlateSnapshotWithSource(providerSource, snapshot)),
       ),
     {
@@ -199,8 +194,7 @@ const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource
   return {
     instanceId: instance.instanceId,
     driverKind: instance.driverKind,
-    ...(supportsTaskStage === undefined ? {} : { supportsTaskStage }),
-    ...(supportsTaskWorktreeWrite === undefined ? {} : { supportsTaskWorktreeWrite }),
+    augment,
     getSnapshot: instance.snapshot.getSnapshot.pipe(Effect.map(augment)),
     refresh: instance.snapshot.refresh.pipe(Effect.map(augment)),
     streamChanges: instance.snapshot.streamChanges.pipe(Stream.map(augment)),
@@ -573,7 +567,9 @@ export const ProviderRegistryLive = Layer.effect(
           const source = buildSnapshotSource(instance);
           const subscription = yield* source.subscribeChanges;
           yield* Stream.runForEach(Stream.fromSubscription(subscription), (provider) =>
-            correlateSnapshotWithSource(source, provider).pipe(Effect.flatMap(syncProvider)),
+            correlateSnapshotWithSource(source, source.augment(provider)).pipe(
+              Effect.flatMap(syncProvider),
+            ),
           ).pipe(Effect.forkScoped);
         }
         yield* Effect.yieldNow;
