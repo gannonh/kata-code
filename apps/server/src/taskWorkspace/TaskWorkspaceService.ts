@@ -1886,7 +1886,17 @@ export const make = Effect.gen(function* () {
           candidate.threadId === input.threadId &&
           candidate.providerTurnId === input.providerTurnId,
       );
-      if (!proposal) return;
+      if (!proposal) {
+        yield* Effect.logWarning("task workspace completion terminal had no pending proposal", {
+          threadId: input.threadId,
+          providerTurnId: input.providerTurnId,
+          pendingProposalCount: pendingProposals.length,
+          sameTurnProposalCount: pendingProposals.filter(
+            (candidate) => candidate.providerTurnId === input.providerTurnId,
+          ).length,
+        });
+        return;
+      }
       yield* settleProposal({
         taskId: proposal.taskId,
         occurrence: proposal.occurrence,
