@@ -1,3 +1,5 @@
+import { setTimeout as delayRealMillis } from "node:timers/promises";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -49,6 +51,35 @@ import type { ProviderInstance } from "../ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+
+/**
+ * Re-read `read` until it satisfies `predicate`, yielding real wall-clock
+ * time between attempts.
+ *
+ * The aggregator persists snapshots from a forked fiber that performs real
+ * filesystem I/O, so `TestClock` cannot advance that work — only the host
+ * scheduler can. Polling on scheduler turns alone bounds the wait by however
+ * often the runtime happens to hand the writer control, which a loaded CI
+ * runner can stretch far past any fixed turn count. Waiting on wall-clock
+ * time instead keeps the budget meaningful, so the assertion that follows
+ * reports the persisted value rather than the schedule that produced it.
+ */
+const POLL_ATTEMPTS = 200;
+const POLL_INTERVAL_MILLIS = 5;
+
+const pollUntil = <A, E, R>(
+  read: Effect.Effect<A, E, R>,
+  predicate: (value: A) => boolean,
+): Effect.Effect<A, E, R> =>
+  Effect.gen(function* () {
+    let value = yield* read;
+    for (let attempt = 0; attempt < POLL_ATTEMPTS && !predicate(value); attempt += 1) {
+      yield* Effect.promise(() => delayRealMillis(POLL_INTERVAL_MILLIS));
+      value = yield* read;
+    }
+    return value;
+  });
+
 const decodeServerSettings = Schema.decodeSync(ServerSettings);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodedDefaultServerSettings = encodeServerSettings(DEFAULT_SERVER_SETTINGS);
@@ -833,16 +864,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             ]);
             yield* PubSub.publish(changes, refreshedProvider);
 
-            let cachedProvider = yield* readProviderStatusCache(filePath);
-            for (
-              let attempt = 0;
-              attempt < 50 && cachedProvider?.checkedAt !== refreshedProvider.checkedAt;
-              attempt += 1
-            ) {
-              yield* TestClock.adjust("10 millis");
-              yield* Effect.yieldNow;
-              cachedProvider = yield* readProviderStatusCache(filePath);
-            }
+            const cachedProvider = yield* pollUntil(
+              readProviderStatusCache(filePath),
+              (cached) => cached?.checkedAt === refreshedProvider.checkedAt,
+            );
 
             assert.deepStrictEqual(cachedProvider, {
               ...refreshedProvider,
