@@ -123,12 +123,12 @@ export async function sendAgentInstruction(
   const sendButton = page.getByRole("button", { name: "Send message" });
   const userMessages = page.locator('[data-message-role="user"]');
   const initialMessageCount = await userMessages.count();
-  const deadline = Date.now() + timeoutMs;
+  const editableDeadline = Date.now() + timeoutMs;
 
   // A provider command approval can temporarily make the composer read-only.
   // Resolve it before filling the next instruction when this flow owns the
   // approval interaction.
-  while (!(await editor.isEditable().catch(() => false)) && Date.now() < deadline) {
+  while (!(await editor.isEditable().catch(() => false)) && Date.now() < editableDeadline) {
     if (options.approveOnce) {
       const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
       if (await approveOnce.isVisible().catch(() => false)) {
@@ -140,6 +140,12 @@ export async function sendAgentInstruction(
     }
     await page.waitForTimeout(250);
   }
+  if (!(await editor.isEditable().catch(() => false))) {
+    throw new Error(`Composer did not become editable within ${timeoutMs}ms. url=${page.url()}`);
+  }
+  // The submit retry gets its own budget so approval resolution cannot consume
+  // the whole timeout before a single submit attempt is made.
+  const deadline = Date.now() + timeoutMs;
   await editor.click();
   await editor.fill(text);
 

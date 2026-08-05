@@ -1046,6 +1046,8 @@ const TaskBuildCheckRecordManualCommand = Schema.Struct({
   status: Schema.Literals(["pass", "fail", "blocked"]),
   note: TrimmedNonEmptyString,
   commitSha: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
 });
 
 const TaskBuildCheckpointContinueCommand = Schema.Struct({

@@ -89,6 +89,10 @@ describe("task workspace Plan compiler", () => {
     ["forward dependency", plan.replace("work:contract\n\n- Manual", "work:service\n\n- Manual")],
     ["invalid policy", plan.replace("Checkpoint: always", "Checkpoint: sometimes")],
     ["empty command", plan.replace("| vp run typecheck", "|")],
+    [
+      "manual check with a command",
+      plan.replace("Review the service", "Review the service | vp run lint"),
+    ],
   ])("rejects %s before approval", (_name, invalid) => {
     expect(() => compileTaskWorkspacePlan(invalid)).toThrow("Invalid implementation Plan");
   });

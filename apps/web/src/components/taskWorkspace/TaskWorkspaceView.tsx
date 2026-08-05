@@ -40,6 +40,10 @@ import { ContextManifestPanel } from "./ContextManifestPanel";
 import { GuidedTaskPanel } from "./GuidedTaskPanel";
 import { SessionsPanel } from "./SessionsPanel";
 
+function operationKey(commandId: string, action: string): string {
+  return `task-${action}-${commandId}`;
+}
+
 /**
  * Rail shown when a task pins a definition version this build has no catalog
  * entry for. Rendering the Standard ladder would be a guess; showing only the
@@ -677,12 +681,20 @@ function BuildPanel({
                                       Boolean(gate)
                                     }
                                     onClick={() => {
+                                      const base = commands.commandBase(
+                                        "task.build.check.record-manual",
+                                      );
                                       void commands.dispatch(
                                         {
-                                          ...commands.commandBase("task.build.check.record-manual"),
+                                          ...base,
+                                          expectedTaskRevision: task.taskRevision,
                                           checkId: check.id,
                                           status: "pass",
                                           note: manualNotes[check.id]!.trim(),
+                                          operationKey: operationKey(
+                                            base.commandId,
+                                            `record-check-${check.id}-pass`,
+                                          ),
                                         },
                                         `record-check-${check.id}-pass`,
                                       );
@@ -702,14 +714,20 @@ function BuildPanel({
                                         Boolean(gate)
                                       }
                                       onClick={() => {
+                                        const base = commands.commandBase(
+                                          "task.build.check.record-manual",
+                                        );
                                         void commands.dispatch(
                                           {
-                                            ...commands.commandBase(
-                                              "task.build.check.record-manual",
-                                            ),
+                                            ...base,
+                                            expectedTaskRevision: task.taskRevision,
                                             checkId: check.id,
                                             status,
                                             note: manualNotes[check.id]!.trim(),
+                                            operationKey: operationKey(
+                                              base.commandId,
+                                              `record-check-${check.id}-${status}`,
+                                            ),
                                           },
                                           `record-check-${check.id}-${status}`,
                                         );

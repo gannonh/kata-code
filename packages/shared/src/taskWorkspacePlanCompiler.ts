@@ -288,8 +288,8 @@ export function compileTaskWorkspacePlan(
         if (!label) fail(`check '${checkId}' has an empty label.`);
         if (kind === "automated" && !command)
           fail(`automated check '${checkId}' has an empty command.`);
-        if (kind === "manual" && separator >= 0 && command === "")
-          fail(`check '${checkId}' has an empty command.`);
+        if (kind === "manual" && separator >= 0)
+          fail(`manual check '${checkId}' must not declare a command.`);
         const check: TaskWorkspaceBuildCheck = {
           id: checkId,
           phaseId,

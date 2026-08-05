@@ -158,6 +158,7 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
     case "task.implementation.amendment.propose":
     case "task.implementation.complete":
     case "task.build.checkpoint.continue":
+    case "task.build.check.record-manual":
     case "task.amendment.request-changes":
     case "task.amendment.approve":
       return command.operationKey ?? null;
@@ -4474,6 +4475,12 @@ export const make = Effect.gen(function* () {
         }
         case "task.build.check.record-manual": {
           requireStage(task, "build");
+          if (
+            command.expectedTaskRevision !== undefined &&
+            command.expectedTaskRevision !== task.taskRevision
+          ) {
+            throw new Error("The implementation task revision is stale.");
+          }
           if (hasWaitingImplementationCheckpoint(task)) {
             throw new Error("Build is paused at a waiting checkpoint.");
           }
@@ -4567,7 +4574,25 @@ export const make = Effect.gen(function* () {
               );
             }
           }
-          return yield* append(command, { ...task, build, updatedAt: command.createdAt });
+          return yield* append(
+            command,
+            { ...task, build, updatedAt: command.createdAt },
+            {
+              eventType: "task.implementation.check.updated",
+              operationReceipt: makeOperationReceipt(
+                command,
+                {
+                  operationType: "task.build.check.record-manual",
+                  operationKey: command.operationKey ?? `record-manual:${command.checkId}`,
+                  payloadDigest: canonicalTaskCommandDigest(command),
+                  status: "completed",
+                  attemptCount: 1,
+                  sourceCommandIds: [command.commandId],
+                },
+                command.createdAt,
+              ),
+            },
+          );
         }
         case "task.build.checkpoint.continue": {
           requireStage(task, "build");

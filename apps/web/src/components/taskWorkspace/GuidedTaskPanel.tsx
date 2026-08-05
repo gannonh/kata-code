@@ -876,14 +876,20 @@ export function GuidedTaskPanel(props: {
                                         disabled={recordReason !== null}
                                         title={recordReason ?? undefined}
                                         onClick={() => {
+                                          const base = commands.commandBase(
+                                            "task.build.check.record-manual",
+                                          );
                                           void commands.dispatch(
                                             {
-                                              ...commands.commandBase(
-                                                "task.build.check.record-manual",
-                                              ),
+                                              ...base,
+                                              expectedTaskRevision: task.taskRevision,
                                               checkId: check.id,
                                               status,
                                               note: note.trim(),
+                                              operationKey: operationKey(
+                                                base.commandId,
+                                                `record-check-${check.id}-${status}`,
+                                              ),
                                             },
                                             `record-check-${check.id}-${status}`,
                                           );
