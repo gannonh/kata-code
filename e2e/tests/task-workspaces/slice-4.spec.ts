@@ -125,6 +125,15 @@ async function waitForImplementationCheckpoint(
   while (Date.now() < deadline) {
     await approveVisibleProviderRequests(page);
     if (await implementationComplete.isVisible().catch(() => false)) return null;
+    const latestAssistant = page.locator('[data-message-role="assistant"] .chat-markdown').last();
+    const latestAssistantText = (await latestAssistant.innerText().catch(() => "")).trim();
+    if (
+      /No eligible (?:phase or )?work item remains|Build stage completed/iu.test(
+        latestAssistantText,
+      )
+    ) {
+      return null;
+    }
     const count = await checkpoints.count();
     for (let index = 0; index < count; index += 1) {
       const candidate = checkpoints.nth(index);
