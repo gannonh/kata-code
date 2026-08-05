@@ -11,6 +11,7 @@ import { expect, test } from "../../src/harness/testFixtures.ts";
 
 const execFile = promisify(execFileCallback);
 const IMPLEMENTATION_READY_TIMEOUT_MS = E2E_TIMEOUTS.agentReplyMs;
+const COMPLETION_ATTEMPTED_PATTERN = /task_implementation_complete/iu;
 const COMPLETION_SUBMITTED_PATTERN =
   /(?:task_implementation_complete.{0,160}(?:accepted|submitted|already called)|completion proposal.{0,160}(?:accepted|submitted)|completion submitted successfully|recorded session and provider-turn metadata)/isu;
 
@@ -139,7 +140,7 @@ async function waitForImplementationCheckpoint(
       if ((await candidate.getAttribute("title")) === "Checkpoint already continued.") continue;
       if (await candidate.isVisible().catch(() => false)) return checkpointId;
     }
-    if (COMPLETION_SUBMITTED_PATTERN.test(latestAssistantText)) {
+    if (COMPLETION_ATTEMPTED_PATTERN.test(latestAssistantText)) {
       return null;
     }
     if (
