@@ -296,7 +296,7 @@ const make = Effect.gen(function* () {
       // it on every exit path, including interruption, so it can never leak
       // into the worktree and poison the next attempt's before-state
       // comparison.
-      const result = yield* Effect.gen(function* () {
+      const executed = yield* Effect.gen(function* () {
         yield* Effect.tryPromise({
           try: () =>
             NodeFs.promises.mkdir(taskCheckTempPath(input.worktreePath), { recursive: true }),
@@ -311,18 +311,7 @@ const make = Effect.gen(function* () {
           worktreePath: input.worktreePath,
           platform: hostPlatform,
         });
-        if (!sandboxed) {
-          return {
-            status: "indeterminate" as const,
-            output: "No supported OS-enforced task check sandbox is available on this host.",
-            exitCode: null,
-            timedOut: false,
-            startingCommitSha: beforeHead.stdout.trim(),
-            endingCommitSha: beforeHead.stdout.trim(),
-            startingStatus: beforeStatus.stdout.trim(),
-            endingStatus: beforeStatus.stdout.trim(),
-          } satisfies TaskWorktreeCommandResult;
-        }
+        if (!sandboxed) return null;
         return yield* processRunner.run({
           command: sandboxed.command,
           args: sandboxed.args,
@@ -340,6 +329,19 @@ const make = Effect.gen(function* () {
         ),
         Effect.ensuring(cleanupTaskCheckTempPath(input.worktreePath).pipe(Effect.orDie)),
       );
+      if (executed === null) {
+        return {
+          status: "indeterminate" as const,
+          output: "No supported OS-enforced task check sandbox is available on this host.",
+          exitCode: null,
+          timedOut: false,
+          startingCommitSha: beforeHead.stdout.trim(),
+          endingCommitSha: beforeHead.stdout.trim(),
+          startingStatus: beforeStatus.stdout.trim(),
+          endingStatus: beforeStatus.stdout.trim(),
+        } satisfies TaskWorktreeCommandResult;
+      }
+      const result = executed;
       // Explicit release point: the temp directory must be gone before the
       // after-state is observed so the check's own scratch files are never
       // counted as worktree changes.

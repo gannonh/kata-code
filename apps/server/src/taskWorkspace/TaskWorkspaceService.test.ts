@@ -5859,6 +5859,97 @@ describe("TaskWorkspaceService guided implementation", () => {
     }),
   );
 
+  it.effect("rejects an early completion tool call while a required check is not current", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-impl-early-complete-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+      const head = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "running",
+          summary: "Implementing.",
+        }),
+      );
+      let current = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const check = yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: current.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-early-complete",
+        }),
+      );
+      // The check settles on the base commit, then the provider moves HEAD
+      // without re-running it: the pass is stale for the new HEAD.
+      yield* runtime.runPromise(
+        service.processImplementationCheck({
+          taskId: task.id,
+          attemptId: check.attemptId,
+          status: "pass",
+          output: "typecheck passed",
+          exitCode: 0,
+          endingCommitSha: head,
+        }),
+      );
+      current = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: current.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "completed",
+          summary: "Implemented.",
+        }),
+      );
+      yield* Effect.tryPromise(() =>
+        git(worktreePath, ["commit", "--allow-empty", "-m", "chore: move head"]),
+      ).pipe(
+        Effect.flatMap(() =>
+          Effect.tryPromise(() =>
+            git(worktreePath, ["commit", "--allow-empty", "-m", "chore: move head 2"]),
+          ),
+        ),
+      );
+      current = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const occurrence = current.occurrences.find((candidate) => candidate.stage === "build")!;
+      const session = current.sessions.find((candidate) => candidate.stage === "build")!;
+      const outcome = yield* runtime.runPromiseExit(
+        service.implementationComplete({
+          taskId: task.id,
+          expectedTaskRevision: current.taskRevision,
+          summary: "Implementation complete.",
+          operationKey: "op-early-complete",
+          sessionId: session.id,
+          providerTurnId: "turn-early-complete",
+        }),
+      );
+      // The early tool call must fail with an actionable error instead of
+      // moving the occurrence to `finalizing` with stale evidence.
+      expect(Exit.isFailure(outcome)).toBe(true);
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const afterOccurrence = after.occurrences.find(
+        (candidate) => candidate.stage === "build" && candidate.ordinal === occurrence.ordinal,
+      )!;
+      expect(afterOccurrence.status).toBe("running");
+      expect(afterOccurrence.completionProposalId).toBeNull();
+    }),
+  );
+
   it("latest-attempt gate blocks a latest fail but not a superseded one", () => {
     const attempt = (id: string, checkId: string, status: TaskWorkspaceCheckAttempt["status"]) =>
       ({ id, checkId, status }) as Pick<TaskWorkspaceCheckAttempt, "checkId" | "status">;

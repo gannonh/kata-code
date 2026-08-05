@@ -3975,6 +3975,18 @@ export const make = Effect.gen(function* () {
             activeWorkItemId: item?.id ?? null,
           };
           const updatedPhase = phaseForBuild({ ...task, build }, phase.id);
+          // Observe HEAD once up front and mark passes for other commits stale
+          // before deciding phase completion, so a phase is never closed on
+          // evidence the same command then invalidates.
+          const repository = task.workspace.repositories[0];
+          const observedHead = repository?.worktreePath
+            ? yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+                Effect.mapError((cause) =>
+                  taskError(command, "Failed to inspect the task worktree HEAD.", cause),
+                ),
+              )
+            : null;
+          if (observedHead !== null) build = markStalePassesForHead(build, observedHead);
           if (
             command.status === "completed" &&
             updatedPhase.workItems.every((candidate) => candidate.status === "completed") &&
@@ -3991,31 +4003,14 @@ export const make = Effect.gen(function* () {
               activeWorkItemId: null,
             };
             if (phase.checkpointPolicy === "always" || phase.checkpointPolicy === "manual-only") {
-              const repository = task.workspace.repositories[0];
-              const observedCommitSha = repository?.worktreePath
-                ? yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
-                    Effect.mapError((cause) =>
-                      taskError(command, "Failed to inspect the task worktree HEAD.", cause),
-                    ),
-                  )
-                : null;
               build = appendCheckpoint(
                 build,
                 { ...updatedPhase, status: "completed" },
                 command.createdAt,
                 undefined,
-                observedCommitSha,
+                observedHead,
               );
             } else build = startNextPhase(build, phase.id, command.createdAt);
-          }
-          const repository = task.workspace.repositories[0];
-          if (repository?.worktreePath) {
-            const observedHead = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
-              Effect.mapError((cause) =>
-                taskError(command, "Failed to inspect the task worktree HEAD.", cause),
-              ),
-            );
-            build = markStalePassesForHead(build, observedHead);
           }
           return yield* append(
             command,
@@ -4250,6 +4245,11 @@ export const make = Effect.gen(function* () {
           };
           if (command.sessionId !== occurrence.sessionId)
             throw new Error("Completion session is not the active primary session.");
+          // Validate the full completion gate before creating the proposal so an
+          // early tool call fails with an actionable error instead of wedging
+          // the occurrence into `finalizing` and later committing stale
+          // terminal evidence.
+          yield* validateBuildCompletion(task);
           return yield* append(
             command,
             {
@@ -5887,7 +5887,8 @@ export const make = Effect.gen(function* () {
   const startImplementationCheck: TaskWorkspaceServiceShape["startImplementationCheck"] = (input) =>
     Effect.gen(function* () {
       const task = taskById.get(input.taskId);
-      if (!task) throw new TaskWorkspaceError({ message: `Task '${input.taskId}' was not found.` });
+      if (!task)
+        return yield* new TaskWorkspaceError({ message: `Task '${input.taskId}' was not found.` });
       const attempt = task.build.checkAttempts.find(
         (candidate) => candidate.id === input.attemptId,
       );
@@ -6681,13 +6682,13 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const run = currentRun(task);
       if (run.currentStage !== "build")
-        throw new TaskWorkspaceError({
+        return yield* new TaskWorkspaceError({
           message: "Build completion requires the active Build stage.",
           commandType: "task.internal",
           taskId: task.id,
         });
       if (task.build.amendmentGateId || hasWaitingImplementationCheckpoint(task))
-        throw new TaskWorkspaceError({
+        return yield* new TaskWorkspaceError({
           message: "Build has an open checkpoint or amendment gate.",
           commandType: "task.internal",
           taskId: task.id,
@@ -6699,7 +6700,7 @@ export const make = Effect.gen(function* () {
             phase.workItems.some((item) => item.status !== "completed"),
         )
       )
-        throw new TaskWorkspaceError({
+        return yield* new TaskWorkspaceError({
           message: "Build has incomplete phases or work items.",
           commandType: "task.internal",
           taskId: task.id,
@@ -6711,14 +6712,14 @@ export const make = Effect.gen(function* () {
         task.build.checks.some((check) => check.status !== "pass" || check.commitSha === null) ||
         latestAttemptBlocksCompletion(task.build.checkAttempts)
       )
-        throw new TaskWorkspaceError({
+        return yield* new TaskWorkspaceError({
           message: "Build has checks that are not passing and current.",
           commandType: "task.internal",
           taskId: task.id,
         });
       const repository = task.workspace.repositories[0];
       if (!repository?.worktreePath || !repository.branch || !repository.baseCommitSha)
-        throw new TaskWorkspaceError({
+        return yield* new TaskWorkspaceError({
           message: "The canonical Build worktree is unavailable.",
           commandType: "task.internal",
           taskId: task.id,
@@ -6730,7 +6731,7 @@ export const make = Effect.gen(function* () {
         expectedBranch,
       );
       if (repository.branch !== expectedBranch || repository.worktreePath !== expectedPath)
-        throw new TaskWorkspaceError({
+        return yield* new TaskWorkspaceError({
           message: "The Build worktree reservation is not canonical.",
           commandType: "task.internal",
           taskId: task.id,
@@ -6740,7 +6741,7 @@ export const make = Effect.gen(function* () {
       const branchHead = yield* runGit(repository.worktreePath, ["rev-parse", expectedBranch]);
       const status = yield* runGit(repository.worktreePath, ["status", "--porcelain=v2"]);
       if (branch !== expectedBranch || head !== branchHead || status.trim() !== "")
-        throw new TaskWorkspaceError({
+        return yield* new TaskWorkspaceError({
           message: "The canonical Build worktree is dirty or on the wrong branch.",
           commandType: "task.internal",
           taskId: task.id,
@@ -6764,7 +6765,7 @@ export const make = Effect.gen(function* () {
         ) ||
         latestAttemptBlocksCompletion(effectiveBuild.checkAttempts)
       )
-        throw new TaskWorkspaceError({
+        return yield* new TaskWorkspaceError({
           message: "A required Build check does not match the current HEAD.",
           commandType: "task.internal",
           taskId: task.id,
