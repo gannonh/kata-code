@@ -127,13 +127,6 @@ async function waitForImplementationCheckpoint(
     if (await implementationComplete.isVisible().catch(() => false)) return null;
     const latestAssistant = page.locator('[data-message-role="assistant"] .chat-markdown').last();
     const latestAssistantText = (await latestAssistant.innerText().catch(() => "")).trim();
-    if (
-      /no eligible (?:phase or )?work item(?: remains)?|Build stage completed/iu.test(
-        latestAssistantText,
-      )
-    ) {
-      return null;
-    }
     const count = await checkpoints.count();
     for (let index = 0; index < count; index += 1) {
       const candidate = checkpoints.nth(index);
@@ -142,6 +135,13 @@ async function waitForImplementationCheckpoint(
       if (!checkpointId || continuedCheckpointIds.includes(checkpointId)) continue;
       if ((await candidate.getAttribute("title")) === "Checkpoint already continued.") continue;
       if (await candidate.isVisible().catch(() => false)) return checkpointId;
+    }
+    if (
+      /no eligible (?:phase or )?work item(?: remains)?|Build stage completed/iu.test(
+        latestAssistantText,
+      )
+    ) {
+      return null;
     }
     await page.waitForTimeout(500);
   }
