@@ -362,7 +362,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     await approveVisibleProviderRequests(appWindow);
     await sendAgentInstruction(
       appWindow,
-      "Continue the Implement stage. First mark the current eligible phase and work item running with task_implementation_progress, implement it, use task_implementation_check_run for every approved automated check, then mark the work item completed and stop at the next checkpoint.",
+      "Continue the Implement stage. Inspect task_implementation_context first. If an eligible phase and work item remain, mark them running with task_implementation_progress, implement them, run every approved automated check with task_implementation_check_run, then mark the work item completed and stop at the next checkpoint. If all phases, work items, checks, and continued checkpoints are clear, call task_implementation_complete with the exact current HEAD instead. Do not rerun completed work items or call task_stage_complete.",
       IMPLEMENTATION_READY_TIMEOUT_MS,
       { approveOnce: true },
     );
@@ -390,7 +390,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       await approveVisibleProviderRequests(appWindow);
       await sendAgentInstruction(
         appWindow,
-        "Continue the Implement stage. First mark the current eligible phase and work item running with task_implementation_progress, implement it, use task_implementation_check_run for every approved automated check, then mark the work item completed and stop at the next checkpoint.",
+        "Continue the Implement stage. Inspect task_implementation_context first. If an eligible phase and work item remain, mark them running with task_implementation_progress, implement them, run every approved automated check with task_implementation_check_run, then mark the work item completed and stop at the next checkpoint. If all phases, work items, checks, and continued checkpoints are clear, call task_implementation_complete with the exact current HEAD instead. Do not rerun completed work items or call task_stage_complete.",
         IMPLEMENTATION_READY_TIMEOUT_MS,
         { approveOnce: true },
       );
@@ -398,7 +398,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     }
     const implementationComplete = appWindow.getByTestId("guided-implementation-complete");
     const continuePrompt =
-      "Continue the Implement stage. First mark the current eligible phase and work item running with task_implementation_progress, implement it, use task_implementation_check_run for every approved automated check, then mark the work item completed and stop at the next checkpoint.";
+      "Continue the Implement stage. Inspect task_implementation_context first. If an eligible phase and work item remain, mark them running with task_implementation_progress, implement them, run every approved automated check with task_implementation_check_run, then mark the work item completed and stop at the next checkpoint. If all phases, work items, checks, and continued checkpoints are clear, call task_implementation_complete with the exact current HEAD instead. Do not rerun completed work items or call task_stage_complete.";
     const finishPrompt =
       "Finish the Implement stage now. Verify every work item and approved check, commit the implementation changes on the canonical task branch so the worktree is clean, then call task_implementation_complete with the required session, provider turn, exact resulting HEAD, and a concise summary. Do not only report completion and do not call task_stage_complete.";
     const hasCompletionSubmission = async (): Promise<boolean> => {
