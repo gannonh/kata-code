@@ -143,7 +143,7 @@ async function waitForImplementationCheckpoint(
       )
     ) {
       noEligibleSince ??= Date.now();
-      if (Date.now() - noEligibleSince >= 5_000) return null;
+      if (Date.now() - noEligibleSince >= 30_000) return null;
     } else {
       noEligibleSince = null;
     }
