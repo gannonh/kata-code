@@ -118,6 +118,7 @@ function checkpointCanContinue(
     .filter((check): check is NonNullable<typeof check> => check !== undefined);
   if (
     checkpoint.status !== "waiting" ||
+    checkpoint.continuationSessionId !== null ||
     !phase ||
     !checks.every((check) => check.status === "pass")
   ) {
@@ -142,6 +143,7 @@ function checkpointDisabledReason(
   isBusy: boolean,
 ) {
   if (checkpoint.status !== "waiting") return "Checkpoint already continued.";
+  if (checkpoint.continuationSessionId !== null) return "Checkpoint continuation is starting.";
   if (task.build.amendmentGateId) return "Approve the pending amendment first.";
   if (!checkpointCanContinue(task, checkpoint))
     return "Pass the checkpoint checks and complete finished phases first.";

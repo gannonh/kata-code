@@ -113,13 +113,33 @@ export async function selectComposerModelForProvider(
     .catch(() => undefined);
 }
 
-export async function sendAgentInstruction(page: Page, text: string): Promise<void> {
+export async function sendAgentInstruction(
+  page: Page,
+  text: string,
+  timeoutMs = E2E_TIMEOUTS.assertionMs,
+  options: { readonly approveOnce?: boolean } = {},
+): Promise<void> {
   const editor = page.getByTestId("composer-editor");
   const sendButton = page.getByRole("button", { name: "Send message" });
   const userMessages = page.locator('[data-message-role="user"]');
   const initialMessageCount = await userMessages.count();
-  const deadline = Date.now() + E2E_TIMEOUTS.assertionMs;
+  const deadline = Date.now() + timeoutMs;
 
+  // A provider command approval can temporarily make the composer read-only.
+  // Resolve it before filling the next instruction when this flow owns the
+  // approval interaction.
+  while (!(await editor.isEditable().catch(() => false)) && Date.now() < deadline) {
+    if (options.approveOnce) {
+      const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
+      if (await approveOnce.isVisible().catch(() => false)) {
+        await expect(approveOnce).toBeEnabled();
+        await approveOnce.click();
+        await page.waitForTimeout(350);
+        continue;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
   await editor.click();
   await editor.fill(text);
 
@@ -129,15 +149,28 @@ export async function sendAgentInstruction(page: Page, text: string): Promise<vo
   while (Date.now() < deadline) {
     if ((await userMessages.count()) > initialMessageCount) return;
 
+    if (options.approveOnce) {
+      const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
+      if (await approveOnce.isVisible().catch(() => false)) {
+        await expect(approveOnce).toBeEnabled();
+        await approveOnce.click();
+        await page.waitForTimeout(350);
+        continue;
+      }
+    }
+
     const currentDraft = (await editor.innerText()).trim();
-    if (currentDraft === text && (await sendButton.isEnabled().catch(() => false))) {
+    if (currentDraft !== text) {
+      await editor.fill(text);
+    }
+    if (await sendButton.isEnabled().catch(() => false)) {
       await sendButton.click();
     }
     await page.waitForTimeout(250);
   }
 
   throw new Error(
-    `Composer did not submit the agent instruction within ${E2E_TIMEOUTS.assertionMs}ms. url=${page.url()} draft=${JSON.stringify((await editor.innerText()).trim())}`,
+    `Composer did not submit the agent instruction within ${timeoutMs}ms. url=${page.url()} draft=${JSON.stringify((await editor.innerText()).trim())}`,
   );
 }
 

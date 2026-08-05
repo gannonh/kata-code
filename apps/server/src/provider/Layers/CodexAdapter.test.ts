@@ -327,6 +327,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.ok(excludeArg);
       assert.match(excludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
       assert.match(excludeArg, /CODEX_HOME/u);
+      assert.match(excludeArg, /OPENSSL_CONF/u);
       assert.match(excludeArg, /\*TOKEN\*/u);
       assert.match(excludeArg, /\*SECRET\*/u);
       assert.match(excludeArg, /\*KEY\*/u);
@@ -348,9 +349,11 @@ validationLayer("CodexAdapterLive validation", (it) => {
         argument.startsWith("permissions.katacode_task_workspace.filesystem="),
       );
       assert.ok(permissionArg);
+      assert.match(permissionArg, /":root"="deny"/u);
       assert.match(permissionArg, /":minimal"="read"/u);
       assert.match(permissionArg, /"\/tmp\/task-worktree\/\*\*"="write"/u);
-      assert.match(permissionArg, /\.git\/\*\*.*="deny"/u);
+      assert.match(permissionArg, /\.git\/\*\*.*="write"/u);
+      assert.doesNotMatch(permissionArg, /\/tmp\/task-worktree\/\.git\/\*\*"="deny"/u);
       assert.doesNotMatch(permissionArg, /":root"="read"/u);
       assert.ok(
         taskRuntimeOptions.appServerArgs?.includes(`default_permissions="katacode_task_workspace"`),

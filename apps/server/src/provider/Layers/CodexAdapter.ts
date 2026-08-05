@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Provider launch profiles need synchronous path normalization.
 /**
  * CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
  *
@@ -76,6 +77,7 @@ const PROVIDER = ProviderDriverKind.make("codex");
 const CODEX_SHELL_ENV_EXCLUDE_PATTERNS = [
   MCP_BEARER_TOKEN_ENV_VAR,
   "CODEX_HOME",
+  "OPENSSL_CONF",
   "*MCP*",
   "*TOKEN*",
   "*SECRET*",
@@ -102,11 +104,19 @@ const CODEX_TASK_DENIED_HOME_PATHS = [
   "~/Library/Application Support",
 ] as const;
 
-function appendDeniedFilesystemPath(entries: Map<string, string>, path: string): void {
+function appendFilesystemPath(
+  entries: Map<string, string>,
+  path: string,
+  access: "read" | "write" | "deny",
+): void {
   const normalized = path.endsWith("/") ? path.slice(0, -1) : path;
   if (normalized.length === 0) return;
-  entries.set(normalized, "deny");
-  entries.set(`${normalized}/**`, "deny");
+  entries.set(normalized, access);
+  entries.set(`${normalized}/**`, access);
+}
+
+function appendDeniedFilesystemPath(entries: Map<string, string>, path: string): void {
+  appendFilesystemPath(entries, path, "deny");
 }
 
 function resolveTaskCodexHomePath(
@@ -123,15 +133,26 @@ function resolveTaskCodexHomePath(
 
 function codexTaskPermissionProfileArgs(
   cwd: string,
+  canonicalCwd: string,
   configuredHomePath?: string,
+  gitReadablePaths: ReadonlyArray<string> = [],
+  gitWritablePaths: ReadonlyArray<string> = [],
 ): ReadonlyArray<string> {
-  const entries = new Map<string, string>([[":minimal", "read"]]);
-  const parent = cwd.slice(0, cwd.lastIndexOf("/"));
-  if (parent.length > 0) appendDeniedFilesystemPath(entries, parent);
-  entries.set(cwd, "write");
-  entries.set(`${cwd}/**`, "write");
-  for (const metadataPath of [".git", ".agents", ".codex"]) {
-    appendDeniedFilesystemPath(entries, `${cwd}/${metadataPath}`);
+  const entries = new Map<string, string>([
+    [":root", "deny"],
+    [":minimal", "read"],
+  ]);
+  for (const gitPath of gitReadablePaths) appendFilesystemPath(entries, gitPath, "read");
+  for (const gitPath of gitWritablePaths) appendFilesystemPath(entries, gitPath, "write");
+  const worktreePaths = Array.from(new Set([cwd, canonicalCwd]));
+  for (const worktreePath of worktreePaths) {
+    entries.set(worktreePath, "write");
+    entries.set(`${worktreePath}/**`, "write");
+    entries.set(`${worktreePath}/.git`, "write");
+    entries.set(`${worktreePath}/.git/**`, "write");
+    for (const metadataPath of [".agents", ".codex"]) {
+      appendDeniedFilesystemPath(entries, `${worktreePath}/${metadataPath}`);
+    }
   }
   for (const path of CODEX_TASK_DENIED_HOME_PATHS) {
     appendDeniedFilesystemPath(entries, expandHomePath(path));
@@ -1498,9 +1519,64 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.taskExecutionProfile === "task-worktree-write"
             ? resolveTaskCodexHomePath(codexConfig.homePath, options?.environment)
             : undefined;
+        const taskCwd = input.cwd ?? process.cwd();
+        const canonicalTaskCwd =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? yield* fileSystem.realPath(taskCwd).pipe(Effect.orElseSucceed(() => taskCwd))
+            : taskCwd;
+        let taskGitReadablePaths: string[] = [];
+        let taskGitWritablePaths: string[] = [];
+        if (input.taskExecutionProfile === "task-worktree-write") {
+          const gitFile = yield* fileSystem
+            .readFileString(NodePath.join(canonicalTaskCwd, ".git"))
+            .pipe(Effect.orElseSucceed(() => null));
+          const gitDirectoryValue = gitFile?.match(/^gitdir:\s*(.+)$/mu)?.[1]?.trim();
+          if (gitDirectoryValue) {
+            const gitDirectoryPath = NodePath.isAbsolute(gitDirectoryValue)
+              ? gitDirectoryValue
+              : NodePath.resolve(canonicalTaskCwd, gitDirectoryValue);
+            const gitDirectory = yield* fileSystem
+              .realPath(gitDirectoryPath)
+              .pipe(Effect.orElseSucceed(() => gitDirectoryPath));
+            const commonDirectoryValue = yield* fileSystem
+              .readFileString(NodePath.join(gitDirectory, "commondir"))
+              .pipe(Effect.orElseSucceed(() => "../.."));
+            const commonDirectoryPath = NodePath.isAbsolute(commonDirectoryValue.trim())
+              ? commonDirectoryValue.trim()
+              : NodePath.resolve(gitDirectory, commonDirectoryValue.trim());
+            const commonDirectory = yield* fileSystem
+              .realPath(commonDirectoryPath)
+              .pipe(Effect.orElseSucceed(() => commonDirectoryPath));
+            const head = yield* fileSystem
+              .readFileString(NodePath.join(gitDirectory, "HEAD"))
+              .pipe(Effect.orElseSucceed(() => ""));
+            const branchRef = head.match(/^ref:\s*(refs\/heads\/.+)$/mu)?.[1]?.trim();
+            taskGitReadablePaths = [commonDirectory];
+            taskGitWritablePaths = [
+              gitDirectory,
+              NodePath.join(commonDirectory, "objects"),
+              ...(branchRef
+                ? [
+                    NodePath.join(commonDirectory, branchRef),
+                    `${NodePath.join(commonDirectory, branchRef)}.lock`,
+                    NodePath.join(commonDirectory, "logs", branchRef),
+                    `${NodePath.join(commonDirectory, "logs", branchRef)}.lock`,
+                    NodePath.join(commonDirectory, "packed-refs"),
+                    `${NodePath.join(commonDirectory, "packed-refs")}.lock`,
+                  ]
+                : []),
+            ];
+          }
+        }
         const taskPermissionProfileArgs =
           input.taskExecutionProfile === "task-worktree-write"
-            ? codexTaskPermissionProfileArgs(input.cwd ?? process.cwd(), taskCodexHomePath)
+            ? codexTaskPermissionProfileArgs(
+                taskCwd,
+                canonicalTaskCwd,
+                taskCodexHomePath,
+                taskGitReadablePaths,
+                taskGitWritablePaths,
+              )
             : [];
         const taskShellEnvironmentPolicyArgs =
           input.taskExecutionProfile === "task-worktree-write"

@@ -128,10 +128,12 @@ const make = Effect.gen(function* () {
           providerInstanceId: scope.providerInstanceId,
         })
         .pipe(Effect.mapError((cause) => error("unauthorized", cause.message)));
-      yield* taskWorkspaces
-        .validatePlanningRoot(task.id)
-        .pipe(Effect.mapError((cause) => error("source-drift", cause.message)));
       const stage = currentStage(task);
+      if (stage !== "build") {
+        yield* taskWorkspaces
+          .validatePlanningRoot(task.id)
+          .pipe(Effect.mapError((cause) => error("source-drift", cause.message)));
+      }
       const occurrence = latestOccurrence(task, stage);
       const isBootstrapPrimary =
         occurrence?.status === "starting" &&

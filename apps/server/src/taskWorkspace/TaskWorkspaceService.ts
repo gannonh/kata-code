@@ -1867,7 +1867,10 @@ export const make = Effect.gen(function* () {
       }
       const repository = task.workspace.repositories[0];
       if (!repository || repository.planningRootFingerprint === null) return;
-      const planningRoot = repository.worktreePath ?? repository.workspaceRoot;
+      const planningRoot =
+        task.preferences.worktreePolicy === "now" && repository.worktreePath
+          ? repository.worktreePath
+          : repository.workspaceRoot;
       const fingerprint = yield* planningRootFingerprint(planningRoot).pipe(
         Effect.mapError(
           (cause) =>
@@ -6347,6 +6350,66 @@ export const make = Effect.gen(function* () {
     };
   };
 
+  const activateBootstrapForProvider = (
+    task: TaskWorkspace,
+    payload: TaskWorkspaceBootstrapOutboxPayload,
+    now: string,
+  ): TaskWorkspace => {
+    const base = finalizeBootstrapContinuation(task, payload, now);
+    const modelSelection = base.preferences.modelSelection;
+    if (!modelSelection) throw new Error("The task has no model selection.");
+    const hasSession = base.sessions.some((session) => session.id === payload.sessionId);
+    return {
+      ...base,
+      bootstrap: {
+        ...base.bootstrap!,
+        status: "running",
+        currentStep: "provider",
+        updatedAt: now,
+      },
+      sessions: hasSession
+        ? base.sessions.map((session) =>
+            session.id === payload.sessionId
+              ? {
+                  ...session,
+                  stage: payload.stage,
+                  threadId: payload.threadId,
+                  role: "primary" as const,
+                  provider: modelSelection.instanceId,
+                  status: "active" as const,
+                  contextManifestId: payload.contextManifestId ?? session.contextManifestId,
+                }
+              : session,
+          )
+        : [
+            ...base.sessions,
+            {
+              id: payload.sessionId,
+              stage: payload.stage,
+              threadId: payload.threadId,
+              role: "primary" as const,
+              provider: modelSelection.instanceId,
+              status: "active" as const,
+              parentSessionId: null,
+              forkPoint: null,
+              contextManifestId: payload.contextManifestId ?? null,
+              createdAt: now,
+            },
+          ],
+      occurrences: base.occurrences.map((occurrence) =>
+        occurrence.stage === payload.stage && occurrence.ordinal === payload.occurrence
+          ? {
+              ...occurrence,
+              status: "running" as const,
+              sessionId: payload.sessionId,
+              threadId: payload.threadId,
+              contextManifestId: payload.contextManifestId ?? occurrence.contextManifestId,
+            }
+          : occurrence,
+      ),
+    };
+  };
+
   const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
 
   const waitForProviderTurnStart = (
@@ -7565,6 +7628,17 @@ export const make = Effect.gen(function* () {
               ),
             );
 
+          // Activate the reserved task session before the provider turn starts.
+          // Provider MCP tools can arrive immediately after turn/start; the task
+          // must already expose the continuation phase and session or the first
+          // progress call races the bootstrap finalization.
+          const providerReadyAt = yield* serverNow;
+          working = yield* internalAppend(
+            "task.bootstrap.step-completed",
+            activateBootstrapForProvider(working, payload, providerReadyAt),
+            { occurredAt: providerReadyAt },
+          );
+
           // Step 3: dispatch the deterministic kickoff message.
           const turnStart = yield* orchestrationEngine
             .dispatch({
@@ -7608,9 +7682,8 @@ export const make = Effect.gen(function* () {
 
           // Step 4: record Ready. The session is created and linked by Kata;
           // there is no manual thread linking in this workflow.
-          const readyBase = finalizeBootstrapContinuation(working, payload, now);
           const readyTask: TaskWorkspace = {
-            ...readyBase,
+            ...working,
             bootstrap: {
               operationKey: working.bootstrap!.operationKey,
               executionProfile: payload.executionProfile,
@@ -7627,32 +7700,6 @@ export const make = Effect.gen(function* () {
               failure: null,
               updatedAt: now,
             },
-            sessions: [
-              ...readyBase.sessions,
-              {
-                id: payload.sessionId,
-                stage: payload.stage,
-                threadId: payload.threadId,
-                role: "primary" as const,
-                provider: modelSelection.instanceId,
-                status: "active" as const,
-                parentSessionId: null,
-                forkPoint: null,
-                contextManifestId: payload.contextManifestId ?? null,
-                createdAt: now,
-              },
-            ],
-            occurrences: readyBase.occurrences.map((occurrence) =>
-              occurrence.stage === payload.stage && occurrence.ordinal === payload.occurrence
-                ? {
-                    ...occurrence,
-                    status: "running" as const,
-                    sessionId: payload.sessionId,
-                    threadId: payload.threadId,
-                    contextManifestId: payload.contextManifestId ?? occurrence.contextManifestId,
-                  }
-                : occurrence,
-            ),
           };
           yield* internalAppend("task.bootstrap.ready", readyTask, {
             occurredAt: now,

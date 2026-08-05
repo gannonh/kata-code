@@ -1143,6 +1143,52 @@ describe("TaskWorkspaceView", () => {
     });
   });
 
+  it("holds the checkpoint control while continuation bootstrap starts", async () => {
+    await renderTask(
+      guidedTask({
+        build: {
+          ...guidedTask().build,
+          activePhaseId: null,
+          activeWorkItemId: null,
+          phases: [
+            {
+              ...guidedTask().build.phases[0]!,
+              status: "completed",
+              workItems: [
+                {
+                  ...guidedTask().build.phases[0]!.workItems[0]!,
+                  status: "completed",
+                },
+              ],
+            },
+          ],
+          checkpoints: [
+            {
+              id: "checkpoint-1",
+              phaseId: "phase:foundation",
+              reason: "Human checkpoint reached.",
+              status: "waiting",
+              checkIds: [],
+              continuationSessionId: "session-build-continuation-1",
+              contextManifestId: "manifest-checkpoint-1",
+              observedCommitSha: null,
+              createdAt: "2026-07-28T17:12:00.000Z",
+              continuedAt: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect
+      .element(page.getByTestId("guided-checkpoint-disabled-reason-checkpoint-1"))
+      .toHaveTextContent("Checkpoint continuation is starting.");
+    await expect
+      .element(page.getByTestId("guided-checkpoint-continue-checkpoint-1"))
+      .toBeDisabled();
+    expect(mocks.dispatchCommand).not.toHaveBeenCalled();
+  });
+
   it("dispatches server-owned checkpoint continuation without raw manifest controls", async () => {
     const commitSha = "cccccccccccccccccccccccccccccccccccccccc";
     await renderTask(
