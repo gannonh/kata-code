@@ -136,11 +136,7 @@ async function waitForImplementationCheckpoint(
       if ((await candidate.getAttribute("title")) === "Checkpoint already continued.") continue;
       if (await candidate.isVisible().catch(() => false)) return checkpointId;
     }
-    if (
-      /no eligible (?:phase or )?work item(?: remains)?|Build stage completed/iu.test(
-        latestAssistantText,
-      )
-    ) {
+    if (/no eligible .*work item|Build stage completed/iu.test(latestAssistantText)) {
       return null;
     }
     await page.waitForTimeout(500);
