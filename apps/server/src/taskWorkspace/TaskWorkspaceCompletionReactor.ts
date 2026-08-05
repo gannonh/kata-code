@@ -85,9 +85,39 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
     yield* Effect.forkScoped(
       Stream.runForEach(provider.streamEvents, (event) => {
         const outcome = runtimeTerminalOutcome(event);
-        if (!outcome || event.turnId === undefined) return Effect.void;
-        return settle(event.threadId, event.turnId, outcome, event.type);
+        const settlement =
+          outcome && event.turnId !== undefined
+            ? settle(event.threadId, event.turnId, outcome, event.type)
+            : Effect.void;
+        return settlement.pipe(
+          Effect.andThen(
+            taskWorkspaces.reconcilePendingProposals.pipe(
+              Effect.tapError((cause) =>
+                Effect.logWarning("task workspace completion reconciliation failed", {
+                  cause: cause.message,
+                }),
+              ),
+              Effect.ignore,
+            ),
+          ),
+        );
       }),
+    );
+    // Reconcile persisted proposals after a provider/runtime event can be
+    // lost at a process boundary. This only settles proposals against durable
+    // terminal activities; it never reruns checks or other external commands.
+    yield* Effect.forkScoped(
+      Effect.forever(
+        taskWorkspaces.reconcilePendingProposals.pipe(
+          Effect.tapError((cause) =>
+            Effect.logWarning("task workspace completion reconciliation failed", {
+              cause: cause.message,
+            }),
+          ),
+          Effect.ignore,
+          Effect.andThen(Effect.sleep("1 second")),
+        ),
+      ),
     );
   }),
 );
