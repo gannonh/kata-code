@@ -25,6 +25,7 @@ import {
   RuntimeRequestId,
   ProviderApprovalDecision,
   ThreadId,
+  TurnId,
   ProviderSendTurnInput,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
@@ -889,6 +890,10 @@ function mapToRuntimeEvents(
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
+        // Codex v2 carries the authoritative turn id inside the completion
+        // payload. Preserve it when the notification envelope omits the
+        // top-level field so terminal settlement remains correlated.
+        turnId: TurnId.make(payload.turn.id),
         type: "turn.completed",
         payload: {
           state: toTurnStatus(payload.turn.status),
