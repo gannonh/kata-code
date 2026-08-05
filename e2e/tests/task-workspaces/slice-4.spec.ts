@@ -138,7 +138,7 @@ async function waitForImplementationCheckpoint(
       if (await candidate.isVisible().catch(() => false)) return checkpointId;
     }
     if (
-      /no eligible .*work item|all (?:approved )?phases and work items .*already completed|Build stage completed/iu.test(
+      /no eligible .*work item|all (?:approved )?phases and work items .*already completed|Build stage completed|all phases .*clear|no further implementation work/iu.test(
         latestAssistantText,
       )
     ) {
