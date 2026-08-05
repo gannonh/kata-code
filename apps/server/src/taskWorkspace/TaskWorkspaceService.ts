@@ -7120,7 +7120,17 @@ export const make = Effect.gen(function* () {
             event.payload.activity.turnId === proposal.providerTurnId &&
             event.payload.activity.kind === "provider-turn-terminal",
         );
-        if (!terminalEvent || terminalEvent.type !== "thread.activity-appended") continue;
+        if (!terminalEvent || terminalEvent.type !== "thread.activity-appended") {
+          yield* Effect.logWarning(
+            "task workspace completion proposal has no matching terminal activity",
+            {
+              taskId: proposal.taskId,
+              threadId: proposal.threadId,
+              providerTurnId: proposal.providerTurnId,
+            },
+          );
+          continue;
+        }
         const outcome = (terminalEvent.payload.activity.payload as { readonly outcome?: unknown })
           .outcome;
         if (outcome !== "completed" && outcome !== "aborted" && outcome !== "failed") continue;

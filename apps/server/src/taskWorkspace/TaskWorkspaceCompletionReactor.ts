@@ -87,7 +87,12 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
         const outcome = runtimeTerminalOutcome(event);
         const settlement =
           outcome && event.turnId !== undefined
-            ? settle(event.threadId, event.turnId, outcome, event.type)
+            ? Effect.logWarning("task workspace completion reactor observed provider terminal", {
+                threadId: event.threadId,
+                providerTurnId: event.turnId,
+                outcome,
+                eventType: event.type,
+              }).pipe(Effect.andThen(settle(event.threadId, event.turnId, outcome, event.type)))
             : Effect.void;
         return settlement.pipe(
           Effect.andThen(
