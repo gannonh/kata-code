@@ -5979,6 +5979,43 @@ export const make = Effect.gen(function* () {
       if (input.endingCommitSha !== null) {
         build = markStalePassesForHead(build, input.endingCommitSha);
       }
+      // A provider may complete a work item before its final approved check
+      // settles. Re-evaluate the owning phase here so a passing check closes
+      // the phase even when no later progress command is possible.
+      if (nextStatus === "pass" && phase) {
+        const settledPhase = build.phases.find((candidate) => candidate.id === phase.id);
+        if (
+          settledPhase &&
+          settledPhase.status !== "completed" &&
+          settledPhase.workItems.every((candidate) => candidate.status === "completed") &&
+          requiredChecksPass(build, settledPhase.checkIds)
+        ) {
+          build = {
+            ...build,
+            phases: build.phases.map((candidate) =>
+              candidate.id === settledPhase.id
+                ? { ...candidate, status: "completed" as const, completedAt: now }
+                : candidate,
+            ),
+            activePhaseId: null,
+            activeWorkItemId: null,
+          };
+          if (
+            settledPhase.checkpointPolicy === "always" ||
+            settledPhase.checkpointPolicy === "manual-only"
+          ) {
+            build = appendCheckpoint(
+              build,
+              { ...settledPhase, status: "completed" },
+              now,
+              undefined,
+              input.endingCommitSha,
+            );
+          } else {
+            build = startNextPhase(build, settledPhase.id, now);
+          }
+        }
+      }
       if (nextStatus !== "pass" && phase) {
         const failedPhase = phaseForBuild({ ...task, build }, phase.id);
         if (
