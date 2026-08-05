@@ -1363,30 +1363,38 @@ const make = Effect.gen(function* () {
             },
             createdAt: now,
           });
-          if (event.type === "turn.completed" || event.type === "turn.aborted") {
-            const outcome =
-              event.type === "turn.aborted"
-                ? "aborted"
-                : normalizeRuntimeTurnState(event.payload.state) === "failed"
-                  ? "failed"
-                  : "completed";
-            yield* orchestrationEngine.dispatch({
-              type: "thread.activity.append",
-              commandId: yield* providerCommandId(event, "task-turn-terminal"),
-              threadId: thread.id,
-              activity: {
-                id: EventId.make(`task-terminal-${String(event.eventId)}`),
-                tone: outcome === "failed" ? "error" : "info",
-                kind: "provider-turn-terminal",
-                summary: `Provider turn ${outcome}.`,
-                payload: { outcome },
-                turnId: eventTurnId ?? null,
-                createdAt: now,
-              },
-              createdAt: now,
-            });
-          }
         }
+      }
+
+      // Persist provider terminal evidence even when the lifecycle guard
+      // rejects a stale session transition. Completion settlement can race the
+      // terminal event, so the durable activity must remain available for
+      // proposal reconciliation.
+      if (
+        (event.type === "turn.completed" || event.type === "turn.aborted") &&
+        eventTurnId !== undefined
+      ) {
+        const outcome =
+          event.type === "turn.aborted"
+            ? "aborted"
+            : normalizeRuntimeTurnState(event.payload.state) === "failed"
+              ? "failed"
+              : "completed";
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: yield* providerCommandId(event, "task-turn-terminal"),
+          threadId: thread.id,
+          activity: {
+            id: EventId.make(`task-terminal-${String(event.eventId)}`),
+            tone: outcome === "failed" ? "error" : "info",
+            kind: "provider-turn-terminal",
+            summary: `Provider turn ${outcome}.`,
+            payload: { outcome },
+            turnId: eventTurnId,
+            createdAt: now,
+          },
+          createdAt: now,
+        });
       }
 
       const assistantDelta =

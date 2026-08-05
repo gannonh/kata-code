@@ -718,6 +718,11 @@ describe("ProviderRuntimeIngestion", () => {
     const midThread = midReadModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(midThread?.session?.status).toBe("running");
     expect(midThread?.session?.activeTurnId).toBe("turn-primary");
+    expect(
+      midThread?.activities.some(
+        (activity) => activity.kind === "provider-turn-terminal" && activity.turnId === "turn-aux",
+      ),
+    ).toBe(true);
 
     harness.emit({
       type: "turn.completed",
