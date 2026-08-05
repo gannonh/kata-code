@@ -112,6 +112,52 @@ function realPath(path: string): string {
   }
 }
 
+/**
+ * Resolve the canonical git metadata a linked task worktree needs to run git
+ * read commands inside the check sandbox. The worktree's `.git` gitfile is
+ * writable by the task implementation, so the resolved gitdir is only trusted
+ * when its HEAD references the task's own expected branch; anything else
+ * yields no mounts and the check fails closed at the branch observation.
+ */
+export function taskGitMetadataReadPaths(
+  worktreePath: string,
+  expectedBranch: string,
+): ReadonlyArray<string> {
+  const gitFile = (() => {
+    try {
+      return NodeFs.readFileSync(NodePath.join(worktreePath, ".git"), "utf8");
+    } catch {
+      return null;
+    }
+  })();
+  if (gitFile === null) return [];
+  const gitDirectoryValue = gitFile.match(/^gitdir:\s*(.+)$/mu)?.[1]?.trim();
+  if (!gitDirectoryValue) return [];
+  const gitDirectoryPath = NodePath.isAbsolute(gitDirectoryValue)
+    ? gitDirectoryValue
+    : NodePath.resolve(worktreePath, gitDirectoryValue);
+  const gitDirectory = realPath(gitDirectoryPath);
+  const head = (() => {
+    try {
+      return NodeFs.readFileSync(NodePath.join(gitDirectory, "HEAD"), "utf8");
+    } catch {
+      return "";
+    }
+  })();
+  if (head.trim() !== `ref: refs/heads/${expectedBranch}`) return [];
+  const commonDirectoryValue = (() => {
+    try {
+      return NodeFs.readFileSync(NodePath.join(gitDirectory, "commondir"), "utf8").trim();
+    } catch {
+      return "../..";
+    }
+  })();
+  const commonDirectoryPath = NodePath.isAbsolute(commonDirectoryValue)
+    ? commonDirectoryValue
+    : NodePath.resolve(gitDirectory, commonDirectoryValue);
+  return Array.from(new Set([gitDirectory, realPath(commonDirectoryPath)]));
+}
+
 export function taskCheckTempPath(worktreePath: string): string {
   return NodePath.join(worktreePath, ".kata-check-tmp");
 }
@@ -128,7 +174,10 @@ export function taskCheckEnvironment(worktreePath: string): NodeJS.ProcessEnv {
   };
 }
 
-export function macSandboxProfile(worktreePath: string): string {
+export function macSandboxProfile(
+  worktreePath: string,
+  extraReadPaths: ReadonlyArray<string> = [],
+): string {
   const home = NodeOs.homedir();
   const worktreePaths = Array.from(new Set([worktreePath, realPath(worktreePath)]));
   const runtimeReadPaths = existingReadablePaths([
@@ -143,6 +192,7 @@ export function macSandboxProfile(worktreePath: string): string {
     // directory. Keep that toolchain available without exposing other user
     // package-manager and credential directories to checks.
     NodePath.join(home, ".vite-plus"),
+    ...extraReadPaths,
   ]);
   return [
     "(version 1)",
@@ -175,7 +225,11 @@ function cleanupTaskCheckTempPath(
   });
 }
 
-function linuxBwrapArgs(worktreePath: string, argv: ReadonlyArray<string>): ReadonlyArray<string> {
+function linuxBwrapArgs(
+  worktreePath: string,
+  argv: ReadonlyArray<string>,
+  extraReadPaths: ReadonlyArray<string> = [],
+): ReadonlyArray<string> {
   const readOnlyPaths = existingReadablePaths([
     "/usr",
     "/bin",
@@ -187,6 +241,7 @@ function linuxBwrapArgs(worktreePath: string, argv: ReadonlyArray<string>): Read
     "/etc/ca-certificates",
     NodePath.join(NodeOs.homedir(), ".vite-plus"),
     NodePath.dirname(realPath(process.execPath)),
+    ...extraReadPaths,
   ]).flatMap((path) => ["--ro-bind", path, path]);
   return [
     "--unshare-all",
@@ -213,18 +268,32 @@ function linuxBwrapArgs(worktreePath: string, argv: ReadonlyArray<string>): Read
 export function sandboxApprovedCheckCommand(input: {
   readonly argv: ReadonlyArray<string>;
   readonly worktreePath: string;
+  readonly expectedBranch?: string;
   readonly platform: NodeJS.Platform;
 }): { readonly command: string; readonly args: ReadonlyArray<string> } | null {
   const platform = input.platform;
+  const gitMetadataReadPaths =
+    input.expectedBranch !== undefined
+      ? taskGitMetadataReadPaths(input.worktreePath, input.expectedBranch)
+      : [];
   if (platform === "darwin" && NodeFs.existsSync("/usr/bin/sandbox-exec")) {
     return {
       command: "/usr/bin/sandbox-exec",
-      args: ["-p", macSandboxProfile(input.worktreePath), "--", ...input.argv],
+      args: [
+        "-p",
+        macSandboxProfile(input.worktreePath, gitMetadataReadPaths),
+        "--",
+        ...input.argv,
+      ],
     };
   }
   if (platform === "linux") {
     const bwrap = executableOnPath("bwrap");
-    if (bwrap) return { command: bwrap, args: linuxBwrapArgs(input.worktreePath, input.argv) };
+    if (bwrap)
+      return {
+        command: bwrap,
+        args: linuxBwrapArgs(input.worktreePath, input.argv, gitMetadataReadPaths),
+      };
   }
   return null;
 }
@@ -309,6 +378,7 @@ const make = Effect.gen(function* () {
         const sandboxed = sandboxApprovedCheckCommand({
           argv,
           worktreePath: input.worktreePath,
+          expectedBranch: input.expectedBranch,
           platform: hostPlatform,
         });
         if (!sandboxed) return null;

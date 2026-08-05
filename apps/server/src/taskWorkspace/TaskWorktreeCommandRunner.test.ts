@@ -19,6 +19,7 @@ import {
   sandboxApprovedCheckCommand,
   taskCheckEnvironment,
   taskCheckTempPath,
+  taskGitMetadataReadPaths,
   TaskWorktreeCommandRunner,
   TaskWorktreeCommandRunnerLive,
 } from "./TaskWorktreeCommandRunner.ts";
@@ -93,6 +94,35 @@ const setup = Effect.gen(function* () {
   return { worktreePath: root, expectedBranch: "main", expectedBaseCommitSha: baseCommitSha };
 });
 
+// A real linked worktree: the worktree's `.git` is a gitfile pointing at
+// metadata under the main repository, exactly like Kata's task worktrees.
+const setupLinkedWorktree = Effect.gen(function* () {
+  const root = yield* Effect.tryPromise(() =>
+    NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-check-linked-")),
+  );
+  yield* Effect.addFinalizer(() =>
+    Effect.tryPromise(() => NodeFs.rm(root, { recursive: true, force: true })).pipe(Effect.orDie),
+  );
+  const mainRepo = NodePath.join(root, "repo");
+  const worktreePath = NodePath.join(root, "worktree");
+  yield* Effect.tryPromise(() => NodeFs.mkdir(mainRepo, { recursive: true }));
+  yield* Effect.tryPromise(() => git(mainRepo, ["init", "-b", "main"]));
+  yield* Effect.tryPromise(() =>
+    NodeFs.writeFile(NodePath.join(mainRepo, "README.md"), "# fixture\n"),
+  );
+  yield* Effect.tryPromise(() => git(mainRepo, ["add", "README.md"]));
+  yield* Effect.tryPromise(() => git(mainRepo, ["commit", "-m", "chore: seed"]));
+  yield* Effect.tryPromise(() =>
+    git(mainRepo, ["worktree", "add", "-b", "katacode/task-linked", worktreePath]),
+  );
+  const baseCommitSha = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+  return {
+    worktreePath,
+    expectedBranch: "katacode/task-linked",
+    expectedBaseCommitSha: baseCommitSha,
+  };
+});
+
 effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
   it.effect("runs a bare executable resolved through PATH", () =>
     Effect.gen(function* () {
@@ -110,6 +140,63 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
       expect(result.output.trim().endsWith(NodePath.basename(worktreePath))).toBe(true);
     }),
   );
+
+  it.effect("runs git checks in a linked worktree with canonical metadata mounted", () =>
+    Effect.gen(function* () {
+      const platform = yield* HostProcessPlatform;
+      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setupLinkedWorktree;
+      const sandboxed = sandboxApprovedCheckCommand({
+        argv: ["git", "status", "--porcelain"],
+        worktreePath,
+        expectedBranch,
+        platform,
+      });
+      if (sandboxed === null) return;
+      // The sandbox must expose the linked worktree's canonical git metadata
+      // read-only, or git itself cannot resolve the repository.
+      const gitMetadataPaths = taskGitMetadataReadPaths(worktreePath, expectedBranch);
+      expect(gitMetadataPaths.length).toBeGreaterThan(0);
+      if (platform === "darwin") {
+        const profile = macSandboxProfile(worktreePath, gitMetadataPaths);
+        for (const gitPath of gitMetadataPaths) {
+          expect(profile).toContain(`(subpath "${gitPath}")`);
+        }
+      }
+      const runner = yield* TaskWorktreeCommandRunner;
+      const result = yield* runner.run({
+        worktreePath,
+        expectedBranch,
+        expectedBaseCommitSha,
+        command: "git status --porcelain",
+        timeoutMs: 15_000,
+      });
+      expect(result.status).toBe("pass");
+      expect(result.exitCode).toBe(0);
+    }),
+  );
+
+  it("refuses to mount git metadata whose HEAD is not the task branch", () => {
+    const root = NodeFileSystem.mkdtempSync(
+      NodePath.join(NodeOs.tmpdir(), "kata-check-redirected-"),
+    );
+    const worktreePath = NodePath.join(root, "worktree");
+    NodeFileSystem.mkdirSync(worktreePath, { recursive: true });
+    NodeFileSystem.writeFileSync(
+      NodePath.join(worktreePath, ".git"),
+      `gitdir: ${NodePath.join(worktreePath, "foreign", ".git")}\n`,
+    );
+    NodeFileSystem.mkdirSync(NodePath.join(worktreePath, "foreign", ".git"), { recursive: true });
+    NodeFileSystem.writeFileSync(
+      NodePath.join(worktreePath, "foreign", ".git", "HEAD"),
+      "ref: refs/heads/main\n",
+    );
+    NodeFileSystem.writeFileSync(
+      NodePath.join(worktreePath, "foreign", ".git", "commondir"),
+      "..\n",
+    );
+    expect(taskGitMetadataReadPaths(worktreePath, "katacode/task-1")).toEqual([]);
+    NodeFileSystem.rmSync(root, { recursive: true, force: true });
+  });
 
   it.effect("runs a multi-word command as argv with PATH resolution", () =>
     Effect.gen(function* () {
