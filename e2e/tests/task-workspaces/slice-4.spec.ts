@@ -400,7 +400,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     const continuePrompt =
       "Continue the Implement stage. First mark the current eligible phase and work item running with task_implementation_progress, implement it, use task_implementation_check_run for every approved automated check, then mark the work item completed and stop at the next checkpoint.";
     const finishPrompt =
-      "Finish the Implement stage. Verify every work item and approved check, commit the implementation changes on the canonical task branch so the worktree is clean, then call the implementation completion tool with the exact resulting HEAD and a concise summary.";
+      "Finish the Implement stage now. Verify every work item and approved check, commit the implementation changes on the canonical task branch so the worktree is clean, then call task_implementation_complete with the required session, provider turn, exact resulting HEAD, and a concise summary. Do not only report completion and do not call task_stage_complete.";
     const hasCompletionSubmission = async (): Promise<boolean> => {
       const assistantMessages = appWindow.locator('[data-message-role="assistant"] .chat-markdown');
       const text = (await assistantMessages.allInnerTexts()).join("\n");
