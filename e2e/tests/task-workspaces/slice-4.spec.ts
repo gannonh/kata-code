@@ -10,7 +10,7 @@ import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/w
 import { expect, test } from "../../src/harness/testFixtures.ts";
 
 const execFile = promisify(execFileCallback);
-const IMPLEMENTATION_READY_TIMEOUT_MS = 180_000;
+const IMPLEMENTATION_READY_TIMEOUT_MS = E2E_TIMEOUTS.agentReplyMs;
 
 async function seedWorkspace(
   runContext: Parameters<typeof createSeededGitWorkspace>[0],
@@ -284,7 +284,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
 }
 
 test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
-  test.describe.configure({ timeout: 600_000 });
+  test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
 
   test("creates through the form, approves Plan, and enters Implement", async ({
     authenticatedAppWindow,
