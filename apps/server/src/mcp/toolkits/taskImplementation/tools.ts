@@ -51,7 +51,8 @@ export const TaskImplementationAmendmentTool = Tool.make("task_implementation_am
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Idempotent, true);
 export const TaskImplementationCompleteTool = Tool.make("task_implementation_complete", {
-  description: "Propose completion of the active implementation occurrence.",
+  description:
+    "Propose completion of the active implementation occurrence. When accepted, stop using tools and return the final response so this provider turn can terminate.",
   parameters: TaskImplementationCompleteInput,
   success: TaskImplementationCompleteAck,
   failure: TaskImplementationToolError,
