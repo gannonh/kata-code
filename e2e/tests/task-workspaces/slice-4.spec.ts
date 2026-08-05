@@ -284,7 +284,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
 }
 
 test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
-  test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
+  test.describe.configure({ timeout: E2E_TIMEOUTS.guidedAgentTestMs });
 
   test("creates through the form, approves Plan, and enters Implement", async ({
     authenticatedAppWindow,
@@ -359,13 +359,6 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
       timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
     });
-    await approveVisibleProviderRequests(appWindow);
-    await sendAgentInstruction(
-      appWindow,
-      "Continue the Implement stage. Inspect task_implementation_context first. If an eligible phase and work item remain, mark them running with task_implementation_progress, implement them, run every approved automated check with task_implementation_check_run, then mark the work item completed and stop at the next checkpoint. If all phases, work items, checks, and continued checkpoints are clear, call task_implementation_complete with the exact current HEAD instead. Do not rerun completed work items or call task_stage_complete.",
-      IMPLEMENTATION_READY_TIMEOUT_MS,
-      { approveOnce: true },
-    );
     const continuedCheckpointIds: string[] = [];
     let nextCheckpointId = await waitForImplementationCheckpoint(appWindow);
     if (nextCheckpointId === null) {
@@ -384,21 +377,9 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       ) {
         break;
       }
-      await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
-        timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-      });
-      await approveVisibleProviderRequests(appWindow);
-      await sendAgentInstruction(
-        appWindow,
-        "Continue the Implement stage. Inspect task_implementation_context first. If an eligible phase and work item remain, mark them running with task_implementation_progress, implement them, run every approved automated check with task_implementation_check_run, then mark the work item completed and stop at the next checkpoint. If all phases, work items, checks, and continued checkpoints are clear, call task_implementation_complete with the exact current HEAD instead. Do not rerun completed work items or call task_stage_complete.",
-        IMPLEMENTATION_READY_TIMEOUT_MS,
-        { approveOnce: true },
-      );
       nextCheckpointId = await waitForImplementationCheckpoint(appWindow, continuedCheckpointIds);
     }
     const implementationComplete = appWindow.getByTestId("guided-implementation-complete");
-    const continuePrompt =
-      "Continue the Implement stage. Inspect task_implementation_context first. If an eligible phase and work item remain, mark them running with task_implementation_progress, implement them, run every approved automated check with task_implementation_check_run, then mark the work item completed and stop at the next checkpoint. If all phases, work items, checks, and continued checkpoints are clear, call task_implementation_complete with the exact current HEAD instead. Do not rerun completed work items or call task_stage_complete.";
     const finishPrompt =
       "Finish the Implement stage now. Verify every work item and approved check, commit the implementation changes on the canonical task branch so the worktree is clean, then call task_implementation_complete with the required session, provider turn, exact resulting HEAD, and a concise summary. Do not only report completion and do not call task_stage_complete.";
     const hasCompletionSubmission = async (): Promise<boolean> => {
@@ -425,13 +406,6 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
             lateCheckpointId,
             continuedCheckpointIds,
           );
-          await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
-            timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-          });
-          await approveVisibleProviderRequests(appWindow);
-          await sendAgentInstruction(appWindow, continuePrompt, IMPLEMENTATION_READY_TIMEOUT_MS, {
-            approveOnce: true,
-          });
           return "checkpoint";
         }
         await appWindow.waitForTimeout(500);
@@ -451,13 +425,6 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
           pendingCheckpointId,
           continuedCheckpointIds,
         );
-        await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
-          timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-        });
-        await approveVisibleProviderRequests(appWindow);
-        await sendAgentInstruction(appWindow, continuePrompt, IMPLEMENTATION_READY_TIMEOUT_MS, {
-          approveOnce: true,
-        });
         continue;
       }
       if (!(await hasCompletionSubmission())) {

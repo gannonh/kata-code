@@ -11,6 +11,7 @@ export const E2E_TIMEOUTS = {
   electronWindowMs: readPositiveIntEnv("KATACODE_E2E_ELECTRON_WINDOW_TIMEOUT_MS", 90_000),
   testMs: readPositiveIntEnv("KATACODE_E2E_TEST_TIMEOUT_MS", 180_000),
   agentTestMs: readPositiveIntEnv("KATACODE_E2E_AGENT_TEST_TIMEOUT_MS", 180_000),
+  guidedAgentTestMs: readPositiveIntEnv("KATACODE_E2E_GUIDED_AGENT_TEST_TIMEOUT_MS", 240_000),
   piAgentTestMs: readPositiveIntEnv("KATACODE_E2E_PI_AGENT_TEST_TIMEOUT_MS", 240_000),
   setupMs: readPositiveIntEnv("KATACODE_E2E_SETUP_TIMEOUT_MS", 20_000),
   assertionMs: readPositiveIntEnv("KATACODE_E2E_ASSERTION_TIMEOUT_MS", 10_000),
