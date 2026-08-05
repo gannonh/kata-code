@@ -314,57 +314,51 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       IMPLEMENTATION_READY_TIMEOUT_MS,
       { approveOnce: true },
     );
-    const firstCheckpointId = await waitForImplementationCheckpoint(appWindow);
-    if (firstCheckpointId === null) {
+    const continuedCheckpointIds: string[] = [];
+    let nextCheckpointId = await waitForImplementationCheckpoint(appWindow);
+    if (nextCheckpointId === null) {
       throw new Error("Implement completed before its required checkpoint.");
     }
-    await expect(appWindow.getByTestId(`guided-checkpoint-${firstCheckpointId}`)).toBeVisible();
-    await appWindow.reload();
-    await expect(appWindow.getByTestId("guided-implementation-panel")).toBeVisible({
-      timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-    });
-    const firstContinue = appWindow.getByTestId(`guided-checkpoint-continue-${firstCheckpointId}`);
-    await expect(firstContinue).toBeEnabled({ timeout: E2E_TIMEOUTS.assertionMs });
-    await firstContinue.click();
-    await expect(firstContinue).toHaveAttribute("title", "Checkpoint already continued.", {
-      timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-    });
-    await expect(appWindow.getByTestId("task-conversation-starting")).toHaveCount(0, {
-      timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-    });
-    await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
-      timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-    });
-    await approveVisibleProviderRequests(appWindow);
-    await sendAgentInstruction(
-      appWindow,
-      "Continue the Implement stage. First mark the current eligible phase and work item running with task_implementation_progress, implement it, use task_implementation_check_run for every approved automated check, then mark the work item completed and stop at the next checkpoint.",
-      IMPLEMENTATION_READY_TIMEOUT_MS,
-      { approveOnce: true },
-    );
-    const secondCheckpointId = await waitForImplementationCheckpoint(appWindow, [
-      firstCheckpointId,
-    ]);
-    if (secondCheckpointId !== null) {
-      await expect(appWindow.getByTestId(`guided-checkpoint-${secondCheckpointId}`)).toBeVisible();
+    for (let checkpointCount = 0; nextCheckpointId !== null; checkpointCount += 1) {
+      if (checkpointCount >= 6) {
+        throw new Error("Implement exceeded the bounded checkpoint continuation budget.");
+      }
+      await expect(appWindow.getByTestId(`guided-checkpoint-${nextCheckpointId}`)).toBeVisible();
       await appWindow.reload();
       await expect(appWindow.getByTestId("guided-implementation-panel")).toBeVisible({
         timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
       });
-      const secondContinue = appWindow.getByTestId(
-        `guided-checkpoint-continue-${secondCheckpointId}`,
+      const continueButton = appWindow.getByTestId(
+        `guided-checkpoint-continue-${nextCheckpointId}`,
       );
-      await expect(secondContinue).toBeEnabled({ timeout: E2E_TIMEOUTS.assertionMs });
-      await secondContinue.click();
-      await expect(secondContinue).toHaveAttribute("title", "Checkpoint already continued.", {
+      await expect(continueButton).toBeEnabled({ timeout: E2E_TIMEOUTS.assertionMs });
+      await continueButton.click();
+      await expect(continueButton).toHaveAttribute("title", "Checkpoint already continued.", {
         timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
       });
+      continuedCheckpointIds.push(nextCheckpointId);
       await expect(appWindow.getByTestId("task-conversation-starting")).toHaveCount(0, {
         timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
       });
+      if (
+        await appWindow
+          .getByTestId("guided-implementation-complete")
+          .isVisible()
+          .catch(() => false)
+      ) {
+        break;
+      }
       await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
         timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
       });
+      await approveVisibleProviderRequests(appWindow);
+      await sendAgentInstruction(
+        appWindow,
+        "Continue the Implement stage. First mark the current eligible phase and work item running with task_implementation_progress, implement it, use task_implementation_check_run for every approved automated check, then mark the work item completed and stop at the next checkpoint.",
+        IMPLEMENTATION_READY_TIMEOUT_MS,
+        { approveOnce: true },
+      );
+      nextCheckpointId = await waitForImplementationCheckpoint(appWindow, continuedCheckpointIds);
     }
     const implementationComplete = appWindow.getByTestId("guided-implementation-complete");
     if (!(await implementationComplete.isVisible().catch(() => false))) {
