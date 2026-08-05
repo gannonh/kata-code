@@ -184,6 +184,7 @@ function linuxBwrapArgs(worktreePath: string, argv: ReadonlyArray<string>): Read
     "/etc/ssl",
     "/etc/ca-certificates",
     NodePath.join(NodeOs.homedir(), ".vite-plus"),
+    NodePath.dirname(realPath(process.execPath)),
   ]).flatMap((path) => ["--ro-bind", path, path]);
   return [
     "--unshare-all",

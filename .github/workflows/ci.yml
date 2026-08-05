@@ -63,6 +63,9 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @kata-sh/code-desktop ensure:electron
 
+      - name: Install task check sandbox runtime
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y bubblewrap
+
       - name: Pull Docker image for sandbox integration tests
         run: docker pull alpine:3.20
 

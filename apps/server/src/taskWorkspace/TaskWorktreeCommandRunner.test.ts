@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import { promisify } from "node:util";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -300,15 +301,26 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
     expect(env.TEMP).toBe(tempPath);
   });
 
-  it("wraps approved commands in the OS sandbox command for supported hosts", () => {
-    const wrapped = sandboxApprovedCheckCommand({
-      argv: ["vp", "run", "typecheck"],
-      worktreePath: "/Users/test/worktrees/katacode-task-1",
-      platform: "darwin",
-    });
-    expect(wrapped?.command).toBe("/usr/bin/sandbox-exec");
-    expect(wrapped?.args).toContain("vp");
-  });
+  it.effect("wraps approved commands in the OS sandbox command for supported hosts", () =>
+    Effect.gen(function* () {
+      const platform = yield* HostProcessPlatform;
+      const wrapped = sandboxApprovedCheckCommand({
+        argv: ["vp", "run", "typecheck"],
+        worktreePath: "/Users/test/worktrees/katacode-task-1",
+        platform,
+      });
+
+      if (platform === "darwin") {
+        expect(wrapped?.command).toBe("/usr/bin/sandbox-exec");
+        expect(wrapped?.args).toContain("vp");
+      } else if (platform === "linux") {
+        expect(wrapped?.command).toMatch(/(?:^|\/)bwrap$/u);
+        expect(wrapped?.args).toContain("vp");
+      } else {
+        expect(wrapped).toBeNull();
+      }
+    }),
+  );
 
   it("reports unsupported sandbox capability without a host execution fallback", () => {
     expect(
