@@ -122,6 +122,7 @@ async function waitForImplementationCheckpoint(
   const checkpoints = page.locator('[data-testid^="guided-checkpoint-continue-"]');
   const implementationComplete = page.getByTestId("guided-implementation-complete");
   const deadline = Date.now() + IMPLEMENTATION_READY_TIMEOUT_MS;
+  let noEligibleSince: number | null = null;
   while (Date.now() < deadline) {
     await approveVisibleProviderRequests(page);
     if (await implementationComplete.isVisible().catch(() => false)) return null;
@@ -137,7 +138,10 @@ async function waitForImplementationCheckpoint(
       if (await candidate.isVisible().catch(() => false)) return checkpointId;
     }
     if (/no eligible .*work item|Build stage completed/iu.test(latestAssistantText)) {
-      return null;
+      noEligibleSince ??= Date.now();
+      if (Date.now() - noEligibleSince >= 5_000) return null;
+    } else {
+      noEligibleSince = null;
     }
     await page.waitForTimeout(500);
   }
