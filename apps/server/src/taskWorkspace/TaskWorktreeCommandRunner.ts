@@ -65,13 +65,15 @@ const scrubEnvironment = (): NodeJS.ProcessEnv => {
     "GIT_COMMITTER_EMAIL",
   ]);
   return {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => allowed.has(key) && !blocked.test(key)),
+    ),
+    // The deterministic identity must win over any host git identity copied
+    // from the environment by the allowlist spread above.
     GIT_AUTHOR_NAME: "Kata Code Task Check",
     GIT_AUTHOR_EMAIL: "tasks@kata.sh",
     GIT_COMMITTER_NAME: "Kata Code Task Check",
     GIT_COMMITTER_EMAIL: "tasks@kata.sh",
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => allowed.has(key) && !blocked.test(key)),
-    ),
   };
 };
 
@@ -261,6 +263,10 @@ const make = Effect.gen(function* () {
           message: "The task worktree base is not an ancestor.",
         });
       }
+      // A previous interrupted run may have left the check temp directory
+      // behind. Remove it before observing the before-state so a stale
+      // directory cannot be counted as a change the check itself made.
+      yield* cleanupTaskCheckTempPath(input.worktreePath);
       const beforeHead = yield* git(input.worktreePath, ["rev-parse", "HEAD"]);
       const beforeStatus = yield* git(input.worktreePath, ["status", "--porcelain=v2"]);
       if (
@@ -286,36 +292,38 @@ const make = Effect.gen(function* () {
           message: "The approved check command is empty.",
         });
       }
-      yield* cleanupTaskCheckTempPath(input.worktreePath);
-      yield* Effect.tryPromise({
-        try: () =>
-          NodeFs.promises.mkdir(taskCheckTempPath(input.worktreePath), { recursive: true }),
-        catch: (cause) =>
-          new TaskWorktreeCommandError({
-            message: "Unable to create the task check temp directory.",
-            cause,
-          }),
-      });
-      const sandboxed = sandboxApprovedCheckCommand({
-        argv,
-        worktreePath: input.worktreePath,
-        platform: hostPlatform,
-      });
-      if (!sandboxed) {
-        yield* cleanupTaskCheckTempPath(input.worktreePath);
-        return {
-          status: "indeterminate" as const,
-          output: "No supported OS-enforced task check sandbox is available on this host.",
-          exitCode: null,
-          timedOut: false,
-          startingCommitSha: beforeHead.stdout.trim(),
-          endingCommitSha: beforeHead.stdout.trim(),
-          startingStatus: beforeStatus.stdout.trim(),
-          endingStatus: beforeStatus.stdout.trim(),
-        } satisfies TaskWorktreeCommandResult;
-      }
-      const result = yield* processRunner
-        .run({
+      // Scope the temp directory to the execution block: the finalizer removes
+      // it on every exit path, including interruption, so it can never leak
+      // into the worktree and poison the next attempt's before-state
+      // comparison.
+      const result = yield* Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: () =>
+            NodeFs.promises.mkdir(taskCheckTempPath(input.worktreePath), { recursive: true }),
+          catch: (cause) =>
+            new TaskWorktreeCommandError({
+              message: "Unable to create the task check temp directory.",
+              cause,
+            }),
+        });
+        const sandboxed = sandboxApprovedCheckCommand({
+          argv,
+          worktreePath: input.worktreePath,
+          platform: hostPlatform,
+        });
+        if (!sandboxed) {
+          return {
+            status: "indeterminate" as const,
+            output: "No supported OS-enforced task check sandbox is available on this host.",
+            exitCode: null,
+            timedOut: false,
+            startingCommitSha: beforeHead.stdout.trim(),
+            endingCommitSha: beforeHead.stdout.trim(),
+            startingStatus: beforeStatus.stdout.trim(),
+            endingStatus: beforeStatus.stdout.trim(),
+          } satisfies TaskWorktreeCommandResult;
+        }
+        return yield* processRunner.run({
           command: sandboxed.command,
           args: sandboxed.args,
           cwd: input.worktreePath,
@@ -324,26 +332,17 @@ const make = Effect.gen(function* () {
           maxOutputBytes: input.maxOutputBytes ?? 1024 * 1024,
           outputMode: "truncate",
           timeoutBehavior: "timedOutResult",
-        })
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new TaskWorktreeCommandError({ message: "Task check execution failed.", cause }),
-          ),
-          Effect.catch((error) =>
-            cleanupTaskCheckTempPath(input.worktreePath).pipe(
-              Effect.flatMap(() => Effect.fail(error)),
-              Effect.catch((cleanupError) =>
-                Effect.fail(
-                  new TaskWorktreeCommandError({
-                    message: "Task check execution failed and cleanup also failed.",
-                    cause: { error, cleanupError },
-                  }),
-                ),
-              ),
-            ),
-          ),
-        );
+        });
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorktreeCommandError({ message: "Task check execution failed.", cause }),
+        ),
+        Effect.ensuring(cleanupTaskCheckTempPath(input.worktreePath).pipe(Effect.orDie)),
+      );
+      // Explicit release point: the temp directory must be gone before the
+      // after-state is observed so the check's own scratch files are never
+      // counted as worktree changes.
       yield* cleanupTaskCheckTempPath(input.worktreePath);
       const afterHead = yield* git(input.worktreePath, ["rev-parse", "HEAD"]);
       const afterStatus = yield* git(input.worktreePath, ["status", "--porcelain=v2"]);
@@ -353,6 +352,9 @@ const make = Effect.gen(function* () {
       const startingStatus = beforeStatus.stdout.trim();
       const endingStatus =
         afterStatus.code === 0 && !afterStatus.timedOut ? afterStatus.stdout.trim() : null;
+      // A failed after-observation is insufficient evidence that the worktree is
+      // unchanged; report indeterminate instead of trusting a stale snapshot.
+      const observedAfterState = endingCommitSha !== null && endingStatus !== null;
       const worktreeChanged =
         (endingCommitSha !== null && endingCommitSha !== startingCommitSha) ||
         (endingStatus !== null && endingStatus !== startingStatus);
@@ -372,9 +374,11 @@ const make = Effect.gen(function* () {
           ? "indeterminate"
           : worktreeChanged
             ? "fail"
-            : result.code === 0
-              ? "pass"
-              : "fail",
+            : !observedAfterState
+              ? "indeterminate"
+              : result.code === 0
+                ? "pass"
+                : "fail",
         output,
         exitCode: result.code === null ? null : Number(result.code),
         timedOut: result.timedOut,

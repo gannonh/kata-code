@@ -43,6 +43,41 @@ const runnerLayer = TaskWorktreeCommandRunnerLive.pipe(
   Layer.provide(ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer))),
 );
 
+// Wraps the real ProcessRunner so the two after-state git observations of a
+// check run report a timeout; everything else (including the check command
+// itself) executes normally.
+const afterStateTimeoutRunnerLayer = TaskWorktreeCommandRunnerLive.pipe(
+  Layer.provide(
+    Layer.effect(
+      ProcessRunner.ProcessRunner,
+      Effect.gen(function* () {
+        const real = yield* ProcessRunner.ProcessRunner;
+        let gitCalls = 0;
+        return {
+          run: (input) => {
+            if (input.command === "git") {
+              gitCalls += 1;
+              // The runner makes four git observations before the command;
+              // the two after-state observations come next.
+              if (gitCalls >= 5) {
+                return Effect.succeed({
+                  stdout: "",
+                  stderr: "",
+                  code: null,
+                  timedOut: true,
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                });
+              }
+            }
+            return real.run(input);
+          },
+        };
+      }),
+    ).pipe(Layer.provide(ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer)))),
+  ),
+);
+
 const setup = Effect.gen(function* () {
   const root = yield* Effect.tryPromise(() =>
     NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-check-runner-")),
@@ -183,6 +218,10 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
       const rmSpy = vi
         .spyOn(NodeFileSystem.promises, "rm")
         .mockRejectedValueOnce(new Error("rm denied"));
+      // Restore even when an assertion below fails so the leaked spy cannot
+      // change the temp-directory cleanup of later tests and the setup
+      // finalizer.
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSpy.mockRestore()));
       const result = yield* runner
         .run({
           worktreePath,
@@ -197,7 +236,6 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
         recursive: true,
         force: true,
       });
-      rmSpy.mockRestore();
     }),
   );
 
@@ -332,3 +370,27 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
     ).toBeNull();
   });
 });
+
+effectIt.layer(afterStateTimeoutRunnerLayer)(
+  "TaskWorktreeCommandRunner after-state timeout",
+  (it) => {
+    it.effect("reports indeterminate when the after-state observation times out", () =>
+      Effect.gen(function* () {
+        const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
+        const runner = yield* TaskWorktreeCommandRunner;
+        const result = yield* runner.run({
+          worktreePath,
+          expectedBranch,
+          expectedBaseCommitSha,
+          command: "pwd",
+          timeoutMs: 15_000,
+        });
+        // A pass cannot be claimed on evidence the worktree is unchanged when
+        // the after-state was never observed.
+        expect(result.status).toBe("indeterminate");
+        expect(result.endingCommitSha).toBeNull();
+        expect(result.endingStatus).toBeNull();
+      }),
+    );
+  },
+);
