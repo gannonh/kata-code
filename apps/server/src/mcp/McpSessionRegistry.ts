@@ -8,7 +8,10 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import { HttpServer } from "effect/unstable/http";
 
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
-import { authorizeActiveTaskStage } from "../taskWorkspace/TaskWorkspaceService.ts";
+import {
+  authorizeActiveTaskImplementation,
+  authorizeActiveTaskStage,
+} from "../taskWorkspace/TaskWorkspaceService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 
@@ -114,8 +117,15 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         threadId,
         providerInstanceId,
       });
+      const implementationAuthorized = taskStageAuthorized
+        ? yield* authorizeActiveTaskImplementation({ environmentId, threadId, providerInstanceId })
+        : false;
       const capabilities: ReadonlySet<McpInvocationContext.McpCapability> = new Set(
-        taskStageAuthorized ? ["preview", "task-stage"] : ["preview"],
+        implementationAuthorized
+          ? ["preview", "task-stage", "task-implementation"]
+          : taskStageAuthorized
+            ? ["preview", "task-stage"]
+            : ["preview"],
       );
       const scope: McpInvocationContext.McpInvocationScope = {
         environmentId,

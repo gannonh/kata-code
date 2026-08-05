@@ -7,13 +7,13 @@ Work map for Kata Code.
 [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) is the sole
 authoritative parent design. Current product sequencing:
 
-| Vertical slice           | Status                                                                   | Plan                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| 1. Guided planning       | **Implemented on `main`; provider-backed manual acceptance in progress** | [Plan and delivery record](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md) |
-| 2. Guided implementation | **Next — Approved; implementation gated on Slice 1 acceptance**          | [Approved plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)      |
-| 3. Guided verification   | **Upcoming — child spec required**                                       | Not written                                                                             |
-| 4. Standard and Freeform | **Upcoming — child spec required**                                       | Not written                                                                             |
-| 5. Deliver               | **Upcoming — child spec required**                                       | Not written                                                                             |
+| Vertical slice           | Status                                                                                                            | Plan                                                                                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Guided planning       | **Implemented on `main`; provider-backed manual acceptance in progress**                                          | [Plan and delivery record](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)                                                                                                         |
+| 2. Guided implementation | **Implemented — cumulative provider acceptance tracked in [#64](https://github.com/gannonh/kata-code/issues/64)** | [Implementation plan and validation](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md) · [Evidence](/specs/evidence/2026-08-04-task-mode-slice-2-implementation-validation.md) |
+| 3. Guided verification   | **Upcoming — child spec required**                                                                                | Not written                                                                                                                                                                                     |
+| 4. Standard and Freeform | **Upcoming — child spec required**                                                                                | Not written                                                                                                                                                                                     |
+| 5. Deliver               | **Upcoming — child spec required**                                                                                | Not written                                                                                                                                                                                     |
 
 Historical pre-reset designs and Slices 1–4 are retained as delivery records and implementation
 substrate. They do not define current product behavior or roadmap order. Start with the parent

@@ -69,6 +69,7 @@ import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as TaskWorkspaceService from "./taskWorkspace/TaskWorkspaceService.ts";
 import { TaskWorkspaceSourceResolverLive } from "./taskWorkspace/Layers/TaskWorkspaceSourceResolver.ts";
 import { TaskWorkspaceBootstrapWorkerLive } from "./taskWorkspace/TaskWorkspaceBootstrapWorker.ts";
+import { TaskWorktreeCommandRunnerLive } from "./taskWorkspace/TaskWorktreeCommandRunner.ts";
 import { TaskWorkspaceCompletionReactorLive } from "./taskWorkspace/TaskWorkspaceCompletionReactor.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
@@ -172,7 +173,11 @@ const PlatformServicesLive = Layer.unwrap(
 );
 
 const ReactorLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(TaskWorkspaceBootstrapWorkerLive),
+  Layer.provideMerge(
+    TaskWorkspaceBootstrapWorkerLive.pipe(
+      Layer.provide(TaskWorktreeCommandRunnerLive.pipe(Layer.provide(ProcessRunner.layer))),
+    ),
+  ),
   Layer.provideMerge(TaskWorkspaceCompletionReactorLive),
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),

@@ -1,5 +1,27 @@
 # OKF bundle log
 
+## 2026-08-05 (Guided completion settlement bounded)
+
+Closed the durable terminal-first completion race by reconciling immediately after proposal
+persistence and added a service regression that asserts the exact resulting commit. The
+authenticated real-provider E2E now uses the standard 180-second agent ceiling and passes through
+active Implement in 1.7 minutes without completion steering. Cumulative provider acceptance remains
+tracked in [#64](https://github.com/gannonh/kata-code/issues/64); the unrelated full-suite Git timeout
+is tracked in [#65](https://github.com/gannonh/kata-code/issues/65). See
+[Slice 2 implementation validation](/specs/evidence/2026-08-04-task-mode-slice-2-implementation-validation.md).
+
+## 2026-08-04 (Guided implementation delivered)
+
+Delivered the Guided Implement slice from approved Plan through durable, write-enabled
+implementation state. Added exact Plan compilation and bounded provider context, provider-owned
+progress/check/amendment/completion bridges, OS-enforced task check execution, explicit failed-check
+recovery, checkpoint continuation, amendment invalidation, Codex credential filtering, resulting
+commit validation, and the current conversation-first Implement panel. Automated validation passes
+for the focused server/provider/compiler suite, 241 current-route browser tests, the full 4,354-test
+repository suite, `vp run typecheck`, `vp check`, and `vp run release:smoke`. The authenticated
+provider-backed cumulative desktop acceptance remains open because local Clerk credentials are
+missing. See [Slice 2 implementation validation](/specs/evidence/2026-08-04-task-mode-slice-2-implementation-validation.md).
+
 ## 2026-08-03 (Guided implementation approved)
 
 Approved the [Guided implementation child spec](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md).

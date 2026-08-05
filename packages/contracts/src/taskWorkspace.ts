@@ -67,7 +67,7 @@ export type TaskWorkspaceWorktreePolicy = typeof TaskWorkspaceWorktreePolicy.Typ
  * in this slice; it forbids write effects during Clarify, Research, Design, and
  * Plan.
  */
-export const TaskWorkspaceExecutionProfile = Schema.Literal("planning");
+export const TaskWorkspaceExecutionProfile = Schema.Literals(["planning", "task-worktree-write"]);
 export type TaskWorkspaceExecutionProfile = typeof TaskWorkspaceExecutionProfile.Type;
 
 /** Canonical repository provisioning status; `provisioned` stays decode-only. */
@@ -135,6 +135,10 @@ export type TaskWorkspaceBootstrapConversationTarget =
  */
 export const TaskWorkspaceBootstrapState = Schema.Struct({
   operationKey: TrimmedNonEmptyString,
+  executionProfile: TaskWorkspaceExecutionProfile.pipe(
+    Schema.withDecodingDefault(Effect.succeed("planning")),
+  ),
+  presentation: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(Effect.succeed("stage"))),
   status: TaskWorkspaceBootstrapStatus,
   currentStep: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -262,6 +266,8 @@ export const TaskWorkspaceBuildCheckStatus = Schema.Literals([
   "pass",
   "fail",
   "blocked",
+  "stale",
+  "indeterminate",
 ]);
 export type TaskWorkspaceBuildCheckStatus = typeof TaskWorkspaceBuildCheckStatus.Type;
 
@@ -285,8 +291,44 @@ export const TaskWorkspaceBuildCheck = Schema.Struct({
   ),
   startedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   completedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Slice 2 check-attempt lineage. Legacy Build checks decode with no attempts.
+  attemptIds: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
 });
 export type TaskWorkspaceBuildCheck = typeof TaskWorkspaceBuildCheck.Type;
+
+export const TaskWorkspaceCheckAttemptStatus = Schema.Literals([
+  "pending",
+  "running",
+  "pass",
+  "fail",
+  "stale",
+  "indeterminate",
+]);
+export type TaskWorkspaceCheckAttemptStatus = typeof TaskWorkspaceCheckAttemptStatus.Type;
+
+export const TaskWorkspaceCheckAttempt = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  checkId: TrimmedNonEmptyString,
+  planRevisionId: TrimmedNonEmptyString,
+  startingCommitSha: TrimmedNonEmptyString,
+  commandDigest: TrimmedNonEmptyString,
+  operationKey: TrimmedNonEmptyString,
+  status: TaskWorkspaceCheckAttemptStatus,
+  output: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  exitCode: Schema.NullOr(Schema.Int).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  timeoutMs: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  observedStatus: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  startedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  completedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  endingCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+});
+export type TaskWorkspaceCheckAttempt = typeof TaskWorkspaceCheckAttempt.Type;
 
 export const TaskWorkspaceCheckpointStatus = Schema.Literals(["waiting", "continued"]);
 export type TaskWorkspaceCheckpointStatus = typeof TaskWorkspaceCheckpointStatus.Type;
@@ -307,12 +349,20 @@ export const TaskWorkspaceBuildCheckpoint = Schema.Struct({
   contextManifestId: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  // Exact worktree commit observed when this checkpoint was created.
+  observedCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   continuedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type TaskWorkspaceBuildCheckpoint = typeof TaskWorkspaceBuildCheckpoint.Type;
 
-export const TaskWorkspaceAmendmentStatus = Schema.Literals(["requested", "approved"]);
+export const TaskWorkspaceAmendmentStatus = Schema.Literals([
+  "requested",
+  "approved",
+  "changes-requested",
+]);
 export type TaskWorkspaceAmendmentStatus = typeof TaskWorkspaceAmendmentStatus.Type;
 
 export const TaskWorkspacePlanDiff = Schema.Struct({
@@ -330,11 +380,15 @@ export const TaskWorkspaceAmendment = Schema.Struct({
   basePlanRevisionId: TrimmedNonEmptyString,
   triggeringPhaseId: TrimmedNonEmptyString,
   triggeringWorkItemId: TrimmedNonEmptyString,
-  triggeringCheckId: TrimmedNonEmptyString,
+  triggeringCheckId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   expected: TrimmedNonEmptyString,
   found: TrimmedNonEmptyString,
   impact: TrimmedNonEmptyString,
   proposedChanges: TrimmedNonEmptyString,
+  proposedPlanMarkdown: Schema.optional(Schema.String),
+  reviewFeedback: Schema.optional(Schema.NullOr(Schema.String)),
   affectedPhaseIds: Schema.Array(TrimmedNonEmptyString),
   affectedWorkItemIds: Schema.Array(TrimmedNonEmptyString),
   dependentCheckIds: Schema.Array(TrimmedNonEmptyString),
@@ -657,6 +711,9 @@ export const TaskWorkspace = Schema.Struct({
     amendments: Schema.Array(TaskWorkspaceAmendment).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
     ),
+    checkAttempts: Schema.Array(TaskWorkspaceCheckAttempt).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+    ),
     currentPlanRevisionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
       Schema.withDecodingDefault(Effect.succeed(null)),
     ),
@@ -884,6 +941,85 @@ const TaskStageStartCommand = Schema.Struct({
   stage: TaskWorkspaceStage,
 });
 
+const TaskWorkflowUpgradeCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.workflow.upgrade"),
+  sourceVersion: TrimmedNonEmptyString,
+  targetVersion: TrimmedNonEmptyString,
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
+});
+
+const TaskImplementationStartCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.implementation.start"),
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
+});
+
+export const TaskWorkflowUpgradeAck = Schema.Struct({
+  accepted: Schema.Literal(true),
+  sourceVersion: TrimmedNonEmptyString,
+  targetVersion: TrimmedNonEmptyString,
+  taskRevision: NonNegativeInt,
+});
+export type TaskWorkflowUpgradeAck = typeof TaskWorkflowUpgradeAck.Type;
+
+export const TaskImplementationStartAck = Schema.Struct({
+  accepted: Schema.Literal(true),
+  occurrenceId: TrimmedNonEmptyString,
+  sessionId: TrimmedNonEmptyString,
+  taskRevision: NonNegativeInt,
+});
+export type TaskImplementationStartAck = typeof TaskImplementationStartAck.Type;
+
+const TaskImplementationProgressCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.implementation.progress"),
+  expectedTaskRevision: NonNegativeInt,
+  phaseId: TrimmedNonEmptyString,
+  workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  status: Schema.Literals(["running", "completed", "blocked"]),
+  summary: TrimmedNonEmptyString,
+});
+
+const TaskImplementationCheckRunCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.implementation.check.run"),
+  expectedTaskRevision: NonNegativeInt,
+  checkId: TrimmedNonEmptyString,
+  operationKey: TrimmedNonEmptyString,
+});
+
+const TaskImplementationAmendmentProposeCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.implementation.amendment.propose"),
+  expectedTaskRevision: NonNegativeInt,
+  phaseId: TrimmedNonEmptyString,
+  workItemId: TrimmedNonEmptyString,
+  triggeringCheckId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  expected: TrimmedNonEmptyString,
+  found: TrimmedNonEmptyString,
+  impact: TrimmedNonEmptyString,
+  proposedPlanMarkdown: Schema.String,
+  operationKey: TrimmedNonEmptyString,
+});
+
+const TaskImplementationCompleteCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.implementation.complete"),
+  expectedTaskRevision: NonNegativeInt,
+  summary: TrimmedNonEmptyString,
+  operationKey: TrimmedNonEmptyString,
+  /** Provider-bound identity, supplied only by server bridge dispatch. */
+  sessionId: Schema.optional(TrimmedNonEmptyString),
+  providerTurnId: Schema.optional(TrimmedNonEmptyString),
+});
+
 const TaskBuildWorkItemSetStatusCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.build.work-item.set-status"),
@@ -910,14 +1046,18 @@ const TaskBuildCheckRecordManualCommand = Schema.Struct({
   status: Schema.Literals(["pass", "fail", "blocked"]),
   note: TrimmedNonEmptyString,
   commitSha: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
 });
 
 const TaskBuildCheckpointContinueCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.build.checkpoint.continue"),
   checkpointId: TrimmedNonEmptyString,
-  threadId: ThreadId,
-  contextManifestId: TrimmedNonEmptyString,
+  threadId: Schema.optional(ThreadId),
+  contextManifestId: Schema.optional(TrimmedNonEmptyString),
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
 });
 
 const TaskAmendmentRequestCommand = Schema.Struct({
@@ -925,7 +1065,9 @@ const TaskAmendmentRequestCommand = Schema.Struct({
   type: Schema.Literal("task.amendment.request"),
   phaseId: TrimmedNonEmptyString,
   workItemId: TrimmedNonEmptyString,
-  checkId: TrimmedNonEmptyString,
+  checkId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   expected: TrimmedNonEmptyString,
   found: TrimmedNonEmptyString,
   impact: TrimmedNonEmptyString,
@@ -935,11 +1077,22 @@ const TaskAmendmentRequestCommand = Schema.Struct({
   dependentCheckIds: Schema.Array(TrimmedNonEmptyString),
 });
 
+const TaskAmendmentRequestChangesCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.amendment.request-changes"),
+  amendmentId: TrimmedNonEmptyString,
+  feedback: TrimmedNonEmptyString,
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
+});
+
 const TaskAmendmentApproveCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.amendment.approve"),
   amendmentId: TrimmedNonEmptyString,
   approvedBy: TrimmedNonEmptyString,
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
 });
 
 const TaskBuildResumeCommand = Schema.Struct({
@@ -986,12 +1139,19 @@ export const TaskWorkspaceCommand = Schema.Union([
   TaskEnvironmentRepairCommand,
   TaskOperationRetryCommand,
   TaskStageStartCommand,
+  TaskWorkflowUpgradeCommand,
+  TaskImplementationStartCommand,
+  TaskImplementationProgressCommand,
+  TaskImplementationCheckRunCommand,
+  TaskImplementationAmendmentProposeCommand,
+  TaskImplementationCompleteCommand,
   TaskBuildPhaseStartCommand,
   TaskBuildWorkItemSetStatusCommand,
   TaskBuildCheckRunCommand,
   TaskBuildCheckRecordManualCommand,
   TaskBuildCheckpointContinueCommand,
   TaskAmendmentRequestCommand,
+  TaskAmendmentRequestChangesCommand,
   TaskAmendmentApproveCommand,
   TaskBuildResumeCommand,
   TaskFixtureApplyCommand,
@@ -1020,12 +1180,25 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.environment.repair",
   "task.operation.retry",
   "task.stage.start",
+  "task.workflow.upgrade",
+  "task.workflow.upgraded",
+  "task.implementation.start",
+  "task.implementation.started",
+  "task.implementation.progress",
+  "task.implementation.check.run",
+  "task.implementation.check.updated",
+  "task.implementation.amendment.propose",
+  "task.implementation.amendment.updated",
+  "task.implementation.complete",
+  "task.implementation.completed",
   "task.build.phase.start",
   "task.build.work-item.set-status",
   "task.build.check.run",
   "task.build.check.record-manual",
   "task.build.checkpoint.continue",
   "task.amendment.request",
+  "task.amendment.request-changes",
+  "task.amendment.changes-requested",
   "task.amendment.approve",
   "task.build.resume",
   "task.fixture.apply",
@@ -1238,6 +1411,7 @@ export const TaskWorkspaceOutboxTarget = Schema.Literals([
   "worktree",
   "bootstrap",
   "proposal-commit",
+  "implementation-check",
 ]);
 export type TaskWorkspaceOutboxTarget = typeof TaskWorkspaceOutboxTarget.Type;
 
@@ -1276,12 +1450,26 @@ export type TaskWorkspaceOutboxEntry = typeof TaskWorkspaceOutboxEntry.Type;
 export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   stage: TaskWorkspaceStage,
   occurrence: NonNegativeInt,
+  executionProfile: TaskWorkspaceExecutionProfile.pipe(
+    Schema.withDecodingDefault(Effect.succeed("planning")),
+  ),
+  presentation: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(Effect.succeed("stage"))),
   sessionId: TrimmedNonEmptyString,
   threadId: ThreadId,
   threadCreateCommandId: CommandId,
   turnStartCommandId: CommandId,
   kickoffMessageId: MessageId,
   trustedInstructions: Schema.optional(Schema.String),
+  contextManifestId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  continuationCheckpointId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  continuationMode: Schema.NullOr(Schema.Literals(["checkpoint", "amendment"])).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  continuationActivatePhase: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeBranch: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -1298,6 +1486,17 @@ export const TaskWorkspaceWorktreeOutboxPayload = Schema.Struct({
   sourceWorkspaceRoot: TrimmedNonEmptyString,
 });
 export type TaskWorkspaceWorktreeOutboxPayload = typeof TaskWorkspaceWorktreeOutboxPayload.Type;
+
+export const TaskWorkspaceImplementationCheckOutboxPayload = Schema.Struct({
+  attemptId: TrimmedNonEmptyString,
+  checkId: TrimmedNonEmptyString,
+  worktreePath: TrimmedNonEmptyString,
+  command: TrimmedNonEmptyString,
+  commandDigest: TrimmedNonEmptyString,
+  timeoutMs: NonNegativeInt,
+});
+export type TaskWorkspaceImplementationCheckOutboxPayload =
+  typeof TaskWorkspaceImplementationCheckOutboxPayload.Type;
 
 /**
  * Provider-neutral task-stage bridge payloads. The context result contains
@@ -1335,6 +1534,121 @@ export const TaskStageCompletionAck = Schema.Struct({
   providerTurnId: TrimmedNonEmptyString,
 });
 export type TaskStageCompletionAck = typeof TaskStageCompletionAck.Type;
+
+export const TaskImplementationContextInput = Schema.Struct({});
+export type TaskImplementationContextInput = typeof TaskImplementationContextInput.Type;
+
+export const TaskWorkspaceImplementationProgress = Schema.Struct({
+  phaseId: TrimmedNonEmptyString,
+  workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  status: Schema.Literals(["pending", "running", "completed", "blocked", "invalidated"]),
+  summary: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type TaskWorkspaceImplementationProgress = typeof TaskWorkspaceImplementationProgress.Type;
+
+export const TaskImplementationProgressInput = Schema.Struct({
+  phaseId: TrimmedNonEmptyString,
+  workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  status: Schema.Literals(["running", "completed", "blocked"]),
+  summary: TrimmedNonEmptyString,
+});
+export type TaskImplementationProgressInput = typeof TaskImplementationProgressInput.Type;
+
+export const TaskImplementationContextResult = Schema.Struct({
+  stage: Schema.Literal("build"),
+  occurrence: NonNegativeInt,
+  brief: Schema.String,
+  planRevisionId: TrimmedNonEmptyString,
+  planMarkdown: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  phases: Schema.Array(TaskWorkspaceBuildPhase),
+  checks: Schema.Array(TaskWorkspaceBuildCheck),
+  checkpoints: Schema.Array(TaskWorkspaceBuildCheckpoint),
+  amendments: Schema.Array(TaskWorkspaceAmendment),
+  checkAttempts: Schema.Array(TaskWorkspaceCheckAttempt).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  currentCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+});
+export type TaskImplementationContextResult = typeof TaskImplementationContextResult.Type;
+
+export const TaskImplementationProgressAck = Schema.Struct({
+  accepted: Schema.Literal(true),
+  phaseId: TrimmedNonEmptyString,
+  workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  status: Schema.Literals(["running", "completed", "blocked"]),
+  taskRevision: NonNegativeInt,
+});
+export type TaskImplementationProgressAck = typeof TaskImplementationProgressAck.Type;
+
+export const TaskImplementationCheckRunInput = Schema.Struct({ checkId: TrimmedNonEmptyString });
+export type TaskImplementationCheckRunInput = typeof TaskImplementationCheckRunInput.Type;
+
+export const TaskImplementationCheckRunAck = Schema.Struct({
+  accepted: Schema.Literal(true),
+  checkId: TrimmedNonEmptyString,
+  attemptId: TrimmedNonEmptyString,
+  status: TaskWorkspaceBuildCheckStatus,
+  taskRevision: NonNegativeInt,
+});
+export type TaskImplementationCheckRunAck = typeof TaskImplementationCheckRunAck.Type;
+
+export const TaskImplementationAmendmentInput = Schema.Struct({
+  phaseId: TrimmedNonEmptyString,
+  workItemId: TrimmedNonEmptyString,
+  triggeringCheckId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  expected: TrimmedNonEmptyString,
+  found: TrimmedNonEmptyString,
+  impact: TrimmedNonEmptyString,
+  proposedPlanMarkdown: Schema.String,
+});
+export type TaskImplementationAmendmentInput = typeof TaskImplementationAmendmentInput.Type;
+
+export const TaskImplementationAmendmentAck = Schema.Struct({
+  accepted: Schema.Literal(true),
+  amendmentId: TrimmedNonEmptyString,
+  taskRevision: NonNegativeInt,
+});
+export type TaskImplementationAmendmentAck = typeof TaskImplementationAmendmentAck.Type;
+
+export const TaskImplementationCompleteInput = Schema.Struct({ summary: TrimmedNonEmptyString });
+export type TaskImplementationCompleteInput = typeof TaskImplementationCompleteInput.Type;
+
+export const TaskImplementationCompleteAck = Schema.Struct({
+  accepted: Schema.Literal(true),
+  proposalId: TrimmedNonEmptyString,
+  providerTurnId: TrimmedNonEmptyString,
+});
+export type TaskImplementationCompleteAck = typeof TaskImplementationCompleteAck.Type;
+
+export const TaskImplementationToolErrorCode = Schema.Literals([
+  "unauthorized",
+  "not-active",
+  "turn-unavailable",
+  "conflict",
+  "invalid",
+  "stale-revision",
+  "unknown-id",
+  "dependency-blocked",
+  "check-blocked",
+  "gate-open",
+  "worktree-invalid",
+]);
+export type TaskImplementationToolErrorCode = typeof TaskImplementationToolErrorCode.Type;
+
+export class TaskImplementationToolError extends Schema.TaggedErrorClass<TaskImplementationToolError>()(
+  "TaskImplementationToolError",
+  { code: TaskImplementationToolErrorCode, message: Schema.String },
+) {}
 
 export const TaskStageToolErrorCode = Schema.Literals([
   "unauthorized",

@@ -128,10 +128,12 @@ const make = Effect.gen(function* () {
           providerInstanceId: scope.providerInstanceId,
         })
         .pipe(Effect.mapError((cause) => error("unauthorized", cause.message)));
-      yield* taskWorkspaces
-        .validatePlanningRoot(task.id)
-        .pipe(Effect.mapError((cause) => error("source-drift", cause.message)));
       const stage = currentStage(task);
+      if (stage !== "build") {
+        yield* taskWorkspaces
+          .validatePlanningRoot(task.id)
+          .pipe(Effect.mapError((cause) => error("source-drift", cause.message)));
+      }
       const occurrence = latestOccurrence(task, stage);
       const isBootstrapPrimary =
         occurrence?.status === "starting" &&
@@ -279,6 +281,25 @@ const make = Effect.gen(function* () {
       );
       const invocation = yield* resolve(scope, { requireActiveTurn: true });
       const providerTurnId = invocation.providerTurnId!;
+      if (invocation.stage === "build") {
+        const proposalId = invocation.occurrence.completionProposalId;
+        if (!proposalId) {
+          return yield* error(
+            "invalid",
+            "Implement completion must use task_implementation_complete.",
+          );
+        }
+        // Legacy stage prompts can still issue task_stage_complete after the
+        // typed Implement tool accepted a proposal. Treat that retry as an
+        // idempotent acknowledgement of the existing proposal.
+        return {
+          accepted: true,
+          stage: invocation.stage,
+          occurrence: invocation.occurrence.ordinal,
+          proposalId,
+          providerTurnId,
+        } satisfies TaskStageCompletionAck;
+      }
       const payloadDigest = createHash("sha256")
         .update(`${decodedInput.summary}\n${decodedInput.markdown}`)
         .digest("hex");

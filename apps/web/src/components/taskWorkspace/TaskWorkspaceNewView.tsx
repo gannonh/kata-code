@@ -73,6 +73,10 @@ function catalogCapabilityLabel(entry: TaskWorkspaceCatalogEntry): string {
   return entry.availableInFirstSlice ? "Available through approved Plan" : "Preview shell";
 }
 
+const CURRENT_WORKFLOW_CATALOG = TASK_WORKSPACE_WORKFLOW_CATALOG.filter(
+  (entry) => currentCatalogEntryForPreset(entry.preset).version === entry.version,
+);
+
 export function TaskWorkspaceNewView() {
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -103,6 +107,8 @@ export function TaskWorkspaceNewView() {
         ? instanceEntries.filter(
             (entry) =>
               entry.snapshot.supportsTaskStage === true &&
+              // guided@0.3.0 Implement requires worktree-write enforcement.
+              entry.snapshot.supportsTaskWorktreeWrite === true &&
               entry.enabled &&
               entry.installed &&
               entry.isAvailable &&
@@ -237,7 +243,7 @@ export function TaskWorkspaceNewView() {
             <label className="block space-y-2 text-sm font-medium">
               Workflow
               <div className="grid gap-2" data-testid="task-workflow-picker">
-                {TASK_WORKSPACE_WORKFLOW_CATALOG.map((entry) => {
+                {CURRENT_WORKFLOW_CATALOG.map((entry) => {
                   const active = entry.preset === preset;
                   return (
                     <label

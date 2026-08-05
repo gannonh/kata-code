@@ -63,6 +63,16 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @kata-sh/code-desktop ensure:electron
 
+      - name: Install task check sandbox runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor,
+          # which denies bwrap's loopback setup (RTM_NEWADDR: EPERM) inside the
+          # new network namespace. Each job gets a fresh VM, so disabling it
+          # here only affects this job.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Pull Docker image for sandbox integration tests
         run: docker pull alpine:3.20
 

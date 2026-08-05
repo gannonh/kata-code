@@ -180,6 +180,21 @@ export const TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0: TaskWorkspaceCatalogEnt
   contextTokenBudget: 32_000,
 };
 
+export const TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_3_0: TaskWorkspaceCatalogEntry = {
+  ...TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0,
+  version: "guided@0.3.0",
+  promptBundleVersion: "task-workspace-guided@0.3.0",
+  description:
+    "Discover, research, and design before planning, then implement the approved Plan in the managed task worktree.",
+  stages: TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0.stages.map((stage) =>
+    stage.stage === "build" ? { ...stage, status: "available", explicitEntry: false } : stage,
+  ),
+  transitions: [
+    ...TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0.transitions,
+    { command: "task.plan.approve", from: "plan", to: "build", requiresArtifact: "plan" },
+  ],
+};
+
 export const TASK_WORKSPACE_STANDARD_CATALOG_ENTRY_V0_2_0: TaskWorkspaceCatalogEntry = {
   preset: "standard",
   version: "standard@0.2.0",
@@ -327,6 +342,7 @@ export const TASK_WORKSPACE_FREEFORM_CATALOG_ENTRY_V0_2_0: TaskWorkspaceCatalogE
  * in place; a task's pinned version keeps resolving the same entry.
  */
 export const TASK_WORKSPACE_WORKFLOW_CATALOG: ReadonlyArray<TaskWorkspaceCatalogEntry> = [
+  TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_3_0,
   TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0,
   TASK_WORKSPACE_STANDARD_CATALOG_ENTRY_V0_2_0,
   TASK_WORKSPACE_FREEFORM_CATALOG_ENTRY_V0_2_0,

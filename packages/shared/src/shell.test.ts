@@ -21,6 +21,7 @@ import {
   resolveSpawnCommand,
   resolveWindowsEnvironment,
   SpawnExecutableResolution,
+  tokenizeCommandLine,
   WindowsShellEnvironment,
   type WindowsShellEnvironmentReader,
 } from "./shell.ts";
@@ -34,6 +35,58 @@ const withWindowsEnvironmentMocks = <A, E, R>(
     Effect.provideService(WindowsShellEnvironment, readEnvironment),
     Effect.provideService(CommandAvailability, commandAvailable),
   );
+
+describe("tokenizeCommandLine", () => {
+  it("splits a multi-word command into argv", () => {
+    expect(tokenizeCommandLine("vp run typecheck")).toEqual(["vp", "run", "typecheck"]);
+  });
+
+  it("returns a bare executable as a single token", () => {
+    expect(tokenizeCommandLine("git")).toEqual(["git"]);
+  });
+
+  it("collapses runs of whitespace and ignores leading/trailing whitespace", () => {
+    expect(tokenizeCommandLine("  vp   run   typecheck  ")).toEqual(["vp", "run", "typecheck"]);
+  });
+
+  it("preserves spaces inside single quotes", () => {
+    expect(tokenizeCommandLine("node -e 'console.log(\"hello world\")'")).toEqual([
+      "node",
+      "-e",
+      'console.log("hello world")',
+    ]);
+  });
+
+  it("preserves spaces and escapes inside double quotes", () => {
+    expect(tokenizeCommandLine('echo "a \\"b\\" c"')).toEqual(["echo", 'a "b" c']);
+  });
+
+  it("keeps single quotes literal inside double quotes", () => {
+    expect(tokenizeCommandLine("node -e \"const s = 'a b'; console.log(s)\"")).toEqual([
+      "node",
+      "-e",
+      "const s = 'a b'; console.log(s)",
+    ]);
+  });
+
+  it("honors backslash escapes outside quotes", () => {
+    expect(tokenizeCommandLine("echo a\\ b")).toEqual(["echo", "a b"]);
+  });
+
+  it("returns an empty argv for an empty or whitespace-only command line", () => {
+    expect(tokenizeCommandLine("")).toEqual([]);
+    expect(tokenizeCommandLine("   ")).toEqual([]);
+  });
+
+  it("throws on a trailing lone backslash instead of emitting an empty token", () => {
+    expect(() => tokenizeCommandLine("echo \\")).toThrow(/Unterminated escape/u);
+  });
+
+  it("throws on an unterminated quote instead of guessing", () => {
+    expect(() => tokenizeCommandLine("echo 'unterminated")).toThrow(/Unterminated quote/u);
+    expect(() => tokenizeCommandLine('echo "unterminated')).toThrow(/Unterminated quote/u);
+  });
+});
 
 describe("extractPathFromShellOutput", () => {
   it("extracts the path between capture markers", () => {

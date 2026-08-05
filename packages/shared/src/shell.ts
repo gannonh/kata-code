@@ -33,6 +33,92 @@ function canExecuteFile(filePath: string): boolean {
   }
 }
 
+/**
+ * Split one command line into argv tokens with deterministic shell-style
+ * quoting. Single quotes preserve every character literally; double quotes
+ * honor backslash escapes before `"`, `\`, `$`, and backtick; backslashes
+ * outside quotes escape the following character; whitespace separates tokens
+ * only outside quotes. An unterminated quote throws instead of guessing.
+ */
+export function tokenizeCommandLine(commandLine: string): ReadonlyArray<string> {
+  const tokens: string[] = [];
+  let current = "";
+  let tokenStarted = false;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+
+  const pushToken = (): void => {
+    if (tokenStarted) {
+      tokens.push(current);
+      current = "";
+      tokenStarted = false;
+    }
+  };
+
+  for (let index = 0; index < commandLine.length; index += 1) {
+    const char = commandLine[index]!;
+    if (inSingleQuote) {
+      if (char === "'") {
+        inSingleQuote = false;
+      } else {
+        current += char;
+      }
+      tokenStarted = true;
+      continue;
+    }
+    if (inDoubleQuote) {
+      if (char === '"') {
+        inDoubleQuote = false;
+      } else if (char === "\\") {
+        const next = commandLine[index + 1];
+        if (next === '"' || next === "\\" || next === "$" || next === "`") {
+          current += next;
+          index += 1;
+        } else {
+          current += char;
+        }
+      } else {
+        current += char;
+      }
+      tokenStarted = true;
+      continue;
+    }
+    if (char === "'") {
+      inSingleQuote = true;
+      tokenStarted = true;
+      continue;
+    }
+    if (char === '"') {
+      inDoubleQuote = true;
+      tokenStarted = true;
+      continue;
+    }
+    if (char === "\\") {
+      const next = commandLine[index + 1];
+      if (next !== undefined) {
+        current += next;
+        index += 1;
+      } else {
+        throw new Error(`Unterminated escape in command line: ${commandLine}`);
+      }
+      tokenStarted = true;
+      continue;
+    }
+    if (/\s/u.test(char)) {
+      pushToken();
+      continue;
+    }
+    current += char;
+    tokenStarted = true;
+  }
+
+  if (inSingleQuote || inDoubleQuote) {
+    throw new Error(`Unterminated quote in command line: ${commandLine}`);
+  }
+  pushToken();
+  return tokens;
+}
+
 export interface CommandAvailabilityOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly extendEnv?: boolean;

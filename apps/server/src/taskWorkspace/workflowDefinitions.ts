@@ -4,9 +4,9 @@ import type {
   TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import {
-  currentCatalogEntryForPreset,
   TASK_WORKSPACE_FREEFORM_CATALOG_ENTRY_V0_2_0,
   TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0,
+  TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_3_0,
   TASK_WORKSPACE_STANDARD_CATALOG_ENTRY_V0_2_0,
   type TaskWorkspaceCatalogEntry,
 } from "@kata-sh/code-shared/taskWorkspaceCatalog";
@@ -273,6 +273,7 @@ export const BUILT_IN_WORKFLOW_DEFINITIONS: WorkflowDefinitionRegistry =
     FREEFORM_WORKFLOW_V0_1_0,
     compileDefinitionFromCatalog(TASK_WORKSPACE_STANDARD_CATALOG_ENTRY_V0_2_0),
     compileDefinitionFromCatalog(TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0),
+    compileDefinitionFromCatalog(TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_3_0),
     compileDefinitionFromCatalog(TASK_WORKSPACE_FREEFORM_CATALOG_ENTRY_V0_2_0),
   ]);
 
@@ -282,7 +283,7 @@ export const CURRENT_STANDARD_WORKFLOW_VERSION = STANDARD_WORKFLOW_V0_1_0.versio
 /** Version a newly created task pins for each preset. */
 const CURRENT_VERSION_BY_PRESET: Readonly<Record<TaskWorkspacePreset, string>> = {
   standard: TASK_WORKSPACE_STANDARD_CATALOG_ENTRY_V0_2_0.version,
-  guided: TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_2_0.version,
+  guided: TASK_WORKSPACE_GUIDED_CATALOG_ENTRY_V0_3_0.version,
   freeform: TASK_WORKSPACE_FREEFORM_CATALOG_ENTRY_V0_2_0.version,
 };
 

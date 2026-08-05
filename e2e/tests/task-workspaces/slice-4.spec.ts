@@ -197,7 +197,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
 test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
   test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
 
-  test("creates through the form, advances conversations, and approves Plan", async ({
+  test("creates through the form, approves Plan, and enters Implement", async ({
     authenticatedAppWindow,
     runContext,
   }) => {
@@ -212,14 +212,16 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       "data-active",
       "true",
     );
-    await expect(appWindow.getByTestId("task-resolved-definition")).toContainText("guided@0.2.0");
+    await expect(appWindow.getByTestId("task-resolved-definition")).toContainText("guided@0.3.0");
 
     const taskId = "task-e2e-guided-approved-plan";
     await appWindow.getByTestId("task-title-input").fill("Guided approved Plan E2E");
     await appWindow.getByTestId("task-slug-input").fill(taskId);
     await appWindow
       .getByTestId("task-brief-input")
-      .fill("Add a deterministic onboarding flow with a readable Plan.");
+      .fill(
+        "Requirements are complete; do not ask clarifying questions. Add `src/onboarding.js` exporting `getOnboardingSteps()` with exactly the ordered string IDs `welcome`, `profile`, and `complete`, plus readable labels. Add `test/onboarding.test.js` asserting those IDs and run it until it passes. The Guided 0.3 Plan must contain exactly one `## Phase [phase:id] Title`, followed immediately by the literal line `Checkpoint: always`, exactly one `### Work item [work:id] Title`, and exactly one automated check bullet `- Automated check [check:typecheck]: Typecheck | node --test test/onboarding.test.js`. No manual check is required.",
+      );
     await appWindow.getByTestId("task-base-ref-input").fill("main");
     await appWindow.getByTestId("task-worktree-option-later").click();
     await selectTaskProvider(appWindow, turn.provider, turn.model);
@@ -248,12 +250,26 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     });
 
     await appWindow.getByTestId("guided-plan-approve").click();
-    await expect(appWindow.getByTestId("task-approved-plan-readonly")).toBeVisible({
-      timeout: E2E_TIMEOUTS.assertionMs,
+    await expect(appWindow.getByTestId("guided-stage-build")).toBeVisible({
+      timeout: E2E_TIMEOUTS.agentReplyMs,
     });
-    await expect(appWindow.getByText("Plan approved", { exact: true })).toBeVisible();
-    await expect(appWindow.getByTestId("guided-stage-build")).toHaveCount(0);
+    await expect(appWindow.getByTestId("guided-implementation-panel")).toBeVisible({
+      timeout: E2E_TIMEOUTS.agentReplyMs,
+    });
+    await expect(appWindow.getByTestId("guided-build-plan-link")).toContainText(
+      "Approved Plan revision",
+    );
+    await expect(appWindow.getByTestId("guided-stage-build")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
     await expect(appWindow.getByTestId("task-apply-fixture")).toHaveCount(0);
+    await expect(appWindow.getByTestId("task-conversation-starting")).toHaveCount(0, {
+      timeout: E2E_TIMEOUTS.agentReplyMs,
+    });
+    await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
+      timeout: E2E_TIMEOUTS.agentReplyMs,
+    });
     await expect(appWindow).toHaveURL(new RegExp(`/tasks/[^/]+/${taskId}$`));
   });
 });

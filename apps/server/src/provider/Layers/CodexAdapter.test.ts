@@ -1,11 +1,13 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
   ApprovalRequestId,
   CodexSettings,
+  EnvironmentId,
   EventId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -18,6 +20,7 @@ import {
   ThreadId,
   TurnId,
 } from "@kata-sh/code-contracts";
+import { MCP_BEARER_TOKEN_ENV_VAR } from "@kata-sh/code-shared/branding";
 import { createModelSelection } from "@kata-sh/code-shared/model";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, vi } from "@effect/vitest";
@@ -35,6 +38,7 @@ import * as Stream from "effect/Stream";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
@@ -287,6 +291,167 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
     }),
   );
+
+  it.effect("isolates the task MCP bearer token from Codex shell subprocesses", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("thread-mcp-isolation");
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-local"),
+        threadId,
+        providerSessionId: "session-mcp-isolation",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        endpoint: "http://127.0.0.1:13773/mcp/session-mcp-isolation",
+        authorizationHeader: "Bearer task-mcp-secret",
+      });
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "auto-accept-edits",
+        taskExecutionProfile: "task-worktree-write",
+      });
+
+      const runtimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      assert.ok(runtimeOptions);
+      assert.equal(runtimeOptions.environment?.[MCP_BEARER_TOKEN_ENV_VAR], "task-mcp-secret");
+      assert.ok(runtimeOptions.appServerArgs?.includes('shell_environment_policy.inherit="core"'));
+      assert.ok(
+        runtimeOptions.appServerArgs?.includes(
+          `mcp_servers.kata.bearer_token_env_var="${MCP_BEARER_TOKEN_ENV_VAR}"`,
+        ),
+      );
+      const excludeArg = runtimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("shell_environment_policy.exclude="),
+      );
+      assert.ok(excludeArg);
+      assert.match(excludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
+      assert.match(excludeArg, /CODEX_HOME/u);
+      assert.match(excludeArg, /OPENSSL_CONF/u);
+      assert.match(excludeArg, /\*TOKEN\*/u);
+      assert.match(excludeArg, /\*SECRET\*/u);
+      assert.match(excludeArg, /\*KEY\*/u);
+      yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
+
+      validationRuntimeFactory.factory.mockClear();
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-task-shell-policy-without-mcp"),
+        cwd: "/tmp/task-worktree",
+        runtimeMode: "auto-accept-edits",
+        taskExecutionProfile: "task-worktree-write",
+      });
+      const taskRuntimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      assert.ok(taskRuntimeOptions);
+      assert.equal(taskRuntimeOptions.environment?.HOME, "/tmp/task-worktree");
+      assert.ok(taskRuntimeOptions.appServerArgs?.includes("--strict-config"));
+      const permissionArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("permissions.katacode_task_workspace.filesystem="),
+      );
+      assert.ok(permissionArg);
+      assert.match(permissionArg, /":root"="deny"/u);
+      assert.match(permissionArg, /":minimal"="read"/u);
+      assert.match(permissionArg, /"\/tmp\/task-worktree\/\*\*"="write"/u);
+      assert.match(permissionArg, /\.git\/\*\*.*="write"/u);
+      assert.doesNotMatch(permissionArg, /\/tmp\/task-worktree\/\.git\/\*\*"="deny"/u);
+      assert.doesNotMatch(permissionArg, /":root"="read"/u);
+      assert.ok(
+        taskRuntimeOptions.appServerArgs?.includes(`default_permissions="katacode_task_workspace"`),
+      );
+      assert.ok(
+        taskRuntimeOptions.appServerArgs?.includes(
+          "permissions.katacode_task_workspace.network.enabled=false",
+        ),
+      );
+      const shellPolicyIndex = taskRuntimeOptions.appServerArgs?.findIndex(
+        (argument) => argument === 'shell_environment_policy.inherit="core"',
+      );
+      assert.ok(shellPolicyIndex !== undefined && shellPolicyIndex > 0);
+      const taskExcludeArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("shell_environment_policy.exclude="),
+      );
+      assert.ok(taskExcludeArg);
+      assert.match(taskExcludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
+    }),
+  );
+
+  it.effect(
+    "rejects a task worktree whose git metadata redirects outside the canonical repository",
+    () =>
+      Effect.gen(function* () {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "kata-codex-git-redirect-"));
+        const runGit = (cwd: string, args: ReadonlyArray<string>) => {
+          const result = spawnSync("git", args, {
+            cwd,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              GIT_AUTHOR_NAME: "Kata Code Test",
+              GIT_AUTHOR_EMAIL: "test@kata.sh",
+              GIT_COMMITTER_NAME: "Kata Code Test",
+              GIT_COMMITTER_EMAIL: "test@kata.sh",
+            },
+          });
+          assert.equal(result.status, 0, result.stderr);
+        };
+        const mainRepo = path.join(root, "repo");
+        const worktreePath = path.join(root, "worktree");
+        const externalGitDir = path.join(root, "external-host-repo", ".git");
+        fs.mkdirSync(mainRepo, { recursive: true });
+        runGit(mainRepo, ["init", "-b", "main"]);
+        fs.writeFileSync(path.join(mainRepo, "README.md"), "# fixture\n");
+        runGit(mainRepo, ["add", "README.md"]);
+        runGit(mainRepo, ["commit", "-m", "chore: seed"]);
+        runGit(mainRepo, ["worktree", "add", "-b", "katacode/task-1", worktreePath]);
+        const canonicalGitFile = fs.readFileSync(path.join(worktreePath, ".git"), "utf8");
+        assert.match(canonicalGitFile, /^gitdir:/u);
+        fs.mkdirSync(externalGitDir, { recursive: true });
+        fs.mkdirSync(path.join(externalGitDir, "objects"), { recursive: true });
+
+        const adapter = yield* CodexAdapter;
+        // Control: the canonical worktree starts a session with git metadata
+        // writes confined to the main repository's .git.
+        const control = yield* adapter
+          .startSession({
+            provider: ProviderDriverKind.make("codex"),
+            threadId: asThreadId("thread-git-canonical"),
+            cwd: worktreePath,
+            runtimeMode: "auto-accept-edits",
+            taskExecutionProfile: "task-worktree-write",
+            taskWorkspaceRoot: mainRepo,
+          })
+          .pipe(Effect.result);
+        assert.equal(control._tag, "Success");
+        const controlOptions = validationRuntimeFactory.factory.mock.calls.at(-1)?.[0];
+        const controlPermissionArg = controlOptions?.appServerArgs?.find((argument) =>
+          argument.startsWith("permissions.katacode_task_workspace.filesystem="),
+        );
+        assert.ok(controlPermissionArg);
+        assert.match(controlPermissionArg, /worktrees.*="write"/u);
+
+        // Attack: the implementation rewrites the writable .git gitfile to
+        // point at an external host directory. The restarted session must fail
+        // closed instead of widening the writable profile.
+        fs.writeFileSync(path.join(worktreePath, ".git"), `gitdir: ${externalGitDir}\n`);
+        const redirected = yield* adapter
+          .startSession({
+            provider: ProviderDriverKind.make("codex"),
+            threadId: asThreadId("thread-git-redirected"),
+            cwd: worktreePath,
+            runtimeMode: "auto-accept-edits",
+            taskExecutionProfile: "task-worktree-write",
+            taskWorkspaceRoot: mainRepo,
+          })
+          .pipe(Effect.result);
+        assert.equal(redirected._tag, "Failure");
+        if (redirected._tag === "Failure") {
+          assert.equal(redirected.failure._tag, "ProviderAdapterValidationError");
+          assert.match(redirected.failure.issue, /not canonical/u);
+        }
+      }).pipe(Effect.scoped),
+    30_000,
+  );
 });
 
 const sessionRuntimeFactory = makeRuntimeFactory();
@@ -488,6 +653,36 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       assert.equal(firstEvent.value.itemId, "msg_1");
       assert.equal(firstEvent.value.turnId, "turn-1");
       assert.equal(firstEvent.value.payload.itemType, "assistant_message");
+    }),
+  );
+
+  it.effect("correlates turn completion from the nested Codex turn payload", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-turn-completed-nested-id"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "turn/completed",
+        threadId: asThreadId("thread-1"),
+        payload: {
+          threadId: "thread-1",
+          turn: {
+            id: "turn-from-payload",
+            items: [],
+            status: "completed",
+          },
+        },
+      });
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") return;
+      assert.equal(firstEvent.value.type, "turn.completed");
+      assert.equal(firstEvent.value.turnId, "turn-from-payload");
     }),
   );
 

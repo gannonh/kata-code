@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Provider launch profiles need synchronous path normalization.
 /**
  * CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
  *
@@ -7,6 +8,8 @@
  *
  * @module CodexAdapterLive
  */
+import * as NodePath from "node:path";
+
 import {
   type CanonicalItemType,
   type CanonicalRequestType,
@@ -22,6 +25,7 @@ import {
   RuntimeRequestId,
   ProviderApprovalDecision,
   ThreadId,
+  TurnId,
   ProviderSendTurnInput,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
@@ -40,6 +44,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { MCP_BEARER_TOKEN_ENV_VAR, MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { getModelSelectionStringOptionValue } from "@kata-sh/code-shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 
 import {
@@ -70,6 +75,122 @@ const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 
 const PROVIDER = ProviderDriverKind.make("codex");
+const CODEX_SHELL_ENV_EXCLUDE_PATTERNS = [
+  MCP_BEARER_TOKEN_ENV_VAR,
+  "CODEX_HOME",
+  "OPENSSL_CONF",
+  "*MCP*",
+  "*TOKEN*",
+  "*SECRET*",
+  "*KEY*",
+  "*BEARER*",
+  "*AUTH*",
+  "*CREDENTIAL*",
+] as const;
+const CODEX_TASK_PERMISSION_PROFILE = "katacode_task_workspace";
+const CODEX_TASK_DENIED_HOME_PATHS = [
+  "~/.codex",
+  "~/.ssh",
+  "~/.gnupg",
+  "~/.aws",
+  "~/.azure",
+  "~/.kube",
+  "~/.config",
+  "~/.katacode",
+  "~/.kata",
+  "~/.netrc",
+  "~/.npmrc",
+  "~/.pypirc",
+  "~/Library/Keychains",
+  "~/Library/Application Support",
+] as const;
+
+function appendFilesystemPath(
+  entries: Map<string, string>,
+  path: string,
+  access: "read" | "write" | "deny",
+): void {
+  const normalized = path.endsWith("/") ? path.slice(0, -1) : path;
+  if (normalized.length === 0) return;
+  entries.set(normalized, access);
+  entries.set(`${normalized}/**`, access);
+}
+
+function appendDeniedFilesystemPath(entries: Map<string, string>, path: string): void {
+  appendFilesystemPath(entries, path, "deny");
+}
+
+function resolveTaskCodexHomePath(
+  configuredHomePath: string | undefined,
+  environment: NodeJS.ProcessEnv | undefined,
+): string | undefined {
+  const configured = configuredHomePath?.trim();
+  if (configured) return configured;
+  const explicit = environment?.CODEX_HOME?.trim();
+  if (explicit) return explicit;
+  const inheritedHome = environment?.HOME?.trim() || process.env.HOME?.trim();
+  return inheritedHome ? NodePath.join(inheritedHome, ".codex") : undefined;
+}
+
+function isPathWithin(target: string, dir: string): boolean {
+  const normalizedTarget = NodePath.resolve(target) + NodePath.sep;
+  const normalizedDir = NodePath.resolve(dir) + NodePath.sep;
+  return normalizedTarget === normalizedDir || normalizedTarget.startsWith(normalizedDir);
+}
+
+function codexTaskPermissionProfileArgs(
+  cwd: string,
+  canonicalCwd: string,
+  configuredHomePath?: string,
+  gitReadablePaths: ReadonlyArray<string> = [],
+  gitWritablePaths: ReadonlyArray<string> = [],
+): ReadonlyArray<string> {
+  const entries = new Map<string, string>([
+    [":root", "deny"],
+    [":minimal", "read"],
+  ]);
+  for (const gitPath of gitReadablePaths) appendFilesystemPath(entries, gitPath, "read");
+  for (const gitPath of gitWritablePaths) appendFilesystemPath(entries, gitPath, "write");
+  const worktreePaths = Array.from(new Set([cwd, canonicalCwd]));
+  for (const worktreePath of worktreePaths) {
+    entries.set(worktreePath, "write");
+    entries.set(`${worktreePath}/**`, "write");
+    entries.set(`${worktreePath}/.git`, "write");
+    entries.set(`${worktreePath}/.git/**`, "write");
+    for (const metadataPath of [".agents", ".codex"]) {
+      appendDeniedFilesystemPath(entries, `${worktreePath}/${metadataPath}`);
+    }
+  }
+  for (const path of CODEX_TASK_DENIED_HOME_PATHS) {
+    appendDeniedFilesystemPath(entries, expandHomePath(path));
+  }
+  if (configuredHomePath) {
+    appendDeniedFilesystemPath(entries, expandHomePath(configuredHomePath));
+  }
+  const filesystem = [...entries]
+    .map(([path, access]) => `${JSON.stringify(path)}=${JSON.stringify(access)}`)
+    .join(",");
+  return [
+    "--strict-config",
+    "-c",
+    `permissions.${CODEX_TASK_PERMISSION_PROFILE}.filesystem={${filesystem}}`,
+    // Explicitly deny network in the profile so every turn (including the
+    // first) starts with outbound traffic blocked. The capability attestation
+    // networkDisabled: true must not depend on Codex's implicit default for
+    // profiles without a network section.
+    "-c",
+    `permissions.${CODEX_TASK_PERMISSION_PROFILE}.network.enabled=false`,
+    "-c",
+    `default_permissions=${JSON.stringify(CODEX_TASK_PERMISSION_PROFILE)}`,
+  ];
+}
+
+const CODEX_TASK_SHELL_ENV_POLICY_ARGS = [
+  "-c",
+  'shell_environment_policy.inherit="core"',
+  "-c",
+  `shell_environment_policy.exclude=[${CODEX_SHELL_ENV_EXCLUDE_PATTERNS.map((pattern) => JSON.stringify(pattern)).join(",")}]`,
+] as const;
 
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
@@ -781,6 +902,10 @@ function mapToRuntimeEvents(
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
+        // Codex v2 carries the authoritative turn id inside the completion
+        // payload. Preserve it when the notification envelope omits the
+        // top-level field so terminal settlement remains correlated.
+        turnId: TurnId.make(payload.turn.id),
         type: "turn.completed",
         payload: {
           state: toTurnStatus(payload.turn.status),
@@ -1400,13 +1525,122 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const taskEnvironment =
+          input.taskExecutionProfile === "task-worktree-write" && input.cwd
+            ? {
+                ...(options?.environment ?? process.env),
+                HOME: input.cwd,
+              }
+            : undefined;
+        const taskCodexHomePath =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? resolveTaskCodexHomePath(codexConfig.homePath, options?.environment)
+            : undefined;
+        const taskCwd = input.cwd ?? process.cwd();
+        const canonicalTaskCwd =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? yield* fileSystem.realPath(taskCwd).pipe(Effect.orElseSucceed(() => taskCwd))
+            : taskCwd;
+        let taskGitReadablePaths: string[] = [];
+        let taskGitWritablePaths: string[] = [];
+        if (input.taskExecutionProfile === "task-worktree-write") {
+          const gitFile = yield* fileSystem
+            .readFileString(NodePath.join(canonicalTaskCwd, ".git"))
+            .pipe(Effect.orElseSucceed(() => null));
+          const gitDirectoryValue = gitFile?.match(/^gitdir:\s*(.+)$/mu)?.[1]?.trim();
+          if (gitDirectoryValue) {
+            const gitDirectoryPath = NodePath.isAbsolute(gitDirectoryValue)
+              ? gitDirectoryValue
+              : NodePath.resolve(canonicalTaskCwd, gitDirectoryValue);
+            const gitDirectory = yield* fileSystem
+              .realPath(gitDirectoryPath)
+              .pipe(Effect.orElseSucceed(() => gitDirectoryPath));
+            const commonDirectoryValue = yield* fileSystem
+              .readFileString(NodePath.join(gitDirectory, "commondir"))
+              .pipe(Effect.orElseSucceed(() => "../.."));
+            const commonDirectoryPath = NodePath.isAbsolute(commonDirectoryValue.trim())
+              ? commonDirectoryValue.trim()
+              : NodePath.resolve(gitDirectory, commonDirectoryValue.trim());
+            const commonDirectory = yield* fileSystem
+              .realPath(commonDirectoryPath)
+              .pipe(Effect.orElseSucceed(() => commonDirectoryPath));
+            // The worktree's `.git` file is writable by the task implementation.
+            // A gitfile redirect is only legitimate when it points into the
+            // canonical repository's `.git` metadata; anything else would grant
+            // write access to an external host directory through the sandbox
+            // profile. Without an approved workspace root, no git metadata
+            // paths are granted at all (fail closed); with one, paths outside
+            // it reject the session loudly.
+            if (input.taskWorkspaceRoot !== undefined) {
+              const workspaceRoot = input.taskWorkspaceRoot;
+              const approvedGitRoot = yield* fileSystem
+                .realPath(NodePath.join(workspaceRoot, ".git"))
+                .pipe(Effect.orElseSucceed(() => NodePath.join(workspaceRoot, ".git")));
+              if (
+                !isPathWithin(gitDirectory, approvedGitRoot) ||
+                !isPathWithin(commonDirectory, approvedGitRoot)
+              ) {
+                return yield* new ProviderAdapterValidationError({
+                  provider: PROVIDER,
+                  operation: "startSession",
+                  issue: "The task worktree git metadata is not canonical.",
+                });
+              }
+              const head = yield* fileSystem
+                .readFileString(NodePath.join(gitDirectory, "HEAD"))
+                .pipe(Effect.orElseSucceed(() => ""));
+              const branchRef = head.match(/^ref:\s*(refs\/heads\/.+)$/mu)?.[1]?.trim();
+              taskGitReadablePaths = [commonDirectory];
+              taskGitWritablePaths = [
+                gitDirectory,
+                NodePath.join(commonDirectory, "objects"),
+                ...(branchRef
+                  ? [
+                      NodePath.join(commonDirectory, branchRef),
+                      `${NodePath.join(commonDirectory, branchRef)}.lock`,
+                      NodePath.join(commonDirectory, "logs", branchRef),
+                      `${NodePath.join(commonDirectory, "logs", branchRef)}.lock`,
+                      NodePath.join(commonDirectory, "packed-refs"),
+                      `${NodePath.join(commonDirectory, "packed-refs")}.lock`,
+                    ]
+                  : []),
+              ];
+            }
+          }
+        }
+        const taskPermissionProfileArgs =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? codexTaskPermissionProfileArgs(
+                taskCwd,
+                canonicalTaskCwd,
+                taskCodexHomePath,
+                taskGitReadablePaths,
+                taskGitWritablePaths,
+              )
+            : [];
+        const taskShellEnvironmentPolicyArgs =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? CODEX_TASK_SHELL_ENV_POLICY_ARGS
+            : [];
+        const taskExecutionAppServerArgs = [
+          ...taskPermissionProfileArgs,
+          ...taskShellEnvironmentPolicyArgs,
+        ];
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
-          ...(options?.environment ? { environment: options.environment } : {}),
-          ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+          ...(taskEnvironment
+            ? { environment: taskEnvironment }
+            : options?.environment
+              ? { environment: options.environment }
+              : {}),
+          ...(taskCodexHomePath
+            ? { homePath: taskCodexHomePath }
+            : codexConfig.homePath
+              ? { homePath: codexConfig.homePath }
+              : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
@@ -1418,17 +1652,24 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { developerInstructions: input.developerInstructions }
             : {}),
           ...(input.taskStage === true ? { taskStage: true } : {}),
+          ...(input.taskExecutionProfile
+            ? { taskExecutionProfile: input.taskExecutionProfile }
+            : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(!mcpSession && taskExecutionAppServerArgs.length > 0
+            ? { appServerArgs: taskExecutionAppServerArgs }
+            : {}),
           ...(mcpSession
             ? {
                 environment: {
-                  ...(options?.environment ?? process.env),
+                  ...(taskEnvironment ?? options?.environment ?? process.env),
                   [MCP_BEARER_TOKEN_ENV_VAR]: mcpSession.authorizationHeader.replace(
                     /^Bearer\s+/,
                     "",
                   ),
                 },
                 appServerArgs: [
+                  ...taskExecutionAppServerArgs,
                   "-c",
                   `mcp_servers.${MCP_SERVER_NAME}.url=${mcpSession.endpoint}`,
                   "-c",
@@ -1571,6 +1812,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ? { developerInstructions: input.developerInstructions }
           : {}),
         ...(input.taskStage === true ? { taskStage: true } : {}),
+        ...(input.taskExecutionProfile ? { taskExecutionProfile: input.taskExecutionProfile } : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
@@ -1728,6 +1970,18 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     capabilities: {
       sessionModelSwitch: "in-session",
       supportsTaskStage: true,
+      taskExecution: {
+        profile: "task-worktree-write",
+        trustedTaskInstructions: true,
+        worktreeOnlyWrites: true,
+        // task-worktree-write starts Codex with a strict named permission
+        // profile that denies the provider home and standard user credential
+        // stores, then filters credential-bearing environment variables.
+        credentialIsolation: true,
+        deterministicResume: true,
+        boundedTurns: true,
+        networkDisabled: true,
+      },
     },
     startSession,
     sendTurn,

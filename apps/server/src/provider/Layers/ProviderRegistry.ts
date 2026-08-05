@@ -29,6 +29,7 @@ import {
   type ServerProvider,
   type ServerProviderUpdateState,
 } from "@kata-sh/code-contracts";
+import { supportsTaskWorktreeWrite as hasTaskWorktreeWriteCapability } from "../Services/ProviderAdapter.ts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -187,12 +188,19 @@ const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource
     instance.adapter?.capabilities?.supportsTaskStage ??
     instance.supportsTaskStage ??
     declaredTaskStageSupport(instance.driverKind);
-  const augment = (snapshot: ServerProvider): ServerProvider =>
-    supportsTaskStage === undefined ? snapshot : { ...snapshot, supportsTaskStage };
+  const supportsTaskWorktreeWrite = instance.adapter?.capabilities
+    ? hasTaskWorktreeWriteCapability(instance.adapter.capabilities)
+    : undefined;
+  const augment = (snapshot: ServerProvider): ServerProvider => ({
+    ...snapshot,
+    ...(supportsTaskStage === undefined ? {} : { supportsTaskStage }),
+    ...(supportsTaskWorktreeWrite === undefined ? {} : { supportsTaskWorktreeWrite }),
+  });
   return {
     instanceId: instance.instanceId,
     driverKind: instance.driverKind,
     ...(supportsTaskStage === undefined ? {} : { supportsTaskStage }),
+    ...(supportsTaskWorktreeWrite === undefined ? {} : { supportsTaskWorktreeWrite }),
     getSnapshot: instance.snapshot.getSnapshot.pipe(Effect.map(augment)),
     refresh: instance.snapshot.refresh.pipe(Effect.map(augment)),
     streamChanges: instance.snapshot.streamChanges.pipe(Stream.map(augment)),

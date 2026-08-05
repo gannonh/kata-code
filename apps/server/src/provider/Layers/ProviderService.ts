@@ -50,7 +50,10 @@ import {
   withMetrics,
 } from "../../observability/Metrics.ts";
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import {
+  supportsTaskWorktreeWrite,
+  type ProviderAdapterShape,
+} from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
@@ -61,11 +64,14 @@ import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import {
+  activeTaskProviderContextForThread,
   activeTaskStageForThread,
   isActiveTaskThread,
   validateActiveTaskTurn,
+  type ActiveTaskProviderContext,
 } from "../../taskWorkspace/TaskWorkspaceService.ts";
-import { trustedStageInstructions } from "../../taskWorkspace/taskStageInstructions.ts";
+import type { TaskWorkspaceStage } from "@kata-sh/code-contracts";
+import { trustedInstructionsForStage } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
@@ -95,6 +101,35 @@ function toValidationError(
     ...(cause !== undefined ? { cause } : {}),
   });
 }
+
+/**
+ * Reject a provider operation on an active Build task when the requested
+ * provider instance is not the instance pinned by the task's model selection.
+ * Non-build task stages and non-task threads pass through unchanged. Exposed
+ * separately so Build-stage entry points share one guard and the rejection is
+ * testable.
+ */
+export const assertPinnedToActiveBuildTask = (input: {
+  readonly operation: string;
+  readonly activeTaskStage: TaskWorkspaceStage | undefined;
+  readonly activeTaskContext: Pick<ActiveTaskProviderContext, "providerInstanceId"> | undefined;
+  readonly providerInstanceId: ProviderInstanceId;
+}): Effect.Effect<void, ProviderValidationError> => {
+  if (input.activeTaskStage !== "build") return Effect.void;
+  if (!input.activeTaskContext) {
+    return toValidationError(
+      input.operation,
+      "The active Build task has no canonical worktree/provider profile.",
+    );
+  }
+  if (input.activeTaskContext.providerInstanceId !== input.providerInstanceId) {
+    return toValidationError(
+      input.operation,
+      "The requested provider instance is not pinned to the active Build task.",
+    );
+  }
+  return Effect.void;
+};
 
 const decodeInputOrValidationError = <S extends Schema.Top>(input: {
   readonly operation: string;
@@ -283,6 +318,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // session starts. Reuse a live thread-bound lease and rotate an expired
       // one so the caller can restart the native session with the new header.
       const existing = McpProviderSession.readMcpProviderSession(threadId);
+      const activeStage = taskStage ? yield* activeTaskStageForThread(threadId) : undefined;
       if (existing?.providerInstanceId === providerInstanceId) {
         if (!McpSessionRegistry.hasActiveMcpSessionRegistry()) {
           McpProviderSession.clearMcpProviderSession(threadId);
@@ -294,7 +330,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (
           scope?.threadId === threadId &&
           scope.providerInstanceId === providerInstanceId &&
-          (!taskStage || scope.capabilities.has("task-stage"))
+          (!taskStage ||
+            (scope.capabilities.has("task-stage") &&
+              (activeStage !== "build" || scope.capabilities.has("task-implementation"))))
         ) {
           return { rotated: false } as const;
         }
@@ -405,21 +443,40 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         binding.runtimePayload,
       );
       const activeTaskStage = yield* activeTaskStageForThread(input.threadId);
+      const activeTaskContext =
+        activeTaskStage === "build"
+          ? yield* activeTaskProviderContextForThread(input.threadId)
+          : undefined;
+      yield* assertPinnedToActiveBuildTask({
+        operation: "ProviderService.restartSessionForMcpCredential",
+        activeTaskStage,
+        activeTaskContext,
+        providerInstanceId: input.providerInstanceId,
+      });
+      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
       const developerInstructions = activeTaskStage
-        ? trustedStageInstructions(activeTaskStage)
+        ? trustedInstructionsForStage(activeTaskStage)
         : (input.developerInstructions ?? persistedDeveloperInstructions);
       const restarted = yield* input.adapter.startSession({
         threadId: input.threadId,
         provider: binding.provider,
         providerInstanceId: input.providerInstanceId,
-        ...(cwd ? { cwd } : {}),
-        ...(modelSelection ? { modelSelection } : {}),
+        ...(activeTaskContext ? { cwd: activeTaskContext.worktreePath } : cwd ? { cwd } : {}),
+        ...(activeTaskContext
+          ? { modelSelection: activeTaskContext.modelSelection }
+          : modelSelection
+            ? { modelSelection }
+            : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
         taskStage: activeTaskStage !== undefined,
+        taskExecutionProfile,
+        ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
         ...(binding.resumeCursor !== null && binding.resumeCursor !== undefined
           ? { resumeCursor: binding.resumeCursor }
           : {}),
-        runtimeMode: binding.runtimeMode ?? "full-access",
+        runtimeMode: activeTaskContext
+          ? activeTaskContext.runtimeMode
+          : (binding.runtimeMode ?? "full-access"),
       });
       yield* upsertSessionBinding(restarted, input.threadId, {
         ...(modelSelection ? { modelSelection } : {}),
@@ -548,8 +605,25 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         input.binding.runtimePayload,
       );
       const activeTaskStage = yield* activeTaskStageForThread(input.binding.threadId);
+      const activeTaskContext =
+        activeTaskStage === "build"
+          ? yield* activeTaskProviderContextForThread(input.binding.threadId)
+          : undefined;
+      if (activeTaskStage === "build" && !activeTaskContext) {
+        return yield* toValidationError(
+          input.operation,
+          "The active Build task has no canonical worktree/provider profile.",
+        );
+      }
+      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
+      if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(adapter.capabilities)) {
+        return yield* toValidationError(
+          input.operation,
+          `Provider '${adapter.provider}' cannot enforce task-worktree-write.`,
+        );
+      }
       const developerInstructions = activeTaskStage
-        ? trustedStageInstructions(activeTaskStage)
+        ? trustedInstructionsForStage(activeTaskStage)
         : persistedDeveloperInstructions;
 
       yield* prepareMcpSession(
@@ -562,12 +636,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           threadId: input.binding.threadId,
           provider: input.binding.provider,
           providerInstanceId: bindingInstanceId,
-          ...(persistedCwd ? { cwd: persistedCwd } : {}),
-          ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+          ...(activeTaskContext
+            ? { cwd: activeTaskContext.worktreePath }
+            : persistedCwd
+              ? { cwd: persistedCwd }
+              : {}),
+          ...(activeTaskContext
+            ? { modelSelection: activeTaskContext.modelSelection }
+            : persistedModelSelection
+              ? { modelSelection: persistedModelSelection }
+              : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
           taskStage: activeTaskStage !== undefined,
+          taskExecutionProfile,
+          ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
-          runtimeMode: input.binding.runtimeMode ?? "full-access",
+          runtimeMode: activeTaskContext
+            ? activeTaskContext.runtimeMode
+            : (input.binding.runtimeMode ?? "full-access"),
         })
         .pipe(Effect.onError(() => clearMcpSession(input.binding.threadId)));
       if (resumed.provider !== adapter.provider) {
@@ -756,6 +842,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         const activeTaskStage = yield* activeTaskStageForThread(threadId);
+        const activeTaskContext =
+          activeTaskStage === "build"
+            ? yield* activeTaskProviderContextForThread(threadId)
+            : undefined;
+        yield* assertPinnedToActiveBuildTask({
+          operation: "ProviderService.startSession",
+          activeTaskStage,
+          activeTaskContext,
+          providerInstanceId: resolvedInstanceId,
+        });
+        const activeTaskProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
+        if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(adapter.capabilities)) {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            `Provider '${resolvedProvider}' cannot enforce task-worktree-write.`,
+          );
+        }
         const persistedDeveloperInstructions =
           persistedBinding?.providerInstanceId === resolvedInstanceId
             ? readPersistedDeveloperInstructions(persistedBinding.runtimePayload)
@@ -763,7 +866,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const developerInstructions =
           input.developerInstructions ??
           (activeTaskStage !== undefined
-            ? trustedStageInstructions(activeTaskStage)
+            ? trustedInstructionsForStage(activeTaskStage)
             : persistedDeveloperInstructions);
         const sessionWithInstance = yield* withMcpRotationLock(
           threadId,
@@ -773,9 +876,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               .startSession({
                 ...input,
                 providerInstanceId: resolvedInstanceId,
-                ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
+                ...(activeTaskContext
+                  ? { cwd: activeTaskContext.worktreePath }
+                  : effectiveCwd !== undefined
+                    ? { cwd: effectiveCwd }
+                    : {}),
+                ...(activeTaskContext
+                  ? { modelSelection: activeTaskContext.modelSelection }
+                  : input.modelSelection
+                    ? { modelSelection: input.modelSelection }
+                    : {}),
                 ...(developerInstructions ? { developerInstructions } : {}),
                 taskStage: activeTaskStage !== undefined,
+                taskExecutionProfile: activeTaskProfile,
+                ...(activeTaskContext
+                  ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot }
+                  : {}),
+                runtimeMode: activeTaskContext ? activeTaskContext.runtimeMode : input.runtimeMode,
                 ...(effectiveResumeCursor !== undefined
                   ? { resumeCursor: effectiveResumeCursor }
                   : {}),
@@ -873,16 +990,38 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // owns the stage lifecycle and completion tool; provider-native plan
       // cards cannot complete a task-stage occurrence.
       const activeTaskStage = yield* activeTaskStageForThread(input.threadId);
+      const activeTaskContext =
+        activeTaskStage === "build"
+          ? yield* activeTaskProviderContextForThread(input.threadId)
+          : undefined;
+      yield* assertPinnedToActiveBuildTask({
+        operation: "ProviderService.sendTurn",
+        activeTaskStage,
+        activeTaskContext,
+        providerInstanceId: routed.instanceId,
+      });
       const providerInteractionMode = normalizeTaskStageInteractionMode({
         isTaskStage: activeTaskStage !== undefined,
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
       });
+      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
+      if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(routed.adapter.capabilities)) {
+        return yield* toValidationError(
+          "ProviderService.sendTurn",
+          `Provider '${routed.adapter.provider}' cannot enforce task-worktree-write.`,
+        );
+      }
       const providerInput =
         activeTaskStage === undefined
           ? { ...input, taskStage: false }
           : {
               ...input,
+              ...(activeTaskContext ? { modelSelection: activeTaskContext.modelSelection } : {}),
+              ...(activeTaskContext
+                ? { developerInstructions: trustedInstructionsForStage("build") }
+                : {}),
               taskStage: true,
+              taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
               interactionMode: providerInteractionMode ?? "default",
             };
       yield* withMcpRotationLock(

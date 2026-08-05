@@ -56,6 +56,7 @@ function task(revision: number): TaskWorkspace {
       checks: [],
       checkpoints: [],
       amendments: [],
+      checkAttempts: [],
       currentPlanRevisionId: null,
       amendmentGateId: null,
       continuationSessionIds: [],

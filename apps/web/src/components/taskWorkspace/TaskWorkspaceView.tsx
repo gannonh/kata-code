@@ -40,6 +40,10 @@ import { ContextManifestPanel } from "./ContextManifestPanel";
 import { GuidedTaskPanel } from "./GuidedTaskPanel";
 import { SessionsPanel } from "./SessionsPanel";
 
+function operationKey(commandId: string, action: string): string {
+  return `task-${action}-${commandId}`;
+}
+
 /**
  * Rail shown when a task pins a definition version this build has no catalog
  * entry for. Rendering the Standard ladder would be a guess; showing only the
@@ -79,6 +83,34 @@ function latestArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind) {
 
 function statusLabel(stage: TaskWorkspaceStage): string {
   return TASK_WORKSPACE_STAGE_LABELS[stage];
+}
+
+function activeStageSession(
+  task: TaskWorkspace,
+  stage: TaskWorkspaceStage,
+  occurrence: TaskWorkspace["occurrences"][number] | undefined,
+) {
+  if (stage === "build") {
+    const continuationSessionId = task.build.continuationSessionIds
+      .toReversed()
+      .find((sessionId) =>
+        task.sessions.some(
+          (session) =>
+            session.id === sessionId &&
+            session.stage === "build" &&
+            session.role === "primary" &&
+            session.status === "active",
+        ),
+      );
+    if (continuationSessionId) {
+      const continuationSession =
+        task.sessions.find((session) => session.id === continuationSessionId) ?? null;
+      if (continuationSession?.status === "active") return continuationSession;
+    }
+  }
+  if (!occurrence?.sessionId) return null;
+  const session = task.sessions.find((candidate) => candidate.id === occurrence.sessionId) ?? null;
+  return session?.status === "active" ? session : null;
 }
 
 /**
@@ -649,12 +681,20 @@ function BuildPanel({
                                       Boolean(gate)
                                     }
                                     onClick={() => {
+                                      const base = commands.commandBase(
+                                        "task.build.check.record-manual",
+                                      );
                                       void commands.dispatch(
                                         {
-                                          ...commands.commandBase("task.build.check.record-manual"),
+                                          ...base,
+                                          expectedTaskRevision: task.taskRevision,
                                           checkId: check.id,
                                           status: "pass",
                                           note: manualNotes[check.id]!.trim(),
+                                          operationKey: operationKey(
+                                            base.commandId,
+                                            `record-check-${check.id}-pass`,
+                                          ),
                                         },
                                         `record-check-${check.id}-pass`,
                                       );
@@ -674,14 +714,20 @@ function BuildPanel({
                                         Boolean(gate)
                                       }
                                       onClick={() => {
+                                        const base = commands.commandBase(
+                                          "task.build.check.record-manual",
+                                        );
                                         void commands.dispatch(
                                           {
-                                            ...commands.commandBase(
-                                              "task.build.check.record-manual",
-                                            ),
+                                            ...base,
+                                            expectedTaskRevision: task.taskRevision,
                                             checkId: check.id,
                                             status,
                                             note: manualNotes[check.id]!.trim(),
+                                            operationKey: operationKey(
+                                              base.commandId,
+                                              `record-check-${check.id}-${status}`,
+                                            ),
                                           },
                                           `record-check-${check.id}-${status}`,
                                         );
@@ -922,11 +968,13 @@ function TaskFirstSliceView({
   commands,
   threadRef,
   hasActiveThread,
+  currentUser,
 }: {
   readonly task: TaskWorkspace;
   readonly commands: ReturnType<typeof useTaskWorkspaceCommands>;
   readonly threadRef: { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null;
   readonly hasActiveThread: boolean;
+  readonly currentUser: TaskWorkspaceCommentAuthor;
 }) {
   const catalogEntry = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
   const stage = currentTaskStage(task);
@@ -939,6 +987,11 @@ function TaskFirstSliceView({
     planOccurrence?.status === "completed" &&
     planOccurrence.gateOutcome === "approved";
   const planArtifact = latestArtifact(task, "plan");
+  const buildReadOnlyPlan =
+    stage === "build" &&
+    planArtifact !== null &&
+    (task.build.resultingCommitSha !== null || !hasActiveThread);
+  const showReadOnlyPlan = Boolean((approvedPlan && planArtifact) || buildReadOnlyPlan);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
@@ -956,7 +1009,7 @@ function TaskFirstSliceView({
       </header>
       <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="min-h-0 min-w-0 overflow-hidden">
-          {approvedPlan && planArtifact ? (
+          {showReadOnlyPlan && planArtifact ? (
             <div
               data-testid="task-approved-plan-readonly"
               className="h-full overflow-auto p-5 sm:p-8"
@@ -996,7 +1049,7 @@ function TaskFirstSliceView({
           )}
         </section>
         {catalogEntry?.availableInFirstSlice ? (
-          <GuidedTaskPanel task={task} commands={commands} />
+          <GuidedTaskPanel task={task} commands={commands} currentUser={currentUser} />
         ) : (
           <PreviewTaskPanel task={task} />
         )}
@@ -1040,10 +1093,7 @@ function TaskWorkspaceViewContent({
         .filter((candidate) => candidate.stage === stage)
         .toSorted((left, right) => right.ordinal - left.ordinal)[0]
     : undefined;
-  const currentSession =
-    task && currentOccurrence?.sessionId
-      ? (task.sessions.find((session) => session.id === currentOccurrence.sessionId) ?? null)
-      : null;
+  const currentSession = task ? activeStageSession(task, stage, currentOccurrence) : null;
   const activeThreadRef = useMemo(
     () =>
       task?.environmentId && currentSession
@@ -1093,6 +1143,7 @@ function TaskWorkspaceViewContent({
         commands={commands}
         threadRef={activeThreadRef}
         hasActiveThread={activeThread !== undefined && "id" in activeThread}
+        currentUser={currentUser}
       />
     );
   }
