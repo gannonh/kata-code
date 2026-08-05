@@ -1831,28 +1831,32 @@ export const make = Effect.gen(function* () {
 
   const settleProviderTurn: TaskWorkspaceServiceShape["settleProviderTurn"] = (input) =>
     Effect.gen(function* () {
-      const current = [...taskById.values()].find((candidate) => {
-        const run = candidate.workflowRuns.at(-1);
-        if (!run) return false;
-        const occurrence = candidate.occurrences
-          .filter((entry) => entry.stage === run.currentStage)
-          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
-        return occurrence?.threadId === input.threadId && occurrence.status === "finalizing";
-      });
-      if (!current) return;
+      // Resolve the exact pending proposal by its durable provider binding. The
+      // latest task occurrence can change while a terminal event and proposal
+      // are racing, so deriving the occurrence from the current run can miss
+      // an otherwise valid proposal.
+      const pendingProposals = yield* store.readPendingProposals().pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: "Failed to read pending completion proposals.",
+              commandType: "task.internal",
+              cause,
+            }),
+        ),
+      );
+      const proposal = pendingProposals.find(
+        (candidate) =>
+          candidate.threadId === input.threadId &&
+          candidate.providerTurnId === input.providerTurnId,
+      );
+      if (!proposal) return;
       yield* settleProposal({
-        taskId: current.id,
-        occurrence: current.occurrences
-          .filter((entry) => entry.threadId === input.threadId)
-          .toSorted((left, right) => right.ordinal - left.ordinal)[0]!.ordinal,
+        taskId: proposal.taskId,
+        occurrence: proposal.occurrence,
         providerTurnId: input.providerTurnId,
         outcome: input.outcome,
-      }).pipe(
-        Effect.catch((cause) =>
-          cause.message.includes("No proposal exists") ? Effect.void : Effect.fail(cause),
-        ),
-        Effect.asVoid,
-      );
+      }).pipe(Effect.asVoid);
     });
 
   const validatePlanningRoot: TaskWorkspaceServiceShape["validatePlanningRoot"] = (taskId) =>
