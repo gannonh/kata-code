@@ -137,11 +137,7 @@ async function waitForImplementationCheckpoint(
       if ((await candidate.getAttribute("title")) === "Checkpoint already continued.") continue;
       if (await candidate.isVisible().catch(() => false)) return checkpointId;
     }
-    if (
-      /task_implementation_complete|completion proposal|completion submitted|exact HEAD/iu.test(
-        latestAssistantText,
-      )
-    ) {
+    if (completionSubmittedPattern.test(latestAssistantText)) {
       return null;
     }
     if (
@@ -366,6 +362,8 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
       timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
     });
+    const completionSubmittedPattern =
+      /(?:task_implementation_complete.{0,160}(?:accepted|submitted|already called)|completion proposal.{0,160}(?:accepted|submitted)|completion submitted successfully|recorded session and provider-turn metadata)/isu;
     const continuedCheckpointIds: string[] = [];
     let nextCheckpointId = await waitForImplementationCheckpoint(appWindow);
     if (nextCheckpointId === null) {
@@ -392,9 +390,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     const hasCompletionSubmission = async (): Promise<boolean> => {
       const assistantMessages = appWindow.locator('[data-message-role="assistant"] .chat-markdown');
       const text = (await assistantMessages.allInnerTexts()).join("\n");
-      return /(?:task_implementation_complete|implementation completion|completion proposal|completion submitted successfully|recorded session and provider-turn metadata|exact HEAD)/iu.test(
-        text,
-      );
+      return completionSubmittedPattern.test(text);
     };
     const waitForCompletionOrCheckpoint = async (): Promise<
       "complete" | "checkpoint" | "timeout"

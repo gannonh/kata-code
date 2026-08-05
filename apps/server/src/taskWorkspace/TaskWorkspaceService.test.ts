@@ -5645,14 +5645,15 @@ describe("TaskWorkspaceService guided implementation", () => {
         }),
       );
       expect(proposed.occurrences.find((o) => o.stage === "build")?.status).toBe("finalizing");
-      const settled = yield* runtime.runPromise(
-        service.settleProposal({
-          taskId: task.id,
-          occurrence: proposed.occurrences.find((o) => o.stage === "build")!.ordinal,
+      const buildOccurrence = proposed.occurrences.find((o) => o.stage === "build")!;
+      yield* runtime.runPromise(
+        service.settleProviderTurn({
+          threadId: buildOccurrence.threadId!,
           providerTurnId: "turn-build-final",
           outcome: "completed",
         }),
       );
+      const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(settled.occurrences.find((o) => o.stage === "build")?.status).toBe("completed");
       expect(settled.build.resultingCommitSha).toBe(head);
       // The historical failed attempt remains recorded but did not block.
