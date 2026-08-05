@@ -6100,6 +6100,10 @@ export const make = Effect.gen(function* () {
       );
   const implementationComplete: TaskWorkspaceServiceShape["implementationComplete"] = (input) =>
     serverCommand(input.taskId, "task.implementation.complete", input).pipe(
+      // The durable terminal activity and proposal can cross a process or
+      // subscription boundary in either order. Reconcile immediately after
+      // persisting the proposal so terminal-first completion cannot stall.
+      Effect.tap(() => reconcilePendingProposals),
       Effect.map((result) => ({
         accepted: true as const,
         proposalId:

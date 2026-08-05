@@ -15,6 +15,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   TaskWorkspaceId,
+  type OrchestrationEvent,
   ThreadId,
   type TaskWorkspace,
   type TaskWorkspaceCheckAttempt,
@@ -122,7 +123,10 @@ function makeGitWorkflow(baseDir: string, createCount: { value: number }): GitWo
 const dispatchedOrchestration: unknown[] = [];
 let failNextOrchestrationDispatch = false;
 type BootstrapObservationMode = "running" | "terminal";
-type BootstrapObservation = { mode: BootstrapObservationMode };
+type BootstrapObservation = {
+  mode: BootstrapObservationMode;
+  durableEvents?: OrchestrationEvent[];
+};
 
 const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* (
   repoRoot: string,
@@ -185,22 +189,21 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
           session: { status: "running", activeTurnId: "bootstrap-turn" },
         },
       } as never;
+      const events: OrchestrationEvent[] = [running];
       if (observation.mode === "terminal") {
-        return Stream.fromIterable([
-          running,
-          {
-            type: "thread.activity-appended",
-            payload: {
-              threadId: turnStart.threadId,
-              activity: {
-                kind: "provider-turn-terminal",
-                turnId: "bootstrap-turn",
-              },
+        events.push({
+          type: "thread.activity-appended",
+          payload: {
+            threadId: turnStart.threadId,
+            activity: {
+              kind: "provider-turn-terminal",
+              turnId: "bootstrap-turn",
             },
-          } as never,
-        ]);
+          },
+        } as never);
       }
-      return Stream.succeed(running);
+      events.push(...(observation.durableEvents ?? []));
+      return Stream.fromIterable(events);
     },
   } as OrchestrationEngineShape);
   const taskLayer = TaskWorkspaceServiceLive.pipe(
@@ -5661,6 +5664,80 @@ describe("TaskWorkspaceService guided implementation", () => {
         settled.build.checkAttempts.find((candidate) => candidate.id === failedRun.attemptId)
           ?.status,
       ).toBe("fail");
+    }),
+  );
+
+  it.effect("settles completion when durable terminal evidence predates the proposal", () =>
+    Effect.gen(function* () {
+      const observation: BootstrapObservation = { mode: "running", durableEvents: [] };
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-impl-terminal-first-",
+        observation,
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+      const head = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "running",
+          summary: "Implementing.",
+        }),
+      );
+      const running = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      yield* runtime.runPromise(
+        service.implementationProgress({
+          taskId: task.id,
+          expectedTaskRevision: running.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          status: "completed",
+          summary: "Implemented.",
+        }),
+      );
+      const ready = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const occurrence = ready.occurrences.find((candidate) => candidate.stage === "build")!;
+      const session = ready.sessions.find((candidate) => candidate.stage === "build")!;
+      const providerTurnId = "turn-build-terminal-first";
+      observation.durableEvents!.push({
+        type: "thread.activity-appended",
+        payload: {
+          threadId: occurrence.threadId!,
+          activity: {
+            kind: "provider-turn-terminal",
+            turnId: providerTurnId,
+            payload: { outcome: "completed" },
+          },
+        },
+      } as never);
+
+      yield* runtime.runPromise(
+        service.implementationComplete({
+          taskId: task.id,
+          expectedTaskRevision: ready.taskRevision,
+          summary: "Implementation complete.",
+          operationKey: "op-implementation-terminal-first",
+          sessionId: session.id,
+          providerTurnId,
+        }),
+      );
+
+      const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(settled.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
+        "completed",
+      );
+      expect(settled.build.resultingCommitSha).toBe(head);
     }),
   );
 
