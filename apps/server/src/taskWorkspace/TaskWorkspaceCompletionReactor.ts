@@ -44,15 +44,22 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
       taskWorkspaces.settleProviderTurn({ threadId, providerTurnId, outcome }).pipe(
         Effect.tapError((cause) =>
           Effect.logWarning("task workspace completion settlement failed", {
-            taskId: threadId,
-            turnId: providerTurnId,
+            threadId,
+            providerTurnId,
             eventType,
             cause: cause.message,
           }),
         ),
         Effect.ignore,
       );
-    yield* taskWorkspaces.reconcilePendingProposals;
+    yield* taskWorkspaces.reconcilePendingProposals.pipe(
+      Effect.tapError((cause) =>
+        Effect.logWarning("task workspace startup proposal reconciliation failed", {
+          cause: cause.message,
+        }),
+      ),
+      Effect.ignore,
+    );
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
         const settleTerminal =
@@ -87,7 +94,7 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
         const outcome = runtimeTerminalOutcome(event);
         const settlement =
           outcome && event.turnId !== undefined
-            ? Effect.logWarning("task workspace completion reactor observed provider terminal", {
+            ? Effect.logDebug("task workspace completion reactor observed provider terminal", {
                 threadId: event.threadId,
                 providerTurnId: event.turnId,
                 outcome,

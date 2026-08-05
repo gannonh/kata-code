@@ -52,8 +52,27 @@ const makeWorker = Effect.gen(function* () {
       const payload = yield* Schema.decodeUnknownEffect(
         TaskWorkspaceImplementationCheckOutboxPayload,
       )(entry.payload).pipe(Effect.orElseSucceed(() => null));
-      if (!payload) return;
       const now = DateTime.formatIso(yield* DateTime.now);
+      if (!payload) {
+        // A malformed row can never be processed; retire it so the poll loop
+        // stops re-reading it on every batch instead of occupying a slot
+        // forever.
+        yield* Effect.logWarning("retiring an undecodable implementation-check outbox row", {
+          outboxId: entry.id,
+          taskId: entry.taskId,
+          operationKey: entry.operationKey,
+        });
+        yield* store
+          .upsertOutbox({
+            ...entry,
+            status: "completed",
+            attemptCount: entry.attemptCount + 1,
+            updatedAt: now,
+            completedAt: now,
+          })
+          .pipe(Effect.catch(() => Effect.void));
+        return;
+      }
       yield* store
         .upsertOutbox({
           ...entry,

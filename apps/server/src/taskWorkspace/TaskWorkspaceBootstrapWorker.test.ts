@@ -571,6 +571,63 @@ describe("TaskWorkspaceBootstrapWorker", () => {
     }),
   );
 
+  it.effect("retires an undecodable implementation-check row without running its command", () =>
+    Effect.gen(function* () {
+      runnerCalls.length = 0;
+      const { runtime, repoRoot, baseDir } = yield* setup("kata-worker-undecodable-");
+      const worker = yield* runtime.runPromise(Effect.service(TaskWorkspaceBootstrapWorker));
+      const store = yield* runtime.runPromise(Effect.service(TaskWorkspaceStore));
+      const { service, task } = yield* driveToBuild(runtime, baseDir, repoRoot);
+
+      yield* runtime.runPromise(
+        service.implementationCheckRun({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          checkId: "check:typecheck",
+          operationKey: "op-check-undecodable",
+        }),
+      );
+      const rowOption = yield* runtime.runPromise(
+        store.getOutboxByOperationKey({
+          environmentId,
+          taskId: task.id,
+          operationKey: "op-check-undecodable:check-attempt-1",
+        }),
+      );
+      expect(Option.isSome(rowOption)).toBe(true);
+      if (Option.isSome(rowOption)) {
+        yield* runtime.runPromise(
+          store.upsertOutbox({
+            ...rowOption.value,
+            payload: { corrupted: true } as never,
+            updatedAt: now(24),
+          }),
+        );
+      }
+
+      // A malformed payload must be retired without running the command, and
+      // the poll loop must not re-queue it on the next drain.
+      yield* runtime.runPromise(worker.drain());
+      expect(runnerCalls).toEqual([]);
+      const retired = yield* runtime.runPromise(
+        store.getOutboxByOperationKey({
+          environmentId,
+          taskId: task.id,
+          operationKey: "op-check-undecodable:check-attempt-1",
+        }),
+      );
+      if (Option.isSome(retired)) {
+        expect(retired.value.status).toBe("completed");
+      }
+      yield* runtime.runPromise(worker.drain());
+      expect(runnerCalls).toEqual([]);
+      // The attempt stays pending; the worker never settles evidence for a row
+      // whose payload it could not decode.
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.build.checkAttempts.at(-1)?.status).toBe("pending");
+    }),
+  );
+
   it.effect("never starts a second attempt for a settled row replayed from the outbox", () =>
     Effect.gen(function* () {
       runnerCalls.length = 0;
