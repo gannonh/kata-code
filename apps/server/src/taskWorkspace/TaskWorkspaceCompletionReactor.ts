@@ -1,9 +1,10 @@
-import type { OrchestrationEvent } from "@kata-sh/code-contracts";
+import type { OrchestrationEvent, ProviderRuntimeEvent } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { TaskWorkspaceService } from "./TaskWorkspaceService.ts";
 
 type ActivityAppendedEvent = Extract<
@@ -21,10 +22,36 @@ function terminalOutcome(
     : undefined;
 }
 
+function runtimeTerminalOutcome(
+  event: ProviderRuntimeEvent,
+): "completed" | "aborted" | "failed" | undefined {
+  if (event.type === "turn.aborted") return "aborted";
+  if (event.type !== "turn.completed") return undefined;
+  return event.payload.state === "failed" ? "failed" : "completed";
+}
+
 export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const orchestrationEngine = yield* OrchestrationEngineService;
+    const provider = yield* ProviderService;
     const taskWorkspaces = yield* TaskWorkspaceService;
+    const settle = (
+      threadId: ProviderRuntimeEvent["threadId"],
+      providerTurnId: string,
+      outcome: "completed" | "aborted" | "failed",
+      eventType: string,
+    ) =>
+      taskWorkspaces.settleProviderTurn({ threadId, providerTurnId, outcome }).pipe(
+        Effect.tapError((cause) =>
+          Effect.logWarning("task workspace completion settlement failed", {
+            taskId: threadId,
+            turnId: providerTurnId,
+            eventType,
+            cause: cause.message,
+          }),
+        ),
+        Effect.ignore,
+      );
     yield* taskWorkspaces.reconcilePendingProposals;
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
@@ -34,23 +61,7 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
                 const outcome = terminalOutcome(event);
                 const providerTurnId = event.payload.activity.turnId;
                 if (!outcome || providerTurnId === null) return Effect.void;
-                return taskWorkspaces
-                  .settleProviderTurn({
-                    threadId: event.payload.threadId,
-                    providerTurnId,
-                    outcome,
-                  })
-                  .pipe(
-                    Effect.tapError((cause) =>
-                      Effect.logWarning("task workspace completion settlement failed", {
-                        taskId: event.payload.threadId,
-                        turnId: providerTurnId,
-                        eventType: event.type,
-                        cause: cause.message,
-                      }),
-                    ),
-                    Effect.ignore,
-                  );
+                return settle(event.payload.threadId, providerTurnId, outcome, event.type);
               })()
             : Effect.void;
         // A completion proposal and its durable terminal activity can be
@@ -69,6 +80,13 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
             ),
           ),
         );
+      }),
+    );
+    yield* Effect.forkScoped(
+      Stream.runForEach(provider.streamEvents, (event) => {
+        const outcome = runtimeTerminalOutcome(event);
+        if (!outcome || event.turnId === undefined) return Effect.void;
+        return settle(event.threadId, event.turnId, outcome, event.type);
       }),
     );
   }),
