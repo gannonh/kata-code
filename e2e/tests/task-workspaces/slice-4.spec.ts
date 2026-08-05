@@ -128,7 +128,7 @@ async function waitForImplementationCheckpoint(
     const latestAssistant = page.locator('[data-message-role="assistant"] .chat-markdown').last();
     const latestAssistantText = (await latestAssistant.innerText().catch(() => "")).trim();
     if (
-      /No eligible (?:phase or )?work item remains|Build stage completed/iu.test(
+      /no eligible (?:phase or )?work item(?: remains)?|Build stage completed/iu.test(
         latestAssistantText,
       )
     ) {
@@ -370,7 +370,22 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       nextCheckpointId = await waitForImplementationCheckpoint(appWindow, continuedCheckpointIds);
     }
     const implementationComplete = appWindow.getByTestId("guided-implementation-complete");
-    if (!(await implementationComplete.isVisible().catch(() => false))) {
+    const completionAccepted = appWindow
+      .getByText(
+        /(?:task_implementation_complete accepted\.|Implementation completion accepted\.)/u,
+      )
+      .last();
+    const hasCompletionSubmission = async (): Promise<boolean> => {
+      const assistantMessages = appWindow.locator('[data-message-role="assistant"] .chat-markdown');
+      const text = (await assistantMessages.allInnerTexts()).join("\n");
+      return /(?:task_implementation_complete accepted|Implementation completion accepted|completion proposal already exists|completion submitted successfully)/iu.test(
+        text,
+      );
+    };
+    if (
+      !(await implementationComplete.isVisible().catch(() => false)) &&
+      !(await hasCompletionSubmission())
+    ) {
       await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
         timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
       });
@@ -382,11 +397,6 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
         { approveOnce: true },
       );
     }
-    const completionAccepted = appWindow
-      .getByText(
-        /(?:task_implementation_complete accepted\.|Implementation completion accepted\.)/u,
-      )
-      .last();
     try {
       await expect(implementationComplete).toBeVisible({ timeout: 15_000 });
     } catch {
@@ -396,13 +406,17 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       try {
         await expect(completionAccepted).toBeVisible({ timeout: 120_000 });
       } catch {
-        await sendAgentInstruction(
-          appWindow,
-          "Inspect the current implementation context and finish any incomplete phase or work item with typed progress. Use task_implementation_check_run for every approved automated check. If the canonical task worktree is dirty, commit the implementation changes now. Only after every phase, work item, and check is complete, call `task_implementation_complete` with the required session, provider turn, exact clean HEAD, and a concise summary. Do not only describe completion.",
-          IMPLEMENTATION_READY_TIMEOUT_MS,
-          { approveOnce: true },
-        );
-        await expect(completionAccepted).toBeVisible({ timeout: IMPLEMENTATION_READY_TIMEOUT_MS });
+        if (!(await hasCompletionSubmission())) {
+          await sendAgentInstruction(
+            appWindow,
+            "Inspect the current implementation context and finish any incomplete phase or work item with typed progress. Use task_implementation_check_run for every approved automated check. If the canonical task worktree is dirty, commit the implementation changes now. Only after every phase, work item, and check is complete, call `task_implementation_complete` with the required session, provider turn, exact clean HEAD, and a concise summary. Do not only describe completion.",
+            IMPLEMENTATION_READY_TIMEOUT_MS,
+            { approveOnce: true },
+          );
+          await expect(completionAccepted).toBeVisible({
+            timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
+          });
+        }
       }
       await expect(implementationComplete).toBeVisible({
         timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
