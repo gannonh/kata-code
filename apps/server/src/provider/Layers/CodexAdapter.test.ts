@@ -382,7 +382,17 @@ validationLayer("CodexAdapterLive validation", (it) => {
       Effect.gen(function* () {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "kata-codex-git-redirect-"));
         const runGit = (cwd: string, args: ReadonlyArray<string>) => {
-          const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+          const result = spawnSync("git", args, {
+            cwd,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              GIT_AUTHOR_NAME: "Kata Code Test",
+              GIT_AUTHOR_EMAIL: "test@kata.sh",
+              GIT_COMMITTER_NAME: "Kata Code Test",
+              GIT_COMMITTER_EMAIL: "test@kata.sh",
+            },
+          });
           assert.equal(result.status, 0, result.stderr);
         };
         const mainRepo = path.join(root, "repo");
