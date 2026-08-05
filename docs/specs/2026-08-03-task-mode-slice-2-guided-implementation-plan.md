@@ -15,8 +15,9 @@ parent: /specs/2026-08-01-task-mode-design.md
 ## Status
 
 **Implemented on 2026-08-04.** The server, provider adapter, current Task route, browser coverage,
-and repository gates for Guided Implement are complete. Provider-backed acceptance for the
-cumulative desktop path remains in progress pending an authenticated local provider environment.
+and required repository gates for Guided Implement are complete. The bounded authenticated path
+passes through active Implement. Remaining cumulative provider acceptance is tracked in
+[#64](https://github.com/gannonh/kata-code/issues/64).
 
 This is the sole next Task mode slice. It extends the current conversation-first Guided path from
 approved Plan through completed Implement. It does not start Verify or redesign the Task mode shell.

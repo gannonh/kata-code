@@ -1,5 +1,15 @@
 # OKF bundle log
 
+## 2026-08-05 (Guided completion settlement bounded)
+
+Closed the durable terminal-first completion race by reconciling immediately after proposal
+persistence and added a service regression that asserts the exact resulting commit. The
+authenticated real-provider E2E now uses the standard 180-second agent ceiling and passes through
+active Implement in 1.7 minutes without completion steering. Cumulative provider acceptance remains
+tracked in [#64](https://github.com/gannonh/kata-code/issues/64); the unrelated full-suite Git timeout
+is tracked in [#65](https://github.com/gannonh/kata-code/issues/65). See
+[Slice 2 implementation validation](/specs/evidence/2026-08-04-task-mode-slice-2-implementation-validation.md).
+
 ## 2026-08-04 (Guided implementation delivered)
 
 Delivered the Guided Implement slice from approved Plan through durable, write-enabled
