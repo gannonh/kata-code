@@ -12,6 +12,78 @@ const mocks = vi.hoisted(() => ({
     taskRoute: { environmentId: "environment-local", taskId: "guided-onboarding" },
   })),
   navigate: vi.fn(async () => undefined),
+  providers: [
+    {
+      instanceId: "instance-1",
+      driver: "codex",
+      displayName: "Codex",
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready",
+      availability: "available",
+      supportsTaskStage: true,
+      supportsTaskWorktreeWrite: true,
+      auth: { status: "authenticated" },
+      checkedAt: "2026-08-01T00:00:00.000Z",
+      models: [
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          isCustom: false,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                type: "select",
+                label: "Reasoning effort",
+                options: [
+                  { id: "low", label: "Low" },
+                  { id: "high", label: "High" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      instanceId: "instance-2",
+      driver: "claude",
+      displayName: "Claude",
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready",
+      availability: "available",
+      supportsTaskStage: true,
+      // Task-stage tools without worktree-write enforcement cannot run the
+      // guided@0.3.0 Implement stage.
+      supportsTaskWorktreeWrite: false,
+      auth: { status: "authenticated" },
+      checkedAt: "2026-08-01T00:00:00.000Z",
+      models: [
+        {
+          slug: "claude-opus-4-6",
+          name: "Claude Opus 4.6",
+          isCustom: false,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                type: "select",
+                label: "Reasoning effort",
+                options: [
+                  { id: "low", label: "Low" },
+                  { id: "high", label: "High" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+  ],
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -41,41 +113,7 @@ vi.mock("../../store", () => ({
 }));
 
 vi.mock("../../rpc/serverState", () => ({
-  useServerProviders: () => [
-    {
-      instanceId: "instance-1",
-      driver: "codex",
-      displayName: "Codex",
-      enabled: true,
-      installed: true,
-      version: null,
-      status: "ready",
-      availability: "available",
-      supportsTaskStage: true,
-      auth: { status: "authenticated" },
-      checkedAt: "2026-08-01T00:00:00.000Z",
-      models: [
-        {
-          slug: "gpt-5.4",
-          name: "GPT-5.4",
-          isCustom: false,
-          capabilities: {
-            optionDescriptors: [
-              {
-                id: "reasoningEffort",
-                type: "select",
-                label: "Reasoning effort",
-                options: [
-                  { id: "low", label: "Low" },
-                  { id: "high", label: "High" },
-                ],
-              },
-            ],
-          },
-        },
-      ],
-    },
-  ],
+  useServerProviders: () => mocks.providers,
 }));
 
 beforeEach(() => {
@@ -137,6 +175,27 @@ describe("TaskWorkspaceNewView", () => {
     await expect
       .element(page.getByTestId("task-resolved-definition"))
       .toHaveTextContent("Freeform · freeform@0.2.0");
+  });
+
+  it("excludes providers without worktree-write enforcement from Guided creation", async () => {
+    await renderNewView();
+
+    // Guided (the default preset) may only select agents that can enforce
+    // task-worktree-write for the guided@0.3.0 Implement stage.
+    const agentSelect = page.getByTestId("task-agent-select");
+    await expect.element(agentSelect).toBeVisible();
+    await expect.element(agentSelect).toHaveValue("instance-1");
+    const guidedOptions = Array.from(agentSelect.element().querySelectorAll("option")).map(
+      (option) => option.value,
+    );
+    expect(guidedOptions).toEqual(["instance-1"]);
+
+    // Standard admits every provider: Claude becomes selectable again.
+    await page.getByTestId("task-workflow-option-standard").click();
+    const standardOptions = Array.from(agentSelect.element().querySelectorAll("option")).map(
+      (option) => option.value,
+    );
+    expect(standardOptions).toEqual(["instance-1", "instance-2"]);
   });
 
   it("preserves a selected model option while creating a task", async () => {

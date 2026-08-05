@@ -168,6 +168,12 @@ function codexTaskPermissionProfileArgs(
     "--strict-config",
     "-c",
     `permissions.${CODEX_TASK_PERMISSION_PROFILE}.filesystem={${filesystem}}`,
+    // Explicitly deny network in the profile so every turn (including the
+    // first) starts with outbound traffic blocked. The capability attestation
+    // networkDisabled: true must not depend on Codex's implicit default for
+    // profiles without a network section.
+    "-c",
+    `permissions.${CODEX_TASK_PERMISSION_PROFILE}.network.enabled=false`,
     "-c",
     `default_permissions=${JSON.stringify(CODEX_TASK_PERMISSION_PROFILE)}`,
   ];

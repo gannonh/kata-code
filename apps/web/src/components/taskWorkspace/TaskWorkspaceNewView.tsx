@@ -107,6 +107,8 @@ export function TaskWorkspaceNewView() {
         ? instanceEntries.filter(
             (entry) =>
               entry.snapshot.supportsTaskStage === true &&
+              // guided@0.3.0 Implement requires worktree-write enforcement.
+              entry.snapshot.supportsTaskWorktreeWrite === true &&
               entry.enabled &&
               entry.installed &&
               entry.isAvailable &&

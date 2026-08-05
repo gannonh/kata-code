@@ -167,6 +167,9 @@ export const ServerProvider = Schema.Struct({
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
   requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
   supportsTaskStage: Schema.optional(Schema.Boolean),
+  // True only for providers whose task execution profile can enforce
+  // worktree-only writes; new Guided tasks (guided@0.3.0) require it.
+  supportsTaskWorktreeWrite: Schema.optional(Schema.Boolean),
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
   version: Schema.NullOr(TrimmedNonEmptyString),

@@ -2592,11 +2592,14 @@ export const make = Effect.gen(function* () {
             if (
               !providerInstance ||
               !providerInstance.enabled ||
-              providerInstance.adapter.capabilities.supportsTaskStage !== true
+              providerInstance.adapter.capabilities.supportsTaskStage !== true ||
+              // New Guided tasks pin guided@0.3.0, whose Implement stage
+              // requires a provider that can enforce task-worktree-write.
+              !supportsTaskWorktreeWrite(providerInstance.adapter.capabilities)
             ) {
               return yield* taskError(
                 command,
-                "Guided requires an enabled provider with task-stage tools, trusted instructions, and completion transport.",
+                "Guided requires an enabled provider with task-worktree-write enforcement, task-stage tools, trusted instructions, and completion transport.",
               );
             }
           }

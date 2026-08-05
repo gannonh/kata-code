@@ -358,6 +358,11 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.ok(
         taskRuntimeOptions.appServerArgs?.includes(`default_permissions="katacode_task_workspace"`),
       );
+      assert.ok(
+        taskRuntimeOptions.appServerArgs?.includes(
+          "permissions.katacode_task_workspace.network.enabled=false",
+        ),
+      );
       const shellPolicyIndex = taskRuntimeOptions.appServerArgs?.findIndex(
         (argument) => argument === 'shell_environment_policy.inherit="core"',
       );

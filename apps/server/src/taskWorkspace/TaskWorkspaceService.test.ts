@@ -29,6 +29,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -56,6 +57,11 @@ import { TaskStageBridge, TaskStageBridgeLive } from "./TaskStageBridge.ts";
 import { TaskWorkspaceService, layer as TaskWorkspaceServiceLive } from "./TaskWorkspaceService.ts";
 import { latestAttemptBlocksCompletion } from "./TaskWorkspaceService.ts";
 import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
+import {
+  ProviderInstanceRegistry,
+  type ProviderInstanceRegistryShape,
+} from "../provider/Services/ProviderInstanceRegistry.ts";
+import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 
 const execFileAsync = promisify(execFile);
 const now = (second: number) => `2026-07-28T17:00:${String(second).padStart(2, "0")}.000Z`;
@@ -133,6 +139,7 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
   baseDir: string,
   createCount: { value: number },
   observation: BootstrapObservation = { mode: "running" },
+  providerRegistry?: ProviderInstanceRegistryShape,
 ) {
   const environmentId = EnvironmentId.make("environment-local");
   const environmentLayer = Layer.succeed(ServerEnvironment, {
@@ -206,7 +213,7 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
       return Stream.fromIterable(events);
     },
   } as OrchestrationEngineShape);
-  const taskLayer = TaskWorkspaceServiceLive.pipe(
+  const taskLayerBase = TaskWorkspaceServiceLive.pipe(
     Layer.provide(gitLayer),
     Layer.provide(environmentLayer),
     Layer.provide(sourceResolverLayer),
@@ -216,6 +223,9 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
     Layer.provide(ServerConfig.layerTest(repoRoot, baseDir)),
     Layer.provideMerge(NodeServices.layer),
   );
+  const taskLayer = providerRegistry
+    ? taskLayerBase.pipe(Layer.provide(Layer.succeed(ProviderInstanceRegistry, providerRegistry)))
+    : taskLayerBase;
   const scope = yield* Scope.make();
   const context = yield* Layer.buildWithScope(taskLayer, scope);
   return {
@@ -230,6 +240,7 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
 const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function* (
   prefix: string,
   observation: BootstrapObservation = { mode: "running" },
+  providerRegistry?: ProviderInstanceRegistryShape,
 ) {
   const root = yield* Effect.tryPromise(() =>
     NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), prefix)),
@@ -246,7 +257,13 @@ const setupRuntime = Effect.fn("TaskWorkspaceServiceTest.setupRuntime")(function
   );
   yield* Effect.tryPromise(() => git(repoRoot, ["add", "README.md"]));
   yield* Effect.tryPromise(() => git(repoRoot, ["commit", "-m", "chore: seed fixture repository"]));
-  const runtime = yield* makeRuntime(repoRoot, baseDir, { value: 0 }, observation);
+  const runtime = yield* makeRuntime(
+    repoRoot,
+    baseDir,
+    { value: 0 },
+    observation,
+    providerRegistry,
+  );
   yield* Effect.addFinalizer(() => runtime.dispose);
   return { runtime, repoRoot, baseDir };
 });
@@ -3045,6 +3062,77 @@ const guidedCreate = (overrides: Record<string, unknown> = {}) =>
   });
 
 describe("TaskWorkspaceService first-slice workflow", () => {
+  it.effect(
+    "rejects a Guided create whose provider cannot enforce task-worktree-write",
+    () =>
+      Effect.gen(function* () {
+        const instanceId = ProviderInstanceId.make("instance-1");
+        const makeInstance = (capabilities: unknown): ProviderInstance =>
+          ({
+            instanceId,
+            driverKind: ProviderDriverKind.make("codex"),
+            enabled: true,
+            adapter: { capabilities },
+          }) as unknown as ProviderInstance;
+        const registry = (
+          instance: ProviderInstance | undefined,
+        ): ProviderInstanceRegistryShape => ({
+          getInstance: (id) => Effect.succeed(id === instanceId ? instance : undefined),
+          listInstances: Effect.succeed(instance ? [instance] : []),
+          listUnavailable: Effect.succeed([]),
+          streamChanges: Stream.empty,
+          subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+        });
+
+        // A task-stage provider without task-worktree-write enforcement is
+        // rejected at create time so the task cannot be created, planned, and
+        // then wedged at implementation start with no provider-change path.
+        const { runtime: rejectingRuntime, repoRoot } = yield* setupRuntime(
+          "kata-task-gate-create-",
+          { mode: "running" },
+          registry(makeInstance({ supportsTaskStage: true })),
+        );
+        const service = yield* rejectingRuntime.runPromise(Effect.service(TaskWorkspaceService));
+        const rejected = yield* rejectingRuntime.runPromiseExit(service.dispatch(guidedCreate()));
+        expect(Exit.isFailure(rejected)).toBe(true);
+        if (Exit.isFailure(rejected)) {
+          expect((Cause.squash(rejected.cause) as Error).message).toContain("task-worktree-write");
+        }
+        yield* rejectingRuntime.dispose;
+
+        // The same create succeeds once the provider attests worktree-write.
+        const { runtime: acceptingRuntime, repoRoot: acceptingRoot } = yield* setupRuntime(
+          "kata-task-gate-create-ok-",
+          { mode: "running" },
+          registry(
+            makeInstance({
+              supportsTaskStage: true,
+              taskExecution: {
+                profile: "task-worktree-write",
+                trustedTaskInstructions: true,
+                worktreeOnlyWrites: true,
+                credentialIsolation: true,
+                deterministicResume: true,
+                boundedTurns: true,
+                networkDisabled: true,
+              },
+            }),
+          ),
+        );
+        const acceptingService = yield* acceptingRuntime.runPromise(
+          Effect.service(TaskWorkspaceService),
+        );
+        const accepted = yield* acceptingRuntime.runPromise(
+          acceptingService.dispatch(
+            guidedCreate({ taskId: TaskWorkspaceId.make("guided-gated-ok") }),
+          ),
+        );
+        expect(accepted.task.versions.workflowDefinition).toBe("guided@0.3.0");
+        void acceptingRoot;
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
   it.effect("creates a first-slice task with server-stamped identity", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot } = yield* setupRuntime("kata-task-slice5-create-");
