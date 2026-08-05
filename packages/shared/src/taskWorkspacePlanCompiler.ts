@@ -28,10 +28,10 @@ export type TaskWorkspaceCompiledPlan = BuildProjection & {
 export const TASK_WORKSPACE_PLAN_MAX_CHARS = 100_000;
 
 const ID = "[a-z][a-z0-9-]{0,63}";
-const PHASE_HEADER = new RegExp(`^## Phase \\[phase:(${ID})\\] (.+)$`, "gm");
-const WORK_HEADER = new RegExp(`^### Work item \\[work:(${ID})\\] (.+)$`, "gm");
+const PHASE_HEADER = new RegExp(`^## Phase \\[phase:(${ID})\\] (.+)`, "gm");
+const WORK_HEADER = new RegExp(`^### Work item \\[work:(${ID})\\] (.+)`, "gm");
 const CHECK_LINE =
-  /^[ \t]*[-*][ \t]+(Automated|Manual)[ \t]+check[ \t]+\[check:([a-z][a-z0-9-]{0,63})\]:[ \t]*(.+)$/i;
+  /^[ \t]*[-*][ \t]+(Automated|Manual)[ \t]+check[ \t]+\[check:([a-z][a-z0-9-]{0,63})\]:[ \t]*(.+)/i;
 const DEPENDENCIES = /^\s*Dependencies:\s*(.*?)\s*$/im;
 const CHECK_PHRASE = /^\s*[-*]\s+(?:Automated|Manual)\s+check\b/i;
 const CHECKPOINT_LINE = /^\s*Checkpoint:\s*(.*?)\s*$/im;
@@ -45,15 +45,19 @@ type HeadingToken = {
 
 function headings(markdown: string): HeadingToken[] {
   const tokens: HeadingToken[] = [];
-  const headingPattern = /^(#{1,6})[ \t]+([^\r\n]*)$/gm;
-  for (const match of markdown.matchAll(headingPattern)) {
-    const index = match.index ?? 0;
-    tokens.push({
-      level: match[1]!.length,
-      text: match[2]!.trimEnd(),
-      index,
-      end: index + match[0]!.length,
-    });
+  const headingPattern = /^(#{1,6})[ \t]+(.*)/;
+  let lineStart = 0;
+  for (const line of markdown.split("\n")) {
+    const match = line.match(headingPattern);
+    if (match) {
+      tokens.push({
+        level: match[1]!.length,
+        text: match[2]!.trimEnd(),
+        index: lineStart,
+        end: lineStart + line.length,
+      });
+    }
+    lineStart += line.length + 1;
   }
   return tokens;
 }
