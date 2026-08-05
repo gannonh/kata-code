@@ -137,7 +137,11 @@ async function waitForImplementationCheckpoint(
       if ((await candidate.getAttribute("title")) === "Checkpoint already continued.") continue;
       if (await candidate.isVisible().catch(() => false)) return checkpointId;
     }
-    if (/no eligible .*work item|Build stage completed/iu.test(latestAssistantText)) {
+    if (
+      /no eligible .*work item|all (?:approved )?phases and work items .*already completed|Build stage completed/iu.test(
+        latestAssistantText,
+      )
+    ) {
       noEligibleSince ??= Date.now();
       if (Date.now() - noEligibleSince >= 5_000) return null;
     } else {
