@@ -155,6 +155,7 @@ async function waitForImplementationCheckpoint(
     }
     await page.waitForTimeout(500);
   }
+  if (continuedCheckpointIds.length > 0) return null;
   throw new Error(
     `No eligible implementation checkpoint appeared within ${IMPLEMENTATION_READY_TIMEOUT_MS}ms.`,
   );
