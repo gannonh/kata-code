@@ -28,26 +28,47 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
     yield* taskWorkspaces.reconcilePendingProposals;
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (event.type !== "thread.activity-appended") return Effect.void;
-        const outcome = terminalOutcome(event);
-        const providerTurnId = event.payload.activity.turnId;
-        if (!outcome || providerTurnId === null) return Effect.void;
-        return taskWorkspaces
-          .settleProviderTurn({
-            threadId: event.payload.threadId,
-            providerTurnId,
-            outcome,
-          })
-          .pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("task workspace completion settlement failed", {
-                taskId: event.payload.threadId,
-                turnId: providerTurnId,
-                eventType: event.type,
-                cause: cause.message,
-              }),
+        const settleTerminal =
+          event.type === "thread.activity-appended"
+            ? (() => {
+                const outcome = terminalOutcome(event);
+                const providerTurnId = event.payload.activity.turnId;
+                if (!outcome || providerTurnId === null) return Effect.void;
+                return taskWorkspaces
+                  .settleProviderTurn({
+                    threadId: event.payload.threadId,
+                    providerTurnId,
+                    outcome,
+                  })
+                  .pipe(
+                    Effect.tapError((cause) =>
+                      Effect.logWarning("task workspace completion settlement failed", {
+                        taskId: event.payload.threadId,
+                        turnId: providerTurnId,
+                        eventType: event.type,
+                        cause: cause.message,
+                      }),
+                    ),
+                    Effect.ignore,
+                  );
+              })()
+            : Effect.void;
+        // A completion proposal and its durable terminal activity can be
+        // observed in either order. Reconcile after every domain event so the
+        // event that makes both records visible closes the proposal without a
+        // timing-based retry.
+        return settleTerminal.pipe(
+          Effect.andThen(
+            taskWorkspaces.reconcilePendingProposals.pipe(
+              Effect.tapError((cause) =>
+                Effect.logWarning("task workspace completion reconciliation failed", {
+                  cause: cause.message,
+                }),
+              ),
+              Effect.ignore,
             ),
-          );
+          ),
+        );
       }),
     );
   }),
