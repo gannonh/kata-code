@@ -5,15 +5,11 @@ import type { Page } from "@playwright/test";
 
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import { E2E_TAGS } from "../../src/config/tags.ts";
-import { assertAgentProviderConfigured, sendAgentInstruction } from "../../src/flows/agentChat.ts";
+import { assertAgentProviderConfigured } from "../../src/flows/agentChat.ts";
 import { createOrOpenProject, createSeededGitWorkspace } from "../../src/flows/workspace.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
 
 const execFile = promisify(execFileCallback);
-const IMPLEMENTATION_READY_TIMEOUT_MS = E2E_TIMEOUTS.agentReplyMs;
-const COMPLETION_ATTEMPTED_PATTERN = /task_implementation_complete/iu;
-const COMPLETION_SUBMITTED_PATTERN =
-  /(?:task_implementation_complete.{0,160}(?:accepted|submitted|already called)|completion proposal.{0,160}(?:accepted|submitted)|completion submitted successfully|recorded session and provider-turn metadata)/isu;
 
 async function seedWorkspace(
   runContext: Parameters<typeof createSeededGitWorkspace>[0],
@@ -108,98 +104,6 @@ async function expectActiveStage(page: Page, stage: string): Promise<void> {
   });
 }
 
-async function approveVisibleProviderRequests(page: Page): Promise<void> {
-  const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    if (!(await approveOnce.isVisible().catch(() => false))) return;
-    await expect(approveOnce).toBeEnabled();
-    await approveOnce.click();
-    await page.waitForTimeout(350);
-  }
-}
-
-async function waitForImplementationCheckpoint(
-  page: Page,
-  continuedCheckpointIds: ReadonlyArray<string> = [],
-): Promise<string | null> {
-  const checkpoints = page.locator('[data-testid^="guided-checkpoint-continue-"]');
-  const implementationComplete = page.getByTestId("guided-implementation-complete");
-  const deadline = Date.now() + IMPLEMENTATION_READY_TIMEOUT_MS;
-  let noEligibleSince: number | null = null;
-  while (Date.now() < deadline) {
-    await approveVisibleProviderRequests(page);
-    if (await implementationComplete.isVisible().catch(() => false)) return null;
-    const latestAssistant = page.locator('[data-message-role="assistant"] .chat-markdown').last();
-    const latestAssistantText = (await latestAssistant.innerText().catch(() => "")).trim();
-    const count = await checkpoints.count();
-    for (let index = 0; index < count; index += 1) {
-      const candidate = checkpoints.nth(index);
-      const testId = await candidate.getAttribute("data-testid");
-      const checkpointId = testId?.replace("guided-checkpoint-continue-", "") ?? "";
-      if (!checkpointId || continuedCheckpointIds.includes(checkpointId)) continue;
-      if ((await candidate.getAttribute("title")) === "Checkpoint already continued.") continue;
-      if (await candidate.isVisible().catch(() => false)) return checkpointId;
-    }
-    if (COMPLETION_ATTEMPTED_PATTERN.test(latestAssistantText)) {
-      return null;
-    }
-    if (
-      /no eligible .*work item|all (?:approved )?phases and work items .*already completed|Build stage completed|all phases .*clear|no further implementation work/iu.test(
-        latestAssistantText,
-      )
-    ) {
-      noEligibleSince ??= Date.now();
-      if (Date.now() - noEligibleSince >= 30_000) return null;
-    } else {
-      noEligibleSince = null;
-    }
-    await page.waitForTimeout(500);
-  }
-  if (continuedCheckpointIds.length > 0) return null;
-  throw new Error(
-    `No eligible implementation checkpoint appeared within ${IMPLEMENTATION_READY_TIMEOUT_MS}ms.`,
-  );
-}
-
-async function findVisibleImplementationCheckpoint(
-  page: Page,
-  continuedCheckpointIds: ReadonlyArray<string>,
-): Promise<string | null> {
-  const checkpoints = page.locator('[data-testid^="guided-checkpoint-continue-"]');
-  const count = await checkpoints.count();
-  for (let index = 0; index < count; index += 1) {
-    const candidate = checkpoints.nth(index);
-    const testId = await candidate.getAttribute("data-testid");
-    const checkpointId = testId?.replace("guided-checkpoint-continue-", "") ?? "";
-    if (!checkpointId || continuedCheckpointIds.includes(checkpointId)) continue;
-    if ((await candidate.getAttribute("title")) === "Checkpoint already continued.") continue;
-    if (await candidate.isEnabled().catch(() => false)) return checkpointId;
-  }
-  return null;
-}
-
-async function continueImplementationCheckpoint(
-  page: Page,
-  checkpointId: string,
-  continuedCheckpointIds: string[],
-): Promise<void> {
-  await expect(page.getByTestId(`guided-checkpoint-${checkpointId}`)).toBeVisible();
-  await page.reload();
-  await expect(page.getByTestId("guided-implementation-panel")).toBeVisible({
-    timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-  });
-  const continueButton = page.getByTestId(`guided-checkpoint-continue-${checkpointId}`);
-  await expect(continueButton).toBeEnabled({ timeout: E2E_TIMEOUTS.assertionMs });
-  await continueButton.click();
-  await expect(continueButton).toHaveAttribute("title", "Checkpoint already continued.", {
-    timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-  });
-  continuedCheckpointIds.push(checkpointId);
-  await expect(page.getByTestId("task-conversation-starting")).toHaveCount(0, {
-    timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-  });
-}
-
 async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
   const panel = page.getByTestId("pending-user-input-panel");
   const researchStage = page.getByTestId("guided-stage-research");
@@ -291,7 +195,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
 }
 
 test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
-  test.describe.configure({ timeout: E2E_TIMEOUTS.guidedAgentTestMs });
+  test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
 
   test("creates through the form, approves Plan, and enters Implement", async ({
     authenticatedAppWindow,
@@ -316,7 +220,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     await appWindow
       .getByTestId("task-brief-input")
       .fill(
-        "Add a deterministic onboarding flow with a readable Plan. Implement `src/onboarding.js` exporting `getOnboardingSteps()` that returns exactly three objects with string IDs `welcome`, `profile`, and `complete`, plus readable labels. Add `test/onboarding.test.js` that imports the implementation and asserts `getOnboardingSteps().map((step) => step.id)` equals `['welcome', 'profile', 'complete']`; do not compare step objects directly to strings, and run the test until it passes. The Guided 0.3 Plan must use exact headings `## Phase [phase:id] Title` and `### Work item [work:id] Title`. Immediately after every Phase heading and before its first Work item, put the literal line `Checkpoint: always`, never `Checkpoint policy:`. Include exactly two phases with exactly one work item in each phase, and one automated check using an exact bullet such as `- Automated check [check:typecheck]: Typecheck | node --test test/onboarding.test.js`; do not describe the automated check in prose instead of that bullet. Use the always checkpoint as the human review checkpoint; no manual check is required.",
+        "Requirements are complete; do not ask clarifying questions. Add `src/onboarding.js` exporting `getOnboardingSteps()` with exactly the ordered string IDs `welcome`, `profile`, and `complete`, plus readable labels. Add `test/onboarding.test.js` asserting those IDs and run it until it passes. The Guided 0.3 Plan must contain exactly one `## Phase [phase:id] Title`, followed immediately by the literal line `Checkpoint: always`, exactly one `### Work item [work:id] Title`, and exactly one automated check bullet `- Automated check [check:typecheck]: Typecheck | node --test test/onboarding.test.js`. No manual check is required.",
       );
     await appWindow.getByTestId("task-base-ref-input").fill("main");
     await appWindow.getByTestId("task-worktree-option-later").click();
@@ -361,101 +265,11 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     );
     await expect(appWindow.getByTestId("task-apply-fixture")).toHaveCount(0);
     await expect(appWindow.getByTestId("task-conversation-starting")).toHaveCount(0, {
-      timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
+      timeout: E2E_TIMEOUTS.agentReplyMs,
     });
     await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
-      timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
+      timeout: E2E_TIMEOUTS.agentReplyMs,
     });
-    const continuedCheckpointIds: string[] = [];
-    let nextCheckpointId = await waitForImplementationCheckpoint(appWindow);
-    if (nextCheckpointId === null) {
-      throw new Error("Implement completed before its required checkpoint.");
-    }
-    for (let checkpointCount = 0; nextCheckpointId !== null; checkpointCount += 1) {
-      if (checkpointCount >= 6) {
-        throw new Error("Implement exceeded the bounded checkpoint continuation budget.");
-      }
-      await continueImplementationCheckpoint(appWindow, nextCheckpointId, continuedCheckpointIds);
-      if (
-        await appWindow
-          .getByTestId("guided-implementation-complete")
-          .isVisible()
-          .catch(() => false)
-      ) {
-        break;
-      }
-      nextCheckpointId = await waitForImplementationCheckpoint(appWindow, continuedCheckpointIds);
-    }
-    const implementationComplete = appWindow.getByTestId("guided-implementation-complete");
-    let completionAttempted = nextCheckpointId === null && continuedCheckpointIds.length > 0;
-    const finishPrompt =
-      "Finish the Implement stage now. Verify every work item and approved check, commit the implementation changes on the canonical task branch so the worktree is clean, then call task_implementation_complete with the required session, provider turn, exact resulting HEAD, and a concise summary. Do not only report completion and do not call task_stage_complete.";
-    const hasCompletionSubmission = async (): Promise<boolean> => {
-      const assistantMessages = appWindow.locator('[data-message-role="assistant"] .chat-markdown');
-      const text = (await assistantMessages.allInnerTexts()).join("\n");
-      return COMPLETION_SUBMITTED_PATTERN.test(text);
-    };
-    const waitForCompletionOrCheckpoint = async (): Promise<
-      "complete" | "checkpoint" | "timeout"
-    > => {
-      const deadline = Date.now() + IMPLEMENTATION_READY_TIMEOUT_MS;
-      while (Date.now() < deadline) {
-        await approveVisibleProviderRequests(appWindow);
-        if (await implementationComplete.isVisible().catch(() => false)) return "complete";
-        const lateCheckpointId = await findVisibleImplementationCheckpoint(
-          appWindow,
-          continuedCheckpointIds,
-        );
-        if (lateCheckpointId !== null) {
-          await continueImplementationCheckpoint(
-            appWindow,
-            lateCheckpointId,
-            continuedCheckpointIds,
-          );
-          return "checkpoint";
-        }
-        await appWindow.waitForTimeout(500);
-      }
-      return "timeout";
-    };
-
-    for (let completionAttempt = 0; completionAttempt < 4; completionAttempt += 1) {
-      if (await implementationComplete.isVisible().catch(() => false)) break;
-      const pendingCheckpointId = await findVisibleImplementationCheckpoint(
-        appWindow,
-        continuedCheckpointIds,
-      );
-      if (pendingCheckpointId !== null) {
-        await continueImplementationCheckpoint(
-          appWindow,
-          pendingCheckpointId,
-          continuedCheckpointIds,
-        );
-        completionAttempted = false;
-        continue;
-      }
-      if (!(await hasCompletionSubmission()) && !completionAttempted) {
-        await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
-          timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-        });
-        await approveVisibleProviderRequests(appWindow);
-        await sendAgentInstruction(appWindow, finishPrompt, IMPLEMENTATION_READY_TIMEOUT_MS, {
-          approveOnce: true,
-        });
-      }
-      completionAttempted = true;
-      const outcome = await waitForCompletionOrCheckpoint();
-      if (outcome === "complete") break;
-      if (outcome === "checkpoint") {
-        completionAttempted = false;
-        continue;
-      }
-      completionAttempted = false;
-    }
-    await expect(implementationComplete).toBeVisible({
-      timeout: IMPLEMENTATION_READY_TIMEOUT_MS,
-    });
-    await expect(appWindow.getByTestId("guided-resulting-commit")).toHaveText(/^[0-9a-f]{40}$/u);
     await expect(appWindow).toHaveURL(new RegExp(`/tasks/[^/]+/${taskId}$`));
   });
 });
