@@ -73,6 +73,13 @@ const make = Effect.gen(function* () {
   const sessionDirectory = yield* Effect.serviceOption(ProviderSessionDirectory);
   const error = (code: typeof TaskImplementationToolError.Type.code, message: string) =>
     new TaskImplementationToolError({ code, message });
+  // Keep a precise error code produced by `resolve` (or the task workspace
+  // service) instead of overwriting it with a generic fallback code, so the
+  // model steers toward the correct recovery.
+  const preserveToolError =
+    (fallback: typeof TaskImplementationToolError.Type.code) =>
+    (cause: { readonly message: string }) =>
+      Schema.is(TaskImplementationToolError)(cause) ? cause : error(fallback, cause.message);
 
   const resolve: TaskImplementationBridgeShape["resolve"] = Effect.fn(
     "TaskImplementationBridge.resolve",
@@ -185,7 +192,7 @@ const make = Effect.gen(function* () {
           summary: input.summary,
         }),
       ),
-      Effect.mapError((cause) => error("invalid", cause.message)),
+      Effect.mapError(preserveToolError("invalid")),
     );
   const checkRun: TaskImplementationBridgeShape["checkRun"] = (scope, input) =>
     resolve(scope).pipe(
@@ -197,7 +204,7 @@ const make = Effect.gen(function* () {
           operationKey: `implementation-check:${invocation.occurrence.id}:${invocation.providerTurnId}:${input.checkId}`,
         }),
       ),
-      Effect.mapError((cause) => error("check-blocked", cause.message)),
+      Effect.mapError(preserveToolError("check-blocked")),
     );
   const amendmentPropose: TaskImplementationBridgeShape["amendmentPropose"] = (scope, input) =>
     resolve(scope).pipe(
@@ -209,7 +216,7 @@ const make = Effect.gen(function* () {
           operationKey: `implementation-amendment:${invocation.occurrence.id}:${invocation.providerTurnId}:${input.phaseId}:${input.workItemId}`,
         }),
       ),
-      Effect.mapError((cause) => error("conflict", cause.message)),
+      Effect.mapError(preserveToolError("conflict")),
     );
   const complete: TaskImplementationBridgeShape["complete"] = (scope, input) =>
     resolve(scope).pipe(
@@ -223,7 +230,7 @@ const make = Effect.gen(function* () {
           providerTurnId: invocation.providerTurnId,
         }),
       ),
-      Effect.mapError((cause) => error("conflict", cause.message)),
+      Effect.mapError(preserveToolError("conflict")),
     );
 
   return {

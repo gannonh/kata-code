@@ -71,7 +71,7 @@ import {
   type ActiveTaskProviderContext,
 } from "../../taskWorkspace/TaskWorkspaceService.ts";
 import type { TaskWorkspaceStage } from "@kata-sh/code-contracts";
-import { trustedStageInstructions } from "../../taskWorkspace/taskStageInstructions.ts";
+import { trustedInstructionsForStage } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
@@ -455,7 +455,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
       const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
       const developerInstructions = activeTaskStage
-        ? trustedStageInstructions(activeTaskStage)
+        ? trustedInstructionsForStage(activeTaskStage)
         : (input.developerInstructions ?? persistedDeveloperInstructions);
       const restarted = yield* input.adapter.startSession({
         threadId: input.threadId,
@@ -622,7 +622,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         );
       }
       const developerInstructions = activeTaskStage
-        ? trustedStageInstructions(activeTaskStage)
+        ? trustedInstructionsForStage(activeTaskStage)
         : persistedDeveloperInstructions;
 
       yield* prepareMcpSession(
@@ -864,7 +864,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const developerInstructions =
           input.developerInstructions ??
           (activeTaskStage !== undefined
-            ? trustedStageInstructions(activeTaskStage)
+            ? trustedInstructionsForStage(activeTaskStage)
             : persistedDeveloperInstructions);
         const sessionWithInstance = yield* withMcpRotationLock(
           threadId,
@@ -989,21 +989,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         activeTaskStage === "build"
           ? yield* activeTaskProviderContextForThread(input.threadId)
           : undefined;
-      if (activeTaskStage === "build" && !activeTaskContext) {
-        return yield* toValidationError(
-          "ProviderService.sendTurn",
-          "The active Build task has no canonical worktree/provider profile.",
-        );
-      }
-      if (
-        activeTaskStage === "build" &&
-        activeTaskContext?.providerInstanceId !== routed.instanceId
-      ) {
-        return yield* toValidationError(
-          "ProviderService.sendTurn",
-          "The routed provider instance is not pinned to the active Build task.",
-        );
-      }
+      yield* assertPinnedToActiveBuildTask({
+        operation: "ProviderService.sendTurn",
+        activeTaskStage,
+        activeTaskContext,
+        providerInstanceId: routed.instanceId,
+      });
       const providerInteractionMode = normalizeTaskStageInteractionMode({
         isTaskStage: activeTaskStage !== undefined,
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
@@ -1022,7 +1013,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               ...input,
               ...(activeTaskContext ? { modelSelection: activeTaskContext.modelSelection } : {}),
               ...(activeTaskContext
-                ? { developerInstructions: trustedStageInstructions("build") }
+                ? { developerInstructions: trustedInstructionsForStage("build") }
                 : {}),
               taskStage: true,
               taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
