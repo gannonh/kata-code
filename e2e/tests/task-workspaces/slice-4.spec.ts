@@ -81,6 +81,16 @@ async function selectTaskProvider(page: Page, provider: string, model: string): 
   await modelSelect.selectOption(modelOption);
 }
 
+/**
+ * Task-owned stage conversations are internal to the Task route. None of the
+ * task's threads may surface as a peer row in the Chats sidebar.
+ */
+async function expectNoTaskThreadsInChatSidebar(page: Page): Promise<void> {
+  // Task stage threads are created by the server as `thread-task-<uuid>`.
+  const taskThreadRows = page.locator('[data-testid^="thread-row-thread-task-"]');
+  await expect(taskThreadRows).toHaveCount(0);
+}
+
 async function expectActiveStage(page: Page, stage: string): Promise<void> {
   const stageItem = page.getByTestId(`guided-stage-${stage}`);
   const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
@@ -241,6 +251,10 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     await expect(appWindow.getByTestId("task-context-manifests-panel")).toHaveCount(0);
     await expect(appWindow.getByTestId("task-sessions-panel")).toHaveCount(0);
 
+    // The Task is the navigation unit: its stage conversations stay inside the
+    // Task route and never appear as peer Chat rows.
+    await expectNoTaskThreadsInChatSidebar(appWindow);
+
     await answerGuidedClarifyQuestions(appWindow);
     await expectActiveStage(appWindow, "research");
     await expectActiveStage(appWindow, "design");
@@ -271,5 +285,23 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       timeout: E2E_TIMEOUTS.agentReplyMs,
     });
     await expect(appWindow).toHaveURL(new RegExp(`/tasks/[^/]+/${taskId}$`));
+    await expectNoTaskThreadsInChatSidebar(appWindow);
+
+    // Completed stages are inspectable history, and the route never changes.
+    await appWindow.getByTestId("guided-stage-plan").click();
+    await expect(appWindow.getByTestId("task-stage-historical-banner")).toBeVisible();
+    await expect(appWindow.getByTestId("task-stage-subtitle")).toContainText("read-only history");
+    await expect(appWindow.getByTestId("task-stage-outcome-view")).toBeVisible();
+    await expect(appWindow.getByTestId("guided-stage-build")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    await expect(appWindow).toHaveURL(new RegExp(`/tasks/[^/]+/${taskId}$`));
+
+    await appWindow.getByTestId("task-stage-return-to-current").click();
+    await expect(appWindow.getByTestId("task-stage-subtitle")).toContainText("current stage");
+    await expect(appWindow.getByTestId("composer-editor")).toBeVisible({
+      timeout: E2E_TIMEOUTS.agentReplyMs,
+    });
   });
 });
