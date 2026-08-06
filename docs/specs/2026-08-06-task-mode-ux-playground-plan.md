@@ -1,8 +1,8 @@
 ---
 type: Plan
 title: "Task mode UX Playground exploration"
-description: "Short prototype plan for comparing a refined conversation-plus-panel Task layout with a Task-first horizontal-stage workspace before approving Agent Runtime convergence."
-status: Active
+description: "Fixture-driven prototype record for selecting the production Task conversation-plus-panel shell before Agent Runtime convergence."
+status: Completed
 tags: [specs, task-mode, ux, playground, prototype, workflows]
 timestamp: 2026-08-06T00:00:00Z
 parent: /specs/2026-08-01-task-mode-design.md
@@ -23,8 +23,9 @@ commands, persistence, routing, or provider behavior change during this explorat
 
 ## Current status
 
-Both prototype layouts and the shared scenario catalog are implemented. The exploration remains
-**Active** until maintainer UAT chooses a direction; implementation does not imply acceptance.
+Both prototype layouts and the shared scenario catalog were implemented. Maintainer UAT selected
+**Prototype A — refined current layout** as the production direction. The bounded production shell
+plan is [Task mode conversation-plus-panel shell](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md).
 
 ```bash
 pnpm run dev
@@ -36,6 +37,19 @@ vp test run --project browser src/components/playground/taskMode/TaskModePrototy
 cd ../../
 vp run e2e --project desktop-dev --grep @task-mode-ux
 ```
+
+## Decision — Prototype A accepted
+
+Prototype A is the accepted Task mode shell:
+
+- the active stage conversation remains the primary canvas;
+- a persistent right Task panel owns stage navigation, progress, outcomes, history, and actions;
+- completed stages are read-only by default and expose outcome-first history;
+- occurrence revision and **Revise from here** remain explicit and preserve append-only history; and
+- the horizontal-stage rail and collapsible inspector are not part of the production direction.
+
+The Playground remains available as fixture evidence while the bounded production shell plan is
+implemented. This decision does not change provider contracts or Agent Runtime lifecycle.
 
 ## Shared product hypothesis
 
@@ -49,7 +63,7 @@ Both prototypes test the same Task-first model:
 - returning to current work is always visible; and
 - revisiting a prior stage is an explicit, impact-previewed branch action that preserves history.
 
-## Prototype A — refined current layout
+## Prototype A — refined current layout (accepted)
 
 Retain the current conversation-first, two-column composition:
 
@@ -60,12 +74,12 @@ Retain the current conversation-first, two-column composition:
 - a historical-stage banner with **Return to current**; and
 - past-stage outcome and conversation views inside the existing shell.
 
-This variant determines whether the current overall layout is sound once navigation leakage and
-panel hierarchy are corrected.
+This variant is the accepted production direction. The bounded implementation work is recorded in
+[Task mode conversation-plus-panel shell](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md).
 
-## Prototype B — horizontal stage workspace
+## Prototype B — horizontal stage workspace (rejected as primary shell)
 
-Move stage navigation above the content:
+The comparison variant moved stage navigation above the content:
 
 - horizontal workflow rail below the Task header;
 - current-stage conversation in the main canvas;
@@ -73,8 +87,8 @@ Move stage navigation above the content:
 - optional collapsible details inspector; and
 - explicit stage occurrence/history selection when a stage has more than one outcome.
 
-This variant tests whether stages should be the persistent primary navigation rather than content
-inside the Task panel.
+Maintainer UAT rejected this as the primary production shell. It remains historical comparison
+evidence only; stages stay inside the persistent Task panel.
 
 ## Branch interaction
 
@@ -117,11 +131,7 @@ A prototype is viable when a maintainer can answer without explanation:
 
 ## Exit
 
-After interactive UAT:
-
-- record the preferred layout and rejected aspects;
-- update the authoritative [Task mode parent](/specs/2026-08-01-task-mode-design.md);
-- write the bounded production UX child plan;
-- rebase the [Agent Runtime convergence design](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
-  on the accepted Task shell; and
-- retain the rejected prototype only as historical design evidence.
+The UAT decision is recorded above. The authoritative [Task mode parent](/specs/2026-08-01-task-mode-design.md)
+links the accepted shell plan, and the [Agent Runtime convergence design](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+may now be reviewed against that shell. The rejected horizontal variant remains historical design
+evidence and is not a production navigation recommendation.

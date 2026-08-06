@@ -14,7 +14,7 @@ export const PLAYGROUND_EXPERIMENTS: readonly PlaygroundExperiment[] = [
     id: "task-mode-ux",
     title: "Task mode UX",
     description:
-      "Compare a refined conversation-plus-panel layout with a horizontal-stage Task workspace across shared fixtures.",
+      "Explore the accepted conversation-plus-panel Task workspace across shared history and revision fixtures.",
     to: "/playground/task-mode",
     status: "active",
   },

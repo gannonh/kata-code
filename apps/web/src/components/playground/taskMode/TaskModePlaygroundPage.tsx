@@ -1,35 +1,15 @@
 import { Link } from "@tanstack/react-router";
-import { Columns3Icon, Rows3Icon } from "lucide-react";
 import { useState } from "react";
 
-import { Button } from "../../ui/button";
-import { TaskModePrototype, type TaskModePrototypeLayout } from "./TaskModePrototype";
+import { TaskModePrototype } from "./TaskModePrototype";
 import {
   getTaskModePrototypeScenario,
   listTaskModePrototypeScenarios,
   type TaskModePrototypeScenarioId,
 } from "./taskModePlaygroundFixtures";
 
-const LAYOUTS: ReadonlyArray<{
-  readonly id: TaskModePrototypeLayout;
-  readonly label: string;
-  readonly description: string;
-}> = [
-  {
-    id: "current-refined",
-    label: "Refined current",
-    description: "Conversation plus persistent right Task panel",
-  },
-  {
-    id: "horizontal-stages",
-    label: "Horizontal stages",
-    description: "Top workflow rail plus optional details inspector",
-  },
-];
-
 export function TaskModePlaygroundPage() {
   const [scenarioId, setScenarioId] = useState<TaskModePrototypeScenarioId>("design-running");
-  const [layout, setLayout] = useState<TaskModePrototypeLayout>("current-refined");
   const scenario = getTaskModePrototypeScenario(scenarioId);
 
   return (
@@ -47,9 +27,9 @@ export function TaskModePlaygroundPage() {
           </Link>
           <div className="hidden h-5 w-px bg-border sm:block" />
           <div className="hidden min-w-0 sm:block">
-            <p className="truncate text-xs font-semibold">Task mode UX</p>
+            <p className="truncate text-xs font-semibold">Task mode · Prototype A</p>
             <p className="truncate text-[10px] text-muted-foreground">
-              Fixture-only design exploration
+              Conversation plus Task panel
             </p>
           </div>
         </div>
@@ -74,35 +54,14 @@ export function TaskModePlaygroundPage() {
             </select>
           </label>
 
-          <div className="flex rounded-lg border border-border bg-background p-0.5">
-            {LAYOUTS.map((candidate) => {
-              const isActive = layout === candidate.id;
-              return (
-                <Button
-                  key={candidate.id}
-                  aria-pressed={isActive}
-                  data-testid={`task-mode-layout-option-${candidate.id}`}
-                  data-active={isActive || undefined}
-                  size="xs"
-                  variant={isActive ? "secondary" : "ghost"}
-                  title={candidate.description}
-                  onClick={() => setLayout(candidate.id)}
-                >
-                  {candidate.id === "current-refined" ? (
-                    <Columns3Icon className="size-3.5" />
-                  ) : (
-                    <Rows3Icon className="size-3.5" />
-                  )}
-                  <span className="hidden md:inline">{candidate.label}</span>
-                </Button>
-              );
-            })}
-          </div>
+          <span className="rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-[11px] font-medium text-primary">
+            Accepted shell
+          </span>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1" title={scenario.description}>
-        <TaskModePrototype key={`${scenarioId}:${layout}`} scenario={scenario} layout={layout} />
+        <TaskModePrototype key={scenarioId} scenario={scenario} layout="current-refined" />
       </div>
     </div>
   );

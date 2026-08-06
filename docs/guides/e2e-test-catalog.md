@@ -16,18 +16,18 @@ Tag selection differs by suite: desktop uses Playwright `--grep @tag`; mobile us
 
 Specs under [`e2e/tests/`](../../e2e/tests/) use a project-aware fixture and can run against Electron (`desktop-dev`) or Chromium (`web-dev`). The browser recording template under `e2e/tests/web/` remains web-only.
 
-| Test                                                                                             | Tag                       | Covers                                                                                                     |
-| ------------------------------------------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| [`smoke/app-launch.spec.ts`](../../e2e/tests/smoke/app-launch.spec.ts)                           | `@smoke`                  | Launches either target past pairing and reaches the app shell                                              |
-| [`smoke/sidebar-v2.spec.ts`](../../e2e/tests/smoke/sidebar-v2.spec.ts)                           | `@sidebar`                | Attention-tier sidebar chrome, no show-more, new-session accordion opens                                   |
-| [`agent/deterministic-chat.spec.ts`](../../e2e/tests/agent/deterministic-chat.spec.ts)           | `@agent`                  | Exact assistant reply from a real provider                                                                 |
-| [`agent/cursor-skills.spec.ts`](../../e2e/tests/agent/cursor-skills.spec.ts)                     | `@cursor`                 | Cursor filesystem skills in the Composer menu and path-qualified token insertion                           |
-| [`agent/pi-smoke.spec.ts`](../../e2e/tests/agent/pi-smoke.spec.ts)                               | `@pi`                     | Pi streaming, interrupt/stop, tool-call work row, runtime-mode warning (creds-gated)                       |
-| [`agent/pi-catalog.spec.ts`](../../e2e/tests/agent/pi-catalog.spec.ts)                           | `@pi-update`              | Built-in Pi catalog discovery and real-model reply (creds-gated)                                           |
-| [`settings/theme.spec.ts`](../../e2e/tests/settings/theme.spec.ts)                               | `@settings`               | Dark theme persists after reload                                                                           |
-| [`settings/pi-provider.spec.ts`](../../e2e/tests/settings/pi-provider.spec.ts)                   | `@settings`               | Pi first in providers, add Pi instance, Pi rail in model picker                                            |
-| [`task-workspaces/slice-4.spec.ts`](../../e2e/tests/task-workspaces/slice-4.spec.ts)             | `@task-workspaces @agent` | Guided creation, automatic handoffs, and approved Plan (provider prerequisites required)                   |
-| [`task-workspaces/ux-playground.spec.ts`](../../e2e/tests/task-workspaces/ux-playground.spec.ts) | `@task-mode-ux`           | Dev-only comparison of current and horizontal-stage Task layouts, history branching, and narrow navigation |
+| Test                                                                                             | Tag                       | Covers                                                                                      |
+| ------------------------------------------------------------------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------- |
+| [`smoke/app-launch.spec.ts`](../../e2e/tests/smoke/app-launch.spec.ts)                           | `@smoke`                  | Launches either target past pairing and reaches the app shell                               |
+| [`smoke/sidebar-v2.spec.ts`](../../e2e/tests/smoke/sidebar-v2.spec.ts)                           | `@sidebar`                | Attention-tier sidebar chrome, no show-more, new-session accordion opens                    |
+| [`agent/deterministic-chat.spec.ts`](../../e2e/tests/agent/deterministic-chat.spec.ts)           | `@agent`                  | Exact assistant reply from a real provider                                                  |
+| [`agent/cursor-skills.spec.ts`](../../e2e/tests/agent/cursor-skills.spec.ts)                     | `@cursor`                 | Cursor filesystem skills in the Composer menu and path-qualified token insertion            |
+| [`agent/pi-smoke.spec.ts`](../../e2e/tests/agent/pi-smoke.spec.ts)                               | `@pi`                     | Pi streaming, interrupt/stop, tool-call work row, runtime-mode warning (creds-gated)        |
+| [`agent/pi-catalog.spec.ts`](../../e2e/tests/agent/pi-catalog.spec.ts)                           | `@pi-update`              | Built-in Pi catalog discovery and real-model reply (creds-gated)                            |
+| [`settings/theme.spec.ts`](../../e2e/tests/settings/theme.spec.ts)                               | `@settings`               | Dark theme persists after reload                                                            |
+| [`settings/pi-provider.spec.ts`](../../e2e/tests/settings/pi-provider.spec.ts)                   | `@settings`               | Pi first in providers, add Pi instance, Pi rail in model picker                             |
+| [`task-workspaces/slice-4.spec.ts`](../../e2e/tests/task-workspaces/slice-4.spec.ts)             | `@task-workspaces @agent` | Guided creation, automatic handoffs, and approved Plan (provider prerequisites required)    |
+| [`task-workspaces/ux-playground.spec.ts`](../../e2e/tests/task-workspaces/ux-playground.spec.ts) | `@task-mode-ux`           | Dev-only acceptance flow for Prototype A history branching, revision, and narrow navigation |
 
 Harness and flows (shared building blocks, not tests): [`e2e/src/harness/`](../../e2e/src/harness/), [`e2e/src/flows/`](../../e2e/src/flows/).
 

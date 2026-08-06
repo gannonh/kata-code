@@ -4,7 +4,7 @@ import { openTaskModePlayground } from "../../src/flows/taskModePlayground.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
 
 test.describe(`Task mode UX Playground ${E2E_TAGS.taskModeUx}`, () => {
-  test("compares both layouts and preserves inspectable branch history", async ({
+  test("validates Prototype A history, revision, and narrow navigation", async ({
     appPage,
     appTarget,
     launchedApp,
@@ -17,9 +17,6 @@ test.describe(`Task mode UX Playground ${E2E_TAGS.taskModeUx}`, () => {
 
     await expect(appPage.getByTestId("task-mode-current-layout-panel")).toBeVisible();
     await expect(appPage.getByLabel("Message Design")).toBeVisible();
-
-    await appPage.getByTestId("task-mode-layout-option-horizontal-stages").click();
-    await expect(appPage.getByTestId("task-mode-horizontal-stage-rail")).toBeVisible();
 
     await appPage.getByLabel("Scenario").selectOption("branch-history");
     await expect(appPage.getByText("Viewing Design v2")).toBeVisible();
