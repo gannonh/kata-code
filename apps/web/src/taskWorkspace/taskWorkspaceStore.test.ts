@@ -1,7 +1,9 @@
-import { EnvironmentId, type TaskWorkspace } from "@kata-sh/code-contracts";
+import { EnvironmentId, ThreadId, type TaskWorkspace } from "@kata-sh/code-contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { shallow } from "zustand/shallow";
 
 import {
+  selectTaskOwnedThreadKeys,
   selectTaskRefsById,
   selectTaskByRef,
   selectTaskWorkspaces,
@@ -124,6 +126,70 @@ describe("taskWorkspaceStore", () => {
     useTaskWorkspaceStore.getState().resetEnvironment(envB);
     expect(selectTaskByRef(useTaskWorkspaceStore.getState(), envA, "task-a")).not.toBeNull();
     expect(selectTaskByRef(useTaskWorkspaceStore.getState(), envB, "task-b")).toBeNull();
+  });
+
+  it("claims every thread a task owns so the chat sidebar can hide them", () => {
+    const task = makeTask("task-guided", "2026-07-28T18:00:00.000Z", envA);
+    useTaskWorkspaceStore.getState().applyStreamItem(envA, {
+      kind: "snapshot",
+      snapshot: {
+        sequence: 1,
+        tasks: [
+          {
+            ...task,
+            sessions: [
+              {
+                id: "session-1",
+                stage: "questions",
+                threadId: ThreadId.make("thread-clarify"),
+                role: "primary",
+                provider: null,
+                status: "active",
+                parentSessionId: null,
+                contextManifestId: null,
+                forkPoint: null,
+                createdAt: "2026-07-28T18:00:00.000Z",
+              },
+            ],
+            occurrences: [
+              {
+                id: "occurrence-1",
+                stage: "plan",
+                ordinal: 0,
+                status: "completed",
+                sessionId: null,
+                threadId: ThreadId.make("thread-plan"),
+                contextManifestId: null,
+                artifactRevisionId: null,
+                completionProposalId: null,
+                gateOutcome: null,
+                feedback: null,
+                supersedesOccurrenceId: null,
+                createdAt: "2026-07-28T18:00:00.000Z",
+                completedAt: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const owned = selectTaskOwnedThreadKeys(useTaskWorkspaceStore.getState());
+    expect(owned.has(`${envA}:thread-clarify`)).toBe(true);
+    expect(owned.has(`${envA}:thread-plan`)).toBe(true);
+    expect(owned.has(`${envB}:thread-clarify`)).toBe(false);
+    expect(owned.has(`${envA}:thread-standard-chat`)).toBe(false);
+  });
+
+  it("keeps the owned-thread set shallow-equal so the sidebar does not re-render", () => {
+    useTaskWorkspaceStore.getState().applyStreamItem(envA, {
+      kind: "snapshot",
+      snapshot: { sequence: 1, tasks: [makeTask("task-a", "2026-07-28T18:00:00.000Z", envA)] },
+    });
+
+    const first = selectTaskOwnedThreadKeys(useTaskWorkspaceStore.getState());
+    const second = selectTaskOwnedThreadKeys(useTaskWorkspaceStore.getState());
+    expect(shallow(first, second)).toBe(true);
   });
 
   it("finds duplicate task ids across environments for the compatibility route", () => {

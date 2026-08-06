@@ -93,6 +93,10 @@ import {
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
 import { TaskWorkspaceSidebar } from "./taskWorkspace/TaskWorkspaceSidebar";
+import {
+  selectTaskOwnedThreadKeys,
+  useTaskWorkspaceStore,
+} from "../taskWorkspace/taskWorkspaceStore";
 import { isTaskModeEnabled } from "../featureFlags";
 
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
@@ -201,7 +205,22 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
 
 export default function Sidebar() {
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const allSidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const taskOwnedThreadKeys = useTaskWorkspaceStore(useShallow(selectTaskOwnedThreadKeys));
+  // Task-owned stage conversations belong to the Task route. They never appear
+  // as peer Chat rows, and never become thread-jump targets.
+  const sidebarThreads = useMemo(
+    () =>
+      taskOwnedThreadKeys.size === 0
+        ? allSidebarThreads
+        : allSidebarThreads.filter(
+            (thread) =>
+              !taskOwnedThreadKeys.has(
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+              ),
+          ),
+    [allSidebarThreads, taskOwnedThreadKeys],
+  );
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });

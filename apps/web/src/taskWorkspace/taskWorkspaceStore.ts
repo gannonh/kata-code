@@ -119,6 +119,31 @@ export const selectTaskRefsById = (
     }))
     .filter((ref) => ref.environmentId !== null);
 
+/**
+ * Every thread a Task owns, keyed the same way the sidebar keys threads.
+ *
+ * Task-owned conversations are internal to the Task route: they are stage
+ * sessions, not peer chats. The chat sidebar subtracts this set so opening a
+ * Task never scatters its stages across the Chats list.
+ *
+ * Read it through `useShallow` — zustand compares Set contents, so an unchanged
+ * task graph does not re-render the sidebar.
+ */
+export const selectTaskOwnedThreadKeys = (state: TaskWorkspaceState): ReadonlySet<string> => {
+  const keys = new Set<string>();
+  for (const task of Object.values(state.taskByRef)) {
+    const environmentId = task.environmentId;
+    if (environmentId === null) continue;
+    for (const session of task.sessions) {
+      keys.add(`${environmentId}:${session.threadId}`);
+    }
+    for (const occurrence of task.occurrences) {
+      if (occurrence.threadId !== null) keys.add(`${environmentId}:${occurrence.threadId}`);
+    }
+  }
+  return keys;
+};
+
 export function currentTaskStage(
   task: TaskWorkspace,
 ): TaskWorkspace["workflowRuns"][number]["currentStage"] {
