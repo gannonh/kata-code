@@ -183,7 +183,16 @@ const baseTask: TaskWorkspace = {
   updatedAt: "2026-07-28T17:00:00.000Z",
 };
 
-async function renderTask(task: TaskWorkspace) {
+/** Desktop width: the Task panel is docked beside the conversation. */
+const DESKTOP_VIEWPORT = { width: 1280, height: 900 } as const;
+/** Below `lg`: the panel moves behind the header trigger as a sheet. */
+const NARROW_VIEWPORT = { width: 820, height: 900 } as const;
+
+async function renderTask(
+  task: TaskWorkspace,
+  viewport: { readonly width: number; readonly height: number } = DESKTOP_VIEWPORT,
+) {
+  await page.viewport(viewport.width, viewport.height);
   useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
     kind: "snapshot",
     snapshot: { sequence: 1, tasks: [task] },
@@ -1317,7 +1326,9 @@ describe("TaskWorkspaceView", () => {
     );
 
     expect(page.getByTestId("mock-task-chat").query()).toBeNull();
-    await expect.element(page.getByTestId("task-approved-plan-readonly")).toBeVisible();
+    await expect
+      .element(page.getByTestId("task-conversation-starting"))
+      .toHaveTextContent("Preparing the Implement conversation");
   });
 
   it("dispatches Guided amendment request changes with feedback", async () => {

@@ -37,8 +37,8 @@ import { Textarea } from "../ui/textarea";
 import { ArtifactsPanel } from "./ArtifactsPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { ContextManifestPanel } from "./ContextManifestPanel";
-import { GuidedTaskPanel } from "./GuidedTaskPanel";
 import { SessionsPanel } from "./SessionsPanel";
+import { TaskShellView } from "./TaskShellView";
 
 function operationKey(commandId: string, action: string): string {
   return `task-${action}-${commandId}`;
@@ -966,96 +966,27 @@ function PreviewTaskPanel({ task }: { readonly task: TaskWorkspace }) {
 function TaskFirstSliceView({
   task,
   commands,
-  threadRef,
-  hasActiveThread,
   currentUser,
 }: {
   readonly task: TaskWorkspace;
   readonly commands: ReturnType<typeof useTaskWorkspaceCommands>;
-  readonly threadRef: { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null;
-  readonly hasActiveThread: boolean;
   readonly currentUser: TaskWorkspaceCommentAuthor;
 }) {
   const catalogEntry = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
-  const stage = currentTaskStage(task);
-  const stageLabel = TASK_WORKSPACE_STAGE_PRESENTATION[stage];
-  const planOccurrence = task.occurrences
-    .filter((candidate) => candidate.stage === "plan")
-    .toSorted((left, right) => right.ordinal - left.ordinal)[0];
-  const approvedPlan =
-    stage === "plan" &&
-    planOccurrence?.status === "completed" &&
-    planOccurrence.gateOutcome === "approved";
-  const planArtifact = latestArtifact(task, "plan");
-  const buildReadOnlyPlan =
-    stage === "build" &&
-    planArtifact !== null &&
-    (task.build.resultingCommitSha !== null || !hasActiveThread);
-  const showReadOnlyPlan = Boolean((approvedPlan && planArtifact) || buildReadOnlyPlan);
-
-  return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
-      <header className="flex items-center gap-3 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{task.title}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {catalogEntry?.label ?? "Task"} · {stageLabel}
-          </p>
-        </div>
-        <Badge variant={approvedPlan ? "success" : "secondary"}>
-          {approvedPlan ? "Plan approved" : stageLabel}
-        </Badge>
-      </header>
-      <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <section className="min-h-0 min-w-0 overflow-hidden">
-          {showReadOnlyPlan && planArtifact ? (
-            <div
-              data-testid="task-approved-plan-readonly"
-              className="h-full overflow-auto p-5 sm:p-8"
-            >
-              <div className="mx-auto max-w-3xl rounded-xl border border-success/30 bg-card p-5">
-                <p className="text-xs font-medium uppercase tracking-wide text-success-foreground">
-                  Approved Plan
-                </p>
-                <h1 className="mt-2 text-xl font-semibold">{planArtifact.title}</h1>
-                <pre className="mt-5 whitespace-pre-wrap text-sm text-muted-foreground">
-                  {planArtifact.markdown}
-                </pre>
-              </div>
-            </div>
-          ) : threadRef && hasActiveThread ? (
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  Loading conversation…
-                </div>
-              }
-            >
-              <TaskChatView
-                environmentId={threadRef.environmentId}
-                threadId={threadRef.threadId}
-                routeKind="server"
-                reserveTitleBarControlInset
-              />
-            </Suspense>
-          ) : (
-            <div
-              data-testid="task-conversation-starting"
-              className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
-            >
-              Preparing the {stageLabel} conversation…
-            </div>
-          )}
-        </section>
-        {catalogEntry?.availableInFirstSlice ? (
-          <GuidedTaskPanel task={task} commands={commands} currentUser={currentUser} />
-        ) : (
+  if (!catalogEntry?.availableInFirstSlice) {
+    return (
+      <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+        <header className="flex items-center gap-3 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
+          <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold">{task.title}</p>
+        </header>
+        <main className="min-h-0 flex-1">
           <PreviewTaskPanel task={task} />
-        )}
-      </main>
-    </SidebarInset>
-  );
+        </main>
+      </SidebarInset>
+    );
+  }
+  return <TaskShellView task={task} commands={commands} currentUser={currentUser} />;
 }
 
 function TaskWorkspaceViewContent({
@@ -1137,15 +1068,7 @@ function TaskWorkspaceViewContent({
   }
 
   if (isFirstSliceTask) {
-    return (
-      <TaskFirstSliceView
-        task={task}
-        commands={commands}
-        threadRef={activeThreadRef}
-        hasActiveThread={activeThread !== undefined && "id" in activeThread}
-        currentUser={currentUser}
-      />
-    );
+    return <TaskFirstSliceView task={task} commands={commands} currentUser={currentUser} />;
   }
 
   const linkedSession =

@@ -4,7 +4,10 @@ import type {
   TaskWorkspaceStage,
   ThreadId,
 } from "@kata-sh/code-contracts";
-import { taskWorkspaceCatalogEntryForVersion } from "@kata-sh/code-shared/taskWorkspaceCatalog";
+import {
+  currentCatalogEntryForPreset,
+  taskWorkspaceCatalogEntryForVersion,
+} from "@kata-sh/code-shared/taskWorkspaceCatalog";
 
 import { currentTaskStage } from "./taskWorkspaceStore";
 
@@ -32,6 +35,8 @@ export interface TaskShellStage {
   readonly occurrences: ReadonlyArray<TaskShellOccurrence>;
   /** A stage the task has reached, and whose content can be inspected. */
   readonly isSelectable: boolean;
+  /** This build implements the stage, even if the pinned version defers it. */
+  readonly isAvailable: boolean;
 }
 
 /**
@@ -47,6 +52,10 @@ export function taskShellStages(task: TaskWorkspace): ReadonlyArray<TaskShellSta
   if (!catalog) return [];
   const activeStage = currentTaskStage(task);
   const activeIndex = catalog.stages.findIndex((entry) => entry.stage === activeStage);
+  // Availability is a property of this build, not of the version the task
+  // pinned: a task on an older definition still needs to see the stage it can
+  // be upgraded into.
+  const currentCatalog = currentCatalogEntryForPreset(catalog.preset);
   return catalog.stages.map((entry, index) => {
     const status: TaskShellStageStatus =
       entry.stage === activeStage
@@ -61,6 +70,9 @@ export function taskShellStages(task: TaskWorkspace): ReadonlyArray<TaskShellSta
       status,
       occurrences,
       isSelectable: status !== "upcoming" || occurrences.length > 0,
+      isAvailable:
+        (currentCatalog.stages.find((candidate) => candidate.stage === entry.stage)?.status ??
+          entry.status) !== "deferred",
     };
   });
 }
@@ -208,7 +220,14 @@ export function taskShellRevisionImpact(
  * the task is actually in.
  */
 function fallbackStage(stage: TaskWorkspaceStage): TaskShellStage {
-  return { stage, label: stage, status: "active", occurrences: [], isSelectable: true };
+  return {
+    stage,
+    label: stage,
+    status: "active",
+    occurrences: [],
+    isSelectable: true,
+    isAvailable: true,
+  };
 }
 
 function occurrenceOutcome(

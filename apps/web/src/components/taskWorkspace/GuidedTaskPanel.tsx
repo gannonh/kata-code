@@ -6,8 +6,8 @@ import {
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
 import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import { taskWorkspaceCatalogEntryForVersion } from "@kata-sh/code-shared/taskWorkspacePresets";
-import { CheckCircle2Icon, CircleIcon, GitBranchIcon, Loader2Icon } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeftIcon, GitBranchIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import type { TaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
 import { Badge } from "../ui/badge";
@@ -268,13 +268,24 @@ export function GuidedTaskPanel(props: {
   readonly task: TaskWorkspace;
   readonly commands: TaskWorkspaceCommands;
   readonly currentUser: TaskWorkspaceCommentAuthor;
+  /** Stage navigation, owned by the shell so selection stays view state. */
+  readonly stageRail?: ReactNode;
+  /** False while the user is inspecting history rather than the live path. */
+  readonly isViewingCurrent?: boolean;
+  readonly onReturnToCurrent?: () => void;
 }) {
-  const { task, commands, currentUser } = props;
+  const {
+    task,
+    commands,
+    currentUser,
+    stageRail,
+    isViewingCurrent = true,
+    onReturnToCurrent,
+  } = props;
   const [feedback, setFeedback] = useState("");
   const [manualNotes, setManualNotes] = useState<Record<string, string>>({});
   const [amendmentFeedback, setAmendmentFeedback] = useState<Record<string, string>>({});
   const stage = currentStage(task);
-  const catalog = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
   const artifact = latestArtifact(
     task,
     stage === "questions" || stage === "research" || stage === "design" || stage === "plan"
@@ -286,7 +297,6 @@ export function GuidedTaskPanel(props: {
   const approved = stage === "plan" && approvedPlanReady(task);
   const gateOpen = task.planGate?.status === "open";
   const repository = task.workspace.repositories[0];
-  const currentIndex = catalog?.stages.indexOf(stage) ?? -1;
   const worktreeOperationKey = repository?.baseCommitSha
     ? `${task.id}:worktree:${repository.baseCommitSha}:${task.preferences.worktreePolicy}`
     : null;
@@ -366,56 +376,36 @@ export function GuidedTaskPanel(props: {
   };
 
   return (
-    <aside
+    <div
       data-testid="guided-task-panel"
-      className="flex min-h-0 min-w-0 flex-col gap-4 overflow-auto border-t border-border bg-card p-4 lg:border-t-0 lg:border-l lg:p-5"
+      className="flex min-h-0 min-w-0 flex-col gap-4 bg-card p-4 lg:p-5"
     >
-      <header>
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Task</p>
-        <h2 className="mt-1 text-base font-semibold">{task.title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{task.intake.brief}</p>
-      </header>
+      {isViewingCurrent ? null : (
+        <div
+          data-testid="guided-history-notice"
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-info/30 bg-info/8 p-2.5 text-xs"
+        >
+          <span className="min-w-0 flex-1">
+            These actions apply to {TASK_WORKSPACE_STAGE_PRESENTATION[stage]}, not to the history
+            you are viewing.
+          </span>
+          {onReturnToCurrent ? (
+            <Button
+              data-testid="guided-panel-return-to-current"
+              size="xs"
+              variant="outline"
+              onClick={onReturnToCurrent}
+            >
+              <ArrowLeftIcon className="size-3.5" />
+              Return to current
+            </Button>
+          ) : null}
+        </div>
+      )}
 
-      {catalog ? (
-        <ol className="grid gap-1" data-testid="guided-stage-rail">
-          {catalog.stages
-            .filter((entry) => entry !== "verify" && entry !== "verified")
-            .map((entry, index) => {
-              const isActive = entry === stage;
-              const isComplete = index < currentIndex || (entry === "plan" && approved);
-              const needsUpgrade =
-                entry === "build" && task.versions.workflowDefinition === "guided@0.2.0";
-              return (
-                <li
-                  key={entry}
-                  data-testid={`guided-stage-${entry}`}
-                  data-active={isActive || undefined}
-                  className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm ${
-                    isActive ? "bg-primary/10 font-semibold" : "text-muted-foreground"
-                  }`}
-                >
-                  {isComplete ? (
-                    <CheckCircle2Icon className="size-4 text-success-foreground" />
-                  ) : isActive ? (
-                    <Loader2Icon className="size-4 text-primary" />
-                  ) : (
-                    <CircleIcon className="size-4 text-muted-foreground/50" />
-                  )}
-                  {TASK_WORKSPACE_STAGE_PRESENTATION[entry]}
-                  {needsUpgrade ? (
-                    <Badge className="ml-auto" size="sm" variant="outline">
-                      upgrade
-                    </Badge>
-                  ) : isActive ? (
-                    <Badge className="ml-auto" size="sm" variant="secondary">
-                      current
-                    </Badge>
-                  ) : null}
-                </li>
-              );
-            })}
-        </ol>
-      ) : null}
+      {stageRail}
+
+      <p className="text-xs leading-5 text-muted-foreground">{task.intake.brief}</p>
 
       <section
         className="rounded-lg border border-border/70 p-3"
@@ -1150,6 +1140,6 @@ export function GuidedTaskPanel(props: {
           {commands.error}
         </p>
       ) : null}
-    </aside>
+    </div>
   );
 }

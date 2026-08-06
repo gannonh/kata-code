@@ -72,6 +72,29 @@ describe("taskShellStages", () => {
     expect(stages.find((stage) => stage.stage === "research")?.isSelectable).toBe(true);
     expect(stages.find((stage) => stage.stage === "verify")?.isSelectable).toBe(false);
   });
+
+  it("marks stages this build has not implemented yet as unavailable", () => {
+    const stages = taskShellStages(makeTaskWorkspace());
+
+    expect(stages.find((stage) => stage.stage === "build")?.isAvailable).toBe(true);
+    expect(stages.find((stage) => stage.stage === "verify")?.isAvailable).toBe(false);
+    expect(stages.find((stage) => stage.stage === "verified")?.isAvailable).toBe(false);
+  });
+
+  it("keeps a stage available for a task pinned to a definition that predates it", () => {
+    const task = makeTaskWorkspace({
+      versions: {
+        taskContract: "task-workspace@0.3.0",
+        artifactContract: "task-artifact@0.3.0",
+        workflowDefinition: "guided@0.2.0",
+        prompt: "task-workspace-guided@0.2.0",
+      },
+    });
+
+    // guided@0.2.0 defers Implement; this build implements it behind an upgrade,
+    // so the stage stays visible rather than silently disappearing.
+    expect(taskShellStages(task).find((stage) => stage.stage === "build")?.isAvailable).toBe(true);
+  });
 });
 
 const guidedTask = atStage(
