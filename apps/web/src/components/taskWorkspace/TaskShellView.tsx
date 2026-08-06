@@ -13,6 +13,7 @@ import {
   type TaskShellContentView,
   type TaskShellSelection,
 } from "../../taskWorkspace/taskShellModel";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useStore } from "../../store";
 import { createThreadSelectorByRef } from "../../storeSelectors";
 import type { TaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
@@ -54,6 +55,10 @@ export function TaskShellView({
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isReviseOpen, setIsReviseOpen] = useState(false);
   const [reviseFeedback, setReviseFeedback] = useState("");
+  // The panel is docked beside the conversation at desktop widths and moves
+  // behind a header trigger below them. It is mounted once either way, so the
+  // panel never exists twice in the accessibility tree.
+  const isPanelDocked = useMediaQuery("lg");
 
   const view = useMemo(() => resolveTaskShellView(task, selection), [task, selection]);
   const impact = useMemo(
@@ -103,7 +108,7 @@ export function TaskShellView({
     const feedback = reviseFeedback.trim();
     if (!feedback) return;
     const base = commands.commandBase("task.stage.request-changes");
-    await commands.dispatch(
+    const accepted = await commands.dispatch(
       {
         ...base,
         expectedTaskRevision: task.taskRevision,
@@ -112,6 +117,9 @@ export function TaskShellView({
       },
       "revise-from-here",
     );
+    // A rejected revision keeps the dialog and the feedback, so the failure is
+    // reported next to the action that produced it and can be retried.
+    if (!accepted) return;
     setIsReviseOpen(false);
     setReviseFeedback("");
     returnToCurrent();
@@ -203,21 +211,23 @@ export function TaskShellView({
           onReturnToCurrent={returnToCurrent}
           onRevise={() => setIsReviseOpen(true)}
         />
-        <aside
-          data-testid="task-shell-panel"
-          className="hidden min-h-0 min-w-0 overflow-auto border-l border-border bg-card lg:block"
-        >
-          {panel}
-        </aside>
+        {isPanelDocked ? (
+          <aside
+            data-testid="task-shell-panel"
+            className="min-h-0 min-w-0 overflow-auto border-l border-border bg-card"
+          >
+            {panel}
+          </aside>
+        ) : null}
       </main>
 
-      <Sheet open={isPanelOpen} onOpenChange={setIsPanelOpen}>
-        <SheetPopup className="w-[22rem] p-0 lg:hidden" data-testid="task-shell-panel-sheet">
+      <Sheet open={isPanelOpen && !isPanelDocked} onOpenChange={setIsPanelOpen}>
+        <SheetPopup className="w-[22rem] p-0" data-testid="task-shell-panel-sheet">
           <SheetTitle className="sr-only">Task panel</SheetTitle>
           <SheetDescription className="sr-only">
             Task progress, stages, outcomes, and actions.
           </SheetDescription>
-          <div className="min-h-0 overflow-auto">{panel}</div>
+          <div className="min-h-0 overflow-auto">{isPanelDocked ? null : panel}</div>
         </SheetPopup>
       </Sheet>
 

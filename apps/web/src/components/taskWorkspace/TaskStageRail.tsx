@@ -63,6 +63,17 @@ export function TaskStageRail({
               >
                 <StageIcon status={stage.status} />
                 <span className="min-w-0 flex-1 truncate">{stage.label}</span>
+                {/* Badges read left to right: how much history, then live state. */}
+                {stage.occurrences.length > 1 ? (
+                  <Badge
+                    size="sm"
+                    variant="outline"
+                    title={`${stage.occurrences.length} occurrences`}
+                    data-testid={`guided-stage-occurrence-count-${stage.stage}`}
+                  >
+                    {stage.occurrences.length}
+                  </Badge>
+                ) : null}
                 {stage.stage === needsUpgradeStage ? (
                   <Badge size="sm" variant="outline">
                     upgrade
@@ -70,14 +81,6 @@ export function TaskStageRail({
                 ) : stage.status === "active" ? (
                   <Badge size="sm" variant="secondary">
                     current
-                  </Badge>
-                ) : stage.occurrences.length > 1 ? (
-                  <Badge
-                    size="sm"
-                    variant="outline"
-                    data-testid={`guided-stage-occurrence-count-${stage.stage}`}
-                  >
-                    {stage.occurrences.length}
                   </Badge>
                 ) : null}
               </button>
