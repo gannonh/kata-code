@@ -60,7 +60,7 @@ export function TaskModePrototypeSidebar({
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Tasks
             </p>
-            <PlusIcon className="size-3.5 text-muted-foreground" />
+            <PlusIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
           </div>
           <button
             type="button"
@@ -98,7 +98,7 @@ export function TaskModePrototypeSidebar({
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Chats
             </p>
-            <SearchIcon className="size-3.5 text-muted-foreground" />
+            <SearchIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
           </div>
           {["Review provider errors", "Explore command palette", "Release notes"].map(
             (title, index) => (

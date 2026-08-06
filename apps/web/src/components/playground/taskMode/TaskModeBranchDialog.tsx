@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "../../ui/dialog";
 import type { TaskModePrototypeStage } from "./taskModePlaygroundFixtures";
+import { nextOccurrenceLabel } from "./taskModePlaygroundFixtures";
 
 export function TaskModeBranchDialog({
   isOpen,
@@ -27,14 +28,13 @@ export function TaskModeBranchDialog({
   readonly onOpenChange: (isOpen: boolean) => void;
   readonly onConfirm: () => void;
 }) {
-  const nextVersion = selectedStage.occurrences.length + 1;
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogPopup data-testid="task-mode-branch-dialog">
         <DialogHeader>
           <DialogTitle>Revise from {selectedStage.occurrenceLabel}?</DialogTitle>
           <DialogDescription>
-            This starts {selectedStage.label} v{nextVersion} as the single active path. Existing
+            This starts {nextOccurrenceLabel(selectedStage)} as the single active path. Existing
             work remains inspectable.
           </DialogDescription>
         </DialogHeader>

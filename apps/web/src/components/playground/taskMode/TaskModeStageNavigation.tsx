@@ -23,7 +23,6 @@ function StageButton({
     <button
       type="button"
       aria-current={isActive ? "step" : undefined}
-      aria-pressed={isSelected}
       data-testid={`task-mode-stage-${stage.id}`}
       data-active={isActive || undefined}
       data-selected={isSelected || undefined}

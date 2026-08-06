@@ -28,9 +28,7 @@ export function TaskModePlaygroundPage() {
           <div className="hidden h-5 w-px bg-border sm:block" />
           <div className="hidden min-w-0 sm:block">
             <p className="truncate text-xs font-semibold">Task mode · Prototype A</p>
-            <p className="truncate text-[10px] text-muted-foreground">
-              Conversation plus Task panel
-            </p>
+            <p className="truncate text-[10px] text-muted-foreground">{scenario.description}</p>
           </div>
         </div>
 
@@ -60,7 +58,7 @@ export function TaskModePlaygroundPage() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1" title={scenario.description}>
+      <div className="flex min-h-0 flex-1">
         <TaskModePrototype key={scenarioId} scenario={scenario} layout="current-refined" />
       </div>
     </div>

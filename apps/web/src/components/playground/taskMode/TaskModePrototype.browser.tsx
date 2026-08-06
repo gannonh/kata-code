@@ -1,5 +1,6 @@
 import "../../../index.css";
 
+import type { ComponentProps } from "react";
 import {
   RouterProvider,
   createMemoryHistory,
@@ -20,7 +21,7 @@ import {
 
 async function renderPrototype(
   scenarioId: Parameters<typeof getTaskModePrototypeScenario>[0],
-  layout: React.ComponentProps<typeof TaskModePrototype>["layout"],
+  layout: ComponentProps<typeof TaskModePrototype>["layout"],
 ) {
   return render(
     <div className="flex h-dvh min-h-0" data-testid="task-mode-test-host">
@@ -122,7 +123,7 @@ describe("Task mode UX Playground prototypes", () => {
     await expect.element(page.getByTestId("task-mode-conversation-view")).toBeInTheDocument();
     await expect
       .element(page.getByTestId("task-mode-stage-design"))
-      .toHaveAttribute("aria-pressed", "true");
+      .toHaveAttribute("data-selected", "true");
   });
 
   it("switches between outcomes for a stage with history", async () => {

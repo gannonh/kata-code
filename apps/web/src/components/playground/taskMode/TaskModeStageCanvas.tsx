@@ -187,7 +187,7 @@ function StageActionCard({
           <Button
             size="xs"
             variant="outline"
-            onClick={() => onAction("Retry queued for the same Design occurrence.")}
+            onClick={() => onAction(`Retry queued for the same ${selectedStage.label} occurrence.`)}
           >
             <RotateCcwIcon className="size-3.5" />
             Retry

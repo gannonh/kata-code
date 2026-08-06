@@ -18,7 +18,11 @@ import type {
   TaskModePrototypeStageId,
   TaskModePrototypeStageStatus,
 } from "./taskModePlaygroundFixtures";
-import { TASK_MODE_PROTOTYPE_STAGES } from "./taskModePlaygroundFixtures";
+import {
+  TASK_MODE_PROTOTYPE_STAGES,
+  nextOccurrenceLabel,
+  nextOccurrenceVersion,
+} from "./taskModePlaygroundFixtures";
 import { TaskModePrototypeSidebar } from "./TaskModePrototypeSidebar";
 import { TaskModeStageCanvas, type TaskModeStageView } from "./TaskModeStageCanvas";
 import { HorizontalStageRail } from "./TaskModeStageNavigation";
@@ -141,10 +145,10 @@ function withBranch(
     const stageIndex = TASK_MODE_PROTOTYPE_STAGES.indexOf(stage.id);
     const status = branchedStageStatus(stageIndex, branchIndex, stage.status);
     if (stage.id !== branchStageId) return { ...stage, status };
-    const nextVersion = stage.occurrences.length + 1;
+    const nextVersion = nextOccurrenceVersion(stage);
     const branchOccurrence: TaskModePrototypeOccurrence = {
       id: `${stage.id}-v${nextVersion}`,
-      label: `${stage.label} v${nextVersion}`,
+      label: nextOccurrenceLabel(stage),
       createdAt: "New active path",
       summary: `Revising ${stage.outcomeTitle.toLowerCase()} from the selected outcome.`,
       isCurrent: true,

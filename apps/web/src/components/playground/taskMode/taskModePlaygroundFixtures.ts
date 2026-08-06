@@ -350,3 +350,11 @@ export function getTaskModePrototypeScenario(
 ): TaskModePrototypeScenario {
   return SCENARIOS[id];
 }
+
+export function nextOccurrenceVersion(stage: TaskModePrototypeStage): number {
+  return stage.occurrences.length + 1;
+}
+
+export function nextOccurrenceLabel(stage: TaskModePrototypeStage): string {
+  return `${stage.label} v${nextOccurrenceVersion(stage)}`;
+}
