@@ -186,15 +186,16 @@ On macOS, Playwright Electron launches always open a visible app window. **`e2e:
 
 ### Feature tags
 
-| Tag          | Coverage                                           |
-| ------------ | -------------------------------------------------- |
-| `@smoke`     | App launch, pairing, and shell surface             |
-| `@auth`      | Clerk Google test-user sign-in                     |
-| `@settings`  | Settings theme persistence                         |
-| `@agent`     | Real LLM deterministic reply                       |
-| `@pi`        | Real Pi provider lifecycle                         |
-| `@pi-update` | Built-in Pi catalog discovery and real-model reply |
-| `@cursor`    | Cursor skill discovery and invocation              |
+| Tag             | Coverage                                              |
+| --------------- | ----------------------------------------------------- |
+| `@smoke`        | App launch, pairing, and shell surface                |
+| `@auth`         | Clerk Google test-user sign-in                        |
+| `@settings`     | Settings theme persistence                            |
+| `@agent`        | Real LLM deterministic reply                          |
+| `@pi`           | Real Pi provider lifecycle                            |
+| `@pi-update`    | Built-in Pi catalog discovery and real-model reply    |
+| `@cursor`       | Cursor skill discovery and invocation                 |
+| `@task-mode-ux` | Dev-only Task workspace layout and history prototypes |
 
 Filter with `--grep`, for example `vp run e2e --project desktop-dev --grep @settings`.
 

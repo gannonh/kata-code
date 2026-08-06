@@ -2,7 +2,7 @@
 
 ## 2026-08-06 (Task mode UX Playground exploration)
 
-Added the active [Task mode UX Playground plan](/specs/2026-08-06-task-mode-ux-playground-plan.md) as a prototype gate before Agent Runtime convergence approval. The exploration compares a refined current conversation-plus-panel layout with a horizontal-stage Task workspace while testing the same Task-first navigation, internal stage-session, history-inspection, and explicit branch hypotheses.
+Added the active [Task mode UX Playground plan](/specs/2026-08-06-task-mode-ux-playground-plan.md) as a prototype gate before Agent Runtime convergence approval. The implemented `/playground/task-mode` route compares a refined current conversation-plus-panel layout with a horizontal-stage Task workspace across one six-scenario fixture catalog. Both test Task-first navigation, internal stage sessions, distinct active/viewed stages, outcome and occurrence history, explicit branch impact, human action states, and responsive behavior. Focused browser coverage and the dev-target `@task-mode-ux` E2E flow are green; maintainer layout selection remains open.
 
 ## 2026-08-06 (Task mode and Agent Runtime convergence)
 

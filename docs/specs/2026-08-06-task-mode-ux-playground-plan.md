@@ -21,6 +21,22 @@ workspace.
 Build fixture-driven prototypes under `/playground/task-mode`. No production Task contracts,
 commands, persistence, routing, or provider behavior change during this exploration.
 
+## Current status
+
+Both prototype layouts and the shared scenario catalog are implemented. The exploration remains
+**Active** until maintainer UAT chooses a direction; implementation does not imply acceptance.
+
+```bash
+pnpm run dev
+open http://localhost:5733/playground/task-mode
+
+cd apps/web
+vp test run --project browser src/components/playground/taskMode/TaskModePrototype.browser.tsx
+
+cd ../../
+vp run e2e --project desktop-dev --grep @task-mode-ux
+```
+
 ## Shared product hypothesis
 
 Both prototypes test the same Task-first model:

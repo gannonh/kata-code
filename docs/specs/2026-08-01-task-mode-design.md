@@ -29,10 +29,12 @@ checkpoint, amendment, restart, adversarial isolation, and exact-commit proof is
 The in-development web and desktop surface is disabled by default. Start development with
 `FF_TASK_MODE=1` to expose Task navigation, routes, and subscriptions.
 
-The next proposed slice is the Draft
+The next proposed production slice is the Draft
 [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md).
 It makes Kata-managed, same-provider child agents one shared execution substrate for normal
-Standard chat and Guided Implement before Guided Verify is designed.
+Standard chat and Guided Implement before Guided Verify is designed. Approval is held while the
+active [Task mode UX Playground exploration](/specs/2026-08-06-task-mode-ux-playground-plan.md)
+compares the current conversation-plus-panel shell with a horizontal-stage Task workspace.
 
 This document is the sole authoritative Task mode product design and roadmap. Dated child specs own
 bounded implementation and acceptance criteria. Earlier Task mode and task-workspace designs remain
@@ -421,13 +423,14 @@ metadata is versioned separately from Task workflow definitions.
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | 1. Guided planning                            | Create a Guided Task and move through Clarify, Research, Design, and approved Plan.                                                               | **Implemented on `main`; cumulative provider proof continues in #64** | [Guided planning](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)             |
 | 2. Guided implementation                      | Execute an approved Plan in a write-enabled Task worktree with durable progress, checks, checkpoints, amendments, recovery, and resulting commit. | **Implemented on `main`; cumulative provider proof continues in #64** | [Guided implementation](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md) |
-| 3. Shared Agent Runtime and Guided delegation | Add Kata-managed, single-provider fleets with role-specific models to Standard chat and Guided Implement under one runtime.                       | **Draft — maintainer approval required**                              | [Convergence design](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)             |
+| UX Playground exploration                     | Compare Task navigation and stage-history layouts before changing the production shell.                                                           | **Active — maintainer UAT pending**                                   | [Prototype plan](/specs/2026-08-06-task-mode-ux-playground-plan.md)                        |
+| 3. Shared Agent Runtime and Guided delegation | Add Kata-managed, single-provider fleets with role-specific models to Standard chat and Guided Implement under one runtime.                       | **Draft — approval held pending UX Playground UAT**                   | [Convergence design](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)             |
 | 4. Guided verification                        | Verify the resulting commit against acceptance criteria, preserve evidence, and reach Done.                                                       | **Upcoming — child spec required**                                    | Not written                                                                                |
 | 5. Standard Task preset and Freeform          | Complete both Task presets using the same runtime, worktree, recovery, and verification model.                                                    | **Upcoming — child spec required**                                    | Not written                                                                                |
 | 6. Deliver                                    | Create and track a draft pull request from a verified Task after explicit approval.                                                               | **Upcoming — child spec required**                                    | Not written                                                                                |
 
-Slice 3 is the sole proposed next implementation target. It must receive maintainer approval and a
-bounded child implementation plan before product code changes. The open Slice 2 provider acceptance
+The UX Playground changes no production Task behavior. Its UAT outcome must define a bounded Task
+shell child plan before Slice 3 is approved or implemented. The open Slice 2 provider acceptance
 record remains visible and may be completed in parallel as validation work; it does not make the
 merged Slice 2 code “next.”
 

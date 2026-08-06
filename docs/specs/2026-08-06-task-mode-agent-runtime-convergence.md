@@ -3,7 +3,7 @@ type: Spec
 title: "Task mode and Agent Runtime convergence"
 description: "Kata-native design for one durable, same-provider-instance agent runtime with role-specific models, shared by Standard mode and Task mode without inheriting provider-specific orchestration."
 status: Draft
-recommendation: "Proceed as the next Task mode vertical slice after maintainer approval"
+recommendation: "Revisit after Task mode UX Playground UAT and a bounded shell plan"
 tags: [specs, task-mode, agents, subagents, workflows, orchestration, providers, codex, upstream]
 timestamp: 2026-08-06T16:20:00Z
 parent: /specs/2026-08-01-task-mode-design.md
@@ -17,8 +17,10 @@ related_upstream:
 
 ## Status
 
-**Draft; maintainer approval required before implementation.** This is the proposed next vertical
-slice in the authoritative [Task mode roadmap](/specs/2026-08-01-task-mode-design.md). It unifies
+**Draft; approval held pending Task mode UX Playground UAT.** This remains the proposed next
+runtime vertical slice in the authoritative [Task mode roadmap](/specs/2026-08-01-task-mode-design.md),
+but it must be rebased on the accepted shell from the active
+[UX Playground exploration](/specs/2026-08-06-task-mode-ux-playground-plan.md). It unifies
 Kata-managed subagents, Standard mode, and Task mode under one durable Agent Runtime rather than
 creating a parallel provider-specific workflow feature.
 
