@@ -2,7 +2,7 @@
 
 ## 2026-08-06 (Task mode shell decision and Plan validation)
 
-Selected Prototype A from the [Task mode UX Playground](/specs/2026-08-06-task-mode-ux-playground-plan.md): the active conversation remains primary and the persistent right panel owns Task navigation, outcomes, history, and actions. Added the bounded [conversation-plus-panel shell plan](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md), retired the horizontal rail as a production recommendation, and kept the accepted Prototype A E2E flow green. Addressed [#70](https://github.com/gannonh/kata-code/issues/70) by validating Guided 0.3 Plan completion before opening the approval gate, clarifying every-phase checkpoint/dependency/manual-check rules in trusted instructions, and surfacing compiler failures beside the Plan revision action.
+Selected Prototype A from the [Task mode UX Playground](/specs/2026-08-06-task-mode-ux-playground-plan.md): the active conversation remains primary and the persistent right panel owns Task navigation, outcomes, history, and actions. Added the bounded [conversation-plus-panel shell plan](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md), retired the horizontal rail as a production recommendation, and kept the accepted Prototype A E2E flow green. The specs roadmap now explicitly schedules the shell implementation before Agent Runtime convergence. Addressed [#70](https://github.com/gannonh/kata-code/issues/70) by validating Guided 0.3 Plan completion before opening the approval gate, clarifying every-phase checkpoint/dependency/manual-check rules in trusted instructions, and surfacing compiler failures beside the Plan revision action.
 
 ## 2026-08-06 (Task mode and Agent Runtime convergence)
 

@@ -4,6 +4,7 @@
 
 - Completed the [Task mode UX Playground decision](/specs/2026-08-06-task-mode-ux-playground-plan.md) with Prototype A accepted: conversation-first canvas plus persistent right Task panel.
 - Added the bounded [conversation-plus-panel shell plan](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md); the horizontal-stage comparison remains historical evidence.
+- Updated the [specs roadmap](/specs/index.md) so the approved shell is the explicit next implementation step before Agent Runtime convergence.
 - Kept Task-first navigation, internal stage sessions, distinct active/viewed stages, read-only history, explicit branch impact, and responsive behavior as the production shell requirements.
 - Added focused Chromium coverage and a passing `@task-mode-ux` E2E flow for Prototype A history, revision, and narrow navigation.
 - Addressed [#70](https://github.com/gannonh/kata-code/issues/70): Guided 0.3 Plan completion now validates before the approval gate opens; trusted instructions explicitly require per-phase checkpoint policies, valid dependencies, and command-free manual checks; compiler failures have an inline Plan revision path.
