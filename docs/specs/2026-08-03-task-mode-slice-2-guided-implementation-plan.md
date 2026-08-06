@@ -1,12 +1,12 @@
 ---
 type: Spec
 title: "Task mode Vertical Slice 2 — Guided implementation"
-description: "Approved child slice for starting a write-enabled Implement occurrence from an approved Guided Plan and exposing durable agent progress, checks, checkpoints, amendments, and recovery in the conversation-first Task mode UI."
+description: "Delivered child slice for executing an approved Guided Plan through a write-enabled Implement occurrence with durable progress, checks, checkpoints, amendments, recovery, and resulting commit."
 status: Implemented
 approved_at: 2026-08-03T22:45:20Z
 acceptance_status: In progress
 tags: [specs, task-mode, task-workspaces, guided, implementation, agents, recovery]
-timestamp: 2026-08-03T22:45:20Z
+timestamp: 2026-08-06T16:20:00Z
 parent: /specs/2026-08-01-task-mode-design.md
 ---
 
@@ -14,13 +14,15 @@ parent: /specs/2026-08-01-task-mode-design.md
 
 ## Status
 
-**Implemented on 2026-08-04.** The server, provider adapter, current Task route, browser coverage,
-and required repository gates for Guided Implement are complete. The bounded authenticated path
-passes through active Implement. Remaining cumulative provider acceptance is tracked in
+**Implemented on `main` in merge commit `59c0c573b`.** The server, Codex provider path, current Task
+route, deterministic tests, and bounded authenticated path through active Implement are complete.
+Remaining cumulative real-provider proof is tracked in
 [#64](https://github.com/gannonh/kata-code/issues/64).
 
-This is the sole next Task mode slice. It extends the current conversation-first Guided path from
-approved Plan through completed Implement. It does not start Verify or redesign the Task mode shell.
+This is a delivered slice, not the next implementation target. It extends the conversation-first
+Guided path from approved Plan through completed Implement. It does not start Verify, add
+Kata-managed child agents, or redesign the Task shell. The complete Task surface remains
+development-only behind `FF_TASK_MODE=1`.
 
 ## Outcome
 
@@ -34,23 +36,28 @@ Implementation completes only after the server confirms a clean task worktree, r
 HEAD commit, and confirms all required work and checks are complete. The task remains at completed
 Implement until the Guided verification slice becomes available.
 
-## Current baseline
+## As-built baseline
 
-The implementation starts from `main` after the Task mode roadmap reconciliation:
+Current `main` contains the delivered implementation:
 
-- Form-created Guided tasks pin `guided@0.2.0` and stop at an approved Plan.
-- `task.plan.approve` completes the Plan occurrence and applies the selected worktree policy. It
-  creates no Implement occurrence or provider session for current tasks.
-- `TaskStageBridge` authorizes planning context and typed artifact completion for Clarify through
-  Plan. It has no implementation progress or completion contract.
-- The bootstrap outbox already provides deterministic worktree, thread, turn, session, and
-  occurrence recovery for automatic planning stages.
-- `TaskWorkspace.build` already stores phases, work items, checks, checkpoints, amendments,
-  continuation sessions, and a resulting commit SHA.
-- Historical Build commands and `BuildPanel` prove reducer and presentation concepts, but their
-  active path depends on fixture checks, direct UI commands, and older task records.
-- The current Guided route renders `GuidedTaskPanel`, hides Implement from its stage rail, and shows
-  the approved Plan as read-only.
+- New form-created Guided Tasks pin `guided@0.3.0`; eligible approved `guided@0.2.0` Tasks can
+  upgrade explicitly without rewriting their history.
+- Plan approval or **Start Implement** creates one Implement occurrence and one primary provider
+  session after deterministic worktree readiness.
+- Guided creation filters for providers that prove `supportsTaskWorktreeWrite`; Codex is the current
+  conforming path.
+- `TaskImplementationBridge` and the MCP toolkit expose typed context, progress, approved check,
+  amendment, and completion operations to the active primary session only.
+- The Plan compiler creates durable phases, work items, dependencies, checks, and checkpoint policy.
+- `TaskWorkspace.build` stores progress, check attempts, checkpoints, amendments, continuations,
+  and resulting commit under the transactional Task aggregate.
+- `TaskWorktreeCommandRunner` runs exact approved check commands with bounded process output and
+  server-observed Git evidence; older fixture commands remain compatibility substrate, not the
+  current Guided contract.
+- Bootstrap, check, continuation, amendment, and completion side effects use durable outbox and
+  reconciliation paths.
+- `GuidedTaskPanel` shows Implement in the current rail and renders durable implementation state
+  beside the active `ChatView`.
 
 Primary implementation surfaces:
 
@@ -116,6 +123,7 @@ Primary implementation surfaces:
 - Provider selection changes during an active Implement occurrence.
 - Native mobile Task mode UI.
 - A visual redesign of the conversation-first shell.
+- Kata-managed child-agent fleets, role-specific models, workspace leases, and shared Agents UI.
 
 ## Product and contract decisions
 
@@ -376,7 +384,7 @@ Extract reusable implementation presentation from the historical `BuildPanel` in
 current Guided tasks through the historical workspace surface. Session linking, raw manifests,
 fixture actions, and artifact editors remain outside the default product path.
 
-## Implementation sequence
+## Delivered implementation sequence
 
 1. **Contracts and catalog:** Add `guided@0.3.0`, prompt pins, upgrade/start operations,
    implementation tool payloads, additive events, and compatibility decoding.
@@ -504,16 +512,35 @@ start, provider-owned write-enabled implementation, bounded context, exact check
 checkpoint continuation, amendment review, restart recovery, Codex credential isolation, and
 conversation-first Implement presentation.
 
-Automated evidence is recorded in
-[Slice 2 implementation validation](/specs/evidence/2026-08-04-task-mode-slice-2-implementation-validation.md).
-The authenticated desktop E2E path remains open because this environment lacks
-`CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`; no provider-backed acceptance is claimed for that
-criterion.
+The bounded Clerk/Codex desktop path reaches active Implement within the standard agent ceiling.
+Checkpoint, amendment, restart, adversarial isolation, and exact completed-commit proof remain open
+in [#64](https://github.com/gannonh/kata-code/issues/64); this record does not claim that cumulative
+provider acceptance is complete.
+
+## Relationship to Agent Runtime convergence
+
+The proposed [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+builds on this delivered slice instead of replacing it.
+
+- `TaskWorkspaceService`, `TaskImplementationBridge`, approved checks, checkpoints, amendments, and
+  resulting-commit settlement remain Task authority.
+- Existing `guided@0.3.0` Tasks and their one-primary-session execution path remain unchanged.
+- A new append-only `guided@0.4.0` associates one Kata-managed fleet with the Implement occurrence.
+- The primary Task session becomes the orchestrator and remains the only caller of Task tools.
+- Child agents use the same provider instance but may use different role-pinned models.
+- Child credentials contain no Task mutation capability.
+- Shared-read and exclusive-write workspace leases prevent parent/child write overlap.
+- Completion adds fleet quiescence to the existing work, check, gate, turn, branch, lineage, and
+  clean-worktree requirements.
+
+This makes Guided Implement the Task consumer of a runtime that also works in Standard chat. It does
+not make agent review authoritative Verify evidence.
 
 ## Explicitly deferred work
 
-No new durable work is deferred by this child spec. Guided verification, Standard and Freeform,
-and Deliver remain assigned to Vertical Slices 3 through 5 in the parent design.
+- Cumulative real-provider Slice 2 acceptance remains tracked in issue #64.
+- Shared Agent Runtime and Guided delegation are the proposed next vertical slice.
+- Guided Verify, complete Standard/Freeform Task presets, and Deliver follow in the parent roadmap.
 
 ## Approval record
 
@@ -521,5 +548,7 @@ and Deliver remain assigned to Vertical Slices 3 through 5 in the parent design.
 - **Decision:** The execution profile, approved-check policy, `guided@0.3.0` workflow, compatibility
   projection, upgrade UX, recovery model, and acceptance criteria are approved.
 - **Independent review:** No blocking or high findings remain.
-- **Implementation gate:** Provider-backed Vertical Slice 1 acceptance must complete before product
-  code changes begin.
+- **Historical implementation gate:** Approval originally required provider-backed Slice 1
+  acceptance before code changes. The implementation subsequently landed on `main`; remaining
+  cumulative provider proof is now tracked explicitly in issue #64 and does not describe Slice 2 as
+  unimplemented.

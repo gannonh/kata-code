@@ -3,7 +3,7 @@ type: Reference
 title: "Deferred work registry"
 description: "Review queue for work intentionally deferred from specs so future planning can revisit, promote, or close it."
 tags: [specs, roadmap, deferred-work, planning]
-timestamp: 2026-08-03T22:00:00Z
+timestamp: 2026-08-06T16:20:00Z
 ---
 
 # Deferred work registry
@@ -29,6 +29,28 @@ Each entry should include:
 - Do not use this registry for speculative ideas without a source. Use the product backlog or a new spec when direction is not tied to a deferral.
 
 ## Deferred / review queue
+
+### Agent Runtime provider expansion and advanced fleet topology
+
+- **Status:** deferred
+- **Tracking issue:** [#68](https://github.com/gannonh/kata-code/issues/68)
+- **Area:** agents, providers, orchestration, task-mode
+- **Source:** [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+- **Rationale:** The first slice must prove Kata-managed, same-provider, depth-one runs and one
+  workspace writer before adding adapters, provider-native adoption, mixed providers, nesting,
+  isolated parallel writers, or a general Standard workflow layer.
+- **Revisit trigger:** After the first Agent Runtime slice passes Standard and Guided real-provider
+  E2E plus provider/security/restart conformance.
+
+### Mobile Agent fleet roster and controls
+
+- **Status:** deferred
+- **Tracking issue:** [#67](https://github.com/gannonh/kata-code/issues/67)
+- **Area:** agents, mobile, connect, ui
+- **Source:** [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+- **Rationale:** The first slice requires truthful aggregate mobile liveness but defers detailed
+  fleet inspection and controls until the shared runtime and desktop/web Agents projection settle.
+- **Revisit trigger:** After the first Agent Runtime slice ships its stable fleet query and actions.
 
 ### Task workspaces rich context manifests (Slice 3+)
 

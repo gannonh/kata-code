@@ -1,5 +1,9 @@
 # Guides log
 
+## 2026-08-06 (Upstream vendor-pull wording)
+
+Updated the [guides index](/guides/index.md) to describe the accepted selective vendor-pull workflow instead of the superseded episodic-merge strategy.
+
 ## 2026-07-14 (Recorded web E2E isolation)
 
 Updated the [E2E test catalog](/guides/e2e-test-catalog.md) so recorded web specs use the standard isolated `web-dev` fixture and authenticated app page.

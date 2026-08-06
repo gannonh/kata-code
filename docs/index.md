@@ -8,18 +8,18 @@ Open Knowledge Format (OKF) documentation for the [Kata Code](https://github.com
 
 ## Start here
 
-| Section                                                   | Purpose                                                  |
-| --------------------------------------------------------- | -------------------------------------------------------- |
-| [Specs roadmap](/specs/index.md)                          | Active, planned, blocked, and completed work             |
-| [Task mode design](/specs/2026-08-01-task-mode-design.md) | Authoritative Task mode product design and slice roadmap |
-| [Architecture](/architecture/index.md)                    | System map, runtime modes, providers, remote access      |
-| [Diagrams](/diagrams/index.md)                            | Interactive architecture visuals                         |
-| [Guides](/guides/index.md)                                | Setup, user workflows, integrations, providers           |
-| [Runbooks](/runbooks/index.md)                            | CI, release, observability, operations                   |
-| [Reference](/reference/index.md)                          | Scripts, workspace layout, encyclopedia                  |
-| [ADRs](/adrs/index.md)                                    | Durable architecture decisions                           |
-| [Fork operations](../../FORK.md)                          | Upstream sync, identity, divergence (repo root)          |
-| [Upstream sync](/guides/upstream-sync.md)                 | Selective merges from T3 Code; episodic cadence          |
+| Section                                                   | Purpose                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------- |
+| [Specs roadmap](/specs/index.md)                          | Active, planned, blocked, and completed work            |
+| [Task mode design](/specs/2026-08-01-task-mode-design.md) | Task workflow and shared Agent Runtime roadmap          |
+| [Architecture](/architecture/index.md)                    | System map, runtime modes, providers, remote access     |
+| [Diagrams](/diagrams/index.md)                            | Interactive architecture visuals                        |
+| [Guides](/guides/index.md)                                | Setup, user workflows, integrations, providers          |
+| [Runbooks](/runbooks/index.md)                            | CI, release, observability, operations                  |
+| [Reference](/reference/index.md)                          | Scripts, workspace layout, encyclopedia                 |
+| [ADRs](/adrs/index.md)                                    | Durable architecture decisions                          |
+| [Fork operations](../../FORK.md)                          | Upstream sync, identity, divergence (repo root)         |
+| [Upstream sync](/guides/upstream-sync.md)                 | Selective vendor-pull from T3 Code; fork-original ports |
 
 ## Fork status (summary)
 

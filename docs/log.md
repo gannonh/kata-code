@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-08-06 (Task mode and Agent Runtime convergence)
+
+Reconciled the Task mode parent and Guided Slice 1/2 records with current `main`: both slices are implemented, the UI remains gated by `FF_TASK_MODE=1`, and cumulative provider proof remains in issue #64. Added the Draft [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md) as the proposed next slice. Kata owns child lifecycle; a fleet stays on one provider instance while role-specific models can specialize orchestration, scouting, implementation, and review. The design shares durable identity, workspace leases, Agents UX, cancellation, liveness, recovery, and E2E proof between Standard chat and Guided Implement while preserving primary-only Task authority. Upstream PR #5219 remains lifecycle/UI evidence, and the full upstream scan baseline is unchanged. Deferred mobile roster and advanced topology/provider work is tracked in [#67](https://github.com/gannonh/kata-code/issues/67) and [#68](https://github.com/gannonh/kata-code/issues/68). Also reconciled stale fork navigation and the `FORK.md` quick reference with the accepted vendor-pull policy.
+
 ## 2026-08-05 (Task mode feature gate)
 
 Task mode navigation, routes, and client subscriptions are now disabled by default while the
@@ -12,8 +16,7 @@ persistence and added a service regression that asserts the exact resulting comm
 authenticated real-provider E2E now uses the standard 180-second agent ceiling and passes through
 active Implement in 1.7 minutes without completion steering. Cumulative provider acceptance remains
 tracked in [#64](https://github.com/gannonh/kata-code/issues/64); the unrelated full-suite Git timeout
-is tracked in [#65](https://github.com/gannonh/kata-code/issues/65). See
-[Slice 2 implementation validation](/specs/evidence/2026-08-04-task-mode-slice-2-implementation-validation.md).
+is tracked in [#65](https://github.com/gannonh/kata-code/issues/65).
 
 ## 2026-08-04 (Guided implementation delivered)
 
@@ -25,7 +28,7 @@ commit validation, and the current conversation-first Implement panel. Automated
 for the focused server/provider/compiler suite, 241 current-route browser tests, the full 4,354-test
 repository suite, `vp run typecheck`, `vp check`, and `vp run release:smoke`. The authenticated
 provider-backed cumulative desktop acceptance remains open because local Clerk credentials are
-missing. See [Slice 2 implementation validation](/specs/evidence/2026-08-04-task-mode-slice-2-implementation-validation.md).
+missing. Follow-up proof is tracked in [#64](https://github.com/gannonh/kata-code/issues/64).
 
 ## 2026-08-03 (Guided implementation approved)
 

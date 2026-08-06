@@ -3,7 +3,7 @@ type: Spec
 title: "Kata Code fork setup"
 description: "Fork operations plan covering identity, upstream sync, release split, and intentional divergence."
 tags: [fork, roadmap, katacode]
-timestamp: 2026-06-16T22:45:00Z
+timestamp: 2026-08-06T14:55:22Z
 ---
 
 # Kata Code fork setup
@@ -15,7 +15,7 @@ timestamp: 2026-06-16T22:45:00Z
 Kata Code is a hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) at [gannonh/kata-code](https://github.com/gannonh/kata-code). Goals:
 
 1. Ship an independent product without waiting on upstream contribution policy.
-2. Pull upstream fixes via **episodic merge-based sync** ([ADR 0003](/adrs/0003-episodic-upstream-sync.md)), not continuous parity with `upstream/main`.
+2. Pull selected upstream fixes and features through **fork-original vendor ports** ([ADR 0004](/adrs/0004-selective-vendor-pull.md)), not continuous parity with `upstream/main`.
 3. Complete branding renames early to reduce merge pain.
 4. Preserve MIT attribution.
 

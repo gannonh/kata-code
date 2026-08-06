@@ -1,5 +1,15 @@
 # Specs log
 
+## 2026-08-06 (Task mode and Agent Runtime converged)
+
+- Reconciled the authoritative [Task mode parent](/specs/2026-08-01-task-mode-design.md), [Guided planning delivery](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md), and [Guided implementation delivery](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md) with current `main`: Slices 1 and 2 are implemented, Task UI is gated by `FF_TASK_MODE=1`, and cumulative provider proof remains open in issue #64.
+- Replaced the isolated upstream-port proposal with the Draft [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md), making a Kata-managed Agent Runtime the proposed next Task mode slice and a shared substrate for Standard chat.
+- Pinned each fleet to one provider instance while supporting role-specific models/options for orchestrator, scout, implementer, and reviewer.
+- Defined durable owner/run identity, parent-turn quiescence, shared-read and exclusive-write workspace leases, primary-only Task authority, `guided@0.4.0`, Agents UX, liveness, recovery, security, acceptance criteria, and E2E coverage.
+- Retained upstream PR #5219 as lifecycle/UI/liveness evidence rather than provider-specific architecture; kept the vendor-pull human gate and full upstream scan baseline unchanged.
+- Filed and registered deferred follow-ups [#67](https://github.com/gannonh/kata-code/issues/67) for the mobile Agents roster and [#68](https://github.com/gannonh/kata-code/issues/68) for provider expansion and advanced fleet topology.
+- Reconciled the [fork setup summary](/specs/fork-setup.md) and `FORK.md` quick reference with ADR 0004's vendor-pull workflow.
+
 ## 2026-08-03 (Guided implementation approved)
 
 - Marked the [Vertical Slice 2 Guided implementation plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
