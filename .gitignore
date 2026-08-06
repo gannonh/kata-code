@@ -79,3 +79,4 @@ session*.jsonl
 .pi-subagents/artifacts
 .pi/tmp/
 sessions/
+.pi-subagents/

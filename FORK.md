@@ -424,9 +424,13 @@ vp i
 pnpm run dev
 pnpm run dev:desktop
 
-# upstream sync
-git checkout -b upstream-sync-$(date +%Y-%m-%d)
-git merge upstream/main
+# upstream scan
+git fetch upstream --tags
+node .agents/skills/upstream-assess/scripts/scan-upstream.ts > /tmp/upstream-scan.md
+
+# targeted vendor port after human approval
+git checkout -b port-upstream/<description>
+git show <upstream-sha>
 
 # verify
 vp check && vp run typecheck
