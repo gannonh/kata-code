@@ -38,7 +38,7 @@ Alternatives considered:
 
 ## Related
 
-- [Fork setup spec](/specs/fork-setup.md)
+- [Fork setup spec](/specs/archive/fork-setup.md)
 - [ADR 0002 — Product identity](/adrs/0002-katacode-product-identity.md)
 - [ADR 0003 — Episodic upstream sync](/adrs/0003-episodic-upstream-sync.md) (cadence and independence policy)
 - [Upstream sync guide](/guides/upstream-sync.md)

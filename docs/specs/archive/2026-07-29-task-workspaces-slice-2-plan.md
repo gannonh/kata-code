@@ -20,7 +20,7 @@ base_sha: 12cc158e8b8210e96b74800b7b9772280ffe8d59
 [PR #58](https://github.com/gannonh/kata-code/pull/58) (`25ce0cc1`). Headed UAT, focused gates,
 review hardening, and cumulative desktop `@task-workspaces` E2E are recorded in
 [Slice 2 validation](/specs/evidence/2026-07-29-task-workspaces-slice-2-validation.md). The
-authoritative current roadmap is [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md).
+authoritative current roadmap is [Task mode — product-first workflows](/specs/archive/2026-08-01-task-mode-design.md).
 
 ## Outcome
 

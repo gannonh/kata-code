@@ -1,12 +1,16 @@
 # OKF bundle log
 
+## 2026-08-06 (Specs migrated to GitHub Issues)
+
+Migrated the active Task roadmap into GitHub-backed specs: parent epic [#72](https://github.com/gannonh/kata-code/issues/72), Guided planning [#73](https://github.com/gannonh/kata-code/issues/73), Guided implementation [#74](https://github.com/gannonh/kata-code/issues/74), Agent Runtime convergence [#75](https://github.com/gannonh/kata-code/issues/75), and the approved conversation-plus-panel shell [#76](https://github.com/gannonh/kata-code/issues/76). Linked the four child issues under #72, archived the completed UX Playground and redundant fork summary, and made `docs/specs/index.md` a GitHub roadmap pointer. The deferred-work registry and product backlog remain local non-spec registries for later triage.
+
 ## 2026-08-06 (Task mode shell decision and Plan validation)
 
-Selected Prototype A from the [Task mode UX Playground](/specs/2026-08-06-task-mode-ux-playground-plan.md): the active conversation remains primary and the persistent right panel owns Task navigation, outcomes, history, and actions. Added the bounded [conversation-plus-panel shell plan](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md), retired the horizontal rail as a production recommendation, and kept the accepted Prototype A E2E flow green. The specs roadmap now explicitly schedules the shell implementation before Agent Runtime convergence. Addressed [#70](https://github.com/gannonh/kata-code/issues/70) by validating Guided 0.3 Plan completion before opening the approval gate, clarifying every-phase checkpoint/dependency/manual-check rules in trusted instructions, and surfacing compiler failures beside the Plan revision action.
+Selected Prototype A from the [Task mode UX Playground](/specs/archive/2026-08-06-task-mode-ux-playground-plan.md): the active conversation remains primary and the persistent right panel owns Task navigation, outcomes, history, and actions. Added the bounded [conversation-plus-panel shell plan](/specs/archive/2026-08-06-task-mode-conversation-panel-shell-plan.md), retired the horizontal rail as a production recommendation, and kept the accepted Prototype A E2E flow green. The specs roadmap now explicitly schedules the shell implementation before Agent Runtime convergence. Addressed [#70](https://github.com/gannonh/kata-code/issues/70) by validating Guided 0.3 Plan completion before opening the approval gate, clarifying every-phase checkpoint/dependency/manual-check rules in trusted instructions, and surfacing compiler failures beside the Plan revision action.
 
 ## 2026-08-06 (Task mode and Agent Runtime convergence)
 
-Reconciled the Task mode parent and Guided Slice 1/2 records with current `main`: both slices are implemented, the UI remains gated by `FF_TASK_MODE=1`, and cumulative provider proof remains in issue #64. Added the Draft [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md) as the proposed next slice. Kata owns child lifecycle; a fleet stays on one provider instance while role-specific models can specialize orchestration, scouting, implementation, and review. The design shares durable identity, workspace leases, Agents UX, cancellation, liveness, recovery, and E2E proof between Standard chat and Guided Implement while preserving primary-only Task authority. Upstream PR #5219 remains lifecycle/UI evidence, and the full upstream scan baseline is unchanged. Deferred mobile roster and advanced topology/provider work is tracked in [#67](https://github.com/gannonh/kata-code/issues/67) and [#68](https://github.com/gannonh/kata-code/issues/68). Also reconciled stale fork navigation and the `FORK.md` quick reference with the accepted vendor-pull policy.
+Reconciled the Task mode parent and Guided Slice 1/2 records with current `main`: both slices are implemented, the UI remains gated by `FF_TASK_MODE=1`, and cumulative provider proof remains in issue #64. Added the Draft [Task mode and Agent Runtime convergence](/specs/archive/2026-08-06-task-mode-agent-runtime-convergence.md) as the proposed next slice. Kata owns child lifecycle; a fleet stays on one provider instance while role-specific models can specialize orchestration, scouting, implementation, and review. The design shares durable identity, workspace leases, Agents UX, cancellation, liveness, recovery, and E2E proof between Standard chat and Guided Implement while preserving primary-only Task authority. Upstream PR #5219 remains lifecycle/UI evidence, and the full upstream scan baseline is unchanged. Deferred mobile roster and advanced topology/provider work is tracked in [#67](https://github.com/gannonh/kata-code/issues/67) and [#68](https://github.com/gannonh/kata-code/issues/68). Also reconciled stale fork navigation and the `FORK.md` quick reference with the accepted vendor-pull policy.
 
 ## 2026-08-05 (Task mode feature gate)
 
@@ -36,14 +40,14 @@ missing. Follow-up proof is tracked in [#64](https://github.com/gannonh/kata-cod
 
 ## 2026-08-03 (Guided implementation approved)
 
-Approved the [Guided implementation child spec](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md).
+Approved the [Guided implementation child spec](/specs/archive/2026-08-03-task-mode-slice-2-guided-implementation-plan.md).
 The design, execution boundary, check policy, workflow upgrade, recovery model, and acceptance
 criteria are approved. Product implementation remains gated on provider-backed Guided planning
 acceptance.
 
 ## 2026-08-03 (Guided implementation Draft)
 
-Added the [Guided implementation child spec](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+Added the [Guided implementation child spec](/specs/archive/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
 for the sole next Task mode slice. It defines the append-only Guided workflow upgrade, write-enabled
 Implement occurrence, approved real checks, typed provider progress tools, checkpoints, reviewed
 Plan amendments, server-observed completion commit, recovery boundaries, and cumulative product-path
@@ -51,8 +55,8 @@ acceptance. Implementation remains gated on Guided planning acceptance and expli
 
 ## 2026-08-03 (Task mode specification reconciliation)
 
-Established [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) as the
-sole parent design and added the delivered [Guided planning child record](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md).
+Established [Task mode — product-first workflows](/specs/archive/2026-08-01-task-mode-design.md) as the
+sole parent design and added the delivered [Guided planning child record](/specs/archive/2026-08-01-task-mode-slice-1-guided-planning-plan.md).
 The roadmap now separates implemented work, active manual acceptance, the next unspecced Guided
 implementation slice, and later unspecced slices. Pre-reset designs and Slices 1–4 remain linked as
 historical implementation records.
@@ -67,7 +71,7 @@ bridge.
 
 ## 2026-08-01 (Task workflow UX reset Phases 0–3)
 
-Implemented the [task workflow UX reset](/specs/2026-08-01-task-mode-design.md)
+Implemented the [task workflow UX reset](/specs/archive/2026-08-01-task-mode-design.md)
 through approved Plan: transactional bootstrap and proposal recovery, pinned source/worktree
 validation, provider-scoped task-stage capabilities, atomic artifact handoffs, explicit provider
 terminal activities, renewable task-turn leases, bounded handoff manifests, and conversation-first
@@ -77,7 +81,7 @@ configured task-stage provider.
 
 ## 2026-08-01 (Task workflow UX reset draft)
 
-Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-mode-design.md)
+Added the Draft [task workflow UX reset design](/specs/archive/2026-08-01-task-mode-design.md)
 to re-baseline task onboarding around Kata-owned Standard, Guided, and Freeform flows. The
 first Guided-to-Plan slice uses an inline brief, automatic stage sessions and artifact handoffs,
 and a Plan approval gate while keeping context-manifest and session-linking mechanics internal.
@@ -259,7 +263,7 @@ Documented finalized pre-merge state on `upstream-sync-2026-06-20` after simplif
 - Updated [closure spec](/specs/2026-06-20-upstream-sync-closure.md) **Current state** and added [branch progress table](/specs/2026-06-20-upstream-sync-closure.md#branch-progress-pre-merge-landed-on-integration-branch): helpers, rebrand rules, classifier `review` bucket, hard-fork branding drop, and desktop dev fixes are landed; bulk merge and post-merge closure Tasks 2, 3, 5 remain blocked.
 - Recorded Closure Task 4 pre-merge audit (no additional classifier rules beyond `review` bucket).
 - Refreshed [resume handoff](/specs/2026-06-20-upstream-sync-handoff.md) to `774da08bc`; marked last-mile `rebrand-fork.ts` work as committed; fixed resume sequence.
-- Updated [fork-setup spec](/specs/fork-setup.md) and [bundle index](/index.md): Phase 2 merged; first upstream sync active on integration branch.
+- Updated [fork-setup spec](/specs/archive/fork-setup.md) and [bundle index](/index.md): Phase 2 merged; first upstream sync active on integration branch.
 - Fixed OTLP default service name in [observability runbook](/operations/observability.md) (`kata-server`, matching source).
 
 **Intentionally unchanged:** FORK.md "Last upstream sync" block (merge not landed). Closure Task 3 (Effect conventions OKF synthesis) — blocked until `.macroscope/check-run-agents/effect-service-conventions.md` arrives with the bulk merge.
@@ -329,7 +333,7 @@ Reran the updated skill from Step 0 against the real 80-commit diff as if for th
 ## 2026-06-17 (episodic upstream sync)
 
 - Added [ADR 0003 — Episodic upstream sync](/adrs/0003-episodic-upstream-sync.md) and [upstream sync guide](/guides/upstream-sync.md).
-- Updated [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook), [fork-setup spec](/specs/fork-setup.md), and [specs roadmap](/specs/index.md).
+- Updated [FORK.md — Phase 3](../../FORK.md#phase-3--upstream-sync-runbook), [fork-setup spec](/specs/archive/fork-setup.md), and [specs roadmap](/specs/index.md).
 
 ## 2026-06-17 (Kata brand icons + desktop packaging)
 
@@ -352,7 +356,7 @@ Reran the updated skill from Step 0 against the real 80-commit diff as if for th
 
 ## 2026-06-16 (Phase 1 CI)
 
-- Documented Phase 1 PR [#1](https://github.com/gannonh/kata-code/pull/1) CI green and review hardening in [fork-setup spec](/specs/fork-setup.md).
+- Documented Phase 1 PR [#1](https://github.com/gannonh/kata-code/pull/1) CI green and review hardening in [fork-setup spec](/specs/archive/fork-setup.md).
 - Expanded [CI runbook](/operations/ci.md) with active vs disabled workflows and fork rebrand test-fixture guidance.
 - Updated [specs roadmap](/specs/index.md): Phase 1 PR & CI complete; Phase 2 next.
 - Refreshed [ADR 0002](/adrs/0002-katacode-product-identity.md) consequences (migration warning, hosted pairing, disabled release workflows).

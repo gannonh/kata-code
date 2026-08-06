@@ -2,20 +2,26 @@
 type: Spec
 title: "Task mode Vertical Slice 1 — Guided planning"
 description: "Delivered child slice for creating a Guided Task and advancing through Clarify, Research, Design, and approved Plan in the conversation-first Task mode UI."
-status: Implemented
 acceptance_status: In progress
 approved_at: 2026-08-01T00:00:00Z
 tags: [specs, task-mode, task-workspaces, guided, planning, conversations, recovery]
 timestamp: 2026-08-06T16:20:00Z
-parent: /specs/2026-08-01-task-mode-design.md
+parent: /specs/archive/2026-08-01-task-mode-design.md
+status: Migrated
+source_status: Implemented
+github_issue: 73
+migrated: true
+archived_at: 2026-08-06T22:05:46Z
 ---
+
+> **Migrated to #73.** The GitHub Issue is the canonical spec. This file is history and is not maintained.
 
 # Task mode Vertical Slice 1 — Guided planning
 
 ## Status
 
 **Implemented on `main`.** This delivered the current Guided planning foundation through approved
-Plan. It is no longer the end of the current implementation: [Vertical Slice 2](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+Plan. It is no longer the end of the current implementation: [Vertical Slice 2](/specs/archive/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
 now continues the same product path through completed Implement.
 
 Provider-backed acceptance is tracked cumulatively with Guided implementation in
@@ -52,7 +58,7 @@ amendments, resulting commit, Verify, or delivery as Slice 1 outcomes.
 
 That historical boundary does not describe the present product ceiling. Slice 2 subsequently added
 `guided@0.3.0`, explicit upgrade/start, and Guided Implement. The current
-[Task mode parent](/specs/2026-08-01-task-mode-design.md) is authoritative for cumulative behavior.
+[Task mode parent](/specs/archive/2026-08-01-task-mode-design.md) is authoritative for cumulative behavior.
 
 Pre-reset artifact editors, manual session linking, raw context-manifest controls, and deterministic
 fixture actions remain compatibility/test infrastructure rather than the current default surface.
@@ -94,7 +100,7 @@ adversarial isolation, and exact-commit proof is tracked in
 
 ## Relationship to Agent Runtime convergence
 
-The next proposed [Agent Runtime convergence slice](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+The next proposed [Agent Runtime convergence slice](/specs/archive/2026-08-06-task-mode-agent-runtime-convergence.md)
 does not rewrite Slice 1 planning state or artifacts.
 
 - Task planning stages remain Task-owned primary sessions.
@@ -120,7 +126,7 @@ behavior.
 
 ## Subsequent work
 
-1. [Vertical Slice 2: Guided implementation](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+1. [Vertical Slice 2: Guided implementation](/specs/archive/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
    — **Implemented on `main`**.
-2. [Shared Agent Runtime and Guided delegation](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+2. [Shared Agent Runtime and Guided delegation](/specs/archive/2026-08-06-task-mode-agent-runtime-convergence.md)
    — **Draft; proposed next slice**.

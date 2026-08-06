@@ -92,12 +92,23 @@ This repository maintains an [OKF](https://github.com/GoogleCloudPlatform/knowle
 
 - Use `/okf read` when available, or read [`./docs/index.md`](./docs/index.md) directly before substantial work, to understand the current documentation map.
 - Follow cross-links into relevant specs, ADRs, runbooks, guides, architecture notes, reference docs, and domain docs before changing related code.
-- Keep [`./docs/specs/index.md`](./docs/specs/index.md) current as the roadmap for active, planned, blocked, completed, and deferred work.
-- When specs defer work that should survive beyond the spec, record or update it in [`./docs/specs/deferred-work.md`](./docs/specs/deferred-work.md) with a source link and revisit trigger.
+- Keep [`./docs/specs/index.md`](./docs/specs/index.md) as the pointer to the GitHub-backed roadmap.
+- Keep [`./docs/specs/deferred-work.md`](./docs/specs/deferred-work.md) current as the non-spec deferred-work registry until its entries are reconciled with GitHub issues.
 - Add or update ADRs in [`./docs/adrs`](./docs/adrs) for durable architecture decisions.
 - After substantial work, PRs, behavior changes, architecture decisions, migrations, or documentation moves, update the OKF bundle and add concise entries to the relevant `log.md` files; during `/okf update`, review deferred-work entries related to changed areas.
 - Maintain Markdown cross-links between related OKF concepts so future agents can traverse decisions, specs, architecture, runbooks, guides, and references.
 - Every non-reserved Markdown file under `./docs` should have OKF frontmatter with at least a non-empty `type` field. `index.md` and `log.md` are reserved navigation/history files.
+
+## Specs live in GitHub Issues
+
+Specs for this repository are GitHub Issues, not files. `docs/specs/` holds the roadmap pointer, historical archive, and explicitly retained non-spec registries.
+
+- Read the roadmap with `gh issue list --label kind:spec --state open`.
+- Read a spec with `gh issue view <N>`; read an epic's phases with `gh sub-issue list <N>`.
+- Do not create spec files under `docs/specs/`. Use the `plan-build-verify-github` skill, which publishes specs as issues.
+- Never build an issue that is not labeled `status:approved` without explicit maintainer approval.
+- Post build reports and acceptance evidence as comments on the spec issue.
+- ADRs remain files under `docs/adrs/`. Cross-link them with the issues they constrain.
 
 ## Communication
 

@@ -2,13 +2,19 @@
 type: Spec
 title: "Task mode Vertical Slice 2 — Guided implementation"
 description: "Delivered child slice for executing an approved Guided Plan through a write-enabled Implement occurrence with durable progress, checks, checkpoints, amendments, recovery, and resulting commit."
-status: Implemented
 approved_at: 2026-08-03T22:45:20Z
 acceptance_status: In progress
 tags: [specs, task-mode, task-workspaces, guided, implementation, agents, recovery]
 timestamp: 2026-08-06T16:20:00Z
-parent: /specs/2026-08-01-task-mode-design.md
+parent: /specs/archive/2026-08-01-task-mode-design.md
+status: Migrated
+source_status: Implemented
+github_issue: 74
+migrated: true
+archived_at: 2026-08-06T22:05:46Z
 ---
+
+> **Migrated to #74.** The GitHub Issue is the canonical spec. This file is history and is not maintained.
 
 # Task mode Vertical Slice 2 — Guided implementation
 
@@ -525,7 +531,7 @@ provider acceptance is complete.
 
 ## Relationship to Agent Runtime convergence
 
-The proposed [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+The proposed [Task mode and Agent Runtime convergence](/specs/archive/2026-08-06-task-mode-agent-runtime-convergence.md)
 builds on this delivered slice instead of replacing it.
 
 - `TaskWorkspaceService`, `TaskImplementationBridge`, approved checks, checkpoints, amendments, and

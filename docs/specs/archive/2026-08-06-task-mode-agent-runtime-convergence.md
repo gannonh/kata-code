@@ -2,25 +2,31 @@
 type: Spec
 title: "Task mode and Agent Runtime convergence"
 description: "Kata-native design for one durable, same-provider-instance agent runtime with role-specific models, shared by Standard mode and Task mode without inheriting provider-specific orchestration."
-status: Draft
 recommendation: "Review implementation against the accepted conversation-plus-panel shell plan"
 tags: [specs, task-mode, agents, subagents, workflows, orchestration, providers, codex, upstream]
 timestamp: 2026-08-06T16:20:00Z
-parent: /specs/2026-08-01-task-mode-design.md
+parent: /specs/archive/2026-08-01-task-mode-design.md
 related_upstream:
   repository: pingdotgg/t3code
   pull_request: 5219
   merge_commit: a2ca89aa10f13a2222e08afd98c66285121d5ba2
+status: Migrated
+source_status: proposed
+github_issue: 75
+migrated: true
+archived_at: 2026-08-06T22:05:46Z
 ---
+
+> **Migrated to #75.** The GitHub Issue is the canonical spec. This file is history and is not maintained.
 
 # Task mode and Agent Runtime convergence
 
 ## Status
 
 **Draft; the Task mode shell is accepted, but runtime implementation remains a separate review.**
-This remains the proposed next runtime vertical slice in the authoritative [Task mode roadmap](/specs/2026-08-01-task-mode-design.md)
-and must preserve the bounded [conversation-plus-panel shell plan](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md).
-The [UX Playground decision](/specs/2026-08-06-task-mode-ux-playground-plan.md) selected Prototype A.
+This remains the proposed next runtime vertical slice in the authoritative [Task mode roadmap](/specs/archive/2026-08-01-task-mode-design.md)
+and must preserve the bounded [conversation-plus-panel shell plan](/specs/archive/2026-08-06-task-mode-conversation-panel-shell-plan.md).
+The [UX Playground decision](/specs/archive/2026-08-06-task-mode-ux-playground-plan.md) selected Prototype A.
 It unifies
 Kata-managed subagents, Standard mode, and Task mode under one durable Agent Runtime rather than
 creating a parallel provider-specific workflow feature.
@@ -621,9 +627,9 @@ the authoritative Task roadmap.
 
 ## Related
 
-- [Task mode parent design](/specs/2026-08-01-task-mode-design.md)
-- [Guided planning delivery](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
-- [Guided implementation delivery](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+- [Task mode parent design](/specs/archive/2026-08-01-task-mode-design.md)
+- [Guided planning delivery](/specs/archive/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
+- [Guided implementation delivery](/specs/archive/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
 - [Provider acceptance issue #64](https://github.com/gannonh/kata-code/issues/64)
 - [Provider architecture](/architecture/providers.md)
 - [Archived Sidebar v2 Active/Idle design](/specs/archive/2026-07-16-sidebar-v2-active-idle-design.md)

@@ -3,7 +3,7 @@ type: Spec
 title: "Task workspaces — artifact-driven workflows delivered as autonomous vertical slices"
 description: "Replacement architecture for Task Mode: tasks are versioned workspaces containing repository bindings, sessions, artifacts, comments, workflow runs, verification evidence, source context, and delivery state; implementation proceeds through independently specified vertical slices."
 status: Superseded
-superseded_by: /specs/2026-08-01-task-mode-design.md
+superseded_by: https://github.com/gannonh/kata-code/issues/72
 tags:
   [
     specs,
@@ -26,7 +26,7 @@ superseded: /specs/2026-07-03-task-mode-design.md
 ## Status
 
 **Superseded** by the authoritative
-[Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) design.
+[Task mode — product-first workflows](/specs/archive/2026-08-01-task-mode-design.md) design.
 
 This document and its Slices 1–4 remain historical implementation records for persistence,
 artifacts, workflow definitions, and Build/checkpoint substrate. They do not define current

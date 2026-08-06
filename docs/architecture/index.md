@@ -16,7 +16,7 @@ System design and runtime structure for Kata Code.
 
 - [Guides — cloud / Kata Code Connect](/cloud/index.md)
 - [Runbooks — observability](/operations/observability.md)
-- [Specs — fork setup](/specs/fork-setup.md)
+- [Specs — fork setup](/specs/archive/fork-setup.md)
 
 ## History
 

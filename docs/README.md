@@ -13,7 +13,7 @@ The OKF knowledge bundle lives at **[docs/index.md](./index.md)**.
 Quick links:
 
 - [Specs roadmap](./specs/index.md)
-- [Fork setup](./specs/fork-setup.md) · [FORK.md](../FORK.md) (canonical)
+- [Fork setup](./specs/archive/fork-setup.md) · [FORK.md](../FORK.md) (canonical)
 - [Architecture](./architecture/index.md)
 - [Guides](./guides/index.md)
 - [Runbooks](./runbooks/index.md)

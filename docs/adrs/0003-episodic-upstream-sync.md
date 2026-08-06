@@ -60,5 +60,5 @@ Questions that motivated this ADR:
 - [ADR 0001 — Connected fork with merge-based upstream sync](/adrs/0001-connected-fork-upstream-merge.md)
 - [ADR 0002 — Kata Code product identity](/adrs/0002-katacode-product-identity.md)
 - [Upstream sync guide](/guides/upstream-sync.md)
-- [Fork setup spec](/specs/fork-setup.md)
+- [Fork setup spec](/specs/archive/fork-setup.md)
 - [FORK.md](../../FORK.md)

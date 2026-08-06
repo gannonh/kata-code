@@ -2,12 +2,17 @@
 type: Plan
 title: "Task mode UX Playground exploration"
 description: "Fixture-driven prototype record for selecting the production Task conversation-plus-panel shell before Agent Runtime convergence."
-status: Completed
 tags: [specs, task-mode, ux, playground, prototype, workflows]
 timestamp: 2026-08-06T00:00:00Z
-parent: /specs/2026-08-01-task-mode-design.md
-related: /specs/2026-08-06-task-mode-agent-runtime-convergence.md
+parent: /specs/archive/2026-08-01-task-mode-design.md
+related: https://github.com/gannonh/kata-code/issues/75
+status: Completed
+source_status: Completed
+migrated: false
+archived_at: 2026-08-06T22:05:46Z
 ---
+
+> **Completed before migration** (source status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Task mode UX Playground exploration
 
@@ -25,7 +30,7 @@ commands, persistence, routing, or provider behavior change during this explorat
 
 Both prototype layouts and the shared scenario catalog were implemented. Maintainer UAT selected
 **Prototype A — refined current layout** as the production direction. The bounded production shell
-plan is [Task mode conversation-plus-panel shell](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md).
+plan is [Task mode conversation-plus-panel shell](/specs/archive/2026-08-06-task-mode-conversation-panel-shell-plan.md).
 
 ```bash
 pnpm run dev
@@ -75,7 +80,7 @@ Retain the current conversation-first, two-column composition:
 - past-stage outcome and conversation views inside the existing shell.
 
 This variant is the accepted production direction. The bounded implementation work is recorded in
-[Task mode conversation-plus-panel shell](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md).
+[Task mode conversation-plus-panel shell](/specs/archive/2026-08-06-task-mode-conversation-panel-shell-plan.md).
 
 ## Prototype B — horizontal stage workspace (rejected as primary shell)
 
@@ -131,7 +136,7 @@ A prototype is viable when a maintainer can answer without explanation:
 
 ## Exit
 
-The UAT decision is recorded above. The authoritative [Task mode parent](/specs/2026-08-01-task-mode-design.md)
-links the accepted shell plan, and the [Agent Runtime convergence design](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+The UAT decision is recorded above. The authoritative [Task mode parent](/specs/archive/2026-08-01-task-mode-design.md)
+links the accepted shell plan, and the [Agent Runtime convergence design](/specs/archive/2026-08-06-task-mode-agent-runtime-convergence.md)
 may now be reviewed against that shell. The rejected horizontal variant remains historical design
 evidence and is not a production navigation recommendation.

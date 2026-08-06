@@ -2,13 +2,19 @@
 type: Plan
 title: "Task mode conversation-plus-panel shell"
 description: "Bounded production UX plan for the accepted Task-first conversation and persistent right-panel shell before Agent Runtime convergence."
-status: Approved
 approved_at: 2026-08-06T20:15:00Z
 tags: [specs, task-mode, ux, shell, workflows]
 timestamp: 2026-08-06T20:15:00Z
-parent: /specs/2026-08-01-task-mode-design.md
-related: /specs/2026-08-06-task-mode-ux-playground-plan.md
+parent: /specs/archive/2026-08-01-task-mode-design.md
+related: /specs/archive/2026-08-06-task-mode-ux-playground-plan.md
+status: Migrated
+source_status: Approved
+github_issue: 76
+migrated: true
+archived_at: 2026-08-06T22:05:46Z
 ---
+
+> **Migrated to #76.** The GitHub Issue is the canonical spec. This file is history and is not maintained.
 
 # Task mode conversation-plus-panel shell
 

@@ -20,7 +20,7 @@ merged the Build/checkpoint implementation. The later conversation-first Task mo
 its product path before current-task integration, so this document no longer defines roadmap
 sequence or current UI behavior.
 
-The authoritative roadmap is [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md).
+The authoritative roadmap is [Task mode — product-first workflows](/specs/archive/2026-08-01-task-mode-design.md).
 Its upcoming Guided implementation slice may reuse this work only through a newly approved child
 spec aligned with the current transactional task model and conversation-first surface.
 
