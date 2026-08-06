@@ -1,5 +1,12 @@
 # Specs log
 
+## 2026-08-06 (Task mode UX Playground exploration)
+
+- Added the active [Task mode UX Playground plan](/specs/2026-08-06-task-mode-ux-playground-plan.md) before approval of the next production slice.
+- Defined two fixture-driven prototypes: a refinement of the current conversation-plus-panel layout and a horizontal-stage Task workspace.
+- Made Task-first navigation, internal stage sessions, distinct active/viewed stages, read-only history, and explicit branch impact the shared hypotheses under test.
+- Held Agent Runtime convergence approval pending interactive Playground UAT without changing its proposed runtime architecture.
+
 ## 2026-08-06 (Task mode and Agent Runtime converged)
 
 - Reconciled the authoritative [Task mode parent](/specs/2026-08-01-task-mode-design.md), [Guided planning delivery](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md), and [Guided implementation delivery](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md) with current `main`: Slices 1 and 2 are implemented, Task UI is gated by `FF_TASK_MODE=1`, and cumulative provider proof remains open in issue #64.

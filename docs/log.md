@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-08-06 (Task mode UX Playground exploration)
+
+Added the active [Task mode UX Playground plan](/specs/2026-08-06-task-mode-ux-playground-plan.md) as a prototype gate before Agent Runtime convergence approval. The exploration compares a refined current conversation-plus-panel layout with a horizontal-stage Task workspace while testing the same Task-first navigation, internal stage-session, history-inspection, and explicit branch hypotheses.
+
 ## 2026-08-06 (Task mode and Agent Runtime convergence)
 
 Reconciled the Task mode parent and Guided Slice 1/2 records with current `main`: both slices are implemented, the UI remains gated by `FF_TASK_MODE=1`, and cumulative provider proof remains in issue #64. Added the Draft [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md) as the proposed next slice. Kata owns child lifecycle; a fleet stays on one provider instance while role-specific models can specialize orchestration, scouting, implementation, and review. The design shares durable identity, workspace leases, Agents UX, cancellation, liveness, recovery, and E2E proof between Standard chat and Guided Implement while preserving primary-only Task authority. Upstream PR #5219 remains lifecycle/UI evidence, and the full upstream scan baseline is unchanged. Deferred mobile roster and advanced topology/provider work is tracked in [#67](https://github.com/gannonh/kata-code/issues/67) and [#68](https://github.com/gannonh/kata-code/issues/68). Also reconciled stale fork navigation and the `FORK.md` quick reference with the accepted vendor-pull policy.
