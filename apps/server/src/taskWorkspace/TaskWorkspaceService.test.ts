@@ -3038,6 +3038,18 @@ describe("TaskWorkspaceService", () => {
   );
 });
 
+const validGuidedPlan = (workTitle = "Implement the change") =>
+  [
+    "## Phase [phase:foundation] Foundation",
+    "",
+    "Checkpoint: never",
+    "",
+    `### Work item [work:implement] ${workTitle}`,
+    "",
+    "- Manual check [check:review]: Review the implementation",
+    "",
+  ].join("\n");
+
 const guidedCreate = (overrides: Record<string, unknown> = {}) =>
   command({
     type: "task.create",
@@ -3803,12 +3815,45 @@ describe("TaskWorkspaceService guided flow", () => {
       task = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(task?.occurrences.find((o) => o.stage === "plan")?.status).toBe("running");
 
-      // Plan output opens the approval gate.
+      // Invalid Plan output is rejected while the provider conversation is
+      // still active, so no approval gate can be opened around an artifact
+      // that the Implement compiler will later reject.
+      const invalidPlanSession = task.sessions.find((candidate) => candidate.stage === "plan")!;
+      const invalidPlan = yield* runtime.runPromiseExit(
+        service.proposeStageCompletion({
+          taskId: task.id,
+          sessionId: invalidPlanSession.id,
+          providerTurnId: "turn-plan",
+          payloadDigest: "digest-plan-invalid",
+          summary: "Plan ready for review.",
+          markdown: [
+            "## Phase [phase:transaction] Transaction",
+            "",
+            "Checkpoint: never",
+            "",
+            "### Work item [work:implement] Implement onboarding",
+            "",
+            "- Manual check [check:provider-uat]: Verify provider UAT | some command",
+          ].join("\n"),
+        }),
+      );
+      expect(Exit.isFailure(invalidPlan)).toBe(true);
+      if (Exit.isFailure(invalidPlan)) {
+        expect((Cause.squash(invalidPlan.cause) as Error).message).toContain(
+          "manual check 'check:provider-uat' must not declare a command",
+        );
+      }
+      const stillRunning = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(stillRunning.planGate).toBeNull();
+      expect(stillRunning.occurrences.find((o) => o.stage === "plan")?.status).toBe("running");
+      expect(stillRunning.artifacts.find((artifact) => artifact.kind === "plan")).toBeUndefined();
+
+      // A valid retry on the same provider turn opens the approval gate.
       task = yield* proposeAndSettle(
-        task!,
+        stillRunning,
         "plan",
         "Plan ready for review.",
-        "# Plan\n\n## Phase 1\nImplement onboarding.\n",
+        validGuidedPlan("Implement onboarding"),
       );
       expect(task.planGate).toMatchObject({ status: "open", occurrence: 0 });
       expect(task.occurrences.find((o) => o.stage === "plan")?.status).toBe("awaiting-approval");
@@ -3881,7 +3926,7 @@ describe("TaskWorkspaceService guided flow", () => {
           providerTurnId: "turn-plan",
           payloadDigest: "digest-plan",
           summary: "First plan.",
-          markdown: "# Plan v1\n",
+          markdown: validGuidedPlan("First implementation"),
         }),
       );
       task = yield* runtime.runPromise(
@@ -3941,7 +3986,7 @@ describe("TaskWorkspaceService guided flow", () => {
           providerTurnId: "turn-plan-2",
           payloadDigest: "digest-plan-2",
           summary: "Revised plan.",
-          markdown: "# Plan v2\n",
+          markdown: validGuidedPlan("Revised implementation"),
         }),
       );
       const reopened = yield* runtime.runPromise(

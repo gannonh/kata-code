@@ -1,13 +1,12 @@
 # Specs log
 
-## 2026-08-06 (Task mode UX Playground exploration)
+## 2026-08-06 (Task mode shell decision and Plan validation)
 
-- Added the active [Task mode UX Playground plan](/specs/2026-08-06-task-mode-ux-playground-plan.md) before approval of the next production slice.
-- Defined two fixture-driven prototypes: a refinement of the current conversation-plus-panel layout and a horizontal-stage Task workspace.
-- Made Task-first navigation, internal stage sessions, distinct active/viewed stages, read-only history, and explicit branch impact the shared hypotheses under test.
-- Held Agent Runtime convergence approval pending interactive Playground UAT without changing its proposed runtime architecture.
-- Implemented `/playground/task-mode` with both layouts, one shared six-scenario fixture catalog, historical outcome/conversation switching, occurrence history, branch-impact confirmation, approval/checkpoint/failure states, and responsive behavior.
-- Added focused Chromium coverage for both layouts and the core history, branch, responsive, mobile-navigation, and action interactions plus a passing cross-target `@task-mode-ux` E2E flow; maintainer layout selection remains open.
+- Completed the [Task mode UX Playground decision](/specs/2026-08-06-task-mode-ux-playground-plan.md) with Prototype A accepted: conversation-first canvas plus persistent right Task panel.
+- Added the bounded [conversation-plus-panel shell plan](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md); the horizontal-stage comparison remains historical evidence.
+- Kept Task-first navigation, internal stage sessions, distinct active/viewed stages, read-only history, explicit branch impact, and responsive behavior as the production shell requirements.
+- Added focused Chromium coverage and a passing `@task-mode-ux` E2E flow for Prototype A history, revision, and narrow navigation.
+- Addressed [#70](https://github.com/gannonh/kata-code/issues/70): Guided 0.3 Plan completion now validates before the approval gate opens; trusted instructions explicitly require per-phase checkpoint policies, valid dependencies, and command-free manual checks; compiler failures have an inline Plan revision path.
 
 ## 2026-08-06 (Task mode and Agent Runtime converged)
 

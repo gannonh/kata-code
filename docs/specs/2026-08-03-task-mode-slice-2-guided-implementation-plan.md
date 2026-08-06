@@ -190,7 +190,13 @@ pattern `[a-z][a-z0-9-]{0,63}` after their namespace. Dependencies reference ear
 only. The compiler rejects missing or duplicate ids, forward or missing dependencies, cycles,
 invalid checkpoint policies, empty commands, and ambiguous check ownership before Plan approval
 succeeds. Exact automated check commands are part of the reviewed Plan. Plan approval therefore
-authorizes those commands for this task worktree.
+authorizes those commands for this task worktree. For Guided 0.3, the server performs this strict
+compilation when the provider submits `task_stage_complete`, before it persists a completion proposal
+or opens the approval gate. An invalid Plan stays in the active conversation so the provider can
+repair it; a legacy invalid gate still exposes the compiler error beside the Request changes path.
+Manual checks never authorize commands, every phase declares its own checkpoint policy, and a
+work item with no dependencies omits the `Dependencies:` line rather than using a sentinel such as
+`none`.
 
 An upgraded `guided@0.2.0` Plan without this shape receives one phase and one work item named
 **Implement approved Plan**, with no automated checks. The user sees that compatibility projection

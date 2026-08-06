@@ -1422,6 +1422,70 @@ describe("TaskWorkspaceView", () => {
     });
   });
 
+  it("keeps invalid Plan approval actionable with an inline revision path", async () => {
+    mocks.dispatchCommand.mockRejectedValueOnce(
+      new Error(
+        "Invalid implementation Plan: manual check 'check:provider-uat' must not declare a command.",
+      ),
+    );
+    const source = guidedTask();
+    await renderTask({
+      ...source,
+      bootstrap: null,
+      taskRevision: 7,
+      workflowRuns: [
+        {
+          ...source.workflowRuns[0]!,
+          currentStage: "plan",
+        },
+      ],
+      occurrences: [
+        {
+          ...source.occurrences[0]!,
+          id: "occurrence-plan-0",
+          stage: "plan",
+          status: "awaiting-approval",
+          sessionId: "session-plan-1",
+          threadId: ThreadId.make("guided-plan-thread-1"),
+          artifactRevisionId: "plan-revision-1",
+        },
+      ],
+      sessions: [
+        {
+          ...source.sessions[0]!,
+          id: "session-plan-1",
+          stage: "plan",
+          threadId: ThreadId.make("guided-plan-thread-1"),
+        },
+      ],
+      planGate: {
+        occurrence: 0,
+        revision: 1,
+        status: "open",
+        feedback: null,
+        openedAt: "2026-07-28T17:10:00.000Z",
+        resolvedAt: null,
+      },
+    });
+
+    await page.getByTestId("guided-plan-approve").click();
+    await expect.element(page.getByTestId("guided-plan-validation-error")).toBeVisible();
+    await expect
+      .element(page.getByTestId("guided-plan-validation-error"))
+      .toHaveTextContent("This Plan cannot be approved yet.");
+    await expect.element(page.getByTestId("guided-plan-request-changes")).toBeDisabled();
+
+    await page
+      .getByTestId("guided-plan-feedback")
+      .fill("Remove the command from the manual check.");
+    await expect.element(page.getByTestId("guided-plan-request-changes")).toBeEnabled();
+    await page.getByTestId("guided-plan-request-changes").click();
+    expect(mocks.dispatchCommand.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: "task.stage.request-changes",
+      feedback: "Remove the command from the manual check.",
+    });
+  });
+
   it("uses the conversation-first Guided surface without manual stage controls", async () => {
     const threadId = ThreadId.make("guided-thread-1");
     await renderTask({

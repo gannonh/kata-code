@@ -1,8 +1,8 @@
 # OKF bundle log
 
-## 2026-08-06 (Task mode UX Playground exploration)
+## 2026-08-06 (Task mode shell decision and Plan validation)
 
-Added the active [Task mode UX Playground plan](/specs/2026-08-06-task-mode-ux-playground-plan.md) as a prototype gate before Agent Runtime convergence approval. The implemented `/playground/task-mode` route compares a refined current conversation-plus-panel layout with a horizontal-stage Task workspace across one six-scenario fixture catalog. Both test Task-first navigation, internal stage sessions, distinct active/viewed stages, outcome and occurrence history, explicit branch impact, human action states, and responsive behavior. Focused browser coverage and the dev-target `@task-mode-ux` E2E flow are green; maintainer layout selection remains open.
+Selected Prototype A from the [Task mode UX Playground](/specs/2026-08-06-task-mode-ux-playground-plan.md): the active conversation remains primary and the persistent right panel owns Task navigation, outcomes, history, and actions. Added the bounded [conversation-plus-panel shell plan](/specs/2026-08-06-task-mode-conversation-panel-shell-plan.md), retired the horizontal rail as a production recommendation, and kept the accepted Prototype A E2E flow green. Addressed [#70](https://github.com/gannonh/kata-code/issues/70) by validating Guided 0.3 Plan completion before opening the approval gate, clarifying every-phase checkpoint/dependency/manual-check rules in trusted instructions, and surfacing compiler failures beside the Plan revision action.
 
 ## 2026-08-06 (Task mode and Agent Runtime convergence)
 
