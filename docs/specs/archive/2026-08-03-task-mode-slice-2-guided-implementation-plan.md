@@ -2,13 +2,19 @@
 type: Spec
 title: "Task mode Vertical Slice 2 — Guided implementation"
 description: "Delivered child slice for executing an approved Guided Plan through a write-enabled Implement occurrence with durable progress, checks, checkpoints, amendments, recovery, and resulting commit."
-status: Implemented
 approved_at: 2026-08-03T22:45:20Z
 acceptance_status: In progress
 tags: [specs, task-mode, task-workspaces, guided, implementation, agents, recovery]
 timestamp: 2026-08-06T16:20:00Z
-parent: /specs/2026-08-01-task-mode-design.md
+parent: /specs/archive/2026-08-01-task-mode-design.md
+status: Migrated
+source_status: Implemented
+github_issue: 74
+migrated: true
+archived_at: 2026-08-06T22:05:46Z
 ---
+
+> **Migrated to #74.** The GitHub Issue is the canonical spec. This file is history and is not maintained.
 
 # Task mode Vertical Slice 2 — Guided implementation
 
@@ -190,7 +196,13 @@ pattern `[a-z][a-z0-9-]{0,63}` after their namespace. Dependencies reference ear
 only. The compiler rejects missing or duplicate ids, forward or missing dependencies, cycles,
 invalid checkpoint policies, empty commands, and ambiguous check ownership before Plan approval
 succeeds. Exact automated check commands are part of the reviewed Plan. Plan approval therefore
-authorizes those commands for this task worktree.
+authorizes those commands for this task worktree. For Guided 0.3, the server performs this strict
+compilation when the provider submits `task_stage_complete`, before it persists a completion proposal
+or opens the approval gate. An invalid Plan stays in the active conversation so the provider can
+repair it; a legacy invalid gate still exposes the compiler error beside the Request changes path.
+Manual checks never authorize commands, every phase declares its own checkpoint policy, and a
+work item with no dependencies omits the `Dependencies:` line rather than using a sentinel such as
+`none`.
 
 An upgraded `guided@0.2.0` Plan without this shape receives one phase and one work item named
 **Implement approved Plan**, with no automated checks. The user sees that compatibility projection
@@ -519,7 +531,7 @@ provider acceptance is complete.
 
 ## Relationship to Agent Runtime convergence
 
-The proposed [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+The proposed [Task mode and Agent Runtime convergence](/specs/archive/2026-08-06-task-mode-agent-runtime-convergence.md)
 builds on this delivered slice instead of replacing it.
 
 - `TaskWorkspaceService`, `TaskImplementationBridge`, approved checks, checkpoints, amendments, and

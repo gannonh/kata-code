@@ -164,6 +164,6 @@ Before a large fork-only feature, ask: _can this live in a new module upstream d
 - [ADR 0001 — Connected fork](/adrs/0001-connected-fork-upstream-merge.md)
 - [ADR 0004 — Selective vendor-pull](/adrs/0004-selective-vendor-pull.md) (supersedes [ADR 0003](/adrs/0003-episodic-upstream-sync.md))
 - [Strategy analysis](/specs/2026-06-21-upstream-sync-strategy-analysis.md)
-- [Fork setup spec](/specs/fork-setup.md)
+- [Fork setup spec](/specs/archive/fork-setup.md)
 - [FORK.md](../../FORK.md)
 - [upstream-assess skill](../../.agents/skills/upstream-assess/SKILL.md) (canonical runbook + bundled scripts)

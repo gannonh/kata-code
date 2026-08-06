@@ -24,6 +24,7 @@ import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as PlaygroundTaskModeRouteImport } from './routes/playground.task-mode'
 import { Route as PlaygroundSidebarRouteImport } from './routes/playground.sidebar'
 import { Route as TasksEnvironmentIdTaskIdRouteImport } from './routes/tasks.$environmentId.$taskId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
@@ -103,6 +104,11 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   path: '/archived',
   getParentRoute: () => SettingsRoute,
 } as any)
+const PlaygroundTaskModeRoute = PlaygroundTaskModeRouteImport.update({
+  id: '/task-mode',
+  path: '/task-mode',
+  getParentRoute: () => PlaygroundRoute,
+} as any)
 const PlaygroundSidebarRoute = PlaygroundSidebarRouteImport.update({
   id: '/sidebar',
   path: '/sidebar',
@@ -132,6 +138,7 @@ export interface FileRoutesByFullPath {
   '/playground': typeof PlaygroundRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/playground/sidebar': typeof PlaygroundSidebarRoute
+  '/playground/task-mode': typeof PlaygroundTaskModeRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/playground/sidebar': typeof PlaygroundSidebarRoute
+  '/playground/task-mode': typeof PlaygroundTaskModeRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -172,6 +180,7 @@ export interface FileRoutesById {
   '/playground': typeof PlaygroundRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/playground/sidebar': typeof PlaygroundSidebarRoute
+  '/playground/task-mode': typeof PlaygroundTaskModeRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/playground'
     | '/settings'
     | '/playground/sidebar'
+    | '/playground/task-mode'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -213,6 +223,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/playground/sidebar'
+    | '/playground/task-mode'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -234,6 +245,7 @@ export interface FileRouteTypes {
     | '/playground'
     | '/settings'
     | '/playground/sidebar'
+    | '/playground/task-mode'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -367,6 +379,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/playground/task-mode': {
+      id: '/playground/task-mode'
+      path: '/task-mode'
+      fullPath: '/playground/task-mode'
+      preLoaderRoute: typeof PlaygroundTaskModeRouteImport
+      parentRoute: typeof PlaygroundRoute
+    }
     '/playground/sidebar': {
       id: '/playground/sidebar'
       path: '/sidebar'
@@ -414,11 +433,13 @@ const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
 interface PlaygroundRouteChildren {
   PlaygroundSidebarRoute: typeof PlaygroundSidebarRoute
+  PlaygroundTaskModeRoute: typeof PlaygroundTaskModeRoute
   PlaygroundIndexRoute: typeof PlaygroundIndexRoute
 }
 
 const PlaygroundRouteChildren: PlaygroundRouteChildren = {
   PlaygroundSidebarRoute: PlaygroundSidebarRoute,
+  PlaygroundTaskModeRoute: PlaygroundTaskModeRoute,
   PlaygroundIndexRoute: PlaygroundIndexRoute,
 }
 

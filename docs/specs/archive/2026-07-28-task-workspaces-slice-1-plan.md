@@ -17,7 +17,7 @@ parent: /specs/2026-07-28-task-workspaces-vertical-slices-design.md
 
 **Historical delivery record; Verified.** Merged to `main` via
 [PR #51](https://github.com/gannonh/kata-code/pull/51) (`a660027c`). The authoritative current
-roadmap is [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md).
+roadmap is [Task mode — product-first workflows](/specs/archive/2026-08-01-task-mode-design.md).
 
 ## Outcome
 

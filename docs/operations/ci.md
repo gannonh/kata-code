@@ -88,4 +88,4 @@ Partial fork renames can leave tests asserting `katacode` where fixtures still m
 
 - Archived plans under `docs/specs/plans/` may still reference upstream toolchain commands; use this runbook and [AGENTS.md](../../AGENTS.md) for current tooling.
 - See [Release runbook](./release.md) for cutting releases; [Release setup](./release-setup.md) for secrets and infrastructure.
-- [Fork setup spec](../specs/fork-setup.md) tracks Phase 1 delivery and Phase 2 scope.
+- [Fork setup spec](../specs/archive/fork-setup.md) tracks Phase 1 delivery and Phase 2 scope.

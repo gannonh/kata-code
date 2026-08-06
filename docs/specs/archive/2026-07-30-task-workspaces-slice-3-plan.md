@@ -17,7 +17,7 @@ base_sha: 6aceff8a85b8a6dfd673ceb9947b7518d8aa9579
 
 **Historical delivery record; Verified.** Slice 3a and 3b merged through PR #62 at
 `cf95a03c9c658d3677fc85d46d486a4ecfda57ae`. The authoritative current roadmap is
-[Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md).
+[Task mode — product-first workflows](/specs/archive/2026-08-01-task-mode-design.md).
 
 The implementation was delivered in two parts:
 

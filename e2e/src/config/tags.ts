@@ -11,6 +11,7 @@ export const E2E_TAGS = {
   environmentsDeploy: "@environments-deploy",
   sidebar: "@sidebar",
   taskWorkspaces: "@task-workspaces",
+  taskModeUx: "@task-mode-ux",
 } as const;
 
 export type E2ETag = (typeof E2E_TAGS)[keyof typeof E2E_TAGS];

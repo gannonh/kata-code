@@ -237,6 +237,10 @@ function manualCheckDisabledReason(
   return null;
 }
 
+function isPlanValidationError(error: string | null): error is string {
+  return error?.startsWith("Invalid implementation Plan:") ?? false;
+}
+
 function completionDisabledReason(task: TaskWorkspace, isBusy: boolean) {
   if (task.build.resultingCommitSha) return "Implementation is already complete.";
   if (task.build.amendmentGateId) return "Approve the pending amendment first.";
@@ -471,6 +475,17 @@ export function GuidedTaskPanel(props: {
               Approve this Plan or send feedback for one continuation conversation.
             </p>
           </div>
+          {isPlanValidationError(commands.error) ? (
+            <div
+              role="alert"
+              data-testid="guided-plan-validation-error"
+              className="space-y-1 rounded-md border border-destructive/35 bg-destructive/8 p-3 text-xs text-destructive"
+            >
+              <p className="font-semibold">This Plan cannot be approved yet.</p>
+              <p>{commands.error}</p>
+              <p>Use Request changes below to ask the active stage conversation to repair it.</p>
+            </div>
+          ) : null}
           <Textarea
             data-testid="guided-plan-feedback"
             value={feedback}
@@ -1127,7 +1142,7 @@ export function GuidedTaskPanel(props: {
         </Button>
       ) : null}
 
-      {commands.error ? (
+      {commands.error && (!isPlanValidationError(commands.error) || !gateOpen) ? (
         <p
           data-testid="guided-task-error"
           className="rounded-lg border border-destructive/35 bg-destructive/8 p-3 text-sm text-destructive"

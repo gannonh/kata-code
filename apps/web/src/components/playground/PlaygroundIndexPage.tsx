@@ -4,12 +4,20 @@ export type PlaygroundExperiment = {
   id: string;
   title: string;
   description: string;
-  to: "/playground/sidebar";
+  to: "/playground/sidebar" | "/playground/task-mode";
   status: "active" | "archived";
 };
 
 /** Catalog of dev-only playground experiments. Add new entries as routes land. */
 export const PLAYGROUND_EXPERIMENTS: readonly PlaygroundExperiment[] = [
+  {
+    id: "task-mode-ux",
+    title: "Task mode UX",
+    description:
+      "Explore the accepted conversation-plus-panel Task workspace across shared history and revision fixtures.",
+    to: "/playground/task-mode",
+    status: "active",
+  },
   {
     id: "sidebar-v2",
     title: "Sidebar v2",

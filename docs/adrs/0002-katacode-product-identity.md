@@ -43,6 +43,6 @@ Shared constants live in `packages/shared/src/branding.ts`.
 
 ## Related
 
-- [Fork setup spec](/specs/fork-setup.md)
+- [Fork setup spec](/specs/archive/fork-setup.md)
 - [ADR 0001 — Connected fork](/adrs/0001-connected-fork-upstream-merge.md)
 - [FORK.md](../../FORK.md) identity map

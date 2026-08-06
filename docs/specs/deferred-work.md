@@ -35,7 +35,7 @@ Each entry should include:
 - **Status:** deferred
 - **Tracking issue:** [#68](https://github.com/gannonh/kata-code/issues/68)
 - **Area:** agents, providers, orchestration, task-mode
-- **Source:** [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+- **Source:** [Task mode and Agent Runtime convergence](https://github.com/gannonh/kata-code/issues/75)
 - **Rationale:** The first slice must prove Kata-managed, same-provider, depth-one runs and one
   workspace writer before adding adapters, provider-native adoption, mixed providers, nesting,
   isolated parallel writers, or a general Standard workflow layer.
@@ -47,7 +47,7 @@ Each entry should include:
 - **Status:** deferred
 - **Tracking issue:** [#67](https://github.com/gannonh/kata-code/issues/67)
 - **Area:** agents, mobile, connect, ui
-- **Source:** [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md)
+- **Source:** [Task mode and Agent Runtime convergence](https://github.com/gannonh/kata-code/issues/75)
 - **Rationale:** The first slice requires truthful aggregate mobile liveness but defers detailed
   fleet inspection and controls until the shared runtime and desktop/web Agents projection settle.
 - **Revisit trigger:** After the first Agent Runtime slice ships its stable fleet query and actions.
@@ -78,7 +78,7 @@ Each entry should include:
 - **Status:** closed
 - **Tracking issue:** [#53](https://github.com/gannonh/kata-code/issues/53)
 - **Area:** task-workspaces, server, persistence
-- **Source:** [Task mode parent](/specs/2026-08-01-task-mode-design.md)
+- **Source:** [Task mode parent](/specs/archive/2026-08-01-task-mode-design.md)
 - **Rationale:** Current tasks moved to transactional SQLite events, snapshots, receipts, and
   outbox rows. Legacy NDJSON data is imported once and retained read-only.
 - **Revisit trigger:** Closed; transactional-store durability issues receive their own defect or
@@ -212,7 +212,7 @@ Each entry should include:
 
 - **Status:** deferred
 - **Area:** mobile, release, infrastructure
-- **Source:** [fork setup spec](/specs/fork-setup.md), `.github/disabled/README.md`
+- **Source:** [fork setup spec](/specs/archive/fork-setup.md), `.github/disabled/README.md`
 - **Rationale:** Requires fork Expo project ownership and production-ready EAS credentials.
 - **Revisit trigger:** Review after Relay Deploy is implemented or before any mobile release planning.
 - **Notes:** Known required values include `KATACODE_EAS_PROJECT_ID` and `EXPO_OWNER`.

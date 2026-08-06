@@ -18,6 +18,7 @@ release-local-smoke/
 .t3
 .idea/
 apps/web/.playwright
+.playwright-cli/
 apps/web/playwright-report
 apps/web/src/components/__screenshots__
 .vitest-*

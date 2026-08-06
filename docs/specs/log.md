@@ -1,18 +1,49 @@
 # Specs log
 
+## 2026-08-06
+
+Migrated file-based specs to GitHub Issues. The issue is now the canonical spec.
+
+Migrated:
+
+- 2026-08-01-task-mode-design.md -> #72
+- 2026-08-01-task-mode-slice-1-guided-planning-plan.md -> #73
+- 2026-08-03-task-mode-slice-2-guided-implementation-plan.md -> #74
+- 2026-08-06-task-mode-agent-runtime-convergence.md -> #75
+- 2026-08-06-task-mode-conversation-panel-shell-plan.md -> #76
+
+Archived without an issue:
+
+- 2026-08-06-task-mode-ux-playground-plan.md (source status: Completed)
+- fork-setup.md (source status: completed)
+
+Retained as non-spec registries for later triage:
+
+- `deferred-work.md` remains the local deferred-work registry while its entries are reconciled with existing GitHub issues.
+- `product-backlog.md` remains a local backlog awaiting GitHub issue triage.
+
+## 2026-08-06 (Task mode shell decision and Plan validation)
+
+- Completed the [Task mode UX Playground decision](/specs/archive/2026-08-06-task-mode-ux-playground-plan.md) with Prototype A accepted: conversation-first canvas plus persistent right Task panel.
+- Added the bounded [conversation-plus-panel shell plan](/specs/archive/2026-08-06-task-mode-conversation-panel-shell-plan.md); the horizontal-stage comparison remains historical evidence.
+- Updated the [specs roadmap](/specs/index.md) so the approved shell is the explicit next implementation step before Agent Runtime convergence.
+- Kept Task-first navigation, internal stage sessions, distinct active/viewed stages, read-only history, explicit branch impact, and responsive behavior as the production shell requirements.
+- Added focused Chromium coverage and a passing `@task-mode-ux` E2E flow for Prototype A history, revision, and narrow navigation.
+- Addressed [#70](https://github.com/gannonh/kata-code/issues/70): Guided 0.3 Plan completion now validates before the approval gate opens; trusted instructions explicitly require per-phase checkpoint policies, valid dependencies, and command-free manual checks; compiler failures have an inline Plan revision path.
+
 ## 2026-08-06 (Task mode and Agent Runtime converged)
 
-- Reconciled the authoritative [Task mode parent](/specs/2026-08-01-task-mode-design.md), [Guided planning delivery](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md), and [Guided implementation delivery](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md) with current `main`: Slices 1 and 2 are implemented, Task UI is gated by `FF_TASK_MODE=1`, and cumulative provider proof remains open in issue #64.
-- Replaced the isolated upstream-port proposal with the Draft [Task mode and Agent Runtime convergence](/specs/2026-08-06-task-mode-agent-runtime-convergence.md), making a Kata-managed Agent Runtime the proposed next Task mode slice and a shared substrate for Standard chat.
+- Reconciled the authoritative [Task mode parent](/specs/archive/2026-08-01-task-mode-design.md), [Guided planning delivery](/specs/archive/2026-08-01-task-mode-slice-1-guided-planning-plan.md), and [Guided implementation delivery](/specs/archive/2026-08-03-task-mode-slice-2-guided-implementation-plan.md) with current `main`: Slices 1 and 2 are implemented, Task UI is gated by `FF_TASK_MODE=1`, and cumulative provider proof remains open in issue #64.
+- Replaced the isolated upstream-port proposal with the Draft [Task mode and Agent Runtime convergence](/specs/archive/2026-08-06-task-mode-agent-runtime-convergence.md), making a Kata-managed Agent Runtime the proposed next Task mode slice and a shared substrate for Standard chat.
 - Pinned each fleet to one provider instance while supporting role-specific models/options for orchestrator, scout, implementer, and reviewer.
 - Defined durable owner/run identity, parent-turn quiescence, shared-read and exclusive-write workspace leases, primary-only Task authority, `guided@0.4.0`, Agents UX, liveness, recovery, security, acceptance criteria, and E2E coverage.
 - Retained upstream PR #5219 as lifecycle/UI/liveness evidence rather than provider-specific architecture; kept the vendor-pull human gate and full upstream scan baseline unchanged.
 - Filed and registered deferred follow-ups [#67](https://github.com/gannonh/kata-code/issues/67) for the mobile Agents roster and [#68](https://github.com/gannonh/kata-code/issues/68) for provider expansion and advanced fleet topology.
-- Reconciled the [fork setup summary](/specs/fork-setup.md) and `FORK.md` quick reference with ADR 0004's vendor-pull workflow.
+- Reconciled the [fork setup summary](/specs/archive/fork-setup.md) and `FORK.md` quick reference with ADR 0004's vendor-pull workflow.
 
 ## 2026-08-03 (Guided implementation approved)
 
-- Marked the [Vertical Slice 2 Guided implementation plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+- Marked the [Vertical Slice 2 Guided implementation plan](/specs/archive/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
   **Approved**.
 - Approved the execution boundary, workflow upgrade, approved-check policy, recovery model, and
   cumulative acceptance criteria after independent blocker/high review.
@@ -20,7 +51,7 @@
 
 ## 2026-08-03 (Guided implementation Draft)
 
-- Added the [Vertical Slice 2 Guided implementation plan](/specs/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
+- Added the [Vertical Slice 2 Guided implementation plan](/specs/archive/2026-08-03-task-mode-slice-2-guided-implementation-plan.md)
   as the sole next Task mode child spec.
 - Defined `guided@0.3.0`, explicit `guided@0.2.0` upgrade eligibility, a write-enabled Implement
   occurrence, deterministic Plan compilation, approved repository checks, typed implementation
@@ -30,9 +61,9 @@
 
 ## 2026-08-03 (Task mode roadmap reconciliation)
 
-- Established [Task mode — product-first workflows](/specs/2026-08-01-task-mode-design.md) as the
+- Established [Task mode — product-first workflows](/specs/archive/2026-08-01-task-mode-design.md) as the
   sole authoritative parent design.
-- Added [Vertical Slice 1: Guided planning](/specs/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
+- Added [Vertical Slice 1: Guided planning](/specs/archive/2026-08-01-task-mode-slice-1-guided-planning-plan.md)
   as the implemented baseline with provider-backed manual acceptance still in progress.
 - Declared Vertical Slice 2 Guided implementation as the only next planning target. Guided
   verification, Standard/Freeform, and Deliver remain explicitly unspecced.
@@ -43,7 +74,7 @@
 
 ## 2026-08-01 (Task workflow UX reset Phases 0–3)
 
-Implemented [Task workflow UX reset](/specs/2026-08-01-task-mode-design.md) through
+Implemented [Task workflow UX reset](/specs/archive/2026-08-01-task-mode-design.md) through
 Phases 0–3: Guided creation, bootstrap and proposal recovery, typed terminal settlement, atomic
 handoffs, Plan approval, worktree policy, explicit provider task-stage capabilities, and the
 conversation-first surface. Full unit, typecheck, OKF, and release-smoke gates pass; provider-backed
@@ -51,7 +82,7 @@ desktop UAT requires an eligible configured task-stage provider.
 
 ## 2026-08-01 (Task workflow UX reset draft)
 
-Added the Draft [task workflow UX reset design](/specs/2026-08-01-task-mode-design.md)
+Added the Draft [task workflow UX reset design](/specs/archive/2026-08-01-task-mode-design.md)
 following maintainer review of the current task screen. The proposed product-first slice keeps
 Kata-owned **Standard**, **Guided**, and **Freeform** templates, uses an inline brief for the
 first slice, automatically manages stage conversations and artifact handoffs, pauses Guided
@@ -374,7 +405,7 @@ Finalized `feat/deployments-phase-2` after the simplify (`37e7f5404`) and strict
 - Retired the ADR 0003 bulk-merge plan: marked [closure spec](/specs/2026-06-20-upstream-sync-closure.md) and [resume handoff](/specs/2026-06-20-upstream-sync-handoff.md) **Superseded**; promoted [strategy analysis](/specs/2026-06-21-upstream-sync-strategy-analysis.md) (Option D) to **Accepted** with outcome [ADR 0004](/adrs/0004-selective-vendor-pull.md).
 - Updated [specs roadmap](/specs/index.md): Active item is now "Upstream sync (first scan)" under selective vendor-pull; added a Retired note for the superseded ADR 0003 specs.
 - Updated [FORK.md](../../FORK.md): sync block → "Last upstream scan"; Phase 3 runbook → vendor-pull process; added Watched clusters (the `[codex]` Effect migration) and a Ported upstream changes log; post-port checklist and agent instructions point at ADR 0004.
-- Updated [fork-setup spec](/specs/fork-setup.md): status row, Phase 3 bullet, and Related now point at ADR 0004; retired the "Active bulk merge" row.
+- Updated [fork-setup spec](/specs/archive/fork-setup.md): status row, Phase 3 bullet, and Related now point at ADR 0004; retired the "Active bulk merge" row.
 
 ## 2026-06-23 (mobile local dev slice — build report updated with PR review fixes)
 
@@ -392,7 +423,7 @@ Finalized `feat/deployments-phase-2` after the simplify (`37e7f5404`) and strict
 
 - Refreshed [closure spec](/specs/2026-06-20-upstream-sync-closure.md) current state and branch-progress table; recorded Closure Task 4 audit (no new rules beyond `review` bucket).
 - Updated [resume handoff](/specs/2026-06-20-upstream-sync-handoff.md) to handoff HEAD `774da08bc`; last-mile rebrand work marked committed; resume sequence corrected.
-- Updated [fork-setup spec](/specs/fork-setup.md): Phase 2 merged; first upstream sync **Active** on `upstream-sync-2026-06-20` (bulk merge pending).
+- Updated [fork-setup spec](/specs/archive/fork-setup.md): Phase 2 merged; first upstream sync **Active** on `upstream-sync-2026-06-20` (bulk merge pending).
 
 ## 2026-06-20 (upstream sync handoff doc added)
 
@@ -451,7 +482,7 @@ The first full merge of upstream (baseline `708d5383` -> tip `97e5cd3bf`, 80 com
 
 ## 2026-06-17 (episodic upstream sync)
 
-- Documented episodic upstream policy in [ADR 0003](/adrs/0003-episodic-upstream-sync.md) and [upstream sync guide](/guides/upstream-sync.md); updated [roadmap](/specs/index.md) and [fork-setup spec](/specs/fork-setup.md).
+- Documented episodic upstream policy in [ADR 0003](/adrs/0003-episodic-upstream-sync.md) and [upstream sync guide](/guides/upstream-sync.md); updated [roadmap](/specs/index.md) and [fork-setup spec](/specs/archive/fork-setup.md).
 
 ## 2026-06-17 (Kata brand icons)
 
@@ -475,10 +506,10 @@ The first full merge of upstream (baseline `708d5383` -> tip `97e5cd3bf`, 80 com
 ## 2026-06-16 (Phase 1 delivery)
 
 - Marked Phase 1 PR & CI complete on [roadmap](/specs/index.md); [PR #1](https://github.com/gannonh/kata-code/pull/1) passes GitHub Actions.
-- Added Phase 1 delivery notes and test-fixture guidance to [fork-setup spec](/specs/fork-setup.md).
+- Added Phase 1 delivery notes and test-fixture guidance to [fork-setup spec](/specs/archive/fork-setup.md).
 
 ## 2026-06-16
 
 - Initialized specs section; moved `.plans/` to `docs/specs/plans/`.
-- Added [fork-setup spec](/specs/fork-setup.md) (canonical fork plan lives in [FORK.md](../../FORK.md)).
+- Added [fork-setup spec](/specs/archive/fork-setup.md) (canonical fork plan lives in [FORK.md](../../FORK.md)).
 - Moved [product backlog](/specs/product-backlog.md) from `docs/project/todo.md`.

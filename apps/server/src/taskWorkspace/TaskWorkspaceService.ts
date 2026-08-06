@@ -6631,6 +6631,25 @@ export const make = Effect.gen(function* () {
             taskId: input.taskId,
           });
         }
+        if (stage === "plan" && definition.version === "guided@0.3.0") {
+          // Validate the provider's exact Plan payload before persisting a
+          // completion proposal. An invalid Plan must stay in the active
+          // conversation so the provider can repair it; it must never open a
+          // gate that can only fail later when the user clicks Approve.
+          try {
+            compileTaskWorkspacePlan({
+              markdown: input.markdown,
+              planRevisionId: "plan-validation",
+            });
+          } catch (cause) {
+            return yield* new TaskWorkspaceError({
+              message: describeFailure(cause),
+              commandType: "task.internal",
+              taskId: input.taskId,
+              cause,
+            });
+          }
+        }
         // A gate-open Plan occurrence rejects replacement proposals until
         // Request changes allocates a continuation.
         if (stage === "plan" && task.planGate?.status === "open") {

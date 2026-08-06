@@ -1365,6 +1365,51 @@ describe("TaskWorkspaceView", () => {
     });
   });
 
+  it("surfaces invalid Plan errors when approving an amendment with a closed Plan gate", async () => {
+    mocks.dispatchCommand.mockRejectedValueOnce(
+      new Error("Invalid implementation Plan: amendment phase 'phase:foundation' is malformed."),
+    );
+    await renderTask(
+      guidedTask({
+        build: {
+          ...guidedTask().build,
+          amendmentGateId: "amendment-1",
+          amendments: [
+            {
+              id: "amendment-1",
+              basePlanRevisionId: "plan-revision-1",
+              triggeringPhaseId: "phase:foundation",
+              triggeringWorkItemId: "work:implement",
+              triggeringCheckId: "check:typecheck",
+              expected: "approved behavior",
+              found: "different behavior",
+              impact: "Plan needs review.",
+              proposedChanges: "Revise the Plan.",
+              proposedPlanMarkdown: "## Phase [phase:foundation] Foundation",
+              reviewFeedback: null,
+              affectedPhaseIds: ["phase:foundation"],
+              affectedWorkItemIds: ["work:implement"],
+              dependentCheckIds: ["check:typecheck"],
+              status: "requested",
+              artifactRevisionId: null,
+              planDiff: null,
+              requestedAt: "2026-07-28T17:12:00.000Z",
+              approvedAt: null,
+              approvedBy: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    await page.getByTestId("guided-amendment-approve-amendment-1").click();
+    await expect.element(page.getByTestId("guided-task-error")).toBeVisible();
+    await expect
+      .element(page.getByTestId("guided-task-error"))
+      .toHaveTextContent("Invalid implementation Plan:");
+    await expect.element(page.getByTestId("guided-plan-validation-error")).not.toBeInTheDocument();
+  });
+
   it("dispatches Guided workflow upgrade before explicit Implement start for upgraded tasks", async () => {
     await renderTask({
       ...guidedTask(),
@@ -1419,6 +1464,70 @@ describe("TaskWorkspaceView", () => {
       type: "task.workflow.upgrade",
       sourceVersion: "guided@0.2.0",
       targetVersion: "guided@0.3.0",
+    });
+  });
+
+  it("keeps invalid Plan approval actionable with an inline revision path", async () => {
+    mocks.dispatchCommand.mockRejectedValueOnce(
+      new Error(
+        "Invalid implementation Plan: manual check 'check:provider-uat' must not declare a command.",
+      ),
+    );
+    const source = guidedTask();
+    await renderTask({
+      ...source,
+      bootstrap: null,
+      taskRevision: 7,
+      workflowRuns: [
+        {
+          ...source.workflowRuns[0]!,
+          currentStage: "plan",
+        },
+      ],
+      occurrences: [
+        {
+          ...source.occurrences[0]!,
+          id: "occurrence-plan-0",
+          stage: "plan",
+          status: "awaiting-approval",
+          sessionId: "session-plan-1",
+          threadId: ThreadId.make("guided-plan-thread-1"),
+          artifactRevisionId: "plan-revision-1",
+        },
+      ],
+      sessions: [
+        {
+          ...source.sessions[0]!,
+          id: "session-plan-1",
+          stage: "plan",
+          threadId: ThreadId.make("guided-plan-thread-1"),
+        },
+      ],
+      planGate: {
+        occurrence: 0,
+        revision: 1,
+        status: "open",
+        feedback: null,
+        openedAt: "2026-07-28T17:10:00.000Z",
+        resolvedAt: null,
+      },
+    });
+
+    await page.getByTestId("guided-plan-approve").click();
+    await expect.element(page.getByTestId("guided-plan-validation-error")).toBeVisible();
+    await expect
+      .element(page.getByTestId("guided-plan-validation-error"))
+      .toHaveTextContent("This Plan cannot be approved yet.");
+    await expect.element(page.getByTestId("guided-plan-request-changes")).toBeDisabled();
+
+    await page
+      .getByTestId("guided-plan-feedback")
+      .fill("Remove the command from the manual check.");
+    await expect.element(page.getByTestId("guided-plan-request-changes")).toBeEnabled();
+    await page.getByTestId("guided-plan-request-changes").click();
+    expect(mocks.dispatchCommand.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: "task.stage.request-changes",
+      feedback: "Remove the command from the manual check.",
     });
   });
 
