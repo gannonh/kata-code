@@ -64,6 +64,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { isTaskModeEnabled } from "../featureFlags";
 
 function isDevPlaygroundPath(pathname: string): boolean {
   return import.meta.env.DEV && (pathname === "/playground" || pathname.startsWith("/playground/"));
@@ -151,7 +152,7 @@ function RootRouteView() {
       <AnchoredToastProvider>
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
-        {primaryEnvironmentAuthenticated ? <TaskWorkspaceBootstrap /> : null}
+        {primaryEnvironmentAuthenticated && isTaskModeEnabled ? <TaskWorkspaceBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
         <RelayClientInstallDialog />
         <SshPasswordPromptDialog />

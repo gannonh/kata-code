@@ -2,6 +2,7 @@ import { EnvironmentId, TaskWorkspaceId } from "@kata-sh/code-contracts";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { TaskRouteView } from "../components/taskWorkspace/TaskRouteView";
+import { requireTaskMode } from "./-taskModeRouteGuard";
 
 function TaskRouteViewWrapper() {
   const { environmentId, taskId } = Route.useParams();
@@ -14,5 +15,6 @@ function TaskRouteViewWrapper() {
 }
 
 export const Route = createFileRoute("/tasks/$environmentId/$taskId")({
+  beforeLoad: requireTaskMode,
   component: TaskRouteViewWrapper,
 });

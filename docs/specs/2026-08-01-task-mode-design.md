@@ -23,6 +23,9 @@ This document is the sole authoritative Task mode product design and roadmap. Ch
 own implementation scope and acceptance criteria. Earlier Task mode and task-workspace designs are
 historical records.
 
+The in-development web and desktop surface is disabled by default. Start the development app with
+`FF_TASK_MODE=1` to expose task navigation, task routes, and task subscriptions.
+
 ## Goal
 
 Make Tasks a user-facing workflow that carries real agent work from intake through planning,

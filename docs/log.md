@@ -1,5 +1,10 @@
 # OKF bundle log
 
+## 2026-08-05 (Task mode feature gate)
+
+Task mode navigation, routes, and client subscriptions are now disabled by default while the
+feature remains in development. Development runs can opt in with `FF_TASK_MODE=1`.
+
 ## 2026-08-05 (Guided completion settlement bounded)
 
 Closed the durable terminal-first completion race by reconciling immediately after proposal

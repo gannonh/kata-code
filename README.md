@@ -66,6 +66,14 @@ pnpm run dev:desktop
 
 Default dev ports: web `5733`, server `13773`. Offset them with `KATACODE_DEV_INSTANCE` or `KATACODE_PORT_OFFSET` to run multiple instances.
 
+Task mode is disabled by default while it is in development. Enable it when starting the web or desktop dev app:
+
+```bash
+FF_TASK_MODE=1 pnpm run dev
+# or
+FF_TASK_MODE=1 pnpm run dev:desktop
+```
+
 > [!NOTE]
 > If Electron reports `path.txt missing` after a fresh install, re-run `ensure:electron` (see above).
 

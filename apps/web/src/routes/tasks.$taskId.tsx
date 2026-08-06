@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { selectTaskRefsById, useTaskWorkspaceStore } from "../taskWorkspace/taskWorkspaceStore";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { requireTaskMode } from "./-taskModeRouteGuard";
 
 /**
  * Compatibility route `/tasks/$taskId`.
@@ -83,5 +84,6 @@ function TaskCompatRouteView() {
 }
 
 export const Route = createFileRoute("/tasks/$taskId")({
+  beforeLoad: requireTaskMode,
   component: TaskCompatRouteView,
 });
