@@ -1142,7 +1142,7 @@ export function GuidedTaskPanel(props: {
         </Button>
       ) : null}
 
-      {commands.error && !isPlanValidationError(commands.error) ? (
+      {commands.error && (!isPlanValidationError(commands.error) || !gateOpen) ? (
         <p
           data-testid="guided-task-error"
           className="rounded-lg border border-destructive/35 bg-destructive/8 p-3 text-sm text-destructive"

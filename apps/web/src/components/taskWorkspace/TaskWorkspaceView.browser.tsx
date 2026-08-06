@@ -1365,6 +1365,51 @@ describe("TaskWorkspaceView", () => {
     });
   });
 
+  it("surfaces invalid Plan errors when approving an amendment with a closed Plan gate", async () => {
+    mocks.dispatchCommand.mockRejectedValueOnce(
+      new Error("Invalid implementation Plan: amendment phase 'phase:foundation' is malformed."),
+    );
+    await renderTask(
+      guidedTask({
+        build: {
+          ...guidedTask().build,
+          amendmentGateId: "amendment-1",
+          amendments: [
+            {
+              id: "amendment-1",
+              basePlanRevisionId: "plan-revision-1",
+              triggeringPhaseId: "phase:foundation",
+              triggeringWorkItemId: "work:implement",
+              triggeringCheckId: "check:typecheck",
+              expected: "approved behavior",
+              found: "different behavior",
+              impact: "Plan needs review.",
+              proposedChanges: "Revise the Plan.",
+              proposedPlanMarkdown: "## Phase [phase:foundation] Foundation",
+              reviewFeedback: null,
+              affectedPhaseIds: ["phase:foundation"],
+              affectedWorkItemIds: ["work:implement"],
+              dependentCheckIds: ["check:typecheck"],
+              status: "requested",
+              artifactRevisionId: null,
+              planDiff: null,
+              requestedAt: "2026-07-28T17:12:00.000Z",
+              approvedAt: null,
+              approvedBy: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    await page.getByTestId("guided-amendment-approve-amendment-1").click();
+    await expect.element(page.getByTestId("guided-task-error")).toBeVisible();
+    await expect
+      .element(page.getByTestId("guided-task-error"))
+      .toHaveTextContent("Invalid implementation Plan:");
+    await expect.element(page.getByTestId("guided-plan-validation-error")).not.toBeInTheDocument();
+  });
+
   it("dispatches Guided workflow upgrade before explicit Implement start for upgraded tasks", async () => {
     await renderTask({
       ...guidedTask(),
