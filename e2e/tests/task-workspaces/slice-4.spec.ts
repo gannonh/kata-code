@@ -100,7 +100,7 @@ async function expectNoTaskThreadsInChatSidebar(page: Page): Promise<void> {
       .first(),
   ).toBeVisible();
   // Task stage threads are created by the server as `thread-task-<uuid>`.
-  const taskThreadRows = page.locator('[data-testid^="thread-row-thread-task-"]');
+  const taskThreadRows = chatList.locator('[data-testid^="thread-row-thread-task-"]');
   await expect(taskThreadRows).toHaveCount(0);
 }
 
