@@ -164,7 +164,7 @@ export function TaskShellView({
           environmentId={threadRef.environmentId}
           threadId={threadRef.threadId}
           routeKind="server"
-          reserveTitleBarControlInset={false}
+          reserveTitleBarControlInset
           readOnly={view.isReadOnly}
           readOnlyNotice={`${view.selectedOccurrence?.label ?? view.selectedStage.label} is read-only history.`}
         />
