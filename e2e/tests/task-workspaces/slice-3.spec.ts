@@ -10,6 +10,7 @@ import {
 import type { Page } from "@playwright/test";
 
 import { E2E_TAGS } from "../../src/config/tags.ts";
+import { openTask } from "../../src/flows/taskWorkspace.ts";
 import { createSeededGitWorkspace } from "../../src/flows/workspace.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
 
@@ -48,24 +49,6 @@ async function dispatchTaskCommand(page: Page, command: TaskWorkspaceCommand): P
     },
     { modulePath: "/src/environments/runtime/index.ts", input: command },
   );
-}
-
-async function openTask(page: Page, id: string): Promise<void> {
-  const taskLink = page.locator(`a[href$="/${id}"]`).first();
-  await expect(taskLink).toBeVisible();
-  const href = await taskLink.getAttribute("href");
-  expect(href).not.toBeNull();
-  await page.evaluate((routeHref) => {
-    const hashIndex = routeHref.indexOf("#/");
-    if (hashIndex >= 0) {
-      window.location.hash = routeHref.slice(hashIndex + 1);
-      return;
-    }
-    window.history.pushState({}, "", routeHref);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  }, href!);
-  await expect(page).toHaveURL(new RegExp(`/tasks/(?:[^/]+/)?${id}$`));
-  await expect(page.getByTestId("task-artifacts-panel")).toBeVisible();
 }
 
 test.describe(`Task workspaces Slice 3 ${E2E_TAGS.taskWorkspaces}`, () => {
