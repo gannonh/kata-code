@@ -1,3 +1,7 @@
+## 2026-08-07
+
+- Verified #76 Task conversation-plus-panel shell: 9/9 acceptance criteria Pass. Evidence: `uat-evidence/electron-20260807-171019/` (14/14 walkthrough checks, 7 screenshots), browser suites 33+13+88, full suite 4385, task-workspaces E2E 9/9 incl. live agent. Awaiting maintainer sign-off.
+
 # Specs log
 
 ## 2026-08-06
