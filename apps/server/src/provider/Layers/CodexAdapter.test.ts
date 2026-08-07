@@ -297,6 +297,14 @@ validationLayer("CodexAdapterLive validation", (it) => {
       validationRuntimeFactory.factory.mockClear();
       const adapter = yield* CodexAdapter;
       const threadId = asThreadId("thread-mcp-isolation");
+      // The no-cwd worktree session in this test derives its agent home next
+      // to the server cwd; verify the path is absent so the finalizer only
+      // ever removes a directory this test created.
+      const defaultAgentHome = `${fs.realpathSync(process.cwd())}.agent-home`;
+      assert.equal(fs.existsSync(defaultAgentHome), false);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => fs.rmSync(defaultAgentHome, { recursive: true, force: true })),
+      );
       McpProviderSession.setMcpProviderSession({
         environmentId: EnvironmentId.make("environment-local"),
         threadId,
@@ -381,15 +389,6 @@ validationLayer("CodexAdapterLive validation", (it) => {
       );
       assert.ok(taskExcludeArg);
       assert.match(taskExcludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
-      // The no-cwd worktree session at the start of this test derives its
-      // agent home next to the server cwd; remove the sibling directory so
-      // the suite leaves nothing behind.
-      yield* Effect.sync(() =>
-        fs.rmSync(`${fs.realpathSync(process.cwd())}.agent-home`, {
-          recursive: true,
-          force: true,
-        }),
-      );
     }),
   );
 
@@ -397,6 +396,14 @@ validationLayer("CodexAdapterLive validation", (it) => {
     Effect.gen(function* () {
       validationRuntimeFactory.factory.mockClear();
       const adapter = yield* CodexAdapter;
+      // The session derives its agent home next to the server cwd. Verify the
+      // path is absent before startup so the finalizer only ever removes a
+      // directory this test created.
+      const expectedAgentHome = `${fs.realpathSync(process.cwd())}.agent-home`;
+      assert.equal(fs.existsSync(expectedAgentHome), false);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => fs.rmSync(expectedAgentHome, { recursive: true, force: true })),
+      );
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-worktree-write-without-cwd"),
@@ -408,16 +415,14 @@ validationLayer("CodexAdapterLive validation", (it) => {
       // No input.cwd falls back to the server's own cwd; the agent home is
       // still derived from the canonical task cwd so the session never
       // inherits the parent HOME without a matching writable sandbox root.
-      const expectedAgentHome = `${fs.realpathSync(process.cwd())}.agent-home`;
       assert.equal(taskRuntimeOptions.environment?.HOME, expectedAgentHome);
-      assert.ok(fs.existsSync(expectedAgentHome));
+      assert.ok(fs.statSync(expectedAgentHome).isDirectory());
       assert.deepStrictEqual(taskRuntimeOptions.taskSandboxWritableRoots, [expectedAgentHome]);
       const permissionArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
         argument.startsWith("permissions.katacode_task_workspace.filesystem="),
       );
       assert.ok(permissionArg);
       assert.ok(permissionArg.includes(`"${expectedAgentHome}/**"="write"`));
-      yield* Effect.sync(() => fs.rmSync(expectedAgentHome, { recursive: true, force: true }));
     }),
   );
 
