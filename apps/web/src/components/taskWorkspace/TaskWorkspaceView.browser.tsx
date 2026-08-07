@@ -79,8 +79,10 @@ vi.mock("../../store", () => {
 });
 
 vi.mock("../ChatView", () => ({
-  default: ({ threadId }: { readonly threadId: string }) => (
-    <div data-testid="mock-task-chat">{threadId}</div>
+  default: ({ threadId, readOnly }: { readonly threadId: string; readonly readOnly?: boolean }) => (
+    <div data-testid="mock-task-chat" data-read-only={readOnly ? "true" : "false"}>
+      {threadId}
+    </div>
   ),
 }));
 
@@ -1302,7 +1304,7 @@ describe("TaskWorkspaceView", () => {
     await expect.element(page.getByTestId("mock-task-chat")).toHaveTextContent(continuationThread);
   });
 
-  it("does not route Build to a stale inactive occurrence session", async () => {
+  it("never treats a stale inactive occurrence session as a live conversation", async () => {
     const originalThread = ThreadId.make("guided-build-thread-1");
     mocks.threadShellById = {
       [originalThread]: {
@@ -1325,10 +1327,11 @@ describe("TaskWorkspaceView", () => {
       }),
     );
 
-    expect(page.getByTestId("mock-task-chat").query()).toBeNull();
+    // The stale session's transcript is still worth reading, but it is not a
+    // live conversation: it is never offered as somewhere to send work.
     await expect
-      .element(page.getByTestId("task-conversation-starting"))
-      .toHaveTextContent("Preparing the Implement conversation");
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveAttribute("data-read-only", "true");
   });
 
   it("dispatches Guided amendment request changes with feedback", async () => {
@@ -1529,13 +1532,19 @@ describe("TaskWorkspaceView", () => {
     await expect
       .element(page.getByTestId("guided-plan-validation-error"))
       .toHaveTextContent("This Plan cannot be approved yet.");
-    await expect.element(page.getByTestId("guided-plan-request-changes")).toBeDisabled();
+    // The failure names the next step, and that step is a live control rather
+    // than an inert one.
+    await expect
+      .element(page.getByTestId("guided-plan-validation-error"))
+      .toHaveTextContent("Revise from here");
 
+    await page.getByTestId("task-stage-revise").click();
+    await expect.element(page.getByTestId("task-revise-confirm")).toBeDisabled();
     await page
-      .getByTestId("guided-plan-feedback")
+      .getByTestId("task-revise-feedback")
       .fill("Remove the command from the manual check.");
-    await expect.element(page.getByTestId("guided-plan-request-changes")).toBeEnabled();
-    await page.getByTestId("guided-plan-request-changes").click();
+    await expect.element(page.getByTestId("task-revise-confirm")).toBeEnabled();
+    await page.getByTestId("task-revise-confirm").click();
     expect(mocks.dispatchCommand.mock.calls.at(-1)?.[0]).toMatchObject({
       type: "task.stage.request-changes",
       feedback: "Remove the command from the manual check.",
@@ -1873,6 +1882,9 @@ describe("Task conversation-plus-panel shell", () => {
     await expect
       .element(page.getByTestId("mock-task-chat"))
       .toHaveTextContent("guided-plan-thread-2");
+    await expect
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveAttribute("data-read-only", "false");
     await expect.element(page.getByTestId("task-shell-panel")).toBeVisible();
     await expect.element(page.getByTestId("guided-task-panel")).toBeVisible();
     expect(page.getByTestId("task-stage-historical-banner").query()).toBeNull();
@@ -1914,6 +1926,11 @@ describe("Task conversation-plus-panel shell", () => {
     await expect
       .element(page.getByTestId("mock-task-chat"))
       .toHaveTextContent("guided-research-thread-1");
+    // A historical conversation is rendered read-only: no composer, no revert,
+    // no branch controls on settled stage work.
+    await expect
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveAttribute("data-read-only", "true");
     // Inspecting history never advances or mutates the workflow.
     expect(mocks.dispatchCommand).not.toHaveBeenCalled();
   });

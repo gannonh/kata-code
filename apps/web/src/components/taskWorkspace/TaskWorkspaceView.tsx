@@ -1,13 +1,11 @@
 import {
   ThreadId,
-  type EnvironmentId,
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
   type TaskWorkspaceCommentAuthor,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
-import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import {
   TASK_WORKSPACE_STAGE_LABELS,
   taskWorkspaceCatalogEntryForVersion,
@@ -16,13 +14,13 @@ import {
 import { useClerk } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
 import { CheckCircle2Icon, CircleIcon, GitBranchIcon, Loader2Icon } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
-import { createThreadSelectorByRef } from "../../storeSelectors";
+import { latestArtifact } from "../../taskWorkspace/taskWorkspaceArtifacts";
 import {
   currentTaskStage,
   selectTaskRefsById,
@@ -50,7 +48,6 @@ function operationKey(commandId: string, action: string): string {
  * stage the task is actually in is honest.
  */
 const UNKNOWN_DEFINITION_STAGES: ReadonlyArray<TaskWorkspaceStage> = [];
-const TaskChatView = lazy(() => import("../ChatView"));
 
 /** Reasoning stages that write their own artifact and complete with their own command. */
 const REASONING_STAGES = [
@@ -73,44 +70,8 @@ Create and commit \`task-workspace-slice-1.txt\` in the provisioned task worktre
 ## Acceptance criterion
 The fixture file exists at the resulting commit with the canonical Slice 1 content.`;
 
-function latestArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind) {
-  const artifact = task.artifacts.find((candidate) => candidate.kind === kind);
-  if (!artifact) return null;
-  return (
-    artifact.revisions.find((revision) => revision.revision === artifact.currentRevision) ?? null
-  );
-}
-
 function statusLabel(stage: TaskWorkspaceStage): string {
   return TASK_WORKSPACE_STAGE_LABELS[stage];
-}
-
-function activeStageSession(
-  task: TaskWorkspace,
-  stage: TaskWorkspaceStage,
-  occurrence: TaskWorkspace["occurrences"][number] | undefined,
-) {
-  if (stage === "build") {
-    const continuationSessionId = task.build.continuationSessionIds
-      .toReversed()
-      .find((sessionId) =>
-        task.sessions.some(
-          (session) =>
-            session.id === sessionId &&
-            session.stage === "build" &&
-            session.role === "primary" &&
-            session.status === "active",
-        ),
-      );
-    if (continuationSessionId) {
-      const continuationSession =
-        task.sessions.find((session) => session.id === continuationSessionId) ?? null;
-      if (continuationSession?.status === "active") return continuationSession;
-    }
-  }
-  if (!occurrence?.sessionId) return null;
-  const session = task.sessions.find((candidate) => candidate.id === occurrence.sessionId) ?? null;
-  return session?.status === "active" ? session : null;
 }
 
 /**
@@ -986,7 +947,16 @@ function TaskFirstSliceView({
       </SidebarInset>
     );
   }
-  return <TaskShellView task={task} commands={commands} currentUser={currentUser} />;
+  // Keyed by task: stage selection and an open revise dialog are about one
+  // task, and must not survive navigating to another.
+  return (
+    <TaskShellView
+      key={`${task.environmentId}:${task.id}`}
+      task={task}
+      commands={commands}
+      currentUser={currentUser}
+    />
+  );
 }
 
 function TaskWorkspaceViewContent({
@@ -1019,22 +989,6 @@ function TaskWorkspaceViewContent({
     : null;
   const railStages = catalogEntry?.stages ?? UNKNOWN_DEFINITION_STAGES;
   const isFreeform = (catalogEntry?.explicitEntryStages.length ?? 0) > 0;
-  const currentOccurrence = task
-    ? task.occurrences
-        .filter((candidate) => candidate.stage === stage)
-        .toSorted((left, right) => right.ordinal - left.ordinal)[0]
-    : undefined;
-  const currentSession = task ? activeStageSession(task, stage, currentOccurrence) : null;
-  const activeThreadRef = useMemo(
-    () =>
-      task?.environmentId && currentSession
-        ? { environmentId: task.environmentId, threadId: currentSession.threadId }
-        : null,
-    [currentSession, task?.environmentId],
-  );
-  const activeThread = useStore(
-    useMemo(() => createThreadSelectorByRef(activeThreadRef), [activeThreadRef]),
-  );
   const isFirstSliceTask = task?.versions.taskContract === "task-workspace@0.3.0";
   const availableThreads = useMemo(
     () =>

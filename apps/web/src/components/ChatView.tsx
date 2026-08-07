@@ -2223,6 +2223,9 @@ function ChatViewContent(props: ChatViewProps) {
   }, [turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
     const byUserMessageId = new Map<MessageId, number>();
+    // Reverting discards later messages and turn diffs. A read-only transcript
+    // is history being inspected, so it must not offer to destroy itself.
+    if (isReadOnly) return byUserMessageId;
     for (let index = 0; index < timelineEntries.length; index += 1) {
       const entry = timelineEntries[index];
       if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
@@ -2252,7 +2255,12 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     return byUserMessageId;
-  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  }, [
+    inferredCheckpointTurnCountByTurnId,
+    isReadOnly,
+    timelineEntries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
 
   const gitCwd = activeProject
     ? projectScriptCwd({
@@ -3593,7 +3601,9 @@ function ChatViewContent(props: ChatViewProps) {
     async (turnCount: number) => {
       const api = readEnvironmentApi(environmentId);
       const localApi = readLocalApi();
-      if (!api || !localApi || !activeThread || isRevertingCheckpoint) return;
+      // Enforced here as well as in the timeline, so the invariant does not
+      // depend on every call site passing the right props.
+      if (isReadOnly || !api || !localApi || !activeThread || isRevertingCheckpoint) return;
 
       if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
         setThreadError(
@@ -3642,6 +3652,7 @@ function ChatViewContent(props: ChatViewProps) {
       environmentId,
       isComposerRunning,
       isConnecting,
+      isReadOnly,
       isRevertingCheckpoint,
       isSendBusy,
       setThreadError,
@@ -4811,7 +4822,7 @@ function ChatViewContent(props: ChatViewProps) {
                   </div>
                 </div>
               )}
-              {isGitRepo && (
+              {isGitRepo && !isReadOnly && (
                 <BranchToolbar
                   environmentId={activeThread.environmentId}
                   threadId={activeThread.id}

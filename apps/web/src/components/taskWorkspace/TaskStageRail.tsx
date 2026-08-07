@@ -22,13 +22,10 @@ function StageIcon({ status }: { readonly status: TaskShellStage["status"] }) {
 export function TaskStageRail({
   stages,
   selectedStage,
-  needsUpgradeStage,
   onSelectStage,
 }: {
   readonly stages: ReadonlyArray<TaskShellStage>;
   readonly selectedStage: TaskWorkspaceStage;
-  /** Stage that is gated behind a workflow-definition upgrade, if any. */
-  readonly needsUpgradeStage?: TaskWorkspaceStage | null;
   readonly onSelectStage: (stage: TaskWorkspaceStage) => void;
 }) {
   // A deferred stage the task has not reached yet is not navigation; it is a
@@ -74,7 +71,7 @@ export function TaskStageRail({
                     {stage.occurrences.length}
                   </Badge>
                 ) : null}
-                {stage.stage === needsUpgradeStage ? (
+                {stage.needsUpgrade ? (
                   <Badge size="sm" variant="outline">
                     upgrade
                   </Badge>

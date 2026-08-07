@@ -37,6 +37,8 @@ export interface TaskShellStage {
   readonly isSelectable: boolean;
   /** This build implements the stage, even if the pinned version defers it. */
   readonly isAvailable: boolean;
+  /** Reaching the stage requires upgrading the task's pinned definition. */
+  readonly needsUpgrade: boolean;
 }
 
 /**
@@ -64,15 +66,17 @@ export function taskShellStages(task: TaskWorkspace): ReadonlyArray<TaskShellSta
           ? "completed"
           : "upcoming";
     const occurrences = stageOccurrences(task, entry.stage, entry.presentation);
+    const isAvailable =
+      (currentCatalog.stages.find((candidate) => candidate.stage === entry.stage)?.status ??
+        entry.status) !== "deferred";
     return {
       stage: entry.stage,
       label: entry.presentation,
       status,
       occurrences,
       isSelectable: status !== "upcoming" || occurrences.length > 0,
-      isAvailable:
-        (currentCatalog.stages.find((candidate) => candidate.stage === entry.stage)?.status ??
-          entry.status) !== "deferred",
+      isAvailable,
+      needsUpgrade: isAvailable && entry.status === "deferred",
     };
   });
 }
@@ -99,7 +103,7 @@ export interface TaskShellView {
   readonly selectedOccurrence: TaskShellOccurrence | null;
   /** The selection is the live workflow path, so actions apply to it. */
   readonly isViewingCurrent: boolean;
-  /** The selection is history: inspectable, never mutable. */
+  /** The selection cannot be added to: history, or a stage whose session ended. */
   readonly isReadOnly: boolean;
   readonly defaultView: TaskShellContentView;
   readonly outcome: TaskShellOutcome | null;
@@ -136,6 +140,14 @@ export function resolveTaskShellView(
     null;
   const isViewingCurrent =
     selectedStage.stage === activeStage.stage && (selectedOccurrence?.isCurrent ?? true);
+  const liveThreadId = isViewingCurrent
+    ? liveStageThreadId(task, selectedStage.stage, selectedOccurrence)
+    : null;
+  // A live stage whose session has ended still has a transcript worth reading.
+  // Showing it read-only is honest; claiming the conversation is still being
+  // prepared is not.
+  const isReadOnly = !isViewingCurrent || liveThreadId === null;
+  const outcome = occurrenceOutcome(task, selectedOccurrence);
 
   return {
     stages,
@@ -143,12 +155,12 @@ export function resolveTaskShellView(
     selectedStage,
     selectedOccurrence,
     isViewingCurrent,
-    isReadOnly: !isViewingCurrent,
-    defaultView: isViewingCurrent ? "conversation" : "outcome",
-    outcome: occurrenceOutcome(task, selectedOccurrence),
-    conversationThreadId: isViewingCurrent
-      ? liveStageThreadId(task, selectedStage.stage, selectedOccurrence)
-      : (selectedOccurrence?.threadId ?? null),
+    isReadOnly,
+    // Outcome-first for settled work, but never onto an empty outcome when a
+    // conversation is the only record of what happened.
+    defaultView: !isReadOnly ? "conversation" : outcome ? "outcome" : "conversation",
+    outcome,
+    conversationThreadId: liveThreadId ?? selectedOccurrence?.threadId ?? null,
   };
 }
 
@@ -204,9 +216,12 @@ export function taskShellRevisionImpact(
   const stages = taskShellStages(task);
   const stageIndex = stages.findIndex((candidate) => candidate.stage === stage);
   const selected = stages[stageIndex];
-  const nextOrdinal = (selected?.occurrences.at(-1)?.ordinal ?? -1) + 2;
+  if (!selected) {
+    return { nextOccurrenceLabel: `${stage} v1`, preservedStageLabels: [] };
+  }
+  const nextOrdinal = (selected.occurrences.at(-1)?.ordinal ?? -1) + 2;
   return {
-    nextOccurrenceLabel: `${selected?.label ?? stage} v${nextOrdinal}`,
+    nextOccurrenceLabel: `${selected.label} v${nextOrdinal}`,
     preservedStageLabels: stages
       .slice(stageIndex + 1)
       .filter((candidate) => candidate.occurrences.length > 0)
@@ -227,6 +242,7 @@ function fallbackStage(stage: TaskWorkspaceStage): TaskShellStage {
     occurrences: [],
     isSelectable: true,
     isAvailable: true,
+    needsUpgrade: false,
   };
 }
 

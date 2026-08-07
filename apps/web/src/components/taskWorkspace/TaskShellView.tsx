@@ -3,7 +3,7 @@ import type {
   TaskWorkspaceCommentAuthor,
   TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
-import { taskWorkspaceCatalogEntryForVersion } from "@kata-sh/code-shared/taskWorkspacePresets";
+import { taskWorkspaceCatalogEntryForVersion } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import { PanelRightIcon } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 
@@ -94,6 +94,12 @@ export function TaskShellView({
     setIsPanelOpen(false);
   };
 
+  const openRevise = () => {
+    // A stale error from an earlier command must not read as this dialog's.
+    commands.setError(null);
+    setIsReviseOpen(true);
+  };
+
   const selectOccurrence = (occurrenceId: string) => {
     setSelection({ stage: view.selectedStage.stage, occurrenceId });
     setContentView(null);
@@ -134,10 +140,12 @@ export function TaskShellView({
         <TaskStageRail
           stages={view.stages}
           selectedStage={view.selectedStage.stage}
-          needsUpgradeStage={task.versions.workflowDefinition === "guided@0.2.0" ? "build" : null}
           onSelectStage={selectStage}
         />
       }
+      occurrences={view.selectedStage.occurrences}
+      selectedOccurrenceId={view.selectedOccurrence?.id ?? null}
+      onSelectOccurrence={selectOccurrence}
       isViewingCurrent={view.isViewingCurrent}
       onReturnToCurrent={returnToCurrent}
     />
@@ -209,7 +217,7 @@ export function TaskShellView({
           onSetContentView={setContentView}
           onSelectOccurrence={selectOccurrence}
           onReturnToCurrent={returnToCurrent}
-          onRevise={() => setIsReviseOpen(true)}
+          onRevise={openRevise}
         />
         {isPanelDocked ? (
           <aside
@@ -227,7 +235,7 @@ export function TaskShellView({
           <SheetDescription className="sr-only">
             Task progress, stages, outcomes, and actions.
           </SheetDescription>
-          <div className="min-h-0 overflow-auto">{isPanelDocked ? null : panel}</div>
+          <div className="min-h-0 overflow-auto">{panel}</div>
         </SheetPopup>
       </Sheet>
 

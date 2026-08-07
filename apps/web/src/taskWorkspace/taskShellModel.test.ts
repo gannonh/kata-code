@@ -93,7 +93,12 @@ describe("taskShellStages", () => {
 
     // guided@0.2.0 defers Implement; this build implements it behind an upgrade,
     // so the stage stays visible rather than silently disappearing.
-    expect(taskShellStages(task).find((stage) => stage.stage === "build")?.isAvailable).toBe(true);
+    const build = taskShellStages(task).find((stage) => stage.stage === "build");
+    expect(build?.isAvailable).toBe(true);
+    expect(build?.needsUpgrade).toBe(true);
+    expect(
+      taskShellStages(makeTaskWorkspace()).find((stage) => stage.stage === "build")?.needsUpgrade,
+    ).toBe(false);
   });
 });
 
@@ -102,7 +107,15 @@ const guidedTask = atStage(
     occurrences: [
       makeOccurrence({ stage: "questions", artifactRevisionId: "questions-r1" }),
       makeOccurrence({ stage: "research", artifactRevisionId: "research-r1" }),
-      makeOccurrence({ stage: "design", status: "running" }),
+      makeOccurrence({ stage: "design", status: "running", sessionId: "session-design" }),
+    ],
+    sessions: [
+      makeSession({
+        id: "session-design",
+        stage: "design",
+        threadId: ThreadId.make("thread-design-0"),
+        status: "active",
+      }),
     ],
     artifacts: [
       makeArtifact({
@@ -202,6 +215,55 @@ describe("resolveTaskShellView", () => {
     );
 
     expect(resolveTaskShellView(task, null).conversationThreadId).toBe("thread-build-continuation");
+  });
+
+  it("keeps a settled stage on its recorded conversation instead of claiming it is starting", () => {
+    const task = atStage(
+      makeTaskWorkspace({
+        occurrences: [
+          makeOccurrence({
+            stage: "build",
+            status: "completed",
+            sessionId: "session-build",
+            threadId: ThreadId.make("thread-build-done"),
+          }),
+        ],
+        sessions: [
+          makeSession({
+            id: "session-build",
+            stage: "build",
+            threadId: ThreadId.make("thread-build-done"),
+            status: "completed",
+          }),
+        ],
+      }),
+      "build",
+    );
+
+    const view = resolveTaskShellView(task, null);
+
+    expect(view.conversationThreadId).toBe("thread-build-done");
+    expect(view.isViewingCurrent).toBe(true);
+    // The stage is the live one, but its conversation has ended: nothing can be
+    // added to it.
+    expect(view.isReadOnly).toBe(true);
+  });
+
+  it("opens history on the conversation when the occurrence published no outcome", () => {
+    const task = atStage(
+      makeTaskWorkspace({
+        occurrences: [
+          makeOccurrence({ stage: "questions", artifactRevisionId: null }),
+          makeOccurrence({ stage: "research", status: "running" }),
+        ],
+      }),
+      "research",
+    );
+
+    const view = resolveTaskShellView(task, { stage: "questions", occurrenceId: null });
+
+    expect(view.outcome).toBeNull();
+    expect(view.defaultView).toBe("conversation");
   });
 
   it("reads a historical conversation from the occurrence that recorded it", () => {

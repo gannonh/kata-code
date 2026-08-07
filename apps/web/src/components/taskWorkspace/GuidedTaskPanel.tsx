@@ -1,31 +1,18 @@
-import {
-  type TaskWorkspace,
-  type TaskWorkspaceArtifactKind,
-  type TaskWorkspaceCommentAuthor,
-} from "@kata-sh/code-contracts";
+import { type TaskWorkspace, type TaskWorkspaceCommentAuthor } from "@kata-sh/code-contracts";
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
 import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
-import { taskWorkspaceCatalogEntryForVersion } from "@kata-sh/code-shared/taskWorkspacePresets";
 import { ArrowLeftIcon, GitBranchIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import type { TaskShellOccurrence } from "../../taskWorkspace/taskShellModel";
+import { latestArtifact } from "../../taskWorkspace/taskWorkspaceArtifacts";
+import { currentTaskStage } from "../../taskWorkspace/taskWorkspaceStore";
 import type { TaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 
-function latestArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind) {
-  const artifact = task.artifacts.find((candidate) => candidate.kind === kind);
-  return (
-    artifact?.revisions.find((revision) => revision.revision === artifact.currentRevision) ?? null
-  );
-}
-
-function currentStage(task: TaskWorkspace) {
-  return task.workflowRuns.at(-1)?.currentStage ?? "questions";
-}
-
-function latestOccurrence(task: TaskWorkspace, stage = currentStage(task)) {
+function latestOccurrence(task: TaskWorkspace, stage = currentTaskStage(task)) {
   return task.occurrences
     .filter((candidate) => candidate.stage === stage)
     .toSorted((left, right) => right.ordinal - left.ordinal)[0];
@@ -269,23 +256,29 @@ export function GuidedTaskPanel(props: {
   readonly commands: TaskWorkspaceCommands;
   readonly currentUser: TaskWorkspaceCommentAuthor;
   /** Stage navigation, owned by the shell so selection stays view state. */
-  readonly stageRail?: ReactNode;
+  readonly stageRail: ReactNode;
+  /** Occurrences of the stage being viewed, oldest first. */
+  readonly occurrences: ReadonlyArray<TaskShellOccurrence>;
+  readonly selectedOccurrenceId: string | null;
+  readonly onSelectOccurrence: (occurrenceId: string) => void;
   /** False while the user is inspecting history rather than the live path. */
-  readonly isViewingCurrent?: boolean;
-  readonly onReturnToCurrent?: () => void;
+  readonly isViewingCurrent: boolean;
+  readonly onReturnToCurrent: () => void;
 }) {
   const {
     task,
     commands,
     currentUser,
     stageRail,
-    isViewingCurrent = true,
+    occurrences,
+    selectedOccurrenceId,
+    onSelectOccurrence,
+    isViewingCurrent,
     onReturnToCurrent,
   } = props;
-  const [feedback, setFeedback] = useState("");
   const [manualNotes, setManualNotes] = useState<Record<string, string>>({});
   const [amendmentFeedback, setAmendmentFeedback] = useState<Record<string, string>>({});
-  const stage = currentStage(task);
+  const stage = currentTaskStage(task);
   const artifact = latestArtifact(
     task,
     stage === "questions" || stage === "research" || stage === "design" || stage === "plan"
@@ -318,22 +311,6 @@ export function GuidedTaskPanel(props: {
       },
       "approve-plan",
     );
-  };
-
-  const requestChanges = () => {
-    const trimmed = feedback.trim();
-    if (!trimmed) return;
-    const base = commands.commandBase("task.stage.request-changes");
-    void commands.dispatch(
-      {
-        ...base,
-        expectedTaskRevision: task.taskRevision,
-        operationKey: operationKey(base.commandId, "request-changes"),
-        feedback: trimmed,
-      },
-      "request-changes",
-    );
-    setFeedback("");
   };
 
   const setWorktreePolicy = (policy: "now" | "later") => {
@@ -389,21 +366,49 @@ export function GuidedTaskPanel(props: {
             These actions apply to {TASK_WORKSPACE_STAGE_PRESENTATION[stage]}, not to the history
             you are viewing.
           </span>
-          {onReturnToCurrent ? (
-            <Button
-              data-testid="guided-panel-return-to-current"
-              size="xs"
-              variant="outline"
-              onClick={onReturnToCurrent}
-            >
-              <ArrowLeftIcon className="size-3.5" />
-              Return to current
-            </Button>
-          ) : null}
+          <Button
+            data-testid="guided-panel-return-to-current"
+            size="xs"
+            variant="outline"
+            onClick={onReturnToCurrent}
+          >
+            <ArrowLeftIcon className="size-3.5" />
+            Return to current
+          </Button>
         </div>
       )}
 
       {stageRail}
+
+      {occurrences.length > 1 ? (
+        <section data-testid="guided-stage-occurrences" className="grid gap-1">
+          <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            History
+          </p>
+          {occurrences.map((occurrence) => (
+            <button
+              key={occurrence.id}
+              type="button"
+              data-testid={`guided-occurrence-${occurrence.id}`}
+              data-selected={occurrence.id === selectedOccurrenceId || undefined}
+              aria-pressed={occurrence.id === selectedOccurrenceId}
+              onClick={() => onSelectOccurrence(occurrence.id)}
+              className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors ${
+                occurrence.id === selectedOccurrenceId
+                  ? "border-border/60 bg-accent text-foreground"
+                  : "border-transparent text-muted-foreground hover:bg-accent/60"
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate">{occurrence.label}</span>
+              {occurrence.isCurrent ? (
+                <Badge size="sm" variant="secondary">
+                  current
+                </Badge>
+              ) : null}
+            </button>
+          ))}
+        </section>
+      ) : null}
 
       <p className="text-xs leading-5 text-muted-foreground">{task.intake.brief}</p>
 
@@ -462,7 +467,8 @@ export function GuidedTaskPanel(props: {
           <div>
             <h3 className="text-sm font-semibold">Plan ready for review</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Approve this Plan or send feedback for one continuation conversation.
+              Approve this Plan, or use <strong>Revise from here</strong> to start a new Plan
+              occurrence.
             </p>
           </div>
           {isPlanValidationError(commands.error) ? (
@@ -473,27 +479,13 @@ export function GuidedTaskPanel(props: {
             >
               <p className="font-semibold">This Plan cannot be approved yet.</p>
               <p>{commands.error}</p>
-              <p>Use Request changes below to ask the active stage conversation to repair it.</p>
+              <p>
+                Use <strong>Revise from here</strong> above the conversation to ask the active stage
+                conversation to repair it.
+              </p>
             </div>
           ) : null}
-          <Textarea
-            data-testid="guided-plan-feedback"
-            value={feedback}
-            onChange={(event) => setFeedback(event.currentTarget.value)}
-            placeholder="What should change?"
-            className="min-h-20 text-sm"
-          />
           <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              data-testid="guided-plan-request-changes"
-              size="sm"
-              variant="outline"
-              disabled={!feedback.trim() || commands.isBusy}
-              title={!feedback.trim() ? "Add feedback before requesting changes." : undefined}
-              onClick={requestChanges}
-            >
-              Request changes
-            </Button>
             <Button
               data-testid="guided-plan-approve"
               size="sm"
