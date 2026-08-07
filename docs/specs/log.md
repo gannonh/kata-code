@@ -1,5 +1,14 @@
 ## 2026-08-07
 
+Backlog triage (issues 1-67):
+
+- Closed #18 (superseded by durable sandbox session store + reconcile), #42 (exact duplicate of #43), #53 (superseded by transactional SQLite event store), #55 (superseded by task-workspaces Slice 3). Closing comments recorded on each issue; #18 registry entry updated to closed.
+- Labeled #14 `deferred`, #40 `enhancement,deferred` (untriaged perf investigation).
+- Promoted #13 (feature flagging) to an approved spec: typed Effect Schema flag registry in `packages/shared` + web adapter with FF_TASK_MODE override shim; adversarial spec review passed; `status:approved` 2026-08-07.
+- Remaining open issues 1-67 are all deferred with rationale + revisit triggers, or workstream-owned (#67).
+
+## 2026-08-07
+
 - Verified #76 Task conversation-plus-panel shell: 9/9 acceptance criteria Pass, accepted and closed. Evidence: `uat-evidence/electron-20260807-171019/` (14/14 walkthrough checks, 7 screenshots), browser suites 33+13+88, full suite 4385, task-workspaces E2E 9/9 incl. live agent.
 
 # Specs log
