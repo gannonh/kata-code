@@ -1,6 +1,5 @@
 import { EnvironmentId, ThreadId, type TaskWorkspace } from "@kata-sh/code-contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { shallow } from "zustand/shallow";
 
 import {
   selectTaskOwnedThreadKeys,
@@ -181,15 +180,46 @@ describe("taskWorkspaceStore", () => {
     expect(owned.has(`${envA}:thread-standard-chat`)).toBe(false);
   });
 
-  it("keeps the owned-thread set shallow-equal so the sidebar does not re-render", () => {
+  it("reuses the owned-thread set until the tasks themselves change", () => {
+    const task = makeTask("task-a", "2026-07-28T18:00:00.000Z", envA);
     useTaskWorkspaceStore.getState().applyStreamItem(envA, {
       kind: "snapshot",
-      snapshot: { sequence: 1, tasks: [makeTask("task-a", "2026-07-28T18:00:00.000Z", envA)] },
+      snapshot: {
+        sequence: 1,
+        tasks: [
+          {
+            ...task,
+            sessions: [
+              {
+                id: "session-1",
+                stage: "questions",
+                threadId: ThreadId.make("thread-clarify"),
+                role: "primary",
+                provider: null,
+                status: "active",
+                parentSessionId: null,
+                contextManifestId: null,
+                forkPoint: null,
+                createdAt: "2026-07-28T18:00:00.000Z",
+              },
+            ],
+          },
+        ],
+      },
     });
 
     const first = selectTaskOwnedThreadKeys(useTaskWorkspaceStore.getState());
-    const second = selectTaskOwnedThreadKeys(useTaskWorkspaceStore.getState());
-    expect(shallow(first, second)).toBe(true);
+    expect(first.size).toBe(1);
+    // The sidebar re-renders constantly; recomputing this set each time would
+    // walk every task's sessions and occurrences for nothing.
+    expect(selectTaskOwnedThreadKeys(useTaskWorkspaceStore.getState())).toBe(first);
+
+    useTaskWorkspaceStore.getState().applyStreamItem(envA, {
+      kind: "task-upserted",
+      sequence: 2,
+      task: makeTask("task-b", "2026-07-28T19:00:00.000Z", envA),
+    });
+    expect(selectTaskOwnedThreadKeys(useTaskWorkspaceStore.getState())).not.toBe(first);
   });
 
   it("finds duplicate task ids across environments for the compatibility route", () => {
