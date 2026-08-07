@@ -381,6 +381,43 @@ validationLayer("CodexAdapterLive validation", (it) => {
       );
       assert.ok(taskExcludeArg);
       assert.match(taskExcludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
+      // The no-cwd worktree session at the start of this test derives its
+      // agent home next to the server cwd; remove the sibling directory so
+      // the suite leaves nothing behind.
+      yield* Effect.sync(() =>
+        fs.rmSync(`${fs.realpathSync(process.cwd())}.agent-home`, {
+          recursive: true,
+          force: true,
+        }),
+      );
+    }),
+  );
+
+  it.effect("creates a task agent home for a worktree-write session without input.cwd", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-worktree-write-without-cwd"),
+        runtimeMode: "auto-accept-edits",
+        taskExecutionProfile: "task-worktree-write",
+      });
+      const taskRuntimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      assert.ok(taskRuntimeOptions);
+      // No input.cwd falls back to the server's own cwd; the agent home is
+      // still derived from the canonical task cwd so the session never
+      // inherits the parent HOME without a matching writable sandbox root.
+      const expectedAgentHome = `${fs.realpathSync(process.cwd())}.agent-home`;
+      assert.equal(taskRuntimeOptions.environment?.HOME, expectedAgentHome);
+      assert.ok(fs.existsSync(expectedAgentHome));
+      assert.deepStrictEqual(taskRuntimeOptions.taskSandboxWritableRoots, [expectedAgentHome]);
+      const permissionArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("permissions.katacode_task_workspace.filesystem="),
+      );
+      assert.ok(permissionArg);
+      assert.ok(permissionArg.includes(`"${expectedAgentHome}/**"="write"`));
+      yield* Effect.sync(() => fs.rmSync(expectedAgentHome, { recursive: true, force: true }));
     }),
   );
 

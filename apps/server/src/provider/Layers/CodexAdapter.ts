@@ -1542,7 +1542,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         // next to the worktree so it is outside the repo, and it is granted
         // explicitly below because the state dir as a whole is denied.
         const taskAgentHomePath =
-          input.taskExecutionProfile === "task-worktree-write" && input.cwd
+          input.taskExecutionProfile === "task-worktree-write"
             ? `${canonicalTaskCwd}.agent-home`
             : undefined;
         if (taskAgentHomePath) {
