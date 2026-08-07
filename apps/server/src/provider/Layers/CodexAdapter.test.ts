@@ -344,7 +344,14 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
       const taskRuntimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
       assert.ok(taskRuntimeOptions);
-      assert.equal(taskRuntimeOptions.environment?.HOME, "/tmp/task-worktree");
+      // The agent's HOME is a sibling scratch directory, never the worktree:
+      // tool caches (nvm, python bytecode, npm) would otherwise pollute the
+      // worktree and block the clean-worktree completion check.
+      assert.equal(taskRuntimeOptions.environment?.HOME, "/tmp/task-worktree.agent-home");
+      assert.ok(fs.existsSync("/tmp/task-worktree.agent-home"));
+      assert.deepStrictEqual(taskRuntimeOptions.taskSandboxWritableRoots, [
+        "/tmp/task-worktree.agent-home",
+      ]);
       assert.ok(taskRuntimeOptions.appServerArgs?.includes("--strict-config"));
       const permissionArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
         argument.startsWith("permissions.katacode_task_workspace.filesystem="),
@@ -353,6 +360,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.match(permissionArg, /":root"="deny"/u);
       assert.match(permissionArg, /":minimal"="read"/u);
       assert.match(permissionArg, /"\/tmp\/task-worktree\/\*\*"="write"/u);
+      assert.match(permissionArg, /"\/tmp\/task-worktree\.agent-home\/\*\*"="write"/u);
       assert.match(permissionArg, /\.git\/\*\*.*="write"/u);
       assert.doesNotMatch(permissionArg, /\/tmp\/task-worktree\/\.git\/\*\*"="deny"/u);
       assert.doesNotMatch(permissionArg, /":root"="read"/u);
