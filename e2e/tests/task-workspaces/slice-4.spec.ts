@@ -87,14 +87,18 @@ async function selectTaskProvider(page: Page, provider: string, model: string): 
  */
 async function expectNoTaskThreadsInChatSidebar(page: Page): Promise<void> {
   // Anchor on a rendered sidebar; an empty page would satisfy the count check.
-  await expect(page.getByTestId("sidebar-thread-list")).toBeVisible();
-  // The project chat opened for this workspace is a non-task row: the list
-  // rendered real conversations, so the zero count below means the task
-  // threads were filtered out rather than proving nothing was rendered.
-  const chatRows = page.locator(
-    '[data-testid^="thread-row-"]:not([data-testid^="thread-row-thread-task-"])',
-  );
-  await expect(chatRows.first()).toBeVisible();
+  const chatList = page.getByTestId("sidebar-thread-list");
+  await expect(chatList).toBeVisible();
+  // The Chats list is live: it renders the empty state, or real chat rows.
+  // Task-owned conversations must never be among the rows either way. The
+  // filtering itself is asserted non-vacuously in the browser suite, where
+  // chats are seeded beside the task.
+  await expect(
+    chatList
+      .locator('[data-testid^="thread-row-"]:not([data-testid^="thread-row-thread-task-"])')
+      .or(chatList.getByText("No threads yet"))
+      .first(),
+  ).toBeVisible();
   // Task stage threads are created by the server as `thread-task-<uuid>`.
   const taskThreadRows = page.locator('[data-testid^="thread-row-thread-task-"]');
   await expect(taskThreadRows).toHaveCount(0);
