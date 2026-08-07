@@ -28,6 +28,7 @@ import {
   useTaskWorkspaceStore,
 } from "../../taskWorkspace/taskWorkspaceStore";
 import { useTaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
+import { operationKey } from "../../taskWorkspace/operationKey";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
@@ -37,10 +38,6 @@ import { CommentsPanel } from "./CommentsPanel";
 import { ContextManifestPanel } from "./ContextManifestPanel";
 import { SessionsPanel } from "./SessionsPanel";
 import { TaskShellView } from "./TaskShellView";
-
-function operationKey(commandId: string, action: string): string {
-  return `task-${action}-${commandId}`;
-}
 
 /**
  * Rail shown when a task pins a definition version this build has no catalog

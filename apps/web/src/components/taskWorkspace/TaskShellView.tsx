@@ -5,8 +5,9 @@ import type {
 } from "@kata-sh/code-contracts";
 import { taskWorkspaceCatalogEntryForVersion } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import { PanelRightIcon } from "lucide-react";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
+import { operationKey } from "../../taskWorkspace/operationKey";
 import {
   resolveTaskShellView,
   taskShellRevisionImpact,
@@ -27,10 +28,6 @@ import { TaskStageCanvas } from "./TaskStageCanvas";
 import { TaskStageRail } from "./TaskStageRail";
 
 const TaskChatView = lazy(() => import("../ChatView"));
-
-function operationKey(commandId: string, action: string): string {
-  return `task-${action}-${commandId}`;
-}
 
 /**
  * The production Task shell: one conversation canvas, one persistent panel.
@@ -67,6 +64,18 @@ export function TaskShellView({
   );
   const catalogEntry = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
   const effectiveContentView = contentView ?? view.defaultView;
+
+  // A manual content override (outcome vs conversation) belongs to one resolved
+  // selection. When the workflow advances the resolved stage or occurrence on
+  // its own — an approval streaming the live path to the next stage — the
+  // override must not linger: it would render an empty outcome for a stage that
+  // has none instead of revealing the new live conversation. User-initiated
+  // selection changes already reset the override, so this only covers
+  // transitions the user did not make.
+  const selectionSignature = `${view.selectedStage.stage}/${view.selectedOccurrence?.id ?? "live"}`;
+  useEffect(() => {
+    setContentView(null);
+  }, [selectionSignature]);
 
   // A stage can be linked to a thread before that thread has reached this
   // client. Rendering a conversation for a thread the store has never seen
@@ -148,6 +157,7 @@ export function TaskShellView({
       onSelectOccurrence={selectOccurrence}
       isViewingCurrent={view.isViewingCurrent}
       onReturnToCurrent={returnToCurrent}
+      canRevise={canRevise}
     />
   );
 

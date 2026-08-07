@@ -1852,7 +1852,13 @@ function shellTask(overrides: Partial<TaskWorkspace> = {}): TaskWorkspace {
 /** Registers the shell fixture's stage threads with the client thread store. */
 function withShellThreads(): void {
   mocks.threadShellById = Object.fromEntries(
-    ["guided-plan-thread-2", "guided-research-thread-1"].map((id) => [
+    [
+      "guided-questions-thread-1",
+      "guided-research-thread-1",
+      "guided-design-thread-1",
+      "guided-plan-thread-1",
+      "guided-plan-thread-2",
+    ].map((id) => [
       id,
       {
         id: ThreadId.make(id),
@@ -1965,6 +1971,57 @@ describe("Task conversation-plus-panel shell", () => {
     await expect
       .element(page.getByTestId("mock-task-chat"))
       .toHaveTextContent("guided-plan-thread-2");
+  });
+
+  it("resets a manual outcome view when the workflow advances past the stage", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    // The user watches the live Plan as its outcome…
+    await page.getByTestId("task-stage-view-outcome").click();
+    await expect.element(page.getByTestId("task-stage-outcome-view")).toBeVisible();
+
+    // …and the approval lands: the streamed update moves the live path to
+    // Implement without any selection change of the user's own.
+    useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
+      kind: "task-upserted",
+      sequence: 2,
+      task: {
+        ...shellTask(),
+        workflowRuns: [{ ...shellTask().workflowRuns[0]!, currentStage: "build" }],
+      },
+    });
+
+    // The stale outcome override must not linger as an empty Implement
+    // outcome; the canvas reveals the new live conversation instead.
+    await expect.element(page.getByTestId("task-stage-title")).toHaveTextContent("Implement");
+    await expect.element(page.getByTestId("task-stage-outcome-view")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByTestId("task-conversation-starting"))
+      .toHaveTextContent("Preparing the Implement conversation");
+  });
+
+  it("labels a completed current stage as ended rather than read-only history", async () => {
+    withShellThreads();
+    const task = shellTask();
+    // The current Plan's session has ended, so the stage is read-only while
+    // still being the live path: history copy and a no-op return button would
+    // both contradict the subtitle.
+    await renderTask({
+      ...task,
+      sessions: task.sessions.map((session) =>
+        session.id === "session-plan-2" ? { ...session, status: "completed" } : session,
+      ),
+    });
+
+    await expect.element(page.getByTestId("task-stage-historical-banner")).toBeVisible();
+    await expect
+      .element(page.getByTestId("task-stage-historical-banner"))
+      .toHaveTextContent("This conversation has ended and is read-only.");
+    await expect
+      .element(page.getByTestId("task-stage-subtitle"))
+      .toHaveTextContent("Plan v2 · current stage");
+    expect(page.getByTestId("task-stage-return-to-current").query()).toBeNull();
   });
 
   it("explains the impact of a revision before creating the next occurrence", async () => {

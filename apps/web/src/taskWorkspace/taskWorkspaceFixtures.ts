@@ -137,7 +137,10 @@ export function makeSession(
   };
 }
 
-/** One artifact holding a single revision, which is also its current revision. */
+/**
+ * One artifact holding the given revisions. `currentRevision` defaults to the
+ * last revision in the list.
+ */
 export function makeArtifact(input: {
   readonly kind: TaskWorkspaceArtifact["kind"];
   readonly revisions: ReadonlyArray<{

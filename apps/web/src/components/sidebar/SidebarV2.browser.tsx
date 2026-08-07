@@ -512,43 +512,44 @@ describe("Sidebar v2 fixtures + playground", () => {
   });
 
   it("keeps a task-owned conversation out of the Chats list", async () => {
-    // A Task claims one of the seeded threads as a stage session. The Task is
-    // the navigation unit, so that conversation must disappear from Chats
-    // entirely rather than sitting beside unrelated chats.
-    useTaskWorkspaceStore.getState().applyStreamItem(SIDEBAR_V2_LOCAL_ENV_ID, {
-      kind: "snapshot",
-      snapshot: {
-        sequence: 1,
-        tasks: [
-          makeTaskWorkspace({
-            id: "task-sidebar-boundary",
-            environmentId: SIDEBAR_V2_LOCAL_ENV_ID,
-            sessions: [
-              {
-                id: "session-1",
-                stage: "questions",
-                threadId: "thread-idle" as ThreadId,
-                role: "primary",
-                provider: null,
-                status: "active",
-                parentSessionId: null,
-                contextManifestId: null,
-                forkPoint: null,
-                createdAt: SIDEBAR_V2_FIXTURE_NOW_ISO,
-              },
-            ],
-          }),
-        ],
-      },
-    });
-
-    const mounted = await mountApp("mixed-tiers");
+    let mounted: Awaited<ReturnType<typeof mountApp>> | undefined;
     try {
+      // A Task claims one of the seeded threads as a stage session. The Task is
+      // the navigation unit, so that conversation must disappear from Chats
+      // entirely rather than sitting beside unrelated chats.
+      useTaskWorkspaceStore.getState().applyStreamItem(SIDEBAR_V2_LOCAL_ENV_ID, {
+        kind: "snapshot",
+        snapshot: {
+          sequence: 1,
+          tasks: [
+            makeTaskWorkspace({
+              id: "task-sidebar-boundary",
+              environmentId: SIDEBAR_V2_LOCAL_ENV_ID,
+              sessions: [
+                {
+                  id: "session-1",
+                  stage: "questions",
+                  threadId: "thread-idle" as ThreadId,
+                  role: "primary",
+                  provider: null,
+                  status: "active",
+                  parentSessionId: null,
+                  contextManifestId: null,
+                  forkPoint: null,
+                  createdAt: SIDEBAR_V2_FIXTURE_NOW_ISO,
+                },
+              ],
+            }),
+          ],
+        },
+      });
+
+      mounted = await mountApp("mixed-tiers");
       expect(document.querySelector('[data-testid="thread-row-thread-idle"]')).toBeNull();
       // Unrelated chats are untouched.
       expect(document.querySelector('[data-testid="thread-row-thread-working"]')).toBeTruthy();
     } finally {
-      await mounted.cleanup();
+      await mounted?.cleanup();
       useTaskWorkspaceStore.getState().reset();
     }
   });

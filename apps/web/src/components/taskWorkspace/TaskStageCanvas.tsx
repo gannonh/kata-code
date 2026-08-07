@@ -45,18 +45,22 @@ function HistoricalBanner({
         Viewing {view.selectedOccurrence?.label ?? view.selectedStage.label}
       </span>
       <span className="min-w-0 flex-1 text-muted-foreground">
-        This is read-only history. {view.activeStage.label} is the current stage.
+        {view.isViewingCurrent
+          ? "This conversation has ended and is read-only."
+          : `This is read-only history. ${view.activeStage.label} is the current stage.`}
       </span>
-      <Button
-        className="shrink-0"
-        data-testid="task-stage-return-to-current"
-        size="xs"
-        variant="outline"
-        onClick={onReturnToCurrent}
-      >
-        <ArrowLeftIcon className="size-3.5" />
-        Return to current
-      </Button>
+      {view.isViewingCurrent ? null : (
+        <Button
+          className="shrink-0"
+          data-testid="task-stage-return-to-current"
+          size="xs"
+          variant="outline"
+          onClick={onReturnToCurrent}
+        >
+          <ArrowLeftIcon className="size-3.5" />
+          Return to current
+        </Button>
+      )}
     </div>
   );
 }

@@ -100,6 +100,29 @@ describe("taskShellStages", () => {
       taskShellStages(makeTaskWorkspace()).find((stage) => stage.stage === "build")?.needsUpgrade,
     ).toBe(false);
   });
+
+  it("renders only the current stage for a definition this build does not know", () => {
+    const task = atStage(
+      makeTaskWorkspace({
+        versions: {
+          taskContract: "task-workspace@0.3.0",
+          artifactContract: "task-artifact@0.3.0",
+          workflowDefinition: "guided@99.0.0",
+          prompt: "task-workspace-guided@99.0.0",
+        },
+      }),
+      "plan",
+    );
+
+    expect(taskShellStages(task)).toEqual([]);
+
+    // The route still renders: the shell falls back to the stage the task is
+    // actually in rather than blocking on a definition it cannot map.
+    const view = resolveTaskShellView(task, null);
+    expect(view.activeStage.stage).toBe("plan");
+    expect(view.selectedStage.stage).toBe("plan");
+    expect(view.isViewingCurrent).toBe(true);
+  });
 });
 
 const guidedTask = atStage(

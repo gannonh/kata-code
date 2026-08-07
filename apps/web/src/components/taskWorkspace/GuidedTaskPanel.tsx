@@ -5,6 +5,7 @@ import { ArrowLeftIcon, GitBranchIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { TaskShellOccurrence } from "../../taskWorkspace/taskShellModel";
+import { operationKey } from "../../taskWorkspace/operationKey";
 import { latestArtifact } from "../../taskWorkspace/taskWorkspaceArtifacts";
 import { currentTaskStage } from "../../taskWorkspace/taskWorkspaceStore";
 import type { TaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
@@ -16,10 +17,6 @@ function latestOccurrence(task: TaskWorkspace, stage = currentTaskStage(task)) {
   return task.occurrences
     .filter((candidate) => candidate.stage === stage)
     .toSorted((left, right) => right.ordinal - left.ordinal)[0];
-}
-
-function operationKey(commandId: string, action: string): string {
-  return `task-${action}-${commandId}`;
 }
 
 function buildStatusVariant(
@@ -264,6 +261,8 @@ export function GuidedTaskPanel(props: {
   /** False while the user is inspecting history rather than the live path. */
   readonly isViewingCurrent: boolean;
   readonly onReturnToCurrent: () => void;
+  /** True when the shell renders the revision control for this view. */
+  readonly canRevise: boolean;
 }) {
   const {
     task,
@@ -275,6 +274,7 @@ export function GuidedTaskPanel(props: {
     onSelectOccurrence,
     isViewingCurrent,
     onReturnToCurrent,
+    canRevise,
   } = props;
   const [manualNotes, setManualNotes] = useState<Record<string, string>>({});
   const [amendmentFeedback, setAmendmentFeedback] = useState<Record<string, string>>({});
@@ -467,8 +467,9 @@ export function GuidedTaskPanel(props: {
           <div>
             <h3 className="text-sm font-semibold">Plan ready for review</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Approve this Plan, or use <strong>Revise from here</strong> to start a new Plan
-              occurrence.
+              {canRevise
+                ? "Approve this Plan, or use Revise from here to start a new Plan occurrence."
+                : "Approve this Plan when it is ready."}
             </p>
           </div>
           {isPlanValidationError(commands.error) ? (
@@ -480,8 +481,9 @@ export function GuidedTaskPanel(props: {
               <p className="font-semibold">This Plan cannot be approved yet.</p>
               <p>{commands.error}</p>
               <p>
-                Use <strong>Revise from here</strong> above the conversation to ask the active stage
-                conversation to repair it.
+                {canRevise
+                  ? "Use Revise from here above the conversation to ask the active stage conversation to repair it."
+                  : "Return to the current Plan to revise it."}
               </p>
             </div>
           ) : null}
