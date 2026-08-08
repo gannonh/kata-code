@@ -16,6 +16,7 @@ import {
 import type { Page } from "@playwright/test";
 
 import { E2E_TAGS } from "../../src/config/tags.ts";
+import { openTask } from "../../src/flows/taskWorkspace.ts";
 import { createSeededGitWorkspace } from "../../src/flows/workspace.ts";
 import { registerFileSessionSeed } from "../../src/harness/fileSession.ts";
 import { expect, test } from "../../src/harness/testFixtures.ts";
@@ -304,23 +305,9 @@ registerFileSessionSeed(fileURLToPath(import.meta.url), async (context) => {
   }
 });
 
-async function openTask(page: Page, id: string): Promise<void> {
-  const taskLink = page.locator(`a[href$="/${id}"]`).first();
-  await expect(taskLink).toBeVisible();
-  const href = await taskLink.getAttribute("href");
-  expect(href).not.toBeNull();
-  await page.evaluate((routeHref) => {
-    const hashIndex = routeHref.indexOf("#/");
-    if (hashIndex >= 0) {
-      window.location.hash = routeHref.slice(hashIndex + 1);
-      return;
-    }
-    window.history.pushState({}, "", routeHref);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  }, href!);
-  await expect(page).toHaveURL(new RegExp(`/tasks/(?:[^/]+/)?${id}$`));
+async function openTaskWorkspace(page: Page, id: string): Promise<void> {
   try {
-    await expect(page.getByTestId("task-artifacts-panel")).toBeVisible();
+    await openTask(page, id);
   } catch (error) {
     const body = await page.locator("body").innerText();
     console.error(`[task-workspaces] route diagnostics\n${page.url()}\n${body.slice(0, 4_000)}`);

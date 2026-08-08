@@ -129,7 +129,7 @@ describe("buildTurnStartParams", () => {
   });
 
   effectIt.effect(
-    "requires task implementation writes to stay in the worktree and off host temp",
+    "keeps task implementation temp directories writable and scopes writable roots to the worktree",
     () =>
       Effect.gen(function* () {
         const params = yield* buildTurnStartParams({
@@ -137,9 +137,50 @@ describe("buildTurnStartParams", () => {
           runtimeMode: "auto-accept-edits",
           prompt: "Implement the approved Plan",
           taskExecutionProfile: "task-worktree-write",
+          taskSandboxWritableRoots: [
+            "/tmp/task/.git/objects",
+            "/tmp/task/.git/refs/heads/katacode/task-1",
+            "/tmp/task.agent-home",
+          ],
         });
 
-        assert.equal(params.sandboxPolicy, undefined);
+        // The shell sandbox must keep the per-user TMPDIR and /tmp writable:
+        // with them excluded, git's xcrun cache, python, and the patch helper
+        // all fail with "couldn't create cache file ... Operation not
+        // permitted" and implementation cannot proceed. Extra write roots are
+        // confined to the task's git metadata and agent home.
+        assert.deepStrictEqual(params.sandboxPolicy, {
+          type: "workspaceWrite",
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+          writableRoots: [
+            "/tmp/task/.git/objects",
+            "/tmp/task/.git/refs/heads/katacode/task-1",
+            "/tmp/task.agent-home",
+          ],
+        });
+      }),
+  );
+
+  effectIt.effect(
+    "grants no extra writable roots for a task session without approved git metadata",
+    () =>
+      Effect.gen(function* () {
+        const params = yield* buildTurnStartParams({
+          threadId: "provider-thread-task-implementation-plain",
+          runtimeMode: "auto-accept-edits",
+          prompt: "Implement the approved Plan",
+          taskExecutionProfile: "task-worktree-write",
+        });
+
+        assert.deepStrictEqual(params.sandboxPolicy, {
+          type: "workspaceWrite",
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+          writableRoots: [],
+        });
       }),
   );
 

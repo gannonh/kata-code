@@ -22,7 +22,8 @@ import { useThreadActions } from "../../hooks/useThreadActions";
 import { isMacPlatform, newCommandId } from "../../lib/utils";
 import { readEnvironmentApi } from "../../environmentApi";
 import { readLocalApi } from "../../localApi";
-import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
+import { useStore } from "../../store";
+import { useChatThreads } from "../../hooks/useChatThreads";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
 import { useUiStateStore } from "../../uiStateStore";
 import type { SidebarThreadSummary } from "../../types";
@@ -156,7 +157,7 @@ export const ThreadListSidebar = memo(function ThreadListSidebar(props: ThreadLi
     },
   });
 
-  const allThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const allThreads = useChatThreads();
   const threadLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
 
   const projectByMemberScopedKey = useMemo(() => {

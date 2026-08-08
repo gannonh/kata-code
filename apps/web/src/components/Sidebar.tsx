@@ -93,6 +93,7 @@ import {
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
 import { TaskWorkspaceSidebar } from "./taskWorkspace/TaskWorkspaceSidebar";
+import { useChatThreads } from "../hooks/useChatThreads";
 import { isTaskModeEnabled } from "../featureFlags";
 
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
@@ -201,7 +202,7 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
 
 export default function Sidebar() {
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const sidebarThreads = useChatThreads();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });

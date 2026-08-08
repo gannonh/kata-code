@@ -1,5 +1,9 @@
 # OKF bundle log
 
+## 2026-08-07 (Task implementation sandbox: temp dirs and agent home)
+
+Fixed a Guided Implement blocker observed in a live run: the Codex task session's shell sandbox excluded the per-user `TMPDIR` and `/tmp`, so git's xcrun cache, python, and the patch helper all failed with `couldn't create cache file … Operation not permitted`, and the agent could not work in the task worktree. Task sessions now send an explicit `workspaceWrite` sandbox policy with the temp exclusions off and writable roots confined to the task's git metadata. The agent's `HOME` also moved off the worktree — which had collected nvm symlinks and python bytecode caches — to a sibling `<worktree>.agent-home` scratch directory, granted in the task permission profile alongside the existing worktree and git-metadata grants.
+
 ## 2026-08-06 (Specs migrated to GitHub Issues)
 
 Migrated the active Task roadmap into GitHub-backed specs: parent epic [#72](https://github.com/gannonh/kata-code/issues/72), Guided planning [#73](https://github.com/gannonh/kata-code/issues/73), Guided implementation [#74](https://github.com/gannonh/kata-code/issues/74), Agent Runtime convergence [#75](https://github.com/gannonh/kata-code/issues/75), and the approved conversation-plus-panel shell [#76](https://github.com/gannonh/kata-code/issues/76). Linked the four child issues under #72, archived the completed UX Playground and redundant fork summary, and made `docs/specs/index.md` a GitHub roadmap pointer. The deferred-work registry and product backlog remain local non-spec registries for later triage.

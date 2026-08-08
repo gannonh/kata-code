@@ -264,12 +264,12 @@ Each entry should include:
 
 ### Sandbox: reclaim orphaned containers on server restart
 
-- **Status:** deferred
+- **Status:** closed
 - **Area:** sandbox, server, docker
 - **Source:** strict quality review of `feat/kata-cloud` — [#18](https://github.com/gannonh/kata-code/issues/18)
-- **Rationale:** Phase 1 session tracking is in-memory (`runningSessions` in `apps/server/src/sandbox/SandboxService.ts`). Server restart resets the map while Docker containers keep running, orphaning `kata.sandbox=true` labeled containers. `AutoRemove` and labels bound the leak but no startup sweep exists. Fixing it expands Phase 1 scope past its acceptance criteria.
-- **Revisit trigger:** Before Phase 3 extends the driver registry beyond Docker, or before any non-developer user relies on deployment sessions.
-- **Notes:** On startup, list `kata.sandbox=true` containers and re-adopt or dispose them by `kata.sandbox.instance` id.
+- **Rationale:** Superseded by the durable session store + reconcile work. `SandboxService` no longer uses an in-memory `runningSessions` map; `SandboxSessionStore` persists session records and `sandboxReconcile.ts` re-adopts or disposes them at startup via driver `lifecycle.status` / `lifecycle.discover`. The Docker driver gained a durable lifecycle (stop/start/status, no `AutoRemove`). Same work as the closed entry "Sandbox: durable RunningSession reclamation across server restarts" (closed 2026-07-09).
+- **Revisit trigger:** None.
+- **Notes:** Closed 2026-08-07 during backlog triage; issue #18 closed as superseded.
 
 ### Sandbox: share Docker config schema between web UI and driver
 

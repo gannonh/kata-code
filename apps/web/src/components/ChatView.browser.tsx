@@ -15,6 +15,7 @@ import {
   type TerminalMetadataStreamEvent,
   type ServerLifecycleWelcomePayload,
   type ThreadId,
+  type CheckpointRef,
   type TurnId,
   WS_METHODS,
   OrchestrationSessionStatus,
@@ -24,7 +25,13 @@ import {
 } from "@kata-sh/code-contracts";
 import { scopedThreadKey, scopeThreadRef } from "@kata-sh/code-client-runtime";
 import { createModelCapabilities, createModelSelection } from "@kata-sh/code-shared/model";
-import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpResponse, http, ws } from "msw";
@@ -62,6 +69,8 @@ import {
 import { isMacPlatform } from "../lib/utils";
 import { __resetLocalApiForTests } from "../localApi";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
+import ChatView from "./ChatView";
+import { SidebarProvider } from "./ui/sidebar";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -372,6 +381,8 @@ function createSnapshotForTargetUser(options: {
   targetText: string;
   targetAttachmentCount?: number;
   sessionStatus?: OrchestrationSessionStatus;
+  /** Record a completed checkpoint so the transcript offers a revert control. */
+  revertibleTurn?: boolean;
 }): OrchestrationReadModel {
   const messages: Array<OrchestrationReadModel["threads"][number]["messages"][number]> = [];
 
@@ -445,7 +456,21 @@ function createSnapshotForTargetUser(options: {
         messages,
         activities: [],
         proposedPlans: [],
-        checkpoints: [],
+        checkpoints: options.revertibleTurn
+          ? [
+              {
+                turnId: "turn-revertible" as TurnId,
+                checkpointTurnCount: 2,
+                checkpointRef: "checkpoint-revertible" as CheckpointRef,
+                status: "ready" as const,
+                files: [
+                  { path: "src/onboarding.ts", kind: "modified", additions: 3, deletions: 1 },
+                ],
+                assistantMessageId: "msg-assistant-21" as MessageId,
+                completedAt: NOW_ISO,
+              },
+            ]
+          : [],
         session: {
           threadId: THREAD_ID,
           status: options.sessionStatus ?? "ready",
@@ -1742,6 +1767,69 @@ async function mountChatView(options: {
   };
 }
 
+/**
+ * Mount one `ChatView` under a minimal router, with an explicit `readOnly`.
+ *
+ * `ChatView` needs only `useNavigate` and a loose `useSearch` from the router,
+ * so it can be rendered outside the app route tree. The full app is mounted
+ * first so stores, websocket subscriptions, and server config are live; every
+ * assertion is scoped to this component's own container so the app's chat does
+ * not answer for it.
+ */
+async function mountStandaloneChatView(options: {
+  readonly snapshot: OrchestrationReadModel;
+  readonly readOnly: boolean;
+}): Promise<{ readonly host: HTMLElement; readonly cleanup: () => Promise<void> }> {
+  const app = await mountChatView({
+    viewport: DEFAULT_VIEWPORT,
+    snapshot: options.snapshot,
+  });
+
+  const host = document.createElement("div");
+  host.style.position = "fixed";
+  host.style.inset = "0";
+  host.style.display = "grid";
+  host.style.background = "var(--background)";
+  document.body.append(host);
+
+  const rootRoute = createRootRoute();
+  const chatRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => (
+      <ChatView
+        environmentId={LOCAL_ENVIRONMENT_ID}
+        threadId={THREAD_ID}
+        routeKind="server"
+        {...(options.readOnly ? { readOnly: true } : {})}
+      />
+    ),
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([chatRoute]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+
+  const screen = await render(
+    <AppAtomRegistryProvider>
+      <SidebarProvider>
+        <RouterProvider router={router as never} />
+      </SidebarProvider>
+    </AppAtomRegistryProvider>,
+    { container: host },
+  );
+  await waitForLayout();
+
+  return {
+    host,
+    cleanup: async () => {
+      await screen.unmount();
+      host.remove();
+      await app.cleanup();
+    },
+  };
+}
+
 describe("ChatView timeline estimator parity (full app)", () => {
   beforeAll(async () => {
     fixture = buildFixture(
@@ -1856,6 +1944,59 @@ describe("ChatView timeline estimator parity (full app)", () => {
   afterEach(() => {
     customWsRpcResolver = null;
     document.body.innerHTML = "";
+  });
+
+  it("renders the transcript without any way to extend or rewrite it", async () => {
+    const mounted = await mountStandaloneChatView({
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-read-only" as MessageId,
+        targetText: "settled stage work",
+        revertibleTurn: true,
+      }),
+      readOnly: true,
+    });
+    try {
+      await vi.waitFor(
+        () => {
+          expect(mounted.host.querySelector('[data-testid="chat-read-only-notice"]')).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 32 },
+      );
+
+      // The transcript is still readable.
+      expect(mounted.host.textContent).toContain("assistant filler 21");
+
+      // Nothing offers to add to it or to rewrite it.
+      expect(mounted.host.querySelector('[data-testid="composer-editor"]')).toBeNull();
+      expect(mounted.host.querySelector('[aria-label="Revert to this message"]')).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the composer on the same thread when it is not read-only", async () => {
+    const mounted = await mountStandaloneChatView({
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-live" as MessageId,
+        targetText: "live stage work",
+        revertibleTurn: true,
+      }),
+      readOnly: false,
+    });
+    try {
+      await vi.waitFor(
+        () => {
+          expect(mounted.host.querySelector('[data-testid="composer-editor"]')).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 32 },
+      );
+      expect(mounted.host.querySelector('[data-testid="chat-read-only-notice"]')).toBeNull();
+      // Keeps the read-only assertions above honest: on this exact thread and
+      // fixture, revert is reachable when the view is live.
+      expect(mounted.host.querySelector('[aria-label="Revert to this message"]')).toBeTruthy();
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it("renders locked single-environment mobile run context as a static workspace label", async () => {

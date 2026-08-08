@@ -1,13 +1,11 @@
 import {
   ThreadId,
-  type EnvironmentId,
   type TaskWorkspace,
   type TaskWorkspaceArtifactKind,
   type TaskWorkspaceCommentAuthor,
   type TaskWorkspaceStage,
 } from "@kata-sh/code-contracts";
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
-import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import {
   TASK_WORKSPACE_STAGE_LABELS,
   taskWorkspaceCatalogEntryForVersion,
@@ -16,13 +14,13 @@ import {
 import { useClerk } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
 import { CheckCircle2Icon, CircleIcon, GitBranchIcon, Loader2Icon } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
-import { createThreadSelectorByRef } from "../../storeSelectors";
+import { latestArtifact } from "../../taskWorkspace/taskWorkspaceArtifacts";
 import {
   currentTaskStage,
   selectTaskRefsById,
@@ -30,6 +28,7 @@ import {
   useTaskWorkspaceStore,
 } from "../../taskWorkspace/taskWorkspaceStore";
 import { useTaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
+import { operationKey } from "../../taskWorkspace/operationKey";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
@@ -37,12 +36,8 @@ import { Textarea } from "../ui/textarea";
 import { ArtifactsPanel } from "./ArtifactsPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { ContextManifestPanel } from "./ContextManifestPanel";
-import { GuidedTaskPanel } from "./GuidedTaskPanel";
 import { SessionsPanel } from "./SessionsPanel";
-
-function operationKey(commandId: string, action: string): string {
-  return `task-${action}-${commandId}`;
-}
+import { TaskShellView } from "./TaskShellView";
 
 /**
  * Rail shown when a task pins a definition version this build has no catalog
@@ -50,7 +45,6 @@ function operationKey(commandId: string, action: string): string {
  * stage the task is actually in is honest.
  */
 const UNKNOWN_DEFINITION_STAGES: ReadonlyArray<TaskWorkspaceStage> = [];
-const TaskChatView = lazy(() => import("../ChatView"));
 
 /** Reasoning stages that write their own artifact and complete with their own command. */
 const REASONING_STAGES = [
@@ -73,44 +67,8 @@ Create and commit \`task-workspace-slice-1.txt\` in the provisioned task worktre
 ## Acceptance criterion
 The fixture file exists at the resulting commit with the canonical Slice 1 content.`;
 
-function latestArtifact(task: TaskWorkspace, kind: TaskWorkspaceArtifactKind) {
-  const artifact = task.artifacts.find((candidate) => candidate.kind === kind);
-  if (!artifact) return null;
-  return (
-    artifact.revisions.find((revision) => revision.revision === artifact.currentRevision) ?? null
-  );
-}
-
 function statusLabel(stage: TaskWorkspaceStage): string {
   return TASK_WORKSPACE_STAGE_LABELS[stage];
-}
-
-function activeStageSession(
-  task: TaskWorkspace,
-  stage: TaskWorkspaceStage,
-  occurrence: TaskWorkspace["occurrences"][number] | undefined,
-) {
-  if (stage === "build") {
-    const continuationSessionId = task.build.continuationSessionIds
-      .toReversed()
-      .find((sessionId) =>
-        task.sessions.some(
-          (session) =>
-            session.id === sessionId &&
-            session.stage === "build" &&
-            session.role === "primary" &&
-            session.status === "active",
-        ),
-      );
-    if (continuationSessionId) {
-      const continuationSession =
-        task.sessions.find((session) => session.id === continuationSessionId) ?? null;
-      if (continuationSession?.status === "active") return continuationSession;
-    }
-  }
-  if (!occurrence?.sessionId) return null;
-  const session = task.sessions.find((candidate) => candidate.id === occurrence.sessionId) ?? null;
-  return session?.status === "active" ? session : null;
 }
 
 /**
@@ -966,95 +924,35 @@ function PreviewTaskPanel({ task }: { readonly task: TaskWorkspace }) {
 function TaskFirstSliceView({
   task,
   commands,
-  threadRef,
-  hasActiveThread,
   currentUser,
 }: {
   readonly task: TaskWorkspace;
   readonly commands: ReturnType<typeof useTaskWorkspaceCommands>;
-  readonly threadRef: { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null;
-  readonly hasActiveThread: boolean;
   readonly currentUser: TaskWorkspaceCommentAuthor;
 }) {
   const catalogEntry = taskWorkspaceCatalogEntryForVersion(task.versions.workflowDefinition);
-  const stage = currentTaskStage(task);
-  const stageLabel = TASK_WORKSPACE_STAGE_PRESENTATION[stage];
-  const planOccurrence = task.occurrences
-    .filter((candidate) => candidate.stage === "plan")
-    .toSorted((left, right) => right.ordinal - left.ordinal)[0];
-  const approvedPlan =
-    stage === "plan" &&
-    planOccurrence?.status === "completed" &&
-    planOccurrence.gateOutcome === "approved";
-  const planArtifact = latestArtifact(task, "plan");
-  const buildReadOnlyPlan =
-    stage === "build" &&
-    planArtifact !== null &&
-    (task.build.resultingCommitSha !== null || !hasActiveThread);
-  const showReadOnlyPlan = Boolean((approvedPlan && planArtifact) || buildReadOnlyPlan);
-
-  return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
-      <header className="flex items-center gap-3 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{task.title}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {catalogEntry?.label ?? "Task"} · {stageLabel}
-          </p>
-        </div>
-        <Badge variant={approvedPlan ? "success" : "secondary"}>
-          {approvedPlan ? "Plan approved" : stageLabel}
-        </Badge>
-      </header>
-      <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <section className="min-h-0 min-w-0 overflow-hidden">
-          {showReadOnlyPlan && planArtifact ? (
-            <div
-              data-testid="task-approved-plan-readonly"
-              className="h-full overflow-auto p-5 sm:p-8"
-            >
-              <div className="mx-auto max-w-3xl rounded-xl border border-success/30 bg-card p-5">
-                <p className="text-xs font-medium uppercase tracking-wide text-success-foreground">
-                  Approved Plan
-                </p>
-                <h1 className="mt-2 text-xl font-semibold">{planArtifact.title}</h1>
-                <pre className="mt-5 whitespace-pre-wrap text-sm text-muted-foreground">
-                  {planArtifact.markdown}
-                </pre>
-              </div>
-            </div>
-          ) : threadRef && hasActiveThread ? (
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  Loading conversation…
-                </div>
-              }
-            >
-              <TaskChatView
-                environmentId={threadRef.environmentId}
-                threadId={threadRef.threadId}
-                routeKind="server"
-                reserveTitleBarControlInset
-              />
-            </Suspense>
-          ) : (
-            <div
-              data-testid="task-conversation-starting"
-              className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
-            >
-              Preparing the {stageLabel} conversation…
-            </div>
-          )}
-        </section>
-        {catalogEntry?.availableInFirstSlice ? (
-          <GuidedTaskPanel task={task} commands={commands} currentUser={currentUser} />
-        ) : (
+  if (!catalogEntry?.availableInFirstSlice) {
+    return (
+      <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+        <header className="flex items-center gap-3 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
+          <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold">{task.title}</p>
+        </header>
+        <main className="min-h-0 flex-1">
           <PreviewTaskPanel task={task} />
-        )}
-      </main>
-    </SidebarInset>
+        </main>
+      </SidebarInset>
+    );
+  }
+  // Keyed by task: stage selection and an open revise dialog are about one
+  // task, and must not survive navigating to another.
+  return (
+    <TaskShellView
+      key={`${task.environmentId}:${task.id}`}
+      task={task}
+      commands={commands}
+      currentUser={currentUser}
+    />
   );
 }
 
@@ -1088,22 +986,6 @@ function TaskWorkspaceViewContent({
     : null;
   const railStages = catalogEntry?.stages ?? UNKNOWN_DEFINITION_STAGES;
   const isFreeform = (catalogEntry?.explicitEntryStages.length ?? 0) > 0;
-  const currentOccurrence = task
-    ? task.occurrences
-        .filter((candidate) => candidate.stage === stage)
-        .toSorted((left, right) => right.ordinal - left.ordinal)[0]
-    : undefined;
-  const currentSession = task ? activeStageSession(task, stage, currentOccurrence) : null;
-  const activeThreadRef = useMemo(
-    () =>
-      task?.environmentId && currentSession
-        ? { environmentId: task.environmentId, threadId: currentSession.threadId }
-        : null,
-    [currentSession, task?.environmentId],
-  );
-  const activeThread = useStore(
-    useMemo(() => createThreadSelectorByRef(activeThreadRef), [activeThreadRef]),
-  );
   const isFirstSliceTask = task?.versions.taskContract === "task-workspace@0.3.0";
   const availableThreads = useMemo(
     () =>
@@ -1137,15 +1019,7 @@ function TaskWorkspaceViewContent({
   }
 
   if (isFirstSliceTask) {
-    return (
-      <TaskFirstSliceView
-        task={task}
-        commands={commands}
-        threadRef={activeThreadRef}
-        hasActiveThread={activeThread !== undefined && "id" in activeThread}
-        currentUser={currentUser}
-      />
-    );
+    return <TaskFirstSliceView task={task} commands={commands} currentUser={currentUser} />;
   }
 
   const linkedSession =

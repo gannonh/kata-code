@@ -148,6 +148,12 @@ export interface CodexSessionRuntimeOptions {
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly appServerArgs?: ReadonlyArray<string>;
+  /**
+   * Extra writable roots for the task implementation shell sandbox: the task's
+   * git metadata and its agent home. The permission profile still governs the
+   * file tools; this only widens what the shell may write outside the worktree.
+   */
+  readonly taskSandboxWritableRoots?: ReadonlyArray<string>;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -353,9 +359,21 @@ function runtimeModeToTurnSandboxPolicy(
   input: RuntimeMode,
   taskStage: boolean,
   taskExecutionProfile?: ProviderTaskExecutionProfile,
+  taskSandboxWritableRoots: ReadonlyArray<string> = [],
 ): EffectCodexSchema.V2TurnStartParams__SandboxPolicy | undefined {
   if (taskExecutionProfile === "task-worktree-write") {
-    return undefined;
+    // The permission profile's filesystem map governs the file tools. This
+    // policy governs the shell sandbox, and it must keep the per-user TMPDIR
+    // and /tmp writable: with them excluded, git's xcrun cache, python, and
+    // the patch helper all fail with "couldn't create cache file ... Operation
+    // not permitted", which made implementation sessions unable to work.
+    return {
+      type: "workspaceWrite",
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+      writableRoots: [...taskSandboxWritableRoots],
+    };
   }
   if (taskStage) {
     return {
@@ -421,6 +439,7 @@ export function buildTurnStartParams(input: {
   readonly developerInstructions?: string;
   readonly taskStage?: boolean;
   readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
+  readonly taskSandboxWritableRoots?: ReadonlyArray<string>;
   readonly interactionMode?: ProviderInteractionMode;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
@@ -442,6 +461,7 @@ export function buildTurnStartParams(input: {
     input.runtimeMode,
     input.taskStage === true,
     input.taskExecutionProfile,
+    input.taskSandboxWritableRoots,
   );
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
@@ -1396,6 +1416,9 @@ export const makeCodexSessionRuntime = (
             ...(input.taskStage === true ? { taskStage: true } : {}),
             ...(options.taskExecutionProfile
               ? { taskExecutionProfile: options.taskExecutionProfile }
+              : {}),
+            ...(options.taskSandboxWritableRoots && options.taskSandboxWritableRoots.length > 0
+              ? { taskSandboxWritableRoots: options.taskSandboxWritableRoots }
               : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           });

@@ -134,6 +134,12 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    # Task mode is in development and gated off by default. These specs exist to
+    # exercise it, so the whole job opts in. Local runs inherit this from a
+    # developer `.env`, which CI does not have — without it the Task surface
+    # never renders and every task spec fails on a missing sidebar link.
+    env:
+      FF_TASK_MODE: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7

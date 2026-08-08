@@ -79,8 +79,10 @@ vi.mock("../../store", () => {
 });
 
 vi.mock("../ChatView", () => ({
-  default: ({ threadId }: { readonly threadId: string }) => (
-    <div data-testid="mock-task-chat">{threadId}</div>
+  default: ({ threadId, readOnly }: { readonly threadId: string; readonly readOnly?: boolean }) => (
+    <div data-testid="mock-task-chat" data-read-only={readOnly ? "true" : "false"}>
+      {threadId}
+    </div>
   ),
 }));
 
@@ -183,7 +185,16 @@ const baseTask: TaskWorkspace = {
   updatedAt: "2026-07-28T17:00:00.000Z",
 };
 
-async function renderTask(task: TaskWorkspace) {
+/** Desktop width: the Task panel is docked beside the conversation. */
+const DESKTOP_VIEWPORT = { width: 1280, height: 900 } as const;
+/** Below `lg`: the panel moves behind the header trigger as a sheet. */
+const NARROW_VIEWPORT = { width: 820, height: 900 } as const;
+
+async function renderTask(
+  task: TaskWorkspace,
+  viewport: { readonly width: number; readonly height: number } = DESKTOP_VIEWPORT,
+) {
+  await page.viewport(viewport.width, viewport.height);
   useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
     kind: "snapshot",
     snapshot: { sequence: 1, tasks: [task] },
@@ -1293,7 +1304,7 @@ describe("TaskWorkspaceView", () => {
     await expect.element(page.getByTestId("mock-task-chat")).toHaveTextContent(continuationThread);
   });
 
-  it("does not route Build to a stale inactive occurrence session", async () => {
+  it("never treats a stale inactive occurrence session as a live conversation", async () => {
     const originalThread = ThreadId.make("guided-build-thread-1");
     mocks.threadShellById = {
       [originalThread]: {
@@ -1316,8 +1327,11 @@ describe("TaskWorkspaceView", () => {
       }),
     );
 
-    expect(page.getByTestId("mock-task-chat").query()).toBeNull();
-    await expect.element(page.getByTestId("task-approved-plan-readonly")).toBeVisible();
+    // The stale session's transcript is still worth reading, but it is not a
+    // live conversation: it is never offered as somewhere to send work.
+    await expect
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveAttribute("data-read-only", "true");
   });
 
   it("dispatches Guided amendment request changes with feedback", async () => {
@@ -1518,13 +1532,19 @@ describe("TaskWorkspaceView", () => {
     await expect
       .element(page.getByTestId("guided-plan-validation-error"))
       .toHaveTextContent("This Plan cannot be approved yet.");
-    await expect.element(page.getByTestId("guided-plan-request-changes")).toBeDisabled();
+    // The failure names the next step, and that step is a live control rather
+    // than an inert one.
+    await expect
+      .element(page.getByTestId("guided-plan-validation-error"))
+      .toHaveTextContent("Revise from here");
 
+    await page.getByTestId("task-stage-revise").click();
+    await expect.element(page.getByTestId("task-revise-confirm")).toBeDisabled();
     await page
-      .getByTestId("guided-plan-feedback")
+      .getByTestId("task-revise-feedback")
       .fill("Remove the command from the manual check.");
-    await expect.element(page.getByTestId("guided-plan-request-changes")).toBeEnabled();
-    await page.getByTestId("guided-plan-request-changes").click();
+    await expect.element(page.getByTestId("task-revise-confirm")).toBeEnabled();
+    await page.getByTestId("task-revise-confirm").click();
     expect(mocks.dispatchCommand.mock.calls.at(-1)?.[0]).toMatchObject({
       type: "task.stage.request-changes",
       feedback: "Remove the command from the manual check.",
@@ -1627,5 +1647,465 @@ describe("TaskWorkspaceView", () => {
     expect(page.getByTestId("task-questions-editor").query()).toBeNull();
     expect(page.getByText(/Link an existing repository thread/).query()).toBeNull();
     expect(page.getByTestId("task-context-manifests-panel").query()).toBeNull();
+  });
+});
+
+/**
+ * Shell fixture: Clarify, Research, and Design are settled history; the task is
+ * waiting on the Plan gate, and Plan has already been revised once.
+ */
+function shellTask(overrides: Partial<TaskWorkspace> = {}): TaskWorkspace {
+  const planThread = ThreadId.make("guided-plan-thread-2");
+  const researchThread = ThreadId.make("guided-research-thread-1");
+  return {
+    ...guidedTask(),
+    title: "Refine Task mode UX",
+    workflowRuns: [{ ...guidedTask().workflowRuns[0]!, currentStage: "plan" }],
+    planGate: {
+      occurrence: 1,
+      revision: 2,
+      status: "open",
+      feedback: null,
+      openedAt: "2026-07-28T17:20:00.000Z",
+      resolvedAt: null,
+    },
+    occurrences: [
+      {
+        id: "occurrence-questions-0",
+        stage: "questions",
+        ordinal: 0,
+        status: "completed",
+        sessionId: null,
+        threadId: ThreadId.make("guided-questions-thread-1"),
+        contextManifestId: null,
+        artifactRevisionId: "questions-revision-1",
+        completionProposalId: null,
+        gateOutcome: null,
+        feedback: null,
+        supersedesOccurrenceId: null,
+        createdAt: "2026-07-28T17:00:00.000Z",
+        completedAt: "2026-07-28T17:02:00.000Z",
+      },
+      {
+        id: "occurrence-research-0",
+        stage: "research",
+        ordinal: 0,
+        status: "completed",
+        sessionId: "session-research-1",
+        threadId: researchThread,
+        contextManifestId: null,
+        artifactRevisionId: "research-revision-1",
+        completionProposalId: null,
+        gateOutcome: null,
+        feedback: null,
+        supersedesOccurrenceId: null,
+        createdAt: "2026-07-28T17:03:00.000Z",
+        completedAt: "2026-07-28T17:05:00.000Z",
+      },
+      {
+        id: "occurrence-design-0",
+        stage: "design",
+        ordinal: 0,
+        status: "completed",
+        sessionId: null,
+        threadId: ThreadId.make("guided-design-thread-1"),
+        contextManifestId: null,
+        artifactRevisionId: null,
+        completionProposalId: null,
+        gateOutcome: null,
+        feedback: null,
+        supersedesOccurrenceId: null,
+        createdAt: "2026-07-28T17:06:00.000Z",
+        completedAt: "2026-07-28T17:07:00.000Z",
+      },
+      {
+        id: "occurrence-plan-0",
+        stage: "plan",
+        ordinal: 0,
+        status: "completed",
+        sessionId: null,
+        threadId: ThreadId.make("guided-plan-thread-1"),
+        contextManifestId: null,
+        artifactRevisionId: "plan-revision-1",
+        completionProposalId: null,
+        gateOutcome: "changes-requested",
+        feedback: "Split the migration phase.",
+        supersedesOccurrenceId: null,
+        createdAt: "2026-07-28T17:08:00.000Z",
+        completedAt: "2026-07-28T17:10:00.000Z",
+      },
+      {
+        id: "occurrence-plan-1",
+        stage: "plan",
+        ordinal: 1,
+        status: "awaiting-approval",
+        sessionId: "session-plan-2",
+        threadId: planThread,
+        contextManifestId: null,
+        artifactRevisionId: "plan-revision-2",
+        completionProposalId: null,
+        gateOutcome: null,
+        feedback: null,
+        supersedesOccurrenceId: "occurrence-plan-0",
+        createdAt: "2026-07-28T17:11:00.000Z",
+        completedAt: null,
+      },
+    ],
+    sessions: [
+      {
+        id: "session-research-1",
+        stage: "research",
+        threadId: researchThread,
+        role: "primary",
+        provider: "claudeAgent",
+        status: "completed",
+        parentSessionId: null,
+        forkPoint: null,
+        contextManifestId: null,
+        createdAt: "2026-07-28T17:03:00.000Z",
+      },
+      {
+        id: "session-plan-2",
+        stage: "plan",
+        threadId: planThread,
+        role: "primary",
+        provider: "claudeAgent",
+        status: "active",
+        parentSessionId: null,
+        forkPoint: null,
+        contextManifestId: null,
+        createdAt: "2026-07-28T17:11:00.000Z",
+      },
+    ],
+    artifacts: [
+      {
+        id: "questions-artifact",
+        kind: "questions",
+        currentRevision: 1,
+        revisions: [
+          {
+            id: "questions-revision-1",
+            kind: "questions",
+            title: "Clarified scope",
+            markdown: "The shell keeps stage sessions inside the Task.",
+            revision: 1,
+            sourceSessionId: null,
+            supersedesRevisionId: null,
+            blockIndex: [],
+            createdAt: "2026-07-28T17:02:00.000Z",
+          },
+        ],
+      },
+      {
+        id: "research-artifact",
+        kind: "research",
+        currentRevision: 1,
+        revisions: [
+          {
+            id: "research-revision-1",
+            kind: "research",
+            title: "Research findings",
+            markdown: "Peer chat rows fragmented the Task.",
+            revision: 1,
+            sourceSessionId: null,
+            supersedesRevisionId: null,
+            blockIndex: [],
+            createdAt: "2026-07-28T17:05:00.000Z",
+          },
+        ],
+      },
+      {
+        id: "plan-artifact",
+        kind: "plan",
+        currentRevision: 2,
+        revisions: [
+          {
+            id: "plan-revision-1",
+            kind: "plan",
+            title: "Superseded plan",
+            markdown: "One migration phase.",
+            revision: 1,
+            sourceSessionId: null,
+            supersedesRevisionId: null,
+            blockIndex: [],
+            createdAt: "2026-07-28T17:08:00.000Z",
+          },
+          {
+            id: "plan-revision-2",
+            kind: "plan",
+            title: "Implementation plan",
+            markdown: "Two migration phases.",
+            revision: 2,
+            sourceSessionId: null,
+            supersedesRevisionId: "plan-revision-1",
+            blockIndex: [],
+            createdAt: "2026-07-28T17:11:00.000Z",
+          },
+        ],
+      },
+    ],
+    build: { ...baseTask.build },
+    ...overrides,
+  };
+}
+
+/** Registers the shell fixture's stage threads with the client thread store. */
+function withShellThreads(): void {
+  mocks.threadShellById = Object.fromEntries(
+    [
+      "guided-questions-thread-1",
+      "guided-research-thread-1",
+      "guided-design-thread-1",
+      "guided-plan-thread-1",
+      "guided-plan-thread-2",
+    ].map((id) => [
+      id,
+      {
+        id: ThreadId.make(id),
+        threadId: ThreadId.make(id),
+        projectId: ProjectId.make("project-1"),
+        title: id,
+        archivedAt: null,
+        createdAt: "2026-07-28T17:00:00.000Z",
+        updatedAt: "2026-07-28T17:00:00.000Z",
+      },
+    ]),
+  );
+}
+
+describe("Task conversation-plus-panel shell", () => {
+  it("keeps the active stage conversation on the canvas beside the task panel", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    await expect
+      .element(page.getByTestId("task-shell-title"))
+      .toHaveTextContent("Refine Task mode UX");
+    await expect
+      .element(page.getByTestId("task-shell-subtitle"))
+      .toHaveTextContent("Guided · Plan");
+    await expect.element(page.getByTestId("task-stage-title")).toHaveTextContent("Plan");
+    await expect
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveTextContent("guided-plan-thread-2");
+    await expect
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveAttribute("data-read-only", "false");
+    await expect.element(page.getByTestId("task-shell-panel")).toBeVisible();
+    await expect.element(page.getByTestId("guided-task-panel")).toBeVisible();
+    expect(page.getByTestId("task-stage-historical-banner").query()).toBeNull();
+  });
+
+  it("names the active stage, the viewed stage, and that history is read-only", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    await page.getByTestId("guided-stage-research").click();
+
+    await expect
+      .element(page.getByTestId("guided-stage-plan"))
+      .toHaveAttribute("data-active", "true");
+    await expect
+      .element(page.getByTestId("guided-stage-research"))
+      .toHaveAttribute("data-selected", "true");
+    await expect
+      .element(page.getByTestId("task-stage-subtitle"))
+      .toHaveTextContent("Research v1 · read-only history");
+    await expect
+      .element(page.getByTestId("task-stage-historical-banner"))
+      .toHaveTextContent("Plan is the current stage");
+  });
+
+  it("opens a completed stage on its outcome and keeps its conversation inspectable", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    await page.getByTestId("guided-stage-research").click();
+
+    await expect
+      .element(page.getByTestId("task-stage-outcome-view"))
+      .toHaveTextContent("Research findings");
+    expect(page.getByTestId("mock-task-chat").query()).toBeNull();
+
+    await page.getByTestId("task-stage-view-conversation").click();
+
+    await expect
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveTextContent("guided-research-thread-1");
+    // A historical conversation is rendered read-only: no composer, no revert,
+    // no branch controls on settled stage work.
+    await expect
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveAttribute("data-read-only", "true");
+    // Inspecting history never advances or mutates the workflow.
+    expect(mocks.dispatchCommand).not.toHaveBeenCalled();
+  });
+
+  it("selects an earlier occurrence of a revised stage and preserves its outcome", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    await expect
+      .element(page.getByTestId("guided-stage-occurrence-count-plan"))
+      .toHaveTextContent("2");
+    await page.getByTestId("task-stage-occurrence-select").selectOptions("occurrence-plan-0");
+
+    await expect
+      .element(page.getByTestId("task-stage-outcome-view"))
+      .toHaveTextContent("Superseded plan");
+    await expect.element(page.getByTestId("task-stage-subtitle")).toHaveTextContent("Plan v1");
+    await expect.element(page.getByTestId("task-stage-return-to-current")).toBeVisible();
+  });
+
+  it("returns to the live path from history", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    await page.getByTestId("guided-stage-questions").click();
+    await expect.element(page.getByTestId("task-stage-return-to-current")).toBeVisible();
+    await page.getByTestId("task-stage-return-to-current").click();
+
+    await expect
+      .element(page.getByTestId("task-stage-subtitle"))
+      .toHaveTextContent("Plan v2 · current stage");
+    await expect
+      .element(page.getByTestId("mock-task-chat"))
+      .toHaveTextContent("guided-plan-thread-2");
+  });
+
+  it("resets a manual outcome view when the workflow advances past the stage", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    // The user watches the live Plan as its outcome…
+    await page.getByTestId("task-stage-view-outcome").click();
+    await expect.element(page.getByTestId("task-stage-outcome-view")).toBeVisible();
+
+    // …and the approval lands: the streamed update moves the live path to
+    // Implement without any selection change of the user's own.
+    useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
+      kind: "task-upserted",
+      sequence: 2,
+      task: {
+        ...shellTask(),
+        workflowRuns: [{ ...shellTask().workflowRuns[0]!, currentStage: "build" }],
+      },
+    });
+
+    // The stale outcome override must not linger as an empty Implement
+    // outcome; the canvas reveals the new live conversation instead.
+    await expect.element(page.getByTestId("task-stage-title")).toHaveTextContent("Implement");
+    await expect.element(page.getByTestId("task-stage-outcome-view")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByTestId("task-conversation-starting"))
+      .toHaveTextContent("Preparing the Implement conversation");
+  });
+
+  it("labels a completed current stage as ended rather than read-only history", async () => {
+    withShellThreads();
+    const task = shellTask();
+    // The current Plan's session has ended, so the stage is read-only while
+    // still being the live path: history copy and a no-op return button would
+    // both contradict the subtitle.
+    await renderTask({
+      ...task,
+      sessions: task.sessions.map((session) =>
+        session.id === "session-plan-2" ? { ...session, status: "completed" } : session,
+      ),
+    });
+
+    await expect.element(page.getByTestId("task-stage-historical-banner")).toBeVisible();
+    await expect
+      .element(page.getByTestId("task-stage-historical-banner"))
+      .toHaveTextContent("This conversation has ended and is read-only.");
+    await expect
+      .element(page.getByTestId("task-stage-subtitle"))
+      .toHaveTextContent("Plan v2 · current stage");
+    expect(page.getByTestId("task-stage-return-to-current").query()).toBeNull();
+  });
+
+  it("explains the impact of a revision before creating the next occurrence", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    await page.getByTestId("task-stage-revise").click();
+
+    await expect.element(page.getByTestId("task-revise-branch-point")).toHaveTextContent("Plan v2");
+    await expect
+      .element(page.getByTestId("task-revise-preserved"))
+      .toHaveTextContent("No downstream outcomes yet");
+
+    await page.getByTestId("task-revise-feedback").fill("Split the migration phase.");
+    await page.getByTestId("task-revise-confirm").click();
+
+    await expect.poll(() => mocks.dispatchCommand.mock.calls.length).toBeGreaterThan(0);
+    expect(mocks.dispatchCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "task.stage.request-changes",
+        feedback: "Split the migration phase.",
+      }),
+    );
+  });
+
+  it("offers no revision control on history, where no command could honor it", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    await page.getByTestId("guided-stage-research").click();
+
+    expect(page.getByTestId("task-stage-revise").query()).toBeNull();
+  });
+
+  it("reaches the task panel through a sheet at narrow widths", async () => {
+    withShellThreads();
+    await renderTask(shellTask(), NARROW_VIEWPORT);
+
+    // The conversation keeps the canvas and the current stage stays named.
+    await expect.element(page.getByTestId("task-stage-canvas")).toBeVisible();
+    await expect
+      .element(page.getByTestId("task-shell-subtitle"))
+      .toHaveTextContent("Guided · Plan");
+    expect(page.getByTestId("task-shell-panel").query()).toBeNull();
+    expect(page.getByTestId("guided-task-panel").query()).toBeNull();
+
+    await page.getByTestId("task-shell-panel-trigger").click();
+
+    await expect.element(page.getByTestId("task-shell-panel-sheet")).toBeVisible();
+    await expect.element(page.getByTestId("guided-stage-rail")).toBeVisible();
+    await expect.element(page.getByTestId("guided-plan-approve")).toBeVisible();
+  });
+
+  it("reports a failed revision beside the action that failed", async () => {
+    withShellThreads();
+    mocks.dispatchCommand.mockRejectedValueOnce(
+      new Error("The Plan gate is 'approved' and cannot accept changes."),
+    );
+    await renderTask(shellTask());
+
+    await page.getByTestId("task-stage-revise").click();
+    await page.getByTestId("task-revise-feedback").fill("Split the migration phase.");
+    await page.getByTestId("task-revise-confirm").click();
+
+    await expect
+      .element(page.getByTestId("task-revise-error"))
+      .toHaveTextContent("cannot accept changes");
+    // The dialog stays open with the feedback intact, so the next step is obvious.
+    await expect.element(page.getByTestId("task-revise-confirm")).toBeVisible();
+  });
+
+  it("keeps a return path in the panel while history is being inspected", async () => {
+    withShellThreads();
+    await renderTask(shellTask());
+
+    await page.getByTestId("guided-stage-research").click();
+
+    await expect
+      .element(page.getByTestId("guided-history-notice"))
+      .toHaveTextContent("These actions apply to Plan");
+    await page.getByTestId("guided-panel-return-to-current").click();
+
+    await expect
+      .element(page.getByTestId("task-stage-subtitle"))
+      .toHaveTextContent("Plan v2 · current stage");
   });
 });

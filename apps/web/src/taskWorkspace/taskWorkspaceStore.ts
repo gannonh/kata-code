@@ -4,6 +4,7 @@ import type {
   TaskWorkspaceId,
   TaskWorkspaceStreamItem,
 } from "@kata-sh/code-contracts";
+import { scopeThreadRef, scopedThreadKey } from "@kata-sh/code-client-runtime";
 import { create } from "zustand";
 
 export function taskWorkspaceKey(environmentId: EnvironmentId, taskId: TaskWorkspaceId): string {
@@ -118,6 +119,39 @@ export const selectTaskRefsById = (
       taskId: task.id,
     }))
     .filter((ref) => ref.environmentId !== null);
+
+const ownedThreadKeysByTasks = new WeakMap<Record<string, TaskWorkspace>, ReadonlySet<string>>();
+
+/**
+ * Every thread a Task owns, keyed the same way Chat surfaces key threads.
+ *
+ * Task-owned conversations are internal to the Task route: they are stage
+ * sessions, not peer chats. Chat subtracts this set so opening a Task never
+ * scatters its stages across the Chats list.
+ *
+ * Memoized on the task slice so the sidebar, which re-renders on clock ticks
+ * and every thread event, pays for this once per task change.
+ */
+export const selectTaskOwnedThreadKeys = (state: TaskWorkspaceState): ReadonlySet<string> => {
+  const cached = ownedThreadKeysByTasks.get(state.taskByRef);
+  if (cached) return cached;
+
+  const keys = new Set<string>();
+  for (const task of Object.values(state.taskByRef)) {
+    const environmentId = task.environmentId;
+    if (environmentId === null) continue;
+    for (const session of task.sessions) {
+      keys.add(scopedThreadKey(scopeThreadRef(environmentId, session.threadId)));
+    }
+    for (const occurrence of task.occurrences) {
+      if (occurrence.threadId !== null) {
+        keys.add(scopedThreadKey(scopeThreadRef(environmentId, occurrence.threadId)));
+      }
+    }
+  }
+  ownedThreadKeysByTasks.set(state.taskByRef, keys);
+  return keys;
+};
 
 export function currentTaskStage(
   task: TaskWorkspace,

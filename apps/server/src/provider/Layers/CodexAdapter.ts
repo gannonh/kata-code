@@ -144,6 +144,7 @@ function codexTaskPermissionProfileArgs(
   configuredHomePath?: string,
   gitReadablePaths: ReadonlyArray<string> = [],
   gitWritablePaths: ReadonlyArray<string> = [],
+  agentHomePath?: string,
 ): ReadonlyArray<string> {
   const entries = new Map<string, string>([
     [":root", "deny"],
@@ -160,6 +161,11 @@ function codexTaskPermissionProfileArgs(
     for (const metadataPath of [".agents", ".codex"]) {
       appendDeniedFilesystemPath(entries, `${worktreePath}/${metadataPath}`);
     }
+  }
+  if (agentHomePath) {
+    // More specific than the state-dir deny below, so the agent's own HOME
+    // stays writable while the rest of the state dir remains off-limits.
+    appendFilesystemPath(entries, agentHomePath, "write");
   }
   for (const path of CODEX_TASK_DENIED_HOME_PATHS) {
     appendDeniedFilesystemPath(entries, expandHomePath(path));
@@ -1525,22 +1531,44 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const taskCwd = input.cwd ?? process.cwd();
+        const canonicalTaskCwd =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? yield* fileSystem.realPath(taskCwd).pipe(Effect.orElseSucceed(() => taskCwd))
+            : taskCwd;
+        // The agent's HOME is a sibling scratch directory, never the worktree:
+        // tool caches (nvm, python bytecode, npm, …) would otherwise land in
+        // the worktree and block the clean-worktree completion check. It lives
+        // next to the worktree so it is outside the repo, and it is granted
+        // explicitly below because the state dir as a whole is denied.
+        const taskAgentHomePath =
+          input.taskExecutionProfile === "task-worktree-write"
+            ? `${canonicalTaskCwd}.agent-home`
+            : undefined;
+        if (taskAgentHomePath) {
+          yield* fileSystem.makeDirectory(taskAgentHomePath, { recursive: true }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterValidationError({
+                  provider: PROVIDER,
+                  operation: "startSession",
+                  issue: `Cannot create the task agent home '${taskAgentHomePath}'.`,
+                  cause,
+                }),
+            ),
+          );
+        }
         const taskEnvironment =
-          input.taskExecutionProfile === "task-worktree-write" && input.cwd
+          input.taskExecutionProfile === "task-worktree-write" && taskAgentHomePath
             ? {
                 ...(options?.environment ?? process.env),
-                HOME: input.cwd,
+                HOME: taskAgentHomePath,
               }
             : undefined;
         const taskCodexHomePath =
           input.taskExecutionProfile === "task-worktree-write"
             ? resolveTaskCodexHomePath(codexConfig.homePath, options?.environment)
             : undefined;
-        const taskCwd = input.cwd ?? process.cwd();
-        const canonicalTaskCwd =
-          input.taskExecutionProfile === "task-worktree-write"
-            ? yield* fileSystem.realPath(taskCwd).pipe(Effect.orElseSucceed(() => taskCwd))
-            : taskCwd;
         let taskGitReadablePaths: string[] = [];
         let taskGitWritablePaths: string[] = [];
         if (input.taskExecutionProfile === "task-worktree-write") {
@@ -1616,6 +1644,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                 taskCodexHomePath,
                 taskGitReadablePaths,
                 taskGitWritablePaths,
+                taskAgentHomePath,
               )
             : [];
         const taskShellEnvironmentPolicyArgs =
@@ -1654,6 +1683,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(input.taskStage === true ? { taskStage: true } : {}),
           ...(input.taskExecutionProfile
             ? { taskExecutionProfile: input.taskExecutionProfile }
+            : {}),
+          ...(taskAgentHomePath
+            ? {
+                taskSandboxWritableRoots: [...taskGitWritablePaths, taskAgentHomePath],
+              }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
           ...(!mcpSession && taskExecutionAppServerArgs.length > 0

@@ -297,6 +297,14 @@ validationLayer("CodexAdapterLive validation", (it) => {
       validationRuntimeFactory.factory.mockClear();
       const adapter = yield* CodexAdapter;
       const threadId = asThreadId("thread-mcp-isolation");
+      // The no-cwd worktree session in this test derives its agent home next
+      // to the server cwd; verify the path is absent so the finalizer only
+      // ever removes a directory this test created.
+      const defaultAgentHome = `${fs.realpathSync(process.cwd())}.agent-home`;
+      assert.equal(fs.existsSync(defaultAgentHome), false);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => fs.rmSync(defaultAgentHome, { recursive: true, force: true })),
+      );
       McpProviderSession.setMcpProviderSession({
         environmentId: EnvironmentId.make("environment-local"),
         threadId,
@@ -344,7 +352,14 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
       const taskRuntimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
       assert.ok(taskRuntimeOptions);
-      assert.equal(taskRuntimeOptions.environment?.HOME, "/tmp/task-worktree");
+      // The agent's HOME is a sibling scratch directory, never the worktree:
+      // tool caches (nvm, python bytecode, npm) would otherwise pollute the
+      // worktree and block the clean-worktree completion check.
+      assert.equal(taskRuntimeOptions.environment?.HOME, "/tmp/task-worktree.agent-home");
+      assert.ok(fs.existsSync("/tmp/task-worktree.agent-home"));
+      assert.deepStrictEqual(taskRuntimeOptions.taskSandboxWritableRoots, [
+        "/tmp/task-worktree.agent-home",
+      ]);
       assert.ok(taskRuntimeOptions.appServerArgs?.includes("--strict-config"));
       const permissionArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
         argument.startsWith("permissions.katacode_task_workspace.filesystem="),
@@ -353,6 +368,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.match(permissionArg, /":root"="deny"/u);
       assert.match(permissionArg, /":minimal"="read"/u);
       assert.match(permissionArg, /"\/tmp\/task-worktree\/\*\*"="write"/u);
+      assert.match(permissionArg, /"\/tmp\/task-worktree\.agent-home\/\*\*"="write"/u);
       assert.match(permissionArg, /\.git\/\*\*.*="write"/u);
       assert.doesNotMatch(permissionArg, /\/tmp\/task-worktree\/\.git\/\*\*"="deny"/u);
       assert.doesNotMatch(permissionArg, /":root"="read"/u);
@@ -373,6 +389,40 @@ validationLayer("CodexAdapterLive validation", (it) => {
       );
       assert.ok(taskExcludeArg);
       assert.match(taskExcludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
+    }),
+  );
+
+  it.effect("creates a task agent home for a worktree-write session without input.cwd", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+      // The session derives its agent home next to the server cwd. Verify the
+      // path is absent before startup so the finalizer only ever removes a
+      // directory this test created.
+      const expectedAgentHome = `${fs.realpathSync(process.cwd())}.agent-home`;
+      assert.equal(fs.existsSync(expectedAgentHome), false);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => fs.rmSync(expectedAgentHome, { recursive: true, force: true })),
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-worktree-write-without-cwd"),
+        runtimeMode: "auto-accept-edits",
+        taskExecutionProfile: "task-worktree-write",
+      });
+      const taskRuntimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      assert.ok(taskRuntimeOptions);
+      // No input.cwd falls back to the server's own cwd; the agent home is
+      // still derived from the canonical task cwd so the session never
+      // inherits the parent HOME without a matching writable sandbox root.
+      assert.equal(taskRuntimeOptions.environment?.HOME, expectedAgentHome);
+      assert.ok(fs.statSync(expectedAgentHome).isDirectory());
+      assert.deepStrictEqual(taskRuntimeOptions.taskSandboxWritableRoots, [expectedAgentHome]);
+      const permissionArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("permissions.katacode_task_workspace.filesystem="),
+      );
+      assert.ok(permissionArg);
+      assert.ok(permissionArg.includes(`"${expectedAgentHome}/**"="write"`));
     }),
   );
 
