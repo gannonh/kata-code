@@ -245,6 +245,11 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
       "true",
     );
     await expect(appWindow.getByTestId("task-permissions-checkout-warning")).toBeVisible();
+    // A non-default permission can be selected before the task is created.
+    await appWindow.getByTestId("task-permissions-option-approval-required").click();
+    await expect(
+      appWindow.getByTestId("task-permissions-option-approval-required"),
+    ).toHaveAttribute("data-active", "true");
 
     const taskId = "task-e2e-guided-approved-plan";
     await appWindow.getByTestId("task-title-input").fill("Guided approved Plan E2E");
@@ -264,7 +269,14 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     // The panel exposes the current permission and lets it be changed.
     await expect(appWindow.getByTestId("guided-task-permissions")).toBeVisible();
     await expect(
-      appWindow.getByTestId("task-panel-permissions-option-full-access"),
+      appWindow.getByTestId("task-panel-permissions-option-approval-required"),
+    ).toHaveAttribute("data-active", "true");
+    // Permission changes apply to the open conversation without creating a
+    // new stage occurrence. Rejection recovery is covered by the browser
+    // component test because a real E2E run must not mock a transport failure.
+    await appWindow.getByTestId("task-panel-permissions-option-auto-accept-edits").click();
+    await expect(
+      appWindow.getByTestId("task-panel-permissions-option-auto-accept-edits"),
     ).toHaveAttribute("data-active", "true");
     await expect(appWindow.getByTestId("guided-stage-questions")).toBeVisible();
     await expect(appWindow.getByTestId("composer-editor")).toBeVisible({

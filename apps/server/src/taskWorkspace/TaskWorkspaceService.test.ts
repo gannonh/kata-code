@@ -3655,6 +3655,54 @@ describe("TaskWorkspaceService bootstrap saga", () => {
     }),
   );
 
+  it.effect("updates a pending bootstrap when permissions change before processing", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-permissions-pending-bootstrap-",
+      );
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("perm-pending-create"),
+            operationKey: "op-perm-pending-create",
+          }),
+        ),
+      );
+      // Keep the worker's original argument so the test covers a stale
+      // in-memory outbox row as well as the durable payload update.
+      const staleEntry = bootstrapEntry(created.task, baseDir, repoRoot);
+      const changed = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.permissions.set",
+            commandId: CommandId.make("perm-pending-set"),
+            taskId: created.task.id,
+            createdAt: now(3),
+            expectedTaskRevision: created.task.taskRevision,
+            operationKey: "op-perm-pending-set",
+            runtimeMode: "approval-required",
+          }),
+        ),
+      );
+      expect(changed.task.preferences.runtimeMode).toBe("approval-required");
+
+      const dispatchBaseline = dispatchedOrchestration.length;
+      yield* runtime.runPromise(service.processBootstrap(staleEntry));
+      const staged = dispatchedOrchestration
+        .slice(dispatchBaseline)
+        .filter(
+          (candidate) =>
+            (candidate as { type?: string }).type === "thread.create" ||
+            (candidate as { type?: string }).type === "thread.turn.start",
+        );
+      expect(staged).toHaveLength(2);
+      for (const candidate of staged) {
+        expect((candidate as { runtimeMode?: string }).runtimeMode).toBe("approval-required");
+      }
+    }),
+  );
+
   it.effect("rejects task.permissions.set with a stale expected revision", () =>
     Effect.gen(function* () {
       const { runtime } = yield* setupRuntime("kata-task-permissions-stale-");

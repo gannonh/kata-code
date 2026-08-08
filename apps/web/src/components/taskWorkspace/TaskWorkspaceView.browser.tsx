@@ -2176,4 +2176,45 @@ describe("Task conversation-plus-panel shell", () => {
     // thread command for a change the task did not accept.
     expect(mocks.orchestrationDispatchCommand).not.toHaveBeenCalled();
   });
+
+  it("keeps the live mode selected and retries after a thread update fails", async () => {
+    const initialTask = guidedTask();
+    mocks.orchestrationDispatchCommand.mockRejectedValueOnce(
+      new Error("The provider session could not restart."),
+    );
+    await renderTask(initialTask);
+
+    await page.getByTestId("task-panel-permissions-option-approval-required").click();
+
+    await expect
+      .element(page.getByTestId("task-panel-permissions-error"))
+      .toHaveTextContent("The provider session could not restart.");
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-full-access"))
+      .toHaveAttribute("data-active", "true");
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-approval-required"))
+      .not.toHaveAttribute("data-active", "true");
+
+    // The task preference was persisted before the live-thread failure. A
+    // retry reuses that persisted choice and only needs to finish the thread
+    // synchronization.
+    useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
+      kind: "task-upserted",
+      sequence: 2,
+      task: {
+        ...initialTask,
+        taskRevision: initialTask.taskRevision + 1,
+        preferences: { ...initialTask.preferences, runtimeMode: "approval-required" },
+      },
+    });
+    mocks.orchestrationDispatchCommand.mockResolvedValueOnce(undefined);
+    await page.getByTestId("task-panel-permissions-option-approval-required").click();
+
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-approval-required"))
+      .toHaveAttribute("data-active", "true");
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.orchestrationDispatchCommand).toHaveBeenCalledTimes(2);
+  });
 });

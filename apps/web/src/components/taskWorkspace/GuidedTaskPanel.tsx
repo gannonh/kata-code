@@ -291,7 +291,13 @@ export function GuidedTaskPanel(props: {
   const [manualNotes, setManualNotes] = useState<Record<string, string>>({});
   const [amendmentFeedback, setAmendmentFeedback] = useState<Record<string, string>>({});
   const [permissionsError, setPermissionsError] = useState<string | null>(null);
+  const [pendingRuntimeMode, setPendingRuntimeMode] = useState<RuntimeMode | null>(null);
+  const [runtimeModeRetry, setRuntimeModeRetry] = useState<{
+    readonly requested: RuntimeMode;
+    readonly previous: RuntimeMode;
+  } | null>(null);
   const permissionsAttemptRef = useRef(false);
+  const runtimeModeChangeInFlightRef = useRef(false);
   const stage = currentTaskStage(task);
   const artifact = latestArtifact(
     task,
@@ -314,6 +320,7 @@ export function GuidedTaskPanel(props: {
   const hasBuildProjection = task.build.phases.length > 0;
   const implementationComplete = task.build.resultingCommitSha !== null;
   const completeReason = completionDisabledReason(task, commands.isBusy);
+  const activeRuntimeMode = runtimeModeRetry?.previous ?? task.preferences.runtimeMode;
 
   const approvePlan = () => {
     const base = commands.commandBase("task.plan.approve");
@@ -347,48 +354,86 @@ export function GuidedTaskPanel(props: {
    * starting a new occurrence or moving workflow state.
    */
   const changeRuntimeMode = async (mode: RuntimeMode) => {
-    if (mode === task.preferences.runtimeMode) return;
-    setPermissionsError(null);
-    permissionsAttemptRef.current = true;
-    const base = commands.commandBase("task.permissions.set");
-    const accepted = await commands.dispatch(
-      {
-        ...base,
-        expectedTaskRevision: task.taskRevision,
-        operationKey: operationKey(base.commandId, "permissions-set"),
-        runtimeMode: mode,
-      },
-      "permissions-set",
-    );
-    if (!accepted) {
-      // The rejection reason lands in `commands.error` after the re-render;
-      // the effect below captures it beside the control. The control stays on
-      // the previously persisted value because no task event was written.
+    if (runtimeModeChangeInFlightRef.current || pendingRuntimeMode !== null || commands.isBusy) {
       return;
     }
-    permissionsAttemptRef.current = false;
-    if (liveThreadId === null || task.environmentId === null) return;
-    const api = readEnvironmentApi(task.environmentId);
-    if (!api) return;
+    const previousMode =
+      runtimeModeRetry?.requested === mode
+        ? runtimeModeRetry.previous
+        : (runtimeModeRetry?.previous ?? task.preferences.runtimeMode);
+    if (mode === activeRuntimeMode) return;
+
+    runtimeModeChangeInFlightRef.current = true;
+    setPendingRuntimeMode(mode);
+    if (runtimeModeRetry !== null) {
+      // Keep the last known live-thread mode displayed while a retry is in flight.
+      setRuntimeModeRetry({ requested: mode, previous: previousMode });
+    }
+    setPermissionsError(null);
+
     try {
-      await api.orchestration.dispatchCommand({
-        type: "thread.runtime-mode.set",
-        commandId: newCommandId(),
-        threadId: liveThreadId,
-        runtimeMode: mode,
-        createdAt: new Date().toISOString(),
-      });
-      // Align the composer draft so the next turn in the open conversation
-      // keeps the new permission instead of reverting to a stale draft value.
-      useComposerDraftStore
-        .getState()
-        .setRuntimeMode({ environmentId: task.environmentId, threadId: liveThreadId }, mode);
-    } catch (cause) {
-      setPermissionsError(
-        cause instanceof Error
-          ? cause.message
-          : "Failed to apply the permission to this conversation.",
-      );
+      if (task.preferences.runtimeMode !== mode) {
+        permissionsAttemptRef.current = true;
+        const base = commands.commandBase("task.permissions.set");
+        const accepted = await commands.dispatch(
+          {
+            ...base,
+            expectedTaskRevision: task.taskRevision,
+            operationKey: operationKey(base.commandId, "permissions-set"),
+            runtimeMode: mode,
+          },
+          "permissions-set",
+        );
+        if (!accepted) {
+          // The rejection reason lands in `commands.error` after the re-render;
+          // the effect below captures it beside the control. No task event was
+          // written, so the persisted mode remains selected.
+          setPendingRuntimeMode(null);
+          setRuntimeModeRetry(null);
+          return;
+        }
+        permissionsAttemptRef.current = false;
+      }
+
+      if (liveThreadId === null || task.environmentId === null) {
+        setPendingRuntimeMode(null);
+        setRuntimeModeRetry(null);
+        return;
+      }
+      const api = readEnvironmentApi(task.environmentId);
+      if (!api) {
+        setPendingRuntimeMode(null);
+        setRuntimeModeRetry({ requested: mode, previous: previousMode });
+        setPermissionsError("The task conversation is unavailable. Try again.");
+        return;
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.runtime-mode.set",
+          commandId: newCommandId(),
+          threadId: liveThreadId,
+          runtimeMode: mode,
+          createdAt: new Date().toISOString(),
+        });
+        // Align the composer draft so the next turn in the open conversation
+        // keeps the new permission instead of reverting to a stale draft value.
+        useComposerDraftStore
+          .getState()
+          .setRuntimeMode({ environmentId: task.environmentId, threadId: liveThreadId }, mode);
+      } catch (cause) {
+        setPendingRuntimeMode(null);
+        setRuntimeModeRetry({ requested: mode, previous: previousMode });
+        setPermissionsError(
+          cause instanceof Error
+            ? cause.message
+            : "Failed to apply the permission to this conversation.",
+        );
+        return;
+      }
+      setPendingRuntimeMode(null);
+      setRuntimeModeRetry(null);
+    } finally {
+      runtimeModeChangeInFlightRef.current = false;
     }
   };
 
@@ -543,7 +588,7 @@ export function GuidedTaskPanel(props: {
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">Permissions</h3>
           <Badge size="sm" variant="outline">
-            {runtimeModeConfig[task.preferences.runtimeMode].label}
+            {runtimeModeConfig[activeRuntimeMode].label}
           </Badge>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -553,7 +598,7 @@ export function GuidedTaskPanel(props: {
         <div className="mt-3 grid gap-2" data-testid="task-panel-permissions-picker">
           {runtimeModeOptions.map((mode) => {
             const option = runtimeModeConfig[mode];
-            const active = mode === task.preferences.runtimeMode;
+            const active = mode === activeRuntimeMode;
             return (
               <label
                 key={mode}
@@ -569,7 +614,7 @@ export function GuidedTaskPanel(props: {
                   className="mt-0.5 size-4 shrink-0"
                   value={mode}
                   checked={active}
-                  disabled={commands.isBusy}
+                  disabled={commands.isBusy || pendingRuntimeMode !== null}
                   onChange={() => void changeRuntimeMode(mode)}
                 />
                 <span className="min-w-0 space-y-1">

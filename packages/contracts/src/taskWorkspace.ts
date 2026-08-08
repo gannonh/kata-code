@@ -668,6 +668,7 @@ export const TaskWorkspace = Schema.Struct({
         worktreePolicy: "later",
         modelSelection: null,
         executionProfile: "planning",
+        runtimeMode: DEFAULT_RUNTIME_MODE,
       }),
     ),
   ),
