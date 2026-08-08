@@ -30,7 +30,12 @@ export function makeTaskWorkspace(overrides: Partial<TaskWorkspace> = {}): TaskW
       prompt: "task-workspace-guided@0.3.0",
     },
     intake: { brief: "Refine the Task shell.", source: { kind: "inline", body: "" } },
-    preferences: { worktreePolicy: "later", modelSelection: null, executionProfile: "planning" },
+    preferences: {
+      worktreePolicy: "later",
+      modelSelection: null,
+      executionProfile: "planning",
+      runtimeMode: "full-access",
+    },
     bootstrap: null,
     occurrences: [],
     planGate: null,

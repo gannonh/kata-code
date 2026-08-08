@@ -1,5 +1,6 @@
 import {
   type ProviderOptionSelection,
+  type RuntimeMode,
   type TaskWorkspaceCommand,
   type TaskWorkspacePreset,
   type TaskWorkspaceWorktreePolicy,
@@ -23,6 +24,7 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { useServerProviders } from "../../rpc/serverState";
+import { runtimeModeConfig, runtimeModeOptions } from "../../runtimeModePresentation";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
@@ -97,6 +99,7 @@ export function TaskWorkspaceNewView() {
   const [baseRef, setBaseRef] = useState("main");
   const [preset, setPreset] = useState<TaskWorkspacePreset>("guided");
   const [worktreePolicy, setWorktreePolicy] = useState<TaskWorkspaceWorktreePolicy>("later");
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>("full-access");
   const [instanceId, setInstanceId] = useState(instanceEntries[0]?.instanceId ?? "");
   const [modelSlug, setModelSlug] = useState("");
   const [optionValues, setOptionValues] = useState<Record<string, string>>({});
@@ -199,6 +202,7 @@ export function TaskWorkspaceNewView() {
       approvalPolicy: "before-build",
       operationKey: `task-create-${newCommandId()}`,
       worktreePolicy,
+      runtimeMode,
       modelSelection: {
         instanceId: instanceId as Parameters<typeof getProviderInstanceModels>[1],
         model: modelSlug,
@@ -484,6 +488,57 @@ export function TaskWorkspaceNewView() {
                   })}
                 </div>
               ) : null}
+
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">Permissions</legend>
+                <div className="grid gap-2" data-testid="task-permissions-picker">
+                  {runtimeModeOptions.map((mode) => {
+                    const option = runtimeModeConfig[mode];
+                    const active = mode === runtimeMode;
+                    return (
+                      <label
+                        key={mode}
+                        data-testid={`task-permissions-option-${mode}`}
+                        data-active={active || undefined}
+                        className={`flex cursor-pointer gap-3 rounded-xl border p-3 text-sm transition-colors ${
+                          active
+                            ? "border-primary bg-primary/5"
+                            : "border-border/70 hover:border-border"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="task-permissions"
+                          className="mt-1 size-4 shrink-0"
+                          value={mode}
+                          checked={active}
+                          onChange={() => setRuntimeMode(mode)}
+                        />
+                        <span className="min-w-0 space-y-1">
+                          <span className="flex flex-wrap items-center gap-1.5 font-medium">
+                            <option.icon className="size-3.5 shrink-0 text-muted-foreground" />
+                            {option.label}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {option.description}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {worktreePolicy !== "now" ? (
+                  <p
+                    data-testid="task-permissions-checkout-warning"
+                    className="text-xs text-warning-foreground"
+                  >
+                    With worktree timing {worktreePolicy === "never" ? "Never" : "Later"}, planning
+                    stages run in your working checkout
+                    {selectedProject ? ` (${selectedProject.cwd})` : ""}. Choose Now to plan in an
+                    isolated task worktree.
+                  </p>
+                ) : null}
+              </fieldset>
             </fieldset>
 
             <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/20 p-4 text-sm sm:grid-cols-2">

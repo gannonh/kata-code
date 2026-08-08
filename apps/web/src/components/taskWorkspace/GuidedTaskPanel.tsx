@@ -1,14 +1,23 @@
-import { type TaskWorkspace, type TaskWorkspaceCommentAuthor } from "@kata-sh/code-contracts";
+import {
+  type RuntimeMode,
+  type TaskWorkspace,
+  type TaskWorkspaceCommentAuthor,
+  type ThreadId,
+} from "@kata-sh/code-contracts";
 import { dependenciesPass } from "@kata-sh/code-shared/taskWorkspaceBuild";
 import { TASK_WORKSPACE_STAGE_PRESENTATION } from "@kata-sh/code-shared/taskWorkspaceCatalog";
 import { ArrowLeftIcon, GitBranchIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { TaskShellOccurrence } from "../../taskWorkspace/taskShellModel";
 import { operationKey } from "../../taskWorkspace/operationKey";
 import { latestArtifact } from "../../taskWorkspace/taskWorkspaceArtifacts";
 import { currentTaskStage } from "../../taskWorkspace/taskWorkspaceStore";
 import type { TaskWorkspaceCommands } from "../../taskWorkspace/useTaskWorkspaceCommands";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { readEnvironmentApi } from "../../environmentApi";
+import { newCommandId } from "../../lib/utils";
+import { runtimeModeConfig, runtimeModeOptions } from "../../runtimeModePresentation";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
@@ -263,6 +272,8 @@ export function GuidedTaskPanel(props: {
   readonly onReturnToCurrent: () => void;
   /** True when the shell renders the revision control for this view. */
   readonly canRevise: boolean;
+  /** The live stage conversation, when one is open; null while preparing or in history. */
+  readonly liveThreadId: ThreadId | null;
 }) {
   const {
     task,
@@ -275,9 +286,12 @@ export function GuidedTaskPanel(props: {
     isViewingCurrent,
     onReturnToCurrent,
     canRevise,
+    liveThreadId,
   } = props;
   const [manualNotes, setManualNotes] = useState<Record<string, string>>({});
   const [amendmentFeedback, setAmendmentFeedback] = useState<Record<string, string>>({});
+  const [permissionsError, setPermissionsError] = useState<string | null>(null);
+  const permissionsAttemptRef = useRef(false);
   const stage = currentTaskStage(task);
   const artifact = latestArtifact(
     task,
@@ -325,6 +339,69 @@ export function GuidedTaskPanel(props: {
       `worktree-${policy}`,
     );
   };
+
+  /**
+   * Change the task-wide permission. The server preference governs the next
+   * stage session; the open stage conversation adopts it immediately through
+   * `thread.runtime-mode.set` plus a composer-draft alignment, without
+   * starting a new occurrence or moving workflow state.
+   */
+  const changeRuntimeMode = async (mode: RuntimeMode) => {
+    if (mode === task.preferences.runtimeMode) return;
+    setPermissionsError(null);
+    permissionsAttemptRef.current = true;
+    const base = commands.commandBase("task.permissions.set");
+    const accepted = await commands.dispatch(
+      {
+        ...base,
+        expectedTaskRevision: task.taskRevision,
+        operationKey: operationKey(base.commandId, "permissions-set"),
+        runtimeMode: mode,
+      },
+      "permissions-set",
+    );
+    if (!accepted) {
+      // The rejection reason lands in `commands.error` after the re-render;
+      // the effect below captures it beside the control. The control stays on
+      // the previously persisted value because no task event was written.
+      return;
+    }
+    permissionsAttemptRef.current = false;
+    if (liveThreadId === null || task.environmentId === null) return;
+    const api = readEnvironmentApi(task.environmentId);
+    if (!api) return;
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.runtime-mode.set",
+        commandId: newCommandId(),
+        threadId: liveThreadId,
+        runtimeMode: mode,
+        createdAt: new Date().toISOString(),
+      });
+      // Align the composer draft so the next turn in the open conversation
+      // keeps the new permission instead of reverting to a stale draft value.
+      useComposerDraftStore
+        .getState()
+        .setRuntimeMode({ environmentId: task.environmentId, threadId: liveThreadId }, mode);
+    } catch (cause) {
+      setPermissionsError(
+        cause instanceof Error
+          ? cause.message
+          : "Failed to apply the permission to this conversation.",
+      );
+    }
+  };
+
+  // Captures the fresh rejection reason from `commands.error` on the render
+  // that follows a failed `task.permissions.set`, so the failure is reported
+  // beside the control rather than only in the shared banner.
+  useEffect(() => {
+    if (!permissionsAttemptRef.current) return;
+    permissionsAttemptRef.current = false;
+    if (commands.error !== null) {
+      setPermissionsError(commands.error);
+    }
+  }, [commands.error]);
 
   const startImplement = async () => {
     if (task.versions.workflowDefinition === "guided@0.2.0") {
@@ -457,6 +534,64 @@ export function GuidedTaskPanel(props: {
         <p className="mt-2 text-muted-foreground">
           Worktree: {repository?.worktreePath ?? repository?.provisioningStatus}
         </p>
+      </section>
+
+      <section
+        className="rounded-lg border border-border/70 p-3"
+        data-testid="guided-task-permissions"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">Permissions</h3>
+          <Badge size="sm" variant="outline">
+            {runtimeModeConfig[task.preferences.runtimeMode].label}
+          </Badge>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Applies to every stage session, including Implement. The next stage starts in the new
+          mode; the open conversation adopts it immediately.
+        </p>
+        <div className="mt-3 grid gap-2" data-testid="task-panel-permissions-picker">
+          {runtimeModeOptions.map((mode) => {
+            const option = runtimeModeConfig[mode];
+            const active = mode === task.preferences.runtimeMode;
+            return (
+              <label
+                key={mode}
+                data-testid={`task-panel-permissions-option-${mode}`}
+                data-active={active || undefined}
+                className={`flex cursor-pointer gap-3 rounded-xl border p-3 text-sm transition-colors ${
+                  active ? "border-primary bg-primary/5" : "border-border/70 hover:border-border"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="task-panel-permissions"
+                  className="mt-0.5 size-4 shrink-0"
+                  value={mode}
+                  checked={active}
+                  disabled={commands.isBusy}
+                  onChange={() => void changeRuntimeMode(mode)}
+                />
+                <span className="min-w-0 space-y-1">
+                  <span className="flex flex-wrap items-center gap-1.5 font-medium">
+                    <option.icon className="size-3.5 shrink-0 text-muted-foreground" />
+                    {option.label}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">{option.description}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {permissionsError !== null ? (
+          <p
+            role="alert"
+            data-testid="task-panel-permissions-error"
+            className="mt-2 rounded-md border border-destructive/35 bg-destructive/8 p-2 text-xs text-destructive"
+          >
+            {permissionsError}
+          </p>
+        ) : null}
       </section>
 
       {gateOpen ? (
