@@ -16,6 +16,7 @@ import {
   TaskWorkspaceError,
   TaskWorkspaceWorktreeOutboxPayload,
   CommandId,
+  DEFAULT_RUNTIME_MODE,
   type TaskWorkspace,
   type TaskWorkspaceArtifact,
   type TaskWorkspaceArtifactKind,
@@ -149,6 +150,7 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
     case "task.create":
     case "task.stage.request-changes":
     case "task.worktree.policy.set":
+    case "task.permissions.set":
     case "task.session.recover-primary":
     case "task.environment.repair":
     case "task.plan.approve":
@@ -800,6 +802,7 @@ function initialTask(
       worktreePolicy,
       modelSelection: command.modelSelection ?? null,
       executionProfile: "planning",
+      runtimeMode: command.runtimeMode ?? DEFAULT_RUNTIME_MODE,
     },
     bootstrap: bootstrap ?? null,
     occurrences: isFirstSliceCreate
@@ -2020,7 +2023,7 @@ export const make = Effect.gen(function* () {
           branch: expectedBranch,
           baseCommitSha: repository.baseCommitSha,
           executionProfile: "task-worktree-write" as const,
-          runtimeMode: "auto-accept-edits" as const,
+          runtimeMode: task.preferences.runtimeMode,
           modelSelection,
         } satisfies ActiveTaskProviderContext;
       }
@@ -2238,6 +2241,7 @@ export const make = Effect.gen(function* () {
         stage,
         occurrence,
         executionProfile: "planning",
+        runtimeMode: command.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         presentation: "stage",
         sessionId,
         threadId,
@@ -5769,6 +5773,36 @@ export const make = Effect.gen(function* () {
             ],
           });
         }
+        case "task.permissions.set": {
+          if (command.expectedTaskRevision !== task.taskRevision) {
+            return yield* taskError(
+              command,
+              `Task revision ${task.taskRevision} does not match the expected revision ${command.expectedTaskRevision}.`,
+            );
+          }
+          const now = yield* serverNow;
+          const nextTask: TaskWorkspace = {
+            ...task,
+            preferences: { ...task.preferences, runtimeMode: command.runtimeMode },
+          };
+          return yield* append(command, nextTask, {
+            operationReceipt: {
+              environmentId,
+              taskId: task.id,
+              operationType: "task.permissions.set",
+              operationKey: command.operationKey,
+              payloadDigest: canonicalTaskCommandDigest(command),
+              status: "completed",
+              attemptCount: 1,
+              sourceCommandIds: [command.commandId],
+              resultEventId: null,
+              resultTaskRevision: null,
+              error: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+        }
         default: {
           return yield* taskError(
             command,
@@ -6239,6 +6273,7 @@ export const make = Effect.gen(function* () {
         stage,
         occurrence,
         executionProfile,
+        runtimeMode: task.preferences.runtimeMode,
         presentation,
         sessionId,
         threadId,
@@ -7767,10 +7802,7 @@ export const make = Effect.gen(function* () {
               projectId,
               title: `Task: ${working.title}`,
               modelSelection,
-              runtimeMode:
-                payload.executionProfile === "task-worktree-write"
-                  ? "auto-accept-edits"
-                  : "approval-required",
+              runtimeMode: payload.runtimeMode,
               interactionMode: "default",
               branch: working.workspace.repositories[0]!.branch,
               worktreePath: working.workspace.repositories[0]!.worktreePath,
@@ -7820,10 +7852,7 @@ export const make = Effect.gen(function* () {
                   ? trustedImplementationInstructions()
                   : trustedStageInstructions(payload.stage)),
               modelSelection,
-              runtimeMode:
-                payload.executionProfile === "task-worktree-write"
-                  ? "auto-accept-edits"
-                  : "approval-required",
+              runtimeMode: payload.runtimeMode,
               interactionMode: "default",
               createdAt: now,
             })

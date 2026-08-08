@@ -1,8 +1,9 @@
-import type {
-  EnvironmentId,
-  TaskWorkspace,
-  TaskWorkspaceEvent,
-  TaskWorkspaceId,
+import {
+  DEFAULT_RUNTIME_MODE,
+  type EnvironmentId,
+  type TaskWorkspace,
+  type TaskWorkspaceEvent,
+  type TaskWorkspaceId,
 } from "@kata-sh/code-contracts";
 
 export const TASK_WORKSPACE_CONTRACT_VERSION_0_3_0 = "task-workspace@0.3.0";
@@ -49,6 +50,9 @@ export function normalizeImportedTask(
       worktreePolicy: task.preferences.worktreePolicy,
       modelSelection: task.preferences.modelSelection,
       executionProfile: "planning",
+      // Legacy tasks adopt the same default as new tasks; the preference did
+      // not exist when they were created.
+      runtimeMode: DEFAULT_RUNTIME_MODE,
     },
     bootstrap: task.bootstrap,
     occurrences: task.occurrences.map((occurrence, index) => ({

@@ -36,7 +36,12 @@ function task(revision: number): TaskWorkspace {
       prompt: "task-workspace-guided@0.2.0",
     },
     intake: { brief: "Store test", source: { kind: "inline", body: "Store test" } },
-    preferences: { worktreePolicy: "later", modelSelection: null, executionProfile: "planning" },
+    preferences: {
+      worktreePolicy: "later",
+      modelSelection: null,
+      executionProfile: "planning",
+      runtimeMode: "full-access",
+    },
     bootstrap: null,
     occurrences: [],
     planGate: null,
