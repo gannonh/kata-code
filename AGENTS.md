@@ -86,19 +86,6 @@ maintainability is encouraged.
 - **Upstream sync:** episodic merges only — no parity with `upstream/main`. Read [FORK.md](./FORK.md) and [upstream sync guide](./docs/guides/upstream-sync.md) before merging `upstream`; log rejects in the divergence log. Keep fork-only code in extension modules ([FORK.md — Phase 4](./FORK.md#phase-4--divergence-boundaries)).
 - **Fork tests:** rename product surfaces (`katacode`, `KATACODE_*`, worktree prefix `katacode/`) but keep upstream-shaped repo names in fixtures (`octocat/t3code` → clone dir `t3code`). See [fork rebrand test fixtures](./docs/operations/ci.md#fork-rebrand-test-fixtures).
 
-## Open Knowledge Format docs
-
-This repository maintains an [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundle at `./docs`.
-
-- Use `/okf read` when available, or read [`./docs/index.md`](./docs/index.md) directly before substantial work, to understand the current documentation map.
-- Follow cross-links into relevant specs, ADRs, runbooks, guides, architecture notes, reference docs, and domain docs before changing related code.
-- Keep [`./docs/specs/index.md`](./docs/specs/index.md) as the pointer to the GitHub-backed roadmap.
-- Keep [`./docs/specs/deferred-work.md`](./docs/specs/deferred-work.md) current as the non-spec deferred-work registry until its entries are reconciled with GitHub issues.
-- Add or update ADRs in [`./docs/adrs`](./docs/adrs) for durable architecture decisions.
-- After substantial work, PRs, behavior changes, architecture decisions, migrations, or documentation moves, update the OKF bundle and add concise entries to the relevant `log.md` files; during `/okf update`, review deferred-work entries related to changed areas.
-- Maintain Markdown cross-links between related OKF concepts so future agents can traverse decisions, specs, architecture, runbooks, guides, and references.
-- Every non-reserved Markdown file under `./docs` should have OKF frontmatter with at least a non-empty `type` field. `index.md` and `log.md` are reserved navigation/history files.
-
 ## Specs live in GitHub Issues
 
 Specs for this repository are GitHub Issues, not files. `docs/specs/` holds the roadmap pointer, historical archive, and explicitly retained non-spec registries.
