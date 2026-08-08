@@ -42,6 +42,14 @@ function slice1Task(overrides: Record<string, unknown>) {
   };
 }
 
+it.effect("defaults runtime mode when a legacy task omits preferences", () =>
+  Effect.gen(function* () {
+    const task = yield* decodeTask(slice1Task({}));
+
+    assert.strictEqual(task.preferences.runtimeMode, "full-access");
+  }),
+);
+
 it.effect("decodes Slice 2 workflow and implementation contracts additively", () =>
   Effect.gen(function* () {
     const upgrade = yield* decodeCommand({

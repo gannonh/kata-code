@@ -25,13 +25,14 @@ gh sub-issue list <N>                                   # read an epic's phases
 
 ## Current Task roadmap
 
-| Issue                                                 | Status                  | Scope                                       |
-| ----------------------------------------------------- | ----------------------- | ------------------------------------------- |
-| [#72](https://github.com/gannonh/kata-code/issues/72) | `status:approved`, epic | Task mode and Agent Runtime product roadmap |
-| [#73](https://github.com/gannonh/kata-code/issues/73) | `status:implemented`    | Guided planning                             |
-| [#74](https://github.com/gannonh/kata-code/issues/74) | `status:implemented`    | Guided implementation                       |
-| [#76](https://github.com/gannonh/kata-code/issues/76) | `status:approved`       | Conversation-plus-panel production shell    |
-| [#75](https://github.com/gannonh/kata-code/issues/75) | `status:draft`          | Shared Agent Runtime and Guided delegation  |
+| Issue                                                 | Status                  | Scope                                         |
+| ----------------------------------------------------- | ----------------------- | --------------------------------------------- |
+| [#72](https://github.com/gannonh/kata-code/issues/72) | `status:approved`, epic | Task mode and Agent Runtime product roadmap   |
+| [#73](https://github.com/gannonh/kata-code/issues/73) | `status:implemented`    | Guided planning                               |
+| [#74](https://github.com/gannonh/kata-code/issues/74) | `status:implemented`    | Guided implementation                         |
+| [#76](https://github.com/gannonh/kata-code/issues/76) | `status:approved`       | Conversation-plus-panel production shell      |
+| [#80](https://github.com/gannonh/kata-code/issues/80) | `status:implemented`    | Task permissions choice for coding agent runs |
+| [#75](https://github.com/gannonh/kata-code/issues/75) | `status:draft`          | Shared Agent Runtime and Guided delegation    |
 
 The approved conversation-plus-panel shell (#76) precedes Agent Runtime convergence (#75).
 Cumulative provider-backed Task acceptance remains tracked in [#64](https://github.com/gannonh/kata-code/issues/64).

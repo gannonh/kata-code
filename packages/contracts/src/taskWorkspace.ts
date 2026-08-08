@@ -11,7 +11,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { ModelSelection } from "./orchestration.ts";
+import { DEFAULT_RUNTIME_MODE, ModelSelection, RuntimeMode } from "./orchestration.ts";
 
 /**
  * Hard ceiling for an inline task brief. The server enforces this below the
@@ -103,6 +103,12 @@ export const TaskWorkspacePreferences = Schema.Struct({
   executionProfile: TaskWorkspaceExecutionProfile.pipe(
     Schema.withDecodingDefault(Effect.succeed("planning")),
   ),
+  /**
+   * One task-wide agent permission governing every stage session, including
+   * Implement. Tasks created before this preference existed adopt the same
+   * default as new tasks.
+   */
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
 });
 export type TaskWorkspacePreferences = typeof TaskWorkspacePreferences.Type;
 
@@ -662,6 +668,7 @@ export const TaskWorkspace = Schema.Struct({
         worktreePolicy: "later",
         modelSelection: null,
         executionProfile: "planning",
+        runtimeMode: DEFAULT_RUNTIME_MODE,
       }),
     ),
   ),
@@ -757,12 +764,14 @@ const TaskCreateCommand = Schema.Struct({
   approvalPolicy: Schema.Literal("before-build"),
   // First-slice create fields. `operationKey` is a stable client-generated
   // semantic key; `brief`/`source`/`worktreePolicy`/`modelSelection` are
-  // required for new creates and absent on legacy commands.
+  // required for new creates and absent on legacy commands. `runtimeMode` is
+  // optional so legacy creates keep decoding; the preference default applies.
   operationKey: Schema.optional(TrimmedNonEmptyString),
   brief: Schema.optional(Schema.String),
   source: Schema.optional(TaskWorkspaceIntakeSource),
   worktreePolicy: Schema.optional(TaskWorkspaceWorktreePolicy),
   modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
 });
 
 const TaskSessionLinkCommand = Schema.Struct({
@@ -894,6 +903,19 @@ const TaskWorktreePolicySetCommand = Schema.Struct({
   expectedTaskRevision: NonNegativeInt,
   operationKey: TrimmedNonEmptyString,
   policy: TaskWorkspaceWorktreePolicy,
+});
+
+/**
+ * Change the task-wide agent permission. Applies to the next stage session;
+ * the panel also dispatches `thread.runtime-mode.set` so the open stage
+ * conversation adopts it without starting a new occurrence.
+ */
+const TaskPermissionsSetCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.permissions.set"),
+  expectedTaskRevision: NonNegativeInt,
+  operationKey: TrimmedNonEmptyString,
+  runtimeMode: RuntimeMode,
 });
 
 /**
@@ -1135,6 +1157,7 @@ export const TaskWorkspaceCommand = Schema.Union([
   TaskPlanApproveCommand,
   TaskStageRequestChangesCommand,
   TaskWorktreePolicySetCommand,
+  TaskPermissionsSetCommand,
   TaskSessionRecoverPrimaryCommand,
   TaskEnvironmentRepairCommand,
   TaskOperationRetryCommand,
@@ -1176,6 +1199,7 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.plan.approve",
   "task.stage.request-changes",
   "task.worktree.policy.set",
+  "task.permissions.set",
   "task.session.recover-primary",
   "task.environment.repair",
   "task.operation.retry",
@@ -1453,6 +1477,9 @@ export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   executionProfile: TaskWorkspaceExecutionProfile.pipe(
     Schema.withDecodingDefault(Effect.succeed("planning")),
   ),
+  // Captured from task preferences when the bootstrap is allocated so the
+  // worker starts every stage session in the task's current permission.
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   presentation: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(Effect.succeed("stage"))),
   sessionId: TrimmedNonEmptyString,
   threadId: ThreadId,

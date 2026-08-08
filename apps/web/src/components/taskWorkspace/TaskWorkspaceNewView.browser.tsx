@@ -271,4 +271,62 @@ describe("TaskWorkspaceNewView", () => {
       .element(page.getByTestId("task-worktree-option-never"))
       .toHaveTextContent(/planning-only/i);
   });
+
+  it("offers Permissions with the three modes and defaults to Full access", async () => {
+    await renderNewView();
+
+    await expect.element(page.getByTestId("task-permissions-picker")).toBeVisible();
+    for (const mode of ["approval-required", "auto-accept-edits", "full-access"] as const) {
+      const option = page.getByTestId(`task-permissions-option-${mode}`);
+      await expect.element(option).toBeVisible();
+    }
+    // Shared presentation vocabulary: same labels as the composer and panel.
+    await expect
+      .element(page.getByTestId("task-permissions-option-approval-required"))
+      .toHaveTextContent("Supervised");
+    await expect
+      .element(page.getByTestId("task-permissions-option-auto-accept-edits"))
+      .toHaveTextContent("Auto-accept edits");
+    await expect
+      .element(page.getByTestId("task-permissions-option-full-access"))
+      .toHaveTextContent("Full access");
+    await expect
+      .element(page.getByTestId("task-permissions-option-full-access"))
+      .toHaveAttribute("data-active", "true");
+  });
+
+  it("warns about the working checkout when planning is Later, and not when Now", async () => {
+    await renderNewView();
+
+    // Later (the default) names the working checkout.
+    const laterWarning = page.getByTestId("task-permissions-checkout-warning");
+    await expect.element(laterWarning).toBeVisible();
+    await expect.element(laterWarning).toHaveTextContent(/working checkout/i);
+    await expect.element(laterWarning).toHaveTextContent("/repo/kata-code");
+
+    // Now removes the warning entirely; no mode is disabled either way.
+    await page.getByTestId("task-worktree-option-now").click();
+    expect(page.getByTestId("task-permissions-checkout-warning").query()).toBeNull();
+    for (const mode of ["approval-required", "auto-accept-edits", "full-access"] as const) {
+      await expect.element(page.getByTestId(`task-permissions-option-${mode}`)).toBeEnabled();
+    }
+
+    // Never plans in the checkout too, so the warning returns.
+    await page.getByTestId("task-worktree-option-never").click();
+    await expect.element(page.getByTestId("task-permissions-checkout-warning")).toBeVisible();
+  });
+
+  it("sends the chosen permission on task.create", async () => {
+    await renderNewView();
+
+    await page.getByTestId("task-brief-input").fill("Add a guided onboarding flow.");
+    await page.getByTestId("task-permissions-option-approval-required").click();
+    await page.getByTestId("task-create-submit").click();
+
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.create",
+      runtimeMode: "approval-required",
+    });
+  });
 });

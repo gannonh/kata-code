@@ -19,6 +19,7 @@ import { TaskWorkspaceView } from "./TaskWorkspaceView";
 
 const mocks = vi.hoisted(() => ({
   dispatchCommand: vi.fn<(command: unknown) => Promise<void>>(async () => undefined),
+  orchestrationDispatchCommand: vi.fn<(command: unknown) => Promise<void>>(async () => undefined),
   primaryEnvironmentId: "environment-local" as string | null,
   threadShellById: {} as Record<string, unknown>,
   useClerk: vi.fn(() => ({ user: null })),
@@ -51,6 +52,12 @@ vi.mock("../../environments/runtime", () => ({
         dispatchCommand: mocks.dispatchCommand,
       },
     },
+  }),
+}));
+
+vi.mock("../../environmentApi", () => ({
+  readEnvironmentApi: () => ({
+    orchestration: { dispatchCommand: mocks.orchestrationDispatchCommand },
   }),
 }));
 
@@ -97,7 +104,12 @@ const baseTask: TaskWorkspace = {
     prompt: "task-workspace-slice-1@0.1.0",
   },
   intake: { brief: "", source: { kind: "inline", body: "" } },
-  preferences: { worktreePolicy: "later", modelSelection: null, executionProfile: "planning" },
+  preferences: {
+    worktreePolicy: "later",
+    modelSelection: null,
+    executionProfile: "planning",
+    runtimeMode: "full-access",
+  },
   bootstrap: null,
   occurrences: [],
   planGate: null,
@@ -228,6 +240,7 @@ function guidedTask(overrides: Partial<TaskWorkspace> = {}): TaskWorkspace {
         options: [],
       },
       executionProfile: "task-worktree-write",
+      runtimeMode: "full-access",
     },
     workspace: {
       repositories: [
@@ -391,6 +404,7 @@ function guidedTask(overrides: Partial<TaskWorkspace> = {}): TaskWorkspace {
 
 beforeEach(() => {
   mocks.dispatchCommand.mockClear();
+  mocks.orchestrationDispatchCommand.mockClear();
   mocks.useClerk.mockClear();
   mocks.primaryEnvironmentId = "environment-local";
   mocks.threadShellById = {};
@@ -1574,6 +1588,7 @@ describe("TaskWorkspaceView", () => {
           options: [],
         },
         executionProfile: "planning",
+        runtimeMode: "full-access",
       },
       bootstrap: {
         operationKey: "task-browser:bootstrap:questions:0:primary",
@@ -2107,5 +2122,99 @@ describe("Task conversation-plus-panel shell", () => {
     await expect
       .element(page.getByTestId("task-stage-subtitle"))
       .toHaveTextContent("Plan v2 · current stage");
+  });
+
+  it("exposes the current permission and changes it across the task and open conversation", async () => {
+    await renderTask(guidedTask());
+
+    const panel = page.getByTestId("guided-task-permissions");
+    await expect.element(panel).toBeVisible();
+    // Shared vocabulary: the same labels as the Create Task form and composer.
+    await expect.element(panel).toHaveTextContent(/Permissions/);
+    await expect.element(panel).toHaveTextContent("Full access");
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-full-access"))
+      .toHaveAttribute("data-active", "true");
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-approval-required"))
+      .toHaveTextContent("Supervised");
+
+    // Changing the mode persists the task-wide preference...
+    await page.getByTestId("task-panel-permissions-option-approval-required").click();
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.permissions.set",
+      runtimeMode: "approval-required",
+      expectedTaskRevision: 0,
+    });
+    // ...applies it to the open stage conversation without moving workflow
+    // state: one thread.runtime-mode.set for the live thread, no occurrence.
+    expect(mocks.orchestrationDispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.orchestrationDispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "thread.runtime-mode.set",
+      threadId: "guided-build-thread-1",
+      runtimeMode: "approval-required",
+    });
+  });
+
+  it("reports a rejected permission change beside the control and keeps the previous value", async () => {
+    mocks.dispatchCommand.mockRejectedValueOnce(
+      new Error("Task revision 0 does not match the expected revision 9."),
+    );
+    await renderTask(guidedTask());
+
+    await page.getByTestId("task-panel-permissions-option-approval-required").click();
+
+    await expect
+      .element(page.getByTestId("task-panel-permissions-error"))
+      .toHaveTextContent("Task revision 0 does not match the expected revision 9.");
+    // The control stays on the persisted value: no task event was written.
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-full-access"))
+      .toHaveAttribute("data-active", "true");
+    // A rejected permission change must not start an occurrence or dispatch a
+    // thread command for a change the task did not accept.
+    expect(mocks.orchestrationDispatchCommand).not.toHaveBeenCalled();
+  });
+
+  it("keeps the live mode selected and retries after a thread update fails", async () => {
+    const initialTask = guidedTask();
+    mocks.orchestrationDispatchCommand.mockRejectedValueOnce(
+      new Error("The provider session could not restart."),
+    );
+    await renderTask(initialTask);
+
+    await page.getByTestId("task-panel-permissions-option-approval-required").click();
+
+    await expect
+      .element(page.getByTestId("task-panel-permissions-error"))
+      .toHaveTextContent("The provider session could not restart.");
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-full-access"))
+      .toHaveAttribute("data-active", "true");
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-approval-required"))
+      .not.toHaveAttribute("data-active", "true");
+
+    // The task preference was persisted before the live-thread failure. A
+    // retry reuses that persisted choice and only needs to finish the thread
+    // synchronization.
+    useTaskWorkspaceStore.getState().applyStreamItem(EnvironmentId.make("environment-local"), {
+      kind: "task-upserted",
+      sequence: 2,
+      task: {
+        ...initialTask,
+        taskRevision: initialTask.taskRevision + 1,
+        preferences: { ...initialTask.preferences, runtimeMode: "approval-required" },
+      },
+    });
+    mocks.orchestrationDispatchCommand.mockResolvedValueOnce(undefined);
+    await page.getByTestId("task-panel-permissions-option-approval-required").click();
+
+    await expect
+      .element(page.getByTestId("task-panel-permissions-option-approval-required"))
+      .toHaveAttribute("data-active", "true");
+    expect(mocks.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(mocks.orchestrationDispatchCommand).toHaveBeenCalledTimes(2);
   });
 });

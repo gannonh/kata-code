@@ -3165,6 +3165,8 @@ describe("TaskWorkspaceService first-slice workflow", () => {
           options: [{ id: "reasoningEffort", value: "high" }],
         },
         executionProfile: "planning",
+        // New tasks default to Full access; the create may override it.
+        runtimeMode: "full-access",
       });
       expect(result.task.versions.taskContract).toBe("task-workspace@0.3.0");
       expect(result.task.versions.artifactContract).toBe("task-artifact@0.3.0");
@@ -3429,6 +3431,7 @@ const bootstrapEntry = (task: TaskWorkspace, baseDir: string, repoRoot: string) 
       threadCreateCommandId: bootstrap.threadCreateCommandId,
       turnStartCommandId: bootstrap.turnStartCommandId,
       kickoffMessageId: bootstrap.kickoffMessageId,
+      runtimeMode: task.preferences.runtimeMode,
       worktreeBranch: task.preferences.worktreePolicy === "now" ? branch : null,
       worktreePath: task.preferences.worktreePolicy === "now" ? worktreePath : null,
     },
@@ -3511,7 +3514,9 @@ describe("TaskWorkspaceService bootstrap saga", () => {
       };
       expect(threadCreate.type).toBe("thread.create");
       expect(threadCreate.threadId).toBe(ready?.bootstrap?.reservedThreadId);
-      expect(threadCreate.runtimeMode).toBe("approval-required");
+      // New tasks default to Full access; the bootstrap starts every stage in
+      // the task's permission instead of hardcoding Supervised.
+      expect(threadCreate.runtimeMode).toBe("full-access");
       expect(threadCreate.interactionMode).toBe("default");
       const kickoff = dispatched[1] as {
         type: string;
@@ -3521,6 +3526,211 @@ describe("TaskWorkspaceService bootstrap saga", () => {
       expect(kickoff.type).toBe("thread.turn.start");
       expect(kickoff.message.text).toBe("Add a guided onboarding flow.");
       expect(kickoff.developerInstructions).toContain("You are running the Clarify stage");
+    }),
+  );
+
+  it.effect("bootstraps every planning stage in the task's chosen permission", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-bootstrap-permission-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("bs-create-permission"),
+            operationKey: "op-bs-create-permission",
+            runtimeMode: "approval-required",
+          }),
+        ),
+      );
+      expect(created.task.preferences.runtimeMode).toBe("approval-required");
+
+      // The create's outbox payload captured the choice, so the first Clarify
+      // session starts Supervised instead of the hardcoded default.
+      const dispatchBaseline = dispatchedOrchestration.length;
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const staged = dispatchedOrchestration
+        .slice(dispatchBaseline)
+        .filter(
+          (command) =>
+            (command as { type?: string }).type === "thread.create" ||
+            (command as { type?: string }).type === "thread.turn.start",
+        );
+      expect(staged).toHaveLength(2);
+      for (const command of staged) {
+        expect((command as { runtimeMode?: string }).runtimeMode).toBe("approval-required");
+      }
+    }),
+  );
+
+  it.effect("task.permissions.set changes the preference and the next stage honors it", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-permissions-set-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("perm-create-1"),
+            operationKey: "op-perm-create-1",
+          }),
+        ),
+      );
+      const firstBootstrapBaseline = dispatchedOrchestration.length;
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+
+      // Change the permission mid-task, after the Clarify session bootstrapped
+      // with the default.
+      const ready = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const changed = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.permissions.set",
+            commandId: CommandId.make("perm-set-1"),
+            taskId: created.task.id,
+            createdAt: now(3),
+            expectedTaskRevision: ready.taskRevision,
+            operationKey: "op-perm-set-1",
+            runtimeMode: "auto-accept-edits",
+          }),
+        ),
+      );
+      expect(changed.task.preferences.runtimeMode).toBe("auto-accept-edits");
+      expect(changed.task.taskRevision).toBe(ready.taskRevision + 1);
+
+      // Completing Clarify through the server-owned handoff allocates the
+      // Research bootstrap from the changed preference.
+      let task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const questionsOccurrence = task.occurrences.find(
+        (candidate) => candidate.stage === "questions" && candidate.status === "running",
+      )!;
+      const questionsSession = task.sessions.find((candidate) => candidate.stage === "questions")!;
+      yield* runtime.runPromise(
+        service.proposeStageCompletion({
+          taskId: task.id,
+          sessionId: questionsSession.id,
+          providerTurnId: "turn-perm-questions",
+          payloadDigest: "digest-perm-questions",
+          summary: "Clarify done.",
+          markdown: "# Questions\n\nNo blockers.",
+        }),
+      );
+      task = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: questionsOccurrence.ordinal,
+          providerTurnId: "turn-perm-questions",
+          outcome: "completed",
+        }),
+      );
+      expect(task.workflowRuns.at(-1)?.currentStage).toBe("research");
+      expect(task.bootstrap?.status).toBe("pending");
+      const secondBootstrapBaseline = dispatchedOrchestration.length;
+      yield* runtime.runPromise(service.processBootstrap(bootstrapEntry(task, baseDir, repoRoot)));
+      const staged = dispatchedOrchestration
+        .slice(secondBootstrapBaseline)
+        .filter(
+          (command) =>
+            (command as { type?: string }).type === "thread.create" ||
+            (command as { type?: string }).type === "thread.turn.start",
+        );
+      expect(staged).toHaveLength(2);
+      for (const command of staged) {
+        expect((command as { runtimeMode?: string }).runtimeMode).toBe("auto-accept-edits");
+      }
+      // The first stage still bootstrapped with the default.
+      const firstStaged = dispatchedOrchestration
+        .slice(firstBootstrapBaseline, secondBootstrapBaseline)
+        .filter(
+          (command) =>
+            (command as { type?: string }).type === "thread.create" ||
+            (command as { type?: string }).type === "thread.turn.start",
+        );
+      expect(firstStaged).toHaveLength(2);
+      for (const command of firstStaged) {
+        expect((command as { runtimeMode?: string }).runtimeMode).toBe("full-access");
+      }
+    }),
+  );
+
+  it.effect("updates a pending bootstrap when permissions change before processing", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-permissions-pending-bootstrap-",
+      );
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("perm-pending-create"),
+            operationKey: "op-perm-pending-create",
+          }),
+        ),
+      );
+      // Keep the worker's original argument so the test covers a stale
+      // in-memory outbox row as well as the durable payload update.
+      const staleEntry = bootstrapEntry(created.task, baseDir, repoRoot);
+      const changed = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.permissions.set",
+            commandId: CommandId.make("perm-pending-set"),
+            taskId: created.task.id,
+            createdAt: now(3),
+            expectedTaskRevision: created.task.taskRevision,
+            operationKey: "op-perm-pending-set",
+            runtimeMode: "approval-required",
+          }),
+        ),
+      );
+      expect(changed.task.preferences.runtimeMode).toBe("approval-required");
+
+      const dispatchBaseline = dispatchedOrchestration.length;
+      yield* runtime.runPromise(service.processBootstrap(staleEntry));
+      const staged = dispatchedOrchestration
+        .slice(dispatchBaseline)
+        .filter(
+          (candidate) =>
+            (candidate as { type?: string }).type === "thread.create" ||
+            (candidate as { type?: string }).type === "thread.turn.start",
+        );
+      expect(staged).toHaveLength(2);
+      for (const candidate of staged) {
+        expect((candidate as { runtimeMode?: string }).runtimeMode).toBe("approval-required");
+      }
+    }),
+  );
+
+  it.effect("rejects task.permissions.set with a stale expected revision", () =>
+    Effect.gen(function* () {
+      const { runtime } = yield* setupRuntime("kata-task-permissions-stale-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(
+        service.dispatch(
+          guidedCreate({
+            commandId: CommandId.make("perm-create-2"),
+            operationKey: "op-perm-create-2",
+          }),
+        ),
+      );
+      const rejected = yield* runtime.runPromiseExit(
+        service.dispatch(
+          command({
+            type: "task.permissions.set",
+            commandId: CommandId.make("perm-set-stale"),
+            taskId: created.task.id,
+            createdAt: now(3),
+            expectedTaskRevision: 99,
+            operationKey: "op-perm-set-stale",
+            runtimeMode: "approval-required",
+          }),
+        ),
+      );
+      expect(rejected._tag).toBe("Failure");
+      const after = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      expect(after.preferences.runtimeMode).toBe("full-access");
     }),
   );
 
@@ -5169,7 +5379,9 @@ describe("TaskWorkspaceService guided implementation", () => {
         branch,
         baseCommitSha: repository.baseCommitSha,
         executionProfile: "task-worktree-write",
-        runtimeMode: "auto-accept-edits",
+        // Implement is governed by the task-wide permission (defaults to Full
+        // access), not a hardcoded auto-accept-edits.
+        runtimeMode: "full-access",
       });
       expect(context?.worktreePath).toBe(worktreePath);
     }),

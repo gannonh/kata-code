@@ -158,6 +158,7 @@ export function TaskShellView({
       isViewingCurrent={view.isViewingCurrent}
       onReturnToCurrent={returnToCurrent}
       canRevise={canRevise}
+      liveThreadId={view.isViewingCurrent ? view.conversationThreadId : null}
     />
   );
 

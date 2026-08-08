@@ -16,6 +16,7 @@ import {
   TaskWorkspaceError,
   TaskWorkspaceWorktreeOutboxPayload,
   CommandId,
+  DEFAULT_RUNTIME_MODE,
   type TaskWorkspace,
   type TaskWorkspaceArtifact,
   type TaskWorkspaceArtifactKind,
@@ -149,6 +150,7 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
     case "task.create":
     case "task.stage.request-changes":
     case "task.worktree.policy.set":
+    case "task.permissions.set":
     case "task.session.recover-primary":
     case "task.environment.repair":
     case "task.plan.approve":
@@ -800,6 +802,7 @@ function initialTask(
       worktreePolicy,
       modelSelection: command.modelSelection ?? null,
       executionProfile: "planning",
+      runtimeMode: command.runtimeMode ?? DEFAULT_RUNTIME_MODE,
     },
     bootstrap: bootstrap ?? null,
     occurrences: isFirstSliceCreate
@@ -1806,6 +1809,7 @@ export const make = Effect.gen(function* () {
         }),
     ),
   );
+  const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
 
   // One-time transactional NDJSON import. The legacy file is retained read-only
   // after a successful import; the store's marker row makes the import idempotent.
@@ -2020,7 +2024,7 @@ export const make = Effect.gen(function* () {
           branch: expectedBranch,
           baseCommitSha: repository.baseCommitSha,
           executionProfile: "task-worktree-write" as const,
-          runtimeMode: "auto-accept-edits" as const,
+          runtimeMode: task.preferences.runtimeMode,
           modelSelection,
         } satisfies ActiveTaskProviderContext;
       }
@@ -2238,6 +2242,7 @@ export const make = Effect.gen(function* () {
         stage,
         occurrence,
         executionProfile: "planning",
+        runtimeMode: command.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         presentation: "stage",
         sessionId,
         threadId,
@@ -2255,6 +2260,34 @@ export const make = Effect.gen(function* () {
       return { bootstrap, outboxPayload, operationKey };
     });
 
+  type TaskWorkspaceOutboxAppend = {
+    readonly target: TaskWorkspaceOutboxEntry["target"];
+    readonly operationKey: string;
+    readonly payload: unknown;
+    readonly status?: TaskWorkspaceOutboxEntry["status"];
+    /** Preserve an existing row when an aggregate update also changes its payload. */
+    readonly existing?: TaskWorkspaceOutboxEntry;
+  };
+
+  const makeOutboxEntry = (
+    entry: TaskWorkspaceOutboxAppend,
+    eventId: string,
+    taskId: TaskWorkspaceId,
+    now: string,
+  ): TaskWorkspaceOutboxEntry => ({
+    id: entry.existing?.id ?? `outbox-${eventId}-${entry.operationKey.slice(-12)}`,
+    environmentId,
+    taskId,
+    operationKey: entry.operationKey,
+    target: entry.target,
+    status: entry.status ?? entry.existing?.status ?? "pending",
+    payload: entry.payload,
+    attemptCount: entry.existing?.attemptCount ?? 0,
+    createdAt: entry.existing?.createdAt ?? now,
+    updatedAt: now,
+    completedAt: entry.existing?.completedAt ?? null,
+  });
+
   const append = (
     command: TaskWorkspaceCommand,
     task: TaskWorkspace,
@@ -2262,12 +2295,7 @@ export const make = Effect.gen(function* () {
       readonly eventType?: TaskWorkspaceEventValue["type"];
       readonly operationReceipt?: TaskWorkspaceOperationReceipt;
       readonly proposal?: TaskWorkspaceCompletionProposal;
-      readonly outbox?: ReadonlyArray<{
-        readonly target: TaskWorkspaceOutboxEntry["target"];
-        readonly operationKey: string;
-        readonly payload: unknown;
-        readonly status?: TaskWorkspaceOutboxEntry["status"];
-      }>;
+      readonly outbox?: ReadonlyArray<TaskWorkspaceOutboxAppend>;
     },
   ) =>
     Effect.gen(function* () {
@@ -2296,20 +2324,8 @@ export const make = Effect.gen(function* () {
             updatedAt: now,
           }
         : undefined;
-      const outbox = input?.outbox?.map(
-        (entry): TaskWorkspaceOutboxEntry => ({
-          id: `outbox-${eventId}-${entry.operationKey.slice(-12)}`,
-          environmentId,
-          taskId: command.taskId,
-          operationKey: entry.operationKey,
-          target: entry.target,
-          status: entry.status ?? "pending",
-          payload: entry.payload,
-          attemptCount: 0,
-          createdAt: now,
-          updatedAt: now,
-          completedAt: null,
-        }),
+      const outbox = input?.outbox?.map((entry) =>
+        makeOutboxEntry(entry, eventId, command.taskId, now),
       );
       const stored = yield* store
         .commit({
@@ -2375,12 +2391,7 @@ export const make = Effect.gen(function* () {
     input?: {
       readonly operationReceipt?: TaskWorkspaceOperationReceipt;
       readonly proposal?: TaskWorkspaceCompletionProposal;
-      readonly outbox?: ReadonlyArray<{
-        readonly target: TaskWorkspaceOutboxEntry["target"];
-        readonly operationKey: string;
-        readonly payload: unknown;
-        readonly status?: TaskWorkspaceOutboxEntry["status"];
-      }>;
+      readonly outbox?: ReadonlyArray<TaskWorkspaceOutboxAppend>;
       readonly occurredAt?: string;
     },
   ) =>
@@ -2417,21 +2428,7 @@ export const make = Effect.gen(function* () {
             updatedAt: now,
           }
         : undefined;
-      const outbox = input?.outbox?.map(
-        (entry): TaskWorkspaceOutboxEntry => ({
-          id: `outbox-${eventId}-${entry.operationKey.slice(-12)}`,
-          environmentId,
-          taskId: task.id,
-          operationKey: entry.operationKey,
-          target: entry.target,
-          status: entry.status ?? "pending",
-          payload: entry.payload,
-          attemptCount: 0,
-          createdAt: now,
-          updatedAt: now,
-          completedAt: null,
-        }),
-      );
+      const outbox = input?.outbox?.map((entry) => makeOutboxEntry(entry, eventId, task.id, now));
       const stored = yield* store
         .commit({
           environmentId,
@@ -5769,6 +5766,72 @@ export const make = Effect.gen(function* () {
             ],
           });
         }
+        case "task.permissions.set": {
+          if (command.expectedTaskRevision !== task.taskRevision) {
+            return yield* taskError(
+              command,
+              `Task revision ${task.taskRevision} does not match the expected revision ${command.expectedTaskRevision}.`,
+            );
+          }
+          const now = yield* serverNow;
+          const nextTask: TaskWorkspace = {
+            ...task,
+            preferences: { ...task.preferences, runtimeMode: command.runtimeMode },
+          };
+          let bootstrapOutboxUpdate: TaskWorkspaceOutboxAppend | undefined;
+          if (
+            task.bootstrap &&
+            (task.bootstrap.status === "pending" || task.bootstrap.status === "running")
+          ) {
+            const existingOutbox = yield* store
+              .getOutboxByOperationKey({
+                environmentId,
+                taskId: task.id,
+                operationKey: task.bootstrap.operationKey,
+              })
+              .pipe(
+                Effect.mapError((cause) =>
+                  taskError(command, "Failed to read the pending bootstrap outbox row.", cause),
+                ),
+              );
+            if (
+              Option.isSome(existingOutbox) &&
+              existingOutbox.value.target === "bootstrap" &&
+              existingOutbox.value.status !== "completed"
+            ) {
+              const payload = yield* decodeBootstrapPayload(existingOutbox.value.payload).pipe(
+                Effect.mapError((cause) =>
+                  taskError(command, "Failed to decode the pending task bootstrap payload.", cause),
+                ),
+              );
+              bootstrapOutboxUpdate = {
+                target: "bootstrap",
+                operationKey: existingOutbox.value.operationKey,
+                payload: { ...payload, runtimeMode: command.runtimeMode },
+                status: existingOutbox.value.status,
+                existing: existingOutbox.value,
+              };
+            }
+          }
+          return yield* append(command, nextTask, {
+            operationReceipt: {
+              environmentId,
+              taskId: task.id,
+              operationType: "task.permissions.set",
+              operationKey: command.operationKey,
+              payloadDigest: canonicalTaskCommandDigest(command),
+              status: "completed",
+              attemptCount: 1,
+              sourceCommandIds: [command.commandId],
+              resultEventId: null,
+              resultTaskRevision: null,
+              error: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+            ...(bootstrapOutboxUpdate ? { outbox: [bootstrapOutboxUpdate] } : {}),
+          });
+        }
         default: {
           return yield* taskError(
             command,
@@ -6239,6 +6302,7 @@ export const make = Effect.gen(function* () {
         stage,
         occurrence,
         executionProfile,
+        runtimeMode: task.preferences.runtimeMode,
         presentation,
         sessionId,
         threadId,
@@ -6531,8 +6595,6 @@ export const make = Effect.gen(function* () {
       ),
     };
   };
-
-  const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
 
   const waitForProviderTurnStart = (
     fromSequenceExclusive: number,
@@ -7534,8 +7596,9 @@ export const make = Effect.gen(function* () {
   };
 
   const processBootstrap = (
-    entry: TaskWorkspaceOutboxEntry,
+    inputEntry: TaskWorkspaceOutboxEntry,
   ): Effect.Effect<void, TaskWorkspaceError> => {
+    let entry = inputEntry;
     const failure = (step: string, cause: unknown): Effect.Effect<void, TaskWorkspaceError> =>
       Effect.gen(function* () {
         const now = yield* serverNow;
@@ -7577,6 +7640,24 @@ export const make = Effect.gen(function* () {
     return semaphore
       .withPermits(1)(
         Effect.gen(function* () {
+          const latestEntry = yield* store
+            .getOutboxByOperationKey({
+              environmentId,
+              taskId: inputEntry.taskId,
+              operationKey: inputEntry.operationKey,
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TaskWorkspaceError({
+                    message: "Failed to read the bootstrap outbox row.",
+                    commandType: "task.internal",
+                    taskId: inputEntry.taskId,
+                    cause,
+                  }),
+              ),
+            );
+          entry = Option.isSome(latestEntry) ? latestEntry.value : inputEntry;
           const task = taskById.get(entry.taskId);
           if (!task || task.bootstrap?.operationKey !== entry.operationKey) {
             // Stale outbox row for a task that no longer owns this operation.
@@ -7767,10 +7848,7 @@ export const make = Effect.gen(function* () {
               projectId,
               title: `Task: ${working.title}`,
               modelSelection,
-              runtimeMode:
-                payload.executionProfile === "task-worktree-write"
-                  ? "auto-accept-edits"
-                  : "approval-required",
+              runtimeMode: payload.runtimeMode,
               interactionMode: "default",
               branch: working.workspace.repositories[0]!.branch,
               worktreePath: working.workspace.repositories[0]!.worktreePath,
@@ -7820,10 +7898,7 @@ export const make = Effect.gen(function* () {
                   ? trustedImplementationInstructions()
                   : trustedStageInstructions(payload.stage)),
               modelSelection,
-              runtimeMode:
-                payload.executionProfile === "task-worktree-write"
-                  ? "auto-accept-edits"
-                  : "approval-required",
+              runtimeMode: payload.runtimeMode,
               interactionMode: "default",
               createdAt: now,
             })
