@@ -70,6 +70,16 @@ Check every issue in scope against these rules.
 - Sub-issues nested more than one level deep.
 - A parent at `status:verified` with unverified children.
 
+**Dependency integrity**
+
+Read the graph with `gh issue view <N> --json number,title,state,labels,blockedBy,blocking`.
+
+- A `blockedBy` edge pointing at a closed or `status:verified` issue. Stale, and it will stop a Build that should proceed.
+- An epic listed as blocked by its own children. That is composition, not a dependency; remove the edge.
+- A dependency cycle. This is a decomposition error, not a label defect.
+- A child whose `## Context` states "Depends on #N" with no matching `blockedBy` edge, so the block is invisible to the UI and to Build.
+- An issue blocked by something in a repo the user cannot access.
+
 **Scope integrity**
 
 - A spec whose acceptance criteria span more than one independently buildable phase. Flag `needs:decomposition`.
@@ -123,6 +133,8 @@ Apply in tiers, and get approval before anything in tier 2 or 3.
 - Remove a stale `phase:*` label when no branch or PR is active.
 - Reconcile a `## Status` section to match its `status:*` label when the label is clearly right (a Build report comment exists, a PR is merged).
 - Link an orphaned sub-issue to its obvious parent with `gh sub-issue add`.
+- Remove a `blockedBy` edge whose blocker is closed or `status:verified`.
+- Add a `blockedBy` edge that the issue body already states in prose.
 
 **Tier 2: ask first.** These change what the roadmap says.
 
@@ -162,8 +174,8 @@ An issue is **ready** when:
 
 - It is `status:approved`.
 - It has usable acceptance criteria.
-- It is not `status:blocked` and has no unresolved dependency.
-- For a sub-issue, its stated dependencies are `status:verified` or `status:implemented`.
+- It is not `status:blocked`, and `gh issue view <N> --json blockedBy` returns no open blockers.
+- Any dependency stated in prose in the body is also satisfied, whether or not it was recorded as an edge.
 - No open PR already implements it.
 
 Rank ready issues by:

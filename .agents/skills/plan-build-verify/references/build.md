@@ -29,18 +29,28 @@ Before editing files:
 2. Read the issue completely:
 
 ```bash
-gh issue view <N> --json number,title,body,labels,state,url,comments
+gh issue view <N> --json number,title,body,labels,state,url,comments,blockedBy
 gh sub-issue list <N>    # if the issue is an epic
 ```
 
-3. Confirm the issue carries `status:approved` and the body's `## Status` section says `Approved`, or confirm the user explicitly overrode the approval gate. If the label and the body disagree, stop and reconcile with the user before writing code.
-4. **If the issue is an epic** (`kind:epic`), do not build the parent. Pick the first `status:approved` child whose dependencies are already `status:verified` or `status:implemented`. If several are ready, ask which to build or confirm the order. State the choice before proceeding.
-5. Confirm the issue contains `## Acceptance criteria` with concrete checkbox criteria. If missing or ambiguous, add `needs:acceptance-criteria`, stop, and return to Plan to fix the issue.
-6. Run the phase-entry hygiene check from `references/conventions.md` and report findings.
-7. Inspect repo instructions such as `AGENTS.md`, `CLAUDE.md`, and README command sections.
-8. Check worktree state with `git status --short --branch`.
-9. Confirm `Blocking open questions` is `None`, or confirm the user explicitly approved proceeding with listed questions.
-10. Create or check out the working branch:
+3. **Check `blockedBy` before writing any code.** If a blocker is still open, stop and report it. Do not start a blocked issue unless the user explicitly acknowledges the blocker and chooses to proceed. If a blocker is already closed or `status:verified`, the edge is stale: clear it with `gh issue edit <N> --remove-blocked-by <BLOCKER>` and say so.
+4. Confirm the issue carries `status:approved` and the body's `## Status` section says `Approved`, or confirm the user explicitly overrode the approval gate. If the label and the body disagree, stop and reconcile with the user before writing code.
+5. **If the issue is an epic** (`kind:epic`), do not build the parent. Pick the first `status:approved` child with no open blockers. Read the graph rather than assuming the order:
+
+```bash
+for c in $(gh sub-issue list <N> --json number | jq -r '.[].number'); do
+  gh issue view "$c" --json number,title,labels,state,blockedBy
+done
+```
+
+If several are ready, ask which to build or confirm the order. State the choice before proceeding.
+
+6. Confirm the issue contains `## Acceptance criteria` with concrete checkbox criteria. If missing or ambiguous, add `needs:acceptance-criteria`, stop, and return to Plan to fix the issue.
+7. Run the phase-entry hygiene check from `references/conventions.md` and report findings.
+8. Inspect repo instructions such as `AGENTS.md`, `CLAUDE.md`, and README command sections.
+9. Check worktree state with `git status --short --branch`.
+10. Confirm `Blocking open questions` is `None`, or confirm the user explicitly approved proceeding with listed questions.
+11. Create or check out the working branch:
 
 ```bash
 gh issue develop <N> --name "<N>-<kebab-title>" --base <default-branch> --checkout
@@ -206,20 +216,13 @@ After all tasks pass their per-task gates:
 4. Fix final-review issues.
 5. Re-run final review until no blocking issues remain.
 
-## Open the pull request
+## Push the branch
+
+Push the branch so the work is durable, but **do not open the pull request**. Verify owns PR creation, because the PR body carries the acceptance-criteria matrix and opening it starts the CI convergence loop.
 
 ```bash
-gh pr create \
-  --base <default-branch> \
-  --head <branch> \
-  --title "<issue title>" \
-  --body-file "$PR_BODY"
-rm -f "$PR_BODY"
+git push -u origin <branch>
 ```
-
-The PR body must contain `Closes #<N>` for the issue being implemented. For a sub-issue, close the sub-issue, not the parent. Summarize scope, tasks, verification results, and approved deviations in the PR body, and link to the Build completion report comment.
-
-If the repo's convention is to merge without a PR, say so and skip this step.
 
 ## Build completion report
 
@@ -243,7 +246,7 @@ Start the comment with `## Build completion report` and include:
 - Approved deviations, with links to their comments.
 - Known follow-up issues, with links if they were opened.
 - Whether independent subagent review was used.
-- PR link.
+- Branch name and pushed head SHA. There is no PR yet; Verify opens it.
 
 Then move the issue to implemented:
 
@@ -263,7 +266,8 @@ When the built issue is a sub-issue:
 
 1. Comment on the parent with a one-line status and a link to the child's Build completion report.
 2. Leave the parent at `status:approved` until every child is `status:verified` and the parent's own acceptance criteria pass.
-3. Report which sibling is next in dependency order.
+
+Do not pick the next sibling here. This child still has to pass Verify, and a sibling that starts before that may build on work that fails acceptance. Verify advances the epic after signoff (Step 10 of `references/verify.md`).
 
 ## Follow-up work
 
@@ -278,9 +282,13 @@ Link it from the Build completion report. Triage will groom it into the roadmap.
 
 ## Transition to Verify
 
-After Build is complete, ask the user if they want to move to Verify.
+**Continue directly into Verify. Do not ask permission.** Read `references/verify.md` and follow it in the same session. Build is not a terminal state: an implemented issue with no acceptance evidence and no PR is unfinished work.
 
-If yes, transition to `references/verify.md` and follow it for acceptance review and validation.
+Announce the transition, then proceed:
+
+> Build complete for #<N>. Entering Verify: acceptance evidence, PR, then CI convergence.
+
+Stop and hand back to the user instead of continuing only when a Red flag below applies, or when the branch could not be pushed.
 
 ## Red flags
 

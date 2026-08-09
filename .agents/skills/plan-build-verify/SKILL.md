@@ -9,15 +9,15 @@ Route implementation work through a sequential path where **GitHub Issues are th
 
 ## Read the conventions first
 
-Before any mode, read `references/conventions.md` completely. It defines the repo preflight, label taxonomy, issue body template, status transitions, sub-issue mechanics, and temporary body files. Every other reference file depends on it.
+Before any mode, read `references/conventions.md` completely. It defines the repo preflight, label taxonomy, issue body template, status transitions, sub-issue mechanics, issue dependencies, and temporary body files. Every other reference file depends on it.
 
 ## Phase contracts
 
 | Phase   | Input                                                     | Output                                                                                                              | Status label transition                   |
 | ------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | Plan    | Idea, vague request, or new build request                  | Context exploration → alignment dialogue → approach approval → spec issue with mandatory `## Acceptance criteria` | none → `status:draft` → `status:approved` |
-| Build   | Approved spec issue number, or explicit user override      | Implemented tasks, commits, PR, review results, Build completion report comment                                     | `status:approved` → `status:implemented`  |
-| Verify  | Implemented spec issue plus completed work or Build report | Acceptance evidence comment, checked acceptance criteria, signoff recommendation                                    | `status:implemented` → `status:verified`  |
+| Build   | Approved spec issue number, or explicit user override      | Implemented tasks, commits, review results, pushed branch, Build completion report comment                           | `status:approved` → `status:implemented`  |
+| Verify  | Implemented spec issue plus completed work or Build report | Acceptance evidence, durable acceptance tests, pull request, green CI, resolved review threads, signoff recommendation | `status:implemented` → `status:verified`  |
 | Triage  | Repo issue backlog                                         | Grooming report and applied label, decomposition, and closure actions                                               | corrective, per issue                     |
 | Migrate | Existing `docs/specs/*.md` bundle                          | Assessment report, spec issues, archived local files, rewritten cross-links, updated specs index                    | derived from each file's declared status  |
 
@@ -35,10 +35,14 @@ Default to **Plan** unless the user explicitly directs you to execute an existin
 
 Read `references/conventions.md` and then the selected reference file completely, and follow both. Only load the workflow you need.
 
+**Build and Verify are one continuous run.** Build does not stop to ask whether to verify; it enters Verify directly. Verify then runs unattended through evidence, acceptance tests, PR creation, and CI convergence, stopping only at signoff. See the autonomy contract in `references/verify.md`.
+
 Hard gates:
 
 - Build must not start from a `status:draft` issue unless the user explicitly overrides the approval gate.
 - Verify must not claim signoff without evidence.
+- Verify must never merge the PR. Signoff and merge are the user's decision.
+- Verify opens the PR, not Build. The PR body carries the acceptance-criteria matrix.
 - In Plan, do not draft a spec issue before the user has answered an alignment question or approved a recommended direction. If you are about to, stop and ask instead.
 - Migration is assess-first. Run `scripts/migrate_specs.sh --assess` and settle every unclassified or conflicting file with the user before any write.
 
@@ -53,6 +57,14 @@ Build and Verify load bundled workflows from this skill directory. Read the entr
 | Build  | TDD             | `references/tdd/workflow.md`             |
 | Verify | User acceptance | `references/user-acceptance/workflow.md` |
 
+Verify's convergence loop (Step 7) drives CI with `gh pr checks --watch` and `gh run` directly. For review threads it uses one sibling skill, resolved against the installed skills directory:
+
+| Purpose                           | Skill                 | Entry point                                               |
+| --------------------------------- | --------------------- | --------------------------------------------------------- |
+| Review-thread inventory and fixes | `address-pr-comments` | `<path-to-skills-directory>/address-pr-comments/SKILL.md`   |
+
+If it is not installed, Verify reads threads with `gh api graphql` instead; the loop does not depend on it.
+
 ## Helper scripts
 
 - `scripts/ensure_labels.sh`: idempotently creates this skill's label taxonomy. `--dry-run` reports what would change.
@@ -64,8 +76,10 @@ Resolve script paths against the skill directory the runtime actually loaded. If
 ## Requirements
 
 - `gh` CLI, authenticated with issue write access for the target repo.
-- `gh sub-issue` extension (`yahsan2/gh-sub-issue`) for decomposed specs. If absent, install with `gh extension install yahsan2/gh-sub-issue` or use the task-list fallback in `references/conventions.md`.
+- `gh sub-issue` extension (`yahsan2/gh-sub-issue`) for decomposed specs. If absent, install with `gh extension install yahsan2/gh-sub-issue` or use the task-list fallback in `references/conventions.md`. Its `create` subcommand has no `--body-file`, so children are created with `gh issue create` and then attached with `gh sub-issue add`.
+- A `gh` recent enough for issue dependencies (`gh issue edit --add-blocked-by`). Native; no extension required.
 - A git remote pointing at the GitHub repository that owns the roadmap.
+- `jq`, for reading `gh sub-issue list --json` output. The extension has no `-q` flag of its own.
 - `python3`, for link rewriting during migration only.
 
 Run the preflight in `references/conventions.md` before the first `gh` write of a session. If `gh` is unavailable or unauthenticated, stop and tell the user. Do not fall back to writing spec files locally.

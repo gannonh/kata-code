@@ -24,7 +24,8 @@ Checks:
 2. **Target repo.** `gh repo view` resolves from the current git remote. If the repo is a fork or the roadmap lives elsewhere, ask the user which repo owns the roadmap and pass `--repo <owner>/<name>` on every subsequent command.
 3. **Issues enabled.** If `gh issue list` errors with issues disabled, stop and tell the user.
 4. **Labels.** Run `scripts/ensure_labels.sh` (see below). It is idempotent and safe to re-run.
-5. **Sub-issue extension.** Required only when decomposing a spec. If missing, offer `gh extension install yahsan2/gh-sub-issue` or use the fallback in "Sub-issues" below.
+5. **Sub-issue extension.** Required only when decomposing a spec. If missing, offer `gh extension install yahsan2/gh-sub-issue` or use the fallback in "Sub-issues" below. Note its `create` subcommand has no `--body-file`; always use the two-step form in "Sub-issues".
+6. **Dependency support.** Native, no extension needed, but it requires a recent `gh`. If `gh issue edit --help` does not list `--add-blocked-by`, tell the user to upgrade `gh` and record dependencies in the issue body prose until they do.
 
 Record the resolved `<owner>/<repo>` for the session and reuse it.
 
@@ -178,26 +179,67 @@ Decompose when a spec has more than one independently buildable and verifiable p
 - Build runs per sub-issue. Verify runs per sub-issue, then rolls up.
 - The parent reaches `status:verified` only when every child is `status:verified` and the parent's own top-level acceptance criteria pass.
 
-Create children with the extension:
+**Create children in two steps: `gh issue create`, then `gh sub-issue add`.**
+
+`gh sub-issue create` accepts only `--body string`. It has no `--body-file`, and passing one fails with `unknown flag: --body-file` without creating the issue. Spec bodies are multi-line Markdown, so they must go through `--body-file`. Create the issue normally, then attach it to the parent:
 
 ```bash
-gh sub-issue create --parent <N> \
+CHILD_URL=$(gh issue create \
   --title "Phase 1: <name>" \
   --body-file "$BODY" \
-  --label "kind:sub-spec,status:approved"
+  --label "kind:sub-spec,status:approved")
+CHILD="${CHILD_URL##*/}"          # gh issue create prints the URL, not JSON
+rm -f "$BODY"
 
+gh sub-issue add <N> "$CHILD"    # attach to the parent
 gh sub-issue list <N>            # inspect the hierarchy
-gh sub-issue add <N> <CHILD>     # link an existing issue as a child
 ```
 
-If `gh sub-issue` is unavailable and the user does not want to install it, fall back to a `## Sub-issues` task list in the parent body (`- [ ] #143`) and keep it current by hand. State clearly in the report that native sub-issue links were not used.
+This produces the same native parent/child link as `gh sub-issue create` while preserving body fidelity. Never fall back to `--body` to make the one-step form work; it mangles backticks, quotes, and newlines.
+
+If the `gh sub-issue` extension is unavailable and the user does not want to install it, fall back to a `## Sub-issues` task list in the parent body (`- [ ] #143`) and keep it current by hand. State clearly in the report that native sub-issue links were not used.
 
 Do not nest more than one level. If a child needs decomposition, the parent scope was wrong; return to Plan.
+
+## Dependencies
+
+Sub-issue links express **composition** (this phase is part of that epic). They say nothing about **order**. When one issue cannot start until another is done, record it as a native GitHub dependency so the block is visible in the UI and queryable, rather than only as prose in `## Context`.
+
+This is built into `gh`; no extension is needed.
+
+```bash
+gh issue create --title "..." --body-file "$BODY" --blocked-by 143,144
+gh issue edit <N> --add-blocked-by 143      # N cannot start until 143 is done
+gh issue edit <N> --add-blocking 145        # N must finish before 145 starts
+gh issue edit <N> --remove-blocked-by 143   # dependency no longer holds
+gh issue view <N> --json number,title,blockedBy,blocking
+```
+
+Flags take comma-separated issue numbers or URLs, and work across repos by URL.
+
+Use a dependency when:
+
+- A phase consumes a schema, interface, migration, or endpoint that an earlier phase creates.
+- Two issues touch the same surface and would conflict if built in parallel.
+- An issue is waiting on an external decision tracked in another issue.
+
+Do not use one when:
+
+- The relationship is merely thematic, or the order is only a preference. Over-linking turns the graph into noise and hides real blocks.
+- The relationship is parent/child. That is `gh sub-issue add`, not a dependency. An epic is not "blocked by" its own phases.
+
+Rules:
+
+- Dependencies are advisory in GitHub; nothing prevents building a blocked issue. Treat an open blocker as a stop condition anyway, and say so rather than silently proceeding.
+- Keep them current. A `blockedBy` pointing at a `status:verified` or closed issue is stale and is a triage defect.
+- Prefer `--add-blocked-by` on the dependent issue over `--add-blocking` on the blocker. Both create the same edge, but consistently writing it from the dependent side keeps the intent readable.
+- A dependency cycle is a decomposition error. Return to Plan and re-cut the phases.
 
 ## Branches and pull requests
 
 - Branch name: `<issue-number>-<kebab-title>`, for example `142-export-workflow`. Derive it from the issue with `gh issue develop <N> --name <branch> --base <default>` when the user wants GitHub to link the branch to the issue.
 - One branch per spec issue or per sub-issue. Never build two issues on one branch.
+- **Verify opens the PR, not Build.** Build pushes the branch; Verify opens the PR once acceptance evidence exists, so the PR body carries the matrix and CI runs against verified work.
 - The PR body must contain `Closes #<N>` for the issue it implements. For a sub-issue, close the sub-issue, not the parent.
 - Link the PR back to the issue with a comment when the PR is opened from a branch GitHub did not auto-link.
 

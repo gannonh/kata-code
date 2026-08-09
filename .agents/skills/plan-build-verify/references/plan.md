@@ -120,15 +120,32 @@ Structure: **parent holds the outcome, children hold the phases.**
 3. For each phase, compose a child body with its own `## Status`, `## Goal`, `## Context` (linking the parent), `## Acceptance criteria`, and `## Build handoff`, then:
 
 ```bash
-gh sub-issue create --parent <PARENT> \
+CHILD_URL=$(gh issue create \
   --title "Phase 1: <name>" \
   --body-file "$BODY" \
-  --label "kind:sub-spec,status:draft"
+  --label "kind:sub-spec,status:draft")
+CHILD="${CHILD_URL##*/}"
 rm -f "$BODY"
+
+gh sub-issue add <PARENT> "$CHILD"
 ```
 
-4. Order children by dependency. State the dependency explicitly in each child's `## Context` ("Depends on #143").
-5. Verify the hierarchy with `gh sub-issue list <PARENT>`.
+`gh sub-issue create` has no `--body-file` flag, so it cannot carry a multi-line spec body. Always use the two-step form above. See "Sub-issues" in `references/conventions.md`.
+
+4. Order children by dependency. Record every real ordering constraint as a native dependency, not only as prose:
+
+```bash
+gh issue edit <CHILD_2> --add-blocked-by <CHILD_1>
+```
+
+Also state it in the child's `## Context` ("Depends on #143") so a reader of the body alone still sees it. Link only genuine blocks, not thematic ordering. See "Dependencies" in `references/conventions.md`.
+
+5. Verify the hierarchy and the dependency graph:
+
+```bash
+gh sub-issue list <PARENT>
+gh issue view <CHILD> --json number,title,blockedBy,blocking
+```
 
 Approval flows to children: when the user approves the epic, move the parent and all children to `status:approved` unless the user approves only part of the plan.
 
