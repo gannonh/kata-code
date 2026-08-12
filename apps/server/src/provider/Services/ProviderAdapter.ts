@@ -16,6 +16,7 @@ import type {
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSession,
+  ProviderSessionEnvironment,
   ProviderSessionStartInput,
   ThreadId,
   ProviderTurnStartResult,
@@ -82,7 +83,10 @@ export interface ProviderAdapterShape<TError> {
    * Start a provider-backed session.
    */
   readonly startSession: (
-    input: ProviderSessionStartInput,
+    input: ProviderSessionStartInput & {
+      /** Generic server-owned process environment additions. */
+      readonly environment?: ProviderSessionEnvironment | undefined;
+    },
   ) => Effect.Effect<ProviderSession, TError>;
 
   /**

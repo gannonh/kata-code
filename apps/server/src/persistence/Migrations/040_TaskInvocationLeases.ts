@@ -1,0 +1,29 @@
+import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+export default Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    CREATE TABLE IF NOT EXISTS task_invocation_leases (
+      token_hash TEXT PRIMARY KEY,
+      environment_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      occurrence INTEGER NOT NULL,
+      stage TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      provider_instance_id TEXT NOT NULL,
+      provider_turn_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      issued_at TEXT NOT NULL,
+      revoked_at TEXT
+    )
+  `;
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS idx_task_invocation_leases_thread
+    ON task_invocation_leases(thread_id, status)
+  `;
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS idx_task_invocation_leases_turn
+    ON task_invocation_leases(thread_id, provider_turn_id, status)
+  `;
+});

@@ -6,6 +6,8 @@
  *
  * @module ClaudeAdapterLive
  */
+// @effect-diagnostics nodeBuiltinImport:off - provider launch env requires the platform path delimiter.
+import * as NodePath from "node:path";
 import {
   type CanUseTool,
   query,
@@ -24,6 +26,7 @@ import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { parseCliArgs } from "@kata-sh/code-shared/cliArgs";
 import {
   ApprovalRequestId,
+  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
@@ -1405,6 +1408,27 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
     Effect.provideService(Path.Path, path),
   );
+  const mergeSessionEnvironment = (input: {
+    readonly environment?: {
+      readonly variables: Readonly<Record<string, string>>;
+      readonly executablePath: string | null;
+      readonly pathPrepend: ReadonlyArray<string>;
+    };
+  }): NodeJS.ProcessEnv => {
+    const base = { ...claudeEnvironment, ...(input.environment?.variables ?? {}) };
+    const pathEntries = [
+      ...(input.environment?.pathPrepend ?? []),
+      ...(base.PATH ? [base.PATH] : []),
+    ].filter((entry) => entry.length > 0);
+    return {
+      ...base,
+      ...(pathEntries.length > 0 ? { PATH: pathEntries.join(NodePath.delimiter) } : {}),
+      ...(input.environment?.executablePath
+        ? { [TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]: input.environment.executablePath }
+        : {}),
+    };
+  };
+
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
@@ -3488,6 +3512,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
       const taskInstructions = input.developerInstructions?.trim();
       const taskStage = input.taskStage === true;
+      const effectiveClaudeEnvironment = mergeSessionEnvironment(
+        input.environment !== undefined ? { environment: input.environment } : {},
+      );
       const permissionMode = taskStage ? undefined : runtimeModeToPermission[input.runtimeMode];
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
@@ -3527,7 +3554,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: claudeEnvironment,
+        env: effectiveClaudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession

@@ -32,6 +32,7 @@ import {
   DispatchResult,
   OrchestrationReadModel,
 } from "./orchestration.ts";
+import { TaskCliContextEnvelope, TASK_CLI_CONTEXT_PATH } from "./taskCli.ts";
 import {
   RelayCloudEnvironmentHealthRequest,
   RelayCloudMintCredentialRequest,
@@ -440,6 +441,14 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+export class EnvironmentTaskCliHttpApi extends HttpApiGroup.make("taskCli").add(
+  HttpApiEndpoint.get("context", TASK_CLI_CONTEXT_PATH, {
+    headers: OptionalBearerHeaders,
+    success: TaskCliContextEnvelope,
+    error: [EnvironmentHttpInternalServerError],
+  }),
+) {}
+
 export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -509,4 +518,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
+  .add(EnvironmentTaskCliHttpApi)
   .add(EnvironmentConnectHttpApi) {}

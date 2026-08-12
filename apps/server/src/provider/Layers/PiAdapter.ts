@@ -13,6 +13,8 @@
  * @module provider/Layers/PiAdapter
  */
 import { randomUUID } from "node:crypto";
+// @effect-diagnostics nodeBuiltinImport:off - provider launch env requires the platform path delimiter.
+import * as NodePath from "node:path";
 import {
   type AgentSessionEvent,
   createAgentSession,
@@ -29,6 +31,7 @@ import {
   type PiSettings,
   ProviderDriverKind,
   ProviderInstanceId,
+  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
   ProviderItemId,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -688,6 +691,22 @@ export function makePiAdapter(
         }
 
         const cwd = input.cwd?.trim() || process.cwd();
+        const sessionEnvironment = input.environment;
+        const effectiveEnvironment = {
+          ...(options?.environment ?? process.env),
+          ...(sessionEnvironment?.variables ?? {}),
+          ...(sessionEnvironment?.pathPrepend && sessionEnvironment.pathPrepend.length > 0
+            ? {
+                PATH: [
+                  ...sessionEnvironment.pathPrepend,
+                  ...(options?.environment?.PATH ? [options.environment.PATH] : []),
+                ].join(NodePath.delimiter),
+              }
+            : {}),
+          ...(sessionEnvironment?.executablePath
+            ? { [TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]: sessionEnvironment.executablePath }
+            : {}),
+        };
         // Docker provision starts `katacode serve` before credential seed
         // copyInto completes. Create a fresh runtime for every session so it
         // reads credentials after the seed is available.
@@ -810,6 +829,20 @@ export function makePiAdapter(
               resourceLoader,
               sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+              // The Pi SDK carries the environment through its bash tool's
+              // process spawn hook; keep the provider contract generic.
+              ...(Object.keys(effectiveEnvironment).length > 0
+                ? {
+                    toolOptions: {
+                      bash: {
+                        spawnHook: (context: { env: NodeJS.ProcessEnv }) => ({
+                          ...context,
+                          env: effectiveEnvironment,
+                        }),
+                      },
+                    },
+                  }
+                : {}),
             });
             return { ...createdSession, resourceLoader, model };
           },

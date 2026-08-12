@@ -13,6 +13,7 @@ import {
   ModelSelection,
   NonNegativeInt,
   ThreadId,
+  TurnId,
   ProviderCompactThreadInput,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
@@ -20,14 +21,19 @@ import {
   ProviderSendTurnInput,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
+  TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
+  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type ProviderSessionEnvironment,
 } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -38,6 +44,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
+import { HttpServer as HttpServerService } from "effect/unstable/http/HttpServer";
 
 import {
   increment,
@@ -50,6 +57,10 @@ import {
   withMetrics,
 } from "../../observability/Metrics.ts";
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
+import { ServerConfig } from "../../config.ts";
+import { ServerEnvironment } from "../../environment/Services/ServerEnvironment.ts";
+import { readPersistedServerRuntimeState } from "../../serverRuntimeState.ts";
+import { TaskInvocationService } from "../../taskCli/TaskInvocationService.ts";
 import {
   supportsTaskWorktreeWrite,
   type ProviderAdapterShape,
@@ -71,6 +82,9 @@ import {
   type ActiveTaskProviderContext,
 } from "../../taskWorkspace/TaskWorkspaceService.ts";
 import type { TaskWorkspaceStage } from "@kata-sh/code-contracts";
+// @effect-diagnostics nodeBuiltinImport:off - provider CLI executable discovery uses the launch path.
+import { randomUUID } from "node:crypto";
+import * as NodePath from "node:path";
 import { trustedInstructionsForStage } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
@@ -283,6 +297,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const taskTurnWatchdogs = new Map<ThreadId, Fiber.Fiber<void, never>>();
+  const taskTurnCredentials = new Map<
+    ThreadId,
+    {
+      readonly token: string;
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly leaseTurnId: TurnId;
+      readonly environment: ProviderSessionEnvironment;
+      readonly providerTurnId?: TurnId;
+    }
+  >();
   const mcpRotationLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
   const getMcpRotationLock = (threadId: ThreadId) =>
     SynchronizedRef.modifyEffect(mcpRotationLocksRef, (current) => {
@@ -308,6 +332,145 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     }),
   );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+  const taskCliExecutable =
+    process.env[TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]?.trim() || process.argv[1] || "katacode";
+  const taskCliPath = NodePath.dirname(taskCliExecutable);
+  const taskCliEnvironmentForTurn = (input: {
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+  }): Effect.Effect<
+    | {
+        readonly environment: ProviderSessionEnvironment;
+        readonly token: string;
+        readonly leaseTurnId: TurnId;
+      }
+    | undefined,
+    ProviderValidationError
+  > =>
+    Effect.gen(function* () {
+      const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+      const serverEnvironment = yield* Effect.serviceOption(ServerEnvironment);
+      const serverConfig = yield* Effect.serviceOption(ServerConfig);
+      const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
+      const httpServer = yield* Effect.serviceOption(HttpServerService);
+      if (Option.isNone(taskInvocations) || Option.isNone(serverEnvironment)) {
+        return undefined;
+      }
+      const environmentId = yield* serverEnvironment.value.getEnvironmentId;
+      const endpoint = yield* Effect.gen(function* () {
+        if (Option.isSome(httpServer) && httpServer.value.address._tag === "TcpAddress") {
+          return `http://127.0.0.1:${httpServer.value.address.port}`;
+        }
+        if (Option.isSome(serverConfig) && Option.isSome(fileSystem)) {
+          const state = yield* readPersistedServerRuntimeState(
+            serverConfig.value.serverRuntimeStatePath,
+          ).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem.value),
+            Effect.orElseSucceed(() => Option.none()),
+          );
+          if (Option.isSome(state)) {
+            return state.value.origin;
+          }
+        }
+        if (Option.isSome(serverConfig) && serverConfig.value.port > 0) {
+          return `http://127.0.0.1:${serverConfig.value.port}`;
+        }
+        return undefined;
+      });
+      if (!endpoint) {
+        return yield* toValidationError(
+          "ProviderService.taskCliEnvironment",
+          "The Task CLI endpoint is unavailable because the server is not listening.",
+        );
+      }
+      const leaseTurnId = TurnId.make(`pending-task-cli-${randomUUID()}`);
+      const issued = yield* taskInvocations.value.issue({
+        environmentId,
+        threadId: input.threadId,
+        providerInstanceId: input.providerInstanceId,
+        providerTurnId: leaseTurnId,
+      });
+      return {
+        token: issued.token,
+        leaseTurnId,
+        environment: {
+          variables: {
+            [TASK_CLI_ENDPOINT_ENVIRONMENT_KEY]: endpoint,
+            [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: issued.token,
+          },
+          executablePath: taskCliExecutable,
+          pathPrepend: [taskCliPath],
+        },
+      };
+    }).pipe(
+      Effect.catchTag("TaskInvocationError", (error) =>
+        error.code === "not_active" ? Effect.succeed(undefined) : Effect.fail(error),
+      ),
+      Effect.mapError((cause) =>
+        toValidationError(
+          "ProviderService.taskCliEnvironment",
+          cause instanceof Error && "message" in cause
+            ? String(cause.message)
+            : "Failed to prepare Task CLI invocation environment.",
+          cause,
+        ),
+      ),
+    );
+
+  const mergeSessionEnvironments = (
+    base: ProviderSessionEnvironment | undefined,
+    task: ProviderSessionEnvironment | undefined,
+  ): ProviderSessionEnvironment | undefined => {
+    if (!base) return task;
+    if (!task) return base;
+    return {
+      variables: { ...base.variables, ...task.variables },
+      executablePath: task.executablePath ?? base.executablePath,
+      pathPrepend: [...task.pathPrepend, ...base.pathPrepend],
+    };
+  };
+  const revokeTaskCredential = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const credential = taskTurnCredentials.get(threadId);
+      const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+      if (!credential || Option.isNone(taskInvocations)) return;
+      const turnIds = [credential.leaseTurnId, credential.providerTurnId].filter(
+        (turnId, index, values): turnId is TurnId =>
+          turnId !== undefined && values.indexOf(turnId) === index,
+      );
+      yield* Effect.forEach(
+        turnIds,
+        (providerTurnId) => taskInvocations.value.revokeTurn({ threadId, providerTurnId }),
+        { discard: true },
+      ).pipe(Effect.ignore);
+      taskTurnCredentials.delete(threadId);
+    });
+  const markTaskTurnPending = (input: {
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly turnId: TurnId;
+  }) =>
+    Effect.gen(function* () {
+      const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+      if (!binding) return;
+      const runtimePayload =
+        binding.runtimePayload &&
+        typeof binding.runtimePayload === "object" &&
+        !Array.isArray(binding.runtimePayload)
+          ? binding.runtimePayload
+          : {};
+      yield* directory.upsert({
+        ...binding,
+        providerInstanceId: input.providerInstanceId,
+        status: "running",
+        runtimePayload: {
+          ...runtimePayload,
+          activeTurnId: input.turnId,
+          lastRuntimeEvent: "provider.task-cli.lease",
+          lastRuntimeEventAt: yield* nowIso,
+        },
+      });
+    });
   const prepareMcpSession = (
     threadId: ThreadId,
     providerInstanceId: ProviderInstanceId,
@@ -357,11 +520,27 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.gen(function* () {
-      if (event.type === "turn.completed" || event.type === "turn.aborted") {
-        const watchdog = taskTurnWatchdogs.get(event.threadId);
-        if (watchdog !== undefined) {
-          taskTurnWatchdogs.delete(event.threadId);
-          yield* Fiber.interrupt(watchdog);
+      if (
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted" ||
+        event.type === "runtime.error" ||
+        event.type === "session.exited"
+      ) {
+        const credential = taskTurnCredentials.get(event.threadId);
+        const eventMatchesCredential =
+          credential !== undefined &&
+          (event.turnId === undefined ||
+            event.turnId === credential.leaseTurnId ||
+            event.turnId === credential.providerTurnId) &&
+          (event.providerInstanceId === undefined ||
+            event.providerInstanceId === credential.providerInstanceId);
+        if (eventMatchesCredential) {
+          yield* revokeTaskCredential(event.threadId);
+          const watchdog = taskTurnWatchdogs.get(event.threadId);
+          if (watchdog !== undefined) {
+            taskTurnWatchdogs.delete(event.threadId);
+            yield* Fiber.interrupt(watchdog);
+          }
         }
       }
       yield* Effect.succeed(event).pipe(
@@ -423,6 +602,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly threadId: ThreadId;
       readonly providerInstanceId: ProviderInstanceId;
       readonly developerInstructions?: string;
+      readonly environment?: ProviderSessionEnvironment;
       readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
     }) {
       const bindingOption = yield* directory.getBinding(input.threadId);
@@ -468,6 +648,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             ? { modelSelection }
             : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
+        ...(input.environment ? { environment: input.environment } : {}),
         taskStage: activeTaskStage !== undefined,
         taskExecutionProfile,
         ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
@@ -910,7 +1091,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               ...session,
               providerInstanceId: resolvedInstanceId,
             };
-
             yield* stopStaleSessionsForThread({
               threadId,
               currentInstanceId: resolvedInstanceId,
@@ -1024,6 +1204,30 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
               interactionMode: providerInteractionMode ?? "default",
             };
+      const isTaskTurn = yield* isActiveTaskThread(input.threadId);
+      yield* Effect.annotateCurrentSpan({
+        "provider.kind": routed.adapter.provider,
+        ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
+      });
+      const taskEnvironment = isTaskTurn
+        ? yield* taskCliEnvironmentForTurn({
+            threadId: input.threadId,
+            providerInstanceId: routed.instanceId,
+          })
+        : undefined;
+      if (taskEnvironment) {
+        taskTurnCredentials.set(input.threadId, {
+          token: taskEnvironment.token,
+          providerInstanceId: routed.instanceId,
+          leaseTurnId: taskEnvironment.leaseTurnId,
+          environment: taskEnvironment.environment,
+        });
+        yield* markTaskTurnPending({
+          threadId: input.threadId,
+          providerInstanceId: routed.instanceId,
+          turnId: taskEnvironment.leaseTurnId,
+        });
+      }
       yield* withMcpRotationLock(
         input.threadId,
         Effect.gen(function* () {
@@ -1032,24 +1236,79 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             routed.instanceId,
             activeTaskStage !== undefined,
           );
-          if (mcpPreparation.rotated) {
+          if (mcpPreparation.rotated || taskEnvironment) {
             yield* restartSessionForMcpCredential({
               threadId: input.threadId,
               providerInstanceId: routed.instanceId,
               ...(input.developerInstructions !== undefined
                 ? { developerInstructions: input.developerInstructions }
                 : {}),
+              ...(mergeSessionEnvironments(input.environment, taskEnvironment?.environment)
+                ? {
+                    environment: mergeSessionEnvironments(
+                      input.environment,
+                      taskEnvironment?.environment,
+                    )!,
+                  }
+                : {}),
               adapter: routed.adapter,
             });
           }
         }),
+      ).pipe(
+        Effect.onError(() =>
+          taskEnvironment ? revokeTaskCredential(input.threadId) : Effect.void,
+        ),
       );
-      const isTaskTurn = yield* isActiveTaskThread(input.threadId);
-      yield* Effect.annotateCurrentSpan({
-        "provider.kind": routed.adapter.provider,
-        ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
-      });
-      const turn = yield* routed.adapter.sendTurn(providerInput);
+      if (taskEnvironment) {
+        yield* markTaskTurnPending({
+          threadId: input.threadId,
+          providerInstanceId: routed.instanceId,
+          turnId: taskEnvironment.leaseTurnId,
+        });
+      }
+      const turn = yield* routed.adapter
+        .sendTurn({
+          ...providerInput,
+          ...(taskEnvironment
+            ? {
+                environment: mergeSessionEnvironments(
+                  providerInput.environment,
+                  taskEnvironment.environment,
+                ),
+              }
+            : {}),
+        })
+        .pipe(
+          Effect.onError(() =>
+            taskEnvironment ? revokeTaskCredential(input.threadId) : Effect.void,
+          ),
+        );
+      if (taskEnvironment) {
+        taskTurnCredentials.set(input.threadId, {
+          token: taskEnvironment.token,
+          providerInstanceId: routed.instanceId,
+          leaseTurnId: taskEnvironment.leaseTurnId,
+          environment: taskEnvironment.environment,
+          providerTurnId: turn.turnId,
+        });
+        const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+        if (Option.isSome(taskInvocations)) {
+          yield* taskInvocations.value
+            .bind({
+              token: taskEnvironment.token,
+              threadId: input.threadId,
+              providerInstanceId: routed.instanceId,
+              providerTurnId: turn.turnId,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                toValidationError("ProviderService.sendTurn", cause.message, cause),
+              ),
+              Effect.onError(() => revokeTaskCredential(input.threadId)),
+            );
+        }
+      }
       const persistedBindingAfterTurn = Option.getOrUndefined(
         yield* directory.getBinding(input.threadId),
       );
@@ -1254,6 +1513,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (routed.isActive) {
           yield* routed.adapter.stopSession(routed.threadId);
         }
+        const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+        if (Option.isSome(taskInvocations)) {
+          yield* taskInvocations.value.revokeThread(input.threadId).pipe(Effect.ignore);
+        }
+        taskTurnCredentials.delete(input.threadId);
         yield* clearMcpSession(input.threadId);
         yield* directory.upsert({
           threadId: input.threadId,
@@ -1467,6 +1731,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ).pipe(Effect.asVoid);
     yield* Effect.forEach(currentAdapters, ([, adapter]) => adapter.stopAll()).pipe(Effect.asVoid);
     yield* McpSessionRegistry.revokeAllActiveMcpCredentials();
+    const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+    if (Option.isSome(taskInvocations)) {
+      yield* taskInvocations.value.revokeAll.pipe(Effect.ignore);
+    }
+    taskTurnCredentials.clear();
     McpProviderSession.clearAllMcpProviderSessions();
     const bindings = yield* directory.listBindings().pipe(Effect.orElseSucceed(() => []));
     yield* Effect.forEach(bindings, (binding) =>

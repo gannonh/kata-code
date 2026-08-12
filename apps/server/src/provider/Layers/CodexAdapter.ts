@@ -15,6 +15,7 @@ import {
   type CanonicalRequestType,
   type CodexSettings,
   ProviderDriverKind,
+  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
   type ProviderEvent,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -1510,6 +1511,28 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
 
+  const mergeSessionEnvironment = (input: {
+    readonly environment?: {
+      readonly variables: Readonly<Record<string, string>>;
+      readonly executablePath: string | null;
+      readonly pathPrepend: ReadonlyArray<string>;
+    };
+  }): NodeJS.ProcessEnv | undefined => {
+    if (!input.environment) return options?.environment;
+    const base = { ...(options?.environment ?? process.env), ...input.environment.variables };
+    const pathEntries = [
+      ...input.environment.pathPrepend,
+      ...(base.PATH ? [base.PATH] : []),
+    ].filter((entry) => entry.length > 0);
+    return {
+      ...base,
+      ...(pathEntries.length > 0 ? { PATH: pathEntries.join(NodePath.delimiter) } : {}),
+      ...(input.environment.executablePath
+        ? { [TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]: input.environment.executablePath }
+        : {}),
+    };
+  };
+
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1558,13 +1581,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ),
           );
         }
+        const genericEnvironment = mergeSessionEnvironment({
+          ...(input.environment !== undefined ? { environment: input.environment } : {}),
+        });
         const taskEnvironment =
           input.taskExecutionProfile === "task-worktree-write" && taskAgentHomePath
             ? {
-                ...(options?.environment ?? process.env),
+                ...(genericEnvironment ?? process.env),
                 HOME: taskAgentHomePath,
               }
-            : undefined;
+            : genericEnvironment;
         const taskCodexHomePath =
           input.taskExecutionProfile === "task-worktree-write"
             ? resolveTaskCodexHomePath(codexConfig.homePath, options?.environment)
@@ -1660,11 +1686,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
-          ...(taskEnvironment
-            ? { environment: taskEnvironment }
-            : options?.environment
-              ? { environment: options.environment }
-              : {}),
+          ...(taskEnvironment ? { environment: taskEnvironment } : {}),
           ...(taskCodexHomePath
             ? { homePath: taskCodexHomePath }
             : codexConfig.homePath
@@ -1696,7 +1718,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(mcpSession
             ? {
                 environment: {
-                  ...(taskEnvironment ?? options?.environment ?? process.env),
+                  ...(taskEnvironment ?? genericEnvironment ?? process.env),
                   [MCP_BEARER_TOKEN_ENV_VAR]: mcpSession.authorizationHeader.replace(
                     /^Bearer\s+/,
                     "",

@@ -105,6 +105,8 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
+import { taskCliHttpApiLayer } from "./taskCli/http.ts";
+import { TaskInvocationServiceLive } from "./taskCli/TaskInvocationService.ts";
 import * as NetService from "@kata-sh/code-shared/Net";
 import * as RelayClient from "@kata-sh/code-shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@kata-sh/code-tailscale";
@@ -319,6 +321,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(Layer.mergeAll(VcsLayerLive, TaskWorkspaceLayerLive)),
   Layer.provideMerge(ProviderRuntimeLayerLive),
+  Layer.provideMerge(TaskInvocationServiceLive),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
@@ -345,9 +348,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
-  Layer.provideMerge(ServerEnvironmentLive),
+  Layer.provideMerge(Layer.mergeAll(ServerEnvironmentLive, ServerSecretStore.layer)),
   Layer.provideMerge(AuthLayerLive),
-  Layer.provideMerge(ServerSecretStore.layer),
   Layer.provideMerge(
     Layer.mergeAll(
       CloudCliTokenManager.layer.pipe(Layer.provide(ServerSecretStore.layer)),
@@ -377,6 +379,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(authHttpApiLayer),
       Layer.provide(connectHttpApiLayer),
       Layer.provide(orchestrationHttpApiLayer),
+      Layer.provide(taskCliHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),

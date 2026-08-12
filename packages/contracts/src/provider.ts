@@ -21,6 +21,7 @@ import {
   ProviderUserInputAnswers,
   RuntimeMode,
 } from "./orchestration.ts";
+import { ProviderSessionEnvironment } from "./taskCli.ts";
 
 /** Server-owned profile requested for a task-bound provider session. */
 export const ProviderTaskExecutionProfile = Schema.Literals(["planning", "task-worktree-write"]);
@@ -63,6 +64,8 @@ export const ProviderSessionStartInput = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   /** Server-owned provider-native system/developer instructions. */
   developerInstructions: Schema.optional(TrimmedNonEmptyString),
+  /** Generic server-owned process environment additions for this session. */
+  environment: Schema.optional(ProviderSessionEnvironment),
   /** Server-derived Guided task-stage execution profile. */
   taskStage: Schema.optional(Schema.Boolean),
   /** Additive profile seam; legacy RuntimeMode remains unchanged. */
@@ -87,6 +90,8 @@ export const ProviderSendTurnInput = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   /** Server-owned provider-native system/developer instructions. */
   developerInstructions: Schema.optional(TrimmedNonEmptyString),
+  /** Generic server-owned process environment additions for this session. */
+  environment: Schema.optional(ProviderSessionEnvironment),
   /** Server-derived Guided task-stage execution profile. */
   taskStage: Schema.optional(Schema.Boolean),
   /** Additive profile seam; legacy RuntimeMode remains unchanged. */

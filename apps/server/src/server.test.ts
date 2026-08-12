@@ -149,6 +149,7 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as Data from "effect/Data";
+import { TaskInvocationService } from "./taskCli/TaskInvocationService.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -756,6 +757,8 @@ const buildAppUnderTest = (options?: {
                 conversationTarget: null,
               }),
             getSnapshot: Effect.succeed({ sequence: 0, tasks: [] }),
+            resolveTaskCliInvocation: () =>
+              Effect.die("No task CLI invocation in server route tests."),
             getTask: () => Effect.succeed(null),
             streamEvents: Stream.empty,
             subscribe: Effect.succeed(Stream.empty),
@@ -763,6 +766,17 @@ const buildAppUnderTest = (options?: {
             processWorktree: () => Effect.void,
             ...options?.layers?.taskWorkspace,
           }),
+          Layer.succeed(
+            TaskInvocationService,
+            TaskInvocationService.of({
+              issue: () => Effect.die("unused"),
+              bind: () => Effect.die("unused"),
+              resolve: () => Effect.die("unused"),
+              revokeThread: () => Effect.void,
+              revokeTurn: () => Effect.void,
+              revokeAll: Effect.void,
+            }),
+          ),
           Layer.mock(CheckpointDiffQuery)({
             getTurnDiff: () =>
               Effect.succeed({
