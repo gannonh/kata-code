@@ -7,6 +7,11 @@ import {
   ProviderSession,
   ProviderSessionStartInput,
 } from "./provider.ts";
+import {
+  PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_CHARS,
+  PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_ENTRIES,
+  ProviderSessionEnvironment,
+} from "./providerEnvironment.ts";
 
 const decodeProviderSessionStartInput = Schema.decodeUnknownSync(ProviderSessionStartInput);
 const decodeProviderSendTurnInput = Schema.decodeUnknownSync(ProviderSendTurnInput);
@@ -19,6 +24,39 @@ function getOptionValue(
 ): unknown {
   return options?.find((option) => option.id === id)?.value;
 }
+
+describe("ProviderSessionEnvironment", () => {
+  it("accepts bounded generic variables, executable path, and PATH prepend", () => {
+    const decode = Schema.decodeUnknownSync(ProviderSessionEnvironment);
+    const parsed = decode({
+      variables: { KATACODE_TASK_CLI_ENDPOINT: "http://127.0.0.1:1234" },
+      executablePath: "/usr/local/bin/katacode",
+      pathPrepend: ["/usr/local/bin"],
+    });
+    expect(parsed.variables.KATACODE_TASK_CLI_ENDPOINT).toBe("http://127.0.0.1:1234");
+  });
+
+  it("rejects oversized PATH budgets and malformed variable names", () => {
+    const decode = Schema.decodeUnknownSync(ProviderSessionEnvironment);
+    expect(() =>
+      decode({
+        variables: { "not-a-shell-name": "secret" },
+        executablePath: null,
+        pathPrepend: ["x".repeat(PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_CHARS + 1)],
+      }),
+    ).toThrow();
+    expect(() =>
+      decode({
+        variables: {},
+        executablePath: null,
+        pathPrepend: Array.from(
+          { length: PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_ENTRIES + 1 },
+          () => "/bin",
+        ),
+      }),
+    ).toThrow();
+  });
+});
 
 describe("ProviderSessionStartInput", () => {
   it("accepts codex-compatible payloads", () => {

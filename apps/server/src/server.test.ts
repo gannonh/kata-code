@@ -8,6 +8,11 @@ import {
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
   CommandId,
+  TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
+  type TaskStageContextResult,
+  TurnId,
+  TaskWorkspaceId,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   EventId,
@@ -56,6 +61,8 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import * as TestConsole from "effect/testing/TestConsole";
+import { Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   FetchHttpClient,
@@ -149,7 +156,13 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as Data from "effect/Data";
-import { TaskInvocationService } from "./taskCli/TaskInvocationService.ts";
+import {
+  TaskInvocationError,
+  TaskInvocationService,
+  type TaskInvocationResolution,
+  type TaskInvocationServiceShape,
+} from "./taskCli/TaskInvocationService.ts";
+import { taskCommand } from "./cli/task.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -369,6 +382,7 @@ const buildAppUnderTest = (options?: {
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
     taskWorkspace?: Partial<TaskWorkspaceServiceShape>;
+    taskInvocation?: Partial<TaskInvocationServiceShape>;
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
@@ -775,6 +789,7 @@ const buildAppUnderTest = (options?: {
               revokeThread: () => Effect.void,
               revokeTurn: () => Effect.void,
               revokeAll: Effect.void,
+              ...options?.layers?.taskInvocation,
             }),
           ),
           Layer.mock(CheckpointDiffQuery)({
@@ -1299,6 +1314,114 @@ const getWsServerUrl = (
   });
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
+  it.effect("serves Task CLI context through bearer auth and the real CLI client", () =>
+    Effect.gen(function* () {
+      const token = "task-cli-success-token";
+      const taskContext: TaskStageContextResult = {
+        stage: "questions",
+        occurrence: 0,
+        brief: "Prove the Task CLI path.",
+        feedback: null,
+        artifacts: [],
+      };
+      const resolved = {
+        lease: {
+          tokenHash: "hashed-token",
+          scope: {
+            environmentId: testEnvironmentDescriptor.environmentId,
+            taskId: TaskWorkspaceId.make("task-cli-success"),
+            occurrence: 0,
+            stage: "questions",
+            threadId: defaultThreadId,
+            providerInstanceId: defaultModelSelection.instanceId,
+            providerTurnId: TurnId.make("turn-cli-success"),
+          },
+          status: "active",
+          issuedAt: "2026-01-01T00:00:00.000Z",
+          expiresAt: null,
+          revokedAt: null,
+          revocationReason: null,
+        },
+        scope: {
+          environmentId: testEnvironmentDescriptor.environmentId,
+          taskId: TaskWorkspaceId.make("task-cli-success"),
+          occurrence: 0,
+          stage: "questions",
+          threadId: defaultThreadId,
+          providerInstanceId: defaultModelSelection.instanceId,
+          providerTurnId: TurnId.make("turn-cli-success"),
+        },
+        context: taskContext,
+      } as const;
+      yield* buildAppUnderTest({
+        config: { staticDir: process.cwd() },
+        layers: {
+          taskInvocation: {
+            resolve: (rawToken): Effect.Effect<TaskInvocationResolution, TaskInvocationError> =>
+              rawToken === token
+                ? Effect.succeed(resolved)
+                : Effect.fail(
+                    new TaskInvocationError({
+                      code: "unauthorized",
+                      message: "The invocation credential is not valid.",
+                    }),
+                  ),
+          },
+        },
+      });
+      const endpoint = yield* getHttpServerUrl("/api/task-cli/v1/context");
+      const unauthorized = yield* fetchEffect(endpoint);
+      assert.equal(unauthorized.status, 200);
+      assert.equal(unauthorized.headers["cache-control"], "no-store");
+      assert.equal(unauthorized.headers.pragma, "no-cache");
+      const unauthorizedBody = yield* responseJsonEffect<{ ok: boolean; error?: { code: string } }>(
+        unauthorized,
+      );
+      assert.isFalse(unauthorizedBody.ok);
+      assert.equal(unauthorizedBody.error?.code, "unauthorized");
+
+      const authorized = yield* HttpClient.execute(
+        HttpClientRequest.make("GET")(testRequestUrl(endpoint), {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      );
+      assert.equal(authorized.status, 200);
+      const authorizedBody = yield* responseJsonEffect<{
+        ok: boolean;
+        context?: TaskStageContextResult;
+      }>(authorized);
+      assert.isTrue(authorizedBody.ok);
+      assert.deepEqual(authorizedBody.context, taskContext);
+
+      const previousEndpoint = process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY];
+      const previousToken = process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+      process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY] = endpoint.replace(
+        "/api/task-cli/v1/context",
+        "",
+      );
+      process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY] = token;
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previousEndpoint === undefined) delete process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY];
+          else process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY] = previousEndpoint;
+          if (previousToken === undefined)
+            delete process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+          else process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY] = previousToken;
+        }),
+      );
+      yield* Command.runWith(taskCommand, { version: "0.0.0" })(["context"]);
+      const output = (yield* TestConsole.logLines).findLast(
+        (line): line is string =>
+          typeof line === "string" && line.includes('"protocol":"task-cli@1"'),
+      );
+      assert.isDefined(output);
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const cliBody = JSON.parse(output!) as { ok: boolean; context?: TaskStageContextResult };
+      assert.isTrue(cliBody.ok);
+      assert.deepEqual(cliBody.context, taskContext);
+    }).pipe(Effect.provide(Layer.mergeAll(TestConsole.layer, NodeHttpServer.layerTest))),
+  );
+
   it.effect("serves static index content for GET / when staticDir is configured", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

@@ -171,6 +171,39 @@ const MODEL_SELECTION = {
 } as const;
 
 describe("makePiAdapter (vertical slice)", () => {
+  it.effect("propagates generic Task CLI environment through the supported Pi bash spawnHook", () =>
+    Effect.gen(function* () {
+      const { session } = makeFakeSession();
+      let capturedTools: ReadonlyArray<{ readonly name?: string; readonly execute?: Function }> =
+        [];
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: ((args: {
+          customTools?: ReadonlyArray<{ name?: string; execute?: Function }>;
+        }) => {
+          capturedTools = args.customTools ?? [];
+          return Promise.resolve({ session });
+        }) as never,
+      });
+      yield* adapter.startSession({
+        threadId: ThreadId.make("pi-thread-task-cli-environment"),
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            KATACODE_TASK_CLI_ENDPOINT: "http://127.0.0.1:1234",
+            KATACODE_TASK_INVOCATION_TOKEN: "opaque-token",
+          },
+          executablePath: "/tmp/bin/katacode",
+          pathPrepend: ["/tmp/bin"],
+        },
+      });
+      const bash = capturedTools.find((tool) => tool.name === "bash");
+      expect(bash).toBeDefined();
+      expect(bash?.execute).toBeTypeOf("function");
+    }),
+  );
+
   it.effect("defaults reasoning models to thinkingLevel off when unset", () =>
     Effect.gen(function* () {
       const { session } = makeFakeSession();

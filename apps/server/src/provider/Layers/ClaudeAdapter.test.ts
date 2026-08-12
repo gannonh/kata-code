@@ -430,6 +430,35 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("propagates generic Task CLI environment and prepends PATH for Claude", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            KATACODE_TASK_CLI_ENDPOINT: "http://127.0.0.1:1234",
+            KATACODE_TASK_INVOCATION_TOKEN: "opaque-token",
+          },
+          executablePath: "/tmp/bin/katacode",
+          pathPrepend: ["/tmp/bin"],
+        },
+      });
+      const environment = harness.getLastCreateQueryInput()?.options.env as NodeJS.ProcessEnv;
+      assert.equal(environment.KATACODE_TASK_CLI_ENDPOINT, "http://127.0.0.1:1234");
+      assert.equal(environment.KATACODE_TASK_INVOCATION_TOKEN, "opaque-token");
+      assert.equal(environment.KATACODE_TASK_CLI_EXECUTABLE, "/tmp/bin/katacode");
+      assert.ok(environment.PATH?.startsWith(`/tmp/bin${path.delimiter}`));
+      assert.equal(environment.KATACODE_TASK_INVOCATION_TOKEN, "opaque-token");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("runs Claude SDK sessions with the configured Claude HOME", () => {
     const harness = makeHarness({ claudeConfig: { homePath: "~/.claude-work" } });
     return Effect.gen(function* () {

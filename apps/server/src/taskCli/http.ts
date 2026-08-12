@@ -6,17 +6,28 @@ import {
   type TaskCliContextEnvelope as TaskCliContextEnvelopeValue,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
+import * as HttpEffect from "effect/unstable/http/HttpEffect";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
 import { annotateEnvironmentRequest } from "../auth/http.ts";
 import { TaskInvocationError, TaskInvocationService } from "./TaskInvocationService.ts";
 
+const TASK_CLI_RESPONSE_HEADERS = {
+  "cache-control": "no-store",
+  pragma: "no-cache",
+} as const;
+
+const appendTaskCliResponseHeaders = HttpEffect.appendPreResponseHandler((_request, response) =>
+  Effect.succeed(HttpServerResponse.setHeaders(response, TASK_CLI_RESPONSE_HEADERS)),
+);
+
 const tokenFromHeaders = (request: HttpServerRequest.HttpServerRequest): string | undefined => {
   const authorization = request.headers.authorization;
-  if (!authorization?.startsWith("Bearer ")) return undefined;
-  const token = authorization.slice("Bearer ".length).trim();
-  return token.length > 0 ? token : undefined;
+  const match = /^(?:Bearer)\s+(.+)$/iu.exec(authorization ?? "");
+  const token = match?.[1]?.trim();
+  return token && token.length > 0 ? token : undefined;
 };
 
 export const taskCliHttpApiLayer = HttpApiBuilder.group(
@@ -28,6 +39,7 @@ export const taskCliHttpApiLayer = HttpApiBuilder.group(
       "context",
       Effect.fn("environment.taskCli.context")(function* (args) {
         yield* annotateEnvironmentRequest(args.endpoint.name);
+        yield* appendTaskCliResponseHeaders;
         const request = yield* HttpServerRequest.HttpServerRequest;
         const token = tokenFromHeaders(request);
         if (!token) {

@@ -1,4 +1,6 @@
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -35,5 +37,18 @@ export const ProviderSessionEnvironment = Schema.Struct({
   pathPrepend: Schema.Array(ProviderSessionEnvironmentPath).check(
     Schema.isMaxLength(PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_ENTRIES),
   ),
-});
+}).check(
+  Schema.makeFilter(
+    (environment) => {
+      const pathChars = environment.pathPrepend.reduce((total, entry) => total + entry.length, 0);
+      return pathChars <=
+        PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_ENTRIES * PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_CHARS
+        ? true
+        : new SchemaIssue.InvalidValue(Option.some(environment.pathPrepend), {
+            message: "Provider session PATH additions exceed the maximum size.",
+          });
+    },
+    { identifier: "ProviderSessionEnvironmentPathBudget" },
+  ),
+);
 export type ProviderSessionEnvironment = typeof ProviderSessionEnvironment.Type;

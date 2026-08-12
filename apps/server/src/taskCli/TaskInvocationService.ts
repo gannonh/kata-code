@@ -21,13 +21,11 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
-const TASK_INVOCATION_LEASE_DURATION_MS = 24 * 60 * 60 * 1_000;
-
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
 } from "../provider/Services/ProviderSessionDirectory.ts";
-import { resolveActiveTaskCliInvocation } from "../taskWorkspace/TaskWorkspaceService.ts";
+import { TaskWorkspaceService } from "../taskWorkspace/TaskWorkspaceService.ts";
 
 const LeaseRow = Schema.Struct({
   tokenHash: Schema.String,
@@ -103,6 +101,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* Effect.serviceOption(ProviderSessionDirectory);
+  const taskWorkspace = yield* Effect.serviceOption(TaskWorkspaceService);
 
   const findLease = SqlSchema.findOneOption({
     Request: Schema.Struct({ tokenHash: Schema.String }),
@@ -220,6 +219,18 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  const resolveActiveTaskInvocation = (scope: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly providerTurnId: TurnId;
+  }) =>
+    Option.isNone(taskWorkspace)
+      ? Effect.fail(toError("not_active", "The Task workflow service is unavailable."))
+      : taskWorkspace.value
+          .resolveTaskCliInvocation(scope)
+          .pipe(Effect.mapError((cause) => toError("not_active", cause.message, cause)));
+
   const bindingHasTurn = (
     binding: Option.Option<ProviderRuntimeBinding>,
     scope: TaskInvocationScopeValue,
@@ -240,12 +251,12 @@ const make = Effect.gen(function* () {
 
   const issue: TaskInvocationServiceShape["issue"] = Effect.fn("TaskInvocationService.issue")(
     function* (input) {
-      const active = yield* resolveActiveTaskCliInvocation({
+      const active = yield* resolveActiveTaskInvocation({
         environmentId: input.environmentId,
         threadId: input.threadId,
         providerInstanceId: input.providerInstanceId,
         providerTurnId: input.providerTurnId,
-      }).pipe(Effect.mapError((cause) => toError("not_active", cause.message, cause)));
+      });
       const scope = yield* decodeScope({
         environmentId: input.environmentId,
         taskId: active.taskId,
@@ -270,11 +281,10 @@ const make = Effect.gen(function* () {
           toError("internal_error", "Failed to hash invocation credential.", cause),
         ),
       );
-      const issuedAtDateTime = yield* DateTime.now;
-      const issuedAt = DateTime.formatIso(issuedAtDateTime);
-      const expiresAt = DateTime.formatIso(
-        DateTime.add(issuedAtDateTime, { milliseconds: TASK_INVOCATION_LEASE_DURATION_MS }),
-      );
+      const issuedAt = DateTime.formatIso(yield* DateTime.now);
+      // New leases are turn-bound rather than wall-clock-bound. The nullable
+      // column remains for decoding older persisted rows that had a TTL.
+      const expiresAt = null;
       yield* sql
         .withTransaction(
           Effect.gen(function* () {
@@ -333,6 +343,22 @@ const make = Effect.gen(function* () {
           "The invocation credential is bound to another provider turn.",
         );
       }
+      const bindingScope: TaskInvocationScopeValue = {
+        environmentId: row.value.environmentId,
+        taskId: row.value.taskId,
+        occurrence: row.value.occurrence,
+        stage: row.value.stage,
+        threadId: row.value.threadId,
+        providerInstanceId: row.value.providerInstanceId,
+        providerTurnId: input.providerTurnId,
+      };
+      const binding = yield* currentBinding(bindingScope);
+      if (!bindingHasTurn(binding, bindingScope)) {
+        return yield* toError(
+          "stale_lease",
+          "The invocation credential cannot bind to an inactive provider turn.",
+        );
+      }
       const updated = yield* sql<{ readonly tokenHash: string }>`
         UPDATE task_invocation_leases
         SET provider_turn_id = ${input.providerTurnId}
@@ -373,7 +399,16 @@ const make = Effect.gen(function* () {
       }
       const row = rowOption.value;
       if (row.status !== "active") {
-        return yield* toError("stale_lease", "The invocation credential has been revoked.");
+        const terminal =
+          row.revocationReason === "terminal" ||
+          row.revocationReason === "failed" ||
+          row.revocationReason === "stopped";
+        return yield* toError(
+          terminal ? "terminal_lease" : "stale_lease",
+          terminal
+            ? "The provider turn for this invocation has terminated."
+            : "The invocation credential has been revoked.",
+        );
       }
       if (row.expiresAt !== null) {
         const expiresAt = yield* Schema.decodeUnknownEffect(Schema.DateFromString)(
@@ -394,7 +429,7 @@ const make = Effect.gen(function* () {
           toError("internal_error", "The persisted invocation scope is malformed.", cause),
         ),
       );
-      const active = yield* resolveActiveTaskCliInvocation(scope).pipe(
+      const active = yield* resolveActiveTaskInvocation(scope).pipe(
         Effect.tapError(() => revokeToken(tokenHash).pipe(Effect.ignore)),
         Effect.mapError((cause) =>
           toError("stale_lease", "The invocation no longer matches an active Task turn.", cause),

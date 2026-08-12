@@ -292,6 +292,33 @@ validationLayer("CodexAdapterLive validation", (it) => {
     }),
   );
 
+  it.effect("propagates generic Task CLI environment and prepends PATH for Codex", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-task-cli-environment"),
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            KATACODE_TASK_CLI_ENDPOINT: "http://127.0.0.1:1234",
+            KATACODE_TASK_INVOCATION_TOKEN: "opaque-token",
+          },
+          executablePath: "/tmp/bin/katacode",
+          pathPrepend: ["/tmp/bin"],
+        },
+      });
+      const runtimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      assert.ok(runtimeOptions);
+      assert.equal(runtimeOptions.environment?.KATACODE_TASK_CLI_ENDPOINT, "http://127.0.0.1:1234");
+      assert.equal(runtimeOptions.environment?.KATACODE_TASK_INVOCATION_TOKEN, "opaque-token");
+      assert.equal(runtimeOptions.environment?.KATACODE_TASK_CLI_EXECUTABLE, "/tmp/bin/katacode");
+      assert.ok(runtimeOptions.environment?.PATH?.startsWith(`/tmp/bin${path.delimiter}`));
+      assert.equal(runtimeOptions.environment?.KATACODE_TASK_INVOCATION_TOKEN, "opaque-token");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("isolates the task MCP bearer token from Codex shell subprocesses", () =>
     Effect.gen(function* () {
       validationRuntimeFactory.factory.mockClear();
