@@ -3074,6 +3074,32 @@ const guidedCreate = (overrides: Record<string, unknown> = {}) =>
   });
 
 describe("TaskWorkspaceService first-slice workflow", () => {
+  it.effect("stamps CLI architecture only on first-slice task records", () =>
+    Effect.gen(function* () {
+      const { runtime } = yield* setupRuntime("kata-task-architecture-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const firstSlice = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      expect(firstSlice.task.versions.executionArchitecture).toBe("task-cli@1");
+
+      const legacy = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.create",
+            commandId: CommandId.make("legacy-architecture-create"),
+            taskId: TaskWorkspaceId.make("legacy-architecture-task"),
+            createdAt: now(2),
+            title: "Legacy task",
+            projectId,
+            workspaceRoot: ".",
+            baseRef: "main",
+            preset: "standard",
+            approvalPolicy: "before-build",
+          }),
+        ),
+      );
+      expect(legacy.task.versions.executionArchitecture).toBeUndefined();
+    }),
+  );
   it.effect(
     "rejects a Guided create whose provider cannot enforce task-worktree-write",
     () =>
