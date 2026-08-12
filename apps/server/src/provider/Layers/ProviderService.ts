@@ -526,6 +526,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         event.type === "runtime.error" ||
         event.type === "session.exited"
       ) {
+        const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+        if (Option.isSome(taskInvocations)) {
+          if (event.turnId !== undefined) {
+            yield* taskInvocations.value
+              .revokeTurn({
+                threadId: event.threadId,
+                providerTurnId: event.turnId,
+              })
+              .pipe(Effect.ignore);
+          } else if (event.type === "runtime.error" || event.type === "session.exited") {
+            yield* taskInvocations.value.revokeThread(event.threadId).pipe(Effect.ignore);
+          }
+        }
         const credential = taskTurnCredentials.get(event.threadId);
         const eventMatchesCredential =
           credential !== undefined &&
