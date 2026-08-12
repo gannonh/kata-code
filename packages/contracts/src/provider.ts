@@ -21,7 +21,7 @@ import {
   ProviderUserInputAnswers,
   RuntimeMode,
 } from "./orchestration.ts";
-import { ProviderSessionEnvironment } from "./taskCli.ts";
+import { ProviderSessionEnvironment } from "./providerEnvironment.ts";
 
 /** Server-owned profile requested for a task-bound provider session. */
 export const ProviderTaskExecutionProfile = Schema.Literals(["planning", "task-worktree-write"]);

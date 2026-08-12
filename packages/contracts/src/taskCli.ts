@@ -8,7 +8,16 @@ import {
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderSessionEnvironment } from "./providerEnvironment.ts";
 import { TaskStageContextResult, TaskWorkspaceId, TaskWorkspaceStage } from "./taskWorkspace.ts";
+
+export { ProviderSessionEnvironment } from "./providerEnvironment.ts";
+export {
+  PROVIDER_SESSION_ENVIRONMENT_MAX_VARIABLES,
+  PROVIDER_SESSION_ENVIRONMENT_MAX_VALUE_CHARS,
+  PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_ENTRIES,
+  PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_CHARS,
+} from "./providerEnvironment.ts";
 
 export const TASK_CLI_PROTOCOL = "task-cli@1" as const;
 export const TASK_CLI_CONTEXT_PATH = "/api/task-cli/v1/context" as const;
@@ -69,20 +78,25 @@ export type TaskInvocationScope = typeof TaskInvocationScope.Type;
 export const TaskInvocationLeaseStatus = Schema.Literals(["active", "revoked"]);
 export type TaskInvocationLeaseStatus = typeof TaskInvocationLeaseStatus.Type;
 
+export const TaskInvocationRevocationReason = Schema.Literals([
+  "superseded",
+  "terminal",
+  "failed",
+  "stopped",
+  "startup_orphan",
+  "orphan",
+  "manual",
+]);
+export type TaskInvocationRevocationReason = typeof TaskInvocationRevocationReason.Type;
+
 /** Persisted invocation material; raw tokens are intentionally absent. */
 export const TaskInvocationLease = Schema.Struct({
   tokenHash: TrimmedNonEmptyString,
   scope: TaskInvocationScope,
   status: TaskInvocationLeaseStatus,
   issuedAt: Schema.String,
+  expiresAt: Schema.NullOr(Schema.String),
   revokedAt: Schema.NullOr(Schema.String),
+  revocationReason: Schema.NullOr(TaskInvocationRevocationReason),
 });
 export type TaskInvocationLease = typeof TaskInvocationLease.Type;
-
-/** Generic provider environment additions. Values remain process-local. */
-export const ProviderSessionEnvironment = Schema.Struct({
-  variables: Schema.Record(TrimmedNonEmptyString, Schema.String),
-  executablePath: Schema.NullOr(TrimmedNonEmptyString),
-  pathPrepend: Schema.Array(TrimmedNonEmptyString),
-});
-export type ProviderSessionEnvironment = typeof ProviderSessionEnvironment.Type;

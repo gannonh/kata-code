@@ -1415,7 +1415,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       readonly pathPrepend: ReadonlyArray<string>;
     };
   }): NodeJS.ProcessEnv => {
-    const base = { ...claudeEnvironment, ...(input.environment?.variables ?? {}) };
+    const base = { ...claudeEnvironment, ...input.environment?.variables };
     const pathEntries = [
       ...(input.environment?.pathPrepend ?? []),
       ...(base.PATH ? [base.PATH] : []),

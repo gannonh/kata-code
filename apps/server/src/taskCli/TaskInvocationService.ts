@@ -21,6 +21,8 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
+const TASK_INVOCATION_LEASE_DURATION_MS = 24 * 60 * 60 * 1_000;
+
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
@@ -38,7 +40,9 @@ const LeaseRow = Schema.Struct({
   providerTurnId: TurnId,
   status: Schema.String,
   issuedAt: Schema.String,
+  expiresAt: Schema.NullOr(Schema.String),
   revokedAt: Schema.NullOr(Schema.String),
+  revocationReason: Schema.NullOr(Schema.String),
 });
 type LeaseRow = typeof LeaseRow.Type;
 
@@ -99,21 +103,6 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* Effect.serviceOption(ProviderSessionDirectory);
-  const startupRevokedAt = DateTime.formatIso(yield* DateTime.now);
-  yield* sql`
-    UPDATE task_invocation_leases
-    SET status = 'revoked', revoked_at = ${startupRevokedAt}
-    WHERE status = 'active'
-  `.pipe(
-    Effect.mapError(
-      (cause) =>
-        new TaskInvocationError({
-          code: "internal_error",
-          message: "Failed to revoke stale Task CLI invocation credentials.",
-          cause,
-        }),
-    ),
-  );
 
   const findLease = SqlSchema.findOneOption({
     Request: Schema.Struct({ tokenHash: Schema.String }),
@@ -130,7 +119,9 @@ const make = Effect.gen(function* () {
         provider_turn_id AS "providerTurnId",
         status,
         issued_at AS "issuedAt",
-        revoked_at AS "revokedAt"
+        expires_at AS "expiresAt",
+        revoked_at AS "revokedAt",
+        revocation_reason AS "revocationReason"
       FROM task_invocation_leases
       WHERE token_hash = ${tokenHash}
     `,
@@ -144,12 +135,22 @@ const make = Effect.gen(function* () {
   const toError = (code: TaskCliErrorCode, message: string, cause?: unknown) =>
     new TaskInvocationError({ code, message, ...(cause !== undefined ? { cause } : {}) });
 
-  const revokeToken = (tokenHash: string) =>
+  const revokeToken = (
+    tokenHash: string,
+    reason:
+      | "superseded"
+      | "terminal"
+      | "failed"
+      | "stopped"
+      | "startup_orphan"
+      | "orphan"
+      | "manual" = "orphan",
+  ) =>
     Effect.gen(function* () {
       const revokedAt = DateTime.formatIso(yield* DateTime.now);
       yield* sql`
         UPDATE task_invocation_leases
-        SET status = 'revoked', revoked_at = ${revokedAt}
+        SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = ${reason}
         WHERE token_hash = ${tokenHash} AND status = 'active'
       `;
     }).pipe(
@@ -169,6 +170,56 @@ const make = Effect.gen(function* () {
             ),
           );
 
+  const reconcileStartupLeases = Effect.gen(function* () {
+    const rows = yield* sql<LeaseRow>`
+      SELECT
+        token_hash AS "tokenHash",
+        environment_id AS "environmentId",
+        task_id AS "taskId",
+        occurrence,
+        stage,
+        thread_id AS "threadId",
+        provider_instance_id AS "providerInstanceId",
+        provider_turn_id AS "providerTurnId",
+        status,
+        issued_at AS "issuedAt",
+        expires_at AS "expiresAt",
+        revoked_at AS "revokedAt",
+        revocation_reason AS "revocationReason"
+      FROM task_invocation_leases
+      WHERE status = 'active'
+    `.pipe(
+      Effect.mapError((cause) =>
+        toError("internal_error", "Failed to inspect Task CLI invocation credentials.", cause),
+      ),
+    );
+    for (const row of rows) {
+      const binding = yield* currentBinding(row);
+      const payload = Option.isSome(binding) ? binding.value.runtimePayload : undefined;
+      const activeTurnId =
+        payload && typeof payload === "object" && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>).activeTurnId
+          : undefined;
+      const isPendingTurn =
+        typeof activeTurnId === "string" && activeTurnId.startsWith("pending-task-cli-");
+      const isLive =
+        Option.isSome(binding) &&
+        binding.value.providerInstanceId === row.providerInstanceId &&
+        binding.value.status === "running" &&
+        activeTurnId === row.providerTurnId &&
+        !isPendingTurn;
+      if (!isLive) {
+        yield* revokeToken(row.tokenHash, "startup_orphan").pipe(Effect.ignore);
+      }
+    }
+  }).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof TaskInvocationError
+        ? cause
+        : toError("internal_error", "Failed to reconcile Task CLI invocation credentials.", cause),
+    ),
+  );
+
   const bindingHasTurn = (
     binding: Option.Option<ProviderRuntimeBinding>,
     scope: TaskInvocationScopeValue,
@@ -184,6 +235,8 @@ const make = Effect.gen(function* () {
       (payload as Record<string, unknown>).activeTurnId === scope.providerTurnId
     );
   };
+
+  yield* reconcileStartupLeases;
 
   const issue: TaskInvocationServiceShape["issue"] = Effect.fn("TaskInvocationService.issue")(
     function* (input) {
@@ -217,24 +270,28 @@ const make = Effect.gen(function* () {
           toError("internal_error", "Failed to hash invocation credential.", cause),
         ),
       );
-      const issuedAt = DateTime.formatIso(yield* DateTime.now);
+      const issuedAtDateTime = yield* DateTime.now;
+      const issuedAt = DateTime.formatIso(issuedAtDateTime);
+      const expiresAt = DateTime.formatIso(
+        DateTime.add(issuedAtDateTime, { milliseconds: TASK_INVOCATION_LEASE_DURATION_MS }),
+      );
       yield* sql
         .withTransaction(
           Effect.gen(function* () {
             yield* sql`
             UPDATE task_invocation_leases
-            SET status = 'revoked', revoked_at = ${issuedAt}
+            SET status = 'revoked', revoked_at = ${issuedAt}, revocation_reason = 'superseded'
             WHERE thread_id = ${scope.threadId} AND status = 'active'
           `;
             yield* sql`
             INSERT INTO task_invocation_leases (
               token_hash, environment_id, task_id, occurrence, stage,
               thread_id, provider_instance_id, provider_turn_id, status,
-              issued_at, revoked_at
+              issued_at, expires_at, revoked_at, revocation_reason
             ) VALUES (
               ${tokenHash}, ${scope.environmentId}, ${scope.taskId}, ${scope.occurrence}, ${scope.stage},
               ${scope.threadId}, ${scope.providerInstanceId}, ${scope.providerTurnId}, 'active',
-              ${issuedAt}, NULL
+              ${issuedAt}, ${expiresAt}, NULL, NULL
             )
           `;
           }),
@@ -318,6 +375,20 @@ const make = Effect.gen(function* () {
       if (row.status !== "active") {
         return yield* toError("stale_lease", "The invocation credential has been revoked.");
       }
+      if (row.expiresAt !== null) {
+        const expiresAt = yield* Schema.decodeUnknownEffect(Schema.DateFromString)(
+          row.expiresAt,
+        ).pipe(
+          Effect.mapError((cause) =>
+            toError("internal_error", "The persisted invocation expiry is malformed.", cause),
+          ),
+        );
+        const now = yield* DateTime.now;
+        if (expiresAt.getTime() <= DateTime.toEpochMillis(now)) {
+          yield* revokeToken(tokenHash, "orphan").pipe(Effect.ignore);
+          return yield* toError("stale_lease", "The invocation credential has expired.");
+        }
+      }
       const scope = yield* decodeScope(row).pipe(
         Effect.mapError((cause) =>
           toError("internal_error", "The persisted invocation scope is malformed.", cause),
@@ -354,7 +425,9 @@ const make = Effect.gen(function* () {
         scope,
         status: "active",
         issuedAt: row.issuedAt,
+        expiresAt: row.expiresAt,
         revokedAt: row.revokedAt,
+        revocationReason: row.revocationReason,
       }).pipe(
         Effect.mapError((cause) =>
           toError("internal_error", "The persisted invocation credential is malformed.", cause),
@@ -369,7 +442,7 @@ const make = Effect.gen(function* () {
       const revokedAt = DateTime.formatIso(yield* DateTime.now);
       yield* sql`
         UPDATE task_invocation_leases
-        SET status = 'revoked', revoked_at = ${revokedAt}
+        SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = 'stopped'
         WHERE thread_id = ${threadId} AND status = 'active'
       `;
     }).pipe(
@@ -383,7 +456,7 @@ const make = Effect.gen(function* () {
       const revokedAt = DateTime.formatIso(yield* DateTime.now);
       yield* sql`
         UPDATE task_invocation_leases
-        SET status = 'revoked', revoked_at = ${revokedAt}
+        SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = 'terminal'
         WHERE thread_id = ${input.threadId}
           AND provider_turn_id = ${input.providerTurnId}
           AND status = 'active'
@@ -398,7 +471,7 @@ const make = Effect.gen(function* () {
     const revokedAt = DateTime.formatIso(yield* DateTime.now);
     yield* sql`
       UPDATE task_invocation_leases
-      SET status = 'revoked', revoked_at = ${revokedAt}
+      SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = 'manual'
       WHERE status = 'active'
     `;
   }).pipe(

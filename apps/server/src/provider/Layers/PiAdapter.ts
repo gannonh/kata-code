@@ -18,6 +18,7 @@ import * as NodePath from "node:path";
 import {
   type AgentSessionEvent,
   createAgentSession,
+  createBashToolDefinition,
   type CreateAgentSessionOptions,
   DefaultResourceLoader,
   SessionManager,
@@ -124,11 +125,12 @@ const PI_TUI_ONLY_CAPABILITY_LABELS: Readonly<Record<string, string>> = {
 /** Session-create options with structural model/runtime shapes for tests. */
 type PiCreateAgentSessionOptions = Omit<
   CreateAgentSessionOptions,
-  "model" | "modelRuntime" | "thinkingLevel"
+  "model" | "modelRuntime" | "thinkingLevel" | "customTools"
 > & {
   readonly model?: PiModelShape;
   readonly modelRuntime?: PiModelRuntimeShape;
   readonly thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
+  readonly customTools?: ReadonlyArray<unknown>;
 };
 
 export interface PiAdapterLiveOptions {
@@ -694,7 +696,7 @@ export function makePiAdapter(
         const sessionEnvironment = input.environment;
         const effectiveEnvironment = {
           ...(options?.environment ?? process.env),
-          ...(sessionEnvironment?.variables ?? {}),
+          ...sessionEnvironment?.variables,
           ...(sessionEnvironment?.pathPrepend && sessionEnvironment.pathPrepend.length > 0
             ? {
                 PATH: [
@@ -829,20 +831,18 @@ export function makePiAdapter(
               resourceLoader,
               sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
-              // The Pi SDK carries the environment through its bash tool's
-              // process spawn hook; keep the provider contract generic.
-              ...(Object.keys(effectiveEnvironment).length > 0
-                ? {
-                    toolOptions: {
-                      bash: {
-                        spawnHook: (context: { env: NodeJS.ProcessEnv }) => ({
-                          ...context,
-                          env: effectiveEnvironment,
-                        }),
-                      },
-                    },
-                  }
-                : {}),
+              // Pi 0.82 exposes the proven spawnHook seam through the bash
+              // tool definition. Replacing the built-in definition by name
+              // keeps the public session options generic while ensuring every
+              // provider shell receives the resolved environment.
+              customTools: [
+                createBashToolDefinition(cwd, {
+                  spawnHook: (context) => ({
+                    ...context,
+                    env: { ...context.env, ...effectiveEnvironment },
+                  }),
+                }),
+              ],
             });
             return { ...createdSession, resourceLoader, model };
           },

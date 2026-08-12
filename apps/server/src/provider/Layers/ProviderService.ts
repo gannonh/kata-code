@@ -1285,6 +1285,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ),
         );
       if (taskEnvironment) {
+        // Track the native turn before binding the lease. The binding is only
+        // accepted after the canonical provider turn is durably persisted.
         taskTurnCredentials.set(input.threadId, {
           token: taskEnvironment.token,
           providerInstanceId: routed.instanceId,
@@ -1292,6 +1294,34 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           environment: taskEnvironment.environment,
           providerTurnId: turn.turnId,
         });
+      }
+      const persistedBindingAfterTurn = Option.getOrUndefined(
+        yield* directory.getBinding(input.threadId),
+      );
+      const developerInstructions =
+        input.developerInstructions ??
+        readPersistedDeveloperInstructions(persistedBindingAfterTurn?.runtimePayload);
+      yield* directory
+        .upsert({
+          threadId: input.threadId,
+          provider: routed.adapter.provider,
+          providerInstanceId: routed.instanceId,
+          status: "running",
+          ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+          runtimePayload: {
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+            ...(developerInstructions ? { developerInstructions } : {}),
+            activeTurnId: turn.turnId,
+            lastRuntimeEvent: "provider.sendTurn",
+            lastRuntimeEventAt: yield* nowIso,
+          },
+        })
+        .pipe(
+          Effect.onError(() =>
+            taskEnvironment ? revokeTaskCredential(input.threadId) : Effect.void,
+          ),
+        );
+      if (taskEnvironment) {
         const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
         if (Option.isSome(taskInvocations)) {
           yield* taskInvocations.value
@@ -1309,26 +1339,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             );
         }
       }
-      const persistedBindingAfterTurn = Option.getOrUndefined(
-        yield* directory.getBinding(input.threadId),
-      );
-      const developerInstructions =
-        input.developerInstructions ??
-        readPersistedDeveloperInstructions(persistedBindingAfterTurn?.runtimePayload);
-      yield* directory.upsert({
-        threadId: input.threadId,
-        provider: routed.adapter.provider,
-        providerInstanceId: routed.instanceId,
-        status: "running",
-        ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
-        runtimePayload: {
-          ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
-          ...(developerInstructions ? { developerInstructions } : {}),
-          activeTurnId: turn.turnId,
-          lastRuntimeEvent: "provider.sendTurn",
-          lastRuntimeEventAt: yield* nowIso,
-        },
-      });
       if (isTaskTurn) {
         const previous = taskTurnWatchdogs.get(input.threadId);
         if (previous !== undefined) {

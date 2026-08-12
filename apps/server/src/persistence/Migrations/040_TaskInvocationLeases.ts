@@ -13,9 +13,13 @@ export default Effect.gen(function* () {
       thread_id TEXT NOT NULL,
       provider_instance_id TEXT NOT NULL,
       provider_turn_id TEXT NOT NULL,
-      status TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
       issued_at TEXT NOT NULL,
-      revoked_at TEXT
+      expires_at TEXT,
+      revoked_at TEXT,
+      revocation_reason TEXT CHECK (revocation_reason IS NULL OR revocation_reason IN (
+        'superseded', 'terminal', 'failed', 'stopped', 'startup_orphan', 'orphan', 'manual'
+      ))
     )
   `;
   yield* sql`

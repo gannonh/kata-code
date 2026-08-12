@@ -1581,9 +1581,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ),
           );
         }
-        const genericEnvironment = mergeSessionEnvironment({
-          ...(input.environment !== undefined ? { environment: input.environment } : {}),
-        });
+        const genericEnvironment = mergeSessionEnvironment(
+          input.environment !== undefined ? { environment: input.environment } : {},
+        );
         const taskEnvironment =
           input.taskExecutionProfile === "task-worktree-write" && taskAgentHomePath
             ? {
