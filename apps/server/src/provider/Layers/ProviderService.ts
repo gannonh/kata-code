@@ -825,6 +825,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         bindingInstanceId,
         activeTaskStage !== undefined,
       );
+      const resumedTaskEnvironment =
+        activeTaskStage !== undefined
+          ? yield* taskCliEnvironmentForTurn({
+              threadId: input.binding.threadId,
+              providerInstanceId: bindingInstanceId,
+            }).pipe(
+              Effect.mapError((cause) => toValidationError(input.operation, cause.message, cause)),
+            )
+          : undefined;
+      if (resumedTaskEnvironment) {
+        taskTurnCredentials.set(input.binding.threadId, {
+          token: resumedTaskEnvironment.token,
+          providerInstanceId: bindingInstanceId,
+          leaseTurnId: resumedTaskEnvironment.leaseTurnId,
+          environment: resumedTaskEnvironment.environment,
+        });
+      }
       const resumed = yield* adapter
         .startSession({
           threadId: input.binding.threadId,
@@ -841,6 +858,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               ? { modelSelection: persistedModelSelection }
               : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
+          ...(resumedTaskEnvironment ? { environment: resumedTaskEnvironment.environment } : {}),
           taskStage: activeTaskStage !== undefined,
           taskExecutionProfile,
           ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
@@ -863,6 +881,35 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         input.binding.threadId,
         developerInstructions ? { developerInstructions } : {},
       );
+      if (resumedTaskEnvironment) {
+        const activeTurnId = resumed.activeTurnId;
+        if (activeTurnId === undefined) {
+          yield* revokeTaskCredential(input.binding.threadId);
+        } else {
+          const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+          if (Option.isSome(taskInvocations)) {
+            yield* taskInvocations.value
+              .bind({
+                token: resumedTaskEnvironment.token,
+                threadId: input.binding.threadId,
+                providerInstanceId: bindingInstanceId,
+                providerTurnId: activeTurnId,
+              })
+              .pipe(
+                Effect.mapError((cause) =>
+                  toValidationError(input.operation, cause.message, cause),
+                ),
+              );
+            taskTurnCredentials.set(input.binding.threadId, {
+              token: resumedTaskEnvironment.token,
+              providerInstanceId: bindingInstanceId,
+              leaseTurnId: resumedTaskEnvironment.leaseTurnId,
+              environment: resumedTaskEnvironment.environment,
+              providerTurnId: activeTurnId,
+            });
+          }
+        }
+      }
       yield* analytics.record("provider.session.recovered", {
         provider: resumed.provider,
         strategy: "resume-thread",
