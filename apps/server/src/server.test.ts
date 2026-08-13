@@ -1423,6 +1423,104 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(Layer.mergeAll(TestConsole.layer, NodeHttpServer.layerTest))),
   );
 
+  it.effect("rejects Task CLI identity query fields without retargeting a valid token", () =>
+    Effect.gen(function* () {
+      const token = "task-cli-identity-token";
+      const taskContext: TaskStageContextResult = {
+        stage: "questions",
+        occurrence: 0,
+        brief: "Server-owned context.",
+        feedback: null,
+        artifacts: [],
+      };
+      yield* buildAppUnderTest({
+        config: { staticDir: process.cwd() },
+        layers: {
+          taskInvocation: {
+            resolve: (rawToken): Effect.Effect<TaskInvocationResolution, TaskInvocationError> =>
+              rawToken === token
+                ? Effect.succeed({
+                    lease: {
+                      tokenHash: "hashed-token",
+                      scope: {
+                        environmentId: testEnvironmentDescriptor.environmentId,
+                        taskId: TaskWorkspaceId.make("task-cli-identity"),
+                        occurrence: 0,
+                        stage: "questions",
+                        threadId: defaultThreadId,
+                        providerInstanceId: defaultModelSelection.instanceId,
+                        providerTurnId: TurnId.make("turn-cli-identity"),
+                      },
+                      status: "active",
+                      issuedAt: "2026-01-01T00:00:00.000Z",
+                      expiresAt: null,
+                      revokedAt: null,
+                      revocationReason: null,
+                    },
+                    scope: {
+                      environmentId: testEnvironmentDescriptor.environmentId,
+                      taskId: TaskWorkspaceId.make("task-cli-identity"),
+                      occurrence: 0,
+                      stage: "questions",
+                      threadId: defaultThreadId,
+                      providerInstanceId: defaultModelSelection.instanceId,
+                      providerTurnId: TurnId.make("turn-cli-identity"),
+                    },
+                    context: taskContext,
+                  })
+                : Effect.fail(
+                    new TaskInvocationError({
+                      code: "unauthorized",
+                      message: "The invocation credential is not valid.",
+                    }),
+                  ),
+          },
+        },
+      });
+      const forged = yield* getHttpServerUrl(
+        "/api/task-cli/v1/context?taskId=forged-task&threadId=forged-thread&occurrence=9",
+      );
+      const forgedResponse = yield* HttpClient.execute(
+        HttpClientRequest.make("GET")(testRequestUrl(forged), {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      );
+      assert.equal(forgedResponse.status, 200);
+      const forgedBody = yield* responseJsonEffect<{
+        ok: boolean;
+        error?: { code: string };
+        context?: TaskStageContextResult;
+      }>(forgedResponse);
+      assert.isFalse(forgedBody.ok);
+      assert.equal(forgedBody.error?.code, "invalid_request");
+      assert.equal(forgedBody.context, undefined);
+
+      const posted = yield* HttpClient.execute(
+        HttpClientRequest.make("POST")(
+          testRequestUrl(yield* getHttpServerUrl("/api/task-cli/v1/context")),
+          {
+            headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+          },
+        ).pipe(
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
+          HttpClientRequest.bodyText(JSON.stringify({ taskId: "forged-task" })),
+        ),
+      );
+      if (posted.status === 200) {
+        const postedBody = yield* responseJsonEffect<{
+          ok: boolean;
+          error?: { code: string };
+          context?: TaskStageContextResult;
+        }>(posted);
+        assert.isFalse(postedBody.ok);
+        assert.equal(postedBody.error?.code, "invalid_request");
+        assert.equal(postedBody.context, undefined);
+      } else {
+        assert.notEqual(posted.status, 200);
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("serves static index content for GET / when staticDir is configured", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

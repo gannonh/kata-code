@@ -5,6 +5,7 @@ import * as NodeFs from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
+import { fileURLToPath } from "node:url";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -64,6 +65,7 @@ const environmentId = EnvironmentId.make("environment-task-cli-process");
 const providerInstanceId = ProviderInstanceId.make("codex-task-cli-test");
 const pendingProviderTurnId = TurnId.make("pending-task-cli-turn-1");
 const providerTurnId = TurnId.make("native-task-cli-turn-1");
+export const TASK_CLI_BUNDLE_PATH = fileURLToPath(new URL("../../dist/bin.mjs", import.meta.url));
 
 const unsupported = (operation: string): Effect.Effect<never, never> =>
   Effect.die(new Error(`Unexpected external Git operation in Task CLI fixture: ${operation}`));
@@ -187,16 +189,17 @@ export interface TaskCliProcessFixture {
   readonly providerDirectory: typeof ProviderSessionDirectory.Service;
   readonly runCli: (
     env?: Record<string, string | undefined>,
+    argv?: ReadonlyArray<string>,
   ) => Effect.Effect<TaskCliProcessResult>;
 }
 
 const runChild = (
   bundlePath: string,
-  endpoint: string,
   env: Record<string, string | undefined>,
+  argv: ReadonlyArray<string> = ["task", "context"],
 ): Effect.Effect<TaskCliProcessResult, Error> =>
   Effect.callback((resume) => {
-    const child = spawn(process.execPath, [bundlePath, "task", "context"], {
+    const child = spawn(process.execPath, [bundlePath, ...argv], {
       cwd: process.cwd(),
       env: Object.fromEntries(
         Object.entries({ ...process.env, ...env }).filter(
@@ -344,13 +347,19 @@ export const makeTaskCliProcessFixture = Effect.fn("makeTaskCliProcessFixture")(
   if (typeof address === "string" || !("port" in address))
     throw new Error("Expected TCP server address.");
   const endpoint = `http://127.0.0.1:${address.port}`;
-  const bundlePath = NodePath.resolve(process.cwd(), "apps/server/dist/bin.mjs");
-  const runCli = (env: Record<string, string | undefined> = {}) =>
-    runChild(bundlePath, endpoint, {
-      KATACODE_TASK_CLI_ENDPOINT: endpoint,
-      KATACODE_TASK_INVOCATION_TOKEN: issued.token,
-      ...env,
-    }).pipe(Effect.orDie);
+  const runCli = (
+    env: Record<string, string | undefined> = {},
+    argv: ReadonlyArray<string> = ["task", "context"],
+  ) =>
+    runChild(
+      TASK_CLI_BUNDLE_PATH,
+      {
+        KATACODE_TASK_CLI_ENDPOINT: endpoint,
+        KATACODE_TASK_INVOCATION_TOKEN: issued.token,
+        ...env,
+      },
+      argv,
+    ).pipe(Effect.orDie);
   return {
     root,
     endpoint,

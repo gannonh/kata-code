@@ -135,4 +135,61 @@ describe("built Task CLI process", () => {
       });
     }).pipe(Effect.scoped as never),
   );
+
+  it.effect("rejects a bare task command with one invalid_request envelope", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliProcessFixture();
+      const result = yield* fixture.runCli({}, ["task"]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeSingleEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "context",
+        error: { code: "invalid_request" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects an unknown Task verb with one invalid_request envelope", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliProcessFixture();
+      const result = yield* fixture.runCli({}, ["task", "complete"]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeSingleEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "context",
+        error: { code: "invalid_request" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects identity flags with one invalid_request envelope", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliProcessFixture();
+      const result = yield* fixture.runCli({}, [
+        "task",
+        "context",
+        "--task-id",
+        "forged-task",
+        "--thread-id",
+        "forged-thread",
+        "--occurrence",
+        "9",
+      ]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeSingleEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "context",
+        error: { code: "invalid_request" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
 });

@@ -30,6 +30,60 @@ const tokenFromHeaders = (request: HttpServerRequest.HttpServerRequest): string 
   return token && token.length > 0 ? token : undefined;
 };
 
+const TASK_CLI_IDENTITY_QUERY_KEYS = new Set([
+  "taskid",
+  "task-id",
+  "threadid",
+  "thread-id",
+  "occurrence",
+  "provider",
+  "session",
+  "turn",
+  "turnid",
+  "turn-id",
+  "providerinstanceid",
+  "provider-instance-id",
+  "task",
+]);
+
+const identityQueryKey = (url: string): string | undefined => {
+  const queryIndex = url.indexOf("?");
+  if (queryIndex === -1) return undefined;
+  const params = new URLSearchParams(url.slice(queryIndex + 1));
+  for (const key of params.keys()) {
+    if (TASK_CLI_IDENTITY_QUERY_KEYS.has(key.toLowerCase())) return key;
+  }
+  return undefined;
+};
+
+const rejectIdentityPayload = (request: HttpServerRequest.HttpServerRequest) => {
+  const queryKey = identityQueryKey(request.url);
+  if (queryKey !== undefined) {
+    return {
+      protocol: "task-cli@1",
+      ok: false,
+      operation: "context",
+      error: {
+        code: "invalid_request" as const,
+        message: `Context requests accept no identity flags or identity payload fields (${queryKey}).`,
+      },
+    } satisfies TaskCliContextEnvelopeValue;
+  }
+  const method = request.method.toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    return {
+      protocol: "task-cli@1",
+      ok: false,
+      operation: "context",
+      error: {
+        code: "invalid_request" as const,
+        message: "Context requests accept no identity flags or identity payload fields.",
+      },
+    } satisfies TaskCliContextEnvelopeValue;
+  }
+  return undefined;
+};
+
 export const taskCliHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "taskCli",
@@ -41,6 +95,10 @@ export const taskCliHttpApiLayer = HttpApiBuilder.group(
         yield* annotateEnvironmentRequest(args.endpoint.name);
         yield* appendTaskCliResponseHeaders;
         const request = yield* HttpServerRequest.HttpServerRequest;
+        const identityRejection = rejectIdentityPayload(request);
+        if (identityRejection) {
+          return identityRejection;
+        }
         const token = tokenFromHeaders(request);
         if (!token) {
           return {
