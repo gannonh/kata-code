@@ -35,6 +35,7 @@ const ProviderSessionEnvironmentVariableValue = Schema.String.check(
 );
 const ProviderSessionEnvironmentPath = TrimmedNonEmptyString.check(
   Schema.isMaxLength(PROVIDER_SESSION_ENVIRONMENT_MAX_PATH_CHARS),
+  Schema.isPattern(/^[^\u0000]*$/u),
 );
 
 /**

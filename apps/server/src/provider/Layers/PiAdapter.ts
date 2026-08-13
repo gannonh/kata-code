@@ -166,6 +166,7 @@ interface PiTurnOutputState {
 
 interface PiSessionContext {
   readonly threadId: ThreadId;
+  readonly sessionGeneration: string;
   session: ProviderSession;
   readonly sdk: PiSdkSession;
   readonly resourceLoader: PiResourceLoader;
@@ -260,6 +261,9 @@ export function makePiAdapter(
         ...stampSync(),
         provider: PROVIDER,
         providerInstanceId: boundInstanceId,
+        ...(sessions.get(threadId)?.sessionGeneration
+          ? { sessionGeneration: sessions.get(threadId)!.sessionGeneration }
+          : {}),
         threadId,
       };
       // exactOptionalPropertyTypes: optional branded fields must be absent,
@@ -708,7 +712,9 @@ export function makePiAdapter(
             ? {
                 PATH: [
                   ...sessionEnvironment.pathPrepend,
+                  ...(sessionEnvironment.variables.PATH ? [sessionEnvironment.variables.PATH] : []),
                   ...(options?.environment?.PATH ? [options.environment.PATH] : []),
+                  ...(process.env.PATH ? [process.env.PATH] : []),
                 ].join(NodePath.delimiter),
               }
             : {}),
@@ -896,6 +902,7 @@ export function makePiAdapter(
 
         const ctx: PiSessionContext = {
           threadId: input.threadId,
+          sessionGeneration: randomUUID(),
           session: providerSession,
           sdk: sdkSession,
           resourceLoader: created.resourceLoader,

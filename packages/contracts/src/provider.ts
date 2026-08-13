@@ -42,6 +42,7 @@ export const ProviderSession = Schema.Struct({
   // populates it (post-slice-4), routing flips to instance-id-only and the
   // legacy `provider` field is removed.
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  sessionGeneration: Schema.optional(TrimmedNonEmptyString),
   status: ProviderSessionStatus,
   runtimeMode: RuntimeMode,
   cwd: Schema.optional(TrimmedNonEmptyString),
@@ -145,6 +146,8 @@ export const ProviderEvent = Schema.Struct({
   provider: ProviderDriverKind,
   // See ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /** Provider session generation for correlating lifecycle events. */
+  sessionGeneration: Schema.optional(TrimmedNonEmptyString),
   threadId: ThreadId,
   createdAt: IsoDateTime,
   method: TrimmedNonEmptyString,

@@ -44,6 +44,12 @@ describe("ProviderSessionEnvironment", () => {
     expect(() =>
       decode({ variables: { PATH: "/bin\u0000:/usr/bin" }, executablePath: null, pathPrepend: [] }),
     ).toThrow();
+    expect(() =>
+      decode({ variables: {}, executablePath: "/bin/katacode\u0000x", pathPrepend: [] }),
+    ).toThrow();
+    expect(() =>
+      decode({ variables: {}, executablePath: null, pathPrepend: ["/tmp\u0000/bin"] }),
+    ).toThrow();
   });
 
   it("rejects oversized PATH budgets and malformed variable names", () => {

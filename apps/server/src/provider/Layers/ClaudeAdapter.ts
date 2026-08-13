@@ -8,6 +8,7 @@
  */
 // @effect-diagnostics nodeBuiltinImport:off - provider launch env requires the platform path delimiter.
 import * as NodePath from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   type CanUseTool,
   query,
@@ -183,6 +184,7 @@ interface ClaudeTaskState {
 
 interface ClaudeSessionContext {
   session: ProviderSession;
+  readonly sessionGeneration: string;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
@@ -264,8 +266,8 @@ function toProcessError(
   return new ProviderAdapterProcessError({
     provider: PROVIDER,
     threadId,
-    detail: toMessage(cause, fallback),
-    cause,
+    detail: String(redactProviderSecrets(toMessage(cause, fallback))),
+    cause: redactProviderSecrets(cause),
   });
 }
 
@@ -1044,8 +1046,10 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
           new ProviderAdapterRequestError({
             provider: PROVIDER,
             method: "turn/start",
-            detail: toMessage(cause, "Failed to read attachment file."),
-            cause,
+            detail: String(
+              redactProviderSecrets(toMessage(cause, "Failed to read attachment file.")),
+            ),
+            cause: redactProviderSecrets(cause),
           }),
       ),
     );
@@ -1469,7 +1473,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
 
   const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
+    Queue.offer(runtimeEventQueue, {
+      ...event,
+      sessionGeneration: event.sessionGeneration ?? sessions.get(event.threadId)?.sessionGeneration,
+    }).pipe(Effect.asVoid);
 
   const logNativeSdkMessage = Effect.fn("logNativeSdkMessage")(function* (
     context: ClaudeSessionContext,
@@ -1770,9 +1777,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     message: string,
     cause?: unknown,
   ) {
-    if (cause !== undefined) {
-      void cause;
-    }
+    const safeCause = cause === undefined ? undefined : redactProviderSecrets(cause);
     const turnState = context.turnState;
     const stamp = yield* makeEventStamp();
     yield* offerRuntimeEvent({
@@ -1785,7 +1790,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       payload: {
         message,
         class: "provider_error",
-        ...(cause !== undefined ? { detail: cause } : {}),
+        ...(safeCause !== undefined ? { detail: safeCause } : {}),
       },
       providerRefs: nativeProviderRefs(context),
     });
@@ -3066,8 +3071,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         new ProviderAdapterProcessError({
           provider: PROVIDER,
           threadId: context.session.threadId,
-          detail: toMessage(cause, "Failed to close Claude runtime query."),
-          cause,
+          detail: String(
+            redactProviderSecrets(toMessage(cause, "Failed to close Claude runtime query.")),
+          ),
+          cause: redactProviderSecrets(cause),
         }),
     }).pipe(
       Effect.catch((cause) =>
@@ -3613,8 +3620,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           new ProviderAdapterProcessError({
             provider: PROVIDER,
             threadId,
-            detail: toMessage(cause, "Failed to start Claude runtime session."),
-            cause,
+            detail: String(
+              redactProviderSecrets(toMessage(cause, "Failed to start Claude runtime session.")),
+            ),
+            cause: redactProviderSecrets(cause),
           }),
       });
 
@@ -3639,6 +3648,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const context: ClaudeSessionContext = {
         session,
+        sessionGeneration: randomUUID(),
         promptQueue,
         query: queryRuntime,
         streamFiber: undefined,

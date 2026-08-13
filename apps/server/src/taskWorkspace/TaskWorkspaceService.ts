@@ -2101,27 +2101,35 @@ export const make = Effect.gen(function* () {
                 ? ["questions", "research", "design"]
                 : [],
       );
-      let remainingContextChars = 12_000 * 4;
-      const latestArtifact = (kind: TaskWorkspaceArtifactKind) => {
-        const artifact = task.artifacts.find((candidate) => candidate.kind === kind);
-        return artifact?.revisions.find(
-          (revision) => revision.revision === artifact.currentRevision,
-        );
-      };
+      const manifest = occurrence.contextManifestId
+        ? task.contextManifests.find((candidate) => candidate.id === occurrence.contextManifestId)
+        : undefined;
+      if (occurrence.contextManifestId !== null && !manifest) {
+        return yield* new TaskWorkspaceError({
+          message: "The active Task context manifest is unavailable.",
+          commandType: "task.cli.context",
+          taskId: task.id,
+        });
+      }
+      const manifestRefs = new Map(
+        manifest?.artifactRefs.map((reference) => [reference.kind, reference.revision]) ?? [],
+      );
+      let remainingContextChars = (manifest?.budget ?? 12_000) * 4;
       const artifacts = task.artifacts
         .filter((artifact) => contextKinds.has(artifact.kind))
         .flatMap((artifact) => {
-          const revision = latestArtifact(artifact.kind);
+          const manifestRevision = manifestRefs.get(artifact.kind);
+          if (manifest !== undefined && manifestRevision === undefined) return [];
+          const revision =
+            (manifestRevision === undefined
+              ? latestArtifact(task, artifact.kind)
+              : artifact.revisions.find((candidate) => candidate.revision === manifestRevision)) ??
+            null;
           if (!revision || remainingContextChars <= 0) return [];
           const markdown = revision.markdown.slice(0, remainingContextChars);
           remainingContextChars -= markdown.length;
           return [
-            {
-              kind: artifact.kind,
-              revision: revision.revision,
-              title: revision.title,
-              markdown,
-            },
+            { kind: artifact.kind, revision: revision.revision, title: revision.title, markdown },
           ];
         });
       return {

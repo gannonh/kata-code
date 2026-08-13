@@ -101,6 +101,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
         ...(input.providerInstanceId !== undefined
           ? { providerInstanceId: input.providerInstanceId }
           : {}),
+        sessionGeneration: `fake-generation-${String(input.threadId)}-${sessions.size + 1}`,
         status: "ready",
         runtimeMode: input.runtimeMode,
         threadId: input.threadId,

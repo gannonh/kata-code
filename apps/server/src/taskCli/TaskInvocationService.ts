@@ -11,6 +11,7 @@ import {
   TurnId,
 } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
+import { randomUUID } from "node:crypto";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -36,6 +37,7 @@ const LeaseRow = Schema.Struct({
   threadId: ThreadId,
   providerInstanceId: ProviderInstanceId,
   providerTurnId: TurnId,
+  ownerGeneration: Schema.String,
   status: Schema.String,
   issuedAt: Schema.String,
   expiresAt: Schema.NullOr(Schema.String),
@@ -103,6 +105,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* Effect.serviceOption(ProviderSessionDirectory);
   const taskWorkspace = yield* Effect.serviceOption(TaskWorkspaceService);
+  const ownerGeneration = randomUUID();
 
   const findLease = SqlSchema.findOneOption({
     Request: Schema.Struct({ tokenHash: Schema.String }),
@@ -117,6 +120,7 @@ const make = Effect.gen(function* () {
         thread_id AS "threadId",
         provider_instance_id AS "providerInstanceId",
         provider_turn_id AS "providerTurnId",
+        owner_generation AS "ownerGeneration",
         status,
         issued_at AS "issuedAt",
         expires_at AS "expiresAt",
@@ -181,6 +185,7 @@ const make = Effect.gen(function* () {
         thread_id AS "threadId",
         provider_instance_id AS "providerInstanceId",
         provider_turn_id AS "providerTurnId",
+        owner_generation AS "ownerGeneration",
         status,
         issued_at AS "issuedAt",
         expires_at AS "expiresAt",
@@ -287,11 +292,11 @@ const make = Effect.gen(function* () {
             yield* sql`
             INSERT INTO task_invocation_leases (
               token_hash, environment_id, task_id, occurrence, stage,
-              thread_id, provider_instance_id, provider_turn_id, status,
+              thread_id, provider_instance_id, provider_turn_id, owner_generation, status,
               issued_at, expires_at, revoked_at, revocation_reason
             ) VALUES (
               ${tokenHash}, ${scope.environmentId}, ${scope.taskId}, ${scope.occurrence}, ${scope.stage},
-              ${scope.threadId}, ${scope.providerInstanceId}, ${scope.providerTurnId}, 'active',
+              ${scope.threadId}, ${scope.providerInstanceId}, ${scope.providerTurnId}, ${ownerGeneration}, 'active',
               ${issuedAt}, ${expiresAt}, NULL, NULL
             )
           `;
@@ -357,6 +362,7 @@ const make = Effect.gen(function* () {
           AND thread_id = ${input.threadId}
           AND provider_instance_id = ${input.providerInstanceId}
           AND provider_turn_id = ${row.value.providerTurnId}
+          AND owner_generation = ${row.value.ownerGeneration}
           AND status = 'active'
         RETURNING token_hash AS "tokenHash"
       `.pipe(

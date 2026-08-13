@@ -14,6 +14,9 @@ export default Effect.gen(function* () {
   yield* sql`ALTER TABLE task_invocation_leases ADD COLUMN revocation_reason TEXT`.pipe(
     Effect.catch(() => Effect.void),
   );
+  yield* sql`ALTER TABLE task_invocation_leases ADD COLUMN owner_generation TEXT NOT NULL DEFAULT 'legacy'`.pipe(
+    Effect.catch(() => Effect.void),
+  );
 
   // Keep the newest active lease per thread if an interrupted pre-rotation
   // implementation left more than one row. The partial unique index below
@@ -39,5 +42,9 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_task_invocation_leases_expiry
     ON task_invocation_leases(expires_at, status)
+  `;
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS idx_task_invocation_leases_owner
+    ON task_invocation_leases(thread_id, owner_generation, status)
   `;
 });

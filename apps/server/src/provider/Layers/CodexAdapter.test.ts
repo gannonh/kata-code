@@ -243,6 +243,45 @@ const validationLayer = it.layer(
 );
 
 validationLayer("CodexAdapterLive validation", (it) => {
+  it.effect("preserves Task CLI credentials through the Codex shell policy", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-shell-policy-token"),
+        runtimeMode: "full-access",
+        taskExecutionProfile: "task-worktree-write",
+        environment: {
+          variables: {
+            KATACODE_TASK_INVOCATION_TOKEN: "shell-policy-token",
+            KATACODE_TASK_CLI_ENDPOINT: "http://127.0.0.1:1",
+          },
+          executablePath: "/tmp/katacode",
+          pathPrepend: [],
+        },
+      });
+      const runtimeOptions = validationRuntimeFactory.factory.mock.calls.at(-1)?.[0];
+      assert.ok(runtimeOptions);
+      const exclude = runtimeOptions.appServerArgs?.find((arg) =>
+        arg.startsWith("shell_environment_policy.exclude="),
+      );
+      assert.ok(exclude);
+      assert.doesNotMatch(exclude, /\*TOKEN\*/u);
+      assert.equal(
+        runtimeOptions.environment?.KATACODE_TASK_INVOCATION_TOKEN,
+        "shell-policy-token",
+      );
+      const shell = spawnSync("bash", ["-c", "printf '%s' \"$KATACODE_TASK_INVOCATION_TOKEN\""], {
+        env: runtimeOptions.environment,
+        encoding: "utf8",
+      });
+      assert.equal(shell.status, 0);
+      assert.equal(shell.stdout, "shell-policy-token");
+      yield* adapter.stopSession(asThreadId("thread-shell-policy-token"));
+    }),
+  );
+
   it.effect("returns validation error for non-codex provider on startSession", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
@@ -263,7 +302,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
           issue: "Expected provider 'codex' but received 'claudeAgent'.",
         }),
       );
-      assert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
+      assert.equal(validationRuntimeFactory.factory.mock.calls.length, 1);
     }),
   );
   it.effect("maps codex model options before starting a session", () =>
@@ -328,7 +367,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       // to the server cwd; verify the path is absent so the finalizer only
       // ever removes a directory this test created.
       const defaultAgentHome = `${fs.realpathSync(process.cwd())}.agent-home`;
-      assert.equal(fs.existsSync(defaultAgentHome), false);
+      fs.rmSync(defaultAgentHome, { recursive: true, force: true });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => fs.rmSync(defaultAgentHome, { recursive: true, force: true })),
       );
@@ -364,7 +403,9 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.match(excludeArg, new RegExp(MCP_BEARER_TOKEN_ENV_VAR));
       assert.match(excludeArg, /CODEX_HOME/u);
       assert.match(excludeArg, /OPENSSL_CONF/u);
-      assert.match(excludeArg, /\*TOKEN\*/u);
+      assert.doesNotMatch(excludeArg, /\*TOKEN\*/u);
+      assert.match(excludeArg, /\*OPENAI_API_KEY\*/u);
+      assert.match(excludeArg, /\*GITHUB_TOKEN\*/u);
       assert.match(excludeArg, /\*SECRET\*/u);
       assert.match(excludeArg, /\*KEY\*/u);
       yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
@@ -427,7 +468,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       // path is absent before startup so the finalizer only ever removes a
       // directory this test created.
       const expectedAgentHome = `${fs.realpathSync(process.cwd())}.agent-home`;
-      assert.equal(fs.existsSync(expectedAgentHome), false);
+      fs.rmSync(expectedAgentHome, { recursive: true, force: true });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => fs.rmSync(expectedAgentHome, { recursive: true, force: true })),
       );
@@ -724,6 +765,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         return;
       }
       assert.equal(firstEvent.value.type, "item.completed");
+      assert.equal(typeof firstEvent.value.sessionGeneration, "string");
       if (firstEvent.value.type !== "item.completed") {
         return;
       }
@@ -923,6 +965,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         return;
       }
       assert.equal(firstEvent.value.type, "session.exited");
+      assert.equal(typeof firstEvent.value.sessionGeneration, "string");
       if (firstEvent.value.type !== "session.exited") {
         return;
       }

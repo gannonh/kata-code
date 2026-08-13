@@ -13,6 +13,7 @@ export default Effect.gen(function* () {
       thread_id TEXT NOT NULL,
       provider_instance_id TEXT NOT NULL,
       provider_turn_id TEXT NOT NULL,
+      owner_generation TEXT NOT NULL DEFAULT 'legacy',
       status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
       issued_at TEXT NOT NULL,
       expires_at TEXT,
@@ -29,5 +30,9 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_task_invocation_leases_turn
     ON task_invocation_leases(thread_id, provider_turn_id, status)
+  `;
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS idx_task_invocation_leases_owner
+    ON task_invocation_leases(thread_id, owner_generation, status)
   `;
 });

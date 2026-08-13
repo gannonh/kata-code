@@ -1,5 +1,4 @@
 const registeredSecrets = new Map<string, number>();
-const MAX_REGISTERED_SECRETS = 512;
 const REDACTED = "[REDACTED]";
 
 const secretKeyPattern = /(TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CREDENTIAL|AUTHORIZATION|BEARER)/iu;
@@ -9,11 +8,6 @@ export const registerProviderSecret = (secret: string): (() => void) => {
   const value = secret.trim();
   if (!value) return () => {};
   registeredSecrets.set(value, (registeredSecrets.get(value) ?? 0) + 1);
-  while (registeredSecrets.size > MAX_REGISTERED_SECRETS) {
-    const oldest = registeredSecrets.keys().next().value;
-    if (oldest === undefined) break;
-    registeredSecrets.delete(oldest);
-  }
   let removed = false;
   return () => {
     if (removed) return;

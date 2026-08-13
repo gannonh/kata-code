@@ -9,6 +9,7 @@
  * @module CodexAdapterLive
  */
 import * as NodePath from "node:path";
+import { randomUUID } from "node:crypto";
 
 import {
   type CanonicalItemType,
@@ -82,7 +83,9 @@ const CODEX_SHELL_ENV_EXCLUDE_PATTERNS = [
   "CODEX_HOME",
   "OPENSSL_CONF",
   "*MCP*",
-  "*TOKEN*",
+  "*OPENAI_API_KEY*",
+  "*ANTHROPIC_API_KEY*",
+  "*GITHUB_TOKEN*",
   "*SECRET*",
   "*KEY*",
   "*BEARER*",
@@ -220,6 +223,7 @@ export interface CodexAdapterLiveOptions {
 
 interface CodexAdapterSessionContext {
   readonly threadId: ThreadId;
+  readonly sessionGeneration: string;
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
@@ -1757,16 +1761,20 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               new ProviderAdapterProcessError({
                 provider: PROVIDER,
                 threadId: input.threadId,
-                detail: cause.message,
-                cause,
+                detail: String(redactProviderSecrets(cause.message)),
+                cause: redactProviderSecrets(cause),
               }),
           ),
         );
 
+        const sessionGeneration = randomUUID();
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
             yield* writeNativeEvent(event);
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
+            const runtimeEvents = mapToRuntimeEvents(event, event.threadId).map((runtimeEvent) => ({
+              ...runtimeEvent,
+              sessionGeneration,
+            }));
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
@@ -1786,8 +1794,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               new ProviderAdapterProcessError({
                 provider: PROVIDER,
                 threadId: input.threadId,
-                detail: cause.message,
-                cause,
+                detail: String(redactProviderSecrets(cause.message)),
+                cause: redactProviderSecrets(cause),
               }),
           ),
           Effect.onError(() =>
@@ -1801,6 +1809,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
         sessions.set(input.threadId, {
           threadId: input.threadId,
+          sessionGeneration,
           scope: sessionScope,
           runtime,
           eventFiber,

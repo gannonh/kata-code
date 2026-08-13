@@ -303,6 +303,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     {
       readonly token: string;
       readonly providerInstanceId: ProviderInstanceId;
+      readonly sessionGeneration: string;
       readonly leaseTurnId: TurnId;
       readonly environment: ProviderSessionEnvironment;
       readonly providerTurnId?: TurnId;
@@ -561,7 +562,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             (event.type === "runtime.error" || event.type === "session.exited") &&
             credential !== undefined &&
             (event.providerInstanceId === undefined ||
-              event.providerInstanceId === credential.providerInstanceId)
+              event.providerInstanceId === credential.providerInstanceId) &&
+            (event.sessionGeneration === undefined ||
+              event.sessionGeneration === credential.sessionGeneration)
           ) {
             // A lifecycle event without a turn id is only authoritative when
             // it identifies the currently tracked provider instance. Old
@@ -575,7 +578,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             safeEvent.turnId === credential.leaseTurnId ||
             safeEvent.turnId === credential.providerTurnId) &&
           (safeEvent.providerInstanceId === undefined ||
-            safeEvent.providerInstanceId === credential.providerInstanceId);
+            safeEvent.providerInstanceId === credential.providerInstanceId) &&
+          (safeEvent.sessionGeneration === undefined ||
+            safeEvent.sessionGeneration === credential.sessionGeneration);
         if (eventMatchesCredential) {
           yield* revokeTaskCredential(safeEvent.threadId);
           const watchdog = taskTurnWatchdogs.get(safeEvent.threadId);
@@ -867,6 +872,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         taskTurnCredentials.set(input.binding.threadId, {
           token: resumedTaskEnvironment.token,
           providerInstanceId: bindingInstanceId,
+          sessionGeneration: "recovery-pending",
           leaseTurnId: resumedTaskEnvironment.leaseTurnId,
           environment: resumedTaskEnvironment.environment,
         });
@@ -932,6 +938,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             taskTurnCredentials.set(input.binding.threadId, {
               token: resumedTaskEnvironment.token,
               providerInstanceId: bindingInstanceId,
+              sessionGeneration:
+                typeof resumed.sessionGeneration === "string"
+                  ? resumed.sessionGeneration
+                  : "recovered",
               leaseTurnId: resumedTaskEnvironment.leaseTurnId,
               environment: resumedTaskEnvironment.environment,
               providerTurnId: activeTurnId,
@@ -1313,6 +1323,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         taskTurnCredentials.set(input.threadId, {
           token: taskEnvironment.token,
           providerInstanceId: routed.instanceId,
+          sessionGeneration: "turn-pending",
           leaseTurnId: taskEnvironment.leaseTurnId,
           environment: taskEnvironment.environment,
         });
@@ -1381,6 +1392,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         taskTurnCredentials.set(input.threadId, {
           token: taskEnvironment.token,
           providerInstanceId: routed.instanceId,
+          sessionGeneration:
+            typeof (yield* routed.adapter.listSessions()).find(
+              (session) => session.threadId === input.threadId,
+            )?.sessionGeneration === "string"
+              ? ((yield* routed.adapter.listSessions()).find(
+                  (session) => session.threadId === input.threadId,
+                )?.sessionGeneration as string)
+              : "turn-active",
           leaseTurnId: taskEnvironment.leaseTurnId,
           environment: taskEnvironment.environment,
           providerTurnId: turn.turnId,
