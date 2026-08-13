@@ -307,17 +307,25 @@ const make = Effect.gen(function* () {
               AND owner_generation = ${ownerGeneration}
               AND status = 'active'
           `;
-            yield* sql`
-            INSERT INTO task_invocation_leases (
-              token_hash, environment_id, task_id, occurrence, stage,
-              thread_id, provider_instance_id, provider_turn_id, owner_generation, status,
-              issued_at, expires_at, revoked_at, revocation_reason
-            ) VALUES (
-              ${tokenHash}, ${scope.environmentId}, ${scope.taskId}, ${scope.occurrence}, ${scope.stage},
-              ${scope.threadId}, ${scope.providerInstanceId}, ${scope.providerTurnId}, ${ownerGeneration}, 'active',
-              ${issuedAt}, ${expiresAt}, NULL, NULL
-            )
-          `;
+            const inserted = yield* sql<{ readonly tokenHash: string }>`
+              INSERT INTO task_invocation_leases (
+                token_hash, environment_id, task_id, occurrence, stage,
+                thread_id, provider_instance_id, provider_turn_id, owner_generation, status,
+                issued_at, expires_at, revoked_at, revocation_reason
+              )
+              SELECT
+                ${tokenHash}, ${scope.environmentId}, ${scope.taskId}, ${scope.occurrence}, ${scope.stage},
+                ${scope.threadId}, ${scope.providerInstanceId}, ${scope.providerTurnId}, ${ownerGeneration}, 'active',
+                ${issuedAt}, ${expiresAt}, NULL, NULL
+              WHERE EXISTS (
+                SELECT 1 FROM task_invocation_lease_owner
+                WHERE owner_id = 1 AND owner_generation = ${ownerGeneration}
+              )
+              RETURNING token_hash AS "tokenHash"
+            `;
+            if (inserted.length !== 1) {
+              return yield* toError("stale_lease", "The invocation runtime is no longer active.");
+            }
           }),
         )
         .pipe(
