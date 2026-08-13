@@ -16,7 +16,9 @@ import {
   type CanonicalRequestType,
   type CodexSettings,
   ProviderDriverKind,
+  TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
   TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   type ProviderEvent,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -69,7 +71,11 @@ import {
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
-import { registerProviderSecret, redactProviderSecrets } from "../providerSecretRedaction.ts";
+import {
+  redactProviderEvent,
+  registerProviderSecret,
+  redactProviderSecrets,
+} from "../providerSecretRedaction.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
@@ -198,13 +204,14 @@ function codexTaskPermissionProfileArgs(
 
 const CODEX_TASK_SHELL_ENV_POLICY_ARGS = [
   "-c",
-  'shell_environment_policy.inherit="core"',
+  // inherit=all so include_only can keep Task CLI vars that are not in Codex's core set.
+  'shell_environment_policy.inherit="all"',
   "-c",
   "shell_environment_policy.ignore_default_excludes=true",
   "-c",
   `shell_environment_policy.exclude=[${CODEX_SHELL_ENV_EXCLUDE_PATTERNS.map((pattern) => JSON.stringify(pattern)).join(",")}]`,
   "-c",
-  'shell_environment_policy.include_only=["PATH","HOME","SHELL","USER","LOGNAME","CODEX_HOME","KATACODE_TASK_CLI_ENDPOINT","KATACODE_TASK_CLI_EXECUTABLE","KATACODE_TASK_INVOCATION_TOKEN"]',
+  `shell_environment_policy.include_only=["PATH","HOME","SHELL","USER","LOGNAME","CODEX_HOME",${JSON.stringify(TASK_CLI_ENDPOINT_ENVIRONMENT_KEY)},${JSON.stringify(TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY)},${JSON.stringify(TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY)}]`,
 ] as const;
 
 export interface CodexAdapterLiveOptions {
@@ -1594,8 +1601,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const genericEnvironment = mergeSessionEnvironment(
           input.environment !== undefined ? { environment: input.environment } : {},
         );
-        const taskToken = input.environment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
+        const taskToken = input.environment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+        const hasTaskCliInvocationEnvironment = Boolean(
+          taskToken ||
+          input.environment?.variables[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY] ||
+          input.environment?.executablePath,
+        );
         const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
+        let sessionAttached = false;
+        yield* Effect.addFinalizer(() =>
+          sessionAttached ? Effect.void : Effect.sync(removeTaskSecret),
+        );
         const taskEnvironment =
           input.taskExecutionProfile === "task-worktree-write" && taskAgentHomePath
             ? {
@@ -1686,7 +1702,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               )
             : [];
         const taskShellEnvironmentPolicyArgs =
-          input.taskExecutionProfile === "task-worktree-write"
+          input.taskExecutionProfile === "task-worktree-write" || hasTaskCliInvocationEnvironment
             ? CODEX_TASK_SHELL_ENV_POLICY_ARGS
             : [];
         const taskExecutionAppServerArgs = [
@@ -1771,10 +1787,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
             yield* writeNativeEvent(event);
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId).map((runtimeEvent) => ({
-              ...runtimeEvent,
-              sessionGeneration,
-            }));
+            const runtimeEvents = mapToRuntimeEvents(event, event.threadId).map((runtimeEvent) =>
+              redactProviderEvent({
+                ...runtimeEvent,
+                sessionGeneration,
+              }),
+            );
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
@@ -1800,8 +1818,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ),
           Effect.onError(() =>
             runtime.close.pipe(
+              Effect.andThen(awaitEventDrain(eventFiber)),
               Effect.andThen(Effect.ignore(Scope.close(sessionScope, Exit.void))),
-              Effect.andThen(Fiber.interrupt(eventFiber)),
               Effect.ignore,
             ),
           ),
@@ -1816,6 +1834,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           stopped: false,
           removeTaskSecret,
         });
+        sessionAttached = true;
         sessionScopeTransferred = true;
 
         return started;
@@ -1993,6 +2012,43 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     yield* nativeEventLogger.write(redactProviderSecrets(event), event.threadId);
   });
 
+  const awaitEventDrain = (fiber: Fiber.Fiber<void, never> | undefined) =>
+    Effect.callback<void>((resume, signal) => {
+      const current = Fiber.getCurrent();
+      if (fiber === undefined || (current !== undefined && current.id === fiber.id)) {
+        resume(Effect.void);
+        return;
+      }
+      if (fiber.pollUnsafe() !== undefined) {
+        resume(Effect.void);
+        return;
+      }
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        resume(Effect.void);
+      };
+      // Wall-clock bound so TestClock sessions cannot stall a hung event iterator.
+      // @effect-diagnostics-next-line globalTimersInEffect:off
+      const timer = setTimeout(() => {
+        fiber.interruptUnsafe();
+        settle();
+      }, 2_000);
+      const unsubscribe = fiber.addObserver(() => {
+        clearTimeout(timer);
+        settle();
+      });
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          unsubscribe();
+        },
+        { once: true },
+      );
+    });
+
   const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (
     session: CodexAdapterSessionContext,
   ) {
@@ -2000,11 +2056,13 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       return;
     }
     session.stopped = true;
-    session.removeTaskSecret();
     sessions.delete(session.threadId);
+    // Close and drain while the Task secret stays registered so late native
+    // and runtime events still redact. Unregister exactly once after drain.
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
-    yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
+    yield* awaitEventDrain(session.eventFiber);
+    session.removeTaskSecret();
   });
 
   const stopSession: CodexAdapterShape["stopSession"] = (threadId) =>

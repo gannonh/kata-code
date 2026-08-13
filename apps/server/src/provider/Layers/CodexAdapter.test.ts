@@ -15,6 +15,9 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderItemId,
+  TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
+  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderSession,
@@ -57,6 +60,7 @@ import {
   makeTaskCliProcessFixture,
   TASK_CLI_BUNDLE_PATH,
 } from "../../taskCli/TaskCliProcessFixture.ts";
+import { REDACTED, redactProviderSecrets } from "../providerSecretRedaction.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
@@ -160,11 +164,21 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Effect.promise(() => this.respondToUserInputImpl(requestId, answers));
   }
 
+  public lateEventsOnClose: ProviderEvent[] = [];
+
   get events() {
     return Stream.fromQueue(this.eventQueue);
   }
 
-  close = Effect.promise(() => this.closeImpl());
+  close = Effect.suspend(() =>
+    Effect.promise(() => this.closeImpl()).pipe(
+      Effect.andThen(
+        Effect.forEach(this.lateEventsOnClose, (event) => Queue.offer(this.eventQueue, event), {
+          discard: true,
+        }),
+      ),
+    ),
+  );
 
   emit(event: ProviderEvent) {
     return Queue.offer(this.eventQueue, event).pipe(Effect.asVoid);
@@ -222,6 +236,151 @@ function makeScopedRuntimeFactory(options?: { readonly failConstruction?: boolea
   };
 }
 
+/** Unix core inherit set from openai/codex `shell_environment.rs`. */
+const UNIX_CORE_ENV_VARS = [
+  "PATH",
+  "SHELL",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LOGNAME",
+  "USER",
+] as const;
+
+interface ParsedShellEnvironmentPolicy {
+  readonly inherit: "all" | "core" | "none";
+  readonly ignoreDefaultExcludes: boolean;
+  readonly exclude: ReadonlyArray<string>;
+  readonly includeOnly: ReadonlyArray<string>;
+}
+
+const globToRegExp = (pattern: string): RegExp => {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/gu, "\\$&")
+    .replaceAll("*", ".*")
+    .replaceAll("?", ".");
+  return new RegExp(`^${escaped}$`, "iu");
+};
+
+const matchesAnyPattern = (name: string, patterns: ReadonlyArray<string>): boolean =>
+  patterns.some((pattern) => globToRegExp(pattern).test(name));
+
+const parseJsonArrayArg = (value: string): ReadonlyArray<string> => {
+  const start = value.indexOf("[");
+  if (start === -1) return [];
+  const parsed: unknown = JSON.parse(value.slice(start));
+  return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
+};
+
+/** Parse Codex `-c shell_environment_policy.*` app-server args. */
+const parseShellEnvironmentPolicy = (
+  appServerArgs: ReadonlyArray<string> | undefined,
+): ParsedShellEnvironmentPolicy => {
+  let inherit: ParsedShellEnvironmentPolicy["inherit"] = "core";
+  let ignoreDefaultExcludes = false;
+  let exclude: ReadonlyArray<string> = [];
+  let includeOnly: ReadonlyArray<string> = [];
+  for (const argument of appServerArgs ?? []) {
+    if (argument.startsWith("shell_environment_policy.inherit=")) {
+      const raw = argument.slice("shell_environment_policy.inherit=".length);
+      const parsed = JSON.parse(raw) as string;
+      if (parsed === "all" || parsed === "core" || parsed === "none") inherit = parsed;
+    } else if (argument === "shell_environment_policy.ignore_default_excludes=true") {
+      ignoreDefaultExcludes = true;
+    } else if (argument.startsWith("shell_environment_policy.exclude=")) {
+      exclude = parseJsonArrayArg(argument.slice("shell_environment_policy.exclude=".length));
+    } else if (argument.startsWith("shell_environment_policy.include_only=")) {
+      includeOnly = parseJsonArrayArg(
+        argument.slice("shell_environment_policy.include_only=".length),
+      );
+    }
+  }
+  return { inherit, ignoreDefaultExcludes, exclude, includeOnly };
+};
+
+/** Apply Codex `populate_env` semantics to the app-server runtime env. */
+const applyShellEnvironmentPolicy = (
+  env: NodeJS.ProcessEnv | undefined,
+  policy: ParsedShellEnvironmentPolicy,
+): Record<string, string> => {
+  const entries = Object.entries(env ?? {}).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  let next: Record<string, string>;
+  switch (policy.inherit) {
+    case "none":
+      next = {};
+      break;
+    case "core":
+      next = Object.fromEntries(
+        entries.filter(([key]) =>
+          UNIX_CORE_ENV_VARS.some((allowed) => allowed.toLowerCase() === key.toLowerCase()),
+        ),
+      );
+      break;
+    default:
+      next = Object.fromEntries(entries);
+  }
+  if (!policy.ignoreDefaultExcludes) {
+    next = Object.fromEntries(
+      Object.entries(next).filter(
+        ([key]) => !matchesAnyPattern(key, ["*KEY*", "*SECRET*", "*TOKEN*"]),
+      ),
+    );
+  }
+  if (policy.exclude.length > 0) {
+    next = Object.fromEntries(
+      Object.entries(next).filter(([key]) => !matchesAnyPattern(key, policy.exclude)),
+    );
+  }
+  if (policy.includeOnly.length > 0) {
+    next = Object.fromEntries(
+      Object.entries(next).filter(([key]) => matchesAnyPattern(key, policy.includeOnly)),
+    );
+  }
+  return next;
+};
+
+const spawnBash = (
+  env: NodeJS.ProcessEnv,
+  command: string,
+): Effect.Effect<{
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}> =>
+  Effect.callback<
+    {
+      readonly status: number | null;
+      readonly stdout: string;
+      readonly stderr: string;
+    },
+    Error
+  >((resume) => {
+    const child = spawn("bash", ["-c", command], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", (error) => resume(Effect.fail(error)));
+    child.on("close", (status) =>
+      resume(
+        Effect.succeed({
+          status,
+          stdout: Buffer.concat(stdout).toString("utf8"),
+          stderr: Buffer.concat(stderr).toString("utf8"),
+        }),
+      ),
+    );
+  }).pipe(Effect.orDie);
+
 const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory, {
   upsert: () => Effect.void,
   getProvider: () =>
@@ -258,11 +417,11 @@ validationLayer("CodexAdapterLive validation", (it) => {
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-shell-policy-token"),
         runtimeMode: "full-access",
-        taskExecutionProfile: "task-worktree-write",
+        taskExecutionProfile: "planning",
         environment: {
           variables: {
-            KATACODE_TASK_INVOCATION_TOKEN: "shell-policy-token",
-            KATACODE_TASK_CLI_ENDPOINT: "http://127.0.0.1:1",
+            [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: "shell-policy-token",
+            [TASK_CLI_ENDPOINT_ENVIRONMENT_KEY]: "http://127.0.0.1:1",
           },
           executablePath: "/tmp/katacode",
           pathPrepend: [],
@@ -270,17 +429,20 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
       const runtimeOptions = validationRuntimeFactory.factory.mock.calls.at(-1)?.[0];
       assert.ok(runtimeOptions);
+      const policy = parseShellEnvironmentPolicy(runtimeOptions.appServerArgs);
+      assert.equal(policy.inherit, "all");
+      assert.equal(policy.ignoreDefaultExcludes, true);
+      assert.ok(policy.includeOnly.includes(TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY));
+      assert.ok(!policy.exclude.includes("*TOKEN*"));
       const exclude = runtimeOptions.appServerArgs?.find((arg) =>
         arg.startsWith("shell_environment_policy.exclude="),
       );
       assert.ok(exclude);
       assert.doesNotMatch(exclude, /\*TOKEN\*/u);
-      assert.equal(
-        runtimeOptions.environment?.KATACODE_TASK_INVOCATION_TOKEN,
-        "shell-policy-token",
-      );
+      const shellEnv = applyShellEnvironmentPolicy(runtimeOptions.environment, policy);
+      assert.equal(shellEnv[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY], "shell-policy-token");
       const shell = spawnSync("bash", ["-c", "printf '%s' \"$KATACODE_TASK_INVOCATION_TOKEN\""], {
-        env: runtimeOptions.environment,
+        env: shellEnv,
         encoding: "utf8",
       });
       assert.equal(shell.status, 0);
@@ -365,7 +527,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("executes the built Task CLI from a Codex bash child", () =>
+  const executeBuiltTaskCliFromCodexShell = (profile: "planning" | "task-worktree-write") =>
     Effect.gen(function* () {
       validationRuntimeFactory.factory.mockClear();
       const fixture = yield* makeTaskCliProcessFixture();
@@ -378,14 +540,24 @@ validationLayer("CodexAdapterLive validation", (it) => {
         `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(TASK_CLI_BUNDLE_PATH)} "$@"\n`,
       );
       fs.chmodSync(shimPath, 0o755);
+      const threadId = asThreadId(`thread-task-cli-shell-${profile}`);
+      if (profile === "task-worktree-write") {
+        const agentHome = `${fs.realpathSync(fixture.root)}.agent-home`;
+        fs.rmSync(agentHome, { recursive: true, force: true });
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => fs.rmSync(agentHome, { recursive: true, force: true })),
+        );
+      }
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("thread-task-cli-shell"),
+        threadId,
+        cwd: fixture.root,
         runtimeMode: "full-access",
+        taskExecutionProfile: profile,
         environment: {
           variables: {
-            KATACODE_TASK_CLI_ENDPOINT: fixture.endpoint,
-            KATACODE_TASK_INVOCATION_TOKEN: fixture.token,
+            [TASK_CLI_ENDPOINT_ENVIRONMENT_KEY]: fixture.endpoint,
+            [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: fixture.token,
           },
           executablePath: shimPath,
           pathPrepend: [shimDir],
@@ -393,46 +565,44 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
       const runtimeOptions = validationRuntimeFactory.factory.mock.calls.at(-1)?.[0];
       assert.ok(runtimeOptions);
-      const runtimeEnv = runtimeOptions.environment ?? {};
-      assert.ok(
-        runtimeEnv.PATH?.startsWith(`${shimDir}${path.delimiter}`),
-        `PATH=${runtimeEnv.PATH ?? ""}`,
+      const policy = parseShellEnvironmentPolicy(runtimeOptions.appServerArgs);
+      assert.equal(policy.inherit, "all");
+      assert.equal(policy.ignoreDefaultExcludes, true);
+      for (const key of [
+        "PATH",
+        TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
+        TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+        TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
+      ]) {
+        assert.ok(policy.includeOnly.includes(key), `include_only missing ${key}`);
+      }
+      assert.ok(!policy.exclude.includes("*TOKEN*"));
+      const excludeArg = runtimeOptions.appServerArgs?.find((argument) =>
+        argument.startsWith("shell_environment_policy.exclude="),
       );
-      assert.equal(runtimeEnv.KATACODE_TASK_CLI_EXECUTABLE, shimPath);
+      assert.ok(excludeArg);
+      assert.doesNotMatch(excludeArg, /\*TOKEN\*/u);
+      const hasPermissionProfile = runtimeOptions.appServerArgs?.some((argument) =>
+        argument.includes("permissions.katacode_task_workspace"),
+      );
+      if (profile === "task-worktree-write") {
+        assert.equal(hasPermissionProfile, true);
+      } else {
+        assert.equal(hasPermissionProfile, false);
+      }
+      const shellEnv = applyShellEnvironmentPolicy(runtimeOptions.environment, policy);
+      assert.equal(shellEnv[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY], fixture.token);
+      assert.equal(shellEnv[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY], fixture.endpoint);
+      assert.equal(shellEnv[TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY], shimPath);
+      assert.ok(shellEnv.PATH?.startsWith(`${shimDir}${path.delimiter}`));
       const which = spawnSync("bash", ["-c", "command -v katacode"], {
-        env: runtimeEnv,
+        env: shellEnv,
         encoding: "utf8",
         timeout: 5_000,
         stdio: ["ignore", "pipe", "pipe"],
       });
       assert.equal(which.stdout.trim(), shimPath, which.stderr);
-      const shell = yield* Effect.callback<
-        {
-          readonly status: number | null;
-          readonly stdout: string;
-          readonly stderr: string;
-        },
-        Error
-      >((resume) => {
-        const child = spawn("bash", ["-c", "katacode task context"], {
-          env: runtimeEnv,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const stdout: Buffer[] = [];
-        const stderr: Buffer[] = [];
-        child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-        child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-        child.on("error", (error) => resume(Effect.fail(error)));
-        child.on("close", (status) =>
-          resume(
-            Effect.succeed({
-              status,
-              stdout: Buffer.concat(stdout).toString("utf8"),
-              stderr: Buffer.concat(stderr).toString("utf8"),
-            }),
-          ),
-        );
-      }).pipe(Effect.orDie);
+      const shell = yield* spawnBash(shellEnv, "katacode task context");
       assert.equal(shell.status, 0, shell.stderr);
       const cliLine = shell.stdout
         .split("\n")
@@ -444,8 +614,15 @@ validationLayer("CodexAdapterLive validation", (it) => {
       };
       assert.equal(envelope.protocol, "task-cli@1");
       assert.equal(envelope.ok, true);
-      yield* adapter.stopSession(asThreadId("thread-task-cli-shell"));
-    }).pipe(Effect.scoped as never),
+      yield* adapter.stopSession(threadId);
+    }).pipe(Effect.scoped as never);
+
+  it.effect("executes PATH-resolved Task CLI from a planning Codex shell", () =>
+    executeBuiltTaskCliFromCodexShell("planning"),
+  );
+
+  it.effect("executes PATH-resolved Task CLI from a task-worktree-write Codex shell", () =>
+    executeBuiltTaskCliFromCodexShell("task-worktree-write"),
   );
 
   it.effect("isolates the task MCP bearer token from Codex shell subprocesses", () =>
@@ -480,7 +657,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       const runtimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
       assert.ok(runtimeOptions);
       assert.equal(runtimeOptions.environment?.[MCP_BEARER_TOKEN_ENV_VAR], "task-mcp-secret");
-      assert.ok(runtimeOptions.appServerArgs?.includes('shell_environment_policy.inherit="core"'));
+      assert.ok(runtimeOptions.appServerArgs?.includes('shell_environment_policy.inherit="all"'));
       assert.ok(
         runtimeOptions.appServerArgs?.includes(
           `mcp_servers.kata.bearer_token_env_var="${MCP_BEARER_TOKEN_ENV_VAR}"`,
@@ -539,7 +716,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         ),
       );
       const shellPolicyIndex = taskRuntimeOptions.appServerArgs?.findIndex(
-        (argument) => argument === 'shell_environment_policy.inherit="core"',
+        (argument) => argument === 'shell_environment_policy.inherit="all"',
       );
       assert.ok(shellPolicyIndex !== undefined && shellPolicyIndex > 0);
       const taskExcludeArg = taskRuntimeOptions.appServerArgs?.find((argument) =>
@@ -1621,7 +1798,116 @@ scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
       assert.equal(yield* adapter.hasSession(asThreadId("thread-fail")), false);
     }),
   );
+
+  it.effect("unregisters the Task secret when startSession fails before attach", () =>
+    Effect.gen(function* () {
+      const secret = "codex-startup-fail-token-c31a9";
+      const adapter = yield* CodexAdapter;
+      const result = yield* adapter
+        .startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-fail-secret"),
+          runtimeMode: "full-access",
+          environment: {
+            variables: {
+              [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: secret,
+            },
+            executablePath: "/tmp/katacode",
+            pathPrepend: [],
+          },
+        })
+        .pipe(Effect.result);
+
+      assert.equal(result._tag, "Failure");
+      assert.equal(yield* adapter.hasSession(asThreadId("thread-fail-secret")), false);
+      assert.equal(redactProviderSecrets(secret), secret);
+    }),
+  );
 });
+
+it.effect(
+  "redacts task tokens in stream and native events emitted during Codex teardown drain",
+  () =>
+    Effect.gen(function* () {
+      const secret = "codex-late-drain-token-4b8e1";
+      const nativeEvents: unknown[] = [];
+      const runtimeFactory = makeRuntimeFactory();
+      const scope = yield* Scope.make("sequential");
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+      const layer = Layer.effect(
+        CodexAdapter,
+        Effect.gen(function* () {
+          const codexConfig = decodeCodexSettings({});
+          return yield* makeCodexAdapter(codexConfig, {
+            makeRuntime: runtimeFactory.factory,
+            nativeEventLogger: {
+              filePath: "/dev/null",
+              write: (event: unknown, _threadId) => Effect.sync(() => nativeEvents.push(event)),
+              close: () => Effect.void,
+            },
+          });
+        }),
+      ).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(ServerSettingsService.layerTest()),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      const context = yield* Layer.buildWithScope(layer, scope);
+      const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(context));
+      const threadId = asThreadId("thread-codex-late-drain");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: secret,
+          },
+          executablePath: process.execPath,
+          pathPrepend: [],
+        },
+      });
+      const runtime = runtimeFactory.lastRuntime;
+      assert.ok(runtime);
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "session.exited",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+      runtime.lateEventsOnClose = [
+        {
+          id: asEventId("evt-late-drain"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          threadId,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "process/stderr",
+          message: `token=${secret}`,
+        },
+        {
+          id: asEventId("evt-late-closed"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          threadId,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "session/closed",
+          message: "Session stopped",
+        },
+      ];
+      yield* adapter.stopSession(threadId);
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const serializedEvents = JSON.stringify(runtimeEvents);
+      const serializedNative = JSON.stringify(nativeEvents);
+      assert.equal(
+        runtimeEvents.some((event) => event.type === "runtime.warning"),
+        true,
+      );
+      assert.equal(serializedEvents.includes(secret), false);
+      assert.equal(serializedNative.includes(secret), false);
+      assert.equal(serializedEvents.includes(REDACTED), true);
+      assert.equal(serializedNative.includes(REDACTED), true);
+    }),
+);
 
 it.effect("flushes managed native logs when the adapter layer shuts down", () =>
   Effect.gen(function* () {
