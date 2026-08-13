@@ -32,6 +32,7 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import { ServerConfig } from "../config.ts";
@@ -40,7 +41,10 @@ import {
   type ServerEnvironmentShape,
 } from "../environment/Services/ServerEnvironment.ts";
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../git/GitWorkflowService.ts";
-import { layerConfig as SqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
+import {
+  layerConfig as SqlitePersistenceLive,
+  makeSqlitePersistenceLive,
+} from "../persistence/Layers/Sqlite.ts";
 import { TaskWorkspaceStoreLive } from "../persistence/Layers/TaskWorkspaceStore.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 import {
@@ -3098,6 +3102,78 @@ describe("TaskWorkspaceService first-slice workflow", () => {
         ),
       );
       expect(legacy.task.versions.executionArchitecture).toBeUndefined();
+    }),
+  );
+
+  it.effect("preserves mixed-version architecture markers across SQLite reopen", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-architecture-reopen-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const firstSlice = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      const legacy = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.create",
+            commandId: CommandId.make("legacy-architecture-reopen"),
+            taskId: TaskWorkspaceId.make("legacy-architecture-reopen-task"),
+            createdAt: now(3),
+            title: "Legacy reopen task",
+            projectId,
+            workspaceRoot: ".",
+            baseRef: "main",
+            preset: "standard",
+            approvalPolicy: "before-build",
+          }),
+        ),
+      );
+      const dbPath = NodePath.join(baseDir, "userdata", "state.sqlite");
+      const readArchitectureRows = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        return yield* sql<{
+          readonly taskId: string;
+          readonly taskJson: string;
+        }>`
+          SELECT task_id AS "taskId", task_json AS "taskJson"
+          FROM task_workspace_events
+          ORDER BY sequence, rowid
+        `;
+      }).pipe(
+        Effect.provide(Layer.provideMerge(makeSqlitePersistenceLive(dbPath), NodeServices.layer)),
+      );
+
+      yield* runtime.dispose;
+      const rowsBefore = yield* readArchitectureRows;
+      const architectureBefore = new Map(
+        rowsBefore.map((row) => {
+          const parsed = JSON.parse(row.taskJson) as {
+            versions?: { executionArchitecture?: string };
+          };
+          return [row.taskId, parsed.versions?.executionArchitecture] as const;
+        }),
+      );
+      expect(architectureBefore.get(firstSlice.task.id)).toBe("task-cli@1");
+      expect(architectureBefore.get(legacy.task.id)).toBeUndefined();
+
+      const restarted = yield* makeRuntime(repoRoot, baseDir, { value: 0 });
+      yield* Effect.addFinalizer(() => restarted.dispose);
+      const restartedService = yield* restarted.runPromise(Effect.service(TaskWorkspaceService));
+      const reopenedCli = yield* restarted.runPromise(restartedService.getTask(firstSlice.task.id));
+      const reopenedLegacy = yield* restarted.runPromise(restartedService.getTask(legacy.task.id));
+      expect(reopenedCli?.versions.executionArchitecture).toBe("task-cli@1");
+      expect(reopenedLegacy?.versions.executionArchitecture).toBeUndefined();
+
+      const rowsAfter = yield* readArchitectureRows;
+      const architectureAfter = new Map(
+        rowsAfter.map((row) => {
+          const parsed = JSON.parse(row.taskJson) as {
+            versions?: { executionArchitecture?: string };
+          };
+          return [row.taskId, parsed.versions?.executionArchitecture] as const;
+        }),
+      );
+      expect(architectureAfter.get(firstSlice.task.id)).toBe("task-cli@1");
+      expect(architectureAfter.get(legacy.task.id)).toBeUndefined();
+      expect(rowsAfter.map((row) => row.taskJson)).toEqual(rowsBefore.map((row) => row.taskJson));
     }),
   );
   it.effect(
