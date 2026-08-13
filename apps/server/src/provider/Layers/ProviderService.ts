@@ -1155,6 +1155,30 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           threadId,
           Effect.gen(function* () {
             yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage !== undefined);
+            const startedTaskEnvironment =
+              activeTaskStage !== undefined
+                ? yield* taskCliEnvironmentForTurn({
+                    threadId,
+                    providerInstanceId: resolvedInstanceId,
+                  }).pipe(
+                    Effect.mapError((cause) =>
+                      toValidationError("ProviderService.startSession", cause.message, cause),
+                    ),
+                  )
+                : undefined;
+            if (startedTaskEnvironment) {
+              taskTurnCredentials.set(threadId, {
+                token: startedTaskEnvironment.token,
+                providerInstanceId: resolvedInstanceId,
+                sessionGeneration: "session-pending",
+                leaseTurnId: startedTaskEnvironment.leaseTurnId,
+                environment: startedTaskEnvironment.environment,
+              });
+            }
+            const sessionEnvironment = mergeSessionEnvironments(
+              input.environment,
+              startedTaskEnvironment?.environment,
+            );
             const session = yield* adapter
               .startSession({
                 ...input,
@@ -1170,6 +1194,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                     ? { modelSelection: input.modelSelection }
                     : {}),
                 ...(developerInstructions ? { developerInstructions } : {}),
+                ...(sessionEnvironment ? { environment: sessionEnvironment } : {}),
                 taskStage: activeTaskStage !== undefined,
                 taskExecutionProfile: activeTaskProfile,
                 ...(activeTaskContext
@@ -1180,7 +1205,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                   ? { resumeCursor: effectiveResumeCursor }
                   : {}),
               })
-              .pipe(Effect.onError(() => clearMcpSession(threadId)));
+              .pipe(
+                Effect.onError(() =>
+                  clearMcpSession(threadId).pipe(
+                    Effect.andThen(
+                      startedTaskEnvironment ? revokeTaskCredential(threadId) : Effect.void,
+                    ),
+                  ),
+                ),
+              );
 
             if (session.provider !== adapter.provider) {
               yield* clearMcpSession(threadId);
@@ -1201,6 +1234,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               modelSelection: input.modelSelection,
               ...(developerInstructions ? { developerInstructions } : {}),
             });
+            if (startedTaskEnvironment) {
+              yield* markTaskTurnPending({
+                threadId,
+                providerInstanceId: resolvedInstanceId,
+                turnId: startedTaskEnvironment.leaseTurnId,
+              });
+            }
             return sessionWithInstance;
           }),
         );
