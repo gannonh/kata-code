@@ -64,6 +64,7 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
+import { registerProviderSecret, redactProviderEvent } from "../providerSecretRedaction.ts";
 import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import { classifyPiTurnFailure } from "../piTurnFailure.ts";
 import {
@@ -268,11 +269,13 @@ export function makePiAdapter(
       return event as E;
     };
 
-    const publish = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Effect.sync(() => options?.onEvent?.(event)).pipe(
-        Effect.andThen(PubSub.publish(runtimeEventPubSub, event)),
+    const publish = (event: ProviderRuntimeEvent): Effect.Effect<void> => {
+      const safeEvent = redactProviderEvent(event);
+      return Effect.sync(() => options?.onEvent?.(safeEvent)).pipe(
+        Effect.andThen(PubSub.publish(runtimeEventPubSub, safeEvent)),
         Effect.asVoid,
       );
+    };
 
     /** Publish from the synchronous SDK listener. `publish` is R=never, so the
      *  default runtime is sufficient. */
@@ -694,6 +697,8 @@ export function makePiAdapter(
 
         const cwd = input.cwd?.trim() || process.cwd();
         const sessionEnvironment = input.environment;
+        const taskToken = sessionEnvironment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
+        if (taskToken) registerProviderSecret(taskToken);
         const effectiveEnvironment = {
           ...(options?.environment ?? process.env),
           ...sessionEnvironment?.variables,
@@ -839,7 +844,15 @@ export function makePiAdapter(
                 createBashToolDefinition(cwd, {
                   spawnHook: (context) => ({
                     ...context,
-                    env: { ...context.env, ...effectiveEnvironment },
+                    env: {
+                      ...context.env,
+                      ...effectiveEnvironment,
+                      PATH: [
+                        ...(sessionEnvironment?.pathPrepend ?? []),
+                        ...(options?.environment?.PATH ? [options.environment.PATH] : []),
+                        ...(process.env.PATH ? [process.env.PATH] : []),
+                      ].join(NodePath.delimiter),
+                    },
                   }),
                 }),
               ],

@@ -88,6 +88,7 @@ import * as NodePath from "node:path";
 import { trustedInstructionsForStage } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import { registerProviderSecret, redactProviderEvent } from "../providerSecretRedaction.ts";
 const isModelSelection = Schema.is(ModelSelection);
 
 /**
@@ -520,6 +521,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.gen(function* () {
+      const safeEvent = redactProviderEvent(event);
       if (
         event.type === "turn.completed" ||
         event.type === "turn.aborted" ||
@@ -539,24 +541,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             yield* taskInvocations.value.revokeThread(event.threadId).pipe(Effect.ignore);
           }
         }
-        const credential = taskTurnCredentials.get(event.threadId);
+        const credential = taskTurnCredentials.get(safeEvent.threadId);
         const eventMatchesCredential =
           credential !== undefined &&
-          (event.turnId === undefined ||
-            event.turnId === credential.leaseTurnId ||
-            event.turnId === credential.providerTurnId) &&
-          (event.providerInstanceId === undefined ||
-            event.providerInstanceId === credential.providerInstanceId);
+          (safeEvent.turnId === undefined ||
+            safeEvent.turnId === credential.leaseTurnId ||
+            safeEvent.turnId === credential.providerTurnId) &&
+          (safeEvent.providerInstanceId === undefined ||
+            safeEvent.providerInstanceId === credential.providerInstanceId);
         if (eventMatchesCredential) {
-          yield* revokeTaskCredential(event.threadId);
-          const watchdog = taskTurnWatchdogs.get(event.threadId);
+          yield* revokeTaskCredential(safeEvent.threadId);
+          const watchdog = taskTurnWatchdogs.get(safeEvent.threadId);
           if (watchdog !== undefined) {
-            taskTurnWatchdogs.delete(event.threadId);
+            taskTurnWatchdogs.delete(safeEvent.threadId);
             yield* Fiber.interrupt(watchdog);
           }
         }
       }
-      yield* Effect.succeed(event).pipe(
+      yield* Effect.succeed(safeEvent).pipe(
         Effect.tap((canonicalEvent) =>
           canonicalEventLogger
             ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
@@ -1210,7 +1212,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
     let metricProvider = "unknown";
     let metricModel = input.modelSelection?.model;
-    return yield* Effect.gen(function* () {
+    const shouldSerializeTaskTurn = yield* isActiveTaskThread(input.threadId);
+    const sendTurnEffect = Effect.gen(function* () {
       const routed = yield* resolveRoutableSession({
         threadId: input.threadId,
         operation: "ProviderService.sendTurn",
@@ -1264,11 +1267,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
               interactionMode: providerInteractionMode ?? "default",
             };
-      const isTaskTurn = yield* isActiveTaskThread(input.threadId);
       yield* Effect.annotateCurrentSpan({
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
+      const isTaskTurn = shouldSerializeTaskTurn;
       const taskEnvironment = isTaskTurn
         ? yield* taskCliEnvironmentForTurn({
             threadId: input.threadId,
@@ -1288,34 +1291,31 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           turnId: taskEnvironment.leaseTurnId,
         });
       }
-      yield* withMcpRotationLock(
-        input.threadId,
-        Effect.gen(function* () {
-          const mcpPreparation = yield* prepareMcpSession(
-            input.threadId,
-            routed.instanceId,
-            activeTaskStage !== undefined,
-          );
-          if (mcpPreparation.rotated || taskEnvironment) {
-            yield* restartSessionForMcpCredential({
-              threadId: input.threadId,
-              providerInstanceId: routed.instanceId,
-              ...(input.developerInstructions !== undefined
-                ? { developerInstructions: input.developerInstructions }
-                : {}),
-              ...(mergeSessionEnvironments(input.environment, taskEnvironment?.environment)
-                ? {
-                    environment: mergeSessionEnvironments(
-                      input.environment,
-                      taskEnvironment?.environment,
-                    )!,
-                  }
-                : {}),
-              adapter: routed.adapter,
-            });
-          }
-        }),
-      ).pipe(
+      yield* Effect.gen(function* () {
+        const mcpPreparation = yield* prepareMcpSession(
+          input.threadId,
+          routed.instanceId,
+          activeTaskStage !== undefined,
+        );
+        if (mcpPreparation.rotated || taskEnvironment) {
+          yield* restartSessionForMcpCredential({
+            threadId: input.threadId,
+            providerInstanceId: routed.instanceId,
+            ...(input.developerInstructions !== undefined
+              ? { developerInstructions: input.developerInstructions }
+              : {}),
+            ...(mergeSessionEnvironments(input.environment, taskEnvironment?.environment)
+              ? {
+                  environment: mergeSessionEnvironments(
+                    input.environment,
+                    taskEnvironment?.environment,
+                  )!,
+                }
+              : {}),
+            adapter: routed.adapter,
+          });
+        }
+      }).pipe(
         Effect.onError(() =>
           taskEnvironment ? revokeTaskCredential(input.threadId) : Effect.void,
         ),
@@ -1449,6 +1449,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }),
       }),
     );
+    return yield* shouldSerializeTaskTurn
+      ? withMcpRotationLock(input.threadId, sendTurnEffect)
+      : sendTurnEffect;
   });
 
   const interruptTurn: ProviderServiceShape["interruptTurn"] = Effect.fn("interruptTurn")(
@@ -1568,47 +1571,50 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         payload: rawInput,
       });
       let metricProvider = "unknown";
-      return yield* Effect.gen(function* () {
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: "ProviderService.stopSession",
-          allowRecovery: false,
-        });
-        metricProvider = routed.adapter.provider;
-        yield* Effect.annotateCurrentSpan({
-          "provider.operation": "stop-session",
-          "provider.kind": routed.adapter.provider,
-          "provider.thread_id": input.threadId,
-        });
-        if (routed.isActive) {
-          yield* routed.adapter.stopSession(routed.threadId);
-        }
-        const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
-        if (Option.isSome(taskInvocations)) {
-          yield* taskInvocations.value.revokeThread(input.threadId).pipe(Effect.ignore);
-        }
-        taskTurnCredentials.delete(input.threadId);
-        yield* clearMcpSession(input.threadId);
-        yield* directory.upsert({
-          threadId: input.threadId,
-          provider: routed.adapter.provider,
-          providerInstanceId: routed.instanceId,
-          status: "stopped",
-          runtimePayload: {
-            activeTurnId: null,
-          },
-        });
-        yield* analytics.record("provider.session.stopped", {
-          provider: routed.adapter.provider,
-        });
-      }).pipe(
-        withMetrics({
-          counter: providerSessionsTotal,
-          outcomeAttributes: () =>
-            providerMetricAttributes(metricProvider, {
-              operation: "stop",
-            }),
-        }),
+      return yield* withMcpRotationLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: "ProviderService.stopSession",
+            allowRecovery: false,
+          });
+          metricProvider = routed.adapter.provider;
+          yield* Effect.annotateCurrentSpan({
+            "provider.operation": "stop-session",
+            "provider.kind": routed.adapter.provider,
+            "provider.thread_id": input.threadId,
+          });
+          if (routed.isActive) {
+            yield* routed.adapter.stopSession(routed.threadId);
+          }
+          const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+          if (Option.isSome(taskInvocations)) {
+            yield* taskInvocations.value.revokeThread(input.threadId).pipe(Effect.ignore);
+          }
+          taskTurnCredentials.delete(input.threadId);
+          yield* clearMcpSession(input.threadId);
+          yield* directory.upsert({
+            threadId: input.threadId,
+            provider: routed.adapter.provider,
+            providerInstanceId: routed.instanceId,
+            status: "stopped",
+            runtimePayload: {
+              activeTurnId: null,
+            },
+          });
+          yield* analytics.record("provider.session.stopped", {
+            provider: routed.adapter.provider,
+          });
+        }).pipe(
+          withMetrics({
+            counter: providerSessionsTotal,
+            outcomeAttributes: () =>
+              providerMetricAttributes(metricProvider, {
+                operation: "stop",
+              }),
+          }),
+        ),
       );
     },
   );

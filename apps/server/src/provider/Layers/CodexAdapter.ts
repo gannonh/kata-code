@@ -68,6 +68,7 @@ import {
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { registerProviderSecret, redactProviderSecrets } from "../providerSecretRedaction.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
@@ -196,7 +197,11 @@ const CODEX_TASK_SHELL_ENV_POLICY_ARGS = [
   "-c",
   'shell_environment_policy.inherit="core"',
   "-c",
+  "shell_environment_policy.ignore_default_excludes=true",
+  "-c",
   `shell_environment_policy.exclude=[${CODEX_SHELL_ENV_EXCLUDE_PATTERNS.map((pattern) => JSON.stringify(pattern)).join(",")}]`,
+  "-c",
+  'shell_environment_policy.include_only=["PATH","HOME","SHELL","USER","LOGNAME","CODEX_HOME","KATACODE_TASK_CLI_ENDPOINT","KATACODE_TASK_CLI_EXECUTABLE","KATACODE_TASK_INVOCATION_TOKEN"]',
 ] as const;
 
 export interface CodexAdapterLiveOptions {
@@ -1584,6 +1589,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const genericEnvironment = mergeSessionEnvironment(
           input.environment !== undefined ? { environment: input.environment } : {},
         );
+        const taskToken = input.environment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
+        if (taskToken) registerProviderSecret(taskToken);
         const taskEnvironment =
           input.taskExecutionProfile === "task-worktree-write" && taskAgentHomePath
             ? {
@@ -1972,7 +1979,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (!nativeEventLogger) {
       return;
     }
-    yield* nativeEventLogger.write(event, event.threadId);
+    yield* nativeEventLogger.write(redactProviderSecrets(event), event.threadId);
   });
 
   const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (

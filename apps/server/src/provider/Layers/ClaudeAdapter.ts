@@ -91,6 +91,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import { registerProviderSecret, redactProviderSecrets } from "../providerSecretRedaction.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString);
@@ -1501,7 +1502,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               }
             : {}),
           ...(itemId ? { itemId: ProviderItemId.make(itemId) } : {}),
-          payload: message,
+          payload: redactProviderSecrets(message),
         },
       },
       context.session.threadId,
@@ -3515,6 +3516,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const effectiveClaudeEnvironment = mergeSessionEnvironment(
         input.environment !== undefined ? { environment: input.environment } : {},
       );
+      const taskToken = input.environment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
+      if (taskToken) registerProviderSecret(taskToken);
       const permissionMode = taskStage ? undefined : runtimeModeToPermission[input.runtimeMode];
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),

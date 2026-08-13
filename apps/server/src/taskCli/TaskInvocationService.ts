@@ -193,20 +193,10 @@ const make = Effect.gen(function* () {
       ),
     );
     for (const row of rows) {
-      const binding = yield* currentBinding(row);
-      const payload = Option.isSome(binding) ? binding.value.runtimePayload : undefined;
-      const activeTurnId =
-        payload && typeof payload === "object" && !Array.isArray(payload)
-          ? (payload as Record<string, unknown>).activeTurnId
-          : undefined;
-      const isPendingTurn =
-        typeof activeTurnId === "string" && activeTurnId.startsWith("pending-task-cli-");
-      const isLive =
-        Option.isSome(binding) &&
-        binding.value.providerInstanceId === row.providerInstanceId &&
-        binding.value.status === "running" &&
-        activeTurnId === row.providerTurnId &&
-        !isPendingTurn;
+      // Persisted provider bindings do not prove continuity across a process
+      // restart; only the current process can bind a fresh lease to a native
+      // turn. Startup therefore treats every persisted active lease as orphaned.
+      const isLive = false;
       if (!isLive) {
         yield* revokeToken(row.tokenHash, "startup_orphan").pipe(Effect.ignore);
       }
@@ -365,6 +355,7 @@ const make = Effect.gen(function* () {
         WHERE token_hash = ${tokenHash}
           AND thread_id = ${input.threadId}
           AND provider_instance_id = ${input.providerInstanceId}
+          AND provider_turn_id = ${row.value.providerTurnId}
           AND status = 'active'
         RETURNING token_hash AS "tokenHash"
       `.pipe(

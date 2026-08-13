@@ -201,6 +201,8 @@ describe("makePiAdapter (vertical slice)", () => {
       const bash = capturedTools.find((tool) => tool.name === "bash");
       expect(bash).toBeDefined();
       expect(bash?.execute).toBeTypeOf("function");
+      const execute = bash?.execute as (toolCallId: string, input: { command: string }) => unknown;
+      expect(execute).toBeTypeOf("function");
     }),
   );
 

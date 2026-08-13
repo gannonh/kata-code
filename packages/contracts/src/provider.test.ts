@@ -36,6 +36,16 @@ describe("ProviderSessionEnvironment", () => {
     expect(parsed.variables.KATACODE_TASK_CLI_ENDPOINT).toBe("http://127.0.0.1:1234");
   });
 
+  it("rejects unallowlisted names and NUL-containing values", () => {
+    const decode = Schema.decodeUnknownSync(ProviderSessionEnvironment);
+    expect(() =>
+      decode({ variables: { OPENAI_API_KEY: "secret" }, executablePath: null, pathPrepend: [] }),
+    ).toThrow();
+    expect(() =>
+      decode({ variables: { PATH: "/bin\u0000:/usr/bin" }, executablePath: null, pathPrepend: [] }),
+    ).toThrow();
+  });
+
   it("rejects oversized PATH budgets and malformed variable names", () => {
     const decode = Schema.decodeUnknownSync(ProviderSessionEnvironment);
     expect(() =>

@@ -2037,11 +2037,21 @@ export const make = Effect.gen(function* () {
         });
       }
       const run = currentRun(task);
+      if (run.preset !== "guided") {
+        return yield* new TaskWorkspaceError({
+          message: "Task CLI context requires the Guided workflow preset.",
+          commandType: "task.cli.context",
+          taskId: task.id,
+        });
+      }
+      yield* validatePlanningRoot(task.id);
       const occurrence = task.occurrences
         .filter((candidate) => candidate.stage === run.currentStage)
         .toSorted((left, right) => right.ordinal - left.ordinal)[0];
       const isBootstrapOccurrence =
-        occurrence?.status === "starting" && task.bootstrap?.reservedThreadId === input.threadId;
+        occurrence?.status === "starting" &&
+        task.bootstrap?.status === "running" &&
+        task.bootstrap?.reservedThreadId === input.threadId;
       if (!occurrence || (!isBootstrapOccurrence && occurrence.threadId !== input.threadId)) {
         return yield* new TaskWorkspaceError({
           message: "The provider thread is not the active Task occurrence.",
