@@ -276,7 +276,7 @@ describe("TaskInvocationService", () => {
         const build = (sqlite: Layer.Layer<SqlClient.SqlClient, unknown, unknown>) => {
           const authority = makeAuthority();
           const persistence = sqlite.pipe(Layer.provideMerge(NodeServices.layer));
-          return TaskInvocationServiceLive.pipe(
+          return Layer.fresh(TaskInvocationServiceLive).pipe(
             Layer.provide(Layer.succeed(ProviderSessionDirectory, authority.directory)),
             Layer.provide(Layer.succeed(TaskWorkspaceService, authority.taskWorkspace)),
             Layer.provideMerge(persistence),
@@ -309,33 +309,48 @@ describe("TaskInvocationService", () => {
           secondContext,
         );
 
-        // The stale runtime may attempt cleanup, but its generation predicate
-        // must not revoke the fresh runtime's active lease.
-        const firstFailure = yield* Effect.provide(
+        const readSharedRows = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          return yield* sql<{ readonly status: string; readonly ownerGeneration: string }>`
+            SELECT status, owner_generation AS "ownerGeneration"
+            FROM task_invocation_leases
+            WHERE provider_turn_id = 'turn-shared'
+            ORDER BY issued_at, rowid
+          `;
+        }).pipe(Effect.provide(secondContext));
+
+        const rowsBeforeStaleWrites = yield* readSharedRows;
+        expect(new Set(rowsBeforeStaleWrites.map((row) => row.ownerGeneration)).size).toBe(2);
+        expect(rowsBeforeStaleWrites.filter((row) => row.status === "active")).toHaveLength(1);
+
+        const firstOwnFailure = yield* Effect.provide(
           firstService.resolve(firstIssued.token),
           firstContext,
         ).pipe(Effect.flip);
-        expect(["stale_lease", "terminal_lease"]).toContain(firstFailure.code);
+        expect(firstOwnFailure.code).toBe("stale_lease");
+
+        yield* Effect.provide(firstService.reconcile, firstContext);
+        yield* Effect.provide(firstService.revokeThread(threadId), firstContext);
+        yield* Effect.provide(
+          firstService.revokeTurn({ threadId, providerTurnId: TurnId.make("turn-shared") }),
+          firstContext,
+        );
+        yield* Effect.provide(firstService.revokeAll, firstContext);
+        const firstIssueFailure = yield* Effect.provide(
+          firstService.issue(issueInput("turn-shared")),
+          firstContext,
+        ).pipe(Effect.flip);
+        expect(firstIssueFailure.code).toBe("stale_lease");
+
         const secondResolution = yield* Effect.provide(
           secondService.resolve(secondIssued.token),
           secondContext,
         );
         expect(secondResolution.scope.providerTurnId).toBe("turn-shared");
 
-        const rows = yield* Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient;
-          return yield* sql<{ readonly status: string; readonly ownerGeneration: string }>`
-          SELECT status, owner_generation AS "ownerGeneration"
-          FROM task_invocation_leases
-          WHERE token_hash IN (
-            SELECT token_hash FROM task_invocation_leases
-            WHERE provider_turn_id = 'turn-shared'
-          )
-          ORDER BY issued_at, rowid
-        `;
-        }).pipe(Effect.provide(secondContext));
-        expect(rows.some((row) => row.status === "active")).toBe(true);
-        expect(rows.map((row) => row.ownerGeneration)).toHaveLength(2);
+        const rows = yield* readSharedRows;
+        expect(rows.filter((row) => row.status === "active")).toHaveLength(1);
+        expect(new Set(rows.map((row) => row.ownerGeneration)).size).toBe(2);
       }) as Effect.Effect<void, unknown, Scope.Scope>,
   );
 

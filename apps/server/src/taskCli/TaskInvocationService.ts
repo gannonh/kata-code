@@ -147,6 +147,26 @@ const make = Effect.gen(function* () {
   const toError = (code: TaskCliErrorCode, message: string, cause?: unknown) =>
     new TaskInvocationError({ code, message, ...(cause !== undefined ? { cause } : {}) });
 
+  const preserveInvocationError =
+    (message: string) =>
+    (cause: unknown): TaskInvocationError =>
+      cause instanceof TaskInvocationError ? cause : toError("internal_error", message, cause);
+
+  const currentOwnerExists = sql<{ readonly ownerGeneration: string }>`
+    SELECT owner_generation AS "ownerGeneration"
+    FROM task_invocation_lease_owner
+    WHERE owner_id = 1 AND owner_generation = ${ownerGeneration}
+  `.pipe(
+    Effect.mapError((cause) =>
+      toError("internal_error", "Failed to read invocation runtime ownership.", cause),
+    ),
+  );
+
+  const isCurrentOwner = Effect.gen(function* () {
+    const rows = yield* currentOwnerExists;
+    return rows.length === 1;
+  });
+
   const revokeToken = (
     tokenHash: string,
     reason:
@@ -185,49 +205,28 @@ const make = Effect.gen(function* () {
           );
 
   const reconcileStartupLeases = Effect.gen(function* () {
-    const rows = yield* sql<LeaseRow>`
-      SELECT
-        token_hash AS "tokenHash",
-        environment_id AS "environmentId",
-        task_id AS "taskId",
-        occurrence,
-        stage,
-        thread_id AS "threadId",
-        provider_instance_id AS "providerInstanceId",
-        provider_turn_id AS "providerTurnId",
-        owner_generation AS "ownerGeneration",
-        status,
-        issued_at AS "issuedAt",
-        expires_at AS "expiresAt",
-        revoked_at AS "revokedAt",
-        revocation_reason AS "revocationReason"
-      FROM task_invocation_leases
+    // Persisted provider bindings do not prove continuity across a process
+    // restart; only the current process can bind a fresh lease to a native
+    // turn. Startup fences every lease owned by a prior runtime generation,
+    // and only while this process still owns the singleton owner row.
+    const revokedAt = DateTime.formatIso(yield* DateTime.now);
+    yield* sql`
+      UPDATE task_invocation_leases
+      SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = 'startup_orphan'
       WHERE status = 'active'
+        AND owner_generation <> ${ownerGeneration}
+        AND EXISTS (
+          SELECT 1 FROM task_invocation_lease_owner
+          WHERE owner_id = 1 AND owner_generation = ${ownerGeneration}
+        )
     `.pipe(
       Effect.mapError((cause) =>
-        toError("internal_error", "Failed to inspect Task CLI invocation credentials.", cause),
+        toError("internal_error", "Failed to fence Task CLI invocation credentials.", cause),
       ),
     );
-    for (const row of rows) {
-      // Persisted provider bindings do not prove continuity across a process
-      // restart; only the current process can bind a fresh lease to a native
-      // turn. Startup fences every lease owned by a prior runtime generation.
-      if (row.ownerGeneration !== ownerGeneration) {
-        yield* sql`
-          UPDATE task_invocation_leases
-          SET status = 'revoked', revoked_at = ${DateTime.formatIso(yield* DateTime.now)},
-              revocation_reason = 'startup_orphan'
-          WHERE token_hash = ${row.tokenHash}
-            AND owner_generation = ${row.ownerGeneration}
-            AND status = 'active'
-        `.pipe(Effect.ignore);
-      }
-    }
   }).pipe(
-    Effect.mapError((cause) =>
-      cause instanceof TaskInvocationError
-        ? cause
-        : toError("internal_error", "Failed to reconcile Task CLI invocation credentials.", cause),
+    Effect.mapError(
+      preserveInvocationError("Failed to reconcile Task CLI invocation credentials."),
     ),
   );
 
@@ -328,11 +327,7 @@ const make = Effect.gen(function* () {
             }
           }),
         )
-        .pipe(
-          Effect.mapError((cause) =>
-            toError("internal_error", "Failed to persist invocation credential.", cause),
-          ),
-        );
+        .pipe(Effect.mapError(preserveInvocationError("Failed to persist invocation credential.")));
       return { token, scope };
     },
   );
@@ -438,7 +433,7 @@ const make = Effect.gen(function* () {
             : "The invocation credential has been revoked.",
         );
       }
-      if (row.ownerGeneration !== ownerGeneration) {
+      if (row.ownerGeneration !== ownerGeneration || !(yield* isCurrentOwner)) {
         return yield* toError(
           "stale_lease",
           "The invocation credential belongs to an inactive runtime.",
@@ -545,15 +540,18 @@ const make = Effect.gen(function* () {
       UPDATE task_invocation_leases
       SET status = 'revoked', revoked_at = ${now}, revocation_reason = 'orphan'
       WHERE status = 'active'
+        AND owner_generation = ${ownerGeneration}
         AND expires_at IS NOT NULL
         AND expires_at <= ${now}
+        AND EXISTS (
+          SELECT 1 FROM task_invocation_lease_owner
+          WHERE owner_id = 1 AND owner_generation = ${ownerGeneration}
+        )
     `;
     yield* reconcileStartupLeases;
   }).pipe(
-    Effect.mapError((cause) =>
-      cause instanceof TaskInvocationError
-        ? cause
-        : toError("internal_error", "Failed to reconcile Task CLI invocation credentials.", cause),
+    Effect.mapError(
+      preserveInvocationError("Failed to reconcile Task CLI invocation credentials."),
     ),
   );
 
