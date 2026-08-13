@@ -1,4 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics preferSchemaOverJson:off
+// @effect-diagnostics missingEffectContext:off
+// @effect-diagnostics missingLayerContext:off
+// @effect-diagnostics anyUnknownInErrorContext:off
 import { describe, expect, it, vi } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -25,6 +29,7 @@ import { makePiAdapter, type PiSdkSession } from "./PiAdapter.ts";
 import type { PiExtensionUIContext } from "./piExtensionUi.ts";
 import type { PiModelShape } from "./PiProvider.ts";
 import { ProviderAdapterRequestError } from "../Errors.ts";
+import { makeTaskCliProcessFixture } from "../../taskCli/TaskCliProcessFixture.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
 const isProviderRuntimeEvent = Schema.is(ProviderRuntimeEvent);
@@ -171,39 +176,122 @@ const MODEL_SELECTION = {
 } as const;
 
 describe("makePiAdapter (vertical slice)", () => {
-  it.effect("propagates generic Task CLI environment through the supported Pi bash spawnHook", () =>
-    Effect.gen(function* () {
-      const { session } = makeFakeSession();
-      let capturedTools: ReadonlyArray<{ readonly name?: string; readonly execute?: Function }> =
-        [];
-      const adapter = yield* makePiAdapter(decodePiSettings({}), {
-        instanceId: ProviderInstanceId.make("pi"),
-        availableModels: [SAMPLE_MODEL],
-        createSession: ((args: {
-          customTools?: ReadonlyArray<{ name?: string; execute?: Function }>;
-        }) => {
-          capturedTools = args.customTools ?? [];
-          return Promise.resolve({ session });
-        }) as never,
-      });
-      yield* adapter.startSession({
-        threadId: ThreadId.make("pi-thread-task-cli-environment"),
-        runtimeMode: "full-access",
-        environment: {
-          variables: {
-            KATACODE_TASK_CLI_ENDPOINT: "http://127.0.0.1:1234",
-            KATACODE_TASK_INVOCATION_TOKEN: "opaque-token",
+  it.effect(
+    "executes a real child shell through Pi bash spawnHook and redacts its event output",
+    () =>
+      Effect.gen(function* () {
+        const { session, hooks } = makeFakeSession();
+        const fixture = yield* makeTaskCliProcessFixture();
+        const cliBundlePath = path.resolve(process.cwd(), "apps/server/dist/bin.mjs");
+        let capturedTools: ReadonlyArray<{ readonly name?: string; readonly execute?: Function }> =
+          [];
+        const recorder = makeEventRecorder();
+        const adapter = yield* makePiAdapter(decodePiSettings({}), {
+          instanceId: ProviderInstanceId.make("pi"),
+          availableModels: [SAMPLE_MODEL],
+          onEvent: recorder.onEvent,
+          createSession: ((args: {
+            customTools?: ReadonlyArray<{ name?: string; execute?: Function }>;
+          }) => {
+            capturedTools = args.customTools ?? [];
+            return Promise.resolve({ session });
+          }) as never,
+        });
+        const secret = fixture.token;
+        const endpoint = fixture.endpoint;
+        const threadId = ThreadId.make("pi-thread-task-cli-environment");
+        yield* adapter.startSession({
+          threadId,
+          runtimeMode: "full-access",
+          environment: {
+            variables: {
+              KATACODE_TASK_CLI_ENDPOINT: endpoint,
+              KATACODE_TASK_INVOCATION_TOKEN: secret,
+              KATACODE_TASK_CLI_BUNDLE: cliBundlePath,
+            },
+            executablePath: process.execPath,
+            pathPrepend: ["/tmp/bin"],
           },
-          executablePath: "/tmp/bin/katacode",
-          pathPrepend: ["/tmp/bin"],
-        },
-      });
-      const bash = capturedTools.find((tool) => tool.name === "bash");
-      expect(bash).toBeDefined();
-      expect(bash?.execute).toBeTypeOf("function");
-      const execute = bash?.execute as (toolCallId: string, input: { command: string }) => unknown;
-      expect(execute).toBeTypeOf("function");
-    }),
+        });
+        const bash = capturedTools.find((tool) => tool.name === "bash");
+        expect(bash).toBeDefined();
+        const execute = bash?.execute as (
+          toolCallId: string,
+          input: { command: string },
+          signal?: AbortSignal,
+          onUpdate?: unknown,
+          context?: unknown,
+        ) => Promise<unknown>;
+        const result = yield* Effect.promise(() =>
+          execute(
+            "pi-task-cli-child",
+            {
+              command:
+                'printf \'%s\\n\' "$KATACODE_TASK_CLI_ENDPOINT" "$KATACODE_TASK_INVOCATION_TOKEN" "$PATH"; "$KATACODE_TASK_CLI_EXECUTABLE" "$KATACODE_TASK_CLI_BUNDLE" task context',
+            },
+            undefined,
+            undefined,
+            {
+              sessionManager: {
+                getSessionId: () => "pi-test-session",
+                getSessionFile: () => undefined,
+              },
+              model: undefined,
+            },
+          ),
+        );
+        const output =
+          typeof result === "object" &&
+          result !== null &&
+          "content" in result &&
+          Array.isArray(result.content)
+            ? result.content
+                .map((entry: unknown) =>
+                  typeof entry === "object" &&
+                  entry !== null &&
+                  "text" in entry &&
+                  typeof entry.text === "string"
+                    ? entry.text
+                    : "",
+                )
+                .join("\n")
+            : "";
+        expect(output).toContain(endpoint);
+        expect(output).toContain(secret);
+        expect(output).toContain("/tmp/bin");
+        const cliLine = output
+          .split("\n")
+          .find((line) => line.trimStart().startsWith('{"protocol"'));
+        const cliEnvelope = JSON.parse(cliLine ?? "null") as unknown;
+        expect(cliEnvelope).toMatchObject({
+          protocol: "task-cli@1",
+          ok: true,
+          operation: "context",
+          context: {
+            stage: "questions",
+            occurrence: 0,
+            brief: "Prove the built Task CLI against real authority.",
+          },
+        });
+
+        hooks.emit?.({
+          type: "tool_execution_start",
+          toolCallId: "pi-task-cli-child",
+          toolName: "bash",
+          args: { command: "printf $KATACODE_TASK_INVOCATION_TOKEN" },
+        } as never);
+        hooks.emit?.({
+          type: "tool_execution_end",
+          toolCallId: "pi-task-cli-child",
+          toolName: "bash",
+          args: { command: "printf $KATACODE_TASK_INVOCATION_TOKEN" },
+          result: { stdout: output, content: output, exitCode: 0 },
+          isError: false,
+        } as never);
+        yield* Effect.promise(() => recorder.waitFor((event) => event.type === "item.completed"));
+        expect(JSON.stringify(recorder.events)).not.toContain(secret);
+        expect(JSON.stringify(recorder.events)).toContain("[REDACTED]");
+      }).pipe(Effect.scoped as never),
   );
 
   it.effect("defaults reasoning models to thinkingLevel off when unset", () =>

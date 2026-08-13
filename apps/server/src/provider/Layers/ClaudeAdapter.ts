@@ -22,6 +22,8 @@ import {
   type SettingSource,
   type SDKUserMessage,
   type ModelUsage,
+  type SpawnOptions,
+  type SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { parseCliArgs } from "@kata-sh/code-shared/cliArgs";
@@ -92,7 +94,11 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { registerProviderSecret, redactProviderSecrets } from "../providerSecretRedaction.ts";
+import {
+  registerProviderSecret,
+  redactProviderEvent,
+  redactProviderSecrets,
+} from "../providerSecretRedaction.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString);
@@ -227,6 +233,8 @@ export interface ClaudeAdapterLiveOptions {
     readonly prompt: AsyncIterable<SDKUserMessage>;
     readonly options: ClaudeQueryOptions;
   }) => ClaudeQueryRuntime;
+  /** Override Claude Code's child process launch while retaining the SDK transport. */
+  readonly spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
@@ -1472,11 +1480,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const nextEventId = Effect.map(randomUUIDv4, (id) => EventId.make(id));
   const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
 
-  const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Queue.offer(runtimeEventQueue, {
+  const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> => {
+    const safeEvent = redactProviderEvent({
       ...event,
       sessionGeneration: event.sessionGeneration ?? sessions.get(event.threadId)?.sessionGeneration,
-    }).pipe(Effect.asVoid);
+    });
+    return Queue.offer(runtimeEventQueue, safeEvent).pipe(Effect.asVoid);
+  };
 
   const logNativeSdkMessage = Effect.fn("logNativeSdkMessage")(function* (
     context: ClaudeSessionContext,
@@ -3567,6 +3577,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         includePartialMessages: true,
         canUseTool,
         env: effectiveClaudeEnvironment,
+        ...(options?.spawnClaudeCodeProcess
+          ? { spawnClaudeCodeProcess: options.spawnClaudeCodeProcess }
+          : {}),
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession
