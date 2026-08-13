@@ -1,4 +1,12 @@
+// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics missingEffectContext:off
+// @effect-diagnostics missingLayerContext:off
+// @effect-diagnostics anyUnknownInErrorContext:off
+// @effect-diagnostics unsafeEffectTypeAssertion:off
 import { describe, expect, it } from "@effect/vitest";
+import * as NodeFs from "node:fs/promises";
+import * as NodeOs from "node:os";
+import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
@@ -9,12 +17,18 @@ import {
   TurnId,
   type TaskStageContextResult,
 } from "@kata-sh/code-contracts";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Scope from "effect/Scope";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import {
+  makeSqlitePersistenceLive,
+  SqlitePersistenceMemory,
+} from "../persistence/Layers/Sqlite.ts";
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
@@ -221,6 +235,107 @@ describe("TaskInvocationService", () => {
       expect(orphanFailure.code).toBe("terminal_lease");
     }).pipe(Effect.provide(test.layer));
   });
+
+  // @effect-diagnostics missingEffectContext:off
+  it.effect(
+    "fences stale runtime writers across shared SQLite",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* Effect.promise(() =>
+          NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-task-owner-fence-")),
+        );
+        const dbPath = NodePath.join(root, "state.sqlite");
+        const makeAuthority = () => {
+          const directory: ProviderSessionDirectoryShape = {
+            upsert: () => Effect.void,
+            getProvider: () => Effect.succeed(ProviderDriverKind.make("codex")),
+            getBinding: () =>
+              Effect.succeed(
+                Option.some({
+                  threadId,
+                  provider: ProviderDriverKind.make("codex"),
+                  providerInstanceId,
+                  status: "running" as const,
+                  runtimePayload: { activeTurnId: "turn-shared" },
+                }),
+              ),
+            listThreadIds: () => Effect.succeed([threadId]),
+            listBindings: () => Effect.succeed([]),
+          };
+          const taskWorkspace = {
+            resolveTaskCliInvocation: () =>
+              Effect.succeed({
+                taskId: TaskWorkspaceId.make("task-cli-shared"),
+                stage: "questions" as const,
+                occurrence: 0,
+                context,
+              }),
+          } as unknown as TaskWorkspaceServiceShape;
+          return { directory, taskWorkspace };
+        };
+        const build = (sqlite: Layer.Layer<SqlClient.SqlClient, unknown, unknown>) => {
+          const authority = makeAuthority();
+          const persistence = sqlite.pipe(Layer.provideMerge(NodeServices.layer));
+          return TaskInvocationServiceLive.pipe(
+            Layer.provide(Layer.succeed(ProviderSessionDirectory, authority.directory)),
+            Layer.provide(Layer.succeed(TaskWorkspaceService, authority.taskWorkspace)),
+            Layer.provideMerge(persistence),
+            Layer.provideMerge(NodeServices.layer),
+          );
+        };
+        const firstSqlite = makeSqlitePersistenceLive(dbPath);
+        const firstScope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(firstScope, Exit.void));
+        const firstContext = yield* Layer.buildWithScope(
+          build(firstSqlite).pipe(Layer.provide(NodeServices.layer)),
+          firstScope,
+        );
+        const firstService = Context.get(firstContext, TaskInvocationService);
+        const firstIssued = yield* Effect.provide(
+          firstService.issue(issueInput("turn-shared")),
+          firstContext,
+        );
+
+        const secondSqlite = makeSqlitePersistenceLive(dbPath);
+        const secondScope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void));
+        const secondContext = yield* Layer.buildWithScope(
+          build(secondSqlite).pipe(Layer.provide(NodeServices.layer)),
+          secondScope,
+        );
+        const secondService = Context.get(secondContext, TaskInvocationService);
+        const secondIssued = yield* Effect.provide(
+          secondService.issue(issueInput("turn-shared")),
+          secondContext,
+        );
+
+        const firstFailure = yield* Effect.provide(
+          firstService.resolve(firstIssued.token),
+          firstContext,
+        ).pipe(Effect.flip);
+        expect(firstFailure.code).toBe("stale_lease");
+        const secondResolution = yield* Effect.provide(
+          secondService.resolve(secondIssued.token),
+          secondContext,
+        );
+        expect(secondResolution.scope.providerTurnId).toBe("turn-shared");
+
+        const rows = yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          return yield* sql<{ readonly status: string; readonly ownerGeneration: string }>`
+          SELECT status, owner_generation AS "ownerGeneration"
+          FROM task_invocation_leases
+          WHERE token_hash IN (
+            SELECT token_hash FROM task_invocation_leases
+            WHERE provider_turn_id = 'turn-shared'
+          )
+          ORDER BY issued_at, rowid
+        `;
+        }).pipe(Effect.provide(secondContext));
+        expect(rows.some((row) => row.status === "active")).toBe(true);
+        expect(rows.map((row) => row.ownerGeneration)).toHaveLength(2);
+      }) as Effect.Effect<void, unknown, Scope.Scope>,
+  );
 
   it.effect("revokes every thread lease on explicit stop and never returns raw credentials", () => {
     const test = makeLayer();

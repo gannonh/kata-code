@@ -106,6 +106,14 @@ const make = Effect.gen(function* () {
   const sessions = yield* Effect.serviceOption(ProviderSessionDirectory);
   const taskWorkspace = yield* Effect.serviceOption(TaskWorkspaceService);
   const ownerGeneration = randomUUID();
+  const claimedAt = DateTime.formatIso(yield* DateTime.now);
+  yield* sql`
+    INSERT INTO task_invocation_lease_owner (owner_id, owner_generation, claimed_at)
+    VALUES (1, ${ownerGeneration}, ${claimedAt})
+    ON CONFLICT(owner_id) DO UPDATE SET
+      owner_generation = excluded.owner_generation,
+      claimed_at = excluded.claimed_at
+  `;
 
   const findLease = SqlSchema.findOneOption({
     Request: Schema.Struct({ tokenHash: Schema.String }),
@@ -155,7 +163,9 @@ const make = Effect.gen(function* () {
       yield* sql`
         UPDATE task_invocation_leases
         SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = ${reason}
-        WHERE token_hash = ${tokenHash} AND status = 'active'
+        WHERE token_hash = ${tokenHash}
+          AND owner_generation = ${ownerGeneration}
+          AND status = 'active'
       `;
     }).pipe(
       Effect.mapError((cause) =>
@@ -201,10 +211,16 @@ const make = Effect.gen(function* () {
     for (const row of rows) {
       // Persisted provider bindings do not prove continuity across a process
       // restart; only the current process can bind a fresh lease to a native
-      // turn. Startup therefore treats every persisted active lease as orphaned.
-      const isLive = false;
-      if (!isLive) {
-        yield* revokeToken(row.tokenHash, "startup_orphan").pipe(Effect.ignore);
+      // turn. Startup fences every lease owned by a prior runtime generation.
+      if (row.ownerGeneration !== ownerGeneration) {
+        yield* sql`
+          UPDATE task_invocation_leases
+          SET status = 'revoked', revoked_at = ${DateTime.formatIso(yield* DateTime.now)},
+              revocation_reason = 'startup_orphan'
+          WHERE token_hash = ${row.tokenHash}
+            AND owner_generation = ${row.ownerGeneration}
+            AND status = 'active'
+        `.pipe(Effect.ignore);
       }
     }
   }).pipe(
@@ -287,7 +303,9 @@ const make = Effect.gen(function* () {
             yield* sql`
             UPDATE task_invocation_leases
             SET status = 'revoked', revoked_at = ${issuedAt}, revocation_reason = 'superseded'
-            WHERE thread_id = ${scope.threadId} AND status = 'active'
+            WHERE thread_id = ${scope.threadId}
+              AND owner_generation = ${ownerGeneration}
+              AND status = 'active'
           `;
             yield* sql`
             INSERT INTO task_invocation_leases (
@@ -362,8 +380,12 @@ const make = Effect.gen(function* () {
           AND thread_id = ${input.threadId}
           AND provider_instance_id = ${input.providerInstanceId}
           AND provider_turn_id = ${row.value.providerTurnId}
-          AND owner_generation = ${row.value.ownerGeneration}
+          AND owner_generation = ${ownerGeneration}
           AND status = 'active'
+          AND EXISTS (
+            SELECT 1 FROM task_invocation_lease_owner
+            WHERE owner_id = 1 AND owner_generation = ${ownerGeneration}
+          )
         RETURNING token_hash AS "tokenHash"
       `.pipe(
         Effect.mapError((cause) =>
@@ -406,6 +428,12 @@ const make = Effect.gen(function* () {
           terminal
             ? "The provider turn for this invocation has terminated."
             : "The invocation credential has been revoked.",
+        );
+      }
+      if (row.ownerGeneration !== ownerGeneration) {
+        return yield* toError(
+          "stale_lease",
+          "The invocation credential belongs to an inactive runtime.",
         );
       }
       if (row.expiresAt !== null) {
@@ -476,7 +504,9 @@ const make = Effect.gen(function* () {
       yield* sql`
         UPDATE task_invocation_leases
         SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = 'stopped'
-        WHERE thread_id = ${threadId} AND status = 'active'
+        WHERE thread_id = ${threadId}
+          AND owner_generation = ${ownerGeneration}
+          AND status = 'active'
       `;
     }).pipe(
       Effect.mapError((cause) =>
@@ -492,6 +522,7 @@ const make = Effect.gen(function* () {
         SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = 'terminal'
         WHERE thread_id = ${input.threadId}
           AND provider_turn_id = ${input.providerTurnId}
+          AND owner_generation = ${ownerGeneration}
           AND status = 'active'
       `;
     }).pipe(
@@ -523,7 +554,8 @@ const make = Effect.gen(function* () {
     yield* sql`
       UPDATE task_invocation_leases
       SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = 'manual'
-      WHERE status = 'active'
+      WHERE owner_generation = ${ownerGeneration}
+        AND status = 'active'
     `;
   }).pipe(
     Effect.mapError((cause) =>
