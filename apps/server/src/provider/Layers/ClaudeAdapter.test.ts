@@ -3,6 +3,8 @@
 // @effect-diagnostics missingEffectContext:off
 // @effect-diagnostics missingLayerContext:off
 // @effect-diagnostics anyUnknownInErrorContext:off
+// @effect-diagnostics globalDate:off
+// @effect-diagnostics globalTimers:off
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +48,21 @@ import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 import { makeTaskCliProcessFixture } from "../../taskCli/TaskCliProcessFixture.ts";
 import { REDACTED } from "../providerSecretRedaction.ts";
+
+async function waitForExistingFile(filePath: string, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      readFileSync(filePath);
+      return;
+    } catch {
+      if (Date.now() >= deadline) {
+        throw new Error("Claude child did not write a Task CLI result file.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
 
 function spawnClaudeTestProcess(options: SpawnOptions): SpawnedProcess {
   const { spawn } = require("node:child_process") as typeof import("node:child_process");
@@ -344,19 +361,7 @@ describe("ClaudeAdapterLive", () => {
         const active = yield* adapter.listSessions();
         assert.equal(active[0]?.threadId, threadId);
         assert.equal(session.resumeCursor !== undefined, true);
-        yield* Effect.promise(async () => {
-          const deadline = Date.now() + 5_000;
-          while (Date.now() < deadline) {
-            try {
-              readFileSync(childResultPath);
-              return;
-            } catch {
-              // The Claude child writes this file after the Task CLI exits.
-            }
-            await new Promise((resolve) => setTimeout(resolve, 25));
-          }
-          throw new Error("Claude child did not write a Task CLI result file.");
-        });
+        yield* Effect.promise(() => waitForExistingFile(childResultPath));
         if (yield* adapter.hasSession(threadId)) {
           yield* adapter.stopSession(threadId);
         }

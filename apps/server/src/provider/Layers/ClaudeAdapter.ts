@@ -3050,6 +3050,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         settled = true;
         resume(Effect.void);
       };
+      // Wall-clock bound so TestClock sessions cannot stall a hung SDK iterator.
+      // @effect-diagnostics-next-line globalTimersInEffect:off
       const timer = setTimeout(() => {
         fiber.interruptUnsafe();
         settle();
