@@ -88,7 +88,7 @@ import * as NodePath from "node:path";
 import { trustedInstructionsForStage } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
-import { registerProviderSecret, redactProviderEvent } from "../providerSecretRedaction.ts";
+import { redactProviderEvent } from "../providerSecretRedaction.ts";
 const isModelSelection = Schema.is(ModelSelection);
 
 /**
@@ -308,24 +308,43 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly providerTurnId?: TurnId;
     }
   >();
-  const mcpRotationLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
-  const getMcpRotationLock = (threadId: ThreadId) =>
+  const mcpRotationLocksRef = yield* SynchronizedRef.make(
+    new Map<string, { readonly semaphore: Semaphore.Semaphore; readonly users: number }>(),
+  );
+  const acquireMcpRotationLock = (threadId: ThreadId) =>
     SynchronizedRef.modifyEffect(mcpRotationLocksRef, (current) => {
       const key = String(threadId);
       const existing = current.get(key);
       if (existing) {
-        return Effect.succeed([existing, current] as const);
+        const next = new Map(current);
+        next.set(key, { ...existing, users: existing.users + 1 });
+        return Effect.succeed([existing.semaphore, next] as const);
       }
       return Semaphore.make(1).pipe(
         Effect.map((semaphore) => {
           const next = new Map(current);
-          next.set(key, semaphore);
+          next.set(key, { semaphore, users: 1 });
           return [semaphore, next] as const;
         }),
       );
     });
+  const releaseMcpRotationLock = (threadId: ThreadId) =>
+    SynchronizedRef.update(mcpRotationLocksRef, (current) => {
+      const key = String(threadId);
+      const existing = current.get(key);
+      if (!existing) return current;
+      const next = new Map(current);
+      if (existing.users <= 1) next.delete(key);
+      else next.set(key, { ...existing, users: existing.users - 1 });
+      return next;
+    });
   const withMcpRotationLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
-    Effect.flatMap(getMcpRotationLock(threadId), (semaphore) => semaphore.withPermit(effect));
+    Effect.gen(function* () {
+      const semaphore = yield* acquireMcpRotationLock(threadId);
+      return yield* semaphore
+        .withPermit(effect)
+        .pipe(Effect.ensuring(releaseMcpRotationLock(threadId)));
+    });
   yield* Effect.addFinalizer(() =>
     Effect.forEach(taskTurnWatchdogs.values(), Fiber.interrupt, {
       concurrency: "unbounded",
@@ -529,6 +548,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         event.type === "session.exited"
       ) {
         const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+        const credential = taskTurnCredentials.get(safeEvent.threadId);
         if (Option.isSome(taskInvocations)) {
           if (event.turnId !== undefined) {
             yield* taskInvocations.value
@@ -537,11 +557,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 providerTurnId: event.turnId,
               })
               .pipe(Effect.ignore);
-          } else if (event.type === "runtime.error" || event.type === "session.exited") {
+          } else if (
+            (event.type === "runtime.error" || event.type === "session.exited") &&
+            credential !== undefined &&
+            (event.providerInstanceId === undefined ||
+              event.providerInstanceId === credential.providerInstanceId)
+          ) {
+            // A lifecycle event without a turn id is only authoritative when
+            // it identifies the currently tracked provider instance. Old
+            // replacement-session exits must not revoke the fresh lease.
             yield* taskInvocations.value.revokeThread(event.threadId).pipe(Effect.ignore);
           }
         }
-        const credential = taskTurnCredentials.get(safeEvent.threadId);
         const eventMatchesCredential =
           credential !== undefined &&
           (safeEvent.turnId === undefined ||
@@ -932,6 +959,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     readonly threadId: ThreadId;
     readonly operation: string;
     readonly allowRecovery: boolean;
+    readonly alreadyLocked?: boolean;
   }) {
     const bindingOption = yield* directory.getBinding(input.threadId);
     const binding = Option.getOrUndefined(bindingOption);
@@ -963,13 +991,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       } as const;
     }
 
-    const recovered = yield* withMcpRotationLock(
-      input.threadId,
-      recoverSessionForThread({
-        binding,
-        operation: input.operation,
-      }),
-    );
+    const recovered = yield* input.alreadyLocked
+      ? recoverSessionForThread({ binding, operation: input.operation })
+      : withMcpRotationLock(
+          input.threadId,
+          recoverSessionForThread({
+            binding,
+            operation: input.operation,
+          }),
+        );
     return {
       adapter: recovered.adapter,
       instanceId,
@@ -1212,9 +1242,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
     let metricProvider = "unknown";
     let metricModel = input.modelSelection?.model;
-    const shouldSerializeTaskTurn = yield* isActiveTaskThread(input.threadId);
     const sendTurnEffect = Effect.gen(function* () {
+      const shouldSerializeTaskTurn = yield* isActiveTaskThread(input.threadId);
       const routed = yield* resolveRoutableSession({
+        alreadyLocked: true,
         threadId: input.threadId,
         operation: "ProviderService.sendTurn",
         allowRecovery: true,
@@ -1449,9 +1480,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }),
       }),
     );
-    return yield* shouldSerializeTaskTurn
-      ? withMcpRotationLock(input.threadId, sendTurnEffect)
-      : sendTurnEffect;
+    return yield* withMcpRotationLock(input.threadId, sendTurnEffect);
   });
 
   const interruptTurn: ProviderServiceShape["interruptTurn"] = Effect.fn("interruptTurn")(

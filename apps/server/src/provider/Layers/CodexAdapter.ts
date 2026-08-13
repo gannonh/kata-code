@@ -224,6 +224,7 @@ interface CodexAdapterSessionContext {
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
   stopped: boolean;
+  removeTaskSecret: () => void;
 }
 
 function mapCodexRuntimeError(
@@ -1590,7 +1591,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.environment !== undefined ? { environment: input.environment } : {},
         );
         const taskToken = input.environment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
-        if (taskToken) registerProviderSecret(taskToken);
+        const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
         const taskEnvironment =
           input.taskExecutionProfile === "task-worktree-write" && taskAgentHomePath
             ? {
@@ -1804,6 +1805,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           runtime,
           eventFiber,
           stopped: false,
+          removeTaskSecret,
         });
         sessionScopeTransferred = true;
 
@@ -1989,6 +1991,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       return;
     }
     session.stopped = true;
+    session.removeTaskSecret();
     sessions.delete(session.threadId);
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));

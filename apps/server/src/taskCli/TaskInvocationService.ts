@@ -90,6 +90,7 @@ export interface TaskInvocationServiceShape {
     readonly providerTurnId: TurnId;
   }) => Effect.Effect<void, TaskInvocationError>;
   readonly revokeAll: Effect.Effect<void, TaskInvocationError>;
+  readonly reconcile: Effect.Effect<void, TaskInvocationError>;
 }
 
 export class TaskInvocationService extends Context.Service<
@@ -493,6 +494,24 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const reconcile: TaskInvocationServiceShape["reconcile"] = Effect.gen(function* () {
+    const now = DateTime.formatIso(yield* DateTime.now);
+    yield* sql`
+      UPDATE task_invocation_leases
+      SET status = 'revoked', revoked_at = ${now}, revocation_reason = 'orphan'
+      WHERE status = 'active'
+        AND expires_at IS NOT NULL
+        AND expires_at <= ${now}
+    `;
+    yield* reconcileStartupLeases;
+  }).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof TaskInvocationError
+        ? cause
+        : toError("internal_error", "Failed to reconcile Task CLI invocation credentials.", cause),
+    ),
+  );
+
   const revokeAll: TaskInvocationServiceShape["revokeAll"] = Effect.gen(function* () {
     const revokedAt = DateTime.formatIso(yield* DateTime.now);
     yield* sql`
@@ -513,6 +532,7 @@ const make = Effect.gen(function* () {
     revokeThread,
     revokeTurn,
     revokeAll,
+    reconcile,
   } satisfies TaskInvocationServiceShape;
 });
 

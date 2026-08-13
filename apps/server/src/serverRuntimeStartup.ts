@@ -21,6 +21,8 @@ import * as Scope from "effect/Scope";
 import * as Context from "effect/Context";
 import * as Console from "effect/Console";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Schedule from "effect/Schedule";
 
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
@@ -35,6 +37,7 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
+import { TaskInvocationService } from "./taskCli/TaskInvocationService.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -288,6 +291,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const orchestrationReactor = yield* OrchestrationReactor;
   const taskWorkspaceBootstrapWorker = yield* TaskWorkspaceBootstrapWorker;
   const providerSessionReaper = yield* ProviderSessionReaper;
+  const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const serverSettings = yield* ServerSettingsService;
   const serverEnvironment = yield* ServerEnvironment;
@@ -337,6 +341,16 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
         yield* taskWorkspaceBootstrapWorker.start().pipe(Scope.provide(reactorScope));
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
+        if (Option.isSome(taskInvocations)) {
+          yield* taskInvocations.value.reconcile.pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("task invocation lease reconciliation failed", { error }),
+            ),
+            Effect.repeat(Schedule.spaced(Duration.minutes(1))),
+            Effect.forkScoped,
+            Scope.provide(reactorScope),
+          );
+        }
       }),
     );
 

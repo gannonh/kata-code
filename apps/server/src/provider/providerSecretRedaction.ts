@@ -1,23 +1,35 @@
-const registeredSecrets = new Set<string>();
+const registeredSecrets = new Map<string, number>();
 const MAX_REGISTERED_SECRETS = 512;
 const REDACTED = "[REDACTED]";
 
 const secretKeyPattern = /(TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CREDENTIAL|AUTHORIZATION|BEARER)/iu;
 
-/** Register a process-local credential for redaction from provider diagnostics. */
-export const registerProviderSecret = (secret: string): void => {
+/** Register a process-local credential and return a removable redaction handle. */
+export const registerProviderSecret = (secret: string): (() => void) => {
   const value = secret.trim();
-  if (!value) return;
-  if (registeredSecrets.size >= MAX_REGISTERED_SECRETS) {
-    const oldest = registeredSecrets.values().next().value;
-    if (oldest) registeredSecrets.delete(oldest);
+  if (!value) return () => {};
+  registeredSecrets.set(value, (registeredSecrets.get(value) ?? 0) + 1);
+  while (registeredSecrets.size > MAX_REGISTERED_SECRETS) {
+    const oldest = registeredSecrets.keys().next().value;
+    if (oldest === undefined) break;
+    registeredSecrets.delete(oldest);
   }
-  registeredSecrets.add(value);
+  let removed = false;
+  return () => {
+    if (removed) return;
+    removed = true;
+    const count = registeredSecrets.get(value);
+    if (count === undefined || count <= 1) registeredSecrets.delete(value);
+    else registeredSecrets.set(value, count - 1);
+  };
 };
+
+/** Test/diagnostic helper: no secret values are returned. */
+export const registeredProviderSecretCount = (): number => registeredSecrets.size;
 
 const redactString = (value: string): string => {
   let redacted = value;
-  for (const secret of registeredSecrets) {
+  for (const secret of registeredSecrets.keys()) {
     if (secret.length > 0 && redacted.includes(secret)) {
       redacted = redacted.split(secret).join(REDACTED);
     }

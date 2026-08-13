@@ -186,6 +186,7 @@ interface PiSessionContext {
   workingMessage: string | undefined;
   /** Per-turn assistant output observed from SDK deltas or terminal messages. */
   turnOutput: Map<string, PiTurnOutputState>;
+  removeTaskSecret: () => void;
 }
 
 /**
@@ -648,6 +649,7 @@ export function makePiAdapter(
     const teardownSession = (ctx: PiSessionContext): Effect.Effect<void> =>
       Effect.gen(function* () {
         ctx.stopped = true;
+        ctx.removeTaskSecret();
         const fiber = ctx.turnFiber;
         if (ctx.activeTurnId && ctx.sdk.isStreaming) {
           // Abort the in-flight turn. Errors during teardown are non-fatal —
@@ -698,7 +700,7 @@ export function makePiAdapter(
         const cwd = input.cwd?.trim() || process.cwd();
         const sessionEnvironment = input.environment;
         const taskToken = sessionEnvironment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
-        if (taskToken) registerProviderSecret(taskToken);
+        const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
         const effectiveEnvironment = {
           ...(options?.environment ?? process.env),
           ...sessionEnvironment?.variables,
@@ -908,6 +910,7 @@ export function makePiAdapter(
           statusTexts: new Map(),
           workingMessage: undefined,
           turnOutput: new Map(),
+          removeTaskSecret,
         };
         ctx.unsubscribe = created.session.subscribe((event) => {
           for (const mapped of mapSdkEvent(event, ctx)) {

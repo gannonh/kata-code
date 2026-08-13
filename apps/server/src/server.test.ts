@@ -783,6 +783,7 @@ const buildAppUnderTest = (options?: {
           Layer.succeed(
             TaskInvocationService,
             TaskInvocationService.of({
+              reconcile: Effect.void,
               issue: () => Effect.die("unused"),
               bind: () => Effect.die("unused"),
               resolve: () => Effect.die("unused"),

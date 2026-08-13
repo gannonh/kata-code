@@ -206,6 +206,7 @@ interface ClaudeSessionContext {
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
+  removeTaskSecret: () => void;
 }
 
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
@@ -3025,6 +3026,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.stopped) return;
 
     context.stopped = true;
+    context.removeTaskSecret();
 
     for (const [requestId, pending] of context.pendingApprovals) {
       yield* Deferred.succeed(pending.decision, "cancel");
@@ -3517,7 +3519,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         input.environment !== undefined ? { environment: input.environment } : {},
       );
       const taskToken = input.environment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
-      if (taskToken) registerProviderSecret(taskToken);
+      const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
       const permissionMode = taskStage ? undefined : runtimeModeToPermission[input.runtimeMode];
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
@@ -3657,6 +3659,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
         stopped: false,
+        removeTaskSecret,
       };
       yield* Ref.set(contextRef, context);
       sessions.set(threadId, context);
