@@ -23,6 +23,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
+import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
@@ -320,8 +321,14 @@ describe("TaskInvocationService", () => {
         }).pipe(Effect.provide(secondContext));
 
         const rowsBeforeStaleWrites = yield* readSharedRows;
-        expect(new Set(rowsBeforeStaleWrites.map((row) => row.ownerGeneration)).size).toBe(2);
+        const generations = [...new Set(rowsBeforeStaleWrites.map((row) => row.ownerGeneration))];
+        expect(generations).toHaveLength(2);
+        expect(generations[0]).not.toBe(generations[1]);
         expect(rowsBeforeStaleWrites.filter((row) => row.status === "active")).toHaveLength(1);
+        const activeOwnerBefore = rowsBeforeStaleWrites.find(
+          (row) => row.status === "active",
+        )?.ownerGeneration;
+        expect(activeOwnerBefore).toBeDefined();
 
         const firstOwnFailure = yield* Effect.provide(
           firstService.resolve(firstIssued.token),
@@ -350,9 +357,28 @@ describe("TaskInvocationService", () => {
 
         const rows = yield* readSharedRows;
         expect(rows.filter((row) => row.status === "active")).toHaveLength(1);
+        expect(rows.find((row) => row.status === "active")?.ownerGeneration).toBe(
+          activeOwnerBefore,
+        );
         expect(new Set(rows.map((row) => row.ownerGeneration)).size).toBe(2);
       }) as Effect.Effect<void, unknown, Scope.Scope>,
   );
+
+  it.effect("keeps a no-expiry lease valid after a long TestClock turn", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("turn-long");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("turn-long"));
+      yield* TestClock.adjust("24 hours");
+      const resolved = yield* service.resolve(issued.token);
+      const rows = yield* readLeaseRows;
+
+      expect(resolved.context).toEqual(context);
+      expect(resolved.lease.expiresAt).toBeNull();
+      expect(rows[0]?.status).toBe("active");
+    }).pipe(Effect.provide(test.layer));
+  });
 
   it.effect("revokes every thread lease on explicit stop and never returns raw credentials", () => {
     const test = makeLayer();
