@@ -30,6 +30,7 @@ import type { PiExtensionUIContext } from "./piExtensionUi.ts";
 import type { PiModelShape } from "./PiProvider.ts";
 import { ProviderAdapterRequestError } from "../Errors.ts";
 import { makeTaskCliProcessFixture } from "../../taskCli/TaskCliProcessFixture.ts";
+import { REDACTED } from "../providerSecretRedaction.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
 const isProviderRuntimeEvent = Schema.is(ProviderRuntimeEvent);
@@ -290,8 +291,54 @@ describe("makePiAdapter (vertical slice)", () => {
         } as never);
         yield* Effect.promise(() => recorder.waitFor((event) => event.type === "item.completed"));
         expect(JSON.stringify(recorder.events)).not.toContain(secret);
-        expect(JSON.stringify(recorder.events)).toContain("[REDACTED]");
+        expect(JSON.stringify(recorder.events)).toContain(REDACTED);
       }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("redacts task tokens emitted during Pi teardown drain", () =>
+    Effect.gen(function* () {
+      const secret = "pi-late-drain-token-7a1e4";
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const originalAbort = session.abort;
+      session.abort = () => {
+        hooks.emit?.({
+          type: "tool_execution_end",
+          toolCallId: "late-teardown",
+          toolName: "bash",
+          args: { command: "printf token" },
+          result: { stdout: secret, content: secret, exitCode: 0 },
+          isError: false,
+        } as never);
+        return originalAbort();
+      };
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+      const threadId = ThreadId.make("pi-thread-late-drain");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+        environment: {
+          variables: {
+            KATACODE_TASK_INVOCATION_TOKEN: secret,
+          },
+          executablePath: process.execPath,
+          pathPrepend: [],
+        },
+      });
+      yield* adapter.sendTurn({ threadId, input: "keep streaming" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+      yield* adapter.stopSession(threadId);
+      const serialized = JSON.stringify(recorder.events);
+      expect(recorder.events.some((event) => event.type === "item.completed")).toBe(true);
+      expect(serialized).not.toContain(secret);
+      expect(serialized).toContain(REDACTED);
+    }),
   );
 
   it.effect("defaults reasoning models to thinkingLevel off when unset", () =>

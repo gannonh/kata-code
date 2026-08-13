@@ -2989,7 +2989,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     Stream.fromAsyncIterable(context.query, (cause) =>
       toProcessError(cause, "Claude runtime stream failed.", context.session.threadId),
     ).pipe(
-      Stream.takeWhile(() => !context.stopped),
       Stream.runForEach((message) =>
         handleSdkMessage(context, message).pipe(
           Effect.mapError((cause) =>
@@ -3034,6 +3033,41 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
   });
 
+  const awaitStreamDrain = (fiber: Fiber.Fiber<void, Error> | undefined) =>
+    Effect.callback<void>((resume, signal) => {
+      const current = Fiber.getCurrent();
+      if (fiber === undefined || (current !== undefined && current.id === fiber.id)) {
+        resume(Effect.void);
+        return;
+      }
+      if (fiber.pollUnsafe() !== undefined) {
+        resume(Effect.void);
+        return;
+      }
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        resume(Effect.void);
+      };
+      const timer = setTimeout(() => {
+        fiber.interruptUnsafe();
+        settle();
+      }, 2_000);
+      const unsubscribe = fiber.addObserver(() => {
+        clearTimeout(timer);
+        settle();
+      });
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          unsubscribe();
+        },
+        { once: true },
+      );
+    });
+
   const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (
     context: ClaudeSessionContext,
     options?: { readonly emitExitEvent?: boolean },
@@ -3041,7 +3075,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.stopped) return;
 
     context.stopped = true;
-    context.removeTaskSecret();
 
     for (const [requestId, pending] of context.pendingApprovals) {
       yield* Deferred.succeed(pending.decision, "cancel");
@@ -3071,10 +3104,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     const streamFiber = context.streamFiber;
     context.streamFiber = undefined;
-    if (streamFiber && streamFiber.pollUnsafe() === undefined) {
-      yield* Fiber.interrupt(streamFiber);
-    }
 
+    // Close the query before interrupting the stream so late SDK messages
+    // still drain through native/event redaction while the secret is registered.
     yield* Effect.try({
       try: () => context.query.close(),
       catch: (cause) =>
@@ -3091,6 +3123,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         emitRuntimeError(context, "Failed to close Claude runtime query.", cause),
       ),
     );
+
+    yield* awaitStreamDrain(streamFiber);
 
     const updatedAt = yield* nowIso;
     context.session = {
@@ -3116,6 +3150,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
+    context.removeTaskSecret();
     sessions.delete(context.session.threadId);
   });
 

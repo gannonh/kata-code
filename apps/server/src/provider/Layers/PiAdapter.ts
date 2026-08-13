@@ -282,10 +282,16 @@ export function makePiAdapter(
       );
     };
 
-    /** Publish from the synchronous SDK listener. `publish` is R=never, so the
-     *  default runtime is sufficient. */
+    /** Publish from the synchronous SDK listener. Redact before forking so a
+     *  teardown that unregisters the secret cannot race the listener Effect. */
     const offerFromListener = (event: ProviderRuntimeEvent) => {
-      Effect.runFork(publish(event));
+      const safeEvent = redactProviderEvent(event);
+      Effect.runFork(
+        Effect.sync(() => options?.onEvent?.(safeEvent)).pipe(
+          Effect.andThen(PubSub.publish(runtimeEventPubSub, safeEvent)),
+          Effect.asVoid,
+        ),
+      );
     };
 
     /** Build a canonical `runtime.warning` event. Callers emit via `publish`
@@ -653,7 +659,6 @@ export function makePiAdapter(
     const teardownSession = (ctx: PiSessionContext): Effect.Effect<void> =>
       Effect.gen(function* () {
         ctx.stopped = true;
-        ctx.removeTaskSecret();
         const fiber = ctx.turnFiber;
         if (ctx.activeTurnId && ctx.sdk.isStreaming) {
           // Abort the in-flight turn. Errors during teardown are non-fatal —
@@ -689,6 +694,7 @@ export function makePiAdapter(
         ctx.statusTexts.clear();
         ctx.workingMessage = undefined;
         sessions.delete(ctx.threadId);
+        ctx.removeTaskSecret();
       });
 
     const startSession = (input: ProviderSessionStartInput) =>

@@ -45,6 +45,7 @@ import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 import { makeTaskCliProcessFixture } from "../../taskCli/TaskCliProcessFixture.ts";
+import { REDACTED } from "../providerSecretRedaction.ts";
 
 function spawnClaudeTestProcess(options: SpawnOptions): SpawnedProcess {
   const { spawn } = require("node:child_process") as typeof import("node:child_process");
@@ -130,8 +131,13 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.setMaxThinkingTokensCalls.push(maxThinkingTokens);
   };
 
+  public lateMessagesOnClose: SDKMessage[] = [];
+
   readonly close = (): void => {
     this.closeCalls += 1;
+    for (const message of this.lateMessagesOnClose) {
+      this.emit(message);
+    }
     this.finish();
   };
 
@@ -316,10 +322,10 @@ describe("ClaudeAdapterLive", () => {
         const secret = fixture.token;
         const endpoint = fixture.endpoint;
         const threadId = ThreadId.make("claude-real-child");
-        const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 3).pipe(
-          Stream.runCollect,
-          Effect.forkChild,
-        );
+        const runtimeEventsFiber = yield* Stream.takeUntil(
+          adapter.streamEvents,
+          (event) => event.type === "session.exited",
+        ).pipe(Stream.runCollect, Effect.forkChild);
         const session = yield* adapter.startSession({
           threadId,
           provider: ProviderDriverKind.make("claudeAgent"),
@@ -338,8 +344,23 @@ describe("ClaudeAdapterLive", () => {
         const active = yield* adapter.listSessions();
         assert.equal(active[0]?.threadId, threadId);
         assert.equal(session.resumeCursor !== undefined, true);
-        yield* Fiber.join(runtimeEventsFiber);
-        yield* adapter.stopSession(threadId);
+        yield* Effect.promise(async () => {
+          const deadline = Date.now() + 5_000;
+          while (Date.now() < deadline) {
+            try {
+              readFileSync(childResultPath);
+              return;
+            } catch {
+              // The Claude child writes this file after the Task CLI exits.
+            }
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          throw new Error("Claude child did not write a Task CLI result file.");
+        });
+        if (yield* adapter.hasSession(threadId)) {
+          yield* adapter.stopSession(threadId);
+        }
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
         yield* adapter.startSession({
           threadId,
           provider: ProviderDriverKind.make("claudeAgent"),
@@ -380,29 +401,67 @@ describe("ClaudeAdapterLive", () => {
           assert.ok(options.env.PATH?.startsWith(`/tmp/bin${path.delimiter}`));
           assert.equal(options.env.KATACODE_TASK_CLI_EXECUTABLE, process.execPath);
         }
-        assert.equal(nativeEvents.length >= 0, true);
-        assert.equal(
-          observedSpawnOptions.every(
-            (options) => options.env.KATACODE_TASK_CLI_ENDPOINT === endpoint,
-          ),
-          true,
-        );
-        assert.equal(
-          observedSpawnOptions.every((options) =>
-            options.env.PATH?.startsWith(`/tmp/bin${path.delimiter}`),
-          ),
-          true,
-        );
-        assert.equal(
-          observedSpawnOptions.every(
-            (options) => options.env.KATACODE_TASK_INVOCATION_TOKEN === secret,
-          ),
-          true,
-        );
+        assert.isAbove(runtimeEvents.length, 0);
         assert.equal(JSON.stringify(nativeEvents).includes(secret), false);
+        assert.equal(JSON.stringify(runtimeEvents).includes(secret), false);
       }).pipe(Effect.scoped as never);
     },
   );
+
+  it.effect("redacts task tokens in stream and native events emitted during query drain", () => {
+    const secret = "claude-late-drain-token-9f3c2";
+    const nativeEvents: unknown[] = [];
+    const harness = makeHarness({
+      nativeEventLogger: {
+        write: (entry: unknown) => Effect.sync(() => nativeEvents.push(entry)),
+        close: Effect.void,
+      } as never,
+    });
+    harness.query.lateMessagesOnClose = [
+      {
+        type: "auth_status",
+        isAuthenticating: false,
+        output: `token=${secret}`,
+        session_id: "late-session",
+        uuid: "late-auth-1",
+      } as unknown as SDKMessage,
+    ];
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "session.exited",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            KATACODE_TASK_INVOCATION_TOKEN: secret,
+          },
+          executablePath: process.execPath,
+          pathPrepend: [],
+        },
+      });
+      yield* adapter.stopSession(THREAD_ID);
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const serializedEvents = JSON.stringify(runtimeEvents);
+      const serializedNative = JSON.stringify(nativeEvents);
+      assert.equal(
+        runtimeEvents.some((event) => event.type === "auth.status"),
+        true,
+      );
+      assert.equal(serializedEvents.includes(secret), false);
+      assert.equal(serializedNative.includes(secret), false);
+      assert.equal(serializedEvents.includes(REDACTED), true);
+      assert.equal(serializedNative.includes(REDACTED), true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
