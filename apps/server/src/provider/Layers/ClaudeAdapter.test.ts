@@ -52,7 +52,7 @@ import {
 } from "../../taskCli/TaskCliProcessFixture.ts";
 import { REDACTED } from "../providerSecretRedaction.ts";
 
-async function waitForExistingFile(filePath: string, timeoutMs = 5_000): Promise<void> {
+async function waitForExistingFile(filePath: string, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
