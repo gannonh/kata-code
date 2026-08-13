@@ -21,6 +21,7 @@ import {
   ProviderRuntimeEvent,
   type ProviderRuntimeEvent as ProviderRuntimeEventType,
   ThreadId,
+  TurnId,
 } from "@kata-sh/code-contracts";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
@@ -29,7 +30,10 @@ import { makePiAdapter, type PiSdkSession } from "./PiAdapter.ts";
 import type { PiExtensionUIContext } from "./piExtensionUi.ts";
 import type { PiModelShape } from "./PiProvider.ts";
 import { ProviderAdapterRequestError } from "../Errors.ts";
-import { makeTaskCliProcessFixture } from "../../taskCli/TaskCliProcessFixture.ts";
+import {
+  makeTaskCliProcessFixture,
+  TASK_CLI_BUNDLE_PATH,
+} from "../../taskCli/TaskCliProcessFixture.ts";
 import { REDACTED } from "../providerSecretRedaction.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
@@ -183,7 +187,7 @@ describe("makePiAdapter (vertical slice)", () => {
       Effect.gen(function* () {
         const { session, hooks } = makeFakeSession();
         const fixture = yield* makeTaskCliProcessFixture();
-        const cliBundlePath = path.resolve(process.cwd(), "apps/server/dist/bin.mjs");
+        const cliBundlePath = TASK_CLI_BUNDLE_PATH;
         let capturedTools: ReadonlyArray<{ readonly name?: string; readonly execute?: Function }> =
           [];
         const recorder = makeEventRecorder();
@@ -293,6 +297,152 @@ describe("makePiAdapter (vertical slice)", () => {
         expect(JSON.stringify(recorder.events)).not.toContain(secret);
         expect(JSON.stringify(recorder.events)).toContain(REDACTED);
       }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("executes a resumed Pi shell with a fresh Task token after restart", () =>
+    Effect.gen(function* () {
+      const first = makeFakeSession();
+      const second = makeFakeSession();
+      const fixture = yield* makeTaskCliProcessFixture();
+      const cliBundlePath = TASK_CLI_BUNDLE_PATH;
+      let capturedTools: ReadonlyArray<{ readonly name?: string; readonly execute?: Function }> =
+        [];
+      let sessionCount = 0;
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: ((args: {
+          customTools?: ReadonlyArray<{ name?: string; execute?: Function }>;
+        }) => {
+          capturedTools = args.customTools ?? [];
+          sessionCount += 1;
+          return Promise.resolve({
+            session: sessionCount === 1 ? first.session : second.session,
+          });
+        }) as never,
+      });
+      const threadId = ThreadId.make("pi-thread-task-cli-resume");
+      const runContextCommand = (toolCallId: string) => {
+        const bash = capturedTools.find((tool) => tool.name === "bash");
+        expect(bash).toBeDefined();
+        const execute = bash?.execute as (
+          toolCallId: string,
+          input: { command: string },
+          signal?: AbortSignal,
+          onUpdate?: unknown,
+          context?: unknown,
+        ) => Promise<unknown>;
+        return Effect.promise(() =>
+          execute(
+            toolCallId,
+            {
+              command:
+                'printf \'%s\\n\' "$KATACODE_TASK_INVOCATION_TOKEN" "$PATH"; "$KATACODE_TASK_CLI_EXECUTABLE" "$KATACODE_TASK_CLI_BUNDLE" task context',
+            },
+            undefined,
+            undefined,
+            {
+              sessionManager: {
+                getSessionId: () => "pi-resume-session",
+                getSessionFile: () => undefined,
+              },
+              model: undefined,
+            },
+          ),
+        );
+      };
+      const cliEnvelopeFrom = (result: unknown) => {
+        const output =
+          typeof result === "object" &&
+          result !== null &&
+          "content" in result &&
+          Array.isArray(result.content)
+            ? result.content
+                .map((entry: unknown) =>
+                  typeof entry === "object" &&
+                  entry !== null &&
+                  "text" in entry &&
+                  typeof entry.text === "string"
+                    ? entry.text
+                    : "",
+                )
+                .join("\n")
+            : "";
+        const cliLine = output
+          .split("\n")
+          .find((line) => line.trimStart().startsWith('{"protocol"'));
+        return {
+          output,
+          envelope: JSON.parse(cliLine ?? "null") as {
+            protocol?: string;
+            ok?: boolean;
+          },
+        };
+      };
+
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            KATACODE_TASK_CLI_ENDPOINT: fixture.endpoint,
+            KATACODE_TASK_INVOCATION_TOKEN: fixture.token,
+            KATACODE_TASK_CLI_BUNDLE: cliBundlePath,
+          },
+          executablePath: process.execPath,
+          pathPrepend: ["/tmp/bin"],
+        },
+      });
+      const firstRun = cliEnvelopeFrom(yield* runContextCommand("pi-task-cli-resume-1"));
+      expect(firstRun.output).toContain(fixture.token);
+      expect(firstRun.output).toContain("/tmp/bin");
+      expect(firstRun.envelope).toMatchObject({ protocol: "task-cli@1", ok: true });
+      const sessions = yield* adapter.listSessions();
+      yield* adapter.stopSession(threadId);
+
+      const resumeTurnId = TurnId.make("pi-resume-turn");
+      yield* fixture.providerDirectory.upsert({
+        threadId: fixture.threadId,
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: fixture.providerInstanceId,
+        adapterKey: "codex-task-cli-test",
+        status: "running",
+        runtimeMode: "full-access",
+        runtimePayload: { activeTurnId: resumeTurnId },
+      });
+      const environmentId = fixture.task.environmentId;
+      if (environmentId === null) {
+        throw new Error("Task CLI fixture is missing an environment id.");
+      }
+      const secondIssued = yield* fixture.invocationService.issue({
+        environmentId,
+        threadId: fixture.threadId,
+        providerInstanceId: fixture.providerInstanceId,
+        providerTurnId: resumeTurnId,
+      });
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        resumeCursor: sessions[0]?.resumeCursor,
+        environment: {
+          variables: {
+            KATACODE_TASK_CLI_ENDPOINT: fixture.endpoint,
+            KATACODE_TASK_INVOCATION_TOKEN: secondIssued.token,
+            KATACODE_TASK_CLI_BUNDLE: cliBundlePath,
+          },
+          executablePath: process.execPath,
+          pathPrepend: ["/tmp/bin"],
+        },
+      });
+      const secondRun = cliEnvelopeFrom(yield* runContextCommand("pi-task-cli-resume-2"));
+      expect(secondRun.output).toContain(secondIssued.token);
+      expect(secondRun.output).not.toContain(fixture.token);
+      expect(secondRun.output).toContain("/tmp/bin");
+      expect(secondRun.envelope).toMatchObject({ protocol: "task-cli@1", ok: true });
+      const stale = yield* fixture.invocationService.resolve(fixture.token).pipe(Effect.flip);
+      expect(stale._tag).toBe("TaskInvocationError");
+      expect(stale.code).toBe("stale_lease");
+    }).pipe(Effect.scoped as never),
   );
 
   it.effect("redacts task tokens emitted during Pi teardown drain", () =>

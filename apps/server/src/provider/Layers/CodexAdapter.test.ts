@@ -1,6 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics preferSchemaOverJson:off
+// @effect-diagnostics missingEffectContext:off
+// @effect-diagnostics anyUnknownInErrorContext:off
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -50,6 +53,10 @@ import {
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
+import {
+  makeTaskCliProcessFixture,
+  TASK_CLI_BUNDLE_PATH,
+} from "../../taskCli/TaskCliProcessFixture.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
@@ -356,6 +363,89 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.ok(runtimeOptions.environment?.PATH?.startsWith(`/tmp/bin${path.delimiter}`));
       assert.equal(runtimeOptions.environment?.KATACODE_TASK_INVOCATION_TOKEN, "opaque-token");
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("executes the built Task CLI from a Codex bash child", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const fixture = yield* makeTaskCliProcessFixture();
+      const adapter = yield* CodexAdapter;
+      const shimDir = path.join(fixture.root, "bin");
+      fs.mkdirSync(shimDir, { recursive: true });
+      const shimPath = path.join(shimDir, "katacode");
+      fs.writeFileSync(
+        shimPath,
+        `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(TASK_CLI_BUNDLE_PATH)} "$@"\n`,
+      );
+      fs.chmodSync(shimPath, 0o755);
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-task-cli-shell"),
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            KATACODE_TASK_CLI_ENDPOINT: fixture.endpoint,
+            KATACODE_TASK_INVOCATION_TOKEN: fixture.token,
+          },
+          executablePath: shimPath,
+          pathPrepend: [shimDir],
+        },
+      });
+      const runtimeOptions = validationRuntimeFactory.factory.mock.calls.at(-1)?.[0];
+      assert.ok(runtimeOptions);
+      const runtimeEnv = runtimeOptions.environment ?? {};
+      assert.ok(
+        runtimeEnv.PATH?.startsWith(`${shimDir}${path.delimiter}`),
+        `PATH=${runtimeEnv.PATH ?? ""}`,
+      );
+      assert.equal(runtimeEnv.KATACODE_TASK_CLI_EXECUTABLE, shimPath);
+      const which = spawnSync("bash", ["-c", "command -v katacode"], {
+        env: runtimeEnv,
+        encoding: "utf8",
+        timeout: 5_000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      assert.equal(which.stdout.trim(), shimPath, which.stderr);
+      const shell = yield* Effect.callback<
+        {
+          readonly status: number | null;
+          readonly stdout: string;
+          readonly stderr: string;
+        },
+        Error
+      >((resume) => {
+        const child = spawn("bash", ["-c", "katacode task context"], {
+          env: runtimeEnv,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        const stdout: Buffer[] = [];
+        const stderr: Buffer[] = [];
+        child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+        child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+        child.on("error", (error) => resume(Effect.fail(error)));
+        child.on("close", (status) =>
+          resume(
+            Effect.succeed({
+              status,
+              stdout: Buffer.concat(stdout).toString("utf8"),
+              stderr: Buffer.concat(stderr).toString("utf8"),
+            }),
+          ),
+        );
+      }).pipe(Effect.orDie);
+      assert.equal(shell.status, 0, shell.stderr);
+      const cliLine = shell.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .find((line) => line.startsWith("{"));
+      const envelope = JSON.parse(cliLine ?? "null") as {
+        protocol?: string;
+        ok?: boolean;
+      };
+      assert.equal(envelope.protocol, "task-cli@1");
+      assert.equal(envelope.ok, true);
+      yield* adapter.stopSession(asThreadId("thread-task-cli-shell"));
+    }).pipe(Effect.scoped as never),
   );
 
   it.effect("isolates the task MCP bearer token from Codex shell subprocesses", () =>

@@ -46,7 +46,10 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
-import { makeTaskCliProcessFixture } from "../../taskCli/TaskCliProcessFixture.ts";
+import {
+  makeTaskCliProcessFixture,
+  TASK_CLI_BUNDLE_PATH,
+} from "../../taskCli/TaskCliProcessFixture.ts";
 import { REDACTED } from "../providerSecretRedaction.ts";
 
 async function waitForExistingFile(filePath: string, timeoutMs = 5_000): Promise<void> {
@@ -319,7 +322,7 @@ describe("ClaudeAdapterLive", () => {
       return Effect.gen(function* () {
         const fixture = yield* makeTaskCliProcessFixture();
         const childResultPath = path.join(fixture.root, "claude-child-result.json");
-        const cliBundlePath = path.resolve(process.cwd(), "apps/server/dist/bin.mjs");
+        const cliBundlePath = TASK_CLI_BUNDLE_PATH;
         const adapter = yield* makeClaudeAdapter(decodeClaudeSettings({}), {
           spawnClaudeCodeProcess: (options) => {
             observedSpawnOptions.push(options);
@@ -389,6 +392,8 @@ describe("ClaudeAdapterLive", () => {
           endpoint: string;
           tokenPresent: boolean;
           tokenLength?: number;
+          path?: string;
+          executable?: string;
         };
         assert.equal(childResult.code, 0);
         assert.equal(childResult.stderr, "");
@@ -399,6 +404,8 @@ describe("ClaudeAdapterLive", () => {
         const childEnvelope = JSON.parse(childResult.stdout) as { protocol?: string; ok?: boolean };
         assert.equal(childEnvelope.protocol, "task-cli@1");
         assert.equal(childEnvelope.ok, true);
+        assert.ok(childResult.path?.startsWith(`/tmp/bin${path.delimiter}`));
+        assert.equal(childResult.executable, process.execPath);
         assert.equal(observedSpawnOptions.length, 2);
         for (const options of observedSpawnOptions) {
           assert.equal(options.env.KATACODE_TASK_CLI_ENDPOINT, endpoint);
@@ -409,6 +416,10 @@ describe("ClaudeAdapterLive", () => {
         assert.isAbove(runtimeEvents.length, 0);
         assert.equal(JSON.stringify(nativeEvents).includes(secret), false);
         assert.equal(JSON.stringify(runtimeEvents).includes(secret), false);
+        assert.ok(
+          JSON.stringify(nativeEvents).includes(REDACTED) ||
+            JSON.stringify(runtimeEvents).includes(REDACTED),
+        );
       }).pipe(Effect.scoped as never);
     },
   );
