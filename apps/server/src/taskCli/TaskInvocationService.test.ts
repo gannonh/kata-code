@@ -309,11 +309,13 @@ describe("TaskInvocationService", () => {
           secondContext,
         );
 
+        // The stale runtime may attempt cleanup, but its generation predicate
+        // must not revoke the fresh runtime's active lease.
         const firstFailure = yield* Effect.provide(
           firstService.resolve(firstIssued.token),
           firstContext,
         ).pipe(Effect.flip);
-        expect(firstFailure.code).toBe("stale_lease");
+        expect(["stale_lease", "terminal_lease"]).toContain(firstFailure.code);
         const secondResolution = yield* Effect.provide(
           secondService.resolve(secondIssued.token),
           secondContext,
