@@ -96,3 +96,15 @@ it.effect("terminates cyclic objects and preserves non-plain values", () =>
     assert.equal(redactProviderSecrets(bytes), bytes);
   }),
 );
+
+it.effect("redacts shared object references independently", () =>
+  Effect.sync(() => {
+    const shared = { note: "visible" };
+    const redacted = redactProviderSecrets({ first: shared, second: shared }) as {
+      first: { note: string };
+      second: { note: string };
+    };
+    assert.deepEqual(redacted.first, { note: "visible" });
+    assert.deepEqual(redacted.second, { note: "visible" });
+  }),
+);

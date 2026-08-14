@@ -40,48 +40,64 @@ const isPlainObject = (value: object): boolean => {
   return proto === Object.prototype || proto === null;
 };
 
-const redactValue = (value: unknown, key: string | undefined, seen: WeakSet<object>): unknown => {
+const redactValue = (
+  value: unknown,
+  key: string | undefined,
+  visiting: WeakSet<object>,
+): unknown => {
   if (typeof value === "string") {
     return key !== undefined && secretKeyPattern.test(key) ? REDACTED : redactString(value);
   }
   if (value === null || typeof value !== "object") {
     return value;
   }
-  if (seen.has(value)) {
+  if (visiting.has(value)) {
     return REDACTED;
   }
   if (value instanceof Error) {
-    seen.add(value);
-    const output: Record<string, unknown> = {
-      name: value.name,
-      message: redactString(value.message),
-    };
-    if (typeof value.stack === "string") {
-      output.stack = redactString(value.stack);
-    }
-    if (value.cause !== undefined) {
-      output.cause = redactValue(value.cause, undefined, seen);
-    }
-    for (const [entryKey, entryValue] of Object.entries(value)) {
-      if (!(entryKey in output)) {
-        output[entryKey] = redactValue(entryValue, entryKey, seen);
+    visiting.add(value);
+    try {
+      const output: Record<string, unknown> = {
+        name: value.name,
+        message: redactString(value.message),
+      };
+      if (typeof value.stack === "string") {
+        output.stack = redactString(value.stack);
       }
+      if (value.cause !== undefined) {
+        output.cause = redactValue(value.cause, undefined, visiting);
+      }
+      for (const [entryKey, entryValue] of Object.entries(value)) {
+        if (!(entryKey in output)) {
+          output[entryKey] = redactValue(entryValue, entryKey, visiting);
+        }
+      }
+      return output;
+    } finally {
+      visiting.delete(value);
     }
-    return output;
   }
   if (Array.isArray(value)) {
-    seen.add(value);
-    return value.map((entry) => redactValue(entry, undefined, seen));
+    visiting.add(value);
+    try {
+      return value.map((entry) => redactValue(entry, undefined, visiting));
+    } finally {
+      visiting.delete(value);
+    }
   }
   if (!isPlainObject(value)) {
     return value;
   }
-  seen.add(value);
-  const output: Record<string, unknown> = {};
-  for (const [entryKey, entryValue] of Object.entries(value)) {
-    output[entryKey] = redactValue(entryValue, entryKey, seen);
+  visiting.add(value);
+  try {
+    const output: Record<string, unknown> = {};
+    for (const [entryKey, entryValue] of Object.entries(value)) {
+      output[entryKey] = redactValue(entryValue, entryKey, visiting);
+    }
+    return output;
+  } finally {
+    visiting.delete(value);
   }
-  return output;
 };
 
 export const redactProviderEvent = <T>(event: T): T => redactProviderSecrets(event) as T;
