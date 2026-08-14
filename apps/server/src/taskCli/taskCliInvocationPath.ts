@@ -58,9 +58,22 @@ export function resolveTaskCliLaunchTarget(
   };
 }
 
-export function renderTaskCliShimScript(target: TaskCliLaunchTarget): string {
+export function renderTaskCliShimScript(
+  target: TaskCliLaunchTarget,
+  platform: NodeJS.Platform = process.platform,
+): string {
   const extension = NodePath.extname(target.entry).toLowerCase();
   const isScript = SCRIPT_EXTENSIONS.has(extension);
+  const winQuote = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+  if (platform === "win32") {
+    const command =
+      !isScript && NodePath.basename(target.entry).replace(/\.exe$/iu, "") === "katacode"
+        ? `${winQuote(target.entry)} %*`
+        : isScript
+          ? `${winQuote(target.interpreter)} ${winQuote(target.entry)} %*`
+          : `${winQuote(target.entry)} %*`;
+    return `@echo off\r\n${command}\r\n`;
+  }
   if (!isScript && NodePath.basename(target.entry).replace(/\.exe$/iu, "") === "katacode") {
     return `#!/bin/sh\nexec ${quote(target.entry)} "$@"\n`;
   }
@@ -75,11 +88,13 @@ export function ensureTaskCliInvocationPath(input: {
   readonly env?: NodeJS.ProcessEnv;
   readonly argv?: ReadonlyArray<string>;
   readonly execPath?: string;
+  readonly platform?: NodeJS.Platform;
 }): TaskCliInvocationPath {
+  const platform = input.platform ?? process.platform;
   const target = resolveTaskCliLaunchTarget(input.env, input.argv, input.execPath);
   const binDir = NodePath.join(input.stateDir, "bin");
-  const executablePath = NodePath.join(binDir, "katacode");
-  const script = renderTaskCliShimScript(target);
+  const executablePath = NodePath.join(binDir, platform === "win32" ? "katacode.cmd" : "katacode");
+  const script = renderTaskCliShimScript(target, platform);
   NodeFs.mkdirSync(binDir, { recursive: true });
   NodeFs.writeFileSync(executablePath, script, { mode: 0o755 });
   return { executablePath, pathPrepend: [binDir] };
