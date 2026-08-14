@@ -10,7 +10,6 @@ const SCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts"]);
 export interface TaskCliLaunchTarget {
   readonly interpreter: string;
   readonly entry: string;
-  readonly needsElectronNode: boolean;
 }
 
 export interface TaskCliInvocationPath {
@@ -19,6 +18,28 @@ export interface TaskCliInvocationPath {
 }
 
 const quote = (value: string): string => JSON.stringify(value);
+
+const isElectronBinary = (execPath: string, env: NodeJS.ProcessEnv): boolean =>
+  env.ELECTRON_RUN_AS_NODE === "1" || /electron/i.test(execPath);
+
+export function resolveNodeInterpreter(
+  execPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (!isElectronBinary(execPath, env)) return execPath;
+  for (const dir of (env.PATH ?? "").split(NodePath.delimiter)) {
+    if (!dir || /Electron\.app/i.test(dir)) continue;
+    for (const nodeName of ["node", "node.exe"]) {
+      const candidate = NodePath.join(dir, nodeName);
+      try {
+        if (NodeFs.statSync(candidate).isFile()) return candidate;
+      } catch {
+        continue;
+      }
+    }
+  }
+  return execPath;
+}
 
 export function resolveTaskCliLaunchTarget(
   env: NodeJS.ProcessEnv = process.env,
@@ -33,9 +54,8 @@ export function resolveTaskCliLaunchTarget(
       ? NodePath.resolve(entry)
       : entry;
   return {
-    interpreter: execPath,
+    interpreter: resolveNodeInterpreter(execPath, env),
     entry: resolvedEntry,
-    needsElectronNode: env.ELECTRON_RUN_AS_NODE === "1" || /electron/i.test(execPath),
   };
 }
 
@@ -45,11 +65,10 @@ export function renderTaskCliShimScript(target: TaskCliLaunchTarget): string {
   if (!isScript && NodePath.basename(target.entry).replace(/\.exe$/iu, "") === "katacode") {
     return `#!/bin/sh\nexec ${quote(target.entry)} "$@"\n`;
   }
-  const electron = target.needsElectronNode ? "export ELECTRON_RUN_AS_NODE=1\n" : "";
   const command = isScript
     ? `exec ${quote(target.interpreter)} ${quote(target.entry)} "$@"`
     : `exec ${quote(target.entry)} "$@"`;
-  return `#!/bin/sh\n${electron}${command}\n`;
+  return `#!/bin/sh\n${command}\n`;
 }
 
 export function ensureTaskCliInvocationPath(input?: {

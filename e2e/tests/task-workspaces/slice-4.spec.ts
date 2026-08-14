@@ -149,7 +149,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
     }
     if (!(await panel.isVisible().catch(() => false))) {
       const latestAssistant = assistantMessages.last();
-      const latestText = (await latestAssistant.innerText().catch(() => "")).trim();
+      const latestText = (await latestAssistant.innerText({ timeout: 500 }).catch(() => "")).trim();
       const sendButton = page.getByRole("button", { name: "Send message", exact: true });
       if (
         latestText.length > 0 &&
