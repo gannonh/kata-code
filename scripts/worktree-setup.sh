@@ -5,7 +5,7 @@
 #   cd ../kata-code-feature
 #   ./scripts/worktree-setup.sh
 #
-# Installs deps, ensures the Electron runtime, and links .env from the central
+# Installs deps, ensures the Electron runtime, and copies .env from the central
 # dotfiles store. Idempotent: safe to re-run.
 
 set -euo pipefail
@@ -19,8 +19,13 @@ pnpm install
 vp run --filter @kata-sh/code-desktop ensure:electron
 
 if [[ -f "$env_source" ]]; then
-  ln -sf "$env_source" "$worktree_root/.env"
-  echo "linked .env → $env_source"
+  dest="$worktree_root/.env"
+  # Drop a leftover symlink so we write a regular file, not through to the store.
+  if [[ -L "$dest" ]]; then
+    rm "$dest"
+  fi
+  cp "$env_source" "$dest"
+  echo "copied .env from $env_source"
 else
-  echo "warn: central env not found at $env_source — .env not linked" >&2
+  echo "warn: central env not found at $env_source — .env not copied" >&2
 fi
