@@ -1,6 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - the fixture owns a real SQLite file, HTTP listener, and child process.
 // @effect-diagnostics anyUnknownInErrorContext:off - inert external-service doubles are intentionally boundary-shaped.
-import { spawn } from "node:child_process";
+// @effect-diagnostics globalDate:off - bundle lock wait uses wall-clock timeout around spawnSync.
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import * as NodeFs from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import * as NodeOs from "node:os";
@@ -12,7 +14,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
   EnvironmentTaskCliHttpApi,
-  EnvironmentHttpApi,
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
@@ -22,10 +23,7 @@ import {
   type TaskWorkspace,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
@@ -66,6 +64,53 @@ const providerInstanceId = ProviderInstanceId.make("codex-task-cli-test");
 const pendingProviderTurnId = TurnId.make("pending-task-cli-turn-1");
 const providerTurnId = TurnId.make("native-task-cli-turn-1");
 export const TASK_CLI_BUNDLE_PATH = fileURLToPath(new URL("../../dist/bin.mjs", import.meta.url));
+const TASK_CLI_SERVER_DIR = fileURLToPath(new URL("../..", import.meta.url));
+const TASK_CLI_BUNDLE_LOCK_DIR = NodePath.join(NodeOs.tmpdir(), "kata-task-cli-bundle.lock");
+const TASK_CLI_BUNDLE_WAIT_MS = 120_000;
+
+const waitForTaskCliBundle = (deadline: number): void => {
+  while (!existsSync(TASK_CLI_BUNDLE_PATH)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Timed out waiting for Task CLI bundle at ${TASK_CLI_BUNDLE_PATH}. Build it with \`vp run --filter @kata-sh/code-cli build:bundle\`.`,
+      );
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+  }
+};
+
+export const ensureTaskCliBundle = (): void => {
+  if (existsSync(TASK_CLI_BUNDLE_PATH)) return;
+
+  let ownsLock = false;
+  try {
+    mkdirSync(TASK_CLI_BUNDLE_LOCK_DIR);
+    ownsLock = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+
+  if (!ownsLock) {
+    waitForTaskCliBundle(Date.now() + TASK_CLI_BUNDLE_WAIT_MS);
+    return;
+  }
+
+  try {
+    if (existsSync(TASK_CLI_BUNDLE_PATH)) return;
+    const result = spawnSync(process.execPath, ["--run", "build:bundle"], {
+      cwd: TASK_CLI_SERVER_DIR,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (result.status !== 0 || !existsSync(TASK_CLI_BUNDLE_PATH)) {
+      throw new Error(
+        `Task CLI bundle missing at ${TASK_CLI_BUNDLE_PATH}. Build it with \`vp run --filter @kata-sh/code-cli build:bundle\`.\n${result.stderr}\n${result.stdout}`,
+      );
+    }
+  } finally {
+    rmSync(TASK_CLI_BUNDLE_LOCK_DIR, { recursive: true, force: true });
+  }
+};
 
 const unsupported = (operation: string): Effect.Effect<never, never> =>
   Effect.die(new Error(`Unexpected external Git operation in Task CLI fixture: ${operation}`));
@@ -225,6 +270,7 @@ const runChild = (
   });
 
 export const makeTaskCliProcessFixture = Effect.fn("makeTaskCliProcessFixture")(function* () {
+  yield* Effect.sync(ensureTaskCliBundle);
   const root = yield* Effect.tryPromise(() =>
     NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-task-cli-process-")),
   );

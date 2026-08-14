@@ -1,8 +1,6 @@
 import {
   EnvironmentHttpApi,
-  EnvironmentHttpInternalServerError,
   TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
-  TaskCliContextEnvelope,
   type TaskCliContextEnvelope as TaskCliContextEnvelopeValue,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
@@ -12,7 +10,7 @@ import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
 import { annotateEnvironmentRequest } from "../auth/http.ts";
-import { TaskInvocationError, TaskInvocationService } from "./TaskInvocationService.ts";
+import { TaskInvocationService } from "./TaskInvocationService.ts";
 
 const TASK_CLI_RESPONSE_HEADERS = {
   "cache-control": "no-store",
