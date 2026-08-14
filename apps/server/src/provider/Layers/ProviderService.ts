@@ -60,7 +60,10 @@ import { ServerConfig } from "../../config.ts";
 import { ServerEnvironment } from "../../environment/Services/ServerEnvironment.ts";
 import { readPersistedServerRuntimeState } from "../../serverRuntimeState.ts";
 import { TaskInvocationService } from "../../taskCli/TaskInvocationService.ts";
-import { ensureTaskCliInvocationPath } from "../../taskCli/taskCliInvocationPath.ts";
+import {
+  ensureTaskCliInvocationPath,
+  resolveTaskCliLaunchTarget,
+} from "../../taskCli/taskCliInvocationPath.ts";
 import {
   supportsTaskWorktreeWrite,
   type ProviderAdapterShape,
@@ -373,9 +376,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const serverConfigForCli = yield* Effect.serviceOption(ServerConfig);
-  const taskCliInvocationPath = ensureTaskCliInvocationPath(
-    Option.isSome(serverConfigForCli) ? { stateDir: serverConfigForCli.value.stateDir } : {},
-  );
+  const taskCliInvocationPath = Option.match(serverConfigForCli, {
+    onNone: () => ({
+      executablePath: resolveTaskCliLaunchTarget().entry,
+      pathPrepend: [] as const,
+    }),
+    onSome: (config) => ensureTaskCliInvocationPath({ stateDir: config.stateDir }),
+  });
   const resolvedTaskCliExecutable = taskCliInvocationPath.executablePath;
   const taskCliEnvironmentForTurn = (input: {
     readonly threadId: ThreadId;

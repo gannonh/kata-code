@@ -27,6 +27,8 @@ import {
 import { createModelSelection } from "@kata-sh/code-shared/model";
 import { it, assert, vi } from "@effect/vitest";
 
+import { ServerConfig } from "../../config.ts";
+
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -2171,6 +2173,7 @@ it.effect("reinjects Task CLI environment and a fresh token after ProviderServic
           Layer.provideMerge(invocationLayer),
           Layer.provideMerge(environmentLayer),
           Layer.provideMerge(httpServerLayer),
+          Layer.provide(ServerConfig.layerTest(tempDir, tempDir)),
           Layer.provide(defaultServerSettingsLayer),
           Layer.provide(AnalyticsService.layerTest),
           Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),

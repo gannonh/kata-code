@@ -76,6 +76,7 @@ describe("task CLI invocation path", () => {
       expect(readFileSync(path.executablePath, "utf8")).toContain(
         'exec "/usr/local/bin/node" "/repo/apps/server/dist/bin.mjs" "$@"',
       );
+      expect(path.executablePath.startsWith(stateDir)).toBe(true);
     } finally {
       rmSync(stateDir, { recursive: true, force: true });
     }

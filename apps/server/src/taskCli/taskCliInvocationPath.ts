@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- the PATH shim is written once at process start with node:fs.
 import * as NodeFs from "node:fs";
-import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
 
 import { TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY } from "@kata-sh/code-contracts";
@@ -71,26 +70,17 @@ export function renderTaskCliShimScript(target: TaskCliLaunchTarget): string {
   return `#!/bin/sh\n${command}\n`;
 }
 
-export function ensureTaskCliInvocationPath(input?: {
-  readonly stateDir?: string;
+export function ensureTaskCliInvocationPath(input: {
+  readonly stateDir: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly argv?: ReadonlyArray<string>;
   readonly execPath?: string;
 }): TaskCliInvocationPath {
-  const target = resolveTaskCliLaunchTarget(input?.env, input?.argv, input?.execPath);
-  const binDir = NodePath.join(
-    input?.stateDir ?? NodePath.join(NodeOs.tmpdir(), "katacode-task-cli", String(process.pid)),
-    "bin",
-  );
+  const target = resolveTaskCliLaunchTarget(input.env, input.argv, input.execPath);
+  const binDir = NodePath.join(input.stateDir, "bin");
   const executablePath = NodePath.join(binDir, "katacode");
   const script = renderTaskCliShimScript(target);
   NodeFs.mkdirSync(binDir, { recursive: true });
-  const existing = NodeFs.existsSync(executablePath)
-    ? NodeFs.readFileSync(executablePath, "utf8")
-    : undefined;
-  if (existing !== script) {
-    NodeFs.writeFileSync(executablePath, script, { mode: 0o755 });
-    NodeFs.chmodSync(executablePath, 0o755);
-  }
+  NodeFs.writeFileSync(executablePath, script, { mode: 0o755 });
   return { executablePath, pathPrepend: [binDir] };
 }
