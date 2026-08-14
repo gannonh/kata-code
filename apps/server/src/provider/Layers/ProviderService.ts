@@ -308,6 +308,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly providerTurnId?: TurnId;
     }
   >();
+  const isSessionInjectedTaskCliGeneration = (generation: string) =>
+    generation === "session-pending" || generation === "recovery-pending";
+  const reuseSessionInjectedTaskCliEnvironment = (input: {
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+  }) => {
+    const existing = taskTurnCredentials.get(input.threadId);
+    if (
+      existing === undefined ||
+      existing.providerInstanceId !== input.providerInstanceId ||
+      !isSessionInjectedTaskCliGeneration(existing.sessionGeneration)
+    ) {
+      return undefined;
+    }
+    return {
+      token: existing.token,
+      leaseTurnId: existing.leaseTurnId,
+      environment: existing.environment,
+    } as const;
+  };
   const mcpRotationLocksRef = yield* SynchronizedRef.make(
     new Map<string, { readonly semaphore: Semaphore.Semaphore; readonly users: number }>(),
   );
@@ -1351,12 +1371,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
       const isTaskTurn = shouldSerializeTaskTurn;
-      const taskEnvironment = isTaskTurn
-        ? yield* taskCliEnvironmentForTurn({
+      const reusedTaskEnvironment = isTaskTurn
+        ? reuseSessionInjectedTaskCliEnvironment({
             threadId: input.threadId,
             providerInstanceId: routed.instanceId,
           })
         : undefined;
+      const issuedTaskEnvironment =
+        isTaskTurn && reusedTaskEnvironment === undefined
+          ? yield* taskCliEnvironmentForTurn({
+              threadId: input.threadId,
+              providerInstanceId: routed.instanceId,
+            })
+          : undefined;
+      const taskEnvironment = reusedTaskEnvironment ?? issuedTaskEnvironment;
       if (taskEnvironment) {
         taskTurnCredentials.set(input.threadId, {
           token: taskEnvironment.token,
@@ -1377,7 +1405,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           routed.instanceId,
           activeTaskStage === "build",
         );
-        if (mcpPreparation.rotated || taskEnvironment) {
+        if (mcpPreparation.rotated || issuedTaskEnvironment) {
           yield* restartSessionForMcpCredential({
             threadId: input.threadId,
             providerInstanceId: routed.instanceId,
