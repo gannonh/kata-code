@@ -1516,7 +1516,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(postedBody.error?.code, "invalid_request");
         assert.equal(postedBody.context, undefined);
       } else {
-        assert.notEqual(posted.status, 200);
+        assert.ok(
+          posted.status === 404 || posted.status === 405,
+          `expected POST rejection with 404 or 405, received ${posted.status}`,
+        );
       }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

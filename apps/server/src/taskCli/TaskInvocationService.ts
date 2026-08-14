@@ -5,13 +5,13 @@ import {
   TaskInvocationLease,
   TaskInvocationScope,
   TaskStageContextResult,
+  TaskWorkspaceError,
   TaskWorkspaceId,
   TaskWorkspaceStage,
   ThreadId,
   TurnId,
 } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
-import { randomUUID } from "node:crypto";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -105,7 +105,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* Effect.serviceOption(ProviderSessionDirectory);
   const taskWorkspace = yield* Effect.serviceOption(TaskWorkspaceService);
-  const ownerGeneration = randomUUID();
+  const ownerGeneration = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
   const claimedAt = DateTime.formatIso(yield* DateTime.now);
   yield* sql`
     INSERT INTO task_invocation_lease_owner (owner_id, owner_generation, claimed_at)
@@ -146,6 +146,8 @@ const make = Effect.gen(function* () {
 
   const toError = (code: TaskCliErrorCode, message: string, cause?: unknown) =>
     new TaskInvocationError({ code, message, ...(cause !== undefined ? { cause } : {}) });
+
+  const isTaskWorkspaceError = Schema.is(TaskWorkspaceError);
 
   const preserveInvocationError =
     (message: string) =>
@@ -237,10 +239,16 @@ const make = Effect.gen(function* () {
     readonly providerTurnId: TurnId;
   }) =>
     Option.isNone(taskWorkspace)
-      ? Effect.fail(toError("not_active", "The Task workflow service is unavailable."))
+      ? Effect.fail(toError("internal_error", "The Task workflow service is unavailable."))
       : taskWorkspace.value
           .resolveTaskCliInvocation(scope)
-          .pipe(Effect.mapError((cause) => toError("not_active", cause.message, cause)));
+          .pipe(
+            Effect.mapError((cause) =>
+              isTaskWorkspaceError(cause) && cause.commandType === "task.cli.context"
+                ? toError("not_active", cause.message, cause)
+                : toError("internal_error", cause.message, cause),
+            ),
+          );
 
   const bindingHasTurn = (
     binding: Option.Option<ProviderRuntimeBinding>,
@@ -459,9 +467,13 @@ const make = Effect.gen(function* () {
         ),
       );
       const active = yield* resolveActiveTaskInvocation(scope).pipe(
-        Effect.tapError(() => revokeToken(tokenHash).pipe(Effect.ignore)),
+        Effect.tapError((error) =>
+          error.code === "not_active" ? revokeToken(tokenHash).pipe(Effect.ignore) : Effect.void,
+        ),
         Effect.mapError((cause) =>
-          toError("stale_lease", "The invocation no longer matches an active Task turn.", cause),
+          cause.code === "not_active"
+            ? toError("stale_lease", "The invocation no longer matches an active Task turn.", cause)
+            : cause,
         ),
       );
       if (

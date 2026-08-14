@@ -30,6 +30,7 @@ import { parseCliArgs } from "@kata-sh/code-shared/cliArgs";
 import {
   ApprovalRequestId,
   TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
@@ -3179,8 +3180,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     return Effect.succeed(context);
   };
 
-  const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
-    function* (input) {
+  const startSession: ClaudeAdapterShape["startSession"] = (input) => {
+    const taskSecret = { remove: () => {}, attached: false };
+    return Effect.gen(function* () {
       if (input.provider !== undefined && input.provider !== PROVIDER) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
@@ -3572,8 +3574,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const effectiveClaudeEnvironment = mergeSessionEnvironment(
         input.environment !== undefined ? { environment: input.environment } : {},
       );
-      const taskToken = input.environment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
+      const taskToken = input.environment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
       const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
+      taskSecret.remove = removeTaskSecret;
       const permissionMode = taskStage ? undefined : runtimeModeToPermission[input.runtimeMode];
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
@@ -3723,6 +3726,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
       yield* Ref.set(contextRef, context);
       sessions.set(threadId, context);
+      taskSecret.attached = true;
 
       const sessionStartedStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
@@ -3795,8 +3799,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return {
         ...session,
       };
-    },
-  );
+    }).pipe(
+      Effect.withSpan("startSession"),
+      Effect.onExit((exit) =>
+        !taskSecret.attached && Exit.isFailure(exit) ? Effect.sync(taskSecret.remove) : Effect.void,
+      ),
+    );
+  };
 
   const sendTurn: ClaudeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const context = yield* requireSession(input.threadId);

@@ -30,8 +30,10 @@ jobs:
           # Vite+ can panic with EAGAIN when GitHub's log pipe backpressures
           # a large lint warning dump (`failed printing to stdout: Resource
           # temporarily unavailable`). Write to a file first, then replay.
+          set +e
           vp check > "${RUNNER_TEMP}/vp-check.log" 2>&1
           status=$?
+          set -e
           cat "${RUNNER_TEMP}/vp-check.log"
           exit "$status"
 

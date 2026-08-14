@@ -2044,7 +2044,7 @@ export const make = Effect.gen(function* () {
           taskId: task.id,
         });
       }
-      yield* validatePlanningRoot(task.id);
+      if (run.currentStage !== "build") yield* validatePlanningRoot(task.id);
       const occurrence = task.occurrences
         .filter((candidate) => candidate.stage === run.currentStage)
         .toSorted((left, right) => right.ordinal - left.ordinal)[0];

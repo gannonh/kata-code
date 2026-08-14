@@ -65,50 +65,45 @@ const pendingProviderTurnId = TurnId.make("pending-task-cli-turn-1");
 const providerTurnId = TurnId.make("native-task-cli-turn-1");
 export const TASK_CLI_BUNDLE_PATH = fileURLToPath(new URL("../../dist/bin.mjs", import.meta.url));
 const TASK_CLI_SERVER_DIR = fileURLToPath(new URL("../..", import.meta.url));
-const TASK_CLI_BUNDLE_LOCK_DIR = NodePath.join(NodeOs.tmpdir(), "kata-task-cli-bundle.lock");
+const TASK_CLI_BUNDLE_LOCK_DIR = `${TASK_CLI_BUNDLE_PATH}.lock`;
 const TASK_CLI_BUNDLE_WAIT_MS = 120_000;
 
-const waitForTaskCliBundle = (deadline: number): void => {
-  while (!existsSync(TASK_CLI_BUNDLE_PATH)) {
+export const ensureTaskCliBundle = (): void => {
+  const deadline = Date.now() + TASK_CLI_BUNDLE_WAIT_MS;
+  for (;;) {
+    if (existsSync(TASK_CLI_BUNDLE_PATH)) return;
     if (Date.now() > deadline) {
       throw new Error(
         `Timed out waiting for Task CLI bundle at ${TASK_CLI_BUNDLE_PATH}. Build it with \`vp run --filter @kata-sh/code-cli build:bundle\`.`,
       );
     }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
-  }
-};
 
-export const ensureTaskCliBundle = (): void => {
-  if (existsSync(TASK_CLI_BUNDLE_PATH)) return;
-
-  let ownsLock = false;
-  try {
-    mkdirSync(TASK_CLI_BUNDLE_LOCK_DIR);
-    ownsLock = true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-  }
-
-  if (!ownsLock) {
-    waitForTaskCliBundle(Date.now() + TASK_CLI_BUNDLE_WAIT_MS);
-    return;
-  }
-
-  try {
-    if (existsSync(TASK_CLI_BUNDLE_PATH)) return;
-    const result = spawnSync(process.execPath, ["--run", "build:bundle"], {
-      cwd: TASK_CLI_SERVER_DIR,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (result.status !== 0 || !existsSync(TASK_CLI_BUNDLE_PATH)) {
-      throw new Error(
-        `Task CLI bundle missing at ${TASK_CLI_BUNDLE_PATH}. Build it with \`vp run --filter @kata-sh/code-cli build:bundle\`.\n${result.stderr}\n${result.stdout}`,
-      );
+    let ownsLock = false;
+    try {
+      mkdirSync(TASK_CLI_BUNDLE_LOCK_DIR);
+      ownsLock = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+      continue;
     }
-  } finally {
-    rmSync(TASK_CLI_BUNDLE_LOCK_DIR, { recursive: true, force: true });
+
+    try {
+      if (existsSync(TASK_CLI_BUNDLE_PATH)) return;
+      const result = spawnSync(process.execPath, ["--run", "build:bundle"], {
+        cwd: TASK_CLI_SERVER_DIR,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      if (result.status !== 0 || !existsSync(TASK_CLI_BUNDLE_PATH)) {
+        throw new Error(
+          `Task CLI bundle missing at ${TASK_CLI_BUNDLE_PATH}. Build it with \`vp run --filter @kata-sh/code-cli build:bundle\`.\n${result.stderr}\n${result.stdout}`,
+        );
+      }
+      return;
+    } finally {
+      if (ownsLock) rmSync(TASK_CLI_BUNDLE_LOCK_DIR, { recursive: true, force: true });
+    }
   }
 };
 

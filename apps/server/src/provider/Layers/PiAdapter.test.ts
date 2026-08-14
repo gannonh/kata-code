@@ -1042,7 +1042,10 @@ export default function (pi) {
       yield* adapter.stopSession(threadId);
       yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "session.exited"));
 
-      expect(recorder.events.some((event) => event.type === "session.exited")).toBe(true);
+      const exited = recorder.events.find((event) => event.type === "session.exited");
+      expect(exited).toBeDefined();
+      expect(typeof exited?.sessionGeneration).toBe("string");
+      expect(exited?.sessionGeneration?.length).toBeGreaterThan(0);
     }),
   );
 

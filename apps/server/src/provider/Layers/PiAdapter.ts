@@ -33,6 +33,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   ProviderItemId,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -49,6 +50,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as PubSub from "effect/PubSub";
@@ -697,8 +699,9 @@ export function makePiAdapter(
         ctx.removeTaskSecret();
       });
 
-    const startSession = (input: ProviderSessionStartInput) =>
-      Effect.gen(function* () {
+    const startSession = (input: ProviderSessionStartInput) => {
+      const taskSecret = { remove: () => {}, attached: false };
+      return Effect.gen(function* () {
         // A thread can re-enter startSession when the user switches models
         // mid-conversation. The Pi SDK session is bound to a single model at
         // creation, so restart it rather than rejecting the request.
@@ -709,8 +712,9 @@ export function makePiAdapter(
 
         const cwd = input.cwd?.trim() || process.cwd();
         const sessionEnvironment = input.environment;
-        const taskToken = sessionEnvironment?.variables.KATACODE_TASK_INVOCATION_TOKEN;
+        const taskToken = sessionEnvironment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
         const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
+        taskSecret.remove = removeTaskSecret;
         const effectiveEnvironment = {
           ...(options?.environment ?? process.env),
           ...sessionEnvironment?.variables,
@@ -861,11 +865,6 @@ export function makePiAdapter(
                     env: {
                       ...context.env,
                       ...effectiveEnvironment,
-                      PATH: [
-                        ...(sessionEnvironment?.pathPrepend ?? []),
-                        ...(options?.environment?.PATH ? [options.environment.PATH] : []),
-                        ...(process.env.PATH ? [process.env.PATH] : []),
-                      ].join(NodePath.delimiter),
                     },
                   }),
                 }),
@@ -931,6 +930,7 @@ export function makePiAdapter(
           }
         });
         sessions.set(input.threadId, ctx);
+        taskSecret.attached = true;
 
         // Seed the tracked turn list with the resumed session's current leaf
         // so rollback math is anchored to real history. Without this, a
@@ -1027,7 +1027,14 @@ export function makePiAdapter(
         }
 
         return providerSession;
-      });
+      }).pipe(
+        Effect.onExit((exit) =>
+          !taskSecret.attached && Exit.isFailure(exit)
+            ? Effect.sync(taskSecret.remove)
+            : Effect.void,
+        ),
+      );
+    };
 
     /**
      * Materialize image attachments into base64 `ImageContent` blocks for the
@@ -1218,10 +1225,12 @@ export function makePiAdapter(
       Effect.gen(function* () {
         const ctx = sessions.get(threadId);
         if (!ctx) return;
+        const sessionGeneration = ctx.sessionGeneration;
         yield* teardownSession(ctx);
         yield* publish(
           makeEvent(threadId, {
             type: "session.exited",
+            sessionGeneration,
             payload: { reason: "Pi session stopped.", exitKind: "graceful" },
           }),
         );

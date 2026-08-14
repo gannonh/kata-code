@@ -355,7 +355,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const taskCliExecutable =
     process.env[TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]?.trim() || process.argv[1] || "katacode";
-  const taskCliPath = NodePath.dirname(taskCliExecutable);
+  const resolvedTaskCliExecutable = NodePath.isAbsolute(taskCliExecutable)
+    ? taskCliExecutable
+    : taskCliExecutable.includes("/") || taskCliExecutable.includes("\\")
+      ? NodePath.resolve(taskCliExecutable)
+      : taskCliExecutable;
+  const taskCliDirectory = NodePath.isAbsolute(resolvedTaskCliExecutable)
+    ? NodePath.dirname(resolvedTaskCliExecutable)
+    : undefined;
   const taskCliEnvironmentForTurn = (input: {
     readonly threadId: ThreadId;
     readonly providerInstanceId: ProviderInstanceId;
@@ -419,8 +426,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             [TASK_CLI_ENDPOINT_ENVIRONMENT_KEY]: endpoint,
             [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: issued.token,
           },
-          executablePath: taskCliExecutable,
-          pathPrepend: [taskCliPath],
+          executablePath: resolvedTaskCliExecutable,
+          pathPrepend: taskCliDirectory === undefined ? [] : [taskCliDirectory],
         },
       };
     }).pipe(
@@ -934,6 +941,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 Effect.mapError((cause) =>
                   toValidationError(input.operation, cause.message, cause),
                 ),
+                Effect.onError(() => revokeTaskCredential(input.binding.threadId)),
               );
             taskTurnCredentials.set(input.binding.threadId, {
               token: resumedTaskEnvironment.token,
@@ -1427,23 +1435,30 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ),
         );
       if (taskEnvironment) {
-        // Track the native turn before binding the lease. The binding is only
-        // accepted after the canonical provider turn is durably persisted.
+        // Record the native turn before any further yields so a terminal event
+        // cannot leave a finished turn bound to a still-active lease.
+        const tracked = taskTurnCredentials.get(input.threadId);
         taskTurnCredentials.set(input.threadId, {
           token: taskEnvironment.token,
           providerInstanceId: routed.instanceId,
-          sessionGeneration:
-            typeof (yield* routed.adapter.listSessions()).find(
-              (session) => session.threadId === input.threadId,
-            )?.sessionGeneration === "string"
-              ? ((yield* routed.adapter.listSessions()).find(
-                  (session) => session.threadId === input.threadId,
-                )?.sessionGeneration as string)
-              : "turn-active",
+          sessionGeneration: tracked?.sessionGeneration ?? "turn-active",
           leaseTurnId: taskEnvironment.leaseTurnId,
           environment: taskEnvironment.environment,
           providerTurnId: turn.turnId,
         });
+        const activeSessions = yield* routed.adapter.listSessions();
+        const generation = activeSessions.find(
+          (session) => session.threadId === input.threadId,
+        )?.sessionGeneration;
+        if (typeof generation === "string") {
+          const current = taskTurnCredentials.get(input.threadId);
+          if (current !== undefined) {
+            taskTurnCredentials.set(input.threadId, {
+              ...current,
+              sessionGeneration: generation,
+            });
+          }
+        }
       }
       const persistedBindingAfterTurn = Option.getOrUndefined(
         yield* directory.getBinding(input.threadId),

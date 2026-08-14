@@ -12,6 +12,7 @@ import {
   EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
+  TaskWorkspaceError,
   TaskWorkspaceId,
   ThreadId,
   TurnId,
@@ -64,6 +65,7 @@ const makeLayer = () => {
     occurrence: 0,
     context,
   };
+  let resolveFailure: TaskWorkspaceError | undefined;
 
   const directory: ProviderSessionDirectoryShape = {
     upsert: (next) =>
@@ -83,7 +85,8 @@ const makeLayer = () => {
   };
 
   const taskWorkspace = {
-    resolveTaskCliInvocation: () => Effect.succeed(active),
+    resolveTaskCliInvocation: () =>
+      resolveFailure === undefined ? Effect.succeed(active) : Effect.fail(resolveFailure),
   } as unknown as TaskWorkspaceServiceShape;
 
   const layer = TaskInvocationServiceLive.pipe(
@@ -106,6 +109,12 @@ const makeLayer = () => {
     },
     setActive: (next: Partial<typeof active>) => {
       active = { ...active, ...next };
+    },
+    failResolve: (error: TaskWorkspaceError) => {
+      resolveFailure = error;
+    },
+    clearResolveFailure: () => {
+      resolveFailure = undefined;
     },
   };
 };
@@ -195,7 +204,6 @@ describe("TaskInvocationService", () => {
   it.effect("serializes concurrent rotations at the database boundary", () => {
     const test = makeLayer();
     return Effect.gen(function* () {
-      test.setBinding("turn-b");
       const service = yield* TaskInvocationService;
       const [first, second] = yield* Effect.all(
         [service.issue(issueInput("turn-a")), service.issue(issueInput("turn-b"))],
@@ -203,12 +211,38 @@ describe("TaskInvocationService", () => {
       );
       const rows = yield* readLeaseRows;
       const activeRows = rows.filter((row) => row.status === "active");
-      const successful = yield* Effect.forEach([first, second], (issued) =>
-        service.resolve(issued.token).pipe(Effect.option),
-      );
+      const winnerTurnId = activeRows[0]?.providerTurnId;
+      const winner = [first, second].find((issued) => issued.scope.providerTurnId === winnerTurnId);
 
       expect(activeRows).toHaveLength(1);
-      expect(successful.filter(Option.isSome)).toHaveLength(1);
+      expect(winnerTurnId).toBeDefined();
+      expect(winner).toBeDefined();
+      test.setBinding(winnerTurnId!);
+      const resolved = yield* service.resolve(winner!.token);
+      expect(resolved.scope.providerTurnId).toBe(winnerTurnId);
+    }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect("does not revoke a live lease when Task lookup fails transiently", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("turn-transient");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("turn-transient"));
+      test.failResolve(
+        new TaskWorkspaceError({
+          message: "Failed to inspect the planning root.",
+          commandType: "task.internal",
+        }),
+      );
+      const failure = yield* service.resolve(issued.token).pipe(Effect.flip);
+      const rows = yield* readLeaseRows;
+      test.clearResolveFailure();
+      const recovered = yield* service.resolve(issued.token);
+
+      expect(failure.code).toBe("internal_error");
+      expect(rows.filter((row) => row.status === "active")).toHaveLength(1);
+      expect(recovered.scope.providerTurnId).toBe("turn-transient");
     }).pipe(Effect.provide(test.layer));
   });
 

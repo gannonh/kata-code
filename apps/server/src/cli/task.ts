@@ -2,6 +2,7 @@ import {
   EnvironmentHttpApi,
   TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
   TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
+  TASK_CLI_PROTOCOL,
   TaskCliContextEnvelope,
   type TaskCliErrorCode,
 } from "@kata-sh/code-contracts";
@@ -25,7 +26,7 @@ class TaskCliCommandError extends Data.TaggedError("TaskCliCommandError")<{
 }> {}
 
 const failureEnvelope = (code: TaskCliErrorCode, message: string) => ({
-  protocol: "task-cli@1" as const,
+  protocol: TASK_CLI_PROTOCOL,
   ok: false as const,
   operation: "context" as const,
   error: { code, message },
@@ -49,13 +50,39 @@ const TASK_CLI_IDENTITY_FLAGS = new Set([
 const TASK_CLI_CONTEXT_REQUIRED_MESSAGE =
   "Specify a Task command. The available command is `katacode task context`.";
 
+const TASK_CLI_BOOLEAN_FLAGS = new Set([
+  "--no-browser",
+  "--auto-bootstrap-project-from-cwd",
+  "--log-websocket-events",
+  "--log-ws-events",
+  "--tailscale-serve",
+  "--help",
+  "-h",
+  "--version",
+  "-v",
+]);
+
+const firstPositionalIndex = (args: ReadonlyArray<string>): number => {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) return -1;
+    if (arg === "--") return index + 1 < args.length ? index + 1 : -1;
+    if (!arg.startsWith("-")) return index;
+    const name = arg.split("=")[0] ?? arg;
+    if (arg.includes("=") || TASK_CLI_BOOLEAN_FLAGS.has(name)) continue;
+    const next = args[index + 1];
+    if (next !== undefined && !next.startsWith("-")) index += 1;
+  }
+  return -1;
+};
+
 const printEnvelope = (envelope: unknown) =>
   encodeJsonString(envelope).pipe(Effect.flatMap((line) => Console.log(line)));
 
 /** Reject identity flags and non-context verbs before Effect CLI help rendering. */
 export const inspectTaskCliInvocationArgs = (args: ReadonlyArray<string>): string | undefined => {
-  const taskIndex = args.findIndex((arg) => arg === "task");
-  if (taskIndex === -1) return undefined;
+  const taskIndex = firstPositionalIndex(args);
+  if (taskIndex === -1 || args[taskIndex] !== "task") return undefined;
   const rest = args.slice(taskIndex + 1);
   for (const arg of rest) {
     const name = arg.split("=")[0];
@@ -121,10 +148,10 @@ const runContext = Effect.gen(function* () {
           headers: { authorization: `Bearer ${token}` },
         });
       }).pipe(
-        Effect.catchCause((cause) => {
-          const message = HttpClientError.isHttpClientError(cause)
-            ? `Task CLI request failed: ${cause.message}`
-            : `Task CLI request failed: ${String(cause)}`;
+        Effect.catch((error) => {
+          const message = HttpClientError.isHttpClientError(error)
+            ? `Task CLI request failed: ${error.message}`
+            : `Task CLI request failed: ${String(error)}`;
           return Effect.succeed(failureEnvelope("internal_error", message));
         }),
       );

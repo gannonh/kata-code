@@ -32,21 +32,56 @@ const redactString = (value: string): string => {
 };
 
 /** Clone and redact provider payloads before they reach logs, events, or UI. */
-export const redactProviderSecrets = (value: unknown, key?: string): unknown => {
+export const redactProviderSecrets = (value: unknown, key?: string): unknown =>
+  redactValue(value, key, new WeakSet<object>());
+
+const isPlainObject = (value: object): boolean => {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+const redactValue = (value: unknown, key: string | undefined, seen: WeakSet<object>): unknown => {
   if (typeof value === "string") {
     return key !== undefined && secretKeyPattern.test(key) ? REDACTED : redactString(value);
   }
-  if (Array.isArray(value)) {
-    return value.map((entry) => redactProviderSecrets(entry));
+  if (value === null || typeof value !== "object") {
+    return value;
   }
-  if (value !== null && typeof value === "object") {
-    const output: Record<string, unknown> = {};
+  if (seen.has(value)) {
+    return REDACTED;
+  }
+  if (value instanceof Error) {
+    seen.add(value);
+    const output: Record<string, unknown> = {
+      name: value.name,
+      message: redactString(value.message),
+    };
+    if (typeof value.stack === "string") {
+      output.stack = redactString(value.stack);
+    }
+    if (value.cause !== undefined) {
+      output.cause = redactValue(value.cause, undefined, seen);
+    }
     for (const [entryKey, entryValue] of Object.entries(value)) {
-      output[entryKey] = redactProviderSecrets(entryValue, entryKey);
+      if (!(entryKey in output)) {
+        output[entryKey] = redactValue(entryValue, entryKey, seen);
+      }
     }
     return output;
   }
-  return value;
+  if (Array.isArray(value)) {
+    seen.add(value);
+    return value.map((entry) => redactValue(entry, undefined, seen));
+  }
+  if (!isPlainObject(value)) {
+    return value;
+  }
+  seen.add(value);
+  const output: Record<string, unknown> = {};
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    output[entryKey] = redactValue(entryValue, entryKey, seen);
+  }
+  return output;
 };
 
 export const redactProviderEvent = <T>(event: T): T => redactProviderSecrets(event) as T;

@@ -42,3 +42,57 @@ it.effect("does not retain empty credentials", () =>
     assert.equal(registeredProviderSecretCount(), count);
   }),
 );
+
+it.effect("ignores repeated calls to the same removal handle", () =>
+  Effect.sync(() => {
+    const secret = "task-secret-idempotent-handle";
+    const removeFirst = registerProviderSecret(secret);
+    const removeSecond = registerProviderSecret(secret);
+    removeFirst();
+    removeFirst();
+    assert.equal(redactProviderSecrets(secret), REDACTED);
+    removeSecond();
+    assert.equal(redactProviderSecrets(secret), secret);
+  }),
+);
+
+it.effect("masks values by credential key name", () =>
+  Effect.sync(() => {
+    assert.deepEqual(redactProviderSecrets({ authorization: "Bearer unregistered" }), {
+      authorization: REDACTED,
+    });
+  }),
+);
+
+it.effect("preserves Error diagnostics while redacting nested secrets", () =>
+  Effect.sync(() => {
+    const secret = "task-secret-error-cause";
+    const remove = registerProviderSecret(secret);
+    const error = new Error(`failed with ${secret}`);
+    error.cause = new Error(`cause ${secret}`);
+    const redacted = redactProviderSecrets(error) as {
+      name: string;
+      message: string;
+      stack?: string;
+      cause: { message: string };
+    };
+    assert.equal(redacted.name, "Error");
+    assert.equal(redacted.message, `failed with ${REDACTED}`);
+    assert.ok((redacted.stack ?? "").includes(REDACTED));
+    assert.ok(!(redacted.stack ?? "").includes(secret));
+    assert.equal(redacted.cause.message, `cause ${REDACTED}`);
+    remove();
+  }),
+);
+
+it.effect("terminates cyclic objects and preserves non-plain values", () =>
+  Effect.sync(() => {
+    const cyclic: { self?: unknown; note: string } = { note: "visible" };
+    cyclic.self = cyclic;
+    const redacted = redactProviderSecrets(cyclic) as { self: unknown; note: string };
+    assert.equal(redacted.note, "visible");
+    assert.equal(redacted.self, REDACTED);
+    const bytes = new Uint8Array([1, 2, 3]);
+    assert.equal(redactProviderSecrets(bytes), bytes);
+  }),
+);
