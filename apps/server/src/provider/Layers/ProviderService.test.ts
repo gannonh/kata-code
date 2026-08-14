@@ -2097,7 +2097,7 @@ it.effect("reinjects Task CLI environment and a fresh token after ProviderServic
       "http://127.0.0.1:13773",
     );
     assert.ok((firstInput.environment?.pathPrepend.length ?? 0) > 0);
-    assert.ok((firstInput.environment?.executablePath ?? "").length > 0);
+    assert.ok((firstInput.environment?.executablePath ?? "").endsWith("/katacode"));
     assert.equal(firstInput.resumeCursor, undefined);
     yield* Scope.close(firstScope, Exit.void);
 

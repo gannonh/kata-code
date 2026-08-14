@@ -107,7 +107,7 @@ async function expectNoTaskThreadsInChatSidebar(page: Page): Promise<void> {
 async function expectActiveStage(page: Page, stage: string): Promise<void> {
   const stageItem = page.getByTestId(`guided-stage-${stage}`);
   const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
-  const deadline = Date.now() + E2E_TIMEOUTS.agentReplyMs;
+  const deadline = Date.now() + Math.max(E2E_TIMEOUTS.agentReplyMs, 180_000);
 
   while (Date.now() < deadline) {
     if ((await stageItem.getAttribute("data-active")) === "true") {
@@ -134,7 +134,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
   const assistantMessages = page.locator('[data-message-role="assistant"] .chat-markdown');
   const clarificationReply =
     "Use a small web onboarding flow with three ordered steps. Persist progress across refreshes and sessions, and store the readable Plan as repository Markdown.";
-  const deadline = Date.now() + E2E_TIMEOUTS.agentTestMs;
+  const deadline = Date.now() + E2E_TIMEOUTS.guidedAgentTestMs;
   let lastConversationalQuestion = "";
 
   while (Date.now() < deadline) {
@@ -218,7 +218,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
 }
 
 test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
-  test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
+  test.describe.configure({ timeout: E2E_TIMEOUTS.guidedAgentTestMs });
 
   test("creates through the form, approves Plan, and enters Implement", async ({
     authenticatedAppWindow,

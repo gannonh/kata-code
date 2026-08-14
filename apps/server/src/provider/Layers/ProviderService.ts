@@ -22,7 +22,6 @@ import {
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
-  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
   TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   type ProviderInstanceId,
   type ProviderDriverKind,
@@ -61,6 +60,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerEnvironment } from "../../environment/Services/ServerEnvironment.ts";
 import { readPersistedServerRuntimeState } from "../../serverRuntimeState.ts";
 import { TaskInvocationService } from "../../taskCli/TaskInvocationService.ts";
+import { ensureTaskCliInvocationPath } from "../../taskCli/taskCliInvocationPath.ts";
 import {
   supportsTaskWorktreeWrite,
   type ProviderAdapterShape,
@@ -84,7 +84,6 @@ import {
 import type { TaskWorkspaceStage } from "@kata-sh/code-contracts";
 // @effect-diagnostics nodeBuiltinImport:off - provider CLI executable discovery uses the launch path.
 import { randomUUID } from "node:crypto";
-import * as NodePath from "node:path";
 import { trustedInstructionsForStage } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
@@ -353,16 +352,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     }),
   );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-  const taskCliExecutable =
-    process.env[TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]?.trim() || process.argv[1] || "katacode";
-  const resolvedTaskCliExecutable = NodePath.isAbsolute(taskCliExecutable)
-    ? taskCliExecutable
-    : taskCliExecutable.includes("/") || taskCliExecutable.includes("\\")
-      ? NodePath.resolve(taskCliExecutable)
-      : taskCliExecutable;
-  const taskCliDirectory = NodePath.isAbsolute(resolvedTaskCliExecutable)
-    ? NodePath.dirname(resolvedTaskCliExecutable)
-    : undefined;
+  const serverConfigForCli = yield* Effect.serviceOption(ServerConfig);
+  const taskCliInvocationPath = ensureTaskCliInvocationPath(
+    Option.isSome(serverConfigForCli) ? { stateDir: serverConfigForCli.value.stateDir } : {},
+  );
+  const resolvedTaskCliExecutable = taskCliInvocationPath.executablePath;
   const taskCliEnvironmentForTurn = (input: {
     readonly threadId: ThreadId;
     readonly providerInstanceId: ProviderInstanceId;
@@ -427,7 +421,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: issued.token,
           },
           executablePath: resolvedTaskCliExecutable,
-          pathPrepend: taskCliDirectory === undefined ? [] : [taskCliDirectory],
+          pathPrepend: [...taskCliInvocationPath.pathPrepend],
         },
       };
     }).pipe(

@@ -93,9 +93,7 @@ export function buildPermissionsRequestApprovalResponse(input: {
   readonly requested: EffectCodexSchema.PermissionsRequestApprovalParams["permissions"];
 }): EffectCodexSchema.PermissionsRequestApprovalResponse {
   const grantsNetwork =
-    input.taskStage &&
-    input.taskExecutionProfile !== "task-worktree-write" &&
-    input.requested.network?.enabled === true;
+    input.taskExecutionProfile === "planning" && input.requested.network?.enabled === true;
 
   return {
     permissions: grantsNetwork ? { network: { enabled: true } } : {},
@@ -357,7 +355,6 @@ function buildThreadStartParams(input: {
 
 function runtimeModeToTurnSandboxPolicy(
   input: RuntimeMode,
-  taskStage: boolean,
   taskExecutionProfile?: ProviderTaskExecutionProfile,
   taskSandboxWritableRoots: ReadonlyArray<string> = [],
 ): EffectCodexSchema.V2TurnStartParams__SandboxPolicy | undefined {
@@ -375,21 +372,17 @@ function runtimeModeToTurnSandboxPolicy(
       writableRoots: [...taskSandboxWritableRoots],
     };
   }
-  if (taskStage) {
-    return {
-      networkAccess: true,
-      type: "readOnly",
-    };
-  }
 
   switch (input) {
     case "approval-required":
       return {
         type: "readOnly",
+        ...(taskExecutionProfile === "planning" ? { networkAccess: true } : {}),
       };
     case "auto-accept-edits":
       return {
         type: "workspaceWrite",
+        ...(taskExecutionProfile === "planning" ? { networkAccess: true } : {}),
       };
     case "full-access":
     default:
@@ -459,7 +452,6 @@ export function buildTurnStartParams(input: {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   const sandboxPolicy = runtimeModeToTurnSandboxPolicy(
     input.runtimeMode,
-    input.taskStage === true,
     input.taskExecutionProfile,
     input.taskSandboxWritableRoots,
   );
@@ -1414,8 +1406,10 @@ export const makeCodexSessionRuntime = (
               ? { developerInstructions: input.developerInstructions }
               : {}),
             ...(input.taskStage === true ? { taskStage: true } : {}),
-            ...(options.taskExecutionProfile
-              ? { taskExecutionProfile: options.taskExecutionProfile }
+            ...((input.taskExecutionProfile ?? options.taskExecutionProfile)
+              ? {
+                  taskExecutionProfile: input.taskExecutionProfile ?? options.taskExecutionProfile,
+                }
               : {}),
             ...(options.taskSandboxWritableRoots && options.taskSandboxWritableRoots.length > 0
               ? { taskSandboxWritableRoots: options.taskSandboxWritableRoots }

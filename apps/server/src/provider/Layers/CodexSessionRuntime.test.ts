@@ -112,21 +112,35 @@ describe("buildTurnStartParams", () => {
     );
   });
 
-  it("allows task-stage MCP calls while retaining read-only execution", () => {
-    const params = Effect.runSync(
-      buildTurnStartParams({
-        threadId: "provider-thread-task-stage",
-        runtimeMode: "approval-required",
-        prompt: "Research the task",
-        taskStage: true,
-      }),
-    );
+  effectIt.effect(
+    "allows planning Task CLI localhost access while retaining the selected filesystem sandbox",
+    () =>
+      Effect.gen(function* () {
+        const approvalRequired = yield* buildTurnStartParams({
+          threadId: "provider-thread-planning",
+          runtimeMode: "approval-required",
+          prompt: "Research the task",
+          taskExecutionProfile: "planning",
+        });
 
-    assert.deepStrictEqual(params.sandboxPolicy, {
-      networkAccess: true,
-      type: "readOnly",
-    });
-  });
+        assert.deepStrictEqual(approvalRequired.sandboxPolicy, {
+          networkAccess: true,
+          type: "readOnly",
+        });
+
+        const autoAccept = yield* buildTurnStartParams({
+          threadId: "provider-thread-planning-write",
+          runtimeMode: "auto-accept-edits",
+          prompt: "Research the task",
+          taskExecutionProfile: "planning",
+        });
+
+        assert.deepStrictEqual(autoAccept.sandboxPolicy, {
+          networkAccess: true,
+          type: "workspaceWrite",
+        });
+      }),
+  );
 
   effectIt.effect(
     "keeps task implementation temp directories writable and scopes writable roots to the worktree",
@@ -282,10 +296,11 @@ describe("Codex approval requests", () => {
     );
   });
 
-  it("grants task-stage network access without granting filesystem permissions", () => {
+  it("grants planning Task CLI network access without granting filesystem permissions", () => {
     assert.deepStrictEqual(
       buildPermissionsRequestApprovalResponse({
-        taskStage: true,
+        taskStage: false,
+        taskExecutionProfile: "planning",
         requested: {
           network: { enabled: true },
           fileSystem: { write: ["/tmp/task-stage"] },
@@ -300,7 +315,7 @@ describe("Codex approval requests", () => {
     );
   });
 
-  it("denies permission requests outside task-stage network access", () => {
+  it("denies permission requests outside planning Task CLI network access", () => {
     assert.deepStrictEqual(
       buildPermissionsRequestApprovalResponse({
         taskStage: false,
@@ -326,11 +341,26 @@ describe("Codex approval requests", () => {
         scope: "turn",
       },
     );
+    assert.deepStrictEqual(
+      buildPermissionsRequestApprovalResponse({
+        taskStage: true,
+        requested: {
+          network: { enabled: true },
+        },
+      }),
+      {
+        permissions: {},
+        scope: "turn",
+      },
+    );
   });
 });
 
 describe("Codex server request handlers", () => {
-  const runApprovalProbe = (taskStage: boolean) =>
+  const runApprovalProbe = (input: {
+    readonly taskStage?: boolean;
+    readonly taskExecutionProfile?: "planning" | "task-worktree-write";
+  }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const path = yield* Path.Path;
@@ -343,7 +373,10 @@ describe("Codex server request handlers", () => {
           binaryPath: mockPeerPath,
           cwd: process.cwd(),
           runtimeMode: "approval-required",
-          ...(taskStage ? { taskStage: true } : {}),
+          ...(input.taskStage ? { taskStage: true } : {}),
+          ...(input.taskExecutionProfile
+            ? { taskExecutionProfile: input.taskExecutionProfile }
+            : {}),
           environment: {
             PATH: process.env.PATH ?? "",
             CODEX_APP_SERVER_TEST_APPROVALS: "1",
@@ -366,7 +399,10 @@ describe("Codex server request handlers", () => {
           yield* runtime.start();
           yield* runtime.sendTurn({
             input: "Exercise the MCP approval handlers.",
-            ...(taskStage ? { taskStage: true } : {}),
+            ...(input.taskStage ? { taskStage: true } : {}),
+            ...(input.taskExecutionProfile
+              ? { taskExecutionProfile: input.taskExecutionProfile }
+              : {}),
           });
           const markerValue = Option.getOrThrow(yield* Fiber.join(markerFiber));
           return decodeApprovalResponses(markerValue);
@@ -375,9 +411,9 @@ describe("Codex server request handlers", () => {
     );
 
   effectIt.layer(NodeServices.layer)("runtime dispatch", (it) => {
-    it.effect("handles task-stage MCP approval and permission requests", () =>
+    it.effect("handles Implement MCP approval without granting planning network", () =>
       Effect.gen(function* () {
-        const responses = yield* runApprovalProbe(true);
+        const responses = yield* runApprovalProbe({ taskStage: true });
         const values = Object.values(responses);
         assert.equal(values.length, 2);
         const elicitation = values.find(
@@ -387,6 +423,28 @@ describe("Codex server request handlers", () => {
           (value) => typeof value === "object" && value !== null && "permissions" in value,
         );
         assert.deepStrictEqual(elicitation, { action: "accept" });
+        assert.deepStrictEqual(permissions, {
+          permissions: {},
+          scope: "turn",
+        });
+      }),
+    );
+
+    it.effect("grants planning Task CLI network without auto-accepting MCP tools", () =>
+      Effect.gen(function* () {
+        const responses = yield* runApprovalProbe({ taskExecutionProfile: "planning" });
+        const values = Object.values(responses);
+        assert.equal(values.length, 2);
+        const elicitation = values.find(
+          (value) => typeof value === "object" && value !== null && "action" in value,
+        );
+        const permissions = values.find(
+          (value) => typeof value === "object" && value !== null && "permissions" in value,
+        );
+        assert.deepStrictEqual(elicitation, {
+          action: "decline",
+          content: null,
+        });
         assert.deepStrictEqual(permissions, {
           permissions: {
             network: { enabled: true },
@@ -398,7 +456,7 @@ describe("Codex server request handlers", () => {
 
     it.effect("keeps non-task-stage MCP requests on their safe response paths", () =>
       Effect.gen(function* () {
-        const responses = yield* runApprovalProbe(false);
+        const responses = yield* runApprovalProbe({});
         const values = Object.values(responses);
         assert.equal(values.length, 2);
         const elicitation = values.find(
