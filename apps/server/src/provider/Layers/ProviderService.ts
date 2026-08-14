@@ -13,6 +13,7 @@ import {
   ModelSelection,
   NonNegativeInt,
   ThreadId,
+  TurnId,
   ProviderCompactThreadInput,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
@@ -20,14 +21,19 @@ import {
   ProviderSendTurnInput,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
+  TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
+  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type ProviderSessionEnvironment,
 } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -38,6 +44,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
+import { HttpServer as HttpServerService } from "effect/unstable/http/HttpServer";
 
 import {
   increment,
@@ -50,6 +57,10 @@ import {
   withMetrics,
 } from "../../observability/Metrics.ts";
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
+import { ServerConfig } from "../../config.ts";
+import { ServerEnvironment } from "../../environment/Services/ServerEnvironment.ts";
+import { readPersistedServerRuntimeState } from "../../serverRuntimeState.ts";
+import { TaskInvocationService } from "../../taskCli/TaskInvocationService.ts";
 import {
   supportsTaskWorktreeWrite,
   type ProviderAdapterShape,
@@ -71,9 +82,13 @@ import {
   type ActiveTaskProviderContext,
 } from "../../taskWorkspace/TaskWorkspaceService.ts";
 import type { TaskWorkspaceStage } from "@kata-sh/code-contracts";
+// @effect-diagnostics nodeBuiltinImport:off - provider CLI executable discovery uses the launch path.
+import { randomUUID } from "node:crypto";
+import * as NodePath from "node:path";
 import { trustedInstructionsForStage } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import { redactProviderEvent } from "../providerSecretRedaction.ts";
 const isModelSelection = Schema.is(ModelSelection);
 
 /**
@@ -283,24 +298,54 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const taskTurnWatchdogs = new Map<ThreadId, Fiber.Fiber<void, never>>();
-  const mcpRotationLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
-  const getMcpRotationLock = (threadId: ThreadId) =>
+  const taskTurnCredentials = new Map<
+    ThreadId,
+    {
+      readonly token: string;
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly sessionGeneration: string;
+      readonly leaseTurnId: TurnId;
+      readonly environment: ProviderSessionEnvironment;
+      readonly providerTurnId?: TurnId;
+    }
+  >();
+  const mcpRotationLocksRef = yield* SynchronizedRef.make(
+    new Map<string, { readonly semaphore: Semaphore.Semaphore; readonly users: number }>(),
+  );
+  const acquireMcpRotationLock = (threadId: ThreadId) =>
     SynchronizedRef.modifyEffect(mcpRotationLocksRef, (current) => {
       const key = String(threadId);
       const existing = current.get(key);
       if (existing) {
-        return Effect.succeed([existing, current] as const);
+        const next = new Map(current);
+        next.set(key, { ...existing, users: existing.users + 1 });
+        return Effect.succeed([existing.semaphore, next] as const);
       }
       return Semaphore.make(1).pipe(
         Effect.map((semaphore) => {
           const next = new Map(current);
-          next.set(key, semaphore);
+          next.set(key, { semaphore, users: 1 });
           return [semaphore, next] as const;
         }),
       );
     });
+  const releaseMcpRotationLock = (threadId: ThreadId) =>
+    SynchronizedRef.update(mcpRotationLocksRef, (current) => {
+      const key = String(threadId);
+      const existing = current.get(key);
+      if (!existing) return current;
+      const next = new Map(current);
+      if (existing.users <= 1) next.delete(key);
+      else next.set(key, { ...existing, users: existing.users - 1 });
+      return next;
+    });
   const withMcpRotationLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
-    Effect.flatMap(getMcpRotationLock(threadId), (semaphore) => semaphore.withPermit(effect));
+    Effect.gen(function* () {
+      const semaphore = yield* acquireMcpRotationLock(threadId);
+      return yield* semaphore
+        .withPermit(effect)
+        .pipe(Effect.ensuring(releaseMcpRotationLock(threadId)));
+    });
   yield* Effect.addFinalizer(() =>
     Effect.forEach(taskTurnWatchdogs.values(), Fiber.interrupt, {
       concurrency: "unbounded",
@@ -308,6 +353,152 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     }),
   );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+  const taskCliExecutable =
+    process.env[TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]?.trim() || process.argv[1] || "katacode";
+  const resolvedTaskCliExecutable = NodePath.isAbsolute(taskCliExecutable)
+    ? taskCliExecutable
+    : taskCliExecutable.includes("/") || taskCliExecutable.includes("\\")
+      ? NodePath.resolve(taskCliExecutable)
+      : taskCliExecutable;
+  const taskCliDirectory = NodePath.isAbsolute(resolvedTaskCliExecutable)
+    ? NodePath.dirname(resolvedTaskCliExecutable)
+    : undefined;
+  const taskCliEnvironmentForTurn = (input: {
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+  }): Effect.Effect<
+    | {
+        readonly environment: ProviderSessionEnvironment;
+        readonly token: string;
+        readonly leaseTurnId: TurnId;
+      }
+    | undefined,
+    ProviderValidationError
+  > =>
+    Effect.gen(function* () {
+      const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+      const serverEnvironment = yield* Effect.serviceOption(ServerEnvironment);
+      const serverConfig = yield* Effect.serviceOption(ServerConfig);
+      const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
+      const httpServer = yield* Effect.serviceOption(HttpServerService);
+      if (Option.isNone(taskInvocations) || Option.isNone(serverEnvironment)) {
+        return undefined;
+      }
+      const environmentId = yield* serverEnvironment.value.getEnvironmentId;
+      const endpoint = yield* Effect.gen(function* () {
+        if (Option.isSome(httpServer) && httpServer.value.address._tag === "TcpAddress") {
+          return `http://127.0.0.1:${httpServer.value.address.port}`;
+        }
+        if (Option.isSome(serverConfig) && Option.isSome(fileSystem)) {
+          const state = yield* readPersistedServerRuntimeState(
+            serverConfig.value.serverRuntimeStatePath,
+          ).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem.value),
+            Effect.orElseSucceed(() => Option.none()),
+          );
+          if (Option.isSome(state)) {
+            return state.value.origin;
+          }
+        }
+        if (Option.isSome(serverConfig) && serverConfig.value.port > 0) {
+          return `http://127.0.0.1:${serverConfig.value.port}`;
+        }
+        return undefined;
+      });
+      if (!endpoint) {
+        return yield* toValidationError(
+          "ProviderService.taskCliEnvironment",
+          "The Task CLI endpoint is unavailable because the server is not listening.",
+        );
+      }
+      const leaseTurnId = TurnId.make(`pending-task-cli-${randomUUID()}`);
+      const issued = yield* taskInvocations.value.issue({
+        environmentId,
+        threadId: input.threadId,
+        providerInstanceId: input.providerInstanceId,
+        providerTurnId: leaseTurnId,
+      });
+      return {
+        token: issued.token,
+        leaseTurnId,
+        environment: {
+          variables: {
+            [TASK_CLI_ENDPOINT_ENVIRONMENT_KEY]: endpoint,
+            [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: issued.token,
+          },
+          executablePath: resolvedTaskCliExecutable,
+          pathPrepend: taskCliDirectory === undefined ? [] : [taskCliDirectory],
+        },
+      };
+    }).pipe(
+      Effect.catchTag("TaskInvocationError", (error) =>
+        error.code === "not_active" ? Effect.succeed(undefined) : Effect.fail(error),
+      ),
+      Effect.mapError((cause) =>
+        toValidationError(
+          "ProviderService.taskCliEnvironment",
+          cause instanceof Error && "message" in cause
+            ? String(cause.message)
+            : "Failed to prepare Task CLI invocation environment.",
+          cause,
+        ),
+      ),
+    );
+
+  const mergeSessionEnvironments = (
+    base: ProviderSessionEnvironment | undefined,
+    task: ProviderSessionEnvironment | undefined,
+  ): ProviderSessionEnvironment | undefined => {
+    if (!base) return task;
+    if (!task) return base;
+    return {
+      variables: { ...base.variables, ...task.variables },
+      executablePath: task.executablePath ?? base.executablePath,
+      pathPrepend: [...task.pathPrepend, ...base.pathPrepend],
+    };
+  };
+  const revokeTaskCredential = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const credential = taskTurnCredentials.get(threadId);
+      const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+      if (!credential || Option.isNone(taskInvocations)) return;
+      const turnIds = [credential.leaseTurnId, credential.providerTurnId].filter(
+        (turnId, index, values): turnId is TurnId =>
+          turnId !== undefined && values.indexOf(turnId) === index,
+      );
+      yield* Effect.forEach(
+        turnIds,
+        (providerTurnId) => taskInvocations.value.revokeTurn({ threadId, providerTurnId }),
+        { discard: true },
+      ).pipe(Effect.ignore);
+      taskTurnCredentials.delete(threadId);
+    });
+  const markTaskTurnPending = (input: {
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly turnId: TurnId;
+  }) =>
+    Effect.gen(function* () {
+      const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+      if (!binding) return;
+      const runtimePayload =
+        binding.runtimePayload &&
+        typeof binding.runtimePayload === "object" &&
+        !Array.isArray(binding.runtimePayload)
+          ? binding.runtimePayload
+          : {};
+      yield* directory.upsert({
+        ...binding,
+        providerInstanceId: input.providerInstanceId,
+        status: "running",
+        runtimePayload: {
+          ...runtimePayload,
+          activeTurnId: input.turnId,
+          lastRuntimeEvent: "provider.task-cli.lease",
+          lastRuntimeEventAt: yield* nowIso,
+        },
+      });
+    });
   const prepareMcpSession = (
     threadId: ThreadId,
     providerInstanceId: ProviderInstanceId,
@@ -357,14 +548,56 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.gen(function* () {
-      if (event.type === "turn.completed" || event.type === "turn.aborted") {
-        const watchdog = taskTurnWatchdogs.get(event.threadId);
-        if (watchdog !== undefined) {
-          taskTurnWatchdogs.delete(event.threadId);
-          yield* Fiber.interrupt(watchdog);
+      const safeEvent = redactProviderEvent(event);
+      if (
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted" ||
+        event.type === "runtime.error" ||
+        event.type === "session.exited"
+      ) {
+        const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+        const credential = taskTurnCredentials.get(safeEvent.threadId);
+        if (Option.isSome(taskInvocations)) {
+          if (event.turnId !== undefined) {
+            yield* taskInvocations.value
+              .revokeTurn({
+                threadId: event.threadId,
+                providerTurnId: event.turnId,
+              })
+              .pipe(Effect.ignore);
+          } else if (
+            (event.type === "runtime.error" || event.type === "session.exited") &&
+            credential !== undefined &&
+            (event.providerInstanceId === undefined ||
+              event.providerInstanceId === credential.providerInstanceId) &&
+            (event.sessionGeneration === undefined ||
+              event.sessionGeneration === credential.sessionGeneration)
+          ) {
+            // A lifecycle event without a turn id is only authoritative when
+            // it identifies the currently tracked provider instance. Old
+            // replacement-session exits must not revoke the fresh lease.
+            yield* taskInvocations.value.revokeThread(event.threadId).pipe(Effect.ignore);
+          }
+        }
+        const eventMatchesCredential =
+          credential !== undefined &&
+          (safeEvent.turnId === undefined ||
+            safeEvent.turnId === credential.leaseTurnId ||
+            safeEvent.turnId === credential.providerTurnId) &&
+          (safeEvent.providerInstanceId === undefined ||
+            safeEvent.providerInstanceId === credential.providerInstanceId) &&
+          (safeEvent.sessionGeneration === undefined ||
+            safeEvent.sessionGeneration === credential.sessionGeneration);
+        if (eventMatchesCredential) {
+          yield* revokeTaskCredential(safeEvent.threadId);
+          const watchdog = taskTurnWatchdogs.get(safeEvent.threadId);
+          if (watchdog !== undefined) {
+            taskTurnWatchdogs.delete(safeEvent.threadId);
+            yield* Fiber.interrupt(watchdog);
+          }
         }
       }
-      yield* Effect.succeed(event).pipe(
+      yield* Effect.succeed(safeEvent).pipe(
         Effect.tap((canonicalEvent) =>
           canonicalEventLogger
             ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
@@ -423,6 +656,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly threadId: ThreadId;
       readonly providerInstanceId: ProviderInstanceId;
       readonly developerInstructions?: string;
+      readonly environment?: ProviderSessionEnvironment;
       readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
     }) {
       const bindingOption = yield* directory.getBinding(input.threadId);
@@ -468,6 +702,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             ? { modelSelection }
             : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
+        ...(input.environment ? { environment: input.environment } : {}),
         taskStage: activeTaskStage !== undefined,
         taskExecutionProfile,
         ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
@@ -631,6 +866,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         bindingInstanceId,
         activeTaskStage !== undefined,
       );
+      const resumedTaskEnvironment =
+        activeTaskStage !== undefined
+          ? yield* taskCliEnvironmentForTurn({
+              threadId: input.binding.threadId,
+              providerInstanceId: bindingInstanceId,
+            }).pipe(
+              Effect.mapError((cause) => toValidationError(input.operation, cause.message, cause)),
+            )
+          : undefined;
+      if (resumedTaskEnvironment) {
+        taskTurnCredentials.set(input.binding.threadId, {
+          token: resumedTaskEnvironment.token,
+          providerInstanceId: bindingInstanceId,
+          sessionGeneration: "recovery-pending",
+          leaseTurnId: resumedTaskEnvironment.leaseTurnId,
+          environment: resumedTaskEnvironment.environment,
+        });
+      }
       const resumed = yield* adapter
         .startSession({
           threadId: input.binding.threadId,
@@ -647,6 +900,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               ? { modelSelection: persistedModelSelection }
               : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
+          ...(resumedTaskEnvironment ? { environment: resumedTaskEnvironment.environment } : {}),
           taskStage: activeTaskStage !== undefined,
           taskExecutionProfile,
           ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
@@ -669,6 +923,40 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         input.binding.threadId,
         developerInstructions ? { developerInstructions } : {},
       );
+      if (resumedTaskEnvironment) {
+        const activeTurnId = resumed.activeTurnId;
+        if (activeTurnId === undefined) {
+          yield* revokeTaskCredential(input.binding.threadId);
+        } else {
+          const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+          if (Option.isSome(taskInvocations)) {
+            yield* taskInvocations.value
+              .bind({
+                token: resumedTaskEnvironment.token,
+                threadId: input.binding.threadId,
+                providerInstanceId: bindingInstanceId,
+                providerTurnId: activeTurnId,
+              })
+              .pipe(
+                Effect.mapError((cause) =>
+                  toValidationError(input.operation, cause.message, cause),
+                ),
+                Effect.onError(() => revokeTaskCredential(input.binding.threadId)),
+              );
+            taskTurnCredentials.set(input.binding.threadId, {
+              token: resumedTaskEnvironment.token,
+              providerInstanceId: bindingInstanceId,
+              sessionGeneration:
+                typeof resumed.sessionGeneration === "string"
+                  ? resumed.sessionGeneration
+                  : "recovered",
+              leaseTurnId: resumedTaskEnvironment.leaseTurnId,
+              environment: resumedTaskEnvironment.environment,
+              providerTurnId: activeTurnId,
+            });
+          }
+        }
+      }
       yield* analytics.record("provider.session.recovered", {
         provider: resumed.provider,
         strategy: "resume-thread",
@@ -689,6 +977,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     readonly threadId: ThreadId;
     readonly operation: string;
     readonly allowRecovery: boolean;
+    readonly alreadyLocked?: boolean;
   }) {
     const bindingOption = yield* directory.getBinding(input.threadId);
     const binding = Option.getOrUndefined(bindingOption);
@@ -720,13 +1009,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       } as const;
     }
 
-    const recovered = yield* withMcpRotationLock(
-      input.threadId,
-      recoverSessionForThread({
-        binding,
-        operation: input.operation,
-      }),
-    );
+    const recovered = yield* input.alreadyLocked
+      ? recoverSessionForThread({ binding, operation: input.operation })
+      : withMcpRotationLock(
+          input.threadId,
+          recoverSessionForThread({
+            binding,
+            operation: input.operation,
+          }),
+        );
     return {
       adapter: recovered.adapter,
       instanceId,
@@ -872,6 +1163,30 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           threadId,
           Effect.gen(function* () {
             yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage !== undefined);
+            const startedTaskEnvironment =
+              activeTaskStage !== undefined
+                ? yield* taskCliEnvironmentForTurn({
+                    threadId,
+                    providerInstanceId: resolvedInstanceId,
+                  }).pipe(
+                    Effect.mapError((cause) =>
+                      toValidationError("ProviderService.startSession", cause.message, cause),
+                    ),
+                  )
+                : undefined;
+            if (startedTaskEnvironment) {
+              taskTurnCredentials.set(threadId, {
+                token: startedTaskEnvironment.token,
+                providerInstanceId: resolvedInstanceId,
+                sessionGeneration: "session-pending",
+                leaseTurnId: startedTaskEnvironment.leaseTurnId,
+                environment: startedTaskEnvironment.environment,
+              });
+            }
+            const sessionEnvironment = mergeSessionEnvironments(
+              input.environment,
+              startedTaskEnvironment?.environment,
+            );
             const session = yield* adapter
               .startSession({
                 ...input,
@@ -887,6 +1202,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                     ? { modelSelection: input.modelSelection }
                     : {}),
                 ...(developerInstructions ? { developerInstructions } : {}),
+                ...(sessionEnvironment ? { environment: sessionEnvironment } : {}),
                 taskStage: activeTaskStage !== undefined,
                 taskExecutionProfile: activeTaskProfile,
                 ...(activeTaskContext
@@ -897,7 +1213,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                   ? { resumeCursor: effectiveResumeCursor }
                   : {}),
               })
-              .pipe(Effect.onError(() => clearMcpSession(threadId)));
+              .pipe(
+                Effect.onError(() =>
+                  clearMcpSession(threadId).pipe(
+                    Effect.andThen(
+                      startedTaskEnvironment ? revokeTaskCredential(threadId) : Effect.void,
+                    ),
+                  ),
+                ),
+              );
 
             if (session.provider !== adapter.provider) {
               yield* clearMcpSession(threadId);
@@ -910,7 +1234,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               ...session,
               providerInstanceId: resolvedInstanceId,
             };
-
             yield* stopStaleSessionsForThread({
               threadId,
               currentInstanceId: resolvedInstanceId,
@@ -919,6 +1242,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               modelSelection: input.modelSelection,
               ...(developerInstructions ? { developerInstructions } : {}),
             });
+            if (startedTaskEnvironment) {
+              yield* markTaskTurnPending({
+                threadId,
+                providerInstanceId: resolvedInstanceId,
+                turnId: startedTaskEnvironment.leaseTurnId,
+              });
+            }
             return sessionWithInstance;
           }),
         );
@@ -970,8 +1300,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
     let metricProvider = "unknown";
     let metricModel = input.modelSelection?.model;
-    return yield* Effect.gen(function* () {
+    const sendTurnEffect = Effect.gen(function* () {
+      const shouldSerializeTaskTurn = yield* isActiveTaskThread(input.threadId);
       const routed = yield* resolveRoutableSession({
+        alreadyLocked: true,
         threadId: input.threadId,
         operation: "ProviderService.sendTurn",
         allowRecovery: true,
@@ -1024,52 +1356,154 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
               interactionMode: providerInteractionMode ?? "default",
             };
-      yield* withMcpRotationLock(
-        input.threadId,
-        Effect.gen(function* () {
-          const mcpPreparation = yield* prepareMcpSession(
-            input.threadId,
-            routed.instanceId,
-            activeTaskStage !== undefined,
-          );
-          if (mcpPreparation.rotated) {
-            yield* restartSessionForMcpCredential({
-              threadId: input.threadId,
-              providerInstanceId: routed.instanceId,
-              ...(input.developerInstructions !== undefined
-                ? { developerInstructions: input.developerInstructions }
-                : {}),
-              adapter: routed.adapter,
-            });
-          }
-        }),
-      );
-      const isTaskTurn = yield* isActiveTaskThread(input.threadId);
       yield* Effect.annotateCurrentSpan({
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
-      const turn = yield* routed.adapter.sendTurn(providerInput);
+      const isTaskTurn = shouldSerializeTaskTurn;
+      const taskEnvironment = isTaskTurn
+        ? yield* taskCliEnvironmentForTurn({
+            threadId: input.threadId,
+            providerInstanceId: routed.instanceId,
+          })
+        : undefined;
+      if (taskEnvironment) {
+        taskTurnCredentials.set(input.threadId, {
+          token: taskEnvironment.token,
+          providerInstanceId: routed.instanceId,
+          sessionGeneration: "turn-pending",
+          leaseTurnId: taskEnvironment.leaseTurnId,
+          environment: taskEnvironment.environment,
+        });
+        yield* markTaskTurnPending({
+          threadId: input.threadId,
+          providerInstanceId: routed.instanceId,
+          turnId: taskEnvironment.leaseTurnId,
+        });
+      }
+      yield* Effect.gen(function* () {
+        const mcpPreparation = yield* prepareMcpSession(
+          input.threadId,
+          routed.instanceId,
+          activeTaskStage !== undefined,
+        );
+        if (mcpPreparation.rotated || taskEnvironment) {
+          yield* restartSessionForMcpCredential({
+            threadId: input.threadId,
+            providerInstanceId: routed.instanceId,
+            ...(input.developerInstructions !== undefined
+              ? { developerInstructions: input.developerInstructions }
+              : {}),
+            ...(mergeSessionEnvironments(input.environment, taskEnvironment?.environment)
+              ? {
+                  environment: mergeSessionEnvironments(
+                    input.environment,
+                    taskEnvironment?.environment,
+                  )!,
+                }
+              : {}),
+            adapter: routed.adapter,
+          });
+        }
+      }).pipe(
+        Effect.onError(() =>
+          taskEnvironment ? revokeTaskCredential(input.threadId) : Effect.void,
+        ),
+      );
+      if (taskEnvironment) {
+        yield* markTaskTurnPending({
+          threadId: input.threadId,
+          providerInstanceId: routed.instanceId,
+          turnId: taskEnvironment.leaseTurnId,
+        });
+      }
+      const turn = yield* routed.adapter
+        .sendTurn({
+          ...providerInput,
+          ...(taskEnvironment
+            ? {
+                environment: mergeSessionEnvironments(
+                  providerInput.environment,
+                  taskEnvironment.environment,
+                ),
+              }
+            : {}),
+        })
+        .pipe(
+          Effect.onError(() =>
+            taskEnvironment ? revokeTaskCredential(input.threadId) : Effect.void,
+          ),
+        );
+      if (taskEnvironment) {
+        // Record the native turn before any further yields so a terminal event
+        // cannot leave a finished turn bound to a still-active lease.
+        const tracked = taskTurnCredentials.get(input.threadId);
+        taskTurnCredentials.set(input.threadId, {
+          token: taskEnvironment.token,
+          providerInstanceId: routed.instanceId,
+          sessionGeneration: tracked?.sessionGeneration ?? "turn-active",
+          leaseTurnId: taskEnvironment.leaseTurnId,
+          environment: taskEnvironment.environment,
+          providerTurnId: turn.turnId,
+        });
+        const activeSessions = yield* routed.adapter.listSessions();
+        const generation = activeSessions.find(
+          (session) => session.threadId === input.threadId,
+        )?.sessionGeneration;
+        if (typeof generation === "string") {
+          const current = taskTurnCredentials.get(input.threadId);
+          if (current !== undefined) {
+            taskTurnCredentials.set(input.threadId, {
+              ...current,
+              sessionGeneration: generation,
+            });
+          }
+        }
+      }
       const persistedBindingAfterTurn = Option.getOrUndefined(
         yield* directory.getBinding(input.threadId),
       );
       const developerInstructions =
         input.developerInstructions ??
         readPersistedDeveloperInstructions(persistedBindingAfterTurn?.runtimePayload);
-      yield* directory.upsert({
-        threadId: input.threadId,
-        provider: routed.adapter.provider,
-        providerInstanceId: routed.instanceId,
-        status: "running",
-        ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
-        runtimePayload: {
-          ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
-          ...(developerInstructions ? { developerInstructions } : {}),
-          activeTurnId: turn.turnId,
-          lastRuntimeEvent: "provider.sendTurn",
-          lastRuntimeEventAt: yield* nowIso,
-        },
-      });
+      yield* directory
+        .upsert({
+          threadId: input.threadId,
+          provider: routed.adapter.provider,
+          providerInstanceId: routed.instanceId,
+          status: "running",
+          ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+          runtimePayload: {
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+            ...(developerInstructions ? { developerInstructions } : {}),
+            activeTurnId: turn.turnId,
+            lastRuntimeEvent: "provider.sendTurn",
+            lastRuntimeEventAt: yield* nowIso,
+          },
+        })
+        .pipe(
+          Effect.onError(() =>
+            taskEnvironment ? revokeTaskCredential(input.threadId) : Effect.void,
+          ),
+        );
+      if (taskEnvironment) {
+        const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+        if (Option.isSome(taskInvocations)) {
+          yield* taskInvocations.value
+            .bind({
+              token: taskEnvironment.token,
+              threadId: input.threadId,
+              providerInstanceId: routed.instanceId,
+              providerTurnId: turn.turnId,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                toValidationError("ProviderService.sendTurn", cause.message, cause),
+              ),
+              Effect.onError(() => revokeTaskCredential(input.threadId)),
+            );
+        }
+      }
       if (isTaskTurn) {
         const previous = taskTurnWatchdogs.get(input.threadId);
         if (previous !== undefined) {
@@ -1120,6 +1554,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }),
       }),
     );
+    return yield* withMcpRotationLock(input.threadId, sendTurnEffect);
   });
 
   const interruptTurn: ProviderServiceShape["interruptTurn"] = Effect.fn("interruptTurn")(
@@ -1239,42 +1674,50 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         payload: rawInput,
       });
       let metricProvider = "unknown";
-      return yield* Effect.gen(function* () {
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: "ProviderService.stopSession",
-          allowRecovery: false,
-        });
-        metricProvider = routed.adapter.provider;
-        yield* Effect.annotateCurrentSpan({
-          "provider.operation": "stop-session",
-          "provider.kind": routed.adapter.provider,
-          "provider.thread_id": input.threadId,
-        });
-        if (routed.isActive) {
-          yield* routed.adapter.stopSession(routed.threadId);
-        }
-        yield* clearMcpSession(input.threadId);
-        yield* directory.upsert({
-          threadId: input.threadId,
-          provider: routed.adapter.provider,
-          providerInstanceId: routed.instanceId,
-          status: "stopped",
-          runtimePayload: {
-            activeTurnId: null,
-          },
-        });
-        yield* analytics.record("provider.session.stopped", {
-          provider: routed.adapter.provider,
-        });
-      }).pipe(
-        withMetrics({
-          counter: providerSessionsTotal,
-          outcomeAttributes: () =>
-            providerMetricAttributes(metricProvider, {
-              operation: "stop",
-            }),
-        }),
+      return yield* withMcpRotationLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: "ProviderService.stopSession",
+            allowRecovery: false,
+          });
+          metricProvider = routed.adapter.provider;
+          yield* Effect.annotateCurrentSpan({
+            "provider.operation": "stop-session",
+            "provider.kind": routed.adapter.provider,
+            "provider.thread_id": input.threadId,
+          });
+          if (routed.isActive) {
+            yield* routed.adapter.stopSession(routed.threadId);
+          }
+          const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+          if (Option.isSome(taskInvocations)) {
+            yield* taskInvocations.value.revokeThread(input.threadId).pipe(Effect.ignore);
+          }
+          taskTurnCredentials.delete(input.threadId);
+          yield* clearMcpSession(input.threadId);
+          yield* directory.upsert({
+            threadId: input.threadId,
+            provider: routed.adapter.provider,
+            providerInstanceId: routed.instanceId,
+            status: "stopped",
+            runtimePayload: {
+              activeTurnId: null,
+            },
+          });
+          yield* analytics.record("provider.session.stopped", {
+            provider: routed.adapter.provider,
+          });
+        }).pipe(
+          withMetrics({
+            counter: providerSessionsTotal,
+            outcomeAttributes: () =>
+              providerMetricAttributes(metricProvider, {
+                operation: "stop",
+              }),
+          }),
+        ),
       );
     },
   );
@@ -1467,6 +1910,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ).pipe(Effect.asVoid);
     yield* Effect.forEach(currentAdapters, ([, adapter]) => adapter.stopAll()).pipe(Effect.asVoid);
     yield* McpSessionRegistry.revokeAllActiveMcpCredentials();
+    const taskInvocations = yield* Effect.serviceOption(TaskInvocationService);
+    if (Option.isSome(taskInvocations)) {
+      yield* taskInvocations.value.revokeAll.pipe(Effect.ignore);
+    }
+    taskTurnCredentials.clear();
     McpProviderSession.clearAllMcpProviderSessions();
     const bindings = yield* directory.listBindings().pipe(Effect.orElseSucceed(() => []));
     yield* Effect.forEach(bindings, (binding) =>

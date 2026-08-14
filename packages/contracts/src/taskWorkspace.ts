@@ -40,6 +40,9 @@ export const TaskWorkspaceStage = Schema.Literals([
 ]);
 export type TaskWorkspaceStage = typeof TaskWorkspaceStage.Type;
 
+/** Persisted discriminator for the provider-agnostic Task CLI architecture. */
+export const TASK_EXECUTION_ARCHITECTURE_VERSION = "task-cli@1" as const;
+
 // `summary` is written by context budgeting, not by a stage.
 export const TaskWorkspaceArtifactKind = Schema.Literals([
   "questions",
@@ -658,6 +661,8 @@ export const TaskWorkspace = Schema.Struct({
     artifactContract: TrimmedNonEmptyString,
     workflowDefinition: TrimmedNonEmptyString,
     prompt: TrimmedNonEmptyString,
+    /** Absent on pre-CLI records; stamped on new CLI-era records. */
+    executionArchitecture: Schema.optional(TrimmedNonEmptyString),
   }),
   intake: TaskWorkspaceIntake.pipe(
     Schema.withDecodingDefault(Effect.succeed({ brief: "", source: { kind: "inline", body: "" } })),

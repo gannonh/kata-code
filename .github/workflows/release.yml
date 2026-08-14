@@ -215,10 +215,22 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check
-        run: vp check
+        run: |
+          # Vite+ can panic with EAGAIN when GitHub's log pipe backpressures
+          # a large lint warning dump (`failed printing to stdout: Resource
+          # temporarily unavailable`). Write to a file first, then replay.
+          set +e
+          vp check > "${RUNNER_TEMP}/vp-check.log" 2>&1
+          status=$?
+          set -e
+          cat "${RUNNER_TEMP}/vp-check.log"
+          exit "$status"
 
       - name: Typecheck
         run: vp run typecheck
+
+      - name: Build server CLI bundle
+        run: vp run --filter @kata-sh/code-cli build:bundle
 
       - name: Test
         run: vp run test

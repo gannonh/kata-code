@@ -19,6 +19,7 @@ import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
+import { redactProviderSecrets } from "../providerSecretRedaction.ts";
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_FILES = 10;
@@ -89,7 +90,7 @@ function resolveStreamLabel(stream: EventNdjsonStream): string {
 const toLogMessage = Effect.fn("toLogMessage")(function* (
   event: unknown,
 ): Effect.fn.Return<string | undefined> {
-  return yield* encodeUnknownJsonString(event).pipe(
+  return yield* encodeUnknownJsonString(redactProviderSecrets(event)).pipe(
     Effect.catch((error) =>
       logWarning("failed to serialize provider event log record", { error }).pipe(
         Effect.as(undefined),

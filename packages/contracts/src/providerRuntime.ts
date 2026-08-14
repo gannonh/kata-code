@@ -248,6 +248,9 @@ const RuntimeErrorType = Schema.Literal("runtime.error");
 
 const ProviderRuntimeEventBase = Schema.Struct({
   eventId: EventId,
+  /** Process-local provider session generation; lifecycle events from older
+   * replacements must never mutate the current turn/lease. */
+  sessionGeneration: Schema.optional(TrimmedNonEmptyStringSchema),
   provider: ProviderDriverKind,
   // Optional during the driver/instance migration. See providerInstance.ts
   // for the routing-key-vs-driver-id distinction. Once every emitter

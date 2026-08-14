@@ -6,6 +6,9 @@
  *
  * @module ClaudeAdapterLive
  */
+// @effect-diagnostics nodeBuiltinImport:off - provider launch env requires the platform path delimiter.
+import * as NodePath from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   type CanUseTool,
   query,
@@ -19,11 +22,15 @@ import {
   type SettingSource,
   type SDKUserMessage,
   type ModelUsage,
+  type SpawnOptions,
+  type SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { parseCliArgs } from "@kata-sh/code-shared/cliArgs";
 import {
   ApprovalRequestId,
+  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
@@ -88,6 +95,11 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import {
+  registerProviderSecret,
+  redactProviderEvent,
+  redactProviderSecrets,
+} from "../providerSecretRedaction.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString);
@@ -179,6 +191,7 @@ interface ClaudeTaskState {
 
 interface ClaudeSessionContext {
   session: ProviderSession;
+  readonly sessionGeneration: string;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
@@ -202,6 +215,7 @@ interface ClaudeSessionContext {
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
+  removeTaskSecret: () => void;
 }
 
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
@@ -220,6 +234,8 @@ export interface ClaudeAdapterLiveOptions {
     readonly prompt: AsyncIterable<SDKUserMessage>;
     readonly options: ClaudeQueryOptions;
   }) => ClaudeQueryRuntime;
+  /** Override Claude Code's child process launch while retaining the SDK transport. */
+  readonly spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
@@ -259,8 +275,8 @@ function toProcessError(
   return new ProviderAdapterProcessError({
     provider: PROVIDER,
     threadId,
-    detail: toMessage(cause, fallback),
-    cause,
+    detail: String(redactProviderSecrets(toMessage(cause, fallback))),
+    cause: redactProviderSecrets(cause),
   });
 }
 
@@ -1039,8 +1055,10 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
           new ProviderAdapterRequestError({
             provider: PROVIDER,
             method: "turn/start",
-            detail: toMessage(cause, "Failed to read attachment file."),
-            cause,
+            detail: String(
+              redactProviderSecrets(toMessage(cause, "Failed to read attachment file.")),
+            ),
+            cause: redactProviderSecrets(cause),
           }),
       ),
     );
@@ -1405,6 +1423,27 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
     Effect.provideService(Path.Path, path),
   );
+  const mergeSessionEnvironment = (input: {
+    readonly environment?: {
+      readonly variables: Readonly<Record<string, string>>;
+      readonly executablePath: string | null;
+      readonly pathPrepend: ReadonlyArray<string>;
+    };
+  }): NodeJS.ProcessEnv => {
+    const base = { ...claudeEnvironment, ...input.environment?.variables };
+    const pathEntries = [
+      ...(input.environment?.pathPrepend ?? []),
+      ...(base.PATH ? [base.PATH] : []),
+    ].filter((entry) => entry.length > 0);
+    return {
+      ...base,
+      ...(pathEntries.length > 0 ? { PATH: pathEntries.join(NodePath.delimiter) } : {}),
+      ...(input.environment?.executablePath
+        ? { [TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]: input.environment.executablePath }
+        : {}),
+    };
+  };
+
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
@@ -1442,8 +1481,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const nextEventId = Effect.map(randomUUIDv4, (id) => EventId.make(id));
   const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
 
-  const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
+  const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> => {
+    const safeEvent = redactProviderEvent({
+      ...event,
+      sessionGeneration: event.sessionGeneration ?? sessions.get(event.threadId)?.sessionGeneration,
+    });
+    return Queue.offer(runtimeEventQueue, safeEvent).pipe(Effect.asVoid);
+  };
 
   const logNativeSdkMessage = Effect.fn("logNativeSdkMessage")(function* (
     context: ClaudeSessionContext,
@@ -1477,7 +1521,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               }
             : {}),
           ...(itemId ? { itemId: ProviderItemId.make(itemId) } : {}),
-          payload: message,
+          payload: redactProviderSecrets(message),
         },
       },
       context.session.threadId,
@@ -1744,9 +1788,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     message: string,
     cause?: unknown,
   ) {
-    if (cause !== undefined) {
-      void cause;
-    }
+    const safeCause = cause === undefined ? undefined : redactProviderSecrets(cause);
     const turnState = context.turnState;
     const stamp = yield* makeEventStamp();
     yield* offerRuntimeEvent({
@@ -1759,7 +1801,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       payload: {
         message,
         class: "provider_error",
-        ...(cause !== undefined ? { detail: cause } : {}),
+        ...(safeCause !== undefined ? { detail: safeCause } : {}),
       },
       providerRefs: nativeProviderRefs(context),
     });
@@ -2948,7 +2990,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     Stream.fromAsyncIterable(context.query, (cause) =>
       toProcessError(cause, "Claude runtime stream failed.", context.session.threadId),
     ).pipe(
-      Stream.takeWhile(() => !context.stopped),
       Stream.runForEach((message) =>
         handleSdkMessage(context, message).pipe(
           Effect.mapError((cause) =>
@@ -2993,6 +3034,43 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
   });
 
+  const awaitStreamDrain = (fiber: Fiber.Fiber<void, Error> | undefined) =>
+    Effect.callback<void>((resume, signal) => {
+      const current = Fiber.getCurrent();
+      if (fiber === undefined || (current !== undefined && current.id === fiber.id)) {
+        resume(Effect.void);
+        return;
+      }
+      if (fiber.pollUnsafe() !== undefined) {
+        resume(Effect.void);
+        return;
+      }
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        resume(Effect.void);
+      };
+      // Wall-clock bound so TestClock sessions cannot stall a hung SDK iterator.
+      // @effect-diagnostics-next-line globalTimersInEffect:off
+      const timer = setTimeout(() => {
+        fiber.interruptUnsafe();
+        settle();
+      }, 2_000);
+      const unsubscribe = fiber.addObserver(() => {
+        clearTimeout(timer);
+        settle();
+      });
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          unsubscribe();
+        },
+        { once: true },
+      );
+    });
+
   const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (
     context: ClaudeSessionContext,
     options?: { readonly emitExitEvent?: boolean },
@@ -3029,24 +3107,27 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     const streamFiber = context.streamFiber;
     context.streamFiber = undefined;
-    if (streamFiber && streamFiber.pollUnsafe() === undefined) {
-      yield* Fiber.interrupt(streamFiber);
-    }
 
+    // Close the query before interrupting the stream so late SDK messages
+    // still drain through native/event redaction while the secret is registered.
     yield* Effect.try({
       try: () => context.query.close(),
       catch: (cause) =>
         new ProviderAdapterProcessError({
           provider: PROVIDER,
           threadId: context.session.threadId,
-          detail: toMessage(cause, "Failed to close Claude runtime query."),
-          cause,
+          detail: String(
+            redactProviderSecrets(toMessage(cause, "Failed to close Claude runtime query.")),
+          ),
+          cause: redactProviderSecrets(cause),
         }),
     }).pipe(
       Effect.catch((cause) =>
         emitRuntimeError(context, "Failed to close Claude runtime query.", cause),
       ),
     );
+
+    yield* awaitStreamDrain(streamFiber);
 
     const updatedAt = yield* nowIso;
     context.session = {
@@ -3072,6 +3153,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
+    context.removeTaskSecret();
     sessions.delete(context.session.threadId);
   });
 
@@ -3098,8 +3180,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     return Effect.succeed(context);
   };
 
-  const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
-    function* (input) {
+  const startSession: ClaudeAdapterShape["startSession"] = (input) => {
+    const taskSecret = { remove: () => {}, attached: false };
+    return Effect.gen(function* () {
       if (input.provider !== undefined && input.provider !== PROVIDER) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
@@ -3488,6 +3571,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
       const taskInstructions = input.developerInstructions?.trim();
       const taskStage = input.taskStage === true;
+      const effectiveClaudeEnvironment = mergeSessionEnvironment(
+        input.environment !== undefined ? { environment: input.environment } : {},
+      );
+      const taskToken = input.environment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+      const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
+      taskSecret.remove = removeTaskSecret;
       const permissionMode = taskStage ? undefined : runtimeModeToPermission[input.runtimeMode];
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
@@ -3527,7 +3616,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: claudeEnvironment,
+        env: effectiveClaudeEnvironment,
+        ...(options?.spawnClaudeCodeProcess
+          ? { spawnClaudeCodeProcess: options.spawnClaudeCodeProcess }
+          : {}),
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession
@@ -3581,8 +3673,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           new ProviderAdapterProcessError({
             provider: PROVIDER,
             threadId,
-            detail: toMessage(cause, "Failed to start Claude runtime session."),
-            cause,
+            detail: String(
+              redactProviderSecrets(toMessage(cause, "Failed to start Claude runtime session.")),
+            ),
+            cause: redactProviderSecrets(cause),
           }),
       });
 
@@ -3607,6 +3701,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const context: ClaudeSessionContext = {
         session,
+        sessionGeneration: randomUUID(),
         promptQueue,
         query: queryRuntime,
         streamFiber: undefined,
@@ -3627,9 +3722,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
         stopped: false,
+        removeTaskSecret,
       };
       yield* Ref.set(contextRef, context);
       sessions.set(threadId, context);
+      taskSecret.attached = true;
 
       const sessionStartedStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
@@ -3702,8 +3799,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return {
         ...session,
       };
-    },
-  );
+    }).pipe(
+      Effect.withSpan("startSession"),
+      Effect.onExit((exit) =>
+        !taskSecret.attached && Exit.isFailure(exit) ? Effect.sync(taskSecret.remove) : Effect.void,
+      ),
+    );
+  };
 
   const sendTurn: ClaudeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const context = yield* requireSession(input.threadId);

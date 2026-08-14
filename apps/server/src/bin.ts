@@ -13,6 +13,11 @@ import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
+import {
+  failTaskCliInvalidRequest,
+  inspectTaskCliInvocationArgs,
+  taskCommand,
+} from "./cli/task.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -49,16 +54,26 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       serveCommand,
       authCommand,
       projectCommand,
+      taskCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
     ]),
   );
 
 export const cli = makeCli();
 
+export const runKatacodeCli = (
+  command = cli,
+  version = packageJson.version,
+  args: ReadonlyArray<string> = process.argv.slice(2),
+) =>
+  Effect.gen(function* () {
+    const rejection = inspectTaskCliInvocationArgs(args);
+    if (rejection !== undefined) {
+      return yield* failTaskCliInvalidRequest(rejection);
+    }
+    yield* Command.runWith(command, { version })(args);
+  });
+
 if (import.meta.main) {
-  Command.run(cli, { version: packageJson.version }).pipe(
-    Effect.scoped,
-    Effect.provide(CliRuntimeLayer),
-    NodeRuntime.runMain,
-  );
+  runKatacodeCli().pipe(Effect.scoped, Effect.provide(CliRuntimeLayer), NodeRuntime.runMain);
 }

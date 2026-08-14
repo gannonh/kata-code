@@ -7,14 +7,17 @@ import type * as EffectAcpProtocol from "effect-acp/protocol";
 
 import type { EventNdjsonLogger } from "../Layers/EventNdjsonLogger.ts";
 import type { AcpSessionRequestLogEvent, AcpSessionRuntimeOptions } from "./AcpSessionRuntime.ts";
+import { redactProviderSecrets } from "../providerSecretRedaction.ts";
 
 function formatRequestLogPayload(event: AcpSessionRequestLogEvent) {
   return {
     method: event.method,
     status: event.status,
-    request: event.payload,
-    ...(event.result !== undefined ? { result: event.result } : {}),
-    ...(event.cause !== undefined ? { cause: Cause.pretty(event.cause) } : {}),
+    request: redactProviderSecrets(event.payload),
+    ...(event.result !== undefined ? { result: redactProviderSecrets(event.result) } : {}),
+    ...(event.cause !== undefined
+      ? { cause: redactProviderSecrets(Cause.pretty(event.cause)) }
+      : {}),
   };
 }
 
@@ -41,7 +44,7 @@ export const makeAcpNativeLoggerFactory = Effect.fn("makeAcpNativeLoggerFactory"
               provider: input.provider,
               createdAt: observedAt,
               threadId: input.threadId,
-              payload: logInput.payload,
+              payload: redactProviderSecrets(logInput.payload),
             },
           },
           input.threadId,
@@ -49,7 +52,7 @@ export const makeAcpNativeLoggerFactory = Effect.fn("makeAcpNativeLoggerFactory"
       }).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("Failed to write native ACP event log.", {
-            cause,
+            cause: redactProviderSecrets(String(cause)),
             provider: input.provider,
             threadId: input.threadId,
           }),

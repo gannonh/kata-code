@@ -13,9 +13,12 @@
  * @module provider/Layers/PiAdapter
  */
 import { randomUUID } from "node:crypto";
+// @effect-diagnostics nodeBuiltinImport:off - provider launch env requires the platform path delimiter.
+import * as NodePath from "node:path";
 import {
   type AgentSessionEvent,
   createAgentSession,
+  createBashToolDefinition,
   type CreateAgentSessionOptions,
   DefaultResourceLoader,
   SessionManager,
@@ -29,6 +32,8 @@ import {
   type PiSettings,
   ProviderDriverKind,
   ProviderInstanceId,
+  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   ProviderItemId,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -45,6 +50,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as PubSub from "effect/PubSub";
@@ -60,6 +66,7 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
+import { registerProviderSecret, redactProviderEvent } from "../providerSecretRedaction.ts";
 import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import { classifyPiTurnFailure } from "../piTurnFailure.ts";
 import {
@@ -121,11 +128,12 @@ const PI_TUI_ONLY_CAPABILITY_LABELS: Readonly<Record<string, string>> = {
 /** Session-create options with structural model/runtime shapes for tests. */
 type PiCreateAgentSessionOptions = Omit<
   CreateAgentSessionOptions,
-  "model" | "modelRuntime" | "thinkingLevel"
+  "model" | "modelRuntime" | "thinkingLevel" | "customTools"
 > & {
   readonly model?: PiModelShape;
   readonly modelRuntime?: PiModelRuntimeShape;
   readonly thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
+  readonly customTools?: ReadonlyArray<unknown>;
 };
 
 export interface PiAdapterLiveOptions {
@@ -160,6 +168,7 @@ interface PiTurnOutputState {
 
 interface PiSessionContext {
   readonly threadId: ThreadId;
+  readonly sessionGeneration: string;
   session: ProviderSession;
   readonly sdk: PiSdkSession;
   readonly resourceLoader: PiResourceLoader;
@@ -180,6 +189,7 @@ interface PiSessionContext {
   workingMessage: string | undefined;
   /** Per-turn assistant output observed from SDK deltas or terminal messages. */
   turnOutput: Map<string, PiTurnOutputState>;
+  removeTaskSecret: () => void;
 }
 
 /**
@@ -253,6 +263,9 @@ export function makePiAdapter(
         ...stampSync(),
         provider: PROVIDER,
         providerInstanceId: boundInstanceId,
+        ...(sessions.get(threadId)?.sessionGeneration
+          ? { sessionGeneration: sessions.get(threadId)!.sessionGeneration }
+          : {}),
         threadId,
       };
       // exactOptionalPropertyTypes: optional branded fields must be absent,
@@ -263,16 +276,24 @@ export function makePiAdapter(
       return event as E;
     };
 
-    const publish = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Effect.sync(() => options?.onEvent?.(event)).pipe(
-        Effect.andThen(PubSub.publish(runtimeEventPubSub, event)),
+    const publish = (event: ProviderRuntimeEvent): Effect.Effect<void> => {
+      const safeEvent = redactProviderEvent(event);
+      return Effect.sync(() => options?.onEvent?.(safeEvent)).pipe(
+        Effect.andThen(PubSub.publish(runtimeEventPubSub, safeEvent)),
         Effect.asVoid,
       );
+    };
 
-    /** Publish from the synchronous SDK listener. `publish` is R=never, so the
-     *  default runtime is sufficient. */
+    /** Publish from the synchronous SDK listener. Redact before forking so a
+     *  teardown that unregisters the secret cannot race the listener Effect. */
     const offerFromListener = (event: ProviderRuntimeEvent) => {
-      Effect.runFork(publish(event));
+      const safeEvent = redactProviderEvent(event);
+      Effect.runFork(
+        Effect.sync(() => options?.onEvent?.(safeEvent)).pipe(
+          Effect.andThen(PubSub.publish(runtimeEventPubSub, safeEvent)),
+          Effect.asVoid,
+        ),
+      );
     };
 
     /** Build a canonical `runtime.warning` event. Callers emit via `publish`
@@ -675,10 +696,12 @@ export function makePiAdapter(
         ctx.statusTexts.clear();
         ctx.workingMessage = undefined;
         sessions.delete(ctx.threadId);
+        ctx.removeTaskSecret();
       });
 
-    const startSession = (input: ProviderSessionStartInput) =>
-      Effect.gen(function* () {
+    const startSession = (input: ProviderSessionStartInput) => {
+      const taskSecret = { remove: () => {}, attached: false };
+      return Effect.gen(function* () {
         // A thread can re-enter startSession when the user switches models
         // mid-conversation. The Pi SDK session is bound to a single model at
         // creation, so restart it rather than rejecting the request.
@@ -688,6 +711,27 @@ export function makePiAdapter(
         }
 
         const cwd = input.cwd?.trim() || process.cwd();
+        const sessionEnvironment = input.environment;
+        const taskToken = sessionEnvironment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+        const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
+        taskSecret.remove = removeTaskSecret;
+        const effectiveEnvironment = {
+          ...(options?.environment ?? process.env),
+          ...sessionEnvironment?.variables,
+          ...(sessionEnvironment?.pathPrepend && sessionEnvironment.pathPrepend.length > 0
+            ? {
+                PATH: [
+                  ...sessionEnvironment.pathPrepend,
+                  ...(sessionEnvironment.variables.PATH ? [sessionEnvironment.variables.PATH] : []),
+                  ...(options?.environment?.PATH ? [options.environment.PATH] : []),
+                  ...(process.env.PATH ? [process.env.PATH] : []),
+                ].join(NodePath.delimiter),
+              }
+            : {}),
+          ...(sessionEnvironment?.executablePath
+            ? { [TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]: sessionEnvironment.executablePath }
+            : {}),
+        };
         // Docker provision starts `katacode serve` before credential seed
         // copyInto completes. Create a fresh runtime for every session so it
         // reads credentials after the seed is available.
@@ -810,6 +854,21 @@ export function makePiAdapter(
               resourceLoader,
               sessionManager,
               tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+              // Pi 0.82 exposes the proven spawnHook seam through the bash
+              // tool definition. Replacing the built-in definition by name
+              // keeps the public session options generic while ensuring every
+              // provider shell receives the resolved environment.
+              customTools: [
+                createBashToolDefinition(cwd, {
+                  spawnHook: (context) => ({
+                    ...context,
+                    env: {
+                      ...context.env,
+                      ...effectiveEnvironment,
+                    },
+                  }),
+                }),
+              ],
             });
             return { ...createdSession, resourceLoader, model };
           },
@@ -848,6 +907,7 @@ export function makePiAdapter(
 
         const ctx: PiSessionContext = {
           threadId: input.threadId,
+          sessionGeneration: randomUUID(),
           session: providerSession,
           sdk: sdkSession,
           resourceLoader: created.resourceLoader,
@@ -862,6 +922,7 @@ export function makePiAdapter(
           statusTexts: new Map(),
           workingMessage: undefined,
           turnOutput: new Map(),
+          removeTaskSecret,
         };
         ctx.unsubscribe = created.session.subscribe((event) => {
           for (const mapped of mapSdkEvent(event, ctx)) {
@@ -869,6 +930,7 @@ export function makePiAdapter(
           }
         });
         sessions.set(input.threadId, ctx);
+        taskSecret.attached = true;
 
         // Seed the tracked turn list with the resumed session's current leaf
         // so rollback math is anchored to real history. Without this, a
@@ -965,7 +1027,14 @@ export function makePiAdapter(
         }
 
         return providerSession;
-      });
+      }).pipe(
+        Effect.onExit((exit) =>
+          !taskSecret.attached && Exit.isFailure(exit)
+            ? Effect.sync(taskSecret.remove)
+            : Effect.void,
+        ),
+      );
+    };
 
     /**
      * Materialize image attachments into base64 `ImageContent` blocks for the
@@ -1156,10 +1225,12 @@ export function makePiAdapter(
       Effect.gen(function* () {
         const ctx = sessions.get(threadId);
         if (!ctx) return;
+        const sessionGeneration = ctx.sessionGeneration;
         yield* teardownSession(ctx);
         yield* publish(
           makeEvent(threadId, {
             type: "session.exited",
+            sessionGeneration,
             payload: { reason: "Pi session stopped.", exitKind: "graceful" },
           }),
         );

@@ -1,4 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics missingEffectContext:off
+// @effect-diagnostics missingLayerContext:off
+// @effect-diagnostics anyUnknownInErrorContext:off
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +19,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionStartInput,
+  TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
+  TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   ThreadId,
   TurnId,
 } from "@kata-sh/code-contracts";
@@ -63,6 +68,15 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
+import { ServerEnvironment } from "../../environment/Services/ServerEnvironment.ts";
+import type { ServerEnvironmentShape } from "../../environment/Services/ServerEnvironment.ts";
+import {
+  TaskInvocationService,
+  TaskInvocationServiceLive,
+} from "../../taskCli/TaskInvocationService.ts";
+import { makeTaskCliProcessFixture } from "../../taskCli/TaskCliProcessFixture.ts";
+import { TaskWorkspaceService } from "../../taskWorkspace/TaskWorkspaceService.ts";
+import * as HttpServer from "effect/unstable/http/HttpServer";
 
 const defaultServerSettingsLayer = ServerSettingsService.layerTest();
 
@@ -101,6 +115,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
         ...(input.providerInstanceId !== undefined
           ? { providerInstanceId: input.providerInstanceId }
           : {}),
+        sessionGeneration: `fake-generation-${String(input.threadId)}-${sessions.size + 1}`,
         status: "ready",
         runtimeMode: input.runtimeMode,
         threadId: input.threadId,
@@ -1974,3 +1989,161 @@ validation.layer("ProviderServiceLive validation", (it) => {
     }),
   );
 });
+
+it.effect("reinjects Task CLI environment and a fresh token after ProviderService resume", () =>
+  Effect.gen(function* () {
+    const fixture = yield* makeTaskCliProcessFixture();
+    const environmentId = fixture.task.environmentId;
+    if (environmentId === null) {
+      throw new Error("Task CLI fixture is missing an environment id.");
+    }
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kata-provider-task-cli-resume-"));
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => fs.rmSync(tempDir, { recursive: true, force: true })),
+    );
+    const dbPath = path.join(tempDir, "orchestration.sqlite");
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+    const httpServerLayer = Layer.succeed(
+      HttpServer.HttpServer,
+      HttpServer.make({
+        serve: () => Effect.void,
+        address: { _tag: "TcpAddress", hostname: "127.0.0.1", port: 13773 },
+      }),
+    );
+    const environmentLayer = Layer.succeed(ServerEnvironment, {
+      getEnvironmentId: Effect.succeed(environmentId),
+      getDescriptor: Effect.succeed({
+        environmentId,
+        label: "task-cli-resume",
+        platform: { os: "darwin", arch: "arm64" },
+        serverVersion: "0.0.0",
+        capabilities: { repositoryIdentity: true },
+      }),
+    } satisfies ServerEnvironmentShape);
+    const makeResumeLayer = (adapter: ReturnType<typeof makeFakeCodexAdapter>) => {
+      const registryBase = makeAdapterRegistryMock({
+        [CODEX_DRIVER]: adapter.adapter,
+      });
+      const registry: ProviderAdapterRegistryShape = {
+        ...registryBase,
+        getByInstance: (instanceId) =>
+          instanceId === fixture.providerInstanceId
+            ? Effect.succeed(adapter.adapter)
+            : registryBase.getByInstance(instanceId),
+        getInstanceInfo: (instanceId) =>
+          instanceId === fixture.providerInstanceId
+            ? Effect.succeed({
+                instanceId,
+                driverKind: CODEX_DRIVER,
+                displayName: undefined,
+                enabled: true,
+                continuationIdentity: {
+                  driverKind: CODEX_DRIVER,
+                  continuationKey: `${CODEX_DRIVER}:instance:${instanceId}`,
+                },
+              })
+            : registryBase.getInstanceInfo(instanceId),
+      };
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(ProviderSessionRuntimeRepositoryLive.pipe(Layer.provide(persistenceLayer))),
+      );
+      const invocationLayer = TaskInvocationServiceLive.pipe(
+        Layer.provide(Layer.succeed(TaskWorkspaceService, fixture.taskService)),
+        Layer.provide(directoryLayer),
+        Layer.provideMerge(persistenceLayer),
+      );
+      return {
+        adapter,
+        invocationLayer,
+        providerLayer: makeProviderServiceLive().pipe(
+          Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+          Layer.provide(directoryLayer),
+          Layer.provideMerge(invocationLayer),
+          Layer.provideMerge(environmentLayer),
+          Layer.provideMerge(httpServerLayer),
+          Layer.provide(defaultServerSettingsLayer),
+          Layer.provide(AnalyticsService.layerTest),
+          Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+        ),
+      };
+    };
+
+    const first = makeResumeLayer(makeFakeCodexAdapter());
+    const firstScope = yield* Scope.make();
+    const firstContext = yield* Layer.buildWithScope(first.providerLayer, firstScope);
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      return yield* provider.startSession(fixture.threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: fixture.providerInstanceId,
+        threadId: fixture.threadId,
+        cwd: "/tmp/project-task-cli-resume",
+        runtimeMode: "full-access",
+      });
+    }).pipe(Effect.provide(firstContext));
+
+    const firstInput = first.adapter.startSession.mock.calls[0]?.[0] as {
+      environment?: {
+        variables: Record<string, string>;
+        executablePath: string | null;
+        pathPrepend: ReadonlyArray<string>;
+      };
+      resumeCursor?: unknown;
+    };
+    const firstToken = firstInput.environment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+    assert.ok(firstToken);
+    assert.equal(
+      firstInput.environment?.variables[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY],
+      "http://127.0.0.1:13773",
+    );
+    assert.ok((firstInput.environment?.pathPrepend.length ?? 0) > 0);
+    assert.ok((firstInput.environment?.executablePath ?? "").length > 0);
+    assert.equal(firstInput.resumeCursor, undefined);
+    yield* Scope.close(firstScope, Exit.void);
+
+    const second = makeResumeLayer(makeFakeCodexAdapter());
+    second.adapter.startSession.mockClear();
+    const secondScope = yield* Scope.make();
+    yield* Effect.addFinalizer(() => Scope.close(secondScope, Exit.void));
+    const secondContext = yield* Layer.buildWithScope(second.providerLayer, secondScope);
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      yield* provider.startSession(fixture.threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: fixture.providerInstanceId,
+        threadId: fixture.threadId,
+        cwd: "/tmp/project-task-cli-resume",
+        runtimeMode: "full-access",
+      });
+    }).pipe(Effect.provide(secondContext));
+
+    assert.equal(second.adapter.startSession.mock.calls.length, 1);
+    const secondInput = second.adapter.startSession.mock.calls[0]?.[0] as typeof firstInput;
+    const secondToken =
+      secondInput.environment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+    assert.ok(secondToken);
+    assert.notEqual(secondToken, firstToken);
+    assert.equal(
+      secondInput.environment?.variables[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY],
+      "http://127.0.0.1:13773",
+    );
+    assert.deepEqual(secondInput.resumeCursor, {
+      opaque: `resume-${String(fixture.threadId)}`,
+    });
+    assert.deepEqual(secondInput.environment?.pathPrepend, firstInput.environment?.pathPrepend);
+    assert.equal(secondInput.environment?.executablePath, firstInput.environment?.executablePath);
+
+    const oldFailure = yield* Effect.gen(function* () {
+      const invocations = yield* TaskInvocationService;
+      return yield* invocations.resolve(firstToken).pipe(Effect.flip);
+    }).pipe(Effect.provide(secondContext));
+    assert.equal(oldFailure._tag, "TaskInvocationError");
+    assert.equal(oldFailure.code, "stale_lease");
+
+    const fresh = yield* Effect.gen(function* () {
+      const invocations = yield* TaskInvocationService;
+      return yield* invocations.resolve(secondToken);
+    }).pipe(Effect.provide(secondContext));
+    assert.equal(fresh.scope.threadId, fixture.threadId);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped as never),
+);

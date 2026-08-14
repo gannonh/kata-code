@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 
 import {
   TASK_BRIEF_MAX_CHARS,
+  TASK_EXECUTION_ARCHITECTURE_VERSION,
   TaskWorkspaceBootstrapOutboxPayload,
   TaskWorkspaceBootstrapState,
   TaskWorkspaceError,
@@ -37,6 +38,7 @@ import {
   type TaskImplementationCheckRunAck,
   type TaskImplementationAmendmentAck,
   type TaskImplementationCompleteAck,
+  type TaskStageContextResult,
   type TaskWorkspaceOperationReceipt,
   type TaskWorkspaceOutboxEntry,
   TaskWorkspaceEvent as TaskWorkspaceEventSchema,
@@ -793,6 +795,7 @@ function initialTask(
         : ARTIFACT_CONTRACT_VERSION,
       workflowDefinition: definition.version,
       prompt: definition.promptBundleRef,
+      ...(isFirstSliceCreate ? { executionArchitecture: TASK_EXECUTION_ARCHITECTURE_VERSION } : {}),
     },
     intake: {
       brief,
@@ -1684,6 +1687,20 @@ export interface TaskWorkspaceServiceShape {
   readonly getActiveTaskProviderContext: (
     threadId: ThreadId,
   ) => Effect.Effect<ActiveTaskProviderContext | undefined>;
+  readonly resolveTaskCliInvocation: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: string;
+    readonly providerTurnId: string;
+  }) => Effect.Effect<
+    {
+      readonly taskId: TaskWorkspaceId;
+      readonly stage: TaskWorkspaceStage;
+      readonly occurrence: number;
+      readonly context: TaskStageContextResult;
+    },
+    TaskWorkspaceError
+  >;
   readonly isTaskThread: (threadId: ThreadId) => Effect.Effect<boolean>;
 }
 
@@ -1731,6 +1748,29 @@ export const activeTaskProviderContextForThread = (
   activeTaskWorkspaceService
     ? activeTaskWorkspaceService.getActiveTaskProviderContext(threadId)
     : Effect.succeed(undefined);
+
+export const resolveActiveTaskCliInvocation = (input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly providerInstanceId: string;
+  readonly providerTurnId: string;
+}): Effect.Effect<
+  {
+    readonly taskId: TaskWorkspaceId;
+    readonly stage: TaskWorkspaceStage;
+    readonly occurrence: number;
+    readonly context: TaskStageContextResult;
+  },
+  TaskWorkspaceError
+> =>
+  activeTaskWorkspaceService
+    ? activeTaskWorkspaceService.resolveTaskCliInvocation(input)
+    : Effect.fail(
+        new TaskWorkspaceError({
+          message: "The Task workflow service is unavailable.",
+          commandType: "task.cli.context",
+        }),
+      );
 
 export const validateActiveTaskTurn = (input: {
   readonly threadId: ThreadId;
@@ -1980,6 +2020,130 @@ export const make = Effect.gen(function* () {
         }
       }
       return undefined;
+    });
+
+  const resolveTaskCliInvocation: TaskWorkspaceServiceShape["resolveTaskCliInvocation"] = (input) =>
+    Effect.gen(function* () {
+      const task = [...taskById.values()].find(
+        (candidate) =>
+          candidate.environmentId === input.environmentId &&
+          (candidate.bootstrap?.reservedThreadId === input.threadId ||
+            candidate.occurrences.some((occurrence) => occurrence.threadId === input.threadId)),
+      );
+      if (!task) {
+        return yield* new TaskWorkspaceError({
+          message: "No Task is registered for this provider thread.",
+          commandType: "task.cli.context",
+        });
+      }
+      const run = currentRun(task);
+      if (run.preset !== "guided") {
+        return yield* new TaskWorkspaceError({
+          message: "Task CLI context requires the Guided workflow preset.",
+          commandType: "task.cli.context",
+          taskId: task.id,
+        });
+      }
+      if (run.currentStage !== "build") yield* validatePlanningRoot(task.id);
+      const occurrence = task.occurrences
+        .filter((candidate) => candidate.stage === run.currentStage)
+        .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+      const isBootstrapOccurrence =
+        occurrence?.status === "starting" &&
+        task.bootstrap?.status === "running" &&
+        task.bootstrap?.reservedThreadId === input.threadId;
+      if (!occurrence || (!isBootstrapOccurrence && occurrence.threadId !== input.threadId)) {
+        return yield* new TaskWorkspaceError({
+          message: "The provider thread is not the active Task occurrence.",
+          commandType: "task.cli.context",
+          taskId: task.id,
+        });
+      }
+      if (
+        !isBootstrapOccurrence &&
+        occurrence.status !== "running" &&
+        occurrence.status !== "finalizing"
+      ) {
+        return yield* new TaskWorkspaceError({
+          message: `The Task occurrence is not active (status '${occurrence.status}').`,
+          commandType: "task.cli.context",
+          taskId: task.id,
+        });
+      }
+      if (task.preferences.modelSelection?.instanceId !== input.providerInstanceId) {
+        return yield* new TaskWorkspaceError({
+          message: "The provider instance is not authorized for this Task.",
+          commandType: "task.cli.context",
+          taskId: task.id,
+        });
+      }
+      const session = occurrence.sessionId
+        ? task.sessions.find((candidate) => candidate.id === occurrence.sessionId)
+        : undefined;
+      if (
+        !isBootstrapOccurrence &&
+        (!session || session.status !== "active" || session.role !== "primary")
+      ) {
+        return yield* new TaskWorkspaceError({
+          message: "The Task primary session is not active.",
+          commandType: "task.cli.context",
+          taskId: task.id,
+        });
+      }
+      const contextKinds: ReadonlySet<TaskWorkspaceArtifactKind> = new Set(
+        run.currentStage === "questions"
+          ? []
+          : run.currentStage === "research"
+            ? ["questions"]
+            : run.currentStage === "design"
+              ? ["questions", "research"]
+              : run.currentStage === "plan"
+                ? ["questions", "research", "design"]
+                : [],
+      );
+      const manifest = occurrence.contextManifestId
+        ? task.contextManifests.find((candidate) => candidate.id === occurrence.contextManifestId)
+        : undefined;
+      if (occurrence.contextManifestId !== null && !manifest) {
+        return yield* new TaskWorkspaceError({
+          message: "The active Task context manifest is unavailable.",
+          commandType: "task.cli.context",
+          taskId: task.id,
+        });
+      }
+      const manifestRefs = new Map(
+        manifest?.artifactRefs.map((reference) => [reference.kind, reference.revision]) ?? [],
+      );
+      let remainingContextChars = (manifest?.budget ?? 12_000) * 4;
+      const artifacts = task.artifacts
+        .filter((artifact) => contextKinds.has(artifact.kind))
+        .flatMap((artifact) => {
+          const manifestRevision = manifestRefs.get(artifact.kind);
+          if (manifest !== undefined && manifestRevision === undefined) return [];
+          const revision =
+            (manifestRevision === undefined
+              ? latestArtifact(task, artifact.kind)
+              : artifact.revisions.find((candidate) => candidate.revision === manifestRevision)) ??
+            null;
+          if (!revision || remainingContextChars <= 0) return [];
+          const markdown = revision.markdown.slice(0, remainingContextChars);
+          remainingContextChars -= markdown.length;
+          return [
+            { kind: artifact.kind, revision: revision.revision, title: revision.title, markdown },
+          ];
+        });
+      return {
+        taskId: task.id,
+        stage: run.currentStage,
+        occurrence: occurrence.ordinal,
+        context: {
+          stage: run.currentStage,
+          occurrence: occurrence.ordinal,
+          brief: task.intake.brief,
+          feedback: occurrence.feedback ?? task.planGate?.feedback ?? null,
+          artifacts,
+        },
+      };
     });
 
   const getActiveTaskProviderContext: TaskWorkspaceServiceShape["getActiveTaskProviderContext"] = (
@@ -8006,6 +8170,7 @@ export const make = Effect.gen(function* () {
     authorizeTaskStage,
     getActiveTaskStage,
     getActiveTaskProviderContext,
+    resolveTaskCliInvocation,
     isTaskThread,
     getSnapshot: Effect.sync(() => ({
       sequence,

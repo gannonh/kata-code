@@ -1,5 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+// @effect-diagnostics preferSchemaOverJson:off
+// @effect-diagnostics missingEffectContext:off
+// @effect-diagnostics missingLayerContext:off
+// @effect-diagnostics anyUnknownInErrorContext:off
+// @effect-diagnostics globalDate:off
+// @effect-diagnostics globalTimers:off
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,6 +16,8 @@ import type {
   PermissionResult,
   SDKMessage,
   SDKUserMessage,
+  SpawnOptions,
+  SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
@@ -38,6 +46,39 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  makeTaskCliProcessFixture,
+  TASK_CLI_BUNDLE_PATH,
+} from "../../taskCli/TaskCliProcessFixture.ts";
+import { REDACTED } from "../providerSecretRedaction.ts";
+
+async function waitForExistingFile(filePath: string, timeoutMs = 20_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      readFileSync(filePath);
+      return;
+    } catch {
+      if (Date.now() >= deadline) {
+        throw new Error("Claude child did not write a Task CLI result file.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
+function spawnClaudeTestProcess(options: SpawnOptions): SpawnedProcess {
+  const { spawn } = require("node:child_process") as typeof import("node:child_process");
+  return spawn(
+    process.execPath,
+    [
+      "-e",
+      `const {spawn}=require("node:child_process"),fs=require("node:fs"); const child=spawn(process.execPath,[process.env.KATACODE_TASK_CLI_BUNDLE,"task","context"],{env:process.env}); let out="",err=""; child.stdout.on("data",b=>out+=b); child.stderr.on("data",b=>err+=b); child.on("close",code=>{fs.writeFileSync(process.env.KATACODE_CLAUDE_CHILD_RESULT,JSON.stringify({code,stdout:out,stderr:err,endpoint:process.env.KATACODE_TASK_CLI_ENDPOINT,tokenPresent:Boolean(process.env.KATACODE_TASK_INVOCATION_TOKEN),tokenLength:process.env.KATACODE_TASK_INVOCATION_TOKEN?.length,path:process.env.PATH,executable:process.env.KATACODE_TASK_CLI_EXECUTABLE})); process.stdout.write(JSON.stringify({type:"system",subtype:"init",apiKeySource:"none",claude_code_version:"test",cwd:process.cwd(),tools:[],mcp_servers:[],model:process.env.KATACODE_TASK_INVOCATION_TOKEN,permissionMode:"bypassPermissions",slash_commands:[],output_style:"default",skills:[],plugins:[],session_id:"child-session-1",uuid:"child-init"})+"\\n"); setTimeout(()=>process.exit(0),10)});`,
+    ],
+    { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"] },
+  ) as unknown as SpawnedProcess;
+}
+
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
@@ -110,8 +151,13 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.setMaxThinkingTokensCalls.push(maxThinkingTokens);
   };
 
+  public lateMessagesOnClose: SDKMessage[] = [];
+
   readonly close = (): void => {
     this.closeCalls += 1;
+    for (const message of this.lateMessagesOnClose) {
+      this.emit(message);
+    }
     this.finish();
   };
 
@@ -268,6 +314,170 @@ const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 
 describe("ClaudeAdapterLive", () => {
+  it.effect(
+    "runs a real Claude child process with task env, fresh restart env, and redacted boundaries",
+    () => {
+      const nativeEvents: unknown[] = [];
+      const observedSpawnOptions: SpawnOptions[] = [];
+      return Effect.gen(function* () {
+        const fixture = yield* makeTaskCliProcessFixture();
+        const childResultPath = path.join(fixture.root, "claude-child-result.json");
+        const cliBundlePath = TASK_CLI_BUNDLE_PATH;
+        const adapter = yield* makeClaudeAdapter(decodeClaudeSettings({}), {
+          spawnClaudeCodeProcess: (options) => {
+            observedSpawnOptions.push(options);
+            return spawnClaudeTestProcess(options);
+          },
+          nativeEventLogger: {
+            write: (entry: unknown) => Effect.sync(() => nativeEvents.push(entry)),
+            close: Effect.void,
+          } as never,
+        }).pipe(
+          Effect.provide(
+            ServerConfig.layerTest("/tmp/claude-real-child", "/tmp").pipe(
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        );
+        const secret = fixture.token;
+        const endpoint = fixture.endpoint;
+        const threadId = ThreadId.make("claude-real-child");
+        const runtimeEventsFiber = yield* Stream.takeUntil(
+          adapter.streamEvents,
+          (event) => event.type === "session.exited",
+        ).pipe(Stream.runCollect, Effect.forkChild);
+        const session = yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          environment: {
+            variables: {
+              KATACODE_TASK_CLI_ENDPOINT: fixture.endpoint,
+              KATACODE_TASK_INVOCATION_TOKEN: fixture.token,
+              KATACODE_TASK_CLI_BUNDLE: cliBundlePath,
+              KATACODE_CLAUDE_CHILD_RESULT: childResultPath,
+            },
+            executablePath: process.execPath,
+            pathPrepend: ["/tmp/bin"],
+          },
+        });
+        const active = yield* adapter.listSessions();
+        assert.equal(active[0]?.threadId, threadId);
+        assert.equal(session.resumeCursor !== undefined, true);
+        yield* Effect.promise(() => waitForExistingFile(childResultPath));
+        if (yield* adapter.hasSession(threadId)) {
+          yield* adapter.stopSession(threadId);
+        }
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+        yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          resumeCursor: session.resumeCursor,
+          environment: {
+            variables: {
+              KATACODE_TASK_CLI_ENDPOINT: fixture.endpoint,
+              KATACODE_TASK_INVOCATION_TOKEN: fixture.token,
+              KATACODE_TASK_CLI_BUNDLE: cliBundlePath,
+              KATACODE_CLAUDE_CHILD_RESULT: childResultPath,
+            },
+            executablePath: process.execPath,
+            pathPrepend: ["/tmp/bin"],
+          },
+        });
+        const childResult = JSON.parse(readFileSync(childResultPath, "utf8")) as {
+          code: number;
+          stdout: string;
+          stderr: string;
+          endpoint: string;
+          tokenPresent: boolean;
+          tokenLength?: number;
+          path?: string;
+          executable?: string;
+        };
+        assert.equal(childResult.code, 0);
+        assert.equal(childResult.stderr, "");
+        assert.equal(childResult.endpoint, endpoint);
+        assert.equal(childResult.tokenPresent, true);
+        assert.equal(childResult.tokenLength, secret.length);
+        assert.equal(childResult.stdout.split("\n").filter(Boolean).length, 1);
+        const childEnvelope = JSON.parse(childResult.stdout) as { protocol?: string; ok?: boolean };
+        assert.equal(childEnvelope.protocol, "task-cli@1");
+        assert.equal(childEnvelope.ok, true);
+        assert.ok(childResult.path?.startsWith(`/tmp/bin${path.delimiter}`));
+        assert.equal(childResult.executable, process.execPath);
+        assert.equal(observedSpawnOptions.length, 2);
+        for (const options of observedSpawnOptions) {
+          assert.equal(options.env.KATACODE_TASK_CLI_ENDPOINT, endpoint);
+          assert.equal(options.env.KATACODE_TASK_INVOCATION_TOKEN, secret);
+          assert.ok(options.env.PATH?.startsWith(`/tmp/bin${path.delimiter}`));
+          assert.equal(options.env.KATACODE_TASK_CLI_EXECUTABLE, process.execPath);
+        }
+        assert.isAbove(runtimeEvents.length, 0);
+        assert.equal(JSON.stringify(nativeEvents).includes(secret), false);
+        assert.equal(JSON.stringify(runtimeEvents).includes(secret), false);
+        assert.ok(
+          JSON.stringify(nativeEvents).includes(REDACTED) ||
+            JSON.stringify(runtimeEvents).includes(REDACTED),
+        );
+      }).pipe(Effect.scoped as never);
+    },
+  );
+
+  it.effect("redacts task tokens in stream and native events emitted during query drain", () => {
+    const secret = "claude-late-drain-token-9f3c2";
+    const nativeEvents: unknown[] = [];
+    const harness = makeHarness({
+      nativeEventLogger: {
+        write: (entry: unknown) => Effect.sync(() => nativeEvents.push(entry)),
+        close: Effect.void,
+      } as never,
+    });
+    harness.query.lateMessagesOnClose = [
+      {
+        type: "auth_status",
+        isAuthenticating: false,
+        output: `token=${secret}`,
+        session_id: "late-session",
+        uuid: "late-auth-1",
+      } as unknown as SDKMessage,
+    ];
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "session.exited",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            KATACODE_TASK_INVOCATION_TOKEN: secret,
+          },
+          executablePath: process.execPath,
+          pathPrepend: [],
+        },
+      });
+      yield* adapter.stopSession(THREAD_ID);
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const serializedEvents = JSON.stringify(runtimeEvents);
+      const serializedNative = JSON.stringify(nativeEvents);
+      assert.equal(
+        runtimeEvents.some((event) => event.type === "auth.status"),
+        true,
+      );
+      assert.equal(serializedEvents.includes(secret), false);
+      assert.equal(serializedNative.includes(secret), false);
+      assert.equal(serializedEvents.includes(REDACTED), true);
+      assert.equal(serializedNative.includes(REDACTED), true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -424,6 +634,35 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.effort, "max");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("propagates generic Task CLI environment and prepends PATH for Claude", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        environment: {
+          variables: {
+            KATACODE_TASK_CLI_ENDPOINT: "http://127.0.0.1:1234",
+            KATACODE_TASK_INVOCATION_TOKEN: "opaque-token",
+          },
+          executablePath: "/tmp/bin/katacode",
+          pathPrepend: ["/tmp/bin"],
+        },
+      });
+      const environment = harness.getLastCreateQueryInput()?.options.env as NodeJS.ProcessEnv;
+      assert.equal(environment.KATACODE_TASK_CLI_ENDPOINT, "http://127.0.0.1:1234");
+      assert.equal(environment.KATACODE_TASK_INVOCATION_TOKEN, "opaque-token");
+      assert.equal(environment.KATACODE_TASK_CLI_EXECUTABLE, "/tmp/bin/katacode");
+      assert.ok(environment.PATH?.startsWith(`/tmp/bin${path.delimiter}`));
+      assert.equal(environment.KATACODE_TASK_INVOCATION_TOKEN, "opaque-token");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
