@@ -15,6 +15,7 @@ describe("trusted planning instructions", () => {
       expect(instructions).toContain(
         "katacode task complete --summary <text> --artifact-file <file|->",
       );
+      expect(instructions).toContain("Prefer `--artifact-file -` and stdin");
       expect(instructions).toBe(trustedStageInstructions(stage));
       expect(instructions).not.toContain("task_stage_");
       expect(instructions).not.toContain("task_implementation_");

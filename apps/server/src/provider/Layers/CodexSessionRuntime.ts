@@ -373,16 +373,23 @@ function runtimeModeToTurnSandboxPolicy(
     };
   }
 
+  if (taskExecutionProfile === "planning") {
+    // Planning artifacts are submitted through the Task CLI. Writes in the
+    // planning checkout change the pinned root fingerprint and block complete.
+    return {
+      type: "readOnly",
+      networkAccess: true,
+    };
+  }
+
   switch (input) {
     case "approval-required":
       return {
         type: "readOnly",
-        ...(taskExecutionProfile === "planning" ? { networkAccess: true } : {}),
       };
     case "auto-accept-edits":
       return {
         type: "workspaceWrite",
-        ...(taskExecutionProfile === "planning" ? { networkAccess: true } : {}),
       };
     case "full-access":
     default:

@@ -112,34 +112,32 @@ describe("buildTurnStartParams", () => {
     );
   });
 
-  effectIt.effect(
-    "allows planning Task CLI localhost access while retaining the selected filesystem sandbox",
-    () =>
-      Effect.gen(function* () {
-        const approvalRequired = yield* buildTurnStartParams({
-          threadId: "provider-thread-planning",
-          runtimeMode: "approval-required",
-          prompt: "Research the task",
-          taskExecutionProfile: "planning",
-        });
+  effectIt.effect("gives planning Task CLI localhost access a read-only filesystem sandbox", () =>
+    Effect.gen(function* () {
+      const approvalRequired = yield* buildTurnStartParams({
+        threadId: "provider-thread-planning",
+        runtimeMode: "approval-required",
+        prompt: "Research the task",
+        taskExecutionProfile: "planning",
+      });
 
-        assert.deepStrictEqual(approvalRequired.sandboxPolicy, {
-          networkAccess: true,
-          type: "readOnly",
-        });
+      assert.deepStrictEqual(approvalRequired.sandboxPolicy, {
+        networkAccess: true,
+        type: "readOnly",
+      });
 
-        const autoAccept = yield* buildTurnStartParams({
-          threadId: "provider-thread-planning-write",
-          runtimeMode: "auto-accept-edits",
-          prompt: "Research the task",
-          taskExecutionProfile: "planning",
-        });
+      const autoAccept = yield* buildTurnStartParams({
+        threadId: "provider-thread-planning-write",
+        runtimeMode: "auto-accept-edits",
+        prompt: "Research the task",
+        taskExecutionProfile: "planning",
+      });
 
-        assert.deepStrictEqual(autoAccept.sandboxPolicy, {
-          networkAccess: true,
-          type: "workspaceWrite",
-        });
-      }),
+      assert.deepStrictEqual(autoAccept.sandboxPolicy, {
+        networkAccess: true,
+        type: "readOnly",
+      });
+    }),
   );
 
   effectIt.effect(
