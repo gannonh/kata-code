@@ -2041,7 +2041,7 @@ export const make = Effect.gen(function* () {
     if (stage === "design") return ["questions", "research"];
     if (stage === "plan") {
       return task.artifacts.some((artifact) => artifact.kind === "plan")
-        ? ["questions", "research", "design", "plan"]
+        ? ["plan", "questions", "research", "design"]
         : ["questions", "research", "design"];
     }
     return [];
@@ -2123,9 +2123,7 @@ export const make = Effect.gen(function* () {
           taskId: task.id,
         });
       }
-      const contextKinds: ReadonlySet<TaskWorkspaceArtifactKind> = new Set(
-        planningContextArtifactKinds(run.currentStage, task),
-      );
+      const contextKinds = planningContextArtifactKinds(run.currentStage, task);
       const manifest = occurrence.contextManifestId
         ? task.contextManifests.find((candidate) => candidate.id === occurrence.contextManifestId)
         : undefined;
@@ -2140,23 +2138,23 @@ export const make = Effect.gen(function* () {
         manifest?.artifactRefs.map((reference) => [reference.kind, reference.revision]) ?? [],
       );
       let remainingContextChars = (manifest?.budget ?? 12_000) * 4;
-      const artifacts = task.artifacts
-        .filter((artifact) => contextKinds.has(artifact.kind))
-        .flatMap((artifact) => {
-          const manifestRevision = manifestRefs.get(artifact.kind);
-          if (manifest !== undefined && manifestRevision === undefined) return [];
-          const revision =
-            (manifestRevision === undefined
-              ? latestArtifact(task, artifact.kind)
-              : artifact.revisions.find((candidate) => candidate.revision === manifestRevision)) ??
-            null;
-          if (!revision || remainingContextChars <= 0) return [];
-          const markdown = revision.markdown.slice(0, remainingContextChars);
-          remainingContextChars -= markdown.length;
-          return [
-            { kind: artifact.kind, revision: revision.revision, title: revision.title, markdown },
-          ];
-        });
+      const artifacts = contextKinds.flatMap((kind) => {
+        const artifact = task.artifacts.find((candidate) => candidate.kind === kind);
+        if (!artifact) return [];
+        const manifestRevision = manifestRefs.get(kind);
+        if (manifest !== undefined && manifestRevision === undefined) return [];
+        const revision =
+          (manifestRevision === undefined
+            ? latestArtifact(task, kind)
+            : artifact.revisions.find((candidate) => candidate.revision === manifestRevision)) ??
+          null;
+        if (!revision || remainingContextChars <= 0) return [];
+        const markdown = revision.markdown.slice(0, remainingContextChars);
+        remainingContextChars -= markdown.length;
+        return [
+          { kind: artifact.kind, revision: revision.revision, title: revision.title, markdown },
+        ];
+      });
       return {
         taskId: task.id,
         stage: run.currentStage,

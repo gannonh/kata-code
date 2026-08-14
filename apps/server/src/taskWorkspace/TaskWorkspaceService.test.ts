@@ -6968,6 +6968,88 @@ describe("Task CLI planning completion", () => {
     }),
   );
 
+  it.effect("keeps the reviewed Plan in CLI context when prior artifacts fill the budget", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-plan-budget-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      let task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const bulky = (stage: string) => `# ${stage}\n\n${"x".repeat(20_000)}\n`;
+      for (const stage of ["questions", "research", "design"] as const) {
+        const occurrence = task.occurrences.find(
+          (candidate) => candidate.stage === stage && candidate.status === "running",
+        )!;
+        yield* runtime.runPromise(
+          completePlanningStage(service, task, `${stage} done`, bulky(stage), `turn-${stage}`),
+        );
+        task = yield* runtime.runPromise(
+          service.settleProposal({
+            taskId: task.id,
+            occurrence: occurrence.ordinal,
+            providerTurnId: `turn-${stage}`,
+            outcome: "completed",
+          }),
+        );
+        yield* runtime.runPromise(
+          service.processBootstrap(bootstrapEntry(task, baseDir, repoRoot)),
+        );
+        task = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      }
+      const planOccurrence = task.occurrences.find(
+        (candidate) => candidate.stage === "plan" && candidate.status === "running",
+      )!;
+      yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "First plan.",
+          validGuidedPlan("Must survive budget packing"),
+          "turn-plan",
+        ),
+      );
+      task = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: planOccurrence.ordinal,
+          providerTurnId: "turn-plan",
+          outcome: "completed",
+        }),
+      );
+      const changed = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.stage.request-changes",
+            commandId: CommandId.make("cli-plan-budget-1"),
+            taskId: task.id,
+            createdAt: now(10),
+            expectedTaskRevision: task.taskRevision,
+            operationKey: "op-cli-plan-budget-1",
+            feedback: "Keep the Plan.",
+          }),
+        ),
+      );
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(changed.task, baseDir, repoRoot)),
+      );
+      const continued = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const context = yield* runtime.runPromise(
+        service.resolveTaskCliInvocation({
+          environmentId: EnvironmentId.make("environment-local"),
+          threadId: continued.bootstrap?.reservedThreadId!,
+          providerInstanceId: "instance-1",
+          providerTurnId: "turn-plan-2",
+        }),
+      );
+      expect(context.context.feedback).toBe("Keep the Plan.");
+      expect(
+        context.context.artifacts.find((artifact) => artifact.kind === "plan")?.markdown,
+      ).toContain("Must survive budget packing");
+    }),
+  );
+
   it.effect("recovers from an invalid complete and accepts a later valid complete", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-recover-");
