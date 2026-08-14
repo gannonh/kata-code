@@ -29,6 +29,7 @@ import {
   type ProviderSession,
   type ProviderSessionEnvironment,
 } from "@kata-sh/code-contracts";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -375,13 +376,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     }),
   );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+  const hostPlatform = yield* HostProcessPlatform;
   const serverConfigForCli = yield* Effect.serviceOption(ServerConfig);
   const taskCliInvocationPath = Option.match(serverConfigForCli, {
     onNone: () => ({
       executablePath: resolveTaskCliLaunchTarget().entry,
       pathPrepend: [] as const,
     }),
-    onSome: (config) => ensureTaskCliInvocationPath({ stateDir: config.stateDir }),
+    onSome: (config) =>
+      ensureTaskCliInvocationPath({ stateDir: config.stateDir, platform: hostPlatform }),
   });
   const resolvedTaskCliExecutable = taskCliInvocationPath.executablePath;
   const taskCliEnvironmentForTurn = (input: {

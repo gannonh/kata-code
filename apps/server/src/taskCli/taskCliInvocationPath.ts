@@ -60,7 +60,7 @@ export function resolveTaskCliLaunchTarget(
 
 export function renderTaskCliShimScript(
   target: TaskCliLaunchTarget,
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform,
 ): string {
   const extension = NodePath.extname(target.entry).toLowerCase();
   const isScript = SCRIPT_EXTENSIONS.has(extension);
@@ -88,9 +88,9 @@ export function ensureTaskCliInvocationPath(input: {
   readonly env?: NodeJS.ProcessEnv;
   readonly argv?: ReadonlyArray<string>;
   readonly execPath?: string;
-  readonly platform?: NodeJS.Platform;
+  readonly platform: NodeJS.Platform;
 }): TaskCliInvocationPath {
-  const platform = input.platform ?? process.platform;
+  const { platform } = input;
   const target = resolveTaskCliLaunchTarget(input.env, input.argv, input.execPath);
   const binDir = NodePath.join(input.stateDir, "bin");
   const executablePath = NodePath.join(binDir, platform === "win32" ? "katacode.cmd" : "katacode");
