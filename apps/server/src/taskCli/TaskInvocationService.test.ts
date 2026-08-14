@@ -117,15 +117,20 @@ const makeLayer = () => {
     },
   } as unknown as TaskWorkspaceServiceShape;
 
-  const layer = TaskInvocationServiceLive.pipe(
-    Layer.provide(Layer.succeed(ProviderSessionDirectory, directory)),
-    Layer.provide(Layer.succeed(TaskWorkspaceService, taskWorkspace)),
+  const collaborators = Layer.mergeAll(
+    Layer.succeed(ProviderSessionDirectory, directory),
+    Layer.succeed(TaskWorkspaceService, taskWorkspace),
+  );
+  const invocationWithoutCollaborators = TaskInvocationServiceLive.pipe(
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(NodeServices.layer),
   );
+  const layer = invocationWithoutCollaborators.pipe(Layer.provideMerge(collaborators));
 
   return {
     layer,
+    invocationWithoutCollaborators,
+    collaborators,
     setBinding: (turnId: string, status: "running" | "stopped" = "running") => {
       binding = {
         threadId,
@@ -194,6 +199,20 @@ describe("TaskInvocationService", () => {
       expect(rows[0]?.tokenHash).not.toBe(issued.token);
       expect(rows.some((row) => Object.values(row).includes(issued.token))).toBe(false);
     }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect("issues a lease when Task collaborators are only in the call context", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("turn-call-context");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("turn-call-context"));
+      const resolved = yield* service.resolve(issued.token);
+      expect(issued.scope.taskId).toBe("task-cli-test");
+      expect(resolved.context).toEqual(context);
+    }).pipe(
+      Effect.provide(Layer.mergeAll(test.invocationWithoutCollaborators, test.collaborators)),
+    );
   });
 
   it.effect("binds the pending lease to the canonical native provider turn", () => {
@@ -344,8 +363,8 @@ describe("TaskInvocationService", () => {
           const authority = makeAuthority();
           const persistence = sqlite.pipe(Layer.provideMerge(NodeServices.layer));
           return Layer.fresh(TaskInvocationServiceLive).pipe(
-            Layer.provide(Layer.succeed(ProviderSessionDirectory, authority.directory)),
-            Layer.provide(Layer.succeed(TaskWorkspaceService, authority.taskWorkspace)),
+            Layer.provideMerge(Layer.succeed(ProviderSessionDirectory, authority.directory)),
+            Layer.provideMerge(Layer.succeed(TaskWorkspaceService, authority.taskWorkspace)),
             Layer.provideMerge(persistence),
             Layer.provideMerge(NodeServices.layer),
           );

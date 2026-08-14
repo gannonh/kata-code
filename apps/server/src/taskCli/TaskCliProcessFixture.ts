@@ -44,7 +44,11 @@ import { layerConfig as SqlitePersistenceLive } from "../persistence/Layers/Sqli
 import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
 import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSessionDirectory.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../persistence/Layers/ProviderSessionRuntime.ts";
-import { TaskInvocationService, TaskInvocationServiceLive } from "./TaskInvocationService.ts";
+import {
+  TaskInvocationService,
+  TaskInvocationServiceLive,
+  type TaskInvocationServiceShape,
+} from "./TaskInvocationService.ts";
 import { taskCliHttpApiLayer } from "./http.ts";
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../git/GitWorkflowService.ts";
 import {
@@ -300,8 +304,8 @@ export const makeTaskCliProcessFixture = Effect.fn("makeTaskCliProcessFixture")(
     Layer.provideMerge(persistenceLayer),
   );
   const invocationLayer = TaskInvocationServiceLive.pipe(
-    Layer.provide(workspaceLayer),
-    Layer.provide(directoryLayer),
+    Layer.provideMerge(workspaceLayer),
+    Layer.provideMerge(directoryLayer),
     Layer.provideMerge(persistenceLayer),
   );
   const scope = yield* Effect.scope;
@@ -311,7 +315,17 @@ export const makeTaskCliProcessFixture = Effect.fn("makeTaskCliProcessFixture")(
   );
   const taskService = Context.get(services, TaskWorkspaceService);
   const directory = Context.get(services, ProviderSessionDirectory);
-  const invocationService = Context.get(services, TaskInvocationService);
+  const rawInvocation = Context.get(services, TaskInvocationService);
+  const invocationService: TaskInvocationServiceShape = {
+    issue: (input) => rawInvocation.issue(input).pipe(Effect.provide(services)),
+    bind: (input) => rawInvocation.bind(input).pipe(Effect.provide(services)),
+    resolve: (token) => rawInvocation.resolve(token).pipe(Effect.provide(services)),
+    complete: (input) => rawInvocation.complete(input).pipe(Effect.provide(services)),
+    revokeThread: (threadId) => rawInvocation.revokeThread(threadId).pipe(Effect.provide(services)),
+    revokeTurn: (input) => rawInvocation.revokeTurn(input).pipe(Effect.provide(services)),
+    revokeAll: rawInvocation.revokeAll.pipe(Effect.provide(services)),
+    reconcile: rawInvocation.reconcile.pipe(Effect.provide(services)),
+  };
   const taskId = TaskWorkspaceId.make("task-cli-process");
   const projectId = "project-task-cli-process";
   const created = yield* taskService.dispatch({

@@ -2048,8 +2048,8 @@ it.effect("reinjects Task CLI environment and a fresh token after ProviderServic
         Layer.provide(ProviderSessionRuntimeRepositoryLive.pipe(Layer.provide(persistenceLayer))),
       );
       const invocationLayer = TaskInvocationServiceLive.pipe(
-        Layer.provide(Layer.succeed(TaskWorkspaceService, fixture.taskService)),
-        Layer.provide(directoryLayer),
+        Layer.provideMerge(Layer.succeed(TaskWorkspaceService, fixture.taskService)),
+        Layer.provideMerge(directoryLayer),
         Layer.provideMerge(persistenceLayer),
       );
       return {
