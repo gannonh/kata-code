@@ -10,6 +10,7 @@ import {
   CommandId,
   TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
   TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
+  type TaskStageCompletionAck,
   type TaskStageContextResult,
   TurnId,
   TaskWorkspaceId,
@@ -773,6 +774,8 @@ const buildAppUnderTest = (options?: {
             getSnapshot: Effect.succeed({ sequence: 0, tasks: [] }),
             resolveTaskCliInvocation: () =>
               Effect.die("No task CLI invocation in server route tests."),
+            proposeTaskCliCompletion: () =>
+              Effect.die("No task CLI completion in server route tests."),
             getTask: () => Effect.succeed(null),
             streamEvents: Stream.empty,
             subscribe: Effect.succeed(Stream.empty),
@@ -787,6 +790,7 @@ const buildAppUnderTest = (options?: {
               issue: () => Effect.die("unused"),
               bind: () => Effect.die("unused"),
               resolve: () => Effect.die("unused"),
+              complete: () => Effect.die("unused"),
               revokeThread: () => Effect.void,
               revokeTurn: () => Effect.void,
               revokeAll: Effect.void,
@@ -1390,9 +1394,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const authorizedBody = yield* responseJsonEffect<{
         ok: boolean;
         context?: TaskStageContextResult;
+        commands?: { context: string; complete: string };
       }>(authorized);
       assert.isTrue(authorizedBody.ok);
       assert.deepEqual(authorizedBody.context, taskContext);
+      assert.deepEqual(authorizedBody.commands, {
+        context: "katacode task context",
+        complete: "katacode task complete --summary <text> --artifact-file <file|->",
+      });
 
       const previousEndpoint = process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY];
       const previousToken = process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
@@ -1417,9 +1426,146 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assert.isDefined(output);
       // @effect-diagnostics-next-line preferSchemaOverJson:off
-      const cliBody = JSON.parse(output!) as { ok: boolean; context?: TaskStageContextResult };
+      const cliBody = JSON.parse(output!) as {
+        ok: boolean;
+        context?: TaskStageContextResult;
+        commands?: { context: string; complete: string };
+      };
       assert.isTrue(cliBody.ok);
       assert.deepEqual(cliBody.context, taskContext);
+      assert.deepEqual(cliBody.commands, {
+        context: "katacode task context",
+        complete: "katacode task complete --summary <text> --artifact-file <file|->",
+      });
+    }).pipe(Effect.provide(Layer.mergeAll(TestConsole.layer, NodeHttpServer.layerTest))),
+  );
+
+  it.effect("serves Task CLI complete through bearer auth and the real CLI client", () =>
+    Effect.gen(function* () {
+      const token = "task-cli-complete-token";
+      const completion: TaskStageCompletionAck = {
+        accepted: true,
+        stage: "questions",
+        occurrence: 0,
+        proposalId: "proposal-task-cli-complete",
+        providerTurnId: TurnId.make("turn-cli-complete"),
+      };
+      yield* buildAppUnderTest({
+        config: { staticDir: process.cwd() },
+        layers: {
+          taskInvocation: {
+            complete: (input): Effect.Effect<TaskStageCompletionAck, TaskInvocationError> =>
+              input.token === token
+                ? Effect.succeed(completion)
+                : Effect.fail(
+                    new TaskInvocationError({
+                      code: "unauthorized",
+                      message: "The invocation credential is not valid.",
+                    }),
+                  ),
+          },
+        },
+      });
+      const endpoint = yield* getHttpServerUrl("/api/task-cli/v1/complete");
+      const unauthorized = yield* HttpClient.execute(
+        HttpClientRequest.make("POST")(testRequestUrl(endpoint), {
+          headers: { "content-type": "application/json" },
+        }).pipe(
+          HttpClientRequest.bodyText(
+            jsonRequestBody({ summary: "Clarify complete.", markdown: "# Clarify\n" }),
+            "application/json",
+          ),
+        ),
+      );
+      assert.equal(unauthorized.status, 200);
+      const unauthorizedBody = yield* responseJsonEffect<{ ok: boolean; error?: { code: string } }>(
+        unauthorized,
+      );
+      assert.isFalse(unauthorizedBody.ok);
+      assert.equal(unauthorizedBody.error?.code, "unauthorized");
+
+      const authorized = yield* HttpClient.execute(
+        HttpClientRequest.make("POST")(testRequestUrl(endpoint), {
+          headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+        }).pipe(
+          HttpClientRequest.bodyText(
+            jsonRequestBody({ summary: "Clarify complete.", markdown: "# Clarify\n" }),
+            "application/json",
+          ),
+        ),
+      );
+      assert.equal(authorized.status, 200);
+      const authorizedBody = yield* responseJsonEffect<{
+        ok: boolean;
+        completion?: TaskStageCompletionAck;
+      }>(authorized);
+      assert.isTrue(authorizedBody.ok);
+      assert.deepEqual(authorizedBody.completion, completion);
+
+      const forged = yield* HttpClient.execute(
+        HttpClientRequest.make("POST")(testRequestUrl(endpoint), {
+          headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+        }).pipe(
+          HttpClientRequest.bodyText(
+            jsonRequestBody({
+              summary: "Clarify complete.",
+              markdown: "# Clarify\n",
+              taskId: "forged-task",
+            }),
+            "application/json",
+          ),
+        ),
+      );
+      assert.equal(forged.status, 200);
+      const forgedBody = yield* responseJsonEffect<{ ok: boolean; error?: { code: string } }>(
+        forged,
+      );
+      assert.isFalse(forgedBody.ok);
+      assert.equal(forgedBody.error?.code, "invalid_request");
+
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const artifactDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "task-cli-complete-",
+      });
+      const artifactPath = path.join(artifactDir, "clarify.md");
+      yield* fileSystem.writeFileString(artifactPath, "# Clarify\n\nThe scope is clear.\n");
+
+      const previousEndpoint = process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY];
+      const previousToken = process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+      process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY] = endpoint.replace(
+        "/api/task-cli/v1/complete",
+        "",
+      );
+      process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY] = token;
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previousEndpoint === undefined) delete process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY];
+          else process.env[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY] = previousEndpoint;
+          if (previousToken === undefined)
+            delete process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+          else process.env[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY] = previousToken;
+        }),
+      );
+      yield* Command.runWith(taskCommand, { version: "0.0.0" })([
+        "complete",
+        "--summary",
+        "Clarify complete.",
+        "--artifact-file",
+        artifactPath,
+      ]);
+      const output = (yield* TestConsole.logLines).findLast(
+        (line): line is string =>
+          typeof line === "string" && line.includes('"protocol":"task-cli@1"'),
+      );
+      assert.isDefined(output);
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const cliBody = JSON.parse(output!) as {
+        ok: boolean;
+        completion?: TaskStageCompletionAck;
+      };
+      assert.isTrue(cliBody.ok);
+      assert.deepEqual(cliBody.completion, completion);
     }).pipe(Effect.provide(Layer.mergeAll(TestConsole.layer, NodeHttpServer.layerTest))),
   );
 

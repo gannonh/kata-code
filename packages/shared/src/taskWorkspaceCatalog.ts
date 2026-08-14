@@ -72,7 +72,7 @@ export type TaskWorkspaceCatalogEntry = {
   readonly description: string;
   /** True when the template is complete through approved Plan in this slice. */
   readonly availableInFirstSlice: boolean;
-  /** True when Guided selection requires a provider task-stage bridge. */
+  /** True when Guided planning requires the Task CLI completion transport. */
   readonly completionTransportRequired: boolean;
   readonly initialStage: TaskWorkspaceStage;
   readonly terminalStage: TaskWorkspaceStage;

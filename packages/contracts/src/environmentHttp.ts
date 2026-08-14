@@ -32,7 +32,12 @@ import {
   DispatchResult,
   OrchestrationReadModel,
 } from "./orchestration.ts";
-import { TaskCliContextEnvelope, TASK_CLI_CONTEXT_PATH } from "./taskCli.ts";
+import {
+  TaskCliCompleteEnvelope,
+  TaskCliContextEnvelope,
+  TASK_CLI_COMPLETE_PATH,
+  TASK_CLI_CONTEXT_PATH,
+} from "./taskCli.ts";
 import {
   RelayCloudEnvironmentHealthRequest,
   RelayCloudMintCredentialRequest,
@@ -441,13 +446,22 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
-export class EnvironmentTaskCliHttpApi extends HttpApiGroup.make("taskCli").add(
-  HttpApiEndpoint.get("context", TASK_CLI_CONTEXT_PATH, {
-    headers: OptionalBearerHeaders,
-    success: TaskCliContextEnvelope,
-    error: [EnvironmentHttpInternalServerError],
-  }),
-) {}
+export class EnvironmentTaskCliHttpApi extends HttpApiGroup.make("taskCli")
+  .add(
+    HttpApiEndpoint.get("context", TASK_CLI_CONTEXT_PATH, {
+      headers: OptionalBearerHeaders,
+      success: TaskCliContextEnvelope,
+      error: [EnvironmentHttpInternalServerError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("complete", TASK_CLI_COMPLETE_PATH, {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Unknown,
+      success: TaskCliCompleteEnvelope,
+      error: [EnvironmentHttpInternalServerError],
+    }),
+  ) {}
 
 export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(

@@ -66,6 +66,14 @@ const makeLayer = () => {
     context,
   };
   let resolveFailure: TaskWorkspaceError | undefined;
+  let completeFailure: TaskWorkspaceError | undefined;
+  let lastComplete:
+    | {
+        readonly summary: string;
+        readonly markdown: string;
+        readonly providerTurnId: string;
+      }
+    | undefined;
 
   const directory: ProviderSessionDirectoryShape = {
     upsert: (next) =>
@@ -87,6 +95,26 @@ const makeLayer = () => {
   const taskWorkspace = {
     resolveTaskCliInvocation: () =>
       resolveFailure === undefined ? Effect.succeed(active) : Effect.fail(resolveFailure),
+    proposeTaskCliCompletion: (input: {
+      readonly summary: string;
+      readonly markdown: string;
+      readonly providerTurnId: string;
+    }) => {
+      lastComplete = {
+        summary: input.summary,
+        markdown: input.markdown,
+        providerTurnId: input.providerTurnId,
+      };
+      return completeFailure === undefined
+        ? Effect.succeed({
+            accepted: true,
+            stage: "questions",
+            occurrence: 0,
+            proposalId: "proposal-cli-1",
+            providerTurnId: input.providerTurnId,
+          })
+        : Effect.fail(completeFailure);
+    },
   } as unknown as TaskWorkspaceServiceShape;
 
   const layer = TaskInvocationServiceLive.pipe(
@@ -113,6 +141,10 @@ const makeLayer = () => {
     failResolve: (error: TaskWorkspaceError) => {
       resolveFailure = error;
     },
+    failComplete: (error: TaskWorkspaceError) => {
+      completeFailure = error;
+    },
+    lastComplete: () => lastComplete,
     clearResolveFailure: () => {
       resolveFailure = undefined;
     },
@@ -427,6 +459,46 @@ describe("TaskInvocationService", () => {
       expect(failure.code).toBe("terminal_lease");
       expect(rows[0]?.revocationReason).toBe("stopped");
       expect(rows[0]).not.toHaveProperty("token");
+    }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect("completes through the bound lease and maps workflow errors to CLI codes", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("turn-complete");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("turn-complete"));
+      const acknowledgement = yield* service.complete({
+        token: issued.token,
+        summary: "Clarify complete.",
+        markdown: "# Clarify\n\nThe scope is clear.\n",
+      });
+      expect(acknowledgement).toMatchObject({
+        accepted: true,
+        stage: "questions",
+        proposalId: "proposal-cli-1",
+        providerTurnId: "turn-complete",
+      });
+      expect(test.lastComplete()).toEqual({
+        summary: "Clarify complete.",
+        markdown: "# Clarify\n\nThe scope is clear.\n",
+        providerTurnId: "turn-complete",
+      });
+
+      test.failComplete(
+        new TaskWorkspaceError({
+          message: "Artifact Markdown is too large (100001 chars; maximum is 100000).",
+          commandType: "task.cli.complete",
+        }),
+      );
+      const oversized = yield* service
+        .complete({
+          token: issued.token,
+          summary: "Too large.",
+          markdown: "x",
+        })
+        .pipe(Effect.flip);
+      expect(oversized.code).toBe("payload_too_large");
     }).pipe(Effect.provide(test.layer));
   });
 });

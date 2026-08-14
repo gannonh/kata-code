@@ -9,7 +9,12 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { ProviderSessionEnvironment } from "./providerEnvironment.ts";
-import { TaskStageContextResult, TaskWorkspaceId, TaskWorkspaceStage } from "./taskWorkspace.ts";
+import {
+  TaskStageCompletionAck,
+  TaskStageContextResult,
+  TaskWorkspaceId,
+  TaskWorkspaceStage,
+} from "./taskWorkspace.ts";
 
 export { ProviderSessionEnvironment } from "./providerEnvironment.ts";
 export {
@@ -22,9 +27,31 @@ export {
 
 export const TASK_CLI_PROTOCOL = "task-cli@1" as const;
 export const TASK_CLI_CONTEXT_PATH = "/api/task-cli/v1/context" as const;
+export const TASK_CLI_COMPLETE_PATH = "/api/task-cli/v1/complete" as const;
 export const TASK_CLI_ENDPOINT_ENVIRONMENT_KEY = "KATACODE_TASK_CLI_ENDPOINT" as const;
 export const TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY = "KATACODE_TASK_INVOCATION_TOKEN" as const;
 export const TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY = "KATACODE_TASK_CLI_EXECUTABLE" as const;
+
+export const TASK_CLI_SUMMARY_MAX_CHARS = 4_000;
+export const TASK_CLI_ARTIFACT_MAX_CHARS = 100_000;
+export const TASK_CLI_RESPONSE_MAX_CHARS = 32_768;
+export const TASK_CLI_CONTEXT_COMMAND = "katacode task context" as const;
+export const TASK_CLI_COMPLETE_COMMAND =
+  "katacode task complete --summary <text> --artifact-file <file|->" as const;
+
+export const TaskCliPlanningCommands = Schema.Struct({
+  context: Schema.Literal(TASK_CLI_CONTEXT_COMMAND),
+  complete: Schema.Literal(TASK_CLI_COMPLETE_COMMAND),
+});
+export type TaskCliPlanningCommands = typeof TaskCliPlanningCommands.Type;
+
+export const TASK_CLI_PLANNING_COMMANDS: TaskCliPlanningCommands = {
+  context: TASK_CLI_CONTEXT_COMMAND,
+  complete: TASK_CLI_COMPLETE_COMMAND,
+};
+
+export const TaskCliOperation = Schema.Literals(["context", "complete"]);
+export type TaskCliOperation = typeof TaskCliOperation.Type;
 
 export const TaskCliErrorCode = Schema.Literals([
   "invalid_request",
@@ -32,6 +59,9 @@ export const TaskCliErrorCode = Schema.Literals([
   "not_active",
   "stale_lease",
   "terminal_lease",
+  "conflict",
+  "invalid_artifact",
+  "payload_too_large",
   "internal_error",
 ]);
 export type TaskCliErrorCode = typeof TaskCliErrorCode.Type;
@@ -47,13 +77,22 @@ export const TaskCliSuccessEnvelope = Schema.Struct({
   ok: Schema.Literal(true),
   operation: Schema.Literal("context"),
   context: TaskStageContextResult,
+  commands: TaskCliPlanningCommands,
 });
 export type TaskCliSuccessEnvelope = typeof TaskCliSuccessEnvelope.Type;
+
+export const TaskCliCompleteSuccessEnvelope = Schema.Struct({
+  protocol: Schema.Literal(TASK_CLI_PROTOCOL),
+  ok: Schema.Literal(true),
+  operation: Schema.Literal("complete"),
+  completion: TaskStageCompletionAck,
+});
+export type TaskCliCompleteSuccessEnvelope = typeof TaskCliCompleteSuccessEnvelope.Type;
 
 export const TaskCliFailureEnvelope = Schema.Struct({
   protocol: Schema.Literal(TASK_CLI_PROTOCOL),
   ok: Schema.Literal(false),
-  operation: Schema.Literal("context"),
+  operation: TaskCliOperation,
   error: TaskCliError,
 });
 export type TaskCliFailureEnvelope = typeof TaskCliFailureEnvelope.Type;
@@ -63,6 +102,31 @@ export const TaskCliContextEnvelope = Schema.Union([
   TaskCliFailureEnvelope,
 ]);
 export type TaskCliContextEnvelope = typeof TaskCliContextEnvelope.Type;
+
+export const TaskCliCompleteEnvelope = Schema.Union([
+  TaskCliCompleteSuccessEnvelope,
+  TaskCliFailureEnvelope,
+]);
+export type TaskCliCompleteEnvelope = typeof TaskCliCompleteEnvelope.Type;
+
+export const TaskCliCompleteRequest = Schema.Struct({
+  summary: Schema.String,
+  markdown: Schema.String,
+});
+export type TaskCliCompleteRequest = typeof TaskCliCompleteRequest.Type;
+
+/** Documented planning-completion contract. Tests cover every row. */
+export const TASK_CLI_PLANNING_COMPLETION_CONTRACT = {
+  protocol: TASK_CLI_PROTOCOL,
+  path: TASK_CLI_COMPLETE_PATH,
+  summaryMaxChars: TASK_CLI_SUMMARY_MAX_CHARS,
+  artifactMaxChars: TASK_CLI_ARTIFACT_MAX_CHARS,
+  responseMaxChars: TASK_CLI_RESPONSE_MAX_CHARS,
+  successExit: 0,
+  failureExit: 1,
+  successFields: ["accepted", "stage", "occurrence", "proposalId", "providerTurnId"] as const,
+  errorCodes: TaskCliErrorCode.literals,
+} as const;
 
 /** Server-derived identity and turn scope for a single provider invocation. */
 export const TaskInvocationScope = Schema.Struct({

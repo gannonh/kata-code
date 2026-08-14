@@ -443,7 +443,7 @@ describe("ProviderCommandReactor", () => {
           attachments: [],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        developerInstructions: "Use task_stage_context before task data.",
+        developerInstructions: "Use katacode task context before task data.",
         runtimeMode: "approval-required",
         createdAt: now,
       }),
@@ -459,10 +459,10 @@ describe("ProviderCommandReactor", () => {
         model: "gpt-5-codex",
       },
       runtimeMode: "approval-required",
-      developerInstructions: "Use task_stage_context before task data.",
+      developerInstructions: "Use katacode task context before task data.",
     });
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
-      developerInstructions: "Use task_stage_context before task data.",
+      developerInstructions: "Use katacode task context before task data.",
     });
 
     const readModel = await harness.readModel();

@@ -63,7 +63,7 @@ describe("buildTurnStartParams", () => {
         prompt: "Make a plan",
         model: "gpt-5.3-codex",
         effort: "medium",
-        developerInstructions: "Use task_stage_context before task data.",
+        developerInstructions: "Use katacode task context before task data.",
         interactionMode: "plan",
       }),
     );
@@ -87,7 +87,7 @@ describe("buildTurnStartParams", () => {
         settings: {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
-          developer_instructions: `${CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS}\n\nUse task_stage_context before task data.`,
+          developer_instructions: `${CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS}\n\nUse katacode task context before task data.`,
         },
       },
     });
@@ -100,7 +100,7 @@ describe("buildTurnStartParams", () => {
         runtimeMode: "approval-required",
         prompt: "Research the task",
         model: "gpt-5.3-codex",
-        developerInstructions: "Call task_stage_complete when the Research artifact is ready.",
+        developerInstructions: "Call katacode task complete when the Research artifact is ready.",
         interactionMode: "default",
       }),
     );
@@ -108,7 +108,7 @@ describe("buildTurnStartParams", () => {
     assert.equal(params.collaborationMode?.mode, "default");
     assert.equal(
       params.collaborationMode?.settings.developer_instructions,
-      `${CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS}\n\nCall task_stage_complete when the Research artifact is ready.`,
+      `${CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS}\n\nCall katacode task complete when the Research artifact is ready.`,
     );
   });
 
@@ -521,7 +521,7 @@ describe("openCodexThread", () => {
         runtimeMode: "full-access",
         cwd: "/tmp/project",
         requestedModel: "gpt-5.3-codex",
-        developerInstructions: "Use task_stage_context before task data.",
+        developerInstructions: "Use katacode task context before task data.",
         serviceTier: undefined,
         resumeThreadId: "stale-thread",
       });
@@ -531,7 +531,7 @@ describe("openCodexThread", () => {
       assert.ok(startCall);
       assert.equal(
         (startCall.payload as { developerInstructions?: string }).developerInstructions,
-        "Use task_stage_context before task data.",
+        "Use katacode task context before task data.",
       );
       assert.deepStrictEqual(
         calls.map((call) => call.method),

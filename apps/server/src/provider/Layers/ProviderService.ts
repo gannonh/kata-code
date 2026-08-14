@@ -521,9 +521,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (
           scope?.threadId === threadId &&
           scope.providerInstanceId === providerInstanceId &&
-          (!taskStage ||
-            (scope.capabilities.has("task-stage") &&
-              (activeStage !== "build" || scope.capabilities.has("task-implementation"))))
+          (!taskStage || activeStage !== "build" || scope.capabilities.has("task-implementation"))
         ) {
           return { rotated: false } as const;
         }
@@ -703,7 +701,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
         ...(input.environment ? { environment: input.environment } : {}),
-        taskStage: activeTaskStage !== undefined,
+        taskStage: activeTaskStage === "build",
         taskExecutionProfile,
         ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
         ...(binding.resumeCursor !== null && binding.resumeCursor !== undefined
@@ -864,7 +862,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       yield* prepareMcpSession(
         input.binding.threadId,
         bindingInstanceId,
-        activeTaskStage !== undefined,
+        activeTaskStage === "build",
       );
       const resumedTaskEnvironment =
         activeTaskStage !== undefined
@@ -901,7 +899,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
           ...(resumedTaskEnvironment ? { environment: resumedTaskEnvironment.environment } : {}),
-          taskStage: activeTaskStage !== undefined,
+          taskStage: activeTaskStage === "build",
           taskExecutionProfile,
           ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
@@ -1162,7 +1160,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const sessionWithInstance = yield* withMcpRotationLock(
           threadId,
           Effect.gen(function* () {
-            yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage !== undefined);
+            yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage === "build");
             const startedTaskEnvironment =
               activeTaskStage !== undefined
                 ? yield* taskCliEnvironmentForTurn({
@@ -1203,7 +1201,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                     : {}),
                 ...(developerInstructions ? { developerInstructions } : {}),
                 ...(sessionEnvironment ? { environment: sessionEnvironment } : {}),
-                taskStage: activeTaskStage !== undefined,
+                taskStage: activeTaskStage === "build",
                 taskExecutionProfile: activeTaskProfile,
                 ...(activeTaskContext
                   ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot }
@@ -1319,8 +1317,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ),
       );
       // Keep the provider's native Plan mode out of Guided task stages. Kata
-      // owns the stage lifecycle and completion tool; provider-native plan
-      // cards cannot complete a task-stage occurrence.
+      // owns the stage lifecycle; provider-native plan cards cannot complete a
+      // planning occurrence. Planning uses `katacode task complete`.
       const activeTaskStage = yield* activeTaskStageForThread(input.threadId);
       const activeTaskContext =
         activeTaskStage === "build"
@@ -1349,10 +1347,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           : {
               ...input,
               ...(activeTaskContext ? { modelSelection: activeTaskContext.modelSelection } : {}),
-              ...(activeTaskContext
-                ? { developerInstructions: trustedInstructionsForStage("build") }
-                : {}),
-              taskStage: true,
+              developerInstructions: trustedInstructionsForStage(activeTaskStage),
+              taskStage: activeTaskStage === "build",
               taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
               interactionMode: providerInteractionMode ?? "default",
             };
@@ -1385,7 +1381,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const mcpPreparation = yield* prepareMcpSession(
           input.threadId,
           routed.instanceId,
-          activeTaskStage !== undefined,
+          activeTaskStage === "build",
         );
         if (mcpPreparation.rotated || taskEnvironment) {
           yield* restartSessionForMcpCredential({

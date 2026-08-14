@@ -14,6 +14,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  TASK_CLI_ARTIFACT_MAX_CHARS,
   TaskWorkspaceId,
   type OrchestrationEvent,
   ThreadId,
@@ -34,7 +35,6 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import { ServerConfig } from "../config.ts";
 import {
   ServerEnvironment,
@@ -57,10 +57,8 @@ import {
   TaskWorkspaceSourceResolver,
   type TaskWorkspaceSourceResolution,
 } from "./Services/TaskWorkspaceSourceResolver.ts";
-import { TaskStageBridge, TaskStageBridgeLive } from "./TaskStageBridge.ts";
 import { TaskWorkspaceService, layer as TaskWorkspaceServiceLive } from "./TaskWorkspaceService.ts";
 import { latestAttemptBlocksCompletion } from "./TaskWorkspaceService.ts";
-import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
 import {
   ProviderInstanceRegistry,
   type ProviderInstanceRegistryShape,
@@ -3177,14 +3175,14 @@ describe("TaskWorkspaceService first-slice workflow", () => {
     }),
   );
   it.effect(
-    "rejects a Guided create whose provider cannot enforce task-worktree-write",
+    "creates Guided tasks for planning without task-stage or worktree-write attestation",
     () =>
       Effect.gen(function* () {
         const instanceId = ProviderInstanceId.make("instance-1");
         const makeInstance = (capabilities: unknown): ProviderInstance =>
           ({
             instanceId,
-            driverKind: ProviderDriverKind.make("codex"),
+            driverKind: ProviderDriverKind.make("pi"),
             enabled: true,
             adapter: { capabilities },
           }) as unknown as ProviderInstance;
@@ -3198,50 +3196,15 @@ describe("TaskWorkspaceService first-slice workflow", () => {
           subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
         });
 
-        // A task-stage provider without task-worktree-write enforcement is
-        // rejected at create time so the task cannot be created, planned, and
-        // then wedged at implementation start with no provider-change path.
-        const { runtime: rejectingRuntime } = yield* setupRuntime(
-          "kata-task-gate-create-",
+        const { runtime } = yield* setupRuntime(
+          "kata-task-gate-create-planning-",
           { mode: "running" },
-          registry(makeInstance({ supportsTaskStage: true })),
+          registry(makeInstance({ supportsTaskStage: false })),
         );
-        const service = yield* rejectingRuntime.runPromise(Effect.service(TaskWorkspaceService));
-        const rejected = yield* rejectingRuntime.runPromiseExit(service.dispatch(guidedCreate()));
-        expect(Exit.isFailure(rejected)).toBe(true);
-        if (Exit.isFailure(rejected)) {
-          expect((Cause.squash(rejected.cause) as Error).message).toContain("task-worktree-write");
-        }
-        yield* rejectingRuntime.dispose;
-
-        // The same create succeeds once the provider attests worktree-write.
-        const { runtime: acceptingRuntime } = yield* setupRuntime(
-          "kata-task-gate-create-ok-",
-          { mode: "running" },
-          registry(
-            makeInstance({
-              supportsTaskStage: true,
-              taskExecution: {
-                profile: "task-worktree-write",
-                trustedTaskInstructions: true,
-                worktreeOnlyWrites: true,
-                credentialIsolation: true,
-                deterministicResume: true,
-                boundedTurns: true,
-                networkDisabled: true,
-              },
-            }),
-          ),
-        );
-        const acceptingService = yield* acceptingRuntime.runPromise(
-          Effect.service(TaskWorkspaceService),
-        );
-        const accepted = yield* acceptingRuntime.runPromise(
-          acceptingService.dispatch(
-            guidedCreate({ taskId: TaskWorkspaceId.make("guided-gated-ok") }),
-          ),
-        );
-        expect(accepted.task.versions.workflowDefinition).toBe("guided@0.3.0");
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+        expect(created.task.versions.workflowDefinition).toBe("guided@0.3.0");
+        expect(created.task.occurrences[0]?.stage).toBe("questions");
       }).pipe(Effect.scoped),
     30_000,
   );
@@ -6822,102 +6785,292 @@ describe("TaskWorkspaceService guided implementation", () => {
   );
 });
 
-describe("TaskStageBridge", () => {
-  it.effect(
-    "loads selected context, proposes one completion, and rejects the superseded thread",
-    () =>
-      Effect.gen(function* () {
-        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-stage-bridge-");
+describe("Task CLI planning completion", () => {
+  const completePlanningStage = (
+    service: typeof TaskWorkspaceService.Service,
+    task: TaskWorkspace,
+    summary: string,
+    markdown: string,
+    providerTurnId: string,
+  ) =>
+    service.proposeTaskCliCompletion({
+      environmentId: EnvironmentId.make("environment-local"),
+      threadId: task.bootstrap?.reservedThreadId ?? task.occurrences.at(-1)?.threadId!,
+      providerInstanceId: "instance-1",
+      providerTurnId,
+      summary,
+      markdown,
+    });
+
+  it.effect("loads selected context, proposes one completion, and rejects a changed replay", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-complete-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const threadId = task.bootstrap?.reservedThreadId!;
+      const context = yield* runtime.runPromise(
+        service.resolveTaskCliInvocation({
+          environmentId: EnvironmentId.make("environment-local"),
+          threadId,
+          providerInstanceId: "instance-1",
+          providerTurnId: "turn-cli-1",
+        }),
+      );
+      expect(context.context).toMatchObject({
+        stage: "questions",
+        occurrence: 0,
+        brief: "Add a guided onboarding flow.",
+        artifacts: [],
+      });
+
+      const acknowledgement = yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "Clarify complete.",
+          "# Clarify\n\nThe scope is clear.\n",
+          "turn-cli-1",
+        ),
+      );
+      expect(acknowledgement).toMatchObject({
+        accepted: true,
+        stage: "questions",
+        occurrence: 0,
+        providerTurnId: "turn-cli-1",
+      });
+      const replay = yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "Clarify complete.",
+          "# Clarify\n\nThe scope is clear.\n",
+          "turn-cli-1",
+        ),
+      );
+      expect(replay.proposalId).toBe(acknowledgement.proposalId);
+
+      const changed = yield* runtime.runPromiseExit(
+        completePlanningStage(
+          service,
+          task,
+          "Clarify complete.",
+          "# Clarify\n\nChanged after proposal.\n",
+          "turn-cli-1",
+        ),
+      );
+      expect(changed._tag).toBe("Failure");
+
+      const proposalTask = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(proposalTask.occurrences[0]?.status).toBe("finalizing");
+      yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: 0,
+          providerTurnId: "turn-cli-1",
+          outcome: "completed",
+        }),
+      );
+      const stale = yield* runtime.runPromiseExit(
+        service.resolveTaskCliInvocation({
+          environmentId: EnvironmentId.make("environment-local"),
+          threadId,
+          providerInstanceId: "instance-1",
+          providerTurnId: "turn-cli-1",
+        }),
+      );
+      expect(stale._tag).toBe("Failure");
+    }),
+  );
+
+  it.effect("includes request-changes feedback and the reviewed Plan in CLI context", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-changes-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      let task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      for (const stage of ["questions", "research", "design"] as const) {
+        const occurrence = task.occurrences.find(
+          (candidate) => candidate.stage === stage && candidate.status === "running",
+        )!;
+        yield* runtime.runPromise(
+          completePlanningStage(service, task, `${stage} done`, `# ${stage}\n`, `turn-${stage}`),
+        );
+        task = yield* runtime.runPromise(
+          service.settleProposal({
+            taskId: task.id,
+            occurrence: occurrence.ordinal,
+            providerTurnId: `turn-${stage}`,
+            outcome: "completed",
+          }),
+        );
+        yield* runtime.runPromise(
+          service.processBootstrap(bootstrapEntry(task, baseDir, repoRoot)),
+        );
+        task = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      }
+      const planOccurrence = task.occurrences.find(
+        (candidate) => candidate.stage === "plan" && candidate.status === "running",
+      )!;
+      yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "First plan.",
+          validGuidedPlan("First implementation"),
+          "turn-plan",
+        ),
+      );
+      task = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: planOccurrence.ordinal,
+          providerTurnId: "turn-plan",
+          outcome: "completed",
+        }),
+      );
+      const changed = yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.stage.request-changes",
+            commandId: CommandId.make("cli-changes-1"),
+            taskId: task.id,
+            createdAt: now(10),
+            expectedTaskRevision: task.taskRevision,
+            operationKey: "op-cli-changes-1",
+            feedback: "Add rollback handling.",
+          }),
+        ),
+      );
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(changed.task, baseDir, repoRoot)),
+      );
+      const continued = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const context = yield* runtime.runPromise(
+        service.resolveTaskCliInvocation({
+          environmentId: EnvironmentId.make("environment-local"),
+          threadId: continued.bootstrap?.reservedThreadId!,
+          providerInstanceId: "instance-1",
+          providerTurnId: "turn-plan-2",
+        }),
+      );
+      expect(context.context.feedback).toBe("Add rollback handling.");
+      expect(context.context.artifacts.some((artifact) => artifact.kind === "plan")).toBe(true);
+      expect(
+        context.context.artifacts.find((artifact) => artifact.kind === "plan")?.markdown,
+      ).toContain("First implementation");
+    }),
+  );
+
+  it.effect("recovers from an invalid complete and accepts a later valid complete", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-recover-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const oversized = yield* runtime.runPromiseExit(
+        completePlanningStage(
+          service,
+          task,
+          "Too large.",
+          "x".repeat(TASK_CLI_ARTIFACT_MAX_CHARS + 1),
+          "turn-cli-recover",
+        ),
+      );
+      expect(oversized._tag).toBe("Failure");
+      const empty = yield* runtime.runPromiseExit(
+        completePlanningStage(service, task, "Empty.", "   ", "turn-cli-recover"),
+      );
+      expect(empty._tag).toBe("Failure");
+      const stillRunning = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(stillRunning.occurrences[0]?.status).toBe("running");
+
+      const accepted = yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "Clarify complete.",
+          "# Clarify\n\nThe scope is clear.\n",
+          "turn-cli-recover",
+        ),
+      );
+      expect(accepted.accepted).toBe(true);
+      const finalizing = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(finalizing.occurrences[0]?.status).toBe("finalizing");
+    }),
+  );
+
+  it.effect("runs the same planning CLI contract for Codex, Claude, and Pi", () =>
+    Effect.gen(function* () {
+      const planningRegistry = (
+        driver: "codex" | "claude" | "pi",
+      ): ProviderInstanceRegistryShape => {
+        const instanceId = ProviderInstanceId.make("instance-1");
+        const instance = {
+          instanceId,
+          driverKind: ProviderDriverKind.make(driver),
+          enabled: true,
+          adapter: {
+            capabilities: {
+              supportsTaskStage: driver !== "pi",
+              supportsTaskWorktreeWrite: driver === "codex",
+            },
+          },
+        } as unknown as ProviderInstance;
+        return {
+          getInstance: (id) => Effect.succeed(id === instanceId ? instance : undefined),
+          listInstances: Effect.succeed([instance]),
+          listUnavailable: Effect.succeed([]),
+          streamChanges: Stream.empty,
+          subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+        };
+      };
+
+      for (const driver of ["codex", "claude", "pi"] as const) {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+          `kata-task-cli-${driver}-`,
+          { mode: "running" },
+          planningRegistry(driver),
+        );
         const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
-        const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+        const created = yield* runtime.runPromise(
+          service.dispatch(
+            guidedCreate({
+              commandId: CommandId.make(`cli-${driver}-create`),
+              operationKey: `op-cli-${driver}-create`,
+              taskId: TaskWorkspaceId.make(`guided-${driver}`),
+            }),
+          ),
+        );
         yield* runtime.runPromise(
           service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
         );
         const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
-        const threadId = task.bootstrap?.reservedThreadId!;
-        const providerInstanceId = ProviderInstanceId.make("instance-1");
-        const directoryLayer = Layer.succeed(ProviderSessionDirectory, {
-          getBinding: () =>
-            Effect.succeed(
-              Option.some({
-                threadId,
-                provider: ProviderDriverKind.make("claudeAgent"),
-                providerInstanceId,
-                runtimePayload: { activeTurnId: "turn-bridge-1" },
-              }),
-            ),
-          getProvider: () => Effect.succeed(ProviderDriverKind.make("claudeAgent")),
-          listThreadIds: () => Effect.succeed([threadId]),
-          listBindings: () => Effect.succeed([]),
-          upsert: () => Effect.void,
-        });
-        const bridgeLayer = TaskStageBridgeLive.pipe(
-          Layer.provide(directoryLayer),
-          Layer.provide(Layer.succeed(TaskWorkspaceService, service)),
-        );
-        const bridgeScope = yield* Scope.make();
-        yield* Effect.addFinalizer(() => Scope.close(bridgeScope, Exit.void));
-        const bridgeContext = yield* Layer.buildWithScope(bridgeLayer, bridgeScope);
-        const bridge = yield* Effect.provide(Effect.service(TaskStageBridge), bridgeContext);
-        const scope = {
-          environmentId: EnvironmentId.make("environment-local"),
-          threadId,
-          providerInstanceId,
-          providerSessionId: "provider-session-bridge-1",
-        };
-        McpProviderSession.setMcpProviderSession({
-          environmentId: scope.environmentId,
-          threadId: scope.threadId,
-          providerSessionId: scope.providerSessionId,
-          providerInstanceId: scope.providerInstanceId,
-          endpoint: "http://127.0.0.1:43123/mcp",
-          authorizationHeader: "Bearer bridge-test-token",
-        });
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
-        );
-
-        const staleCredential = yield* Effect.exit(
-          Effect.provide(
-            bridge.context({ ...scope, providerSessionId: "provider-session-stale" }),
-            bridgeContext,
+        const acknowledgement = yield* runtime.runPromise(
+          completePlanningStage(
+            service,
+            task,
+            `${driver} clarify complete.`,
+            `# Clarify\n\n${driver} planning uses the Task CLI.\n`,
+            `turn-${driver}`,
           ),
-        );
-        expect(staleCredential._tag).toBe("Failure");
-
-        const context = yield* Effect.provide(bridge.context(scope), bridgeContext);
-        expect(context).toMatchObject({
-          stage: "questions",
-          occurrence: 0,
-          brief: "Add a guided onboarding flow.",
-          artifacts: [],
-        });
-        const acknowledgement = yield* Effect.provide(
-          bridge.complete(scope, {
-            summary: "Clarify complete.",
-            markdown: "# Clarify\n\nThe scope is clear.\n",
-          }),
-          bridgeContext,
         );
         expect(acknowledgement).toMatchObject({
           accepted: true,
           stage: "questions",
           occurrence: 0,
-          providerTurnId: "turn-bridge-1",
+          providerTurnId: `turn-${driver}`,
         });
-        const proposalTask = (yield* runtime.runPromise(service.getTask(task.id)))!;
-        expect(proposalTask.occurrences[0]?.status).toBe("finalizing");
-
-        yield* runtime.runPromise(
-          service.settleProposal({
-            taskId: task.id,
-            occurrence: 0,
-            providerTurnId: "turn-bridge-1",
-            outcome: "completed",
-          }),
-        );
-        const stale = yield* Effect.exit(Effect.provide(bridge.context(scope), bridgeContext));
-        expect(stale._tag).toBe("Failure");
-      }),
+      }
+    }),
   );
 });

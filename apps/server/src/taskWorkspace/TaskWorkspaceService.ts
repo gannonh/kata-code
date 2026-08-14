@@ -11,6 +11,8 @@ import { promisify } from "node:util";
 
 import {
   TASK_BRIEF_MAX_CHARS,
+  TASK_CLI_ARTIFACT_MAX_CHARS,
+  TASK_CLI_SUMMARY_MAX_CHARS,
   TASK_EXECUTION_ARCHITECTURE_VERSION,
   TaskWorkspaceBootstrapOutboxPayload,
   TaskWorkspaceBootstrapState,
@@ -38,6 +40,7 @@ import {
   type TaskImplementationCheckRunAck,
   type TaskImplementationAmendmentAck,
   type TaskImplementationCompleteAck,
+  type TaskStageCompletionAck,
   type TaskStageContextResult,
   type TaskWorkspaceOperationReceipt,
   type TaskWorkspaceOutboxEntry,
@@ -1701,6 +1704,14 @@ export interface TaskWorkspaceServiceShape {
     },
     TaskWorkspaceError
   >;
+  readonly proposeTaskCliCompletion: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: string;
+    readonly providerTurnId: string;
+    readonly summary: string;
+    readonly markdown: string;
+  }) => Effect.Effect<TaskStageCompletionAck, TaskWorkspaceError>;
   readonly isTaskThread: (threadId: ThreadId) => Effect.Effect<boolean>;
 }
 
@@ -2022,6 +2033,28 @@ export const make = Effect.gen(function* () {
       return undefined;
     });
 
+  const planningContextArtifactKinds = (
+    stage: TaskWorkspaceStage,
+    task: TaskWorkspace,
+  ): ReadonlyArray<TaskWorkspaceArtifactKind> => {
+    if (stage === "research") return ["questions"];
+    if (stage === "design") return ["questions", "research"];
+    if (stage === "plan") {
+      return task.artifacts.some((artifact) => artifact.kind === "plan")
+        ? ["questions", "research", "design", "plan"]
+        : ["questions", "research", "design"];
+    }
+    return [];
+  };
+
+  const latestRequestedPlanFeedback = (task: TaskWorkspace): string | null => {
+    for (let index = task.gateHistory.length - 1; index >= 0; index -= 1) {
+      const entry = task.gateHistory[index];
+      if (entry?.outcome === "changes-requested" && entry.feedback) return entry.feedback;
+    }
+    return null;
+  };
+
   const resolveTaskCliInvocation: TaskWorkspaceServiceShape["resolveTaskCliInvocation"] = (input) =>
     Effect.gen(function* () {
       const task = [...taskById.values()].find(
@@ -2091,15 +2124,7 @@ export const make = Effect.gen(function* () {
         });
       }
       const contextKinds: ReadonlySet<TaskWorkspaceArtifactKind> = new Set(
-        run.currentStage === "questions"
-          ? []
-          : run.currentStage === "research"
-            ? ["questions"]
-            : run.currentStage === "design"
-              ? ["questions", "research"]
-              : run.currentStage === "plan"
-                ? ["questions", "research", "design"]
-                : [],
+        planningContextArtifactKinds(run.currentStage, task),
       );
       const manifest = occurrence.contextManifestId
         ? task.contextManifests.find((candidate) => candidate.id === occurrence.contextManifestId)
@@ -2140,10 +2165,126 @@ export const make = Effect.gen(function* () {
           stage: run.currentStage,
           occurrence: occurrence.ordinal,
           brief: task.intake.brief,
-          feedback: occurrence.feedback ?? task.planGate?.feedback ?? null,
+          feedback:
+            occurrence.feedback ?? task.planGate?.feedback ?? latestRequestedPlanFeedback(task),
           artifacts,
         },
       };
+    });
+
+  const proposeTaskCliCompletion: TaskWorkspaceServiceShape["proposeTaskCliCompletion"] = (input) =>
+    Effect.gen(function* () {
+      const resolved = yield* resolveTaskCliInvocation({
+        environmentId: input.environmentId,
+        threadId: input.threadId,
+        providerInstanceId: input.providerInstanceId,
+        providerTurnId: input.providerTurnId,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: cause.message,
+              commandType: "task.cli.complete",
+              ...(cause.taskId !== undefined ? { taskId: cause.taskId } : {}),
+              ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+            }),
+        ),
+      );
+      if (resolved.stage === "build") {
+        return yield* new TaskWorkspaceError({
+          message:
+            "Planning completion requires an active Clarify, Research, Design, or Plan stage.",
+          commandType: "task.cli.complete",
+          taskId: resolved.taskId,
+        });
+      }
+      const summary = input.summary.trim();
+      if (summary.length === 0) {
+        return yield* new TaskWorkspaceError({
+          message: "A completion summary is required.",
+          commandType: "task.cli.complete",
+          taskId: resolved.taskId,
+        });
+      }
+      if (summary.length > TASK_CLI_SUMMARY_MAX_CHARS) {
+        return yield* new TaskWorkspaceError({
+          message: `Summary is too large (${summary.length} chars; maximum is ${TASK_CLI_SUMMARY_MAX_CHARS}).`,
+          commandType: "task.cli.complete",
+          taskId: resolved.taskId,
+        });
+      }
+      if (input.markdown.trim().length === 0) {
+        return yield* new TaskWorkspaceError({
+          message: "Artifact Markdown is required.",
+          commandType: "task.cli.complete",
+          taskId: resolved.taskId,
+        });
+      }
+      if (input.markdown.length > TASK_CLI_ARTIFACT_MAX_CHARS) {
+        return yield* new TaskWorkspaceError({
+          message: `Artifact Markdown is too large (${input.markdown.length} chars; maximum is ${TASK_CLI_ARTIFACT_MAX_CHARS}).`,
+          commandType: "task.cli.complete",
+          taskId: resolved.taskId,
+        });
+      }
+      const task = taskById.get(resolved.taskId);
+      if (!task) {
+        return yield* new TaskWorkspaceError({
+          message: `Task '${resolved.taskId}' was not found.`,
+          commandType: "task.cli.complete",
+          taskId: resolved.taskId,
+        });
+      }
+      const occurrence = task.occurrences
+        .filter((candidate) => candidate.stage === resolved.stage)
+        .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+      const sessionId = occurrence?.sessionId ?? task.bootstrap?.reservedSessionId;
+      if (!sessionId) {
+        return yield* new TaskWorkspaceError({
+          message: "The Task primary session is not active.",
+          commandType: "task.cli.complete",
+          taskId: resolved.taskId,
+        });
+      }
+      const payloadDigest = createHash("sha256")
+        .update(`${summary}\n${input.markdown}`)
+        .digest("hex");
+      const proposed = yield* proposeStageCompletion({
+        taskId: resolved.taskId,
+        sessionId,
+        providerTurnId: input.providerTurnId,
+        payloadDigest,
+        summary,
+        markdown: input.markdown,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: cause.message,
+              commandType: "task.cli.complete",
+              taskId: resolved.taskId,
+              ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+            }),
+        ),
+      );
+      const proposedOccurrence = proposed.occurrences
+        .filter((candidate) => candidate.stage === resolved.stage)
+        .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+      const proposalId = proposedOccurrence?.completionProposalId;
+      if (!proposalId) {
+        return yield* new TaskWorkspaceError({
+          message: "The completion proposal was not persisted.",
+          commandType: "task.cli.complete",
+          taskId: resolved.taskId,
+        });
+      }
+      return {
+        accepted: true as const,
+        stage: resolved.stage,
+        occurrence: resolved.occurrence,
+        proposalId,
+        providerTurnId: input.providerTurnId,
+      } satisfies TaskStageCompletionAck;
     });
 
   const getActiveTaskProviderContext: TaskWorkspaceServiceShape["getActiveTaskProviderContext"] = (
@@ -2232,12 +2373,14 @@ export const make = Effect.gen(function* () {
         if (
           !providerInstance ||
           !providerInstance.enabled ||
-          providerInstance.adapter.capabilities.supportsTaskStage !== true ||
           (run.currentStage === "build" &&
             !supportsTaskWorktreeWrite(providerInstance.adapter.capabilities))
         ) {
           return yield* new TaskWorkspaceError({
-            message: `Provider instance '${input.providerInstanceId}' is not task-stage capable.`,
+            message:
+              run.currentStage === "build"
+                ? `Provider instance '${input.providerInstanceId}' cannot enforce task-worktree-write.`
+                : `Provider instance '${input.providerInstanceId}' is not available for this Task.`,
             commandType: "task.internal",
             taskId: task.id,
           });
@@ -2752,18 +2895,8 @@ export const make = Effect.gen(function* () {
             const providerInstance = yield* providerInstanceRegistry.value.getInstance(
               command.modelSelection!.instanceId,
             );
-            if (
-              !providerInstance ||
-              !providerInstance.enabled ||
-              providerInstance.adapter.capabilities.supportsTaskStage !== true ||
-              // New Guided tasks pin guided@0.3.0, whose Implement stage
-              // requires a provider that can enforce task-worktree-write.
-              !supportsTaskWorktreeWrite(providerInstance.adapter.capabilities)
-            ) {
-              return yield* taskError(
-                command,
-                "Guided requires an enabled provider with task-worktree-write enforcement, task-stage tools, trusted instructions, and completion transport.",
-              );
+            if (!providerInstance || !providerInstance.enabled) {
+              return yield* taskError(command, "Guided requires an enabled provider.");
             }
           }
         }
@@ -2838,7 +2971,7 @@ export const make = Effect.gen(function* () {
       ) {
         return yield* taskError(
           command,
-          "Guided stage work is server-owned; use the task-stage bridge from the active conversation.",
+          "Guided stage work is server-owned; use `katacode task complete` from the active conversation.",
         );
       }
       if (
@@ -3372,13 +3505,8 @@ export const make = Effect.gen(function* () {
             const provider = yield* providerInstanceRegistry.value.getInstance(
               task.preferences.modelSelection.instanceId,
             );
-            if (
-              !provider ||
-              !provider.enabled ||
-              provider.adapter.capabilities.supportsTaskStage !== true ||
-              !supportsTaskWorktreeWrite(provider.adapter.capabilities)
-            ) {
-              throw new Error("The selected provider cannot enforce task-worktree-write.");
+            if (!provider || !provider.enabled) {
+              throw new Error("The selected provider is not available.");
             }
           }
           const target = resolveWorkflowDefinition(command.targetVersion);
@@ -3511,13 +3639,8 @@ export const make = Effect.gen(function* () {
             const provider = yield* providerInstanceRegistry.value.getInstance(
               task.preferences.modelSelection.instanceId,
             );
-            if (
-              !provider ||
-              !provider.enabled ||
-              provider.adapter.capabilities.supportsTaskStage !== true ||
-              !supportsTaskWorktreeWrite(provider.adapter.capabilities)
-            )
-              throw new Error("The selected provider cannot enforce task-worktree-write.");
+            if (!provider || !provider.enabled)
+              throw new Error("The selected provider is not available.");
           }
           const build =
             task.build.currentPlanRevisionId === plan.id
@@ -5742,11 +5865,65 @@ export const make = Effect.gen(function* () {
             );
           }
           const now = yield* serverNow;
-          const nextOccurrence = allocateOccurrence(task, "plan", now);
-          const bootstrap = yield* allocateStageBootstrap(task, "plan", nextOccurrence.ordinal);
+          const nextOccurrenceBase = allocateOccurrence(task, "plan", now);
+          const contextBudget = 12_000;
+          let tokenEstimate = 0;
+          let compressedBlockCount = 0;
+          const artifactRefs = planningContextArtifactKinds("plan", task).flatMap((kind) => {
+            const artifact = latestArtifact(task, kind);
+            if (!artifact) return [];
+            const totalTokens = Math.ceil(artifact.markdown.length / 4);
+            const availableTokens = Math.max(0, contextBudget - tokenEstimate);
+            const selectedBlockCount =
+              totalTokens <= availableTokens || artifact.blockIndex.length === 0
+                ? artifact.blockIndex.length
+                : Math.max(
+                    1,
+                    Math.floor((availableTokens / totalTokens) * artifact.blockIndex.length),
+                  );
+            const blockIds = artifact.blockIndex
+              .slice(0, selectedBlockCount)
+              .map((block) => block.id);
+            tokenEstimate += Math.min(totalTokens, availableTokens);
+            compressedBlockCount += Math.max(0, artifact.blockIndex.length - blockIds.length);
+            return [
+              {
+                kind,
+                revision: artifact.revision,
+                blockIds,
+              },
+            ];
+          });
+          const bootstrap = yield* allocateStageBootstrap(
+            task,
+            "plan",
+            nextOccurrenceBase.ordinal,
+            {
+              contextManifestId: `manifest-${task.id}-plan-${nextOccurrenceBase.ordinal}`,
+            },
+          );
+          const contextManifest: TaskWorkspaceContextManifest = {
+            id: `manifest-${task.id}-plan-${nextOccurrenceBase.ordinal}`,
+            taskId: task.id,
+            sessionId: bootstrap.outboxPayload.sessionId,
+            artifactRefs,
+            notes: "Server-selected prior artifacts and reviewed Plan for request-changes.",
+            tokenEstimate,
+            budget: contextBudget,
+            summaryArtifactRef: null,
+            compressedBlockCount,
+            createdAt: bootstrap.now,
+          };
+          const nextOccurrence = {
+            ...nextOccurrenceBase,
+            feedback: command.feedback,
+            supersedesOccurrenceId: occurrence.id,
+            contextManifestId: contextManifest.id,
+          };
           const continuationTask: TaskWorkspace = {
             ...task,
             planGate: null,
+            contextManifests: [...task.contextManifests, contextManifest],
             gateHistory: [
               ...task.gateHistory,
               {
@@ -7389,6 +7566,41 @@ export const make = Effect.gen(function* () {
           });
           return persistedTask;
         }
+        const contentDigest = createHash("sha256")
+          .update(`${pending.summary}\n${pending.markdown}`)
+          .digest("hex");
+        if (
+          pending.stage !== "build" &&
+          /^[a-f0-9]{64}$/u.test(pending.payloadDigest) &&
+          pending.payloadDigest !== contentDigest
+        ) {
+          const rejectedTask: TaskWorkspace = {
+            ...task,
+            occurrences: task.occurrences.map((candidate) =>
+              candidate.id ===
+              task.occurrences.find(
+                (occurrence) =>
+                  occurrence.ordinal === input.occurrence && occurrence.stage === pending.stage,
+              )?.id
+                ? {
+                    ...candidate,
+                    status: "running" as const,
+                    completionProposalId: null,
+                  }
+                : candidate,
+            ),
+          };
+          return yield* internalAppend("task.proposal.rejected", rejectedTask, {
+            occurredAt: now,
+            proposal: {
+              ...pending,
+              status: "rejected",
+              terminalTurnOutcome: "completed",
+              rejectionReason: "The proposal-bound artifact input changed after proposal.",
+              settledAt: now,
+            },
+          });
+        }
         let taskForCompletion = task;
         // Completed Build turns settle only from server-observed canonical state.
         if (pending.stage === "build") {
@@ -8171,6 +8383,7 @@ export const make = Effect.gen(function* () {
     getActiveTaskStage,
     getActiveTaskProviderContext,
     resolveTaskCliInvocation,
+    proposeTaskCliCompletion,
     isTaskThread,
     getSnapshot: Effect.sync(() => ({
       sequence,

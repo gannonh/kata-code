@@ -139,6 +139,7 @@ jobs:
             src/components/chat/ProviderModelPicker.browser.tsx \
             src/components/chat/CompactComposerControlsMenu.browser.tsx \
             src/components/settings/SettingsPanels.browser.tsx \
+            src/components/taskWorkspace/TaskWorkspaceNewView.browser.tsx \
             src/components/taskWorkspace/TaskWorkspaceView.browser.tsx
 
   test_task_workspaces_e2e:

@@ -36,7 +36,7 @@ async function selectTaskProvider(page: Page, provider: string, model: string): 
   const agentSelect = page.getByTestId("task-agent-select");
   if ((await agentSelect.locator("option").count()) === 0) {
     throw new Error(
-      `No provider with task-stage capability is available for Guided E2E '${provider}'. Configure an eligible provider instance and rerun.`,
+      `No eligible provider is available for Guided E2E '${provider}'. Configure an enabled provider instance and rerun.`,
     );
   }
   await expect(agentSelect).toBeEnabled();

@@ -556,14 +556,14 @@ describe("ClaudeAdapterLive", () => {
         threadId: THREAD_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
-        developerInstructions: "Use task_stage_context before task data.",
+        developerInstructions: "Use katacode task context before task data.",
         taskStage: true,
       });
 
       assert.deepEqual(harness.getLastCreateQueryInput()?.options.systemPrompt, {
         type: "preset",
         preset: "claude_code",
-        append: "Use task_stage_context before task data.",
+        append: "Use katacode task context before task data.",
       });
       const options = harness.getLastCreateQueryInput()?.options;
       assert.equal(options?.permissionMode, undefined);
