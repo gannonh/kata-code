@@ -42,18 +42,6 @@ interface ManagedSession {
 }
 
 const sessionsByFile = new Map<string, ManagedSession>();
-const seedByFile = new Map<string, (context: E2ERunContext) => Promise<void>>();
-
-export function registerFileSessionSeed(
-  fileKey: string,
-  seed: (context: E2ERunContext) => Promise<void>,
-): void {
-  seedByFile.set(fileKey, seed);
-}
-
-async function applyFileSessionSeed(fileKey: string, context: E2ERunContext): Promise<void> {
-  await seedByFile.get(fileKey)?.(context);
-}
 
 async function authenticateSession(page: Page): Promise<void> {
   logHarnessPhase("Signing in with Clerk Google test user...");
@@ -70,7 +58,6 @@ async function bootDesktopSession(project: AppProject, fileKey: string): Promise
   });
   await writeRunManifest(runContext);
   try {
-    await applyFileSessionSeed(fileKey, runContext);
     const launchedApp = await launchApp(runContext);
     await waitForAppEnvironmentReady(launchedApp.window, runContext);
     let authentication: Promise<Page> | undefined;
@@ -101,7 +88,6 @@ async function bootWebSession(project: AppProject, fileKey: string): Promise<E2E
   let browser: Browser | undefined;
   let browserContext: BrowserContext | undefined;
   try {
-    await applyFileSessionSeed(fileKey, runContext);
     const { pairingUrl } = await startWebDevStack(runContext);
     browser = await chromium.launch();
     browserContext = await browser.newContext();
