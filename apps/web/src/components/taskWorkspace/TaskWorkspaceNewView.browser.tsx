@@ -57,8 +57,7 @@ const mocks = vi.hoisted(() => ({
       status: "ready",
       availability: "available",
       supportsTaskStage: true,
-      // Task-stage tools without worktree-write enforcement cannot run the
-      // guided@0.3.0 Implement stage.
+      // Planning no longer requires worktree-write; Implement still does.
       supportsTaskWorktreeWrite: false,
       auth: { status: "authenticated" },
       checkedAt: "2026-08-01T00:00:00.000Z",
@@ -80,6 +79,28 @@ const mocks = vi.hoisted(() => ({
               },
             ],
           },
+        },
+      ],
+    },
+    {
+      instanceId: "instance-3",
+      driver: "pi",
+      displayName: "Pi",
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready",
+      availability: "available",
+      supportsTaskStage: false,
+      supportsTaskWorktreeWrite: false,
+      auth: { status: "authenticated" },
+      checkedAt: "2026-08-01T00:00:00.000Z",
+      models: [
+        {
+          slug: "openrouter/free",
+          name: "OpenRouter Free",
+          isCustom: false,
+          capabilities: { optionDescriptors: [] },
         },
       ],
     },
@@ -177,25 +198,22 @@ describe("TaskWorkspaceNewView", () => {
       .toHaveTextContent("Freeform · freeform@0.2.0");
   });
 
-  it("excludes providers without worktree-write enforcement from Guided creation", async () => {
+  it("includes enabled planning providers in Guided creation without task-stage or worktree-write", async () => {
     await renderNewView();
 
-    // Guided (the default preset) may only select agents that can enforce
-    // task-worktree-write for the guided@0.3.0 Implement stage.
     const agentSelect = page.getByTestId("task-agent-select");
     await expect.element(agentSelect).toBeVisible();
     await expect.element(agentSelect).toHaveValue("instance-1");
     const guidedOptions = Array.from(agentSelect.element().querySelectorAll("option")).map(
       (option) => option.value,
     );
-    expect(guidedOptions).toEqual(["instance-1"]);
+    expect(guidedOptions).toEqual(["instance-1", "instance-2", "instance-3"]);
 
-    // Standard admits every provider: Claude becomes selectable again.
     await page.getByTestId("task-workflow-option-standard").click();
     const standardOptions = Array.from(agentSelect.element().querySelectorAll("option")).map(
       (option) => option.value,
     );
-    expect(standardOptions).toEqual(["instance-1", "instance-2"]);
+    expect(standardOptions).toEqual(["instance-1", "instance-2", "instance-3"]);
   });
 
   it("preserves a selected model option while creating a task", async () => {

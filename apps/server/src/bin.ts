@@ -69,7 +69,7 @@ export const runKatacodeCli = (
   Effect.gen(function* () {
     const rejection = inspectTaskCliInvocationArgs(args);
     if (rejection !== undefined) {
-      return yield* failTaskCliInvalidRequest(rejection);
+      return yield* failTaskCliInvalidRequest(rejection.message, rejection.operation);
     }
     yield* Command.runWith(command, { version })(args);
   });

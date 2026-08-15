@@ -22,7 +22,6 @@ import {
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   TASK_CLI_ENDPOINT_ENVIRONMENT_KEY,
-  TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY,
   TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
   type ProviderInstanceId,
   type ProviderDriverKind,
@@ -30,6 +29,7 @@ import {
   type ProviderSession,
   type ProviderSessionEnvironment,
 } from "@kata-sh/code-contracts";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -62,6 +62,10 @@ import { ServerEnvironment } from "../../environment/Services/ServerEnvironment.
 import { readPersistedServerRuntimeState } from "../../serverRuntimeState.ts";
 import { TaskInvocationService } from "../../taskCli/TaskInvocationService.ts";
 import {
+  ensureTaskCliInvocationPath,
+  resolveTaskCliLaunchTarget,
+} from "../../taskCli/taskCliInvocationPath.ts";
+import {
   supportsTaskWorktreeWrite,
   type ProviderAdapterShape,
 } from "../Services/ProviderAdapter.ts";
@@ -84,7 +88,6 @@ import {
 import type { TaskWorkspaceStage } from "@kata-sh/code-contracts";
 // @effect-diagnostics nodeBuiltinImport:off - provider CLI executable discovery uses the launch path.
 import { randomUUID } from "node:crypto";
-import * as NodePath from "node:path";
 import { trustedInstructionsForStage } from "../../taskWorkspace/taskStageInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
@@ -309,6 +312,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly providerTurnId?: TurnId;
     }
   >();
+  const isSessionInjectedTaskCliGeneration = (generation: string) =>
+    generation === "session-pending" || generation === "recovery-pending";
+  const reuseSessionInjectedTaskCliEnvironment = (input: {
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+  }) => {
+    const existing = taskTurnCredentials.get(input.threadId);
+    if (
+      existing === undefined ||
+      existing.providerInstanceId !== input.providerInstanceId ||
+      !isSessionInjectedTaskCliGeneration(existing.sessionGeneration)
+    ) {
+      return undefined;
+    }
+    return {
+      token: existing.token,
+      leaseTurnId: existing.leaseTurnId,
+      environment: existing.environment,
+    } as const;
+  };
   const mcpRotationLocksRef = yield* SynchronizedRef.make(
     new Map<string, { readonly semaphore: Semaphore.Semaphore; readonly users: number }>(),
   );
@@ -353,16 +376,17 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     }),
   );
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-  const taskCliExecutable =
-    process.env[TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY]?.trim() || process.argv[1] || "katacode";
-  const resolvedTaskCliExecutable = NodePath.isAbsolute(taskCliExecutable)
-    ? taskCliExecutable
-    : taskCliExecutable.includes("/") || taskCliExecutable.includes("\\")
-      ? NodePath.resolve(taskCliExecutable)
-      : taskCliExecutable;
-  const taskCliDirectory = NodePath.isAbsolute(resolvedTaskCliExecutable)
-    ? NodePath.dirname(resolvedTaskCliExecutable)
-    : undefined;
+  const hostPlatform = yield* HostProcessPlatform;
+  const serverConfigForCli = yield* Effect.serviceOption(ServerConfig);
+  const taskCliInvocationPath = Option.match(serverConfigForCli, {
+    onNone: () => ({
+      executablePath: resolveTaskCliLaunchTarget().entry,
+      pathPrepend: [] as const,
+    }),
+    onSome: (config) =>
+      ensureTaskCliInvocationPath({ stateDir: config.stateDir, platform: hostPlatform }),
+  });
+  const resolvedTaskCliExecutable = taskCliInvocationPath.executablePath;
   const taskCliEnvironmentForTurn = (input: {
     readonly threadId: ThreadId;
     readonly providerInstanceId: ProviderInstanceId;
@@ -427,7 +451,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             [TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY]: issued.token,
           },
           executablePath: resolvedTaskCliExecutable,
-          pathPrepend: taskCliDirectory === undefined ? [] : [taskCliDirectory],
+          pathPrepend: [...taskCliInvocationPath.pathPrepend],
         },
       };
     }).pipe(
@@ -521,9 +545,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (
           scope?.threadId === threadId &&
           scope.providerInstanceId === providerInstanceId &&
-          (!taskStage ||
-            (scope.capabilities.has("task-stage") &&
-              (activeStage !== "build" || scope.capabilities.has("task-implementation"))))
+          (!taskStage || activeStage !== "build" || scope.capabilities.has("task-implementation"))
         ) {
           return { rotated: false } as const;
         }
@@ -703,7 +725,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
         ...(input.environment ? { environment: input.environment } : {}),
-        taskStage: activeTaskStage !== undefined,
+        taskStage: activeTaskStage === "build",
         taskExecutionProfile,
         ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
         ...(binding.resumeCursor !== null && binding.resumeCursor !== undefined
@@ -864,7 +886,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       yield* prepareMcpSession(
         input.binding.threadId,
         bindingInstanceId,
-        activeTaskStage !== undefined,
+        activeTaskStage === "build",
       );
       const resumedTaskEnvironment =
         activeTaskStage !== undefined
@@ -901,7 +923,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
           ...(resumedTaskEnvironment ? { environment: resumedTaskEnvironment.environment } : {}),
-          taskStage: activeTaskStage !== undefined,
+          taskStage: activeTaskStage === "build",
           taskExecutionProfile,
           ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
@@ -1162,7 +1184,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const sessionWithInstance = yield* withMcpRotationLock(
           threadId,
           Effect.gen(function* () {
-            yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage !== undefined);
+            yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage === "build");
             const startedTaskEnvironment =
               activeTaskStage !== undefined
                 ? yield* taskCliEnvironmentForTurn({
@@ -1203,7 +1225,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                     : {}),
                 ...(developerInstructions ? { developerInstructions } : {}),
                 ...(sessionEnvironment ? { environment: sessionEnvironment } : {}),
-                taskStage: activeTaskStage !== undefined,
+                taskStage: activeTaskStage === "build",
                 taskExecutionProfile: activeTaskProfile,
                 ...(activeTaskContext
                   ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot }
@@ -1319,8 +1341,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ),
       );
       // Keep the provider's native Plan mode out of Guided task stages. Kata
-      // owns the stage lifecycle and completion tool; provider-native plan
-      // cards cannot complete a task-stage occurrence.
+      // owns the stage lifecycle; provider-native plan cards cannot complete a
+      // planning occurrence. Planning uses `katacode task complete`.
       const activeTaskStage = yield* activeTaskStageForThread(input.threadId);
       const activeTaskContext =
         activeTaskStage === "build"
@@ -1349,10 +1371,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           : {
               ...input,
               ...(activeTaskContext ? { modelSelection: activeTaskContext.modelSelection } : {}),
-              ...(activeTaskContext
-                ? { developerInstructions: trustedInstructionsForStage("build") }
-                : {}),
-              taskStage: true,
+              developerInstructions: trustedInstructionsForStage(activeTaskStage),
+              taskStage: activeTaskStage === "build",
               taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
               interactionMode: providerInteractionMode ?? "default",
             };
@@ -1361,12 +1381,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
       const isTaskTurn = shouldSerializeTaskTurn;
-      const taskEnvironment = isTaskTurn
-        ? yield* taskCliEnvironmentForTurn({
+      const reusedTaskEnvironment = isTaskTurn
+        ? reuseSessionInjectedTaskCliEnvironment({
             threadId: input.threadId,
             providerInstanceId: routed.instanceId,
           })
         : undefined;
+      const issuedTaskEnvironment =
+        isTaskTurn && reusedTaskEnvironment === undefined
+          ? yield* taskCliEnvironmentForTurn({
+              threadId: input.threadId,
+              providerInstanceId: routed.instanceId,
+            })
+          : undefined;
+      const taskEnvironment = reusedTaskEnvironment ?? issuedTaskEnvironment;
       if (taskEnvironment) {
         taskTurnCredentials.set(input.threadId, {
           token: taskEnvironment.token,
@@ -1385,9 +1413,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const mcpPreparation = yield* prepareMcpSession(
           input.threadId,
           routed.instanceId,
-          activeTaskStage !== undefined,
+          activeTaskStage === "build",
         );
-        if (mcpPreparation.rotated || taskEnvironment) {
+        if (mcpPreparation.rotated || issuedTaskEnvironment) {
           yield* restartSessionForMcpCredential({
             threadId: input.threadId,
             providerInstanceId: routed.instanceId,

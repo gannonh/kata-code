@@ -27,6 +27,8 @@ import {
 import { createModelSelection } from "@kata-sh/code-shared/model";
 import { it, assert, vi } from "@effect/vitest";
 
+import { ServerConfig } from "../../config.ts";
+
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -1990,6 +1992,116 @@ validation.layer("ProviderServiceLive validation", (it) => {
   );
 });
 
+it.effect("reuses the startSession Task CLI token on the first sendTurn", () =>
+  Effect.gen(function* () {
+    const fixture = yield* makeTaskCliProcessFixture();
+    const environmentId = fixture.task.environmentId;
+    if (environmentId === null) {
+      throw new Error("Task CLI fixture is missing an environment id.");
+    }
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kata-provider-task-cli-first-turn-"));
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => fs.rmSync(tempDir, { recursive: true, force: true })),
+    );
+    const persistenceLayer = makeSqlitePersistenceLive(path.join(tempDir, "orchestration.sqlite"));
+    const httpServerLayer = Layer.succeed(
+      HttpServer.HttpServer,
+      HttpServer.make({
+        serve: () => Effect.void,
+        address: { _tag: "TcpAddress", hostname: "127.0.0.1", port: 13773 },
+      }),
+    );
+    const environmentLayer = Layer.succeed(ServerEnvironment, {
+      getEnvironmentId: Effect.succeed(environmentId),
+      getDescriptor: Effect.succeed({
+        environmentId,
+        label: "task-cli-first-turn",
+        platform: { os: "darwin", arch: "arm64" },
+        serverVersion: "0.0.0",
+        capabilities: { repositoryIdentity: true },
+      }),
+    } satisfies ServerEnvironmentShape);
+    const adapter = makeFakeCodexAdapter();
+    const defaultCodexAdapter = makeFakeCodexAdapter();
+    const registryBase = makeAdapterRegistryMock({
+      [CODEX_DRIVER]: defaultCodexAdapter.adapter,
+    });
+    const registry: ProviderAdapterRegistryShape = {
+      ...registryBase,
+      getByInstance: (instanceId) =>
+        instanceId === fixture.providerInstanceId
+          ? Effect.succeed(adapter.adapter)
+          : registryBase.getByInstance(instanceId),
+      getInstanceInfo: (instanceId) =>
+        instanceId === fixture.providerInstanceId
+          ? Effect.succeed({
+              instanceId,
+              driverKind: CODEX_DRIVER,
+              displayName: undefined,
+              enabled: true,
+              continuationIdentity: {
+                driverKind: CODEX_DRIVER,
+                continuationKey: `${CODEX_DRIVER}:instance:${instanceId}`,
+              },
+            })
+          : registryBase.getInstanceInfo(instanceId),
+    };
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(
+      Layer.provide(ProviderSessionRuntimeRepositoryLive.pipe(Layer.provide(persistenceLayer))),
+    );
+    const invocationLayer = TaskInvocationServiceLive.pipe(
+      Layer.provideMerge(Layer.succeed(TaskWorkspaceService, fixture.taskService)),
+      Layer.provideMerge(directoryLayer),
+      Layer.provideMerge(persistenceLayer),
+    );
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+      Layer.provide(directoryLayer),
+      Layer.provideMerge(invocationLayer),
+      Layer.provideMerge(environmentLayer),
+      Layer.provideMerge(httpServerLayer),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    );
+    const scope = yield* Scope.make();
+    yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+    const context = yield* Layer.buildWithScope(providerLayer, scope);
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      yield* provider.startSession(fixture.threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: fixture.providerInstanceId,
+        threadId: fixture.threadId,
+        cwd: "/tmp/project-task-cli-first-turn",
+        runtimeMode: "full-access",
+      });
+      yield* provider.sendTurn({
+        threadId: fixture.threadId,
+        input: "Start Clarify.",
+        attachments: [],
+      });
+    }).pipe(Effect.provide(context));
+
+    assert.equal(adapter.startSession.mock.calls.length, 1);
+    assert.equal(adapter.stopSession.mock.calls.length, 0);
+    assert.equal(adapter.sendTurn.mock.calls.length, 1);
+    const startEnv = (
+      adapter.startSession.mock.calls[0]?.[0] as {
+        environment?: { variables: Record<string, string> };
+      }
+    ).environment?.variables;
+    const sendEnv = (
+      adapter.sendTurn.mock.calls[0]?.[0] as {
+        environment?: { variables: Record<string, string> };
+      }
+    ).environment?.variables;
+    const startToken = startEnv?.[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+    assert.ok(startToken);
+    assert.equal(sendEnv?.[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY], startToken);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped as never),
+);
+
 it.effect("reinjects Task CLI environment and a fresh token after ProviderService resume", () =>
   Effect.gen(function* () {
     const fixture = yield* makeTaskCliProcessFixture();
@@ -2048,8 +2160,8 @@ it.effect("reinjects Task CLI environment and a fresh token after ProviderServic
         Layer.provide(ProviderSessionRuntimeRepositoryLive.pipe(Layer.provide(persistenceLayer))),
       );
       const invocationLayer = TaskInvocationServiceLive.pipe(
-        Layer.provide(Layer.succeed(TaskWorkspaceService, fixture.taskService)),
-        Layer.provide(directoryLayer),
+        Layer.provideMerge(Layer.succeed(TaskWorkspaceService, fixture.taskService)),
+        Layer.provideMerge(directoryLayer),
         Layer.provideMerge(persistenceLayer),
       );
       return {
@@ -2061,6 +2173,7 @@ it.effect("reinjects Task CLI environment and a fresh token after ProviderServic
           Layer.provideMerge(invocationLayer),
           Layer.provideMerge(environmentLayer),
           Layer.provideMerge(httpServerLayer),
+          Layer.provide(ServerConfig.layerTest(tempDir, tempDir)),
           Layer.provide(defaultServerSettingsLayer),
           Layer.provide(AnalyticsService.layerTest),
           Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
@@ -2097,7 +2210,7 @@ it.effect("reinjects Task CLI environment and a fresh token after ProviderServic
       "http://127.0.0.1:13773",
     );
     assert.ok((firstInput.environment?.pathPrepend.length ?? 0) > 0);
-    assert.ok((firstInput.environment?.executablePath ?? "").length > 0);
+    assert.ok((firstInput.environment?.executablePath ?? "").endsWith("/katacode"));
     assert.equal(firstInput.resumeCursor, undefined);
     yield* Scope.close(firstScope, Exit.void);
 

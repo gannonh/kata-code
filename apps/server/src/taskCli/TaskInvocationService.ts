@@ -4,6 +4,7 @@ import {
   TaskCliErrorCode,
   TaskInvocationLease,
   TaskInvocationScope,
+  TaskStageCompletionAck,
   TaskStageContextResult,
   TaskWorkspaceError,
   TaskWorkspaceId,
@@ -86,6 +87,11 @@ export interface TaskInvocationServiceShape {
   readonly resolve: (
     rawToken: string,
   ) => Effect.Effect<TaskInvocationResolution, TaskInvocationError>;
+  readonly complete: (input: {
+    readonly token: string;
+    readonly summary: string;
+    readonly markdown: string;
+  }) => Effect.Effect<TaskStageCompletionAck, TaskInvocationError>;
   readonly revokeThread: (threadId: ThreadId) => Effect.Effect<void, TaskInvocationError>;
   readonly revokeTurn: (input: {
     readonly threadId: ThreadId;
@@ -103,8 +109,6 @@ export class TaskInvocationService extends Context.Service<
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
-  const sessions = yield* Effect.serviceOption(ProviderSessionDirectory);
-  const taskWorkspace = yield* Effect.serviceOption(TaskWorkspaceService);
   const ownerGeneration = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
   const claimedAt = DateTime.formatIso(yield* DateTime.now);
   yield* sql`
@@ -195,16 +199,30 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // Resolve optional collaborators at call time. TaskInvocationServiceLive is
+  // constructed before TaskWorkspaceService is in the runtime layer graph.
   const currentBinding = (scope: TaskInvocationScopeValue) =>
-    Option.isNone(sessions)
-      ? Effect.succeed(Option.none<ProviderRuntimeBinding>())
-      : sessions.value
-          .getBinding(scope.threadId)
-          .pipe(
-            Effect.mapError((cause) =>
-              toError("internal_error", "Failed to read provider turn state.", cause),
-            ),
-          );
+    Effect.gen(function* () {
+      const sessions = yield* Effect.serviceOption(ProviderSessionDirectory);
+      if (Option.isNone(sessions)) {
+        return Option.none<ProviderRuntimeBinding>();
+      }
+      return yield* sessions.value
+        .getBinding(scope.threadId)
+        .pipe(
+          Effect.mapError((cause) =>
+            toError("internal_error", "Failed to read provider turn state.", cause),
+          ),
+        );
+    });
+
+  const requireTaskWorkspace = Effect.gen(function* () {
+    const taskWorkspace = yield* Effect.serviceOption(TaskWorkspaceService);
+    if (Option.isNone(taskWorkspace)) {
+      return yield* toError("internal_error", "The Task workflow service is unavailable.");
+    }
+    return taskWorkspace.value;
+  });
 
   const reconcileStartupLeases = Effect.gen(function* () {
     // Persisted provider bindings do not prove continuity across a process
@@ -238,17 +256,19 @@ const make = Effect.gen(function* () {
     readonly providerInstanceId: ProviderInstanceId;
     readonly providerTurnId: TurnId;
   }) =>
-    Option.isNone(taskWorkspace)
-      ? Effect.fail(toError("internal_error", "The Task workflow service is unavailable."))
-      : taskWorkspace.value
-          .resolveTaskCliInvocation(scope)
-          .pipe(
-            Effect.mapError((cause) =>
-              isTaskWorkspaceError(cause) && cause.commandType === "task.cli.context"
-                ? toError("not_active", cause.message, cause)
-                : toError("internal_error", cause.message, cause),
-            ),
-          );
+    Effect.gen(function* () {
+      const taskWorkspace = yield* requireTaskWorkspace;
+      return yield* taskWorkspace
+        .resolveTaskCliInvocation(scope)
+        .pipe(
+          Effect.mapError((cause) =>
+            isTaskWorkspaceError(cause) &&
+            (cause.commandType === "task.cli.context" || cause.commandType === "task.cli.complete")
+              ? toError("not_active", cause.message, cause)
+              : toError("internal_error", cause.message, cause),
+          ),
+        );
+    });
 
   const bindingHasTurn = (
     binding: Option.Option<ProviderRuntimeBinding>,
@@ -513,6 +533,66 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const mapCompleteError = (cause: unknown): TaskInvocationError => {
+    if (cause instanceof TaskInvocationError) return cause;
+    const message = isTaskWorkspaceError(cause) ? cause.message : String(cause);
+    const lower = message.toLowerCase();
+    if (lower.includes("too large") || lower.includes("maximum is")) {
+      return toError("payload_too_large", message, cause);
+    }
+    if (lower.includes("different completion proposal")) {
+      return toError("conflict", message, cause);
+    }
+    if (
+      lower.includes("artifact markdown") ||
+      lower.includes("summary is required") ||
+      lower.includes("markdown is required") ||
+      (lower.includes("plan") &&
+        (lower.includes("invalid") ||
+          lower.includes("expected") ||
+          lower.includes("must") ||
+          lower.includes("missing")))
+    ) {
+      return toError("invalid_artifact", message, cause);
+    }
+    if (
+      lower.includes("planning completion requires") ||
+      lower.includes("specify --summary") ||
+      lower.includes("malformed")
+    ) {
+      return toError("invalid_request", message, cause);
+    }
+    if (
+      lower.includes("not active") ||
+      lower.includes("no active") ||
+      lower.includes("is not the active") ||
+      lower.includes("cannot accept a proposal")
+    ) {
+      return toError("not_active", message, cause);
+    }
+    if (lower.includes("not authorized") || lower.includes("unauthorized")) {
+      return toError("unauthorized", message, cause);
+    }
+    return toError("internal_error", message, cause);
+  };
+
+  const complete: TaskInvocationServiceShape["complete"] = Effect.fn(
+    "TaskInvocationService.complete",
+  )(function* (input) {
+    const resolved = yield* resolve(input.token);
+    const taskWorkspace = yield* requireTaskWorkspace;
+    return yield* taskWorkspace
+      .proposeTaskCliCompletion({
+        environmentId: resolved.scope.environmentId,
+        threadId: resolved.scope.threadId,
+        providerInstanceId: resolved.scope.providerInstanceId,
+        providerTurnId: resolved.scope.providerTurnId,
+        summary: input.summary,
+        markdown: input.markdown,
+      })
+      .pipe(Effect.mapError(mapCompleteError));
+  });
+
   const revokeThread: TaskInvocationServiceShape["revokeThread"] = (threadId) =>
     Effect.gen(function* () {
       const revokedAt = DateTime.formatIso(yield* DateTime.now);
@@ -585,6 +665,7 @@ const make = Effect.gen(function* () {
     issue,
     bind,
     resolve,
+    complete,
     revokeThread,
     revokeTurn,
     revokeAll,

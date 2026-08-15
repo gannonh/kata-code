@@ -42,7 +42,7 @@ export interface ProviderAdapterCapabilities {
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
-  /** The provider can load Kata's task-stage MCP tools for Guided workflows. */
+  /** The provider can load Kata's Implement-stage MCP tools for Guided workflows. */
   readonly supportsTaskStage?: boolean;
   /** Explicit adapter attestation for the server-owned write profile. */
   readonly taskExecution?: ProviderTaskExecutionCapabilities;

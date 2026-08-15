@@ -17,17 +17,14 @@ import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
 } from "./toolkits/preview/handlers.ts";
-import { TaskStageToolkitHandlersLive } from "./toolkits/taskStage/handlers.ts";
 import { TaskImplementationToolkitHandlersLive } from "./toolkits/taskImplementation/handlers.ts";
 import {
   PreviewSnapshotTool,
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
-import { TaskStageToolkit } from "./toolkits/taskStage/tools.ts";
 import { TaskImplementationToolkit } from "./toolkits/taskImplementation/tools.ts";
 import { TaskImplementationBridgeLive } from "../taskWorkspace/TaskImplementationBridge.ts";
-import { TaskStageBridgeLive } from "../taskWorkspace/TaskStageBridge.ts";
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -180,9 +177,6 @@ const PreviewSnapshotRegistrationLive = Layer.effectDiscard(registerPreviewSnaps
   Layer.provide(PreviewSnapshotToolkitHandlersLive),
 );
 
-const TaskStageToolkitRegistrationLive = McpServer.toolkit(TaskStageToolkit).pipe(
-  Layer.provide(TaskStageToolkitHandlersLive),
-);
 const TaskImplementationToolkitRegistrationLive = McpServer.toolkit(TaskImplementationToolkit).pipe(
   Layer.provide(TaskImplementationToolkitHandlersLive),
 );
@@ -192,9 +186,6 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 );
 
-export const TaskStageRegistrationLive = TaskStageToolkitRegistrationLive.pipe(
-  Layer.provide(TaskStageBridgeLive),
-);
 export const TaskImplementationRegistrationLive = TaskImplementationToolkitRegistrationLive.pipe(
   Layer.provide(TaskImplementationBridgeLive),
 );
@@ -207,6 +198,5 @@ const McpTransportLive = McpServer.layerHttp({
 
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
-  TaskStageRegistrationLive,
   TaskImplementationRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive), Layer.provide(PreviewAutomationBroker.layer));

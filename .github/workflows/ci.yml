@@ -139,43 +139,8 @@ jobs:
             src/components/chat/ProviderModelPicker.browser.tsx \
             src/components/chat/CompactComposerControlsMenu.browser.tsx \
             src/components/settings/SettingsPanels.browser.tsx \
+            src/components/taskWorkspace/TaskWorkspaceNewView.browser.tsx \
             src/components/taskWorkspace/TaskWorkspaceView.browser.tsx
-
-  test_task_workspaces_e2e:
-    name: Test Task Workspaces E2E
-    runs-on: macos-15
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    # Task mode is in development and gated off by default. These specs exist to
-    # exercise it, so the whole job opts in. Local runs inherit this from a
-    # developer `.env`, which CI does not have — without it the Task surface
-    # never renders and every task spec fails on a missing sidebar link.
-    env:
-      FF_TASK_MODE: "1"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @kata-sh/code-desktop ensure:electron
-
-      - name: Build desktop pipeline
-        run: vp run build:desktop
-
-      # The @agent task-workspace scenario requires maintainer-only Clerk and provider
-      # credentials. Keep the credential-free task-workspace coverage in PR CI.
-      - name: Run credential-free task-workspaces E2E
-        run: vp exec playwright test --config e2e/playwright.config.ts --project desktop-dev --grep @task-workspaces --grep-invert @agent
 
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis

@@ -3392,17 +3392,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           return yield* handleAskUserQuestion(context, toolInput, callbackOptions);
         }
 
-        if (
-          context.taskStage &&
-          (toolName === `mcp__${MCP_SERVER_NAME}__task_stage_context` ||
-            toolName === `mcp__${MCP_SERVER_NAME}__task_stage_complete`)
-        ) {
-          return {
-            behavior: "allow",
-            updatedInput: toolInput,
-          } satisfies PermissionResult;
-        }
-
         if (toolName === "ExitPlanMode") {
           const planMarkdown = extractExitPlanModePlan(toolInput);
           if (planMarkdown) {

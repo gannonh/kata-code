@@ -8,10 +8,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import { HttpServer } from "effect/unstable/http";
 
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
-import {
-  authorizeActiveTaskImplementation,
-  authorizeActiveTaskStage,
-} from "../taskWorkspace/TaskWorkspaceService.ts";
+import { authorizeActiveTaskImplementation } from "../taskWorkspace/TaskWorkspaceService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 
@@ -94,7 +91,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const pruneExpired = (records: ReadonlyMap<string, CredentialRecord>, timestamp: number) => {
     const next = new Map(
       Array.from(records).filter(([, record]) => {
-        const lease = record.scope.capabilities.has("task-stage")
+        const lease = record.scope.capabilities.has("task-implementation")
           ? taskStageIdleTimeoutMs
           : idleTimeoutMs;
         return timestamp <= record.scope.expiresAt && timestamp - record.lastUsedAt <= lease;
@@ -112,20 +109,13 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       const expiresAt = issuedAt + maximumLifetimeMs;
       const threadId = ThreadId.make(request.threadId);
       const providerInstanceId = ProviderInstanceId.make(request.providerInstanceId);
-      const taskStageAuthorized = yield* authorizeActiveTaskStage({
+      const implementationAuthorized = yield* authorizeActiveTaskImplementation({
         environmentId,
         threadId,
         providerInstanceId,
       });
-      const implementationAuthorized = taskStageAuthorized
-        ? yield* authorizeActiveTaskImplementation({ environmentId, threadId, providerInstanceId })
-        : false;
       const capabilities: ReadonlySet<McpInvocationContext.McpCapability> = new Set(
-        implementationAuthorized
-          ? ["preview", "task-stage", "task-implementation"]
-          : taskStageAuthorized
-            ? ["preview", "task-stage"]
-            : ["preview"],
+        implementationAuthorized ? ["preview", "task-implementation"] : ["preview"],
       );
       const scope: McpInvocationContext.McpInvocationScope = {
         environmentId,

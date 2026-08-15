@@ -62,9 +62,9 @@ Set `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and
 `models.json` and does not register the model as custom, so model selection proves the installed Pi
 catalog discovered it.
 
-Pi is not currently eligible for Guided task-workspace E2E because its adapter does not implement
-the task-stage MCP bridge. Use the task-stage-capable provider configured by
-`KATACODE_E2E_AGENT_PROVIDER` for `@task-workspaces`.
+Pi can run Guided planning through the Task CLI. Full `@task-workspaces` E2E still
+needs a worktree-write-capable provider for Implement after Plan approval. Use the
+provider configured by `KATACODE_E2E_AGENT_PROVIDER`.
 
 ### Cursor skill tests (`@cursor`)
 
@@ -186,16 +186,16 @@ On macOS, Playwright Electron launches always open a visible app window. **`e2e:
 
 ### Feature tags
 
-| Tag             | Coverage                                                  |
-| --------------- | --------------------------------------------------------- |
-| `@smoke`        | App launch, pairing, and shell surface                    |
-| `@auth`         | Clerk Google test-user sign-in                            |
-| `@settings`     | Settings theme persistence                                |
-| `@agent`        | Real LLM deterministic reply                              |
-| `@pi`           | Real Pi provider lifecycle                                |
-| `@pi-update`    | Built-in Pi catalog discovery and real-model reply        |
-| `@cursor`       | Cursor skill discovery and invocation                     |
-| `@task-mode-ux` | Dev-only accepted Prototype A Task shell and history flow |
+| Tag                | Coverage                                                 |
+| ------------------ | -------------------------------------------------------- |
+| `@smoke`           | App launch, pairing, and shell surface                   |
+| `@auth`            | Clerk Google test-user sign-in                           |
+| `@settings`        | Settings theme persistence                               |
+| `@agent`           | Real LLM deterministic reply                             |
+| `@pi`              | Real Pi provider lifecycle                               |
+| `@pi-update`       | Built-in Pi catalog discovery and real-model reply       |
+| `@cursor`          | Cursor skill discovery and invocation                    |
+| `@task-workspaces` | Guided Task create through approved Plan (also `@agent`) |
 
 Filter with `--grep`, for example `vp run e2e --project desktop-dev --grep @settings`.
 

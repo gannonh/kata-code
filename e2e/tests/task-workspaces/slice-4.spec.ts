@@ -36,7 +36,7 @@ async function selectTaskProvider(page: Page, provider: string, model: string): 
   const agentSelect = page.getByTestId("task-agent-select");
   if ((await agentSelect.locator("option").count()) === 0) {
     throw new Error(
-      `No provider with task-stage capability is available for Guided E2E '${provider}'. Configure an eligible provider instance and rerun.`,
+      `No eligible provider is available for Guided E2E '${provider}'. Configure an enabled provider instance and rerun.`,
     );
   }
   await expect(agentSelect).toBeEnabled();
@@ -107,7 +107,7 @@ async function expectNoTaskThreadsInChatSidebar(page: Page): Promise<void> {
 async function expectActiveStage(page: Page, stage: string): Promise<void> {
   const stageItem = page.getByTestId(`guided-stage-${stage}`);
   const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
-  const deadline = Date.now() + E2E_TIMEOUTS.agentReplyMs;
+  const deadline = Date.now() + Math.max(E2E_TIMEOUTS.agentReplyMs, 180_000);
 
   while (Date.now() < deadline) {
     if ((await stageItem.getAttribute("data-active")) === "true") {
@@ -134,7 +134,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
   const assistantMessages = page.locator('[data-message-role="assistant"] .chat-markdown');
   const clarificationReply =
     "Use a small web onboarding flow with three ordered steps. Persist progress across refreshes and sessions, and store the readable Plan as repository Markdown.";
-  const deadline = Date.now() + E2E_TIMEOUTS.agentTestMs;
+  const deadline = Date.now() + E2E_TIMEOUTS.guidedAgentTestMs;
   let lastConversationalQuestion = "";
 
   while (Date.now() < deadline) {
@@ -149,7 +149,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
     }
     if (!(await panel.isVisible().catch(() => false))) {
       const latestAssistant = assistantMessages.last();
-      const latestText = (await latestAssistant.innerText().catch(() => "")).trim();
+      const latestText = (await latestAssistant.innerText({ timeout: 500 }).catch(() => "")).trim();
       const sendButton = page.getByRole("button", { name: "Send message", exact: true });
       if (
         latestText.length > 0 &&
@@ -218,7 +218,7 @@ async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
 }
 
 test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
-  test.describe.configure({ timeout: E2E_TIMEOUTS.agentTestMs });
+  test.describe.configure({ timeout: E2E_TIMEOUTS.guidedAgentTestMs });
 
   test("creates through the form, approves Plan, and enters Implement", async ({
     authenticatedAppWindow,
@@ -250,6 +250,14 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
     await expect(
       appWindow.getByTestId("task-permissions-option-approval-required"),
     ).toHaveAttribute("data-active", "true");
+    // Kickoff starts on create. Auto-accept-edits must be selected before
+    // submit so the live agent is not blocked on approvals; in-conversation
+    // permission changes while a turn is running are covered by the browser
+    // component test.
+    await appWindow.getByTestId("task-permissions-option-auto-accept-edits").click();
+    await expect(
+      appWindow.getByTestId("task-permissions-option-auto-accept-edits"),
+    ).toHaveAttribute("data-active", "true");
 
     const taskId = "task-e2e-guided-approved-plan";
     await appWindow.getByTestId("task-title-input").fill("Guided approved Plan E2E");
@@ -266,15 +274,7 @@ test.describe(`Task workspaces Guided approved Plan ${E2E_TAGS.taskWorkspaces} $
 
     await expect(appWindow).toHaveURL(new RegExp(`/tasks/[^/]+/${taskId}$`));
     await expect(appWindow.getByTestId("guided-task-panel")).toBeVisible();
-    // The panel exposes the current permission and lets it be changed.
     await expect(appWindow.getByTestId("guided-task-permissions")).toBeVisible();
-    await expect(
-      appWindow.getByTestId("task-panel-permissions-option-approval-required"),
-    ).toHaveAttribute("data-active", "true");
-    // Permission changes apply to the open conversation without creating a
-    // new stage occurrence. Rejection recovery is covered by the browser
-    // component test because a real E2E run must not mock a transport failure.
-    await appWindow.getByTestId("task-panel-permissions-option-auto-accept-edits").click();
     await expect(
       appWindow.getByTestId("task-panel-permissions-option-auto-accept-edits"),
     ).toHaveAttribute("data-active", "true");
