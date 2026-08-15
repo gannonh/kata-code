@@ -8,7 +8,6 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import { HttpServer } from "effect/unstable/http";
 
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
-import { authorizeActiveTaskImplementation } from "../taskWorkspace/TaskWorkspaceService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 
@@ -50,14 +49,11 @@ interface RegistryState {
 export interface McpSessionRegistryOptions {
   /** Preview credential idle lease. */
   readonly idleTimeoutMs?: number;
-  /** Task-stage credential idle lease. */
-  readonly taskStageIdleTimeoutMs?: number;
   readonly maximumLifetimeMs?: number;
   readonly now?: () => number;
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1_000;
-const DEFAULT_TASK_STAGE_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1_000;
 const DEFAULT_MAXIMUM_LIFETIME_MS = 8 * 60 * 60 * 1_000;
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -75,8 +71,6 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const state = yield* SynchronizedRef.make<RegistryState>({ records: new Map() });
   const currentTimeMillis = options.now ? Effect.sync(options.now) : Clock.currentTimeMillis;
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
-  const taskStageIdleTimeoutMs =
-    options.taskStageIdleTimeoutMs ?? DEFAULT_TASK_STAGE_IDLE_TIMEOUT_MS;
   const maximumLifetimeMs = options.maximumLifetimeMs ?? DEFAULT_MAXIMUM_LIFETIME_MS;
   const endpoint =
     httpServer.address._tag === "TcpAddress"
@@ -91,10 +85,9 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const pruneExpired = (records: ReadonlyMap<string, CredentialRecord>, timestamp: number) => {
     const next = new Map(
       Array.from(records).filter(([, record]) => {
-        const lease = record.scope.capabilities.has("task-implementation")
-          ? taskStageIdleTimeoutMs
-          : idleTimeoutMs;
-        return timestamp <= record.scope.expiresAt && timestamp - record.lastUsedAt <= lease;
+        return (
+          timestamp <= record.scope.expiresAt && timestamp - record.lastUsedAt <= idleTimeoutMs
+        );
       }),
     );
     return next.size === records.size ? records : next;
@@ -109,14 +102,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       const expiresAt = issuedAt + maximumLifetimeMs;
       const threadId = ThreadId.make(request.threadId);
       const providerInstanceId = ProviderInstanceId.make(request.providerInstanceId);
-      const implementationAuthorized = yield* authorizeActiveTaskImplementation({
-        environmentId,
-        threadId,
-        providerInstanceId,
-      });
-      const capabilities: ReadonlySet<McpInvocationContext.McpCapability> = new Set(
-        implementationAuthorized ? ["preview", "task-implementation"] : ["preview"],
-      );
+      const capabilities: ReadonlySet<McpInvocationContext.McpCapability> = new Set(["preview"]);
       const scope: McpInvocationContext.McpInvocationScope = {
         environmentId,
         threadId,

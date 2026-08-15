@@ -37,11 +37,8 @@ import {
   type TaskWorkspaceContextManifest,
   type TaskWorkspaceDispatchOperationStatus,
   type TaskWorkspaceDispatchResult,
-  type TaskImplementationContextResult,
   type TaskImplementationProgressAck,
-  type TaskImplementationCheckRunAck,
   type TaskImplementationAmendmentAck,
-  type TaskImplementationCompleteAck,
   type TaskStageCompletionAck,
   type TaskStageContextResult,
   type TaskWorkspaceOperationReceipt,
@@ -1587,35 +1584,6 @@ export interface TaskWorkspaceServiceShape {
   readonly dispatch: (
     command: TaskWorkspaceCommand,
   ) => Effect.Effect<TaskWorkspaceDispatchResult, TaskWorkspaceError>;
-  readonly implementationContext: (
-    taskId: TaskWorkspaceId,
-  ) => Effect.Effect<TaskImplementationContextResult, TaskWorkspaceError>;
-  readonly implementationProgress: (input: {
-    readonly taskId: TaskWorkspaceId;
-    readonly expectedTaskRevision: number;
-    readonly phaseId: string;
-    readonly workItemId: string | null;
-    readonly status: "running" | "completed" | "blocked";
-    readonly summary: string;
-  }) => Effect.Effect<TaskImplementationProgressAck, TaskWorkspaceError>;
-  readonly implementationCheckRun: (input: {
-    readonly taskId: TaskWorkspaceId;
-    readonly expectedTaskRevision: number;
-    readonly checkId: string;
-    readonly operationKey: string;
-  }) => Effect.Effect<TaskImplementationCheckRunAck, TaskWorkspaceError>;
-  readonly implementationAmendmentPropose: (input: {
-    readonly taskId: TaskWorkspaceId;
-    readonly expectedTaskRevision: number;
-    readonly phaseId: string;
-    readonly workItemId: string;
-    readonly triggeringCheckId: string | null;
-    readonly expected: string;
-    readonly found: string;
-    readonly impact: string;
-    readonly proposedPlanMarkdown: string;
-    readonly operationKey: string;
-  }) => Effect.Effect<TaskImplementationAmendmentAck, TaskWorkspaceError>;
   readonly implementationProgressCli: (input: {
     readonly taskId: TaskWorkspaceId;
     readonly target: "phase" | "work-item";
@@ -1665,10 +1633,6 @@ export interface TaskWorkspaceServiceShape {
   readonly reconcilePendingChecks: (input?: {
     readonly olderThanMs?: number;
   }) => Effect.Effect<void, TaskWorkspaceError>;
-  readonly startImplementationCheck: (input: {
-    readonly taskId: TaskWorkspaceId;
-    readonly attemptId: string;
-  }) => Effect.Effect<void, TaskWorkspaceError>;
   readonly processImplementationCheck: (input: {
     readonly taskId: TaskWorkspaceId;
     readonly attemptId: string;
@@ -1678,14 +1642,6 @@ export interface TaskWorkspaceServiceShape {
     readonly endingCommitSha: string | null;
     readonly startingCommitSha?: string;
   }) => Effect.Effect<void, TaskWorkspaceError>;
-  readonly implementationComplete: (input: {
-    readonly taskId: TaskWorkspaceId;
-    readonly expectedTaskRevision: number;
-    readonly summary: string;
-    readonly operationKey: string;
-    readonly sessionId: string;
-    readonly providerTurnId: string;
-  }) => Effect.Effect<TaskImplementationCompleteAck, TaskWorkspaceError>;
   readonly getSnapshot: Effect.Effect<TaskWorkspaceSnapshot, never>;
   readonly getTask: (taskId: TaskWorkspaceId) => Effect.Effect<TaskWorkspace | null, never>;
   readonly streamEvents: Stream.Stream<TaskWorkspaceEventValue>;
@@ -1736,11 +1692,6 @@ export interface TaskWorkspaceServiceShape {
     taskId: TaskWorkspaceId,
   ) => Effect.Effect<void, TaskWorkspaceError>;
   readonly validateProviderTurn: (input: {
-    readonly threadId: ThreadId;
-    readonly providerInstanceId: string;
-  }) => Effect.Effect<void, TaskWorkspaceError>;
-  readonly authorizeTaskStage: (input: {
-    readonly environmentId: EnvironmentId;
     readonly threadId: ThreadId;
     readonly providerInstanceId: string;
   }) => Effect.Effect<void, TaskWorkspaceError>;
@@ -1860,31 +1811,6 @@ export const activeTaskStageForThread = (
   activeTaskWorkspaceService
     ? activeTaskWorkspaceService.getActiveTaskStage(threadId)
     : Effect.succeed(undefined);
-
-export const authorizeActiveTaskImplementation = (input: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly providerInstanceId: string;
-}): Effect.Effect<boolean> =>
-  activeTaskWorkspaceService
-    ? activeTaskWorkspaceService.authorizeTaskStage(input).pipe(
-        Effect.flatMap(() => activeTaskWorkspaceService!.getActiveTaskStage(input.threadId)),
-        Effect.map((stage) => stage === "build"),
-        Effect.catch(() => Effect.succeed(false)),
-      )
-    : Effect.succeed(false);
-
-export const authorizeActiveTaskStage = (input: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly providerInstanceId: string;
-}): Effect.Effect<boolean> =>
-  activeTaskWorkspaceService
-    ? activeTaskWorkspaceService.authorizeTaskStage(input).pipe(
-        Effect.as(true),
-        Effect.catch(() => Effect.succeed(false)),
-      )
-    : Effect.succeed(false);
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
@@ -2494,84 +2420,6 @@ export const make = Effect.gen(function* () {
         } satisfies ActiveTaskProviderContext;
       }
       return undefined;
-    });
-
-  const authorizeTaskStage: TaskWorkspaceServiceShape["authorizeTaskStage"] = (input) =>
-    Effect.gen(function* () {
-      const task = [...taskById.values()].find(
-        (candidate) =>
-          candidate.environmentId === input.environmentId &&
-          (candidate.bootstrap?.reservedThreadId === input.threadId ||
-            candidate.occurrences.some((occurrence) => occurrence.threadId === input.threadId)),
-      );
-      if (!task) {
-        return yield* new TaskWorkspaceError({
-          message: "No matching task-stage session exists.",
-          commandType: "task.internal",
-          taskId: "unknown",
-        });
-      }
-      const run = currentRun(task);
-      if (run.preset !== "guided") {
-        return yield* new TaskWorkspaceError({
-          message: `Task '${task.id}' does not use the Guided workflow.`,
-          commandType: "task.internal",
-          taskId: task.id,
-        });
-      }
-      if (task.preferences.modelSelection?.instanceId !== input.providerInstanceId) {
-        return yield* new TaskWorkspaceError({
-          message: `Provider instance '${input.providerInstanceId}' is not authorized for task '${task.id}'.`,
-          commandType: "task.internal",
-          taskId: task.id,
-        });
-      }
-      if (Option.isSome(providerInstanceRegistry)) {
-        const providerInstance = yield* providerInstanceRegistry.value.getInstance(
-          ProviderInstanceId.make(input.providerInstanceId),
-        );
-        if (
-          !providerInstance ||
-          !providerInstance.enabled ||
-          (run.currentStage === "build" &&
-            !supportsTaskWorktreeWrite(providerInstance.adapter.capabilities))
-        ) {
-          return yield* new TaskWorkspaceError({
-            message:
-              run.currentStage === "build"
-                ? `Provider instance '${input.providerInstanceId}' cannot enforce task-worktree-write.`
-                : `Provider instance '${input.providerInstanceId}' is not available for this Task.`,
-            commandType: "task.internal",
-            taskId: task.id,
-          });
-        }
-      }
-      const occurrence = task.occurrences
-        .filter((candidate) => candidate.stage === run.currentStage)
-        .toSorted((left, right) => right.ordinal - left.ordinal)[0];
-      const reservedThreadId = task.bootstrap?.reservedThreadId;
-      const isBootstrapPrimary =
-        occurrence?.status === "starting" &&
-        task.bootstrap?.status === "running" &&
-        reservedThreadId === input.threadId;
-      const isActivePrimary =
-        (occurrence?.status === "running" || occurrence?.status === "finalizing") &&
-        occurrence.threadId === input.threadId &&
-        occurrence.sessionId !== null &&
-        task.sessions.some(
-          (session) =>
-            session.id === occurrence.sessionId &&
-            session.role === "primary" &&
-            session.status === "active",
-        );
-      if (!isBootstrapPrimary && !isActivePrimary) {
-        return yield* new TaskWorkspaceError({
-          message: `Thread '${input.threadId}' is not the active task primary.`,
-          commandType: "task.internal",
-          taskId: task.id,
-        });
-      }
-      if (run.currentStage !== "build") yield* validatePlanningRoot(task.id);
     });
 
   const validateProviderTurn: TaskWorkspaceServiceShape["validateProviderTurn"] = (input) =>
@@ -6427,65 +6275,6 @@ export const make = Effect.gen(function* () {
   const dispatch: TaskWorkspaceServiceShape["dispatch"] = (command) =>
     semaphore.withPermits(1)(dispatchUnlocked(command));
 
-  const implementationContext: TaskWorkspaceServiceShape["implementationContext"] = (taskId) =>
-    Effect.gen(function* () {
-      const task = taskById.get(taskId);
-      if (!task)
-        return yield* new TaskWorkspaceError({ message: `Task '${taskId}' was not found.` });
-      const plan = latestPlanRevision(task);
-      if (!plan || task.build.currentPlanRevisionId !== plan.id) {
-        return yield* new TaskWorkspaceError({
-          message: "The approved implementation Plan is unavailable.",
-        });
-      }
-      if (plan.markdown.length > IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS) {
-        return yield* new TaskWorkspaceError({
-          message: `Approved Plan revision '${plan.id}' is too large for implementation context (${plan.markdown.length} chars, max ${IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS}).`,
-          taskId,
-        });
-      }
-      const repository = task.workspace.repositories[0];
-      const currentCommitSha = repository?.worktreePath
-        ? yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
-            Effect.mapError(
-              (cause) =>
-                new TaskWorkspaceError({
-                  message: "Failed to inspect the task worktree HEAD.",
-                  commandType: "task.internal",
-                  taskId,
-                  cause,
-                }),
-            ),
-          )
-        : null;
-      return {
-        stage: "build",
-        occurrence: latestOccurrence(task, "build")?.ordinal ?? 0,
-        brief: task.intake.brief,
-        planRevisionId: plan.id,
-        planMarkdown: plan.markdown,
-        phases: boundedCollection(task.build.phases, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
-          boundPhaseForImplementationContext,
-        ),
-        checks: boundedCollection(task.build.checks, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
-          boundCheckForImplementationContext,
-        ),
-        checkpoints: boundedCollection(
-          task.build.checkpoints,
-          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
-        ).map(boundCheckpointForImplementationContext),
-        amendments: boundedCollection(
-          task.build.amendments,
-          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
-        ).map(boundAmendmentForImplementationContext),
-        checkAttempts: boundedCollection(
-          task.build.checkAttempts,
-          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
-        ).map(boundAttemptForImplementationContext),
-        currentCommitSha,
-      } satisfies TaskImplementationContextResult;
-    });
-
   const serverCommand = (taskId: TaskWorkspaceId, type: string, fields: Record<string, unknown>) =>
     Effect.gen(function* () {
       const commandId = CommandId.make(`server:implementation:${yield* serverUuid}`);
@@ -6498,71 +6287,6 @@ export const make = Effect.gen(function* () {
         ...fields,
       } as TaskWorkspaceCommand;
       return yield* dispatch(markInternalImplementationCommand(command));
-    });
-
-  const implementationProgress: TaskWorkspaceServiceShape["implementationProgress"] = (input) =>
-    serverCommand(input.taskId, "task.implementation.progress", input).pipe(
-      Effect.map((result) => ({
-        accepted: true as const,
-        phaseId: input.phaseId,
-        workItemId: input.workItemId,
-        status: input.status,
-        taskRevision: result.task.taskRevision,
-      })),
-    );
-  const implementationCheckRun: TaskWorkspaceServiceShape["implementationCheckRun"] = (input) =>
-    serverCommand(input.taskId, "task.implementation.check.run", input).pipe(
-      Effect.map((result) => {
-        const check = result.task.build.checks.find((candidate) => candidate.id === input.checkId);
-        const attempt =
-          result.task.build.checkAttempts.find(
-            (candidate) =>
-              candidate.checkId === input.checkId && candidate.operationKey === input.operationKey,
-          ) ??
-          result.task.build.checkAttempts
-            .toReversed()
-            .find((candidate) => candidate.checkId === input.checkId);
-        const attemptId = attempt?.id ?? `attempt-${input.operationKey}`;
-        return {
-          accepted: true as const,
-          checkId: input.checkId,
-          attemptId,
-          status: check?.status ?? "pending",
-          taskRevision: result.task.taskRevision,
-        };
-      }),
-    );
-  const startImplementationCheck: TaskWorkspaceServiceShape["startImplementationCheck"] = (input) =>
-    Effect.gen(function* () {
-      const task = taskById.get(input.taskId);
-      if (!task)
-        return yield* new TaskWorkspaceError({ message: `Task '${input.taskId}' was not found.` });
-      const attempt = task.build.checkAttempts.find(
-        (candidate) => candidate.id === input.attemptId,
-      );
-      if (!attempt || attempt.status !== "pending") return;
-      const newestAttempt = task.build.checkAttempts
-        .toReversed()
-        .find((candidate) => candidate.checkId === attempt.checkId);
-      if (!newestAttempt || newestAttempt.id !== attempt.id) return;
-      const now = yield* serverNow;
-      const build: TaskWorkspace["build"] = {
-        ...task.build,
-        checkAttempts: task.build.checkAttempts.map((candidate) =>
-          candidate.id === attempt.id
-            ? { ...candidate, status: "running" as const, startedAt: now }
-            : candidate,
-        ),
-      };
-      yield* internalAppend(
-        "task.implementation.check.updated",
-        {
-          ...task,
-          build,
-          updatedAt: now,
-        },
-        { occurredAt: now },
-      );
     });
 
   const processImplementationCheck: TaskWorkspaceServiceShape["processImplementationCheck"] = (
@@ -6738,30 +6462,6 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const implementationAmendmentPropose: TaskWorkspaceServiceShape["implementationAmendmentPropose"] =
-    (input) =>
-      serverCommand(input.taskId, "task.implementation.amendment.propose", input).pipe(
-        Effect.map((result) => ({
-          accepted: true as const,
-          amendmentId: result.task.build.amendments.at(-1)!.id,
-          taskRevision: result.task.taskRevision,
-        })),
-      );
-  const implementationComplete: TaskWorkspaceServiceShape["implementationComplete"] = (input) =>
-    serverCommand(input.taskId, "task.implementation.complete", input).pipe(
-      // The durable terminal activity and proposal can cross a process or
-      // subscription boundary in either order. Reconcile immediately after
-      // persisting the proposal so terminal-first completion cannot stall.
-      Effect.tap(() => reconcilePendingProposals),
-      Effect.map((result) => ({
-        accepted: true as const,
-        proposalId:
-          result.task.occurrences.find((candidate) => candidate.stage === "build")
-            ?.completionProposalId ?? `proposal-${input.operationKey}`,
-        providerTurnId: input.providerTurnId,
-      })),
-    );
-
   const implementationProgressCli: TaskWorkspaceServiceShape["implementationProgressCli"] = (
     input,
   ) =>
@@ -6799,14 +6499,21 @@ export const make = Effect.gen(function* () {
               : `Work item '${input.id}' was not found in the active Build.`,
           taskId: task.id,
         });
-      return yield* implementationProgress({
-        taskId: input.taskId,
+      return yield* serverCommand(input.taskId, "task.implementation.progress", {
         expectedTaskRevision: task.taskRevision,
         phaseId,
         workItemId: input.target === "work-item" ? input.id : null,
         status: input.status,
         summary: input.summary,
-      });
+      }).pipe(
+        Effect.map((result) => ({
+          accepted: true as const,
+          phaseId,
+          workItemId: input.target === "work-item" ? input.id : null,
+          status: input.status,
+          taskRevision: result.task.taskRevision,
+        })),
+      );
     });
 
   const implementationAmendmentProposeCli: TaskWorkspaceServiceShape["implementationAmendmentProposeCli"] =
@@ -6851,8 +6558,7 @@ export const make = Effect.gen(function* () {
             ].join("\n"),
           )
           .digest("hex");
-        return yield* implementationAmendmentPropose({
-          taskId: input.taskId,
+        return yield* serverCommand(input.taskId, "task.implementation.amendment.propose", {
           expectedTaskRevision: task.taskRevision,
           phaseId: input.phaseId,
           workItemId: input.workItemId,
@@ -6863,6 +6569,11 @@ export const make = Effect.gen(function* () {
           proposedPlanMarkdown: input.proposedPlanMarkdown,
           operationKey: `implementation-amendment-cli:${input.taskId}:${proposalPayloadDigest}`,
         }).pipe(
+          Effect.map((result) => ({
+            accepted: true as const,
+            amendmentId: result.task.build.amendments.at(-1)!.id,
+            taskRevision: result.task.taskRevision,
+          })),
           Effect.mapError((cause) => {
             if (!isTaskWorkspaceError(cause)) return cause;
             const message = cause.message;
@@ -9241,19 +8952,13 @@ export const make = Effect.gen(function* () {
 
   return TaskWorkspaceService.of({
     dispatch,
-    implementationContext,
-    implementationProgress,
-    implementationCheckRun,
-    startImplementationCheck,
     processImplementationCheck,
-    implementationAmendmentPropose,
     implementationProgressCli,
     implementationAmendmentProposeCli,
     implementationCheckBegin,
     implementationCheckFinalize,
     acknowledgeImplementationCheck,
     reconcilePendingChecks,
-    implementationComplete,
     processBootstrap,
     processWorktree,
     proposeStageCompletion,
@@ -9262,7 +8967,6 @@ export const make = Effect.gen(function* () {
     reconcilePendingProposals,
     validatePlanningRoot,
     validateProviderTurn,
-    authorizeTaskStage,
     getActiveTaskStage,
     getActiveTaskProviderContext,
     resolveTaskCliInvocation,

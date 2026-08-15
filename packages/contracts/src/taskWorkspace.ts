@@ -1595,9 +1595,6 @@ export const TaskStageCompletionAck = Schema.Struct({
 });
 export type TaskStageCompletionAck = typeof TaskStageCompletionAck.Type;
 
-export const TaskImplementationContextInput = Schema.Struct({});
-export type TaskImplementationContextInput = typeof TaskImplementationContextInput.Type;
-
 export const TaskWorkspaceImplementationProgress = Schema.Struct({
   phaseId: TrimmedNonEmptyString,
   workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
@@ -1607,35 +1604,6 @@ export const TaskWorkspaceImplementationProgress = Schema.Struct({
   summary: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type TaskWorkspaceImplementationProgress = typeof TaskWorkspaceImplementationProgress.Type;
-
-export const TaskImplementationProgressInput = Schema.Struct({
-  phaseId: TrimmedNonEmptyString,
-  workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  status: Schema.Literals(["running", "completed", "blocked"]),
-  summary: TrimmedNonEmptyString,
-});
-export type TaskImplementationProgressInput = typeof TaskImplementationProgressInput.Type;
-
-export const TaskImplementationContextResult = Schema.Struct({
-  stage: Schema.Literal("build"),
-  occurrence: NonNegativeInt,
-  brief: Schema.String,
-  planRevisionId: TrimmedNonEmptyString,
-  planMarkdown: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  phases: Schema.Array(TaskWorkspaceBuildPhase),
-  checks: Schema.Array(TaskWorkspaceBuildCheck),
-  checkpoints: Schema.Array(TaskWorkspaceBuildCheckpoint),
-  amendments: Schema.Array(TaskWorkspaceAmendment),
-  checkAttempts: Schema.Array(TaskWorkspaceCheckAttempt).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
-  currentCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-});
-export type TaskImplementationContextResult = typeof TaskImplementationContextResult.Type;
 
 export const TaskImplementationProgressAck = Schema.Struct({
   accepted: Schema.Literal(true),
@@ -1648,67 +1616,12 @@ export const TaskImplementationProgressAck = Schema.Struct({
 });
 export type TaskImplementationProgressAck = typeof TaskImplementationProgressAck.Type;
 
-export const TaskImplementationCheckRunInput = Schema.Struct({ checkId: TrimmedNonEmptyString });
-export type TaskImplementationCheckRunInput = typeof TaskImplementationCheckRunInput.Type;
-
-export const TaskImplementationCheckRunAck = Schema.Struct({
-  accepted: Schema.Literal(true),
-  checkId: TrimmedNonEmptyString,
-  attemptId: TrimmedNonEmptyString,
-  status: TaskWorkspaceBuildCheckStatus,
-  taskRevision: NonNegativeInt,
-});
-export type TaskImplementationCheckRunAck = typeof TaskImplementationCheckRunAck.Type;
-
-export const TaskImplementationAmendmentInput = Schema.Struct({
-  phaseId: TrimmedNonEmptyString,
-  workItemId: TrimmedNonEmptyString,
-  triggeringCheckId: Schema.NullOr(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  expected: TrimmedNonEmptyString,
-  found: TrimmedNonEmptyString,
-  impact: TrimmedNonEmptyString,
-  proposedPlanMarkdown: Schema.String,
-});
-export type TaskImplementationAmendmentInput = typeof TaskImplementationAmendmentInput.Type;
-
 export const TaskImplementationAmendmentAck = Schema.Struct({
   accepted: Schema.Literal(true),
   amendmentId: TrimmedNonEmptyString,
   taskRevision: NonNegativeInt,
 });
 export type TaskImplementationAmendmentAck = typeof TaskImplementationAmendmentAck.Type;
-
-export const TaskImplementationCompleteInput = Schema.Struct({ summary: TrimmedNonEmptyString });
-export type TaskImplementationCompleteInput = typeof TaskImplementationCompleteInput.Type;
-
-export const TaskImplementationCompleteAck = Schema.Struct({
-  accepted: Schema.Literal(true),
-  proposalId: TrimmedNonEmptyString,
-  providerTurnId: TrimmedNonEmptyString,
-});
-export type TaskImplementationCompleteAck = typeof TaskImplementationCompleteAck.Type;
-
-export const TaskImplementationToolErrorCode = Schema.Literals([
-  "unauthorized",
-  "not-active",
-  "turn-unavailable",
-  "conflict",
-  "invalid",
-  "stale-revision",
-  "unknown-id",
-  "dependency-blocked",
-  "check-blocked",
-  "gate-open",
-  "worktree-invalid",
-]);
-export type TaskImplementationToolErrorCode = typeof TaskImplementationToolErrorCode.Type;
-
-export class TaskImplementationToolError extends Schema.TaggedErrorClass<TaskImplementationToolError>()(
-  "TaskImplementationToolError",
-  { code: TaskImplementationToolErrorCode, message: Schema.String },
-) {}
 
 export const TaskStageToolErrorCode = Schema.Literals([
   "unauthorized",

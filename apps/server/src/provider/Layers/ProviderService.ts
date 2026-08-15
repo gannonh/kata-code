@@ -523,17 +523,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         },
       });
     });
-  const prepareMcpSession = (
-    threadId: ThreadId,
-    providerInstanceId: ProviderInstanceId,
-    taskStage: boolean,
-  ) =>
+  const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     Effect.gen(function* () {
       // Native provider runtimes capture the MCP authorization header when a
       // session starts. Reuse a live thread-bound lease and rotate an expired
       // one so the caller can restart the native session with the new header.
       const existing = McpProviderSession.readMcpProviderSession(threadId);
-      const activeStage = taskStage ? yield* activeTaskStageForThread(threadId) : undefined;
       if (existing?.providerInstanceId === providerInstanceId) {
         if (!McpSessionRegistry.hasActiveMcpSessionRegistry()) {
           McpProviderSession.clearMcpProviderSession(threadId);
@@ -542,11 +537,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const scope = yield* McpSessionRegistry.resolveActiveMcpCredential(
           existing.authorizationHeader,
         );
-        if (
-          scope?.threadId === threadId &&
-          scope.providerInstanceId === providerInstanceId &&
-          (!taskStage || activeStage !== "build" || scope.capabilities.has("task-implementation"))
-        ) {
+        if (scope?.threadId === threadId && scope.providerInstanceId === providerInstanceId) {
           return { rotated: false } as const;
         }
       }
@@ -883,11 +874,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ? trustedInstructionsForStage(activeTaskStage)
         : persistedDeveloperInstructions;
 
-      yield* prepareMcpSession(
-        input.binding.threadId,
-        bindingInstanceId,
-        activeTaskStage === "build",
-      );
+      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
       const resumedTaskEnvironment =
         activeTaskStage !== undefined
           ? yield* taskCliEnvironmentForTurn({
@@ -1184,7 +1171,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const sessionWithInstance = yield* withMcpRotationLock(
           threadId,
           Effect.gen(function* () {
-            yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage === "build");
+            yield* prepareMcpSession(threadId, resolvedInstanceId);
             const startedTaskEnvironment =
               activeTaskStage !== undefined
                 ? yield* taskCliEnvironmentForTurn({
@@ -1410,11 +1397,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
       }
       yield* Effect.gen(function* () {
-        const mcpPreparation = yield* prepareMcpSession(
-          input.threadId,
-          routed.instanceId,
-          activeTaskStage === "build",
-        );
+        const mcpPreparation = yield* prepareMcpSession(input.threadId, routed.instanceId);
         if (mcpPreparation.rotated || issuedTaskEnvironment) {
           yield* restartSessionForMcpCredential({
             threadId: input.threadId,
