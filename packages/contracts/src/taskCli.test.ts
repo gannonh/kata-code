@@ -248,6 +248,8 @@ describe("implementation Task CLI contracts", () => {
   });
 });
 
+const decodeErrorCode = Schema.decodeUnknownSync(TaskCliErrorCode);
+
 describe("implementation command contract table", () => {
   it("declares one row per command with stable paths, codes, and exit semantics", () => {
     const rows = TASK_CLI_IMPLEMENTATION_COMMAND_CONTRACT.commands;
@@ -275,7 +277,7 @@ describe("implementation command contract table", () => {
       expect(row.maxRequestChars).toBeGreaterThanOrEqual(0);
       expect(row.successSchema.length).toBeGreaterThan(0);
       for (const code of row.errorCodes) {
-        expect(Schema.decodeUnknownSync(TaskCliErrorCode)(code)).toBe(code);
+        expect(decodeErrorCode(code)).toBe(code);
       }
     }
   });

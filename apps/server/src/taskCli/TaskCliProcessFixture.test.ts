@@ -3,6 +3,7 @@
 // @effect-diagnostics missingEffectContext:off
 // @effect-diagnostics missingLayerContext:off
 // @effect-diagnostics anyUnknownInErrorContext:off
+// @effect-diagnostics no-global-process-runtime:off - test-only host probe for the OS-enforced check sandbox binary.
 import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import * as NodePath from "node:path";
@@ -12,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/unstable/http";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 
 import {
   EnvironmentHttpApi,
@@ -351,9 +353,10 @@ describe("built Task CLI process", () => {
   );
 });
 
-const hostHasCheckSandbox = (): boolean => {
-  if (process.platform === "darwin") return existsSync("/usr/bin/sandbox-exec");
-  if (process.platform === "linux") {
+const hostHasCheckSandbox = Effect.gen(function* () {
+  const platform = yield* HostProcessPlatform;
+  if (platform === "darwin") return existsSync("/usr/bin/sandbox-exec");
+  if (platform === "linux") {
     try {
       execFileSync("which", ["bwrap"], { stdio: "ignore" });
       return true;
@@ -362,12 +365,12 @@ const hostHasCheckSandbox = (): boolean => {
     }
   }
   return false;
-};
+});
 
 describe("built Task CLI check flow", () => {
   it.effect("executes an approved check through begin, local run, and finalize", () =>
     Effect.gen(function* () {
-      if (!hostHasCheckSandbox()) return;
+      if (!(yield* hostHasCheckSandbox)) return;
       const fixture = yield* makeTaskCliBuildFixture();
       const result = yield* fixture.runCli({}, ["task", "check", "run", "check:pass"]);
 
@@ -401,7 +404,7 @@ describe("built Task CLI check flow", () => {
 
   it.effect("returns the stable settled-pass result without re-running a passed check", () =>
     Effect.gen(function* () {
-      if (!hostHasCheckSandbox()) return;
+      if (!(yield* hostHasCheckSandbox)) return;
       const fixture = yield* makeTaskCliBuildFixture();
       const first = yield* fixture.runCli({}, ["task", "check", "run", "check:pass"]);
       expect(first.exitCode).toBe(0);
@@ -421,7 +424,7 @@ describe("built Task CLI check flow", () => {
 
   it.effect("settles a failing check and allocates the next attempt on rerun", () =>
     Effect.gen(function* () {
-      if (!hostHasCheckSandbox()) return;
+      if (!(yield* hostHasCheckSandbox)) return;
       const fixture = yield* makeTaskCliBuildFixture();
       const first = yield* fixture.runCli({}, ["task", "check", "run", "check:fail"]);
       expect(first.exitCode).toBe(0);
