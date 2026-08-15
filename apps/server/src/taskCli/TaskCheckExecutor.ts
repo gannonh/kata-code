@@ -36,6 +36,10 @@ export interface TaskCheckExecutorResult {
 
 export class TaskCheckExecutorError extends Data.TaggedError("TaskCheckExecutorError")<{
   readonly message: string;
+  /** "git-state" failures mean the CLI cannot trust its before-observation
+   * against the server-bound attempt and must not finalize; "execution"
+   * failures still finalize as indeterminate so the server learns the outcome. */
+  readonly kind: "git-state" | "execution";
   readonly cause?: unknown;
 }> {}
 
@@ -45,10 +49,9 @@ export interface TaskCheckExecutorShape {
   ) => Effect.Effect<TaskCheckExecutorResult, TaskCheckExecutorError>;
 }
 
-export class TaskCheckExecutor extends Context.Service<
-  TaskCheckExecutor,
-  TaskCheckExecutorShape
->()("@kata-sh/code-cli/taskCli/TaskCheckExecutor") {}
+export class TaskCheckExecutor extends Context.Service<TaskCheckExecutor, TaskCheckExecutorShape>()(
+  "@kata-sh/code-cli/taskCli/TaskCheckExecutor",
+) {}
 
 const scrubEnvironment = (): NodeJS.ProcessEnv => {
   const blocked = /(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY|AUTH|BEARER|MCP|CREDENTIAL|PROVIDER)/iu;
@@ -227,6 +230,7 @@ function cleanupTaskCheckTempPath(
     catch: (cause) =>
       new TaskCheckExecutorError({
         message: "Unable to clean the task check temp directory.",
+        kind: "execution",
         cause,
       }),
   });
@@ -333,26 +337,52 @@ const make = Effect.gen(function* () {
       ) {
         return yield* new TaskCheckExecutorError({
           message: "Unable to observe the task worktree.",
+          kind: "git-state",
         });
       }
       const startingCommitSha = beforeHead.stdout.trim();
       if (startingCommitSha !== input.expectedStartingCommitSha) {
         return yield* new TaskCheckExecutorError({
           message: "The starting Git state does not match the bound attempt.",
+          kind: "git-state",
         });
       }
-      // A malformed command line (unterminated quote or escape) throws; keep it
-      // a handled failure so the CLI maps it to a stable envelope instead of a
-      // Die defect killing the command.
+      const startingStatus = beforeStatus.stdout.trim();
+      // A malformed command line (unterminated quote or escape) cannot be
+      // executed; settle it as indeterminate so the server records the attempt
+      // instead of a Die defect killing the CLI command.
       const argv = yield* Effect.try({
         try: () => tokenizeCommandLine(input.command),
         catch: (cause) =>
-          new TaskCheckExecutorError({ message: "Malformed check command.", cause }),
-      });
+          new TaskCheckExecutorError({
+            message: "Malformed check command.",
+            kind: "execution",
+            cause,
+          }),
+      }).pipe(Effect.orElseSucceed(() => null));
+      if (argv === null) {
+        return {
+          status: "indeterminate" as const,
+          output: "Malformed check command.",
+          exitCode: null,
+          timedOut: false,
+          startingCommitSha,
+          endingCommitSha: startingCommitSha,
+          startingStatus,
+          endingStatus: startingStatus,
+        } satisfies TaskCheckExecutorResult;
+      }
       if (argv.length === 0) {
-        return yield* new TaskCheckExecutorError({
-          message: "The approved check command is empty.",
-        });
+        return {
+          status: "indeterminate" as const,
+          output: "The approved check command is empty.",
+          exitCode: null,
+          timedOut: false,
+          startingCommitSha,
+          endingCommitSha: startingCommitSha,
+          startingStatus,
+          endingStatus: startingStatus,
+        } satisfies TaskCheckExecutorResult;
       }
       // Scope the temp directory to the execution block: the finalizer removes
       // it on every exit path, including interruption, so it can never leak
@@ -365,6 +395,7 @@ const make = Effect.gen(function* () {
           catch: (cause) =>
             new TaskCheckExecutorError({
               message: "Unable to create the task check temp directory.",
+              kind: "execution",
               cause,
             }),
         });
@@ -385,9 +416,14 @@ const make = Effect.gen(function* () {
           timeoutBehavior: "timedOutResult",
         });
       }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new TaskCheckExecutorError({ message: "Task check execution failed.", cause }),
+        Effect.mapError((cause) =>
+          cause instanceof TaskCheckExecutorError
+            ? cause
+            : new TaskCheckExecutorError({
+                message: "Task check execution failed.",
+                kind: "execution",
+                cause,
+              }),
         ),
         Effect.ensuring(cleanupTaskCheckTempPath(input.worktreePath).pipe(Effect.orDie)),
       );
@@ -412,7 +448,6 @@ const make = Effect.gen(function* () {
       const afterStatus = yield* git(input.worktreePath, ["status", "--porcelain=v2"]);
       const endingCommitSha =
         afterHead.code === 0 && !afterHead.timedOut ? afterHead.stdout.trim() : null;
-      const startingStatus = beforeStatus.stdout.trim();
       const endingStatus =
         afterStatus.code === 0 && !afterStatus.timedOut ? afterStatus.stdout.trim() : null;
       // A failed after-observation is insufficient evidence that the worktree is
@@ -454,7 +489,11 @@ const make = Effect.gen(function* () {
       Effect.mapError((cause) =>
         cause instanceof TaskCheckExecutorError
           ? cause
-          : new TaskCheckExecutorError({ message: "Task worktree command failed.", cause }),
+          : new TaskCheckExecutorError({
+              message: "Task worktree command failed.",
+              kind: "execution",
+              cause,
+            }),
       ),
     );
 

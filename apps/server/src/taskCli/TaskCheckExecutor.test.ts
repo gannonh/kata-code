@@ -116,7 +116,9 @@ const setupLinkedWorktree = Effect.gen(function* () {
   yield* Effect.tryPromise(() =>
     git(mainRepo, ["worktree", "add", "-b", "katacode/task-linked", worktreePath]),
   );
-  const startingCommitSha = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+  const startingCommitSha = yield* Effect.tryPromise(() =>
+    git(worktreePath, ["rev-parse", "HEAD"]),
+  );
   return {
     worktreePath,
     expectedBranch: "katacode/task-linked",
@@ -335,44 +337,42 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
     }),
   );
 
-  it.effect("rejects an empty command without spawning a process", () =>
+  it.effect("rejects an empty command as an indeterminate result without spawning", () =>
     Effect.gen(function* () {
       const { worktreePath, startingCommitSha } = yield* setup;
       const executor = yield* TaskCheckExecutor;
-      const result = yield* executor
-        .run({
-          worktreePath,
-          expectedStartingCommitSha: startingCommitSha,
-          command: "   ",
-          timeoutMs: 15_000,
-        })
-        .pipe(Effect.exit);
-      expect(result._tag).toBe("Failure");
+      const result = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        command: "   ",
+        timeoutMs: 15_000,
+      });
+      expect(result.status).toBe("indeterminate");
+      expect(result.output).toContain("empty");
+      expect(result.endingCommitSha).toBe(result.startingCommitSha);
     }),
   );
 
-  it.effect("settles a malformed command line as a handled failure, not a defect", () =>
+  it.effect("settles a malformed command line as an indeterminate result, not a defect", () =>
     Effect.gen(function* () {
       const { worktreePath, startingCommitSha } = yield* setup;
       const executor = yield* TaskCheckExecutor;
-      const trailingBackslash = yield* executor
-        .run({
-          worktreePath,
-          expectedStartingCommitSha: startingCommitSha,
-          command: "echo \\",
-          timeoutMs: 15_000,
-        })
-        .pipe(Effect.exit);
-      expect(trailingBackslash._tag).toBe("Failure");
-      const unterminatedQuote = yield* executor
-        .run({
-          worktreePath,
-          expectedStartingCommitSha: startingCommitSha,
-          command: "echo 'unterminated",
-          timeoutMs: 15_000,
-        })
-        .pipe(Effect.exit);
-      expect(unterminatedQuote._tag).toBe("Failure");
+      const trailingBackslash = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        command: "echo \\",
+        timeoutMs: 15_000,
+      });
+      expect(trailingBackslash.status).toBe("indeterminate");
+      expect(trailingBackslash.output).toContain("Malformed");
+      const unterminatedQuote = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        command: "echo 'unterminated",
+        timeoutMs: 15_000,
+      });
+      expect(unterminatedQuote.status).toBe("indeterminate");
+      expect(unterminatedQuote.output).toContain("Malformed");
     }),
   );
 
@@ -451,36 +451,33 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
   });
 });
 
-effectIt.layer(afterStateTimeoutRunnerLayer)(
-  "TaskCheckExecutor after-state timeout",
-  (it) => {
-    it.effect("reports indeterminate when the after-state observation times out", () =>
-      Effect.gen(function* () {
-        const platform = yield* HostProcessPlatform;
-        const { worktreePath, startingCommitSha } = yield* setup;
-        // The after-state timeout path only runs the check command when a
-        // sandbox is available; without sandbox-exec/bwrap the executor
-        // short-circuits with the no-sandbox indeterminate result before the
-        // mocked after-observations, so there is nothing to assert.
-        const sandboxed = sandboxApprovedCheckCommand({
-          argv: ["true"],
-          worktreePath,
-          platform,
-        });
-        if (sandboxed === null) return;
-        const executor = yield* TaskCheckExecutor;
-        const result = yield* executor.run({
-          worktreePath,
-          expectedStartingCommitSha: startingCommitSha,
-          command: "pwd",
-          timeoutMs: 15_000,
-        });
-        // A pass cannot be claimed on evidence the worktree is unchanged when
-        // the after-state was never observed.
-        expect(result.status).toBe("indeterminate");
-        expect(result.endingCommitSha).toBeNull();
-        expect(result.endingStatus).toBeNull();
-      }),
-    );
-  },
-);
+effectIt.layer(afterStateTimeoutRunnerLayer)("TaskCheckExecutor after-state timeout", (it) => {
+  it.effect("reports indeterminate when the after-state observation times out", () =>
+    Effect.gen(function* () {
+      const platform = yield* HostProcessPlatform;
+      const { worktreePath, startingCommitSha } = yield* setup;
+      // The after-state timeout path only runs the check command when a
+      // sandbox is available; without sandbox-exec/bwrap the executor
+      // short-circuits with the no-sandbox indeterminate result before the
+      // mocked after-observations, so there is nothing to assert.
+      const sandboxed = sandboxApprovedCheckCommand({
+        argv: ["true"],
+        worktreePath,
+        platform,
+      });
+      if (sandboxed === null) return;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        command: "pwd",
+        timeoutMs: 15_000,
+      });
+      // A pass cannot be claimed on evidence the worktree is unchanged when
+      // the after-state was never observed.
+      expect(result.status).toBe("indeterminate");
+      expect(result.endingCommitSha).toBeNull();
+      expect(result.endingStatus).toBeNull();
+    }),
+  );
+});
