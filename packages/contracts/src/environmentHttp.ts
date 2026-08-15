@@ -33,10 +33,18 @@ import {
   OrchestrationReadModel,
 } from "./orchestration.ts";
 import {
+  TaskCliAmendmentEnvelope,
+  TaskCliCheckBeginEnvelope,
+  TaskCliCheckFinalizeEnvelope,
   TaskCliCompleteEnvelope,
   TaskCliContextEnvelope,
+  TaskCliProgressEnvelope,
+  TASK_CLI_AMENDMENT_PATH,
+  TASK_CLI_CHECK_BEGIN_PATH,
+  TASK_CLI_CHECK_FINALIZE_PATH,
   TASK_CLI_COMPLETE_PATH,
   TASK_CLI_CONTEXT_PATH,
+  TASK_CLI_PROGRESS_PATH,
 } from "./taskCli.ts";
 import {
   RelayCloudEnvironmentHealthRequest,
@@ -459,6 +467,38 @@ export class EnvironmentTaskCliHttpApi extends HttpApiGroup.make("taskCli")
       headers: OptionalBearerHeaders,
       payload: Schema.Unknown,
       success: TaskCliCompleteEnvelope,
+      error: [EnvironmentHttpInternalServerError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("progress", TASK_CLI_PROGRESS_PATH, {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Unknown,
+      success: TaskCliProgressEnvelope,
+      error: [EnvironmentHttpInternalServerError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("checkBegin", TASK_CLI_CHECK_BEGIN_PATH, {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Unknown,
+      success: TaskCliCheckBeginEnvelope,
+      error: [EnvironmentHttpInternalServerError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("checkFinalize", TASK_CLI_CHECK_FINALIZE_PATH, {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Unknown,
+      success: TaskCliCheckFinalizeEnvelope,
+      error: [EnvironmentHttpInternalServerError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("amendment", TASK_CLI_AMENDMENT_PATH, {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Unknown,
+      success: TaskCliAmendmentEnvelope,
       error: [EnvironmentHttpInternalServerError],
     }),
   ) {}
