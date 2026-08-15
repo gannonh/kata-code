@@ -217,22 +217,35 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
       return Stream.fromIterable(events);
     },
   } as OrchestrationEngineShape);
+  const configLayer = ServerConfig.layerTest(repoRoot, baseDir);
+  const sqliteLayer = SqlitePersistenceLive.pipe(
+    Layer.provide(configLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  const storeLayer = TaskWorkspaceStoreLive.pipe(
+    Layer.provide(sqliteLayer),
+    Layer.provide(configLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
   const taskLayerBase = TaskWorkspaceServiceLive.pipe(
     Layer.provide(gitLayer),
     Layer.provide(environmentLayer),
     Layer.provide(sourceResolverLayer),
     Layer.provide(orchestrationLayer),
-    Layer.provide(TaskWorkspaceStoreLive),
+    Layer.provide(storeLayer),
     Layer.provideMerge(TaskCheckFinalizerServiceLive),
-    Layer.provide(SqlitePersistenceLive),
-    Layer.provide(ServerConfig.layerTest(repoRoot, baseDir)),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provide(sqliteLayer),
+    Layer.provide(configLayer),
   );
   const taskLayer = providerRegistry
     ? taskLayerBase.pipe(Layer.provide(Layer.succeed(ProviderInstanceRegistry, providerRegistry)))
     : taskLayerBase;
+  // Expose the same store instance in the built context so tests can read
+  // proposal rows. Within a single layer build, duplicate references to the
+  // same layer value share one instance.
+  const taskLayerWithStore = taskLayer.pipe(Layer.provideMerge(storeLayer));
   const scope = yield* Scope.make();
-  const context = yield* Layer.buildWithScope(taskLayer, scope);
+  const context = yield* Layer.buildWithScope(taskLayerWithStore, scope);
   return {
     runPromise: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provide(effect, context),
     runPromiseExit: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -7212,6 +7225,21 @@ describe("TaskWorkspaceService guided implementation", () => {
       const occurrence = after.occurrences.find((candidate) => candidate.stage === "build")!;
       expect(occurrence.status).toBe("running");
       expect(occurrence.completionProposalId).toBeNull();
+      const stored = yield* runtime.runPromise(Effect.serviceOption(TaskWorkspaceStore));
+      expect(Option.isSome(stored)).toBe(true);
+      const store = stored.pipe(Option.getOrThrow);
+      const proposal = yield* runtime.runPromise(
+        store.getProposal({
+          taskId: task.id,
+          occurrence: buildOccurrence.ordinal,
+          providerTurnId: "turn-build-1",
+        }),
+      );
+      expect(Option.getOrNull(proposal)).toMatchObject({
+        status: "rejected",
+        terminalTurnOutcome: "completed",
+        rejectionReason: "The worktree commit drifted after the completion proposal.",
+      });
       void ack;
       void settled;
     }),
@@ -7251,6 +7279,20 @@ describe("TaskWorkspaceService guided implementation", () => {
       expect(after.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
         "running",
       );
+      const stored = yield* runtime.runPromise(Effect.serviceOption(TaskWorkspaceStore));
+      expect(Option.isSome(stored)).toBe(true);
+      const store = stored.pipe(Option.getOrThrow);
+      const proposal = yield* runtime.runPromise(
+        store.getProposal({
+          taskId: task.id,
+          occurrence: buildOccurrence.ordinal,
+          providerTurnId: "turn-build-1",
+        }),
+      );
+      expect(Option.getOrNull(proposal)).toMatchObject({
+        status: "rejected",
+        rejectionReason: "The worktree status drifted after the completion proposal.",
+      });
     }),
   );
 
@@ -7340,6 +7382,52 @@ describe("TaskWorkspaceService guided implementation", () => {
       expect(rejected.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
         "running",
       );
+    }),
+  );
+
+  it.effect("CLI build complete rejects failed turns without advancing", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-build-complete-failed-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(completeBuildWorkItem(service, task.id));
+      yield* runtime.runPromise(
+        completeBuildStage(service, task, "Build complete.", "turn-build-failed"),
+      );
+      const buildOccurrence = task.occurrences.find((candidate) => candidate.stage === "build")!;
+      yield* runtime.runPromise(
+        service.settleProviderTurn({
+          threadId: buildOccurrence.threadId!,
+          providerTurnId: "turn-build-failed",
+          outcome: "failed",
+        }),
+      );
+      const rejected = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(rejected.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
+        "running",
+      );
+      const stored = yield* runtime.runPromise(Effect.serviceOption(TaskWorkspaceStore));
+      expect(Option.isSome(stored)).toBe(true);
+      const store = stored.pipe(Option.getOrThrow);
+      const proposal = yield* runtime.runPromise(
+        store.getProposal({
+          taskId: task.id,
+          occurrence: buildOccurrence.ordinal,
+          providerTurnId: "turn-build-failed",
+        }),
+      );
+      expect(Option.getOrNull(proposal)).toMatchObject({
+        status: "rejected",
+        terminalTurnOutcome: "failed",
+      });
     }),
   );
 
