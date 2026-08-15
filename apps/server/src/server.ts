@@ -107,6 +107,7 @@ import {
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import { taskCliHttpApiLayer } from "./taskCli/http.ts";
 import { TaskInvocationServiceLive } from "./taskCli/TaskInvocationService.ts";
+import { TaskCheckFinalizerServiceLive } from "./taskCli/TaskCheckFinalizerService.ts";
 import * as NetService from "@kata-sh/code-shared/Net";
 import * as RelayClient from "@kata-sh/code-shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@kata-sh/code-tailscale";
@@ -321,7 +322,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(Layer.mergeAll(VcsLayerLive, TaskWorkspaceLayerLive)),
   Layer.provideMerge(ProviderRuntimeLayerLive),
-  Layer.provideMerge(TaskInvocationServiceLive),
+  Layer.provideMerge(Layer.mergeAll(TaskInvocationServiceLive, TaskCheckFinalizerServiceLive)),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),

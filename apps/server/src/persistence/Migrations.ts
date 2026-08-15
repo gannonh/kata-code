@@ -55,6 +55,7 @@ import Migration0039 from "./Migrations/039_RepairTaskWorkspaceTables.ts";
 import Migration0040 from "./Migrations/040_TaskInvocationLeases.ts";
 import Migration0041 from "./Migrations/041_TaskInvocationLeaseLifecycle.ts";
 import Migration0042 from "./Migrations/042_TaskInvocationLeaseOwner.ts";
+import Migration0043 from "./Migrations/043_TaskCheckFinalizers.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -109,6 +110,7 @@ export const migrationEntries = [
   [40, "TaskInvocationLeases", Migration0040],
   [41, "TaskInvocationLeaseLifecycle", Migration0041],
   [42, "TaskInvocationLeaseOwner", Migration0042],
+  [43, "TaskCheckFinalizers", Migration0043],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
