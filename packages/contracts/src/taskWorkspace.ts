@@ -65,14 +65,6 @@ export type TaskWorkspacePreset = typeof TaskWorkspacePreset.Type;
 export const TaskWorkspaceWorktreePolicy = Schema.Literals(["now", "later", "never"]);
 export type TaskWorkspaceWorktreePolicy = typeof TaskWorkspaceWorktreePolicy.Type;
 
-/**
- * Enforced execution profile for pre-Implement stages. Only `planning` exists
- * in this slice; it forbids write effects during Clarify, Research, Design, and
- * Plan.
- */
-export const TaskWorkspaceExecutionProfile = Schema.Literals(["planning", "task-worktree-write"]);
-export type TaskWorkspaceExecutionProfile = typeof TaskWorkspaceExecutionProfile.Type;
-
 /** Canonical repository provisioning status; `provisioned` stays decode-only. */
 export const TaskWorkspaceProvisioningStatus = Schema.Literals([
   "not-requested",
@@ -102,9 +94,6 @@ export const TaskWorkspacePreferences = Schema.Struct({
   ),
   modelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  executionProfile: TaskWorkspaceExecutionProfile.pipe(
-    Schema.withDecodingDefault(Effect.succeed("planning")),
   ),
   /**
    * One task-wide agent permission governing every stage session, including
@@ -144,9 +133,6 @@ export type TaskWorkspaceBootstrapConversationTarget =
  */
 export const TaskWorkspaceBootstrapState = Schema.Struct({
   operationKey: TrimmedNonEmptyString,
-  executionProfile: TaskWorkspaceExecutionProfile.pipe(
-    Schema.withDecodingDefault(Effect.succeed("planning")),
-  ),
   presentation: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(Effect.succeed("stage"))),
   status: TaskWorkspaceBootstrapStatus,
   currentStep: Schema.NullOr(TrimmedNonEmptyString).pipe(
@@ -675,7 +661,6 @@ export const TaskWorkspace = Schema.Struct({
       Effect.succeed({
         worktreePolicy: "later",
         modelSelection: null,
-        executionProfile: "planning",
         runtimeMode: DEFAULT_RUNTIME_MODE,
       }),
     ),
@@ -1506,9 +1491,6 @@ export type TaskWorkspaceOutboxEntry = typeof TaskWorkspaceOutboxEntry.Type;
 export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   stage: TaskWorkspaceStage,
   occurrence: NonNegativeInt,
-  executionProfile: TaskWorkspaceExecutionProfile.pipe(
-    Schema.withDecodingDefault(Effect.succeed("planning")),
-  ),
   // Captured from task preferences when the bootstrap is allocated so the
   // worker starts every stage session in the task's current permission.
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),

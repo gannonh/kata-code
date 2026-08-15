@@ -58,7 +58,6 @@ describe("taskWorkspaceNormalizer", () => {
       source: { kind: "inline", body: "Legacy slice 1 task" },
     });
     expect(normalized.preferences.worktreePolicy).toBe("later");
-    expect(normalized.preferences.executionProfile).toBe("planning");
     expect(normalized.taskRevision).toBe(3);
   });
 

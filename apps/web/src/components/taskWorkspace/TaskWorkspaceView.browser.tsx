@@ -107,7 +107,6 @@ const baseTask: TaskWorkspace = {
   preferences: {
     worktreePolicy: "later",
     modelSelection: null,
-    executionProfile: "planning",
     runtimeMode: "full-access",
   },
   bootstrap: null,
@@ -239,7 +238,6 @@ function guidedTask(overrides: Partial<TaskWorkspace> = {}): TaskWorkspace {
         model: "claude-sonnet-4",
         options: [],
       },
-      executionProfile: "task-worktree-write",
       runtimeMode: "full-access",
     },
     workspace: {
@@ -1588,12 +1586,10 @@ describe("TaskWorkspaceView", () => {
           model: "claude-sonnet-4",
           options: [],
         },
-        executionProfile: "planning",
         runtimeMode: "full-access",
       },
       bootstrap: {
         operationKey: "task-browser:bootstrap:questions:0:primary",
-        executionProfile: "planning",
         presentation: "stage",
         status: "ready",
         currentStep: null,

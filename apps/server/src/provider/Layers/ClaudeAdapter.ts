@@ -197,7 +197,6 @@ interface ClaudeSessionContext {
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
-  readonly taskStage: boolean;
   currentApiModelId: string | undefined;
   resumeSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
@@ -933,37 +932,6 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
-const CLAUDE_TASK_STAGE_BUILT_IN_TOOLS = [
-  "Task",
-  "AskUserQuestion",
-  "Bash",
-  "CronCreate",
-  "CronDelete",
-  "CronList",
-  "DesignSync",
-  "Edit",
-  "EnterWorktree",
-  "ExitWorktree",
-  "Monitor",
-  "NotebookEdit",
-  "PushNotification",
-  "Read",
-  "ReportFindings",
-  "ScheduleWakeup",
-  "SendMessage",
-  "Skill",
-  "TaskCreate",
-  "TaskGet",
-  "TaskList",
-  "TaskOutput",
-  "TaskStop",
-  "TaskUpdate",
-  "ToolSearch",
-  "WebFetch",
-  "WebSearch",
-  "Workflow",
-  "Write",
-] as const;
 
 function buildPromptText(
   input: ProviderSendTurnInput,
@@ -3559,14 +3527,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "full-access": "bypassPermissions",
       };
       const taskInstructions = input.developerInstructions?.trim();
-      const taskStage = input.taskStage === true;
       const effectiveClaudeEnvironment = mergeSessionEnvironment(
         input.environment !== undefined ? { environment: input.environment } : {},
       );
       const taskToken = input.environment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
       const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
       taskSecret.remove = removeTaskSecret;
-      const permissionMode = taskStage ? undefined : runtimeModeToPermission[input.runtimeMode];
+      const permissionMode = runtimeModeToPermission[input.runtimeMode];
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
         ...(fastMode ? { fastMode: true } : {}),
@@ -3582,12 +3549,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           preset: "claude_code",
           ...(taskInstructions ? { append: taskInstructions } : {}),
         },
-        ...(taskStage
-          ? {
-              disallowedTools: ["EnterPlanMode", "ExitPlanMode"],
-              tools: [...CLAUDE_TASK_STAGE_BUILT_IN_TOOLS],
-            }
-          : {}),
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.
@@ -3620,7 +3581,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                   headers: {
                     Authorization: mcpSession.authorizationHeader,
                   },
-                  ...(taskStage ? { alwaysLoad: true } : {}),
                 },
               },
             }
@@ -3696,7 +3656,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
-        taskStage,
         currentApiModelId: apiModelId,
         resumeSessionId: sessionId,
         pendingApprovals,
@@ -3833,7 +3792,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // "plan" maps directly to the SDK's "plan" permission mode;
     // "default" restores the session's original permission mode.
     // When interactionMode is absent we leave the current mode unchanged.
-    if (input.interactionMode === "plan" && !context.taskStage) {
+    if (input.interactionMode === "plan") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
@@ -4017,7 +3976,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
-      supportsTaskStage: true,
     },
     startSession,
     sendTurn,

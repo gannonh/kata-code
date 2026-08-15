@@ -9,7 +9,6 @@
  */
 import type {
   ApprovalRequestId,
-  ProviderTaskExecutionProfile,
   ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderUserInputAnswers,
@@ -27,40 +26,12 @@ import type * as Stream from "effect/Stream";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
 
-export interface ProviderTaskExecutionCapabilities {
-  readonly profile: ProviderTaskExecutionProfile;
-  readonly trustedTaskInstructions: boolean;
-  readonly worktreeOnlyWrites: boolean;
-  readonly credentialIsolation: boolean;
-  readonly deterministicResume: boolean;
-  readonly boundedTurns: boolean;
-  readonly networkDisabled: boolean;
-}
-
 export interface ProviderAdapterCapabilities {
   /**
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
-  /** The provider can load Kata's Implement-stage MCP tools for Guided workflows. */
-  readonly supportsTaskStage?: boolean;
-  /** Explicit adapter attestation for the server-owned write profile. */
-  readonly taskExecution?: ProviderTaskExecutionCapabilities;
 }
-
-export const supportsTaskWorktreeWrite = (capabilities: ProviderAdapterCapabilities): boolean => {
-  const execution = capabilities.taskExecution;
-  return (
-    capabilities.supportsTaskStage === true &&
-    execution?.profile === "task-worktree-write" &&
-    execution.trustedTaskInstructions &&
-    execution.worktreeOnlyWrites &&
-    execution.credentialIsolation &&
-    execution.deterministicResume &&
-    execution.boundedTurns &&
-    execution.networkDisabled
-  );
-};
 
 export interface ProviderThreadTurnSnapshot {
   readonly id: TurnId;

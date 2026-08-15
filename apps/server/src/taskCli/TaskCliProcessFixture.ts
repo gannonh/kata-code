@@ -252,7 +252,6 @@ const bootstrapEntry = (task: TaskWorkspace) => {
     payload: {
       stage,
       occurrence: 0,
-      executionProfile: "planning" as const,
       runtimeMode: task.preferences.runtimeMode,
       presentation: "stage" as const,
       sessionId: bootstrap.reservedSessionId,

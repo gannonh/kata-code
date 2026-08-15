@@ -49,7 +49,6 @@ export function normalizeImportedTask(
     preferences: {
       worktreePolicy: task.preferences.worktreePolicy,
       modelSelection: task.preferences.modelSelection,
-      executionProfile: "planning",
       // Legacy tasks adopt the same default as new tasks; the preference did
       // not exist when they were created.
       runtimeMode: DEFAULT_RUNTIME_MODE,

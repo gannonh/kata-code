@@ -3298,7 +3298,7 @@ describe("TaskWorkspaceService first-slice workflow", () => {
         const { runtime } = yield* setupRuntime(
           "kata-task-gate-create-planning-",
           { mode: "running" },
-          registry(makeInstance({ supportsTaskStage: false })),
+          registry(makeInstance({})),
         );
         const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
         const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
@@ -3328,7 +3328,6 @@ describe("TaskWorkspaceService first-slice workflow", () => {
           model: "claude-sonnet-4",
           options: [{ id: "reasoningEffort", value: "high" }],
         },
-        executionProfile: "planning",
         // New tasks default to Full access; the create may override it.
         runtimeMode: "full-access",
       });
@@ -4762,6 +4761,67 @@ describe("TaskWorkspaceService guided implementation", () => {
     return { service, task: bootstrapped };
   });
 
+  const implementationRegistry = (driver: "pi" | "claude"): ProviderInstanceRegistryShape => {
+    const instanceId = ProviderInstanceId.make("instance-1");
+    const instance = {
+      instanceId,
+      driverKind: ProviderDriverKind.make(driver),
+      enabled: true,
+      adapter: { capabilities: {} },
+    } as unknown as ProviderInstance;
+    return {
+      getInstance: (id) => Effect.succeed(id === instanceId ? instance : undefined),
+      listInstances: Effect.succeed([instance]),
+      listUnavailable: Effect.succeed([]),
+      streamChanges: Stream.empty,
+      subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+    };
+  };
+
+  it.effect("starts Implement for a Pi-pinned task without a task-execution capability", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-implement-pi-",
+        { mode: "running" },
+        implementationRegistry("pi"),
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      expect(task.workflowRuns.at(-1)?.currentStage).toBe("build");
+      expect(task.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
+        "running",
+      );
+    }),
+  );
+
+  it.effect("starts Implement for a Claude-pinned task without a task-execution capability", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-implement-claude-",
+        { mode: "running" },
+        implementationRegistry("claude"),
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      expect(task.workflowRuns.at(-1)?.currentStage).toBe("build");
+      expect(task.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
+        "running",
+      );
+    }),
+  );
+
   it.effect(
     "binds manual checks to the observed HEAD and creates server-owned checkpoint continuation",
     () =>
@@ -5434,7 +5494,6 @@ describe("TaskWorkspaceService guided implementation", () => {
         providerInstanceId: "instance-1",
         branch,
         baseCommitSha: repository.baseCommitSha,
-        executionProfile: "task-worktree-write",
         // Implement is governed by the task-wide permission (defaults to Full
         // access), not a hardcoded auto-accept-edits.
         runtimeMode: "full-access",
@@ -8296,10 +8355,7 @@ describe("Task CLI planning completion", () => {
           driverKind: ProviderDriverKind.make(driver),
           enabled: true,
           adapter: {
-            capabilities: {
-              supportsTaskStage: driver !== "pi",
-              supportsTaskWorktreeWrite: driver === "codex",
-            },
+            capabilities: {},
           },
         } as unknown as ProviderInstance;
         return {

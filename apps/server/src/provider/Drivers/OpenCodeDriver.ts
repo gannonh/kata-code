@@ -89,7 +89,6 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
   metadata: {
     displayName: "OpenCode",
     supportsMultipleInstances: true,
-    supportsTaskStage: true,
   },
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => decodeOpenCodeSettings({}),

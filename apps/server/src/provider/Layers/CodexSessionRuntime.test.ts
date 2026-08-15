@@ -112,90 +112,6 @@ describe("buildTurnStartParams", () => {
     );
   });
 
-  effectIt.effect("gives planning Task CLI localhost access a read-only filesystem sandbox", () =>
-    Effect.gen(function* () {
-      const approvalRequired = yield* buildTurnStartParams({
-        threadId: "provider-thread-planning",
-        runtimeMode: "approval-required",
-        prompt: "Research the task",
-        taskExecutionProfile: "planning",
-      });
-
-      assert.deepStrictEqual(approvalRequired.sandboxPolicy, {
-        networkAccess: true,
-        type: "readOnly",
-      });
-
-      const autoAccept = yield* buildTurnStartParams({
-        threadId: "provider-thread-planning-write",
-        runtimeMode: "auto-accept-edits",
-        prompt: "Research the task",
-        taskExecutionProfile: "planning",
-      });
-
-      assert.deepStrictEqual(autoAccept.sandboxPolicy, {
-        networkAccess: true,
-        type: "readOnly",
-      });
-    }),
-  );
-
-  effectIt.effect(
-    "keeps task implementation temp directories writable and scopes writable roots to the worktree",
-    () =>
-      Effect.gen(function* () {
-        const params = yield* buildTurnStartParams({
-          threadId: "provider-thread-task-implementation",
-          runtimeMode: "auto-accept-edits",
-          prompt: "Implement the approved Plan",
-          taskExecutionProfile: "task-worktree-write",
-          taskSandboxWritableRoots: [
-            "/tmp/task/.git/objects",
-            "/tmp/task/.git/refs/heads/katacode/task-1",
-            "/tmp/task.agent-home",
-          ],
-        });
-
-        // The shell sandbox must keep the per-user TMPDIR and /tmp writable:
-        // with them excluded, git's xcrun cache, python, and the patch helper
-        // all fail with "couldn't create cache file ... Operation not
-        // permitted" and implementation cannot proceed. Extra write roots are
-        // confined to the task's git metadata and agent home.
-        assert.deepStrictEqual(params.sandboxPolicy, {
-          type: "workspaceWrite",
-          networkAccess: false,
-          excludeTmpdirEnvVar: false,
-          excludeSlashTmp: false,
-          writableRoots: [
-            "/tmp/task/.git/objects",
-            "/tmp/task/.git/refs/heads/katacode/task-1",
-            "/tmp/task.agent-home",
-          ],
-        });
-      }),
-  );
-
-  effectIt.effect(
-    "grants no extra writable roots for a task session without approved git metadata",
-    () =>
-      Effect.gen(function* () {
-        const params = yield* buildTurnStartParams({
-          threadId: "provider-thread-task-implementation-plain",
-          runtimeMode: "auto-accept-edits",
-          prompt: "Implement the approved Plan",
-          taskExecutionProfile: "task-worktree-write",
-        });
-
-        assert.deepStrictEqual(params.sandboxPolicy, {
-          type: "workspaceWrite",
-          networkAccess: false,
-          excludeTmpdirEnvVar: false,
-          excludeSlashTmp: false,
-          writableRoots: [],
-        });
-      }),
-  );
-
   it("includes default collaboration mode and image attachments", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -267,98 +183,20 @@ describe("buildTurnStartParams", () => {
 });
 
 describe("Codex approval requests", () => {
-  it("accepts only Kata MCP tool approvals during task stages", () => {
-    assert.deepStrictEqual(
-      buildMcpServerElicitationResponse({
-        taskStage: true,
-        serverName: "kata",
-        meta: { codex_approval_kind: "mcp_tool_call" },
-      }),
-      { action: "accept" },
-    );
-    assert.deepStrictEqual(
-      buildMcpServerElicitationResponse({
-        taskStage: true,
-        serverName: "other",
-        meta: { codex_approval_kind: "mcp_tool_call" },
-      }),
-      { action: "decline", content: null },
-    );
-    assert.deepStrictEqual(
-      buildMcpServerElicitationResponse({
-        taskStage: true,
-        serverName: "kata",
-        meta: { codex_approval_kind: "user_input" },
-      }),
-      { action: "decline", content: null },
-    );
-  });
-
-  it("grants planning Task CLI network access without granting filesystem permissions", () => {
-    assert.deepStrictEqual(
-      buildPermissionsRequestApprovalResponse({
-        taskStage: false,
-        taskExecutionProfile: "planning",
-        requested: {
-          network: { enabled: true },
-          fileSystem: { write: ["/tmp/task-stage"] },
-        },
-      }),
-      {
-        permissions: {
-          network: { enabled: true },
-        },
-        scope: "turn",
-      },
-    );
-  });
-
-  it("denies permission requests outside planning Task CLI network access", () => {
-    assert.deepStrictEqual(
-      buildPermissionsRequestApprovalResponse({
-        taskStage: false,
-        requested: {
-          network: { enabled: true },
-          fileSystem: { write: ["/tmp/project"] },
-        },
-      }),
-      {
-        permissions: {},
-        scope: "turn",
-      },
-    );
-    assert.deepStrictEqual(
-      buildPermissionsRequestApprovalResponse({
-        taskStage: true,
-        requested: {
-          fileSystem: { write: ["/tmp/project"] },
-        },
-      }),
-      {
-        permissions: {},
-        scope: "turn",
-      },
-    );
-    assert.deepStrictEqual(
-      buildPermissionsRequestApprovalResponse({
-        taskStage: true,
-        requested: {
-          network: { enabled: true },
-        },
-      }),
-      {
-        permissions: {},
-        scope: "turn",
-      },
-    );
+  it("always declines MCP elicitations and grants no permissions", () => {
+    assert.deepStrictEqual(buildMcpServerElicitationResponse(), {
+      action: "decline",
+      content: null,
+    });
+    assert.deepStrictEqual(buildPermissionsRequestApprovalResponse(), {
+      permissions: {},
+      scope: "turn",
+    });
   });
 });
 
 describe("Codex server request handlers", () => {
-  const runApprovalProbe = (input: {
-    readonly taskStage?: boolean;
-    readonly taskExecutionProfile?: "planning" | "task-worktree-write";
-  }) =>
+  const runApprovalProbe = () =>
     Effect.scoped(
       Effect.gen(function* () {
         const path = yield* Path.Path;
@@ -371,10 +209,6 @@ describe("Codex server request handlers", () => {
           binaryPath: mockPeerPath,
           cwd: process.cwd(),
           runtimeMode: "approval-required",
-          ...(input.taskStage ? { taskStage: true } : {}),
-          ...(input.taskExecutionProfile
-            ? { taskExecutionProfile: input.taskExecutionProfile }
-            : {}),
           environment: {
             PATH: process.env.PATH ?? "",
             CODEX_APP_SERVER_TEST_APPROVALS: "1",
@@ -397,10 +231,6 @@ describe("Codex server request handlers", () => {
           yield* runtime.start();
           yield* runtime.sendTurn({
             input: "Exercise the MCP approval handlers.",
-            ...(input.taskStage ? { taskStage: true } : {}),
-            ...(input.taskExecutionProfile
-              ? { taskExecutionProfile: input.taskExecutionProfile }
-              : {}),
           });
           const markerValue = Option.getOrThrow(yield* Fiber.join(markerFiber));
           return decodeApprovalResponses(markerValue);
@@ -409,9 +239,9 @@ describe("Codex server request handlers", () => {
     );
 
   effectIt.layer(NodeServices.layer)("runtime dispatch", (it) => {
-    it.effect("handles Implement MCP approval without granting planning network", () =>
+    it.effect("declines MCP elicitations and grants no permissions", () =>
       Effect.gen(function* () {
-        const responses = yield* runApprovalProbe({ taskStage: true });
+        const responses = yield* runApprovalProbe();
         const values = Object.values(responses);
         assert.equal(values.length, 2);
         const elicitation = values.find(
@@ -420,57 +250,8 @@ describe("Codex server request handlers", () => {
         const permissions = values.find(
           (value) => typeof value === "object" && value !== null && "permissions" in value,
         );
-        assert.deepStrictEqual(elicitation, { action: "accept" });
-        assert.deepStrictEqual(permissions, {
-          permissions: {},
-          scope: "turn",
-        });
-      }),
-    );
-
-    it.effect("grants planning Task CLI network without auto-accepting MCP tools", () =>
-      Effect.gen(function* () {
-        const responses = yield* runApprovalProbe({ taskExecutionProfile: "planning" });
-        const values = Object.values(responses);
-        assert.equal(values.length, 2);
-        const elicitation = values.find(
-          (value) => typeof value === "object" && value !== null && "action" in value,
-        );
-        const permissions = values.find(
-          (value) => typeof value === "object" && value !== null && "permissions" in value,
-        );
-        assert.deepStrictEqual(elicitation, {
-          action: "decline",
-          content: null,
-        });
-        assert.deepStrictEqual(permissions, {
-          permissions: {
-            network: { enabled: true },
-          },
-          scope: "turn",
-        });
-      }),
-    );
-
-    it.effect("keeps non-task-stage MCP requests on their safe response paths", () =>
-      Effect.gen(function* () {
-        const responses = yield* runApprovalProbe({});
-        const values = Object.values(responses);
-        assert.equal(values.length, 2);
-        const elicitation = values.find(
-          (value) => typeof value === "object" && value !== null && "action" in value,
-        );
-        const permissions = values.find(
-          (value) => typeof value === "object" && value !== null && "permissions" in value,
-        );
-        assert.deepStrictEqual(elicitation, {
-          action: "decline",
-          content: null,
-        });
-        assert.deepStrictEqual(permissions, {
-          permissions: {},
-          scope: "turn",
-        });
+        assert.deepStrictEqual(elicitation, { action: "decline", content: null });
+        assert.deepStrictEqual(permissions, { permissions: {}, scope: "turn" });
       }),
     );
   });

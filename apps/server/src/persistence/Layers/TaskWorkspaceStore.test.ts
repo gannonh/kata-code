@@ -39,7 +39,6 @@ function task(revision: number): TaskWorkspace {
     preferences: {
       worktreePolicy: "later",
       modelSelection: null,
-      executionProfile: "planning",
       runtimeMode: "full-access",
     },
     bootstrap: null,

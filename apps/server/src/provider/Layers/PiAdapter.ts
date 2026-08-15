@@ -1657,7 +1657,7 @@ export function makePiAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "unsupported", supportsTaskStage: false },
+      capabilities: { sessionModelSwitch: "unsupported" },
       startSession,
       sendTurn,
       interruptTurn,

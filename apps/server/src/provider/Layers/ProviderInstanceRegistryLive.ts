@@ -195,16 +195,11 @@ const buildEntry = <R>(input: {
     }
 
     const createdInstance = createResult.success;
-    const supportsTaskStage =
-      createdInstance.adapter.capabilities.supportsTaskStage ?? driver.metadata.supportsTaskStage;
 
     return {
       kind: "live" as const,
       live: {
-        instance:
-          supportsTaskStage === undefined
-            ? createdInstance
-            : { ...createdInstance, supportsTaskStage },
+        instance: createdInstance,
         scope: childScope,
         entry,
       },

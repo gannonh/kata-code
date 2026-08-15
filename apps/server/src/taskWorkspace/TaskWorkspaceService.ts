@@ -82,7 +82,6 @@ import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts"
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
-import { supportsTaskWorktreeWrite } from "../provider/Services/ProviderAdapter.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 import {
   TaskWorkspaceSourceResolver,
@@ -97,10 +96,7 @@ import {
   TASK_WORKSPACE_CONTRACT_VERSION_0_3_0,
   deriveImportedEvents,
 } from "./taskWorkspaceNormalizer.ts";
-import {
-  trustedImplementationInstructions,
-  trustedStageInstructions,
-} from "./taskStageInstructions.ts";
+import { trustedInstructionsForStage, trustedStageInstructions } from "./taskStageInstructions.ts";
 import {
   allowsExplicitEntry,
   artifactKindForStage,
@@ -811,7 +807,6 @@ function initialTask(
     preferences: {
       worktreePolicy,
       modelSelection: command.modelSelection ?? null,
-      executionProfile: "planning",
       runtimeMode: command.runtimeMode ?? DEFAULT_RUNTIME_MODE,
     },
     bootstrap: bootstrap ?? null,
@@ -1758,7 +1753,6 @@ export interface ActiveTaskProviderContext {
   readonly workspaceRoot: string;
   readonly branch: string;
   readonly baseCommitSha: string;
-  readonly executionProfile: "planning" | "task-worktree-write";
   readonly runtimeMode: "approval-required" | "auto-accept-edits" | "full-access";
   readonly modelSelection: NonNullable<TaskWorkspace["preferences"]["modelSelection"]>;
 }
@@ -2413,7 +2407,6 @@ export const make = Effect.gen(function* () {
           workspaceRoot: repository.workspaceRoot,
           branch: expectedBranch,
           baseCommitSha: repository.baseCommitSha,
-          executionProfile: "task-worktree-write" as const,
           runtimeMode: task.preferences.runtimeMode,
           modelSelection,
         } satisfies ActiveTaskProviderContext;
@@ -2538,7 +2531,6 @@ export const make = Effect.gen(function* () {
           : null;
       const bootstrap: TaskWorkspaceBootstrapState = {
         operationKey,
-        executionProfile: "planning",
         presentation: "stage",
         status: "pending",
         currentStep: null,
@@ -2555,7 +2547,6 @@ export const make = Effect.gen(function* () {
       const outboxPayload: TaskWorkspaceBootstrapOutboxPayload = {
         stage,
         occurrence,
-        executionProfile: "planning",
         runtimeMode: command.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         presentation: "stage",
         sessionId,
@@ -3664,7 +3655,6 @@ export const make = Effect.gen(function* () {
             "build",
             occurrence.ordinal,
             {
-              executionProfile: "task-worktree-write",
               presentation: "implementation",
               worktreeBranch: repository.branch,
               worktreePath: repository.worktreePath,
@@ -3672,11 +3662,10 @@ export const make = Effect.gen(function* () {
           );
           const startedTask: TaskWorkspace = {
             ...approvedTask,
-            preferences: { ...approvedTask.preferences, executionProfile: "task-worktree-write" },
+            preferences: approvedTask.preferences,
             bootstrap: bootstrapStateFor(
               {
                 operationKey: bootstrap.operationKey,
-                executionProfile: "task-worktree-write",
                 presentation: "implementation",
                 sessionId: bootstrap.outboxPayload.sessionId,
                 threadId: bootstrap.outboxPayload.threadId,
@@ -3914,7 +3903,6 @@ export const make = Effect.gen(function* () {
               "build",
               buildOccurrence.ordinal,
               {
-                executionProfile: "task-worktree-write",
                 presentation: "implementation",
                 worktreeBranch: repository.branch,
                 worktreePath: repository.worktreePath,
@@ -3922,11 +3910,10 @@ export const make = Effect.gen(function* () {
             );
             const startedTask: TaskWorkspace = {
               ...approvedBase,
-              preferences: { ...approvedBase.preferences, executionProfile: "task-worktree-write" },
+              preferences: approvedBase.preferences,
               bootstrap: bootstrapStateFor(
                 {
                   operationKey: bootstrap.operationKey,
-                  executionProfile: "task-worktree-write",
                   presentation: "implementation",
                   sessionId: bootstrap.outboxPayload.sessionId,
                   threadId: bootstrap.outboxPayload.threadId,
@@ -4858,9 +4845,7 @@ export const make = Effect.gen(function* () {
             );
           }
           const repository = task.workspace.repositories[0];
-          const shouldObserveHead =
-            task.versions.workflowDefinition === "guided@0.3.0" &&
-            task.preferences.executionProfile === "task-worktree-write";
+          const shouldObserveHead = task.versions.workflowDefinition === "guided@0.3.0";
           let observedCommitSha = command.commitSha ?? task.build.resultingCommitSha;
           if (shouldObserveHead) {
             if (!repository?.worktreePath) {
@@ -7106,7 +7091,6 @@ export const make = Effect.gen(function* () {
     stage: TaskWorkspaceStage,
     occurrence: number,
     options?: {
-      readonly executionProfile?: TaskWorkspace["preferences"]["executionProfile"];
       readonly presentation?: string;
       readonly worktreeBranch?: string | null;
       readonly worktreePath?: string | null;
@@ -7143,13 +7127,11 @@ export const make = Effect.gen(function* () {
           : branch && repository
             ? expectedTaskWorktreePath(config.worktreesDir, repository.workspaceRoot, branch)
             : null;
-      const executionProfile = options?.executionProfile ?? task.preferences.executionProfile;
       const presentation =
         options?.presentation ?? (stage === "build" ? "implementation" : "stage");
       const outboxPayload: TaskWorkspaceBootstrapOutboxPayload = {
         stage,
         occurrence,
-        executionProfile,
         runtimeMode: task.preferences.runtimeMode,
         presentation,
         sessionId,
@@ -7157,10 +7139,7 @@ export const make = Effect.gen(function* () {
         threadCreateCommandId,
         turnStartCommandId,
         kickoffMessageId,
-        trustedInstructions:
-          executionProfile === "task-worktree-write"
-            ? trustedImplementationInstructions()
-            : trustedStageInstructions(stage),
+        trustedInstructions: trustedInstructionsForStage(stage),
         contextManifestId: options?.contextManifestId ?? null,
         continuationCheckpointId: options?.continuationCheckpointId ?? null,
         continuationMode: options?.continuationMode ?? null,
@@ -7174,7 +7153,6 @@ export const make = Effect.gen(function* () {
   const bootstrapStateFor = (
     input: {
       readonly operationKey: string;
-      readonly executionProfile?: TaskWorkspace["preferences"]["executionProfile"];
       readonly presentation?: string;
       readonly sessionId: string;
       readonly threadId: ThreadId;
@@ -7185,7 +7163,6 @@ export const make = Effect.gen(function* () {
     now: string,
   ): TaskWorkspaceBootstrapState => ({
     operationKey: input.operationKey,
-    executionProfile: input.executionProfile ?? "planning",
     presentation: input.presentation ?? "stage",
     status: "pending",
     currentStep: null,
@@ -7260,7 +7237,6 @@ export const make = Effect.gen(function* () {
         "build",
         buildOccurrence.ordinal,
         {
-          executionProfile: "task-worktree-write",
           presentation: "implementation",
           worktreeBranch: input.task.workspace.repositories[0]?.branch ?? null,
           worktreePath: input.task.workspace.repositories[0]?.worktreePath ?? null,
@@ -7296,7 +7272,6 @@ export const make = Effect.gen(function* () {
           bootstrap: bootstrapStateFor(
             {
               operationKey: bootstrap.operationKey,
-              executionProfile: "task-worktree-write",
               presentation: "implementation",
               sessionId: bootstrap.outboxPayload.sessionId,
               threadId: bootstrap.outboxPayload.threadId,
@@ -8461,9 +8436,7 @@ export const make = Effect.gen(function* () {
             const provider = yield* providerInstanceRegistry.value.getInstance(
               readyTask.preferences.modelSelection.instanceId,
             );
-            implementationEligible = Boolean(
-              provider?.enabled && supportsTaskWorktreeWrite(provider.adapter.capabilities),
-            );
+            implementationEligible = Boolean(provider?.enabled);
           }
           const shouldStartImplementation =
             implementationEligible &&
@@ -8488,7 +8461,6 @@ export const make = Effect.gen(function* () {
               "build",
               buildOccurrence.ordinal,
               {
-                executionProfile: "task-worktree-write",
                 presentation: "implementation",
                 worktreeBranch: worktree.worktree.refName,
                 worktreePath: worktree.worktree.path,
@@ -8496,11 +8468,10 @@ export const make = Effect.gen(function* () {
             );
             readyTask = {
               ...readyTask,
-              preferences: { ...readyTask.preferences, executionProfile: "task-worktree-write" },
+              preferences: readyTask.preferences,
               bootstrap: bootstrapStateFor(
                 {
                   operationKey: bootstrap.operationKey,
-                  executionProfile: "task-worktree-write",
                   presentation: "implementation",
                   sessionId: bootstrap.outboxPayload.sessionId,
                   threadId: bootstrap.outboxPayload.threadId,
@@ -8665,7 +8636,7 @@ export const make = Effect.gen(function* () {
           // Step 1: provision or reconcile the worktree when policy requires it.
           let working = task;
           const repository = working.workspace.repositories[0]!;
-          if (payload.executionProfile === "task-worktree-write") {
+          if (payload.stage === "build") {
             const expectedBranch = `katacode/task-${safeBranchSegment(entry.taskId)}`;
             const expectedPath = expectedTaskWorktreePath(
               config.worktreesDir,
@@ -8850,16 +8821,13 @@ export const make = Effect.gen(function* () {
                 messageId: payload.kickoffMessageId,
                 role: "user",
                 text:
-                  payload.executionProfile === "task-worktree-write"
+                  payload.stage === "build"
                     ? `Implement the approved Plan for task '${working.title}'. Use the implementation context tool and begin with the first eligible work item.`
                     : working.intake.brief,
                 attachments: [],
               },
               developerInstructions:
-                payload.trustedInstructions ??
-                (payload.executionProfile === "task-worktree-write"
-                  ? trustedImplementationInstructions()
-                  : trustedStageInstructions(payload.stage)),
+                payload.trustedInstructions ?? trustedInstructionsForStage(payload.stage),
               modelSelection,
               runtimeMode: payload.runtimeMode,
               interactionMode: "default",
@@ -8884,7 +8852,6 @@ export const make = Effect.gen(function* () {
             ...working,
             bootstrap: {
               operationKey: working.bootstrap!.operationKey,
-              executionProfile: payload.executionProfile,
               presentation: payload.presentation,
               status: "ready",
               currentStep: null,
