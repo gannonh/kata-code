@@ -27,6 +27,8 @@ import { FetchHttpClient, HttpClientError } from "effect/unstable/http";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
 import { taskCliFailureEnvelope } from "../taskCli/envelope.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import { TaskCheckExecutor, TaskCheckExecutorLive } from "../taskCli/TaskCheckExecutor.ts";
 
 const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
@@ -436,14 +438,83 @@ const runCheck = (checkId: string) =>
     if (!beginEnvelope.ok) {
       return yield* finishTaskCliEnvelope(beginEnvelope);
     }
-    // Task C replaces this stub with the real check executor + finalize step.
-    return yield* finishTaskCliEnvelope(
-      taskCliFailureEnvelope(
-        "check",
-        "internal_error",
-        `Check execution is not implemented yet (attempt '${beginEnvelope.attemptId}' began).`,
-      ),
+    // A settled pass is a stable result: print it and do not re-run.
+    if (beginEnvelope.outcome === "settled-pass") {
+      return yield* finishTaskCliEnvelope(beginEnvelope);
+    }
+    const finalizerToken = beginEnvelope.finalizerToken;
+    if (finalizerToken === null) {
+      return yield* finishTaskCliEnvelope(
+        taskCliFailureEnvelope(
+          "check",
+          "internal_error",
+          `Check '${checkId}' began without a finalization credential.`,
+        ),
+      );
+    }
+    const executor = yield* TaskCheckExecutor;
+    const executed = yield* executor
+      .run({
+        worktreePath: beginEnvelope.cwd,
+        expectedStartingCommitSha: beginEnvelope.startingCommitSha,
+        command: beginEnvelope.command,
+        timeoutMs: beginEnvelope.timeoutMs,
+        maxOutputBytes: beginEnvelope.maxOutputBytes,
+      })
+      .pipe(
+        Effect.map((result) => ({ _tag: "result" as const, result })),
+        Effect.catchTag("TaskCheckExecutorError", (error) =>
+          Effect.succeed(
+            error.kind === "git-state"
+              ? { _tag: "git-state" as const, message: error.message }
+              : { _tag: "execution-failure" as const, message: error.message },
+          ),
+        ),
+      );
+
+    if (executed._tag === "git-state") {
+      // Do not finalize: leave the attempt pending so the server reconcile
+      // settles it indeterminate.
+      return yield* finishTaskCliEnvelope(
+        taskCliFailureEnvelope("check", "conflict", executed.message),
+      );
+    }
+
+    const finalizePayload =
+      executed._tag === "result"
+        ? {
+            finalizerToken,
+            exitCode: executed.result.exitCode,
+            output: executed.result.output.slice(0, beginEnvelope.maxOutputBytes),
+            timedOut: executed.result.timedOut,
+            startingCommitSha: executed.result.startingCommitSha,
+            endingCommitSha: executed.result.endingCommitSha,
+            startingStatus: executed.result.startingStatus,
+            endingStatus: executed.result.endingStatus,
+          }
+        : {
+            finalizerToken,
+            exitCode: null,
+            output: executed.message,
+            timedOut: false,
+            startingCommitSha: beginEnvelope.startingCommitSha,
+            endingCommitSha: null,
+            startingStatus: beginEnvelope.startingStatus,
+            endingStatus: null,
+          };
+
+    const finalizeEnvelope = yield* Effect.gen(function* () {
+      const client = yield* HttpApiClient.make(EnvironmentHttpApi, { baseUrl: endpoint });
+      return yield* client.taskCli.checkFinalize({ headers: {}, payload: finalizePayload });
+    }).pipe(
+      Effect.catch((error) => {
+        const message = HttpClientError.isHttpClientError(error)
+          ? `Task CLI request failed: ${error.message}`
+          : `Task CLI request failed: ${String(error)}`;
+        return Effect.succeed(taskCliFailureEnvelope("check", "internal_error", message));
+      }),
     );
+    return yield* finishTaskCliEnvelope(finalizeEnvelope);
   });
 
 export const taskProgressCommand = Command.make("progress", {
@@ -490,6 +561,7 @@ export const taskCheckRunCommand = Command.make("run", {
 }).pipe(
   Command.withDescription("Run an approved automated check in the canonical task worktree."),
   Command.withHandler((args) => runCheck(args.checkId.trim())),
+  Command.provide(TaskCheckExecutorLive.pipe(Layer.provide(ProcessRunner.layer))),
 );
 
 export const taskCheckCommand = Command.make("check").pipe(
