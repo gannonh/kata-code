@@ -1652,8 +1652,9 @@ export interface TaskWorkspaceServiceShape {
   ) => Effect.Effect<void, TaskWorkspaceError>;
   /**
    * Persist a typed completion proposal for the active stage occurrence and
-   * provider turn (the task-stage bridge entry point). One proposal per
-   * occurrence and turn; a different payload on the same key conflicts.
+   * provider turn (the katacode Task CLI completion entry point). One
+   * proposal per occurrence and turn; a different payload on the same key
+   * conflicts.
    */
   readonly proposeStageCompletion: (input: {
     readonly taskId: TaskWorkspaceId;
@@ -2983,7 +2984,7 @@ export const make = Effect.gen(function* () {
       ) {
         return yield* taskError(
           command,
-          "Guided implementation provider operations are server-owned; use the task implementation bridge from the active conversation.",
+          "Guided implementation provider operations are server-owned; use the katacode Task CLI commands from the active conversation.",
         );
       }
 

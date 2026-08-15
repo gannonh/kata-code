@@ -1046,6 +1046,108 @@ describe("TaskWorkspaceView", () => {
     await expect.element(page.getByTestId("guided-resulting-commit")).toHaveTextContent(commitSha);
   });
 
+  it("acknowledges an unacknowledged indeterminate attempt through the command path", async () => {
+    const base = guidedTask();
+    await renderTask({
+      ...base,
+      workflowRuns: [{ ...base.workflowRuns[0]!, currentStage: "build" }],
+      build: {
+        ...base.build,
+        checks: base.build.checks.map((check) =>
+          check.id === "check:typecheck"
+            ? {
+                ...check,
+                status: "indeterminate" as const,
+                output: "The check result could not be reconciled.",
+              }
+            : check,
+        ),
+        checkAttempts: [
+          {
+            ...base.build.checkAttempts[0]!,
+            status: "indeterminate" as const,
+            output: "The check result could not be reconciled.",
+            exitCode: null,
+            indeterminateAcknowledgedAt: null,
+          },
+        ],
+      },
+    });
+
+    await expect
+      .element(page.getByTestId("guided-check-attempt-check-attempt-1"))
+      .toHaveTextContent("indeterminate");
+    const ack = page.getByTestId("task-build-check-ack-check-attempt-1");
+    await expect.element(ack).toBeVisible();
+    await ack.click();
+    expect(mocks.dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "task.implementation.check.ack",
+      checkId: "check:typecheck",
+      attemptId: "check-attempt-1",
+      expectedTaskRevision: expect.any(Number),
+      acknowledgedBy: expect.any(String),
+    });
+  });
+
+  it("marks an acknowledged indeterminate attempt without offering another ack", async () => {
+    const base = guidedTask();
+    await renderTask({
+      ...base,
+      workflowRuns: [{ ...base.workflowRuns[0]!, currentStage: "build" }],
+      build: {
+        ...base.build,
+        checks: base.build.checks.map((check) =>
+          check.id === "check:typecheck" ? { ...check, status: "indeterminate" as const } : check,
+        ),
+        checkAttempts: [
+          {
+            ...base.build.checkAttempts[0]!,
+            status: "indeterminate" as const,
+            exitCode: null,
+            indeterminateAcknowledgedAt: "2026-07-28T17:11:00.000Z",
+          },
+        ],
+      },
+    });
+
+    await expect
+      .element(page.getByTestId("guided-check-attempt-check-attempt-1"))
+      .toHaveTextContent("acknowledged");
+    expect(page.getByTestId("task-build-check-ack-check-attempt-1").query()).toBeNull();
+  });
+
+  it("shows a failed attempt's exit code and output as the check error state", async () => {
+    const base = guidedTask();
+    await renderTask({
+      ...base,
+      workflowRuns: [{ ...base.workflowRuns[0]!, currentStage: "build" }],
+      build: {
+        ...base.build,
+        checks: base.build.checks.map((check) =>
+          check.id === "check:typecheck"
+            ? {
+                ...check,
+                status: "fail" as const,
+                output: "Typecheck failed before rerun.",
+                exitCode: 1,
+              }
+            : check,
+        ),
+      },
+    });
+
+    await expect
+      .element(page.getByTestId("guided-check-attempt-check-attempt-1"))
+      .toHaveTextContent("fail");
+    await expect
+      .element(
+        page
+          .getByTestId("guided-check-attempt-check-attempt-1")
+          .getByText("Typecheck failed before rerun."),
+      )
+      .toBeVisible();
+  });
+
   it("explains disabled Guided Implement controls", async () => {
     await renderTask(
       guidedTask({
