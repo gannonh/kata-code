@@ -6783,6 +6783,454 @@ describe("TaskWorkspaceService guided implementation", () => {
       ).toBe(false);
     }),
   );
+
+  it.effect("CLI progress persists a known phase while the Build occurrence is active", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-progress-phase-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Manual check [check:review]: Review the implementation",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const ack = yield* runtime.runPromise(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "phase",
+          id: "phase:foundation",
+          status: "running",
+          summary: "Foundation started.",
+        }),
+      );
+      expect(ack).toMatchObject({
+        accepted: true,
+        phaseId: "phase:foundation",
+        workItemId: null,
+        status: "running",
+      });
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.taskRevision).toBe(ack.taskRevision);
+      expect(after.build.phases[0]?.status).toBe("running");
+    }),
+  );
+
+  it.effect("CLI progress resolves the owning phase for a known work item", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-progress-item-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Manual check [check:review]: Review the implementation",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const ack = yield* runtime.runPromise(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Implementation started.",
+        }),
+      );
+      expect(ack).toMatchObject({
+        accepted: true,
+        phaseId: "phase:foundation",
+        workItemId: "work:implement",
+        status: "running",
+      });
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.build.phases[0]?.workItems[0]).toMatchObject({
+        id: "work:implement",
+        status: "running",
+      });
+    }),
+  );
+
+  it.effect("CLI progress rejects an unknown phase without changing state", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-progress-nophase-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const before = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "phase",
+          id: "phase:missing",
+          status: "running",
+          summary: "Should not persist.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain("was not found");
+      }
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.taskRevision).toBe(before.taskRevision);
+      expect(after.build.phases[0]?.status).toBe("pending");
+    }),
+  );
+
+  it.effect("CLI progress rejects an unknown work item without changing state", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-progress-noitem-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const before = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:missing",
+          status: "running",
+          summary: "Should not persist.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain("was not found");
+      }
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.taskRevision).toBe(before.taskRevision);
+    }),
+  );
+
+  it.effect("CLI progress rejects a work item with an unsatisfied dependency", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-progress-dep-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:first] First",
+        "",
+        "- Manual check [check:first]: Review first",
+        "",
+        "### Work item [work:second] Second",
+        "Dependencies: work:first",
+        "",
+        "- Manual check [check:second]: Review second",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:second",
+          status: "running",
+          summary: "Should be blocked by dependency.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain(
+          "has incomplete dependencies",
+        );
+      }
+    }),
+  );
+
+  it.effect("CLI progress rejects a later phase while a predecessor is incomplete", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-progress-phase2-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:first] First",
+        "",
+        "- Manual check [check:first]: Review first",
+        "",
+        "## Phase [phase:feature] Feature",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:second] Second",
+        "",
+        "- Manual check [check:second]: Review second",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "phase",
+          id: "phase:feature",
+          status: "running",
+          summary: "Should be blocked by predecessor phase.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain(
+          "incomplete predecessor phases",
+        );
+      }
+    }),
+  );
+
+  it.effect("CLI progress rejects optimistic re-running of an already-running work item", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-progress-optimistic-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Manual check [check:review]: Review the implementation",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Implementation started.",
+        }),
+      );
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Already running.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain("is not pending");
+      }
+    }),
+  );
+
+  it.effect("CLI progress rejects progress while an amendment gate is open", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-progress-amend-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Manual check [check:review]: Review the implementation",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(
+        service.implementationAmendmentPropose({
+          taskId: task.id,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          triggeringCheckId: null,
+          expected: "The Plan covers implementation.",
+          found: "The Plan needs a lint check.",
+          impact: "Lint must run.",
+          proposedPlanMarkdown: planMarkdown.replace("Review the implementation", "Run lint"),
+          operationKey: "op-cli-progress-amend",
+        }),
+      );
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Should be blocked by the amendment gate.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain("amendment gate");
+      }
+    }),
+  );
+
+  it.effect("CLI progress rejects progress while a waiting checkpoint blocks", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-progress-checkpoint-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: always",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Manual check [check:review]: Review the implementation",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      // Complete the work item and phase so the checkpoint becomes waiting.
+      yield* runtime.runPromise(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Implementation started.",
+        }),
+      );
+      const running = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      yield* runtime.runPromise(
+        service.dispatch(
+          command({
+            type: "task.build.check.record-manual",
+            commandId: CommandId.make("cli-progress-checkpoint-review"),
+            taskId: task.id,
+            createdAt: now(22),
+            checkId: "check:review",
+            status: "pass",
+            note: "Reviewed.",
+          }),
+        ),
+      );
+      yield* runtime.runPromise(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "completed",
+          summary: "Implementation complete.",
+        }),
+      );
+      const gated = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(gated.build.checkpoints[0]?.status).toBe("waiting");
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Should be blocked by the waiting checkpoint.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain("checkpoint");
+      }
+    }),
+  );
+
+  it.effect("CLI progress rejects progress when the Build occurrence is no longer active", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-progress-inactive-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      // Drive the single work item to completion and settle the Build
+      // occurrence so it is no longer running.
+      yield* runtime.runPromise(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Implementation started.",
+        }),
+      );
+      const running = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      yield* runtime.runPromise(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "completed",
+          summary: "Implementation complete.",
+        }),
+      );
+      const ready = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const buildSession = ready.sessions.find((candidate) => candidate.stage === "build")!;
+      const proposed = yield* runtime.runPromise(
+        service.proposeStageCompletion({
+          taskId: task.id,
+          sessionId: buildSession.id,
+          providerTurnId: "turn-build-cli-progress",
+          payloadDigest: "digest-build-cli-progress",
+          summary: "Implementation complete.",
+          markdown: "Implemented the approved Plan.",
+        }),
+      );
+      const buildOccurrence = proposed.occurrences.find((o) => o.stage === "build")!;
+      yield* runtime.runPromise(
+        service.settleProviderTurn({
+          threadId: buildOccurrence.threadId!,
+          providerTurnId: "turn-build-cli-progress",
+          outcome: "completed",
+        }),
+      );
+      const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(settled.occurrences.find((o) => o.stage === "build")?.status).toBe("completed");
+
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: task.id,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Should not advance a completed occurrence.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain("not active");
+      }
+    }),
+  );
+
+  it.effect("CLI progress rejects progress outside the Build stage", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-progress-stage-");
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(implementationCreate()));
+      const result = yield* runtime.runPromiseExit(
+        service.implementationProgressCli({
+          taskId: created.task.id,
+          target: "phase",
+          id: "phase:foundation",
+          status: "running",
+          summary: "Should not run before Build.",
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain("No active Build");
+      }
+    }),
+  );
 });
 
 describe("Task CLI planning completion", () => {

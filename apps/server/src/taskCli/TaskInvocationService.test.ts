@@ -67,11 +67,21 @@ const makeLayer = () => {
   };
   let resolveFailure: TaskWorkspaceError | undefined;
   let completeFailure: TaskWorkspaceError | undefined;
+  let progressFailure: TaskWorkspaceError | undefined;
   let lastComplete:
     | {
         readonly summary: string;
         readonly markdown: string;
         readonly providerTurnId: string;
+      }
+    | undefined;
+  let lastProgress:
+    | {
+        readonly taskId: TaskWorkspaceId;
+        readonly target: "phase" | "work-item";
+        readonly id: string;
+        readonly status: "running" | "completed" | "blocked";
+        readonly summary: string;
       }
     | undefined;
 
@@ -115,6 +125,30 @@ const makeLayer = () => {
           })
         : Effect.fail(completeFailure);
     },
+    implementationProgressCli: (input: {
+      readonly taskId: TaskWorkspaceId;
+      readonly target: "phase" | "work-item";
+      readonly id: string;
+      readonly status: "running" | "completed" | "blocked";
+      readonly summary: string;
+    }) => {
+      lastProgress = {
+        taskId: input.taskId,
+        target: input.target,
+        id: input.id,
+        status: input.status,
+        summary: input.summary,
+      };
+      return progressFailure === undefined
+        ? Effect.succeed({
+            accepted: true as const,
+            phaseId: input.target === "phase" ? input.id : "phase:foundation",
+            workItemId: input.target === "work-item" ? input.id : null,
+            status: input.status,
+            taskRevision: 7,
+          })
+        : Effect.fail(progressFailure);
+    },
   } as unknown as TaskWorkspaceServiceShape;
 
   const collaborators = Layer.mergeAll(
@@ -149,7 +183,11 @@ const makeLayer = () => {
     failComplete: (error: TaskWorkspaceError) => {
       completeFailure = error;
     },
+    failProgress: (error: TaskWorkspaceError) => {
+      progressFailure = error;
+    },
     lastComplete: () => lastComplete,
+    lastProgress: () => lastProgress,
     clearResolveFailure: () => {
       resolveFailure = undefined;
     },
@@ -518,6 +556,52 @@ describe("TaskInvocationService", () => {
         })
         .pipe(Effect.flip);
       expect(oversized.code).toBe("payload_too_large");
+    }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect("progresses through the bound lease and maps workflow errors to CLI codes", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("turn-progress");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("turn-progress"));
+      const acknowledgement = yield* service.progress({
+        token: issued.token,
+        target: "phase",
+        id: "phase:foundation",
+        status: "running",
+        summary: "Foundation started.",
+      });
+      expect(acknowledgement).toMatchObject({
+        accepted: true,
+        phaseId: "phase:foundation",
+        workItemId: null,
+        status: "running",
+      });
+      expect(test.lastProgress()).toEqual({
+        taskId: TaskWorkspaceId.make("task-cli-test"),
+        target: "phase",
+        id: "phase:foundation",
+        status: "running",
+        summary: "Foundation started.",
+      });
+
+      test.failProgress(
+        new TaskWorkspaceError({
+          message: "The Build occurrence is not active.",
+          commandType: "task.internal",
+        }),
+      );
+      const failure = yield* service
+        .progress({
+          token: issued.token,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Should not persist.",
+        })
+        .pipe(Effect.flip);
+      expect(failure.code).toBe("not_active");
     }).pipe(Effect.provide(test.layer));
   });
 });

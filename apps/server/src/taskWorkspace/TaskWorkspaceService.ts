@@ -6596,6 +6596,31 @@ export const make = Effect.gen(function* () {
         return yield* new TaskWorkspaceError({
           message: `Task '${input.taskId}' was not found.`,
         });
+      if (currentRun(task).currentStage !== "build") {
+        return yield* new TaskWorkspaceError({
+          message: "No active Build implementation for this Task.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      const occurrence = activeOccurrence(task, "build");
+      if (!occurrence || (occurrence.status !== "running" && occurrence.status !== "finalizing")) {
+        return yield* new TaskWorkspaceError({
+          message: "The Build occurrence is not active.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      const session = occurrence.sessionId
+        ? task.sessions.find((candidate) => candidate.id === occurrence.sessionId)
+        : undefined;
+      if (!session || session.status !== "active" || session.role !== "primary") {
+        return yield* new TaskWorkspaceError({
+          message: "The Task primary session is not active.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
       const phaseId =
         input.target === "phase"
           ? input.id
@@ -6607,6 +6632,7 @@ export const make = Effect.gen(function* () {
             input.target === "phase"
               ? `Phase '${input.id}' was not found in the active Build.`
               : `Work item '${input.id}' was not found in the active Build.`,
+          taskId: task.id,
         });
       return yield* implementationProgress({
         taskId: input.taskId,
