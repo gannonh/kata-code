@@ -58,7 +58,9 @@ import {
   type TaskWorkspaceSourceResolution,
 } from "./Services/TaskWorkspaceSourceResolver.ts";
 import { TaskWorkspaceService, layer as TaskWorkspaceServiceLive } from "./TaskWorkspaceService.ts";
+import type { TaskWorkspaceServiceShape } from "./TaskWorkspaceService.ts";
 import { latestAttemptBlocksCompletion } from "./TaskWorkspaceService.ts";
+import { TaskCheckFinalizerServiceLive } from "../taskCli/TaskCheckFinalizerService.ts";
 import {
   ProviderInstanceRegistry,
   type ProviderInstanceRegistryShape,
@@ -221,6 +223,7 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
     Layer.provide(sourceResolverLayer),
     Layer.provide(orchestrationLayer),
     Layer.provide(TaskWorkspaceStoreLive),
+    Layer.provideMerge(TaskCheckFinalizerServiceLive),
     Layer.provide(SqlitePersistenceLive),
     Layer.provide(ServerConfig.layerTest(repoRoot, baseDir)),
     Layer.provideMerge(NodeServices.layer),
@@ -7208,6 +7211,386 @@ describe("TaskWorkspaceService guided implementation", () => {
       if (Exit.isFailure(result)) {
         expect((Cause.squash(result.cause) as Error).message).toContain("not active");
       }
+    }),
+  );
+
+  const checkPlanMarkdown = [
+    "## Phase [phase:foundation] Foundation",
+    "Checkpoint: never",
+    "",
+    "### Work item [work:implement] Implement approved Plan",
+    "",
+    "- Automated check [check:typecheck]: Typecheck | vp run typecheck",
+    "",
+  ].join("\n");
+
+  const finalizeCheck = (
+    service: TaskWorkspaceServiceShape,
+    token: string,
+    startingCommitSha: string,
+    input: {
+      readonly exitCode?: number | null;
+      readonly output?: string;
+      readonly timedOut?: boolean;
+      readonly endingCommitSha?: string | null;
+      readonly startingStatus?: string;
+      readonly endingStatus?: string | null;
+      readonly overrideStartingCommitSha?: string;
+    } = {},
+  ) =>
+    service.implementationCheckFinalize({
+      finalizerToken: token,
+      exitCode: input.exitCode ?? 0,
+      output: input.output ?? "",
+      timedOut: input.timedOut ?? false,
+      startingCommitSha: input.overrideStartingCommitSha ?? startingCommitSha,
+      endingCommitSha:
+        input.endingCommitSha === undefined ? startingCommitSha : input.endingCommitSha,
+      startingStatus: input.startingStatus ?? "",
+      endingStatus: input.endingStatus ?? null,
+    });
+
+  const startFoundationPhase = (service: TaskWorkspaceServiceShape, taskId: string) =>
+    service.implementationProgressCli({
+      taskId,
+      target: "work-item",
+      id: "work:implement",
+      status: "running",
+      summary: "Starting implementation.",
+    });
+
+  it.effect("CLI check begin allocates the first attempt with a bound finalization token", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-begin-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      expect(begun).toMatchObject({
+        accepted: true,
+        outcome: "spawn",
+        attemptId: "check-attempt-1",
+        checkId: "check:typecheck",
+        attemptNumber: 0,
+        command: "vp run typecheck",
+        timeoutMs: 120_000,
+      });
+      expect(begun.finalizerToken).not.toBeNull();
+      expect(begun.cwd).toContain("worktrees");
+      expect(begun.startingCommitSha).toMatch(/^[0-9a-f]{40}$/);
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(
+        after.build.checks.find((candidate) => candidate.id === "check:typecheck")?.status,
+      ).toBe("running");
+    }),
+  );
+
+  it.effect("CLI check begin retries reuse the same pending attempt with a fresh token", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-retry-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const first = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      const retry = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      expect(retry.attemptId).toBe(first.attemptId);
+      expect(retry.attemptNumber).toBe(first.attemptNumber);
+      expect(retry.finalizerToken).not.toBe(first.finalizerToken);
+
+      // The superseded token can no longer finalize.
+      const stale = yield* runtime.runPromiseExit(
+        finalizeCheck(service, first.finalizerToken!, first.startingCommitSha),
+      );
+      expect(Exit.isFailure(stale)).toBe(true);
+      if (Exit.isFailure(stale)) {
+        expect((Cause.squash(stale.cause) as Error).message).toContain("no longer active");
+      }
+    }),
+  );
+
+  it.effect(
+    "CLI check finalize rejects a swapped attempt token bound to a superseded attempt",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-swap-");
+        const { service, task } = yield* driveToBuildStage(
+          runtime,
+          baseDir,
+          repoRoot,
+          checkPlanMarkdown,
+        );
+        yield* runtime.runPromise(startFoundationPhase(service, task.id));
+        const first = yield* runtime.runPromise(
+          service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+        );
+        // Allocate a newer attempt while the first attempt's token is still
+        // pending. The older token must never settle the newer attempt.
+        const afterFirst = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        yield* runtime.runPromise(
+          service.implementationCheckRun({
+            taskId: task.id,
+            expectedTaskRevision: afterFirst.taskRevision,
+            checkId: "check:typecheck",
+            operationKey: "swap-second-attempt",
+          }),
+        );
+        const swapped = yield* runtime.runPromiseExit(
+          finalizeCheck(service, first.finalizerToken!, first.startingCommitSha),
+        );
+        expect(Exit.isFailure(swapped)).toBe(true);
+        if (Exit.isFailure(swapped)) {
+          expect((Cause.squash(swapped.cause) as Error).message).toContain("no longer the newest");
+        }
+      }),
+  );
+
+  it.effect("CLI check begin returns a settled pass without rerunning", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-pass-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      yield* runtime.runPromise(
+        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, { exitCode: 0 }),
+      );
+      const settled = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      expect(settled).toMatchObject({
+        outcome: "settled-pass",
+        attemptId: "check-attempt-1",
+        finalizerToken: null,
+      });
+    }),
+  );
+
+  it.effect("CLI check begin allocates the next attempt after a settled failure", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-rerun-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const first = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      yield* runtime.runPromise(
+        finalizeCheck(service, first.finalizerToken!, first.startingCommitSha, { exitCode: 1 }),
+      );
+      const second = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      expect(second.attemptId).toBe("check-attempt-2");
+      expect(second.attemptNumber).toBe(1);
+      expect(second.outcome).toBe("spawn");
+    }),
+  );
+
+  it.effect("CLI check finalize consumes the token exactly once and rejects replay", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-final-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      const settled = yield* runtime.runPromise(
+        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+          exitCode: 0,
+          output: "typecheck ok",
+        }),
+      );
+      expect(settled).toMatchObject({
+        checkId: "check:typecheck",
+        attemptId: "check-attempt-1",
+        status: "pass",
+      });
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.build.checkAttempts[0]?.status).toBe("pass");
+
+      const replay = yield* runtime.runPromiseExit(
+        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, { exitCode: 0 }),
+      );
+      expect(Exit.isFailure(replay)).toBe(true);
+      if (Exit.isFailure(replay)) {
+        expect((Cause.squash(replay.cause) as Error).message).toContain(
+          "already settled (status 'pass')",
+        );
+      }
+    }),
+  );
+
+  it.effect(
+    "CLI check finalize rejects altered starting Git state and reconcile makes it indeterminate",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-altered-");
+        const { service, task } = yield* driveToBuildStage(
+          runtime,
+          baseDir,
+          repoRoot,
+          checkPlanMarkdown,
+        );
+        yield* runtime.runPromise(startFoundationPhase(service, task.id));
+        const begun = yield* runtime.runPromise(
+          service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+        );
+        const altered = yield* runtime.runPromiseExit(
+          finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+            overrideStartingCommitSha: "0".repeat(40),
+          }),
+        );
+        expect(Exit.isFailure(altered)).toBe(true);
+        if (Exit.isFailure(altered)) {
+          expect((Cause.squash(altered.cause) as Error).message).toContain("does not match");
+        }
+        const still = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        expect(still.build.checkAttempts[0]?.status).toBe("pending");
+
+        yield* runtime.runPromise(service.reconcilePendingChecks({ olderThanMs: 0 }));
+        const reconciled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        expect(reconciled.build.checkAttempts[0]?.status).toBe("indeterminate");
+        expect(reconciled.build.checkAttempts[0]?.indeterminateAcknowledgedAt).toBeNull();
+      }),
+  );
+
+  it.effect("CLI check finalize rejects oversized output before consuming the token", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-oversized-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      const oversized = yield* runtime.runPromiseExit(
+        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+          output: "x".repeat(1_048_577),
+        }),
+      );
+      expect(Exit.isFailure(oversized)).toBe(true);
+      if (Exit.isFailure(oversized)) {
+        expect((Cause.squash(oversized.cause) as Error).message).toContain("output bounds");
+      }
+      // The token is still usable after a rejected finalization.
+      const settled = yield* runtime.runPromise(
+        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, { exitCode: 0 }),
+      );
+      expect(settled.status).toBe("pass");
+    }),
+  );
+
+  it.effect("CLI check acknowledge authorizes the next attempt after an indeterminate result", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-ack-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      yield* runtime.runPromise(
+        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+          timedOut: true,
+          exitCode: null,
+          endingCommitSha: null,
+        }),
+      );
+      const indeterminate = yield* runtime
+        .runPromise(
+          service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+        )
+        .pipe(Effect.flip);
+      expect((indeterminate as Error).message).toContain("indeterminate");
+
+      yield* runtime.runPromise(
+        service.acknowledgeImplementationCheck({
+          taskId: task.id,
+          checkId: "check:typecheck",
+          attemptId: "check-attempt-1",
+          acknowledgedBy: "operator",
+        }),
+      );
+      const next = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      expect(next.attemptId).toBe("check-attempt-2");
+      expect(next.outcome).toBe("spawn");
+    }),
+  );
+
+  it.effect("CLI check acknowledge is idempotent and rejects non-indeterminate attempts", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-ack-idem-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      yield* runtime.runPromise(
+        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+          timedOut: true,
+          exitCode: null,
+          endingCommitSha: null,
+        }),
+      );
+      const ack = {
+        taskId: task.id,
+        checkId: "check:typecheck",
+        attemptId: "check-attempt-1",
+        acknowledgedBy: "operator",
+      };
+      yield* runtime.runPromise(service.acknowledgeImplementationCheck(ack));
+      yield* runtime.runPromise(service.acknowledgeImplementationCheck(ack));
+      const acked = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(acked.build.checkAttempts[0]?.indeterminateAcknowledgedAt).not.toBeNull();
+
+      const pendingAck = yield* runtime.runPromiseExit(
+        service.acknowledgeImplementationCheck({ ...ack, attemptId: "check-attempt-2" }),
+      );
+      expect(Exit.isFailure(pendingAck)).toBe(true);
     }),
   );
 

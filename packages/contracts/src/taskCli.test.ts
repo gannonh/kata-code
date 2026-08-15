@@ -119,6 +119,7 @@ describe("implementation Task CLI contracts", () => {
         cwd: "/worktree",
         timeoutMs: 120_000,
         maxOutputBytes: 1_048_576,
+        outcome: "spawn",
         finalizerToken: "opaque-token",
         startingCommitSha: "deadbeef",
         startingStatus: "",
@@ -133,6 +134,27 @@ describe("implementation Task CLI contracts", () => {
         error: { code: "check_indeterminate", message: "acknowledge the previous attempt" },
       }),
     ).toMatchObject({ ok: false, error: { code: "check_indeterminate" } });
+    // A settled pass carries no finalization token: the CLI reports the pass
+    // and never re-executes the command.
+    expect(
+      decode({
+        ...successBase,
+        operation: "check",
+        accepted: true,
+        attemptId: "check-attempt-1",
+        checkId: "check:typecheck",
+        attemptNumber: 0,
+        command: "vp run typecheck",
+        cwd: "/worktree",
+        timeoutMs: 120_000,
+        maxOutputBytes: 1_048_576,
+        outcome: "settled-pass",
+        finalizerToken: null,
+        startingCommitSha: "deadbeef",
+        startingStatus: "",
+        taskRevision: 4,
+      }),
+    ).toMatchObject({ ok: true, outcome: "settled-pass", finalizerToken: null });
     expect(TASK_CLI_CHECK_BEGIN_PATH).toBe("/api/task-cli/v1/check/begin");
   });
 
@@ -310,6 +332,7 @@ describe("implementation command contract table", () => {
           cwd: "/tmp",
           timeoutMs: 120_000,
           maxOutputBytes: 1_048_576,
+          outcome: "spawn",
           finalizerToken: "opaque-token",
           startingCommitSha: "0123456789abcdef",
           startingStatus: "",
