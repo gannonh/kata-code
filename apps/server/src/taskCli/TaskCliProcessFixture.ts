@@ -321,6 +321,11 @@ export const makeTaskCliProcessFixture = Effect.fn("makeTaskCliProcessFixture")(
     bind: (input) => rawInvocation.bind(input).pipe(Effect.provide(services)),
     resolve: (token) => rawInvocation.resolve(token).pipe(Effect.provide(services)),
     complete: (input) => rawInvocation.complete(input).pipe(Effect.provide(services)),
+    progress: (input) => rawInvocation.progress(input).pipe(Effect.provide(services)),
+    checkBegin: (input) => rawInvocation.checkBegin(input).pipe(Effect.provide(services)),
+    checkFinalize: (input) => rawInvocation.checkFinalize(input).pipe(Effect.provide(services)),
+    amendmentPropose: (input) =>
+      rawInvocation.amendmentPropose(input).pipe(Effect.provide(services)),
     revokeThread: (threadId) => rawInvocation.revokeThread(threadId).pipe(Effect.provide(services)),
     revokeTurn: (input) => rawInvocation.revokeTurn(input).pipe(Effect.provide(services)),
     revokeAll: rawInvocation.revokeAll.pipe(Effect.provide(services)),

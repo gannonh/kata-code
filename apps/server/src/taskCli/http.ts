@@ -1,10 +1,18 @@
 import {
   EnvironmentHttpApi,
   TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY,
+  TaskCliAmendmentRequest,
+  TaskCliCheckBeginRequest,
+  TaskCliCheckFinalizeRequest,
   TaskCliCompleteRequest,
+  TaskCliProgressRequest,
+  type TaskCliAmendmentEnvelope as TaskCliAmendmentEnvelopeValue,
+  type TaskCliCheckBeginEnvelope as TaskCliCheckBeginEnvelopeValue,
+  type TaskCliCheckFinalizeEnvelope as TaskCliCheckFinalizeEnvelopeValue,
   type TaskCliCompleteEnvelope as TaskCliCompleteEnvelopeValue,
   type TaskCliContextEnvelope as TaskCliContextEnvelopeValue,
   type TaskCliOperation,
+  type TaskCliProgressEnvelope as TaskCliProgressEnvelopeValue,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -15,9 +23,13 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
 import { annotateEnvironmentRequest } from "../auth/http.ts";
 import {
+  taskCliAmendmentSuccessEnvelope,
+  taskCliCheckBeginSuccessEnvelope,
+  taskCliCheckFinalizeSuccessEnvelope,
   taskCliCompleteSuccessEnvelope,
   taskCliContextSuccessEnvelope,
   taskCliFailureEnvelope,
+  taskCliProgressSuccessEnvelope,
 } from "./envelope.ts";
 import { TaskInvocationService } from "./TaskInvocationService.ts";
 
@@ -51,6 +63,18 @@ const TASK_CLI_IDENTITY_QUERY_KEYS = new Set([
   "providerinstanceid",
   "provider-instance-id",
   "task",
+  "checkid",
+  "check-id",
+  "attempt",
+  "attemptid",
+  "attempt-id",
+  "finalizertoken",
+  "finalizer-token",
+  "phaseid",
+  "phase-id",
+  "workitemid",
+  "work-item-id",
+  "amendment",
 ]);
 
 const TASK_CLI_IDENTITY_BODY_KEYS = new Set([
@@ -71,6 +95,23 @@ const TASK_CLI_IDENTITY_BODY_KEYS = new Set([
   "provider-instance-id",
   "provider_instance_id",
   "task",
+  "checkid",
+  "check-id",
+  "check_id",
+  "attempt",
+  "attemptid",
+  "attempt-id",
+  "attempt_id",
+  "finalizertoken",
+  "finalizer-token",
+  "finalizer_token",
+  "phaseid",
+  "phase-id",
+  "phase_id",
+  "workitemid",
+  "work-item-id",
+  "work_item_id",
+  "amendment",
 ]);
 
 const identityQueryKey = (url: string): string | undefined => {
@@ -123,6 +164,10 @@ const unauthorizedEnvelope = (operation: TaskCliOperation) =>
   );
 
 const decodeCompleteRequest = Schema.decodeUnknownEffect(TaskCliCompleteRequest);
+const decodeProgressRequest = Schema.decodeUnknownEffect(TaskCliProgressRequest);
+const decodeCheckBeginRequest = Schema.decodeUnknownEffect(TaskCliCheckBeginRequest);
+const decodeCheckFinalizeRequest = Schema.decodeUnknownEffect(TaskCliCheckFinalizeRequest);
+const decodeAmendmentRequest = Schema.decodeUnknownEffect(TaskCliAmendmentRequest);
 
 export const taskCliHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
@@ -188,6 +233,147 @@ export const taskCliHttpApiLayer = HttpApiBuilder.group(
               Effect.map((completion) => taskCliCompleteSuccessEnvelope(completion)),
               Effect.catchTag("TaskInvocationError", (error) =>
                 Effect.succeed(taskCliFailureEnvelope("complete", error.code, error.message)),
+              ),
+            );
+        }),
+      )
+      .handle(
+        "progress",
+        Effect.fn("environment.taskCli.progress")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* appendTaskCliResponseHeaders;
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const rejected = identityRejection("progress", request, args.payload);
+          if (rejected) return rejected satisfies TaskCliProgressEnvelopeValue;
+          const token = tokenFromHeaders(request);
+          if (!token)
+            return unauthorizedEnvelope("progress") satisfies TaskCliProgressEnvelopeValue;
+          const decoded = yield* decodeProgressRequest(args.payload).pipe(
+            Effect.catch(() =>
+              Effect.succeed<typeof TaskCliProgressRequest.Type | undefined>(undefined),
+            ),
+          );
+          if (!decoded) {
+            return taskCliFailureEnvelope(
+              "progress",
+              "invalid_request",
+              "Progress requests require a target (phase or work-item), id, status, and summary.",
+            ) satisfies TaskCliProgressEnvelopeValue;
+          }
+          return yield* invocations
+            .progress({
+              token,
+              target: decoded.target,
+              id: decoded.id,
+              status: decoded.status,
+              summary: decoded.summary,
+            })
+            .pipe(
+              Effect.map((ack) => taskCliProgressSuccessEnvelope(ack)),
+              Effect.catchTag("TaskInvocationError", (error) =>
+                Effect.succeed(taskCliFailureEnvelope("progress", error.code, error.message)),
+              ),
+            );
+        }),
+      )
+      .handle(
+        "checkBegin",
+        Effect.fn("environment.taskCli.checkBegin")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* appendTaskCliResponseHeaders;
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const rejected = identityRejection("check", request, args.payload);
+          if (rejected) return rejected satisfies TaskCliCheckBeginEnvelopeValue;
+          const token = tokenFromHeaders(request);
+          if (!token) return unauthorizedEnvelope("check") satisfies TaskCliCheckBeginEnvelopeValue;
+          const decoded = yield* decodeCheckBeginRequest(args.payload).pipe(
+            Effect.catch(() =>
+              Effect.succeed<typeof TaskCliCheckBeginRequest.Type | undefined>(undefined),
+            ),
+          );
+          if (!decoded) {
+            return taskCliFailureEnvelope(
+              "check",
+              "invalid_request",
+              "Check begin requests require a known check id.",
+            ) satisfies TaskCliCheckBeginEnvelopeValue;
+          }
+          return yield* invocations.checkBegin({ token, checkId: decoded.checkId }).pipe(
+            Effect.map((result) => taskCliCheckBeginSuccessEnvelope(result)),
+            Effect.catchTag("TaskInvocationError", (error) =>
+              Effect.succeed(taskCliFailureEnvelope("check", error.code, error.message)),
+            ),
+          );
+        }),
+      )
+      .handle(
+        "checkFinalize",
+        Effect.fn("environment.taskCli.checkFinalize")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* appendTaskCliResponseHeaders;
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const rejected = identityRejection("check", request, args.payload);
+          if (rejected) return rejected satisfies TaskCliCheckFinalizeEnvelopeValue;
+          // The finalizer token is the credential for finalization; the request
+          // carries no invocation identity and no bearer token.
+          const decoded = yield* decodeCheckFinalizeRequest(args.payload).pipe(
+            Effect.catch(() =>
+              Effect.succeed<typeof TaskCliCheckFinalizeRequest.Type | undefined>(undefined),
+            ),
+          );
+          if (!decoded) {
+            return taskCliFailureEnvelope(
+              "check",
+              "invalid_request",
+              "Check finalize requests require a finalizer token and observed result.",
+            ) satisfies TaskCliCheckFinalizeEnvelopeValue;
+          }
+          return yield* invocations.checkFinalize(decoded).pipe(
+            Effect.map((result) => taskCliCheckFinalizeSuccessEnvelope(result)),
+            Effect.catchTag("TaskInvocationError", (error) =>
+              Effect.succeed(taskCliFailureEnvelope("check", error.code, error.message)),
+            ),
+          );
+        }),
+      )
+      .handle(
+        "amendment",
+        Effect.fn("environment.taskCli.amendment")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* appendTaskCliResponseHeaders;
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const rejected = identityRejection("amendment", request, args.payload);
+          if (rejected) return rejected satisfies TaskCliAmendmentEnvelopeValue;
+          const token = tokenFromHeaders(request);
+          if (!token)
+            return unauthorizedEnvelope("amendment") satisfies TaskCliAmendmentEnvelopeValue;
+          const decoded = yield* decodeAmendmentRequest(args.payload).pipe(
+            Effect.catch(() =>
+              Effect.succeed<typeof TaskCliAmendmentRequest.Type | undefined>(undefined),
+            ),
+          );
+          if (!decoded) {
+            return taskCliFailureEnvelope(
+              "amendment",
+              "invalid_request",
+              "Amendment requests require phase, work item, expected, found, impact, and proposed Plan markdown.",
+            ) satisfies TaskCliAmendmentEnvelopeValue;
+          }
+          return yield* invocations
+            .amendmentPropose({
+              token,
+              phaseId: decoded.phaseId,
+              workItemId: decoded.workItemId,
+              triggeringCheckId: decoded.triggeringCheckId,
+              expected: decoded.expected,
+              found: decoded.found,
+              impact: decoded.impact,
+              proposedPlanMarkdown: decoded.proposedPlanMarkdown,
+            })
+            .pipe(
+              Effect.map((ack) => taskCliAmendmentSuccessEnvelope(ack)),
+              Effect.catchTag("TaskInvocationError", (error) =>
+                Effect.succeed(taskCliFailureEnvelope("amendment", error.code, error.message)),
               ),
             );
         }),

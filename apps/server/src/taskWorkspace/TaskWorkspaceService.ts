@@ -20,6 +20,8 @@ import {
   TaskWorkspaceWorktreeOutboxPayload,
   CommandId,
   DEFAULT_RUNTIME_MODE,
+  type TaskCliCheckBeginResult,
+  type TaskCliCheckFinalizeStatus,
   type TaskWorkspace,
   type TaskWorkspaceArtifact,
   type TaskWorkspaceArtifactKind,
@@ -1607,6 +1609,45 @@ export interface TaskWorkspaceServiceShape {
     readonly proposedPlanMarkdown: string;
     readonly operationKey: string;
   }) => Effect.Effect<TaskImplementationAmendmentAck, TaskWorkspaceError>;
+  readonly implementationProgressCli: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly target: "phase" | "work-item";
+    readonly id: string;
+    readonly status: "running" | "completed" | "blocked";
+    readonly summary: string;
+  }) => Effect.Effect<TaskImplementationProgressAck, TaskWorkspaceError>;
+  readonly implementationAmendmentProposeCli: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly phaseId: string;
+    readonly workItemId: string;
+    readonly triggeringCheckId: string | null;
+    readonly expected: string;
+    readonly found: string;
+    readonly impact: string;
+    readonly proposedPlanMarkdown: string;
+  }) => Effect.Effect<TaskImplementationAmendmentAck, TaskWorkspaceError>;
+  readonly implementationCheckBegin: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly checkId: string;
+  }) => Effect.Effect<TaskCliCheckBeginResult, TaskWorkspaceError>;
+  readonly implementationCheckFinalize: (input: {
+    readonly finalizerToken: string;
+    readonly exitCode: number | null;
+    readonly output: string;
+    readonly timedOut: boolean;
+    readonly startingCommitSha: string;
+    readonly endingCommitSha: string | null;
+    readonly startingStatus: string;
+    readonly endingStatus: string | null;
+  }) => Effect.Effect<
+    {
+      readonly checkId: string;
+      readonly attemptId: string;
+      readonly status: TaskCliCheckFinalizeStatus;
+      readonly taskRevision: number;
+    },
+    TaskWorkspaceError
+  >;
   readonly startImplementationCheck: (input: {
     readonly taskId: TaskWorkspaceId;
     readonly attemptId: string;
@@ -6546,6 +6587,76 @@ export const make = Effect.gen(function* () {
       })),
     );
 
+  const implementationProgressCli: TaskWorkspaceServiceShape["implementationProgressCli"] = (
+    input,
+  ) =>
+    Effect.gen(function* () {
+      const task = taskById.get(input.taskId);
+      if (!task)
+        return yield* new TaskWorkspaceError({
+          message: `Task '${input.taskId}' was not found.`,
+        });
+      const phaseId =
+        input.target === "phase"
+          ? input.id
+          : task.build.phases.find((phase) => phase.workItems.some((item) => item.id === input.id))
+              ?.id;
+      if (!phaseId)
+        return yield* new TaskWorkspaceError({
+          message:
+            input.target === "phase"
+              ? `Phase '${input.id}' was not found in the active Build.`
+              : `Work item '${input.id}' was not found in the active Build.`,
+        });
+      return yield* implementationProgress({
+        taskId: input.taskId,
+        expectedTaskRevision: task.taskRevision,
+        phaseId,
+        workItemId: input.target === "work-item" ? input.id : null,
+        status: input.status,
+        summary: input.summary,
+      });
+    });
+
+  const implementationAmendmentProposeCli: TaskWorkspaceServiceShape["implementationAmendmentProposeCli"] =
+    (input) =>
+      Effect.gen(function* () {
+        const task = taskById.get(input.taskId);
+        if (!task)
+          return yield* new TaskWorkspaceError({
+            message: `Task '${input.taskId}' was not found.`,
+          });
+        return yield* implementationAmendmentPropose({
+          taskId: input.taskId,
+          expectedTaskRevision: task.taskRevision,
+          phaseId: input.phaseId,
+          workItemId: input.workItemId,
+          triggeringCheckId: input.triggeringCheckId,
+          expected: input.expected,
+          found: input.found,
+          impact: input.impact,
+          proposedPlanMarkdown: input.proposedPlanMarkdown,
+          operationKey: `implementation-amendment-cli:${input.taskId}:${input.phaseId}:${input.workItemId}:${input.triggeringCheckId ?? "none"}`,
+        });
+      });
+
+  const implementationCheckBegin: TaskWorkspaceServiceShape["implementationCheckBegin"] = () =>
+    Effect.fail(
+      new TaskWorkspaceError({
+        message: "Implementation check execution is not implemented yet.",
+        commandType: "task.internal",
+      }),
+    );
+
+  const implementationCheckFinalize: TaskWorkspaceServiceShape["implementationCheckFinalize"] =
+    () =>
+      Effect.fail(
+        new TaskWorkspaceError({
+          message: "Implementation check finalization is not implemented yet.",
+          commandType: "task.internal",
+        }),
+      );
+
   const latestOccurrence = (
     task: TaskWorkspace,
     stage: TaskWorkspaceStage,
@@ -8368,6 +8479,10 @@ export const make = Effect.gen(function* () {
     startImplementationCheck,
     processImplementationCheck,
     implementationAmendmentPropose,
+    implementationProgressCli,
+    implementationAmendmentProposeCli,
+    implementationCheckBegin,
+    implementationCheckFinalize,
     implementationComplete,
     processBootstrap,
     processWorktree,

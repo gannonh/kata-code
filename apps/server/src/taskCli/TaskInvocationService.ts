@@ -11,6 +11,10 @@ import {
   TaskWorkspaceStage,
   ThreadId,
   TurnId,
+  type TaskCliCheckBeginResult,
+  type TaskCliCheckFinalizeStatus,
+  type TaskImplementationAmendmentAck,
+  type TaskImplementationProgressAck,
 } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -92,6 +96,45 @@ export interface TaskInvocationServiceShape {
     readonly summary: string;
     readonly markdown: string;
   }) => Effect.Effect<TaskStageCompletionAck, TaskInvocationError>;
+  readonly progress: (input: {
+    readonly token: string;
+    readonly target: "phase" | "work-item";
+    readonly id: string;
+    readonly status: "running" | "completed" | "blocked";
+    readonly summary: string;
+  }) => Effect.Effect<TaskImplementationProgressAck, TaskInvocationError>;
+  readonly checkBegin: (input: {
+    readonly token: string;
+    readonly checkId: string;
+  }) => Effect.Effect<TaskCliCheckBeginResult, TaskInvocationError>;
+  readonly checkFinalize: (input: {
+    readonly finalizerToken: string;
+    readonly exitCode: number | null;
+    readonly output: string;
+    readonly timedOut: boolean;
+    readonly startingCommitSha: string;
+    readonly endingCommitSha: string | null;
+    readonly startingStatus: string;
+    readonly endingStatus: string | null;
+  }) => Effect.Effect<
+    {
+      readonly checkId: string;
+      readonly attemptId: string;
+      readonly status: TaskCliCheckFinalizeStatus;
+      readonly taskRevision: number;
+    },
+    TaskInvocationError
+  >;
+  readonly amendmentPropose: (input: {
+    readonly token: string;
+    readonly phaseId: string;
+    readonly workItemId: string;
+    readonly triggeringCheckId: string | null;
+    readonly expected: string;
+    readonly found: string;
+    readonly impact: string;
+    readonly proposedPlanMarkdown: string;
+  }) => Effect.Effect<TaskImplementationAmendmentAck, TaskInvocationError>;
   readonly revokeThread: (threadId: ThreadId) => Effect.Effect<void, TaskInvocationError>;
   readonly revokeTurn: (input: {
     readonly threadId: ThreadId;
@@ -593,6 +636,96 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError(mapCompleteError));
   });
 
+  const mapImplementationError = (cause: unknown): TaskInvocationError => {
+    if (cause instanceof TaskInvocationError) return cause;
+    const message = isTaskWorkspaceError(cause) ? cause.message : String(cause);
+    const lower = message.toLowerCase();
+    if (
+      lower.includes("too large") ||
+      lower.includes("maximum is") ||
+      lower.includes("output bounds")
+    ) {
+      return toError("payload_too_large", message, cause);
+    }
+    if (lower.includes("indeterminate")) {
+      return toError("check_indeterminate", message, cause);
+    }
+    if (lower.includes("not implemented")) {
+      return toError("internal_error", message, cause);
+    }
+    if (
+      lower.includes("not active") ||
+      lower.includes("no active") ||
+      lower.includes("is not the active") ||
+      lower.includes("cannot accept a proposal")
+    ) {
+      return toError("not_active", message, cause);
+    }
+    if (lower.includes("not authorized") || lower.includes("unauthorized")) {
+      return toError("unauthorized", message, cause);
+    }
+    if (lower.includes("conflict") || lower.includes("drift")) {
+      return toError("conflict", message, cause);
+    }
+    return toError("internal_error", message, cause);
+  };
+
+  const progress: TaskInvocationServiceShape["progress"] = Effect.fn(
+    "TaskInvocationService.progress",
+  )(function* (input) {
+    const resolved = yield* resolve(input.token);
+    const taskWorkspace = yield* requireTaskWorkspace;
+    return yield* taskWorkspace
+      .implementationProgressCli({
+        taskId: resolved.scope.taskId,
+        target: input.target,
+        id: input.id,
+        status: input.status,
+        summary: input.summary,
+      })
+      .pipe(Effect.mapError(mapImplementationError));
+  });
+
+  const checkBegin: TaskInvocationServiceShape["checkBegin"] = Effect.fn(
+    "TaskInvocationService.checkBegin",
+  )(function* (input) {
+    const resolved = yield* resolve(input.token);
+    const taskWorkspace = yield* requireTaskWorkspace;
+    return yield* taskWorkspace
+      .implementationCheckBegin({ taskId: resolved.scope.taskId, checkId: input.checkId })
+      .pipe(Effect.mapError(mapImplementationError));
+  });
+
+  const checkFinalize: TaskInvocationServiceShape["checkFinalize"] = Effect.fn(
+    "TaskInvocationService.checkFinalize",
+  )(function* (input) {
+    const taskWorkspace = yield* requireTaskWorkspace;
+    // The finalizer token is the sole credential; the invocation lease is not
+    // consulted because finalization must accept no caller identities.
+    return yield* taskWorkspace
+      .implementationCheckFinalize(input)
+      .pipe(Effect.mapError(mapImplementationError));
+  });
+
+  const amendmentPropose: TaskInvocationServiceShape["amendmentPropose"] = Effect.fn(
+    "TaskInvocationService.amendmentPropose",
+  )(function* (input) {
+    const resolved = yield* resolve(input.token);
+    const taskWorkspace = yield* requireTaskWorkspace;
+    return yield* taskWorkspace
+      .implementationAmendmentProposeCli({
+        taskId: resolved.scope.taskId,
+        phaseId: input.phaseId,
+        workItemId: input.workItemId,
+        triggeringCheckId: input.triggeringCheckId,
+        expected: input.expected,
+        found: input.found,
+        impact: input.impact,
+        proposedPlanMarkdown: input.proposedPlanMarkdown,
+      })
+      .pipe(Effect.mapError(mapImplementationError));
+  });
+
   const revokeThread: TaskInvocationServiceShape["revokeThread"] = (threadId) =>
     Effect.gen(function* () {
       const revokedAt = DateTime.formatIso(yield* DateTime.now);
@@ -666,6 +799,10 @@ const make = Effect.gen(function* () {
     bind,
     resolve,
     complete,
+    progress,
+    checkBegin,
+    checkFinalize,
+    amendmentPropose,
     revokeThread,
     revokeTurn,
     revokeAll,
