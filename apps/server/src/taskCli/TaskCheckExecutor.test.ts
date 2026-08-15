@@ -134,6 +134,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "pwd",
         timeoutMs: 15_000,
       });
@@ -168,6 +169,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "git status --porcelain",
         timeoutMs: 15_000,
       });
@@ -206,6 +208,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "git rev-parse --abbrev-ref HEAD",
         timeoutMs: 15_000,
       });
@@ -222,6 +225,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "node -e \"const s = 'hello world'; process.stdout.write(s)\"",
         timeoutMs: 15_000,
       });
@@ -237,6 +241,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "git commit --allow-empty -m move-head",
         timeoutMs: 15_000,
       });
@@ -256,6 +261,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "node -e \"require('node:fs').writeFileSync('dirty.txt', 'x')\"",
         timeoutMs: 15_000,
       });
@@ -277,6 +283,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command:
           "node -e \"require('node:fs').writeFileSync(require('node:path').join(process.env.TMPDIR, 'scratch.txt'), 'x')\"",
         timeoutMs: 15_000,
@@ -309,6 +316,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
         .run({
           worktreePath,
           expectedStartingCommitSha: startingCommitSha,
+          expectedStartingStatus: "",
           command: "pwd",
           timeoutMs: 15_000,
         })
@@ -329,11 +337,48 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
         .run({
           worktreePath,
           expectedStartingCommitSha: "0123456789abcdef0123456789abcdef01234567",
+          expectedStartingStatus: "",
           command: "git status",
           timeoutMs: 15_000,
         })
         .pipe(Effect.exit);
       expect(result._tag).toBe("Failure");
+    }),
+  );
+
+  it.effect("rejects a starting worktree status that differs from the bound attempt", () =>
+    Effect.gen(function* () {
+      const { worktreePath, startingCommitSha } = yield* setup;
+      // A background change (e.g. a formatter) after the server bound the
+      // attempt must never be adopted as the check baseline.
+      yield* Effect.tryPromise(() =>
+        NodeFs.writeFile(NodePath.join(worktreePath, "dirty.txt"), "x"),
+      );
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor
+        .run({
+          worktreePath,
+          expectedStartingCommitSha: startingCommitSha,
+          expectedStartingStatus: "",
+          command: "pwd",
+          timeoutMs: 15_000,
+        })
+        .pipe(Effect.exit);
+      expect(result._tag).toBe("Failure");
+      // The bound status is still accepted when it matches the observation.
+      const dirtyStatus = yield* Effect.tryPromise(() =>
+        execFileAsync("git", ["status", "--porcelain=v2"], { cwd: worktreePath }).then(
+          ({ stdout }) => stdout.trim(),
+        ),
+      );
+      const accepted = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: dirtyStatus,
+        command: "pwd",
+        timeoutMs: 15_000,
+      });
+      expect(accepted.status).toBe("pass");
     }),
   );
 
@@ -344,6 +389,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "   ",
         timeoutMs: 15_000,
       });
@@ -360,6 +406,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const trailingBackslash = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "echo \\",
         timeoutMs: 15_000,
       });
@@ -368,6 +415,7 @@ effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
       const unterminatedQuote = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "echo 'unterminated",
         timeoutMs: 15_000,
       });
@@ -470,6 +518,7 @@ effectIt.layer(afterStateTimeoutRunnerLayer)("TaskCheckExecutor after-state time
       const result = yield* executor.run({
         worktreePath,
         expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "pwd",
         timeoutMs: 15_000,
       });

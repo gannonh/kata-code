@@ -459,6 +459,7 @@ const runCheck = (checkId: string) =>
       .run({
         worktreePath: beginEnvelope.cwd,
         expectedStartingCommitSha: beginEnvelope.startingCommitSha,
+        expectedStartingStatus: beginEnvelope.startingStatus,
         command: beginEnvelope.command,
         timeoutMs: beginEnvelope.timeoutMs,
         maxOutputBytes: beginEnvelope.maxOutputBytes,

@@ -18,6 +18,11 @@ export interface TaskCheckExecutorInput {
    * when its own before-observation matches this sha; the branch and base are
    * server-side concerns the CLI never learns (and never needs). */
   readonly expectedStartingCommitSha: string;
+  /** The worktree status the server bound to this attempt. Mirrors
+   * `expectedStartingCommitSha`: a background change (e.g. a formatter)
+   * between the server's begin snapshot and the CLI's own before-observation
+   * must never be adopted as the check baseline. */
+  readonly expectedStartingStatus: string;
   readonly command: string;
   readonly timeoutMs: number;
   readonly maxOutputBytes?: number;
@@ -348,6 +353,12 @@ const make = Effect.gen(function* () {
         });
       }
       const startingStatus = beforeStatus.stdout.trim();
+      if (startingStatus !== input.expectedStartingStatus) {
+        return yield* new TaskCheckExecutorError({
+          message: "The starting worktree status does not match the bound attempt.",
+          kind: "git-state",
+        });
+      }
       // A malformed command line (unterminated quote or escape) cannot be
       // executed; settle it as indeterminate so the server records the attempt
       // instead of a Die defect killing the CLI command.

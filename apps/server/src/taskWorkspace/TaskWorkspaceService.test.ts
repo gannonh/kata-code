@@ -7645,8 +7645,11 @@ describe("TaskWorkspaceService guided implementation", () => {
 
   const finalizeCheck = (
     service: TaskWorkspaceServiceShape,
-    token: string,
-    startingCommitSha: string,
+    begun: {
+      readonly finalizerToken: string | null;
+      readonly startingCommitSha: string;
+      readonly startingStatus: string;
+    },
     input: {
       readonly exitCode?: number | null;
       readonly output?: string;
@@ -7658,7 +7661,7 @@ describe("TaskWorkspaceService guided implementation", () => {
     } = {},
   ) =>
     service.implementationCheckFinalize({
-      finalizerToken: token,
+      finalizerToken: begun.finalizerToken!,
       exitCode: input.exitCode ?? 0,
       status:
         input.timedOut === true
@@ -7668,10 +7671,10 @@ describe("TaskWorkspaceService guided implementation", () => {
             : "fail",
       output: input.output ?? "",
       timedOut: input.timedOut ?? false,
-      startingCommitSha: input.overrideStartingCommitSha ?? startingCommitSha,
+      startingCommitSha: input.overrideStartingCommitSha ?? begun.startingCommitSha,
       endingCommitSha:
-        input.endingCommitSha === undefined ? startingCommitSha : input.endingCommitSha,
-      startingStatus: input.startingStatus ?? "",
+        input.endingCommitSha === undefined ? begun.startingCommitSha : input.endingCommitSha,
+      startingStatus: input.startingStatus ?? begun.startingStatus,
       endingStatus: input.endingStatus ?? null,
     });
 
@@ -7737,9 +7740,7 @@ describe("TaskWorkspaceService guided implementation", () => {
       expect(retry.finalizerToken).not.toBe(first.finalizerToken);
 
       // The superseded token can no longer finalize.
-      const stale = yield* runtime.runPromiseExit(
-        finalizeCheck(service, first.finalizerToken!, first.startingCommitSha),
-      );
+      const stale = yield* runtime.runPromiseExit(finalizeCheck(service, first));
       expect(Exit.isFailure(stale)).toBe(true);
       if (Exit.isFailure(stale)) {
         expect((Cause.squash(stale.cause) as Error).message).toContain("no longer active");
@@ -7773,9 +7774,7 @@ describe("TaskWorkspaceService guided implementation", () => {
             operationKey: "swap-second-attempt",
           }),
         );
-        const swapped = yield* runtime.runPromiseExit(
-          finalizeCheck(service, first.finalizerToken!, first.startingCommitSha),
-        );
+        const swapped = yield* runtime.runPromiseExit(finalizeCheck(service, first));
         expect(Exit.isFailure(swapped)).toBe(true);
         if (Exit.isFailure(swapped)) {
           expect((Cause.squash(swapped.cause) as Error).message).toContain("no longer the newest");
@@ -7796,9 +7795,7 @@ describe("TaskWorkspaceService guided implementation", () => {
       const begun = yield* runtime.runPromise(
         service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
       );
-      yield* runtime.runPromise(
-        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, { exitCode: 0 }),
-      );
+      yield* runtime.runPromise(finalizeCheck(service, begun, { exitCode: 0 }));
       const settled = yield* runtime.runPromise(
         service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
       );
@@ -7823,9 +7820,7 @@ describe("TaskWorkspaceService guided implementation", () => {
       const first = yield* runtime.runPromise(
         service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
       );
-      yield* runtime.runPromise(
-        finalizeCheck(service, first.finalizerToken!, first.startingCommitSha, { exitCode: 1 }),
-      );
+      yield* runtime.runPromise(finalizeCheck(service, first, { exitCode: 1 }));
       const second = yield* runtime.runPromise(
         service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
       );
@@ -7855,7 +7850,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         sql`UPDATE task_check_finalizers SET occurrence = 999 WHERE attempt_id = ${begun.attemptId}`,
       );
       const crossOccurrence = yield* runtime.runPromiseExit(
-        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, { exitCode: 0 }),
+        finalizeCheck(service, begun, { exitCode: 0 }),
       );
       expect(Exit.isFailure(crossOccurrence)).toBe(true);
       if (Exit.isFailure(crossOccurrence)) {
@@ -7885,7 +7880,7 @@ describe("TaskWorkspaceService guided implementation", () => {
       );
       const token = begun.finalizerToken!;
       yield* runtime.runPromise(
-        finalizeCheck(service, token, begun.startingCommitSha, {
+        finalizeCheck(service, begun, {
           exitCode: 0,
           output: "typecheck ok",
         }),
@@ -7893,9 +7888,7 @@ describe("TaskWorkspaceService guided implementation", () => {
       const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(JSON.stringify(after)).not.toContain(token);
       // A replay attempt must reject without echoing the credential.
-      const replay = yield* runtime.runPromiseExit(
-        finalizeCheck(service, token, begun.startingCommitSha, { exitCode: 0 }),
-      );
+      const replay = yield* runtime.runPromiseExit(finalizeCheck(service, begun, { exitCode: 0 }));
       expect(Exit.isFailure(replay)).toBe(true);
       if (Exit.isFailure(replay)) {
         expect((Cause.squash(replay.cause) as Error).message).not.toContain(token);
@@ -7917,7 +7910,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
       );
       const settled = yield* runtime.runPromise(
-        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+        finalizeCheck(service, begun, {
           exitCode: 0,
           output: "typecheck ok",
         }),
@@ -7930,9 +7923,7 @@ describe("TaskWorkspaceService guided implementation", () => {
       const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(after.build.checkAttempts[0]?.status).toBe("pass");
 
-      const replay = yield* runtime.runPromiseExit(
-        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, { exitCode: 0 }),
-      );
+      const replay = yield* runtime.runPromiseExit(finalizeCheck(service, begun, { exitCode: 0 }));
       expect(Exit.isFailure(replay)).toBe(true);
       if (Exit.isFailure(replay)) {
         expect((Cause.squash(replay.cause) as Error).message).toContain(
@@ -7958,7 +7949,7 @@ describe("TaskWorkspaceService guided implementation", () => {
           service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
         );
         const altered = yield* runtime.runPromiseExit(
-          finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+          finalizeCheck(service, begun, {
             overrideStartingCommitSha: "0".repeat(40),
           }),
         );
@@ -7976,6 +7967,74 @@ describe("TaskWorkspaceService guided implementation", () => {
       }),
   );
 
+  it.effect("CLI check finalize rejects an altered starting worktree status", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-status-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      // A client claiming a starting status different from the one bound at
+      // begin (e.g. it adopted a background formatter's change as its
+      // baseline) must not settle against that unbound state.
+      const altered = yield* runtime.runPromiseExit(
+        finalizeCheck(service, begun, { startingStatus: "1 M forged.txt" }),
+      );
+      expect(Exit.isFailure(altered)).toBe(true);
+      if (Exit.isFailure(altered)) {
+        expect((Cause.squash(altered.cause) as Error).message).toContain(
+          "starting worktree status",
+        );
+      }
+      // The token survives the rejection: the honest bound status still
+      // finalizes.
+      const accepted = yield* runtime.runPromise(finalizeCheck(service, begun));
+      expect(accepted.status).toBe("pass");
+    }),
+  );
+
+  it.effect(
+    "CLI check finalize rejects a worktree status drifted from the claimed ending status",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-drift-");
+        const { service, task } = yield* driveToBuildStage(
+          runtime,
+          baseDir,
+          repoRoot,
+          checkPlanMarkdown,
+        );
+        yield* runtime.runPromise(startFoundationPhase(service, task.id));
+        const begun = yield* runtime.runPromise(
+          service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+        );
+        // A background formatter dirties the worktree after the CLI observed
+        // its after-state; the claimed ending status no longer matches what the
+        // server observes at finalize time.
+        const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+        yield* runtime.runPromise(
+          Effect.tryPromise(() =>
+            NodeFs.writeFile(NodePath.join(worktreePath, "drift.txt"), "x", "utf8"),
+          ),
+        );
+        const drifted = yield* runtime.runPromiseExit(
+          finalizeCheck(service, begun, { endingStatus: begun.startingStatus }),
+        );
+        expect(Exit.isFailure(drifted)).toBe(true);
+        if (Exit.isFailure(drifted)) {
+          expect((Cause.squash(drifted.cause) as Error).message).toContain("status drifted");
+        }
+        const still = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        expect(still.build.checkAttempts[0]?.status).toBe("pending");
+      }),
+  );
+
   it.effect("CLI check finalize rejects oversized output before consuming the token", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-oversized-");
@@ -7990,7 +8049,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
       );
       const oversized = yield* runtime.runPromiseExit(
-        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+        finalizeCheck(service, begun, {
           output: "x".repeat(1_048_577),
         }),
       );
@@ -7999,9 +8058,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         expect((Cause.squash(oversized.cause) as Error).message).toContain("output bounds");
       }
       // The token is still usable after a rejected finalization.
-      const settled = yield* runtime.runPromise(
-        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, { exitCode: 0 }),
-      );
+      const settled = yield* runtime.runPromise(finalizeCheck(service, begun, { exitCode: 0 }));
       expect(settled.status).toBe("pass");
     }),
   );
@@ -8020,7 +8077,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
       );
       yield* runtime.runPromise(
-        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+        finalizeCheck(service, begun, {
           timedOut: true,
           exitCode: null,
           endingCommitSha: null,
@@ -8063,7 +8120,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
       );
       yield* runtime.runPromise(
-        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, {
+        finalizeCheck(service, begun, {
           timedOut: true,
           exitCode: null,
           endingCommitSha: null,

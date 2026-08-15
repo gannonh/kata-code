@@ -458,6 +458,7 @@ describe("built Task CLI check flow", () => {
       expect(begin).toMatchObject({ ok: true, outcome: "spawn" });
       const token = begin.ok ? begin.finalizerToken : null;
       const startingCommitSha = begin.ok ? begin.startingCommitSha : null;
+      const startingStatus = begin.ok ? begin.startingStatus : "";
       expect(token).toBeTruthy();
       expect(startingCommitSha).toBeTruthy();
 
@@ -471,8 +472,8 @@ describe("built Task CLI check flow", () => {
           timedOut: false,
           startingCommitSha: "tampered-sha",
           endingCommitSha: startingCommitSha,
-          startingStatus: "",
-          endingStatus: "",
+          startingStatus,
+          endingStatus: startingStatus,
         },
       });
       expect(tampered).toMatchObject({

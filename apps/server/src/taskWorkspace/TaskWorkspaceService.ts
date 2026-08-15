@@ -6914,6 +6914,14 @@ export const make = Effect.gen(function* () {
             taskId: task.id,
           });
         }
+        if (input.startingStatus !== pending.startingStatus) {
+          return yield* new TaskWorkspaceError({
+            message:
+              "Conflict: the check starting worktree status does not match the bound attempt.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
         if (input.output.length > pending.maxOutputBytes) {
           return yield* new TaskWorkspaceError({
             message: "Check output exceeds the configured output bounds.",
@@ -6947,6 +6955,34 @@ export const make = Effect.gen(function* () {
             commandType: "task.cli.check",
             taskId: task.id,
           });
+        }
+        // The client-claimed after-state must match what the server observes
+        // now: a background change after the CLI's own after-observation (or a
+        // fabricated ending status) must not let a pass settle against Git
+        // state that no longer matches the claim. Indeterminate finalizations
+        // carry no ending status and are excluded — they bless nothing.
+        if (input.endingStatus !== null) {
+          const observedStatus = yield* runGit(repository.worktreePath, [
+            "status",
+            "--porcelain=v2",
+          ]).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TaskWorkspaceError({
+                  message: "Failed to inspect the task worktree status.",
+                  commandType: "task.cli.check",
+                  taskId: task.id,
+                  cause,
+                }),
+            ),
+          );
+          if (observedStatus !== input.endingStatus) {
+            return yield* new TaskWorkspaceError({
+              message: "Conflict: the worktree status drifted during the check.",
+              commandType: "task.cli.check",
+              taskId: task.id,
+            });
+          }
         }
         // The client-observed indeterminate classification (no supported
         // sandbox, unobservable after-state, malformed command) is the only
