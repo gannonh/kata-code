@@ -7091,10 +7091,13 @@ export const make = Effect.gen(function* () {
           : input.exitCode === 0
             ? ("pass" as const)
             : ("fail" as const);
-        // Consume exactly once, then settle through the durable task event log.
-        yield* finalizers
-          .consume({ finalizerToken: input.finalizerToken })
-          .pipe(Effect.mapError(mapFinalizerError));
+        // Settle BEFORE consuming: a crash between consume and settle would
+        // leave the token spent with the attempt wedged pending and no
+        // reconciliation path (the startup fence only revokes pending rows).
+        // In this order a crash leaves the attempt durably settled and the
+        // token pending: a retried finalize hits the already-settled conflict
+        // (message carries the settled status) and the periodic reconcile
+        // revokes the orphaned pending token.
         yield* processImplementationCheck({
           taskId: task.id,
           attemptId: pending.attemptId,
@@ -7104,6 +7107,9 @@ export const make = Effect.gen(function* () {
           endingCommitSha: input.endingCommitSha,
           startingCommitSha: input.startingCommitSha,
         });
+        yield* finalizers
+          .consume({ finalizerToken: input.finalizerToken })
+          .pipe(Effect.mapError(mapFinalizerError));
         const after = taskById.get(task.id);
         const settled = after?.build.checkAttempts.find(
           (candidate) => candidate.id === pending.attemptId,
