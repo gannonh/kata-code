@@ -323,10 +323,13 @@ const makeRuntime = Effect.fn("TaskWorkspaceServiceTest.makeRuntime")(function* 
   const taskLayer = providerRegistry
     ? taskLayerBase.pipe(Layer.provide(Layer.succeed(ProviderInstanceRegistry, providerRegistry)))
     : taskLayerBase;
-  // Expose the same store instance in the built context so tests can read
-  // proposal rows. Within a single layer build, duplicate references to the
-  // same layer value share one instance.
-  const taskLayerWithStore = taskLayer.pipe(Layer.provideMerge(storeLayer));
+  // Expose the same store and SQL client instances in the built context so
+  // tests can read proposal rows and finalizer state through runPromise
+  // without constructing second instances.
+  const taskLayerWithStore = taskLayer.pipe(
+    Layer.provideMerge(storeLayer),
+    Layer.provideMerge(sqliteLayer),
+  );
   const scope = yield* Scope.make();
   const context = yield* Layer.buildWithScope(taskLayerWithStore, scope);
   return {
@@ -7829,6 +7832,74 @@ describe("TaskWorkspaceService guided implementation", () => {
       expect(second.attemptId).toBe("check-attempt-2");
       expect(second.attemptNumber).toBe(1);
       expect(second.outcome).toBe("spawn");
+    }),
+  );
+
+  it.effect("CLI check finalize rejects a token bound to another Task occurrence", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-occur-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      // Simulate a stale row bound to a superseded occurrence: the finalizer
+      // must never settle the active occurrence's attempt.
+      const sql = yield* runtime.runPromise(Effect.service(SqlClient.SqlClient));
+      yield* runtime.runPromise(
+        sql`UPDATE task_check_finalizers SET occurrence = 999 WHERE attempt_id = ${begun.attemptId}`,
+      );
+      const crossOccurrence = yield* runtime.runPromiseExit(
+        finalizeCheck(service, begun.finalizerToken!, begun.startingCommitSha, { exitCode: 0 }),
+      );
+      expect(Exit.isFailure(crossOccurrence)).toBe(true);
+      if (Exit.isFailure(crossOccurrence)) {
+        expect((Cause.squash(crossOccurrence.cause) as Error).message).toContain(
+          "another Task occurrence",
+        );
+      }
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.build.checkAttempts.find((a) => a.id === begun.attemptId)?.status).toBe(
+        "pending",
+      );
+    }),
+  );
+
+  it.effect("CLI check finalization never persists or reports the raw finalizer token", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-check-secret-");
+      const { service, task } = yield* driveToBuildStage(
+        runtime,
+        baseDir,
+        repoRoot,
+        checkPlanMarkdown,
+      );
+      yield* runtime.runPromise(startFoundationPhase(service, task.id));
+      const begun = yield* runtime.runPromise(
+        service.implementationCheckBegin({ taskId: task.id, checkId: "check:typecheck" }),
+      );
+      const token = begun.finalizerToken!;
+      yield* runtime.runPromise(
+        finalizeCheck(service, token, begun.startingCommitSha, {
+          exitCode: 0,
+          output: "typecheck ok",
+        }),
+      );
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(JSON.stringify(after)).not.toContain(token);
+      // A replay attempt must reject without echoing the credential.
+      const replay = yield* runtime.runPromiseExit(
+        finalizeCheck(service, token, begun.startingCommitSha, { exitCode: 0 }),
+      );
+      expect(Exit.isFailure(replay)).toBe(true);
+      if (Exit.isFailure(replay)) {
+        expect((Cause.squash(replay.cause) as Error).message).not.toContain(token);
+      }
     }),
   );
 
