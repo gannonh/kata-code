@@ -141,6 +141,43 @@ async function stageCodexOAuthAuth(katacodeHome: string): Promise<boolean> {
   }
 }
 
+type ClaudeE2eAuthMode = "oauth" | "oauth-or-api-key" | "api-key";
+
+function readClaudeE2eAuthMode(): ClaudeE2eAuthMode {
+  const value = process.env.KATACODE_E2E_CLAUDE_AUTH_MODE?.trim().toLowerCase();
+  if (value === "oauth" || value === "oauth-or-api-key" || value === "api-key") {
+    return value;
+  }
+  return "api-key";
+}
+
+/**
+ * Claude OAuth state lives in the host `~/.claude.json` (`oauthAccount`),
+ * resolved by the Claude agent SDK under its HOME. Stage it into the isolated
+ * HOME exactly like Codex's auth.json so E2E runs can reuse the host OAuth
+ * session without re-authenticating interactively.
+ */
+async function stageClaudeOAuth(katacodeHome: string): Promise<boolean> {
+  const mode = readClaudeE2eAuthMode();
+  if (mode === "api-key") return false;
+
+  const sourceAuthPath = join(homedir(), ".claude.json");
+  const destinationAuthPath = join(katacodeHome, ".claude.json");
+
+  try {
+    await copyFile(sourceAuthPath, destinationAuthPath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" && mode === "oauth-or-api-key") {
+      return false;
+    }
+    throw new Error(
+      `Claude OAuth auth is required for KATACODE_E2E_CLAUDE_AUTH_MODE=${mode}, but ${sourceAuthPath} could not be staged.`,
+      { cause: error },
+    );
+  }
+}
+
 /** Provision an isolated E2E home, ports, and dev env for one Playwright worker. */
 export async function createIsolatedRun(input: {
   readonly projectName: string;
@@ -218,6 +255,12 @@ export async function createIsolatedRun(input: {
   // available only for the explicit oauth-or-api-key fallback mode.
   const codexOAuthStaged = await stageCodexOAuthAuth(katacodeHome);
 
+  // Claude OAuth lives in the host ~/.claude.json (oauthAccount). Stage it
+  // into the isolated HOME like Codex auth when the repository .env requests
+  // OAuth-first Claude auth. The ambient Anthropic keys are only forwarded as
+  // the explicit oauth-or-api-key fallback when staging fails.
+  const claudeOAuthStaged = await stageClaudeOAuth(katacodeHome);
+
   // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
   // name. The isolated HOME has no macOS login keychain, so interactive
   // `agent login` token storage is unavailable; the API-key auth path skips
@@ -239,9 +282,24 @@ export async function createIsolatedRun(input: {
         ...envWithoutProviderSecrets,
         ...(ambientOpenAiApiKey ? { OPENAI_API_KEY: ambientOpenAiApiKey } : {}),
       };
+  // Claude OAuth staging does not strip the OpenAI key: Codex fallback auth
+  // must keep working for mixed-provider suites in the same isolated run.
+  const inheritedEnvWithClaudeFallback = claudeOAuthStaged
+    ? inheritedEnv
+    : {
+        ...inheritedEnv,
+        ...(readClaudeE2eAuthMode() === "oauth-or-api-key"
+          ? {
+              ...(_ambientAnthropicApiKey ? { ANTHROPIC_API_KEY: _ambientAnthropicApiKey } : {}),
+              ...(_ambientAnthropicAuthToken
+                ? { ANTHROPIC_AUTH_TOKEN: _ambientAnthropicAuthToken }
+                : {}),
+            }
+          : {}),
+      };
 
   const baseEnv = {
-    ...inheritedEnv,
+    ...inheritedEnvWithClaudeFallback,
     KATACODE_HOME: katacodeHome,
     HOME: katacodeHome,
     USERPROFILE: katacodeHome,

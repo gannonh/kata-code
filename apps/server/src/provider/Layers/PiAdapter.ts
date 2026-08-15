@@ -183,6 +183,9 @@ interface PiSessionContext {
   pendingUserInputs: Map<string, { resolve: (answers: ProviderUserInputAnswers) => void }>;
   /** TUI-only extension methods that have already emitted a warning this session. */
   unsupportedWarnings: Set<string>;
+  /** Trusted stage instructions; delivered once at the start of the first turn. */
+  developerInstructions: string | undefined;
+  instructionsDelivered: boolean;
   /** Last status text per key (dedupe so repeated setStatus calls don't spam). */
   statusTexts: Map<string, string>;
   /** Last working message (dedupe so repeated setWorkingMessage calls don't spam). */
@@ -919,6 +922,8 @@ export function makePiAdapter(
           turns: [],
           pendingUserInputs: new Map(),
           unsupportedWarnings: new Set(),
+          developerInstructions: input.developerInstructions?.trim() || undefined,
+          instructionsDelivered: false,
           statusTexts: new Map(),
           workingMessage: undefined,
           turnOutput: new Map(),
@@ -1116,11 +1121,24 @@ export function makePiAdapter(
         }
 
         const rawText = input.input?.trim() ?? "";
+        // The Pi SDK exposes no native developer-instructions channel, so the
+        // trusted stage instructions are prepended to the first user turn of
+        // each session. Later turns stay untouched: the protocol text belongs
+        // only at session start, exactly like Codex collaboration-mode
+        // instructions.
+        const withInstructions =
+          ctx.developerInstructions !== undefined && !ctx.instructionsDelivered
+            ? `${ctx.developerInstructions}\n\n${rawText}`
+            : rawText;
+        ctx.instructionsDelivered = true;
         const text = yield* Effect.try({
           try: () =>
-            rawText
-              ? expandProviderSkillTokensInPrompt(rawText, ctx.resourceLoader.getSkills().skills)
-              : rawText,
+            withInstructions
+              ? expandProviderSkillTokensInPrompt(
+                  withInstructions,
+                  ctx.resourceLoader.getSkills().skills,
+                )
+              : withInstructions,
           catch: (cause) =>
             new ProviderAdapterRequestError({
               provider: PROVIDER,

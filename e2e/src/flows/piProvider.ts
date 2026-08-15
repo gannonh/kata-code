@@ -10,6 +10,8 @@ import { openProviderSettings } from "./settings.ts";
 export interface PiSmokeConfig {
   readonly agentDir: string;
   readonly model: string;
+  /** Priority-ordered model fallbacks selected when the primary is absent. */
+  readonly modelFallbacks: ReadonlyArray<string>;
 }
 
 const REQUIRED_PI_ENV = [
@@ -46,6 +48,10 @@ export function readPiSmokeConfig():
     config: {
       agentDir: process.env.KATACODE_E2E_PI_AGENT_DIR!,
       model: process.env.KATACODE_E2E_PI_MODEL!,
+      modelFallbacks: (process.env.KATACODE_E2E_PI_MODEL_FALLBACKS ?? "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
     },
   };
 }

@@ -51,20 +51,33 @@ first. The inherited `OPENAI_API_KEY` remains available only as Codex's fallback
 is unavailable. Use `oauth` to fail when the host OAuth file is missing, or `api-key` to force the
 fallback for an intentional diagnostic run.
 
-The harness strips Anthropic API credentials from E2E child processes. Claude E2E requires an
-explicit provider-instance configuration that does not depend on global Anthropic credentials.
+The harness strips Anthropic API credentials from E2E child processes. Claude E2E authenticates
+through the host Claude OAuth state instead — see the Claude section below.
 
-### Pi dependency-update validation
+### Claude E2E authentication
+
+Set `KATACODE_E2E_CLAUDE_AUTH_MODE=oauth-or-api-key` in `.env` for the default local policy. The
+harness stages the host `~/.claude.json` (which holds Claude Code's `oauthAccount` OAuth session)
+into the isolated run HOME, exactly like Codex's `auth.json`, so the Claude agent SDK resolves the
+host OAuth session without an interactive sign-in. When the host OAuth file is missing,
+`oauth-or-api-key` keeps the ambient `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` as the fallback.
+Use `oauth` to fail when the host OAuth file is missing, or `api-key` to force API-key auth for a
+diagnostic run. The default Claude instance ships enabled; model selection uses
+`KATACODE_E2E_CLAUDE_MODEL` (e.g. `haiku-4.5`, matched case- and punctuation-insensitively against
+the runtime catalog labels).
+
+### Pi provider runs
 
 Set `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and
-`KATACODE_E2E_PI_MODEL` to an authenticated model. `openrouter/free` uses the staged Pi
-`auth.json` and is the preferred low-cost local smoke model. `@pi-update` omits the source
-`models.json` and does not register the model as custom, so model selection proves the installed Pi
-catalog discovered it.
+`KATACODE_E2E_PI_MODEL` to an authenticated model. Pi sessions validate the model against the
+runtime-discovered catalog (not the staged cache), so `KATACODE_E2E_PI_MODEL` must exist in the
+account's live catalog — check with `pi --list-models <search>` before changing it. Optionally set
+`KATACODE_E2E_PI_MODEL_FALLBACKS` to a comma-separated priority list; provider-parity runs select
+the first model the task form actually offers.
 
-Pi can run Guided planning through the Task CLI. Full `@task-workspaces` E2E still
-needs a worktree-write-capable provider for Implement after Plan approval. Use the
-provider configured by `KATACODE_E2E_AGENT_PROVIDER`.
+Pi runs the full Guided workflow (planning and Implement) through the Task CLI like Codex and
+Claude; see the provider-parity spec below. `@pi-update` omits the source `models.json` and does
+not register the model as custom, so model selection proves the installed Pi catalog discovered it.
 
 ### Cursor skill tests (`@cursor`)
 
@@ -186,16 +199,16 @@ On macOS, Playwright Electron launches always open a visible app window. **`e2e:
 
 ### Feature tags
 
-| Tag                | Coverage                                                 |
-| ------------------ | -------------------------------------------------------- |
-| `@smoke`           | App launch, pairing, and shell surface                   |
-| `@auth`            | Clerk Google test-user sign-in                           |
-| `@settings`        | Settings theme persistence                               |
-| `@agent`           | Real LLM deterministic reply                             |
-| `@pi`              | Real Pi provider lifecycle                               |
-| `@pi-update`       | Built-in Pi catalog discovery and real-model reply       |
-| `@cursor`          | Cursor skill discovery and invocation                    |
-| `@task-workspaces` | Guided Task create through approved Plan (also `@agent`) |
+| Tag                | Coverage                                                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `@smoke`           | App launch, pairing, and shell surface                                                                                |
+| `@auth`            | Clerk Google test-user sign-in                                                                                        |
+| `@settings`        | Settings theme persistence                                                                                            |
+| `@agent`           | Real LLM deterministic reply                                                                                          |
+| `@pi`              | Real Pi provider lifecycle                                                                                            |
+| `@pi-update`       | Built-in Pi catalog discovery and real-model reply                                                                    |
+| `@cursor`          | Cursor skill discovery and invocation                                                                                 |
+| `@task-workspaces` | Guided Task create through approved Plan (also `@agent`); provider-parity spec completes Implement with Pi and Claude |
 
 Filter with `--grep`, for example `vp run e2e --project desktop-dev --grep @settings`.
 
