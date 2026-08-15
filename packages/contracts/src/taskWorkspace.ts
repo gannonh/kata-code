@@ -1468,7 +1468,6 @@ export const TaskWorkspaceOutboxTarget = Schema.Literals([
   "worktree",
   "bootstrap",
   "proposal-commit",
-  "implementation-check",
 ]);
 export type TaskWorkspaceOutboxTarget = typeof TaskWorkspaceOutboxTarget.Type;
 
@@ -1546,17 +1545,6 @@ export const TaskWorkspaceWorktreeOutboxPayload = Schema.Struct({
   sourceWorkspaceRoot: TrimmedNonEmptyString,
 });
 export type TaskWorkspaceWorktreeOutboxPayload = typeof TaskWorkspaceWorktreeOutboxPayload.Type;
-
-export const TaskWorkspaceImplementationCheckOutboxPayload = Schema.Struct({
-  attemptId: TrimmedNonEmptyString,
-  checkId: TrimmedNonEmptyString,
-  worktreePath: TrimmedNonEmptyString,
-  command: TrimmedNonEmptyString,
-  commandDigest: TrimmedNonEmptyString,
-  timeoutMs: NonNegativeInt,
-});
-export type TaskWorkspaceImplementationCheckOutboxPayload =
-  typeof TaskWorkspaceImplementationCheckOutboxPayload.Type;
 
 /**
  * Provider-neutral task-stage bridge payloads. The context result contains

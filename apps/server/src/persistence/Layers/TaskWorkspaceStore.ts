@@ -353,23 +353,6 @@ const makeStore = Effect.gen(function* () {
       `,
   });
 
-  const readRunningImplementationCheckRows = SqlSchema.findAll({
-    Request: Schema.Struct({ environmentId: EnvironmentId, limit: Schema.Number }),
-    Result: OutboxRow,
-    execute: (request) =>
-      sql`
-        SELECT outbox_id AS "outboxId", environment_id AS "environmentId",
-          task_id AS "taskId", operation_key AS "operationKey", target, status,
-          payload_json AS "payloadJson", attempt_count AS "attemptCount",
-          created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt"
-        FROM task_workspace_outbox
-        WHERE environment_id = ${request.environmentId}
-          AND target = 'implementation-check' AND status = 'running'
-        ORDER BY created_at ASC
-        LIMIT ${request.limit}
-      `,
-  });
-
   const findProposal = SqlSchema.findOneOption({
     Request: Schema.Struct({
       taskId: TaskWorkspaceId,
@@ -717,31 +700,6 @@ const makeStore = Effect.gen(function* () {
       ),
     importLegacy,
     readPendingOutbox,
-    readRunningImplementationChecks: ({ environmentId, limit }) =>
-      readRunningImplementationCheckRows({ environmentId, limit }).pipe(
-        Effect.mapError(toSqlError("TaskWorkspaceStore.readRunningImplementationChecks:query")),
-        Effect.flatMap((rows) =>
-          Effect.forEach(rows, (row) =>
-            decodeOutbox({
-              id: row.outboxId,
-              environmentId: row.environmentId,
-              taskId: row.taskId,
-              operationKey: row.operationKey,
-              target: row.target,
-              status: row.status,
-              payload: JSON.parse(row.payloadJson) as unknown,
-              attemptCount: row.attemptCount,
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-              completedAt: row.completedAt,
-            }).pipe(
-              Effect.mapError(
-                toDecodeError("TaskWorkspaceStore.readRunningImplementationChecks:row"),
-              ),
-            ),
-          ),
-        ),
-      ),
     getOutboxByOperationKey: (input) =>
       findOutboxByOperationKey(input).pipe(
         Effect.mapError(toSqlError("TaskWorkspaceStore.getOutboxByOperationKey:query")),
