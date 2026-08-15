@@ -336,6 +336,9 @@ export const TaskWorkspaceCheckAttempt = Schema.Struct({
   endingCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  indeterminateAcknowledgedAt: Schema.NullOr(IsoDateTime).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type TaskWorkspaceCheckAttempt = typeof TaskWorkspaceCheckAttempt.Type;
 
@@ -1020,6 +1023,20 @@ const TaskImplementationCheckRunCommand = Schema.Struct({
   operationKey: TrimmedNonEmptyString,
 });
 
+/**
+ * Human/server acknowledgement of an indeterminate check attempt. Recording
+ * the unknown outcome authorizes the next numbered attempt for the check.
+ */
+const TaskImplementationCheckAckCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.implementation.check.ack"),
+  checkId: TrimmedNonEmptyString,
+  attemptId: TrimmedNonEmptyString,
+  acknowledgedBy: TrimmedNonEmptyString,
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
+});
+
 const TaskImplementationAmendmentProposeCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.implementation.amendment.propose"),
@@ -1171,6 +1188,7 @@ export const TaskWorkspaceCommand = Schema.Union([
   TaskImplementationStartCommand,
   TaskImplementationProgressCommand,
   TaskImplementationCheckRunCommand,
+  TaskImplementationCheckAckCommand,
   TaskImplementationAmendmentProposeCommand,
   TaskImplementationCompleteCommand,
   TaskBuildPhaseStartCommand,
@@ -1216,6 +1234,7 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.implementation.progress",
   "task.implementation.check.run",
   "task.implementation.check.updated",
+  "task.implementation.check.ack",
   "task.implementation.amendment.propose",
   "task.implementation.amendment.updated",
   "task.implementation.complete",

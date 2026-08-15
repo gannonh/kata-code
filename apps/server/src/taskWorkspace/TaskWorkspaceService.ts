@@ -92,6 +92,10 @@ import {
   type TaskWorkspaceSourceResolution,
 } from "./Services/TaskWorkspaceSourceResolver.ts";
 import {
+  TaskCheckFinalizerService,
+  TaskCheckFinalizerError,
+} from "../taskCli/TaskCheckFinalizerService.ts";
+import {
   TASK_ARTIFACT_CONTRACT_VERSION_0_3_0,
   TASK_WORKSPACE_CONTRACT_VERSION_0_3_0,
   deriveImportedEvents,
@@ -164,6 +168,7 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
     case "task.workflow.upgrade":
     case "task.implementation.start":
     case "task.implementation.check.run":
+    case "task.implementation.check.ack":
     case "task.implementation.amendment.propose":
     case "task.implementation.complete":
     case "task.build.checkpoint.continue":
@@ -1176,6 +1181,8 @@ const IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS = 2_000;
 const IMPLEMENTATION_CONTEXT_MAX_ENTRIES = 128;
 const IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS = 2_000;
 const IMPLEMENTATION_MANIFEST_MAX_CHARS = 16_000;
+const CHECK_TIMEOUT_MS = 120_000;
+const CHECK_MAX_OUTPUT_BYTES = 1_048_576;
 
 function truncateDiagnosticField(value: string | null, maxChars: number): string | null {
   if (value === null || value.length <= maxChars) return value;
@@ -1648,6 +1655,15 @@ export interface TaskWorkspaceServiceShape {
     },
     TaskWorkspaceError
   >;
+  readonly acknowledgeImplementationCheck: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly checkId: string;
+    readonly attemptId: string;
+    readonly acknowledgedBy: string;
+  }) => Effect.Effect<void, TaskWorkspaceError>;
+  readonly reconcilePendingChecks: (input?: {
+    readonly olderThanMs?: number;
+  }) => Effect.Effect<void, TaskWorkspaceError>;
   readonly startImplementationCheck: (input: {
     readonly taskId: TaskWorkspaceId;
     readonly attemptId: string;
@@ -4415,6 +4431,7 @@ export const make = Effect.gen(function* () {
             startedAt: null,
             completedAt: null,
             endingCommitSha: null,
+            indeterminateAcknowledgedAt: null,
           };
           const build: TaskWorkspace["build"] = {
             ...task.build,
@@ -4447,22 +4464,73 @@ export const make = Effect.gen(function* () {
                 },
                 command.createdAt,
               ),
-              outbox: [
-                {
-                  target: "implementation-check",
-                  // One unique row per attempt: a slow older attempt must never
-                  // clobber the row of a newer rerun of the same check.
-                  operationKey: `${command.operationKey}:${attemptId}`,
-                  payload: {
-                    attemptId,
-                    checkId: check.id,
-                    worktreePath: repository.worktreePath,
-                    command: check.command,
-                    commandDigest,
-                    timeoutMs: 120_000,
-                  },
-                },
-              ],
+            },
+          );
+        }
+        case "task.implementation.check.ack": {
+          requireStage(task, "build");
+          if (
+            command.expectedTaskRevision !== undefined &&
+            command.expectedTaskRevision !== task.taskRevision
+          )
+            throw new Error("The implementation task revision is stale.");
+          const attempt = task.build.checkAttempts.find(
+            (candidate) => candidate.id === command.attemptId,
+          );
+          if (!attempt || attempt.checkId !== command.checkId)
+            throw new Error(`Check attempt '${command.attemptId}' was not found.`);
+          if (attempt.status !== "indeterminate")
+            throw new Error(`Check attempt '${command.attemptId}' is not indeterminate.`);
+          const newest = task.build.checkAttempts
+            .toReversed()
+            .find((candidate) => candidate.checkId === attempt.checkId);
+          if (!newest || newest.id !== attempt.id)
+            throw new Error("The check attempt is no longer the newest for the check.");
+          // Idempotent replay: an already-acknowledged attempt produces no new
+          // event and returns the current dispatch outcome unchanged.
+          if (attempt.indeterminateAcknowledgedAt !== null) {
+            return {
+              sequence,
+              task,
+              operation: {
+                key: command.operationKey ?? command.type,
+                status: "completed" as const,
+                attempt: 0,
+                error: null,
+              },
+              taskRoute: { environmentId, taskId: command.taskId },
+              conversationTarget: task.bootstrap?.conversationTarget ?? null,
+            };
+          }
+          const build: TaskWorkspace["build"] = {
+            ...task.build,
+            checkAttempts: task.build.checkAttempts.map((candidate) =>
+              candidate.id === attempt.id
+                ? { ...candidate, indeterminateAcknowledgedAt: command.createdAt }
+                : candidate,
+            ),
+          };
+          return yield* append(
+            command,
+            { ...task, build, updatedAt: command.createdAt },
+            {
+              eventType: "task.implementation.check.ack",
+              ...(command.operationKey !== undefined
+                ? {
+                    operationReceipt: makeOperationReceipt(
+                      command,
+                      {
+                        operationType: "task.implementation.check.ack",
+                        operationKey: command.operationKey,
+                        payloadDigest: canonicalTaskCommandDigest(command),
+                        status: "completed",
+                        attemptCount: 1,
+                        sourceCommandIds: [command.commandId],
+                      },
+                      command.createdAt,
+                    ),
+                  }
+                : {}),
             },
           );
         }
@@ -6656,22 +6724,449 @@ export const make = Effect.gen(function* () {
         });
       });
 
-  const implementationCheckBegin: TaskWorkspaceServiceShape["implementationCheckBegin"] = () =>
-    Effect.fail(
-      new TaskWorkspaceError({
-        message: "Implementation check execution is not implemented yet.",
-        commandType: "task.internal",
+  const requireCheckFinalizerService = Effect.gen(function* () {
+    const finalizers = yield* Effect.serviceOption(TaskCheckFinalizerService);
+    if (Option.isNone(finalizers)) {
+      return yield* new TaskWorkspaceError({
+        message: "The check finalization service is unavailable.",
+        commandType: "task.cli.check",
+      });
+    }
+    return finalizers.value;
+  });
+
+  const mapFinalizerError = (cause: unknown): TaskWorkspaceError => {
+    if (cause instanceof TaskCheckFinalizerError) {
+      if (cause.code === "replay" && cause.attemptId !== undefined) {
+        const owner = [...taskById.values()].find((candidate) =>
+          candidate.build.checkAttempts.some((attempt) => attempt.id === cause.attemptId),
+        );
+        const attempt = owner?.build.checkAttempts.find(
+          (candidate) => candidate.id === cause.attemptId,
+        );
+        return new TaskWorkspaceError({
+          message: `Conflict: the check attempt has already settled (status '${attempt?.status ?? "unknown"}').`,
+          commandType: "task.cli.check",
+          ...(owner !== undefined ? { taskId: owner.id } : {}),
+        });
+      }
+      const message =
+        cause.code === "replay"
+          ? "Conflict: the check finalization credential was already consumed (replay rejected)."
+          : cause.code === "stale"
+            ? "Conflict: the check finalization credential is no longer active."
+            : "Unauthorized: the check finalization credential is not valid.";
+      return new TaskWorkspaceError({
+        message,
+        commandType: "task.cli.check",
+        ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+      });
+    }
+    return new TaskWorkspaceError({
+      message: describeFailure(cause),
+      commandType: "task.cli.check",
+    });
+  };
+
+  const checkAttemptNumber = (task: TaskWorkspace, attemptId: string): number =>
+    task.build.checkAttempts
+      .filter(
+        (candidate) =>
+          candidate.checkId === task.build.checkAttempts.find((a) => a.id === attemptId)?.checkId,
+      )
+      .findIndex((candidate) => candidate.id === attemptId);
+
+  const implementationCheckBegin: TaskWorkspaceServiceShape["implementationCheckBegin"] = (input) =>
+    Effect.gen(function* () {
+      const finalizers = yield* requireCheckFinalizerService;
+      const task = taskById.get(input.taskId);
+      if (!task) {
+        return yield* new TaskWorkspaceError({
+          message: `Task '${input.taskId}' was not found.`,
+          commandType: "task.cli.check",
+          taskId: input.taskId,
+        });
+      }
+      if (currentRun(task).currentStage !== "build") {
+        return yield* new TaskWorkspaceError({
+          message: "No active Build implementation for this Task.",
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const activeBuild = activeOccurrence(task, "build");
+      if (
+        !activeBuild ||
+        (activeBuild.status !== "running" && activeBuild.status !== "finalizing")
+      ) {
+        return yield* new TaskWorkspaceError({
+          message: "The Build occurrence is not active.",
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const check = task.build.checks.find((candidate) => candidate.id === input.checkId);
+      if (!check) {
+        return yield* new TaskWorkspaceError({
+          message: `Check '${input.checkId}' was not found in the active Build.`,
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      if (check.kind !== "automated" || !check.command) {
+        return yield* new TaskWorkspaceError({
+          message: `Check '${check.id}' is not an approved automated command.`,
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const repository = task.workspace.repositories[0];
+      if (!repository?.worktreePath) {
+        return yield* new TaskWorkspaceError({
+          message: "The canonical Build worktree is unavailable.",
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const newestAttempt = task.build.checkAttempts
+        .toReversed()
+        .find((candidate) => candidate.checkId === check.id);
+
+      if (newestAttempt?.status === "pass") {
+        return {
+          accepted: true as const,
+          attemptId: newestAttempt.id,
+          checkId: check.id,
+          attemptNumber: checkAttemptNumber(task, newestAttempt.id),
+          command: check.command,
+          cwd: repository.worktreePath,
+          timeoutMs: newestAttempt.timeoutMs,
+          maxOutputBytes: CHECK_MAX_OUTPUT_BYTES,
+          outcome: "settled-pass" as const,
+          finalizerToken: null,
+          startingCommitSha: newestAttempt.startingCommitSha,
+          startingStatus: "",
+          taskRevision: task.taskRevision,
+        } satisfies TaskCliCheckBeginResult;
+      }
+
+      if (newestAttempt?.status === "indeterminate" && !newestAttempt.indeterminateAcknowledgedAt) {
+        return yield* new TaskWorkspaceError({
+          message: `The latest attempt for check '${check.id}' is indeterminate and has not been acknowledged.`,
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+
+      let attemptId: string;
+      let refreshed: TaskWorkspace = task;
+      if (
+        newestAttempt &&
+        (newestAttempt.status === "pending" || newestAttempt.status === "running")
+      ) {
+        // Response-retry semantics: reuse the same pending semantic attempt.
+        // If the prior begin crashed before issuing its finalizer, the
+        // attempt can never settle from a client finalize; reconcile it to
+        // indeterminate and surface the stable CHECK_INDETERMINATE result.
+        const hasPending = yield* finalizers
+          .pendingForAttempt({ taskId: task.id, attemptId: newestAttempt.id })
+          .pipe(Effect.mapError(mapFinalizerError));
+        if (!hasPending) {
+          yield* processImplementationCheck({
+            taskId: task.id,
+            attemptId: newestAttempt.id,
+            status: "indeterminate",
+            output: "The check begin could not be reconciled.",
+            exitCode: null,
+            endingCommitSha: null,
+          });
+          return yield* new TaskWorkspaceError({
+            message: `The latest attempt for check '${check.id}' is indeterminate and has not been acknowledged.`,
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        attemptId = newestAttempt.id;
+        const observedHead = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to inspect the task worktree HEAD.",
+                commandType: "task.cli.check",
+                taskId: task.id,
+                cause,
+              }),
+          ),
+        );
+        if (observedHead !== newestAttempt.startingCommitSha) {
+          return yield* new TaskWorkspaceError({
+            message: "The worktree moved since the check attempt was persisted.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+      } else {
+        // Settled failure, acknowledged indeterminate, or no prior attempt:
+        // allocate the next numbered attempt through the durable reducer.
+        const attemptNumber = task.build.checkAttempts.filter(
+          (candidate) => candidate.checkId === check.id,
+        ).length;
+        const dispatched = yield* serverCommand(task.id, "task.implementation.check.run", {
+          expectedTaskRevision: task.taskRevision,
+          checkId: check.id,
+          operationKey: `implementation-check:${task.id}:${check.id}:${attemptNumber + 1}`,
+        });
+        refreshed = dispatched.task;
+        const created = refreshed.build.checkAttempts
+          .toReversed()
+          .find((candidate) => candidate.checkId === check.id);
+        if (!created) {
+          return yield* new TaskWorkspaceError({
+            message: "The check attempt was not persisted.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        attemptId = created.id;
+      }
+
+      const attempt = refreshed.build.checkAttempts.find((candidate) => candidate.id === attemptId);
+      if (!attempt) {
+        return yield* new TaskWorkspaceError({
+          message: "The check attempt was not persisted.",
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const startingStatus = yield* runGit(repository.worktreePath, [
+        "status",
+        "--porcelain=v2",
+      ]).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: "Failed to inspect the task worktree status.",
+              commandType: "task.cli.check",
+              taskId: task.id,
+              cause,
+            }),
+        ),
+      );
+      yield* finalizers
+        .revokeForAttempt({
+          taskId: task.id,
+          attemptId,
+          reason: "superseded",
+        })
+        .pipe(Effect.mapError(mapFinalizerError));
+      const issued = yield* finalizers
+        .issue({
+          taskId: task.id,
+          checkId: check.id,
+          attemptId,
+          occurrence: activeBuild.ordinal,
+          commandDigest: attempt.commandDigest,
+          canonicalCwd: repository.worktreePath,
+          timeoutMs: attempt.timeoutMs,
+          maxOutputBytes: CHECK_MAX_OUTPUT_BYTES,
+          startingCommitSha: attempt.startingCommitSha,
+          startingStatus,
+        })
+        .pipe(Effect.mapError(mapFinalizerError));
+      return {
+        accepted: true as const,
+        attemptId,
+        checkId: check.id,
+        attemptNumber: checkAttemptNumber(refreshed, attemptId),
+        command: check.command,
+        cwd: repository.worktreePath,
+        timeoutMs: attempt.timeoutMs,
+        maxOutputBytes: CHECK_MAX_OUTPUT_BYTES,
+        outcome: "spawn" as const,
+        finalizerToken: issued.finalizerToken,
+        startingCommitSha: attempt.startingCommitSha,
+        startingStatus,
+        taskRevision: refreshed.taskRevision,
+      } satisfies TaskCliCheckBeginResult;
+    });
+
+  const implementationCheckFinalize: TaskWorkspaceServiceShape["implementationCheckFinalize"] = (
+    input,
+  ) =>
+    semaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const finalizers = yield* requireCheckFinalizerService;
+        // Validate against the pending row before consuming so a rejected
+        // finalization (altered state, oversized output, drift, swap, or
+        // cross-occurrence use) leaves the token usable for a corrected retry.
+        const pending = yield* finalizers
+          .read({ finalizerToken: input.finalizerToken })
+          .pipe(Effect.mapError(mapFinalizerError));
+        const task = taskById.get(pending.taskId);
+        if (!task) {
+          return yield* new TaskWorkspaceError({
+            message: "The finalization task is no longer available.",
+            commandType: "task.cli.check",
+            taskId: pending.taskId,
+          });
+        }
+        const attempt = task.build.checkAttempts.find(
+          (candidate) => candidate.id === pending.attemptId,
+        );
+        if (!attempt) {
+          return yield* new TaskWorkspaceError({
+            message: "The finalization attempt is no longer available.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        if (attempt.status !== "pending" && attempt.status !== "running") {
+          return yield* new TaskWorkspaceError({
+            message: `Conflict: the check attempt has already settled (status '${attempt.status}').`,
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const newest = task.build.checkAttempts
+          .toReversed()
+          .find((candidate) => candidate.checkId === pending.checkId);
+        if (!newest || newest.id !== attempt.id) {
+          return yield* new TaskWorkspaceError({
+            message: "Conflict: the finalization attempt is no longer the newest for the check.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const activeBuild = activeOccurrence(task, "build");
+        if (!activeBuild || activeBuild.ordinal !== pending.occurrence) {
+          return yield* new TaskWorkspaceError({
+            message: "Conflict: the finalization token belongs to another Task occurrence.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        if (input.startingCommitSha !== pending.startingCommitSha) {
+          return yield* new TaskWorkspaceError({
+            message: "Conflict: the check starting Git state does not match the bound attempt.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        if (input.output.length > pending.maxOutputBytes) {
+          return yield* new TaskWorkspaceError({
+            message: "Check output exceeds the configured output bounds.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const repository = task.workspace.repositories[0];
+        if (!repository?.worktreePath) {
+          return yield* new TaskWorkspaceError({
+            message: "The canonical Build worktree is unavailable.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const observedHead = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to inspect the task worktree HEAD.",
+                commandType: "task.cli.check",
+                taskId: task.id,
+                cause,
+              }),
+          ),
+        );
+        const effectiveEnding = input.endingCommitSha ?? pending.startingCommitSha;
+        if (effectiveEnding !== observedHead) {
+          return yield* new TaskWorkspaceError({
+            message: "Conflict: the worktree drifted during the check.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const status = input.timedOut
+          ? ("indeterminate" as const)
+          : input.exitCode === 0
+            ? ("pass" as const)
+            : ("fail" as const);
+        // Consume exactly once, then settle through the durable task event log.
+        yield* finalizers
+          .consume({ finalizerToken: input.finalizerToken })
+          .pipe(Effect.mapError(mapFinalizerError));
+        yield* processImplementationCheck({
+          taskId: task.id,
+          attemptId: pending.attemptId,
+          status,
+          output: input.output,
+          exitCode: input.exitCode,
+          endingCommitSha: input.endingCommitSha,
+          startingCommitSha: input.startingCommitSha,
+        });
+        const after = taskById.get(task.id);
+        const settled = after?.build.checkAttempts.find(
+          (candidate) => candidate.id === pending.attemptId,
+        );
+        return {
+          checkId: pending.checkId,
+          attemptId: pending.attemptId,
+          status: (settled?.status as TaskCliCheckFinalizeStatus | undefined) ?? status,
+          taskRevision: after?.taskRevision ?? task.taskRevision,
+        };
       }),
     );
 
-  const implementationCheckFinalize: TaskWorkspaceServiceShape["implementationCheckFinalize"] =
-    () =>
-      Effect.fail(
-        new TaskWorkspaceError({
-          message: "Implementation check finalization is not implemented yet.",
-          commandType: "task.internal",
-        }),
-      );
+  const acknowledgeImplementationCheck: TaskWorkspaceServiceShape["acknowledgeImplementationCheck"] =
+    (input) =>
+      Effect.gen(function* () {
+        const task = taskById.get(input.taskId);
+        if (!task) {
+          return yield* new TaskWorkspaceError({
+            message: `Task '${input.taskId}' was not found.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        yield* serverCommand(input.taskId, "task.implementation.check.ack", {
+          checkId: input.checkId,
+          attemptId: input.attemptId,
+          acknowledgedBy: input.acknowledgedBy,
+          operationKey: `implementation-check-ack:${input.taskId}:${input.attemptId}`,
+        }).pipe(Effect.asVoid);
+      });
+
+  const reconcilePendingChecks: TaskWorkspaceServiceShape["reconcilePendingChecks"] = (input) =>
+    Effect.gen(function* () {
+      const finalizers = yield* requireCheckFinalizerService;
+      const affected = yield* finalizers
+        .reconcile({ olderThanMs: input?.olderThanMs ?? CHECK_TIMEOUT_MS * 2 + 10_000 })
+        .pipe(Effect.mapError(mapFinalizerError));
+      for (const entry of affected) {
+        const task = taskById.get(entry.taskId);
+        if (!task) continue;
+        const attempt = task.build.checkAttempts.find(
+          (candidate) => candidate.id === entry.attemptId,
+        );
+        if (!attempt || (attempt.status !== "pending" && attempt.status !== "running")) continue;
+        yield* processImplementationCheck({
+          taskId: entry.taskId,
+          attemptId: entry.attemptId,
+          status: "indeterminate",
+          output: "The check result could not be reconciled.",
+          exitCode: null,
+          endingCommitSha: null,
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("task check reconciliation settlement failed", {
+              taskId: entry.taskId,
+              attemptId: entry.attemptId,
+              cause: cause instanceof Error ? cause.message : String(cause),
+            }),
+          ),
+        );
+      }
+    });
 
   const latestOccurrence = (
     task: TaskWorkspace,
@@ -8499,6 +8994,8 @@ export const make = Effect.gen(function* () {
     implementationAmendmentProposeCli,
     implementationCheckBegin,
     implementationCheckFinalize,
+    acknowledgeImplementationCheck,
+    reconcilePendingChecks,
     implementationComplete,
     processBootstrap,
     processWorktree,
