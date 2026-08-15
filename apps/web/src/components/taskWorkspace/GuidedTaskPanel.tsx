@@ -1131,6 +1131,42 @@ export function GuidedTaskPanel(props: {
                                               latest
                                             </span>
                                           ) : null}
+                                          {attempt.status === "indeterminate" &&
+                                          attempt.indeterminateAcknowledgedAt === null ? (
+                                            <Button
+                                              data-testid={`task-build-check-ack-${attempt.id}`}
+                                              size="xs"
+                                              variant="outline"
+                                              disabled={commands.isBusy}
+                                              title="Record the unknown outcome and authorize the next attempt"
+                                              onClick={() => {
+                                                const base = commands.commandBase(
+                                                  "task.implementation.check.ack",
+                                                );
+                                                void commands.dispatch(
+                                                  {
+                                                    ...base,
+                                                    expectedTaskRevision: task.taskRevision,
+                                                    checkId: check.id,
+                                                    attemptId: attempt.id,
+                                                    acknowledgedBy: currentUser.id,
+                                                    operationKey: operationKey(
+                                                      base.commandId,
+                                                      `ack-check-${attempt.id}`,
+                                                    ),
+                                                  },
+                                                  `ack-check-${attempt.id}`,
+                                                );
+                                              }}
+                                            >
+                                              Acknowledge
+                                            </Button>
+                                          ) : attempt.status === "indeterminate" &&
+                                            attempt.indeterminateAcknowledgedAt !== null ? (
+                                            <span className="text-[11px] text-muted-foreground">
+                                              acknowledged
+                                            </span>
+                                          ) : null}
                                         </div>
                                         {attempt.endingCommitSha ? (
                                           <p className="break-all font-mono text-[11px] text-muted-foreground">

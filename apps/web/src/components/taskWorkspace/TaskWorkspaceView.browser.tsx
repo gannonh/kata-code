@@ -395,6 +395,7 @@ function guidedTask(overrides: Partial<TaskWorkspace> = {}): TaskWorkspace {
           startedAt: "2026-07-28T17:09:00.000Z",
           completedAt: "2026-07-28T17:09:05.000Z",
           endingCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          indeterminateAcknowledgedAt: null,
         },
       ],
     },
