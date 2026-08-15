@@ -59,8 +59,9 @@ function skipReason(candidate: ParityCase): string | undefined {
 test.describe(`Task workspaces provider parity ${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
   // Full guided flow through Implement completion: the agent implements a
   // small deterministic deliverable, runs the approved check through the Task
-  // CLI, commits, and proposes completion. Budget generously for real agents.
-  test.describe.configure({ timeout: 20 * 60_000 });
+  // CLI, commits, and proposes completion. Budget generously for real agents;
+  // Claude's staged-OAuth turns are an order of magnitude slower than Codex.
+  test.describe.configure({ timeout: 45 * 60_000 });
 
   for (const candidate of parityCases) {
     test(`reaches completed Implement with ${candidate.name}`, async ({
@@ -116,9 +117,13 @@ test.describe(`Task workspaces provider parity ${E2E_TAGS.taskWorkspaces} ${E2E_
       await expectNoTaskThreadsInChatSidebar(appWindow);
 
       await answerGuidedClarifyQuestions(appWindow);
-      await expectActiveStage(appWindow, "research");
-      await expectActiveStage(appWindow, "design");
-      await expectActiveStage(appWindow, "plan");
+      // Claude's OAuth-backed agent turns are far slower than Codex's
+      // (clarify ~4 min, research ~10 min observed); budget each stage
+      // generously instead of the Codex-tuned default.
+      const stageDeadlineMs = candidate.provider === "claude" ? 15 * 60_000 : 180_000;
+      await expectActiveStage(appWindow, "research", stageDeadlineMs);
+      await expectActiveStage(appWindow, "design", stageDeadlineMs);
+      await expectActiveStage(appWindow, "plan", stageDeadlineMs);
       await expect(appWindow.getByTestId("guided-plan-gate")).toBeVisible({
         timeout: E2E_TIMEOUTS.agentReplyMs,
       });
@@ -130,14 +135,29 @@ test.describe(`Task workspaces provider parity ${E2E_TAGS.taskWorkspaces} ${E2E_
 
       // AC9: the provider must run the approved check through the Task CLI,
       // commit cleanly, and reach completed Implement with the exact
-      // resulting commit recorded by the server.
-      await expect(appWindow.getByTestId("guided-resulting-commit")).toBeVisible({
-        timeout: 15 * 60_000,
-      });
-      const resultingCommit = (
-        await appWindow.getByTestId("guided-resulting-commit").innerText()
-      ).trim();
-      expect(resultingCommit).toMatch(/^[0-9a-f]{40}$/);
+      // resulting commit recorded by the server. The deterministic Plan uses
+      // `Checkpoint: always`, so the provider pauses at the checkpoint gate
+      // and the operator continues it — exactly like the human desktop flow.
+      const resultingCommit = appWindow.getByTestId("guided-resulting-commit");
+      const checkpointContinue = appWindow.locator('[data-testid^="guided-checkpoint-continue-"]');
+      const commitDeadline = Date.now() + 15 * 60_000;
+      while (Date.now() < commitDeadline) {
+        if (await resultingCommit.isVisible().catch(() => false)) break;
+        // Checkpoint rows keep rendering their Continue buttons after
+        // continuation (disabled), so skip to the first enabled one.
+        const count = await checkpointContinue.count();
+        for (let index = 0; index < count; index += 1) {
+          const candidate = checkpointContinue.nth(index);
+          if (await candidate.isEnabled().catch(() => false)) {
+            await candidate.click();
+            break;
+          }
+        }
+        await appWindow.waitForTimeout(500);
+      }
+      await expect(resultingCommit).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
+      const resultingCommitSha = (await resultingCommit.innerText()).trim();
+      expect(resultingCommitSha).toMatch(/^[0-9a-f]{40}$/);
       // The server-side bind between the worktree HEAD and the recorded
       // resulting commit is asserted in the task-workspace unit suites; the
       // desktop surface here proves the completed Implement panel and the

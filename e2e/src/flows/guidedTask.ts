@@ -130,10 +130,14 @@ export async function expectNoTaskThreadsInChatSidebar(page: Page): Promise<void
   await expect(taskThreadRows).toHaveCount(0);
 }
 
-export async function expectActiveStage(page: Page, stage: string): Promise<void> {
+export async function expectActiveStage(
+  page: Page,
+  stage: string,
+  deadlineMs: number = Math.max(E2E_TIMEOUTS.agentReplyMs, 180_000),
+): Promise<void> {
   const stageItem = page.getByTestId(`guided-stage-${stage}`);
   const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
-  const deadline = Date.now() + Math.max(E2E_TIMEOUTS.agentReplyMs, 180_000);
+  const deadline = Date.now() + deadlineMs;
 
   while (Date.now() < deadline) {
     if ((await stageItem.getAttribute("data-active")) === "true") {
