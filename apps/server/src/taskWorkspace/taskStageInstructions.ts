@@ -13,8 +13,7 @@ export function trustedImplementationInstructions(): string {
 }
 
 export function trustedInstructionsForStage(stage: TaskWorkspaceStage): string {
-  // The Implement stage is the only stage whose tools live under the
-  // task_implementation_* contract; planning stages use the Task CLI.
+  // Every stage now runs through the katacode Task CLI; no MCP tools remain.
   return stage === "build" ? trustedImplementationInstructions() : trustedStageInstructions(stage);
 }
 

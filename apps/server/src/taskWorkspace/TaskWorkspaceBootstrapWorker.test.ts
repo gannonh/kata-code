@@ -384,11 +384,10 @@ const driveToBuild = Effect.fn("TaskWorkspaceBootstrapWorkerTest.driveToBuild")(
   const bootstrapped = (yield* runtime.runPromise(service.getTask(taskId)))!;
   expect(bootstrapped.occurrences.find((o) => o.stage === "build")?.status).toBe("running");
   yield* runtime.runPromise(
-    service.implementationProgress({
+    service.implementationProgressCli({
       taskId: bootstrapped.id,
-      expectedTaskRevision: bootstrapped.taskRevision,
-      phaseId: "phase:foundation",
-      workItemId: "work:implement",
+      target: "work-item",
+      id: "work:implement",
       status: "running",
       summary: "Start implementation checks.",
     }),
