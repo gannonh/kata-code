@@ -32,6 +32,7 @@ import {
   type ProviderRuntimeBinding,
 } from "../provider/Services/ProviderSessionDirectory.ts";
 import { TaskWorkspaceService } from "../taskWorkspace/TaskWorkspaceService.ts";
+import { TaskInvocationOwner, TaskInvocationOwnerLive } from "./TaskInvocationOwner.ts";
 
 const LeaseRow = Schema.Struct({
   tokenHash: Schema.String,
@@ -153,15 +154,10 @@ export class TaskInvocationService extends Context.Service<
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
-  const ownerGeneration = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
-  const claimedAt = DateTime.formatIso(yield* DateTime.now);
-  yield* sql`
-    INSERT INTO task_invocation_lease_owner (owner_id, owner_generation, claimed_at)
-    VALUES (1, ${ownerGeneration}, ${claimedAt})
-    ON CONFLICT(owner_id) DO UPDATE SET
-      owner_generation = excluded.owner_generation,
-      claimed_at = excluded.claimed_at
-  `;
+  // Ownership is claimed by TaskInvocationOwner, which this layer requires:
+  // the durable upsert lands before any lease operation can observe it, so
+  // every consumer sees the generation this process actually claimed.
+  const { ownerGeneration } = yield* TaskInvocationOwner;
 
   const findLease = SqlSchema.findOneOption({
     Request: Schema.Struct({ tokenHash: Schema.String }),
@@ -814,4 +810,6 @@ const make = Effect.gen(function* () {
   } satisfies TaskInvocationServiceShape;
 });
 
-export const TaskInvocationServiceLive = Layer.effect(TaskInvocationService, make);
+export const TaskInvocationServiceLive = Layer.effect(TaskInvocationService, make).pipe(
+  Layer.provide(TaskInvocationOwnerLive),
+);

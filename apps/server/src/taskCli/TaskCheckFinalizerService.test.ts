@@ -116,6 +116,29 @@ describe("TaskCheckFinalizerService", () => {
     }).pipe(Effect.provide(makeLayer())),
   );
 
+  it.effect("stamps issued finalizers with the durable claimed owner generation", () =>
+    Effect.gen(function* () {
+      const service = yield* TaskCheckFinalizerService;
+      yield* service.issue(issueInput);
+      const sql = yield* SqlClient.SqlClient;
+      // The finalizer must fence against the generation this process claimed
+      // in the durable owner row — never a process-local fallback and never a
+      // stale generation left by a previous runtime.
+      const owner = yield* sql<{ readonly ownerGeneration: string }>`
+        SELECT owner_generation AS "ownerGeneration"
+        FROM task_invocation_lease_owner
+        WHERE owner_id = 1
+      `;
+      expect(owner).toHaveLength(1);
+      const row = yield* sql<{ readonly ownerGeneration: string }>`
+        SELECT owner_generation AS "ownerGeneration"
+        FROM task_check_finalizers
+        WHERE attempt_id = ${issueInput.attemptId}
+      `;
+      expect(row[0]?.ownerGeneration).toBe(owner[0]?.ownerGeneration);
+    }).pipe(Effect.provide(makeLayer())),
+  );
+
   it.effect("revokes a prior pending finalizer before issuing a retry token", () =>
     Effect.gen(function* () {
       const service = yield* TaskCheckFinalizerService;

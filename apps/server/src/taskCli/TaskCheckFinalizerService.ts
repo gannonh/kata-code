@@ -9,6 +9,8 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
+import { TaskInvocationOwner, TaskInvocationOwnerLive } from "./TaskInvocationOwner.ts";
+
 const FinalizerRow = Schema.Struct({
   finalizerHash: Schema.String,
   taskId: Schema.String,
@@ -113,17 +115,11 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
 
-  // Fencing reuses the invocation-lease owner row. It is created by
-  // TaskInvocationService when present; when that service is absent (unit
-  // tests), fall back to a process-local generation with no cross-process
-  // fencing, which is correct for an in-memory single-process runtime.
-  const ownerRows = yield* sql<{ readonly ownerGeneration: string }>`
-    SELECT owner_generation AS "ownerGeneration"
-    FROM task_invocation_lease_owner
-    WHERE owner_id = 1
-  `;
-  const ownerGeneration =
-    ownerRows[0]?.ownerGeneration ?? (yield* crypto.randomUUIDv4.pipe(Effect.orDie));
+  // Fencing reuses the invocation-lease owner row claimed by
+  // TaskInvocationOwner. Requiring that layer (instead of reading the row at
+  // construction time) guarantees this process's freshly claimed generation is
+  // observed, never a previous runtime's stale one.
+  const { ownerGeneration } = yield* TaskInvocationOwner;
 
   const toError = (
     code: TaskCheckFinalizerError["code"],
@@ -389,4 +385,6 @@ const make = Effect.gen(function* () {
   } satisfies TaskCheckFinalizerServiceShape;
 });
 
-export const TaskCheckFinalizerServiceLive = Layer.effect(TaskCheckFinalizerService, make);
+export const TaskCheckFinalizerServiceLive = Layer.effect(TaskCheckFinalizerService, make).pipe(
+  Layer.provide(TaskInvocationOwnerLive),
+);
