@@ -1712,6 +1712,8 @@ export interface TaskWorkspaceServiceShape {
     readonly payloadDigest: string;
     readonly summary: string;
     readonly markdown: string;
+    readonly proposalCommitSha?: string | null;
+    readonly proposalStatusSnapshot?: string | null;
   }) => Effect.Effect<TaskWorkspace, TaskWorkspaceError>;
   /**
    * Settle a proposal once the provider turn reaches a terminal state.
@@ -2246,14 +2248,6 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
-      if (resolved.stage === "build") {
-        return yield* new TaskWorkspaceError({
-          message:
-            "Planning completion requires an active Clarify, Research, Design, or Plan stage.",
-          commandType: "task.cli.complete",
-          taskId: resolved.taskId,
-        });
-      }
       const summary = input.summary.trim();
       if (summary.length === 0) {
         return yield* new TaskWorkspaceError({
@@ -2268,6 +2262,116 @@ export const make = Effect.gen(function* () {
           commandType: "task.cli.complete",
           taskId: resolved.taskId,
         });
+      }
+      if (resolved.stage === "build") {
+        // Build completion binds the proposal to the proposal-time Git basis
+        // so terminal settlement can reject complete-then-mutate/commit drift.
+        // Markdown is not required for Build; the resulting commit is the
+        // artifact evidence.
+        const buildTask = taskById.get(resolved.taskId);
+        if (!buildTask) {
+          return yield* new TaskWorkspaceError({
+            message: `Task '${resolved.taskId}' was not found.`,
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        const buildOccurrence = activeOccurrence(buildTask, "build");
+        if (
+          !buildOccurrence ||
+          (buildOccurrence.status !== "running" && buildOccurrence.status !== "finalizing")
+        ) {
+          return yield* new TaskWorkspaceError({
+            message: "The Build occurrence is not active.",
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        const repository = buildTask.workspace.repositories[0];
+        if (!repository?.worktreePath) {
+          return yield* new TaskWorkspaceError({
+            message: "The canonical Build worktree is unavailable.",
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        const sessionId = buildOccurrence.sessionId ?? buildTask.bootstrap?.reservedSessionId;
+        if (!sessionId) {
+          return yield* new TaskWorkspaceError({
+            message: "The Task primary session is not active.",
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        const proposalCommitSha = yield* runGit(repository.worktreePath, [
+          "rev-parse",
+          "HEAD",
+        ]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to observe the Build worktree HEAD.",
+                commandType: "task.cli.complete",
+                taskId: resolved.taskId,
+                cause,
+              }),
+          ),
+        );
+        const proposalStatusSnapshot = yield* runGit(repository.worktreePath, [
+          "status",
+          "--porcelain=v2",
+        ]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to observe the Build worktree status.",
+                commandType: "task.cli.complete",
+                taskId: resolved.taskId,
+                cause,
+              }),
+          ),
+        );
+        const payloadDigest = createHash("sha256")
+          .update(`${summary}\n${input.markdown}`)
+          .digest("hex");
+        const proposed = yield* proposeStageCompletion({
+          taskId: resolved.taskId,
+          sessionId,
+          providerTurnId: input.providerTurnId,
+          payloadDigest,
+          summary,
+          markdown: input.markdown,
+          proposalCommitSha,
+          proposalStatusSnapshot,
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: cause.message,
+                commandType: "task.cli.complete",
+                taskId: resolved.taskId,
+                ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+              }),
+          ),
+        );
+        const proposedOccurrence = proposed.occurrences
+          .filter((candidate) => candidate.stage === "build")
+          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+        const proposalId = proposedOccurrence?.completionProposalId;
+        if (!proposalId) {
+          return yield* new TaskWorkspaceError({
+            message: "The completion proposal was not persisted.",
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        return {
+          accepted: true as const,
+          stage: resolved.stage,
+          occurrence: resolved.occurrence,
+          proposalId,
+          providerTurnId: input.providerTurnId,
+        } satisfies TaskStageCompletionAck;
       }
       if (input.markdown.trim().length === 0) {
         return yield* new TaskWorkspaceError({
@@ -4638,6 +4742,8 @@ export const make = Effect.gen(function* () {
             terminalTurnOutcome: null,
             committedArtifactRevisionId: null,
             rejectionReason: null,
+            proposalCommitSha: null,
+            proposalStatusSnapshot: null,
             createdAt: command.createdAt,
             settledAt: null,
           };
@@ -7798,6 +7904,8 @@ export const make = Effect.gen(function* () {
           terminalTurnOutcome: null,
           committedArtifactRevisionId: null,
           rejectionReason: null,
+          proposalCommitSha: input.proposalCommitSha ?? null,
+          proposalStatusSnapshot: input.proposalStatusSnapshot ?? null,
           createdAt: now,
           settledAt: null,
         };
@@ -8316,6 +8424,84 @@ export const make = Effect.gen(function* () {
               commandType: "task.internal",
               taskId: task.id,
             });
+          }
+          // Reject complete-then-mutate and commit drift against the
+          // proposal-time Git basis before any further validation or
+          // advancement. Proposals without a basis (legacy internal path)
+          // keep their existing behavior.
+          if (pending.proposalCommitSha !== null) {
+            const repository = task.workspace.repositories[0];
+            const rejectBuildDrift = (rejectionReason: string) => {
+              const rejectedTask: TaskWorkspace = {
+                ...task,
+                occurrences: task.occurrences.map((candidate) =>
+                  candidate.id === occurrence.id
+                    ? {
+                        ...candidate,
+                        status: "running" as const,
+                        completionProposalId: null,
+                      }
+                    : candidate,
+                ),
+              };
+              return internalAppend("task.proposal.rejected", rejectedTask, {
+                occurredAt: now,
+                proposal: {
+                  ...pending,
+                  status: "rejected",
+                  terminalTurnOutcome: "completed",
+                  rejectionReason,
+                  settledAt: now,
+                },
+              });
+            };
+            if (!repository?.worktreePath) {
+              return yield* new TaskWorkspaceError({
+                message: "The canonical Build worktree is unavailable.",
+                commandType: "task.internal",
+                taskId: task.id,
+              });
+            }
+            const observedCommitSha = yield* runGit(repository.worktreePath, [
+              "rev-parse",
+              "HEAD",
+            ]).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TaskWorkspaceError({
+                    message: "Failed to re-observe the Build worktree HEAD.",
+                    commandType: "task.internal",
+                    taskId: task.id,
+                    cause,
+                  }),
+              ),
+            );
+            if (observedCommitSha !== pending.proposalCommitSha) {
+              return yield* rejectBuildDrift(
+                "The worktree commit drifted after the completion proposal.",
+              );
+            }
+            if (pending.proposalStatusSnapshot !== null) {
+              const observedStatus = yield* runGit(repository.worktreePath, [
+                "status",
+                "--porcelain=v2",
+              ]).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new TaskWorkspaceError({
+                      message: "Failed to re-observe the Build worktree status.",
+                      commandType: "task.internal",
+                      taskId: task.id,
+                      cause,
+                    }),
+                ),
+              );
+              if (observedStatus !== pending.proposalStatusSnapshot) {
+                return yield* rejectBuildDrift(
+                  "The worktree status drifted after the completion proposal.",
+                );
+              }
+            }
           }
           const normalizedBuild = normalizeCompletedBuildPhases(task.build, now);
           if (normalizedBuild !== task.build) {

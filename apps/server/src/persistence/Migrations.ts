@@ -56,6 +56,7 @@ import Migration0040 from "./Migrations/040_TaskInvocationLeases.ts";
 import Migration0041 from "./Migrations/041_TaskInvocationLeaseLifecycle.ts";
 import Migration0042 from "./Migrations/042_TaskInvocationLeaseOwner.ts";
 import Migration0043 from "./Migrations/043_TaskCheckFinalizers.ts";
+import Migration0044 from "./Migrations/044_TaskCompletionProposalGitBasis.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -111,6 +112,7 @@ export const migrationEntries = [
   [41, "TaskInvocationLeaseLifecycle", Migration0041],
   [42, "TaskInvocationLeaseOwner", Migration0042],
   [43, "TaskCheckFinalizers", Migration0043],
+  [44, "TaskCompletionProposalGitBasis", Migration0044],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

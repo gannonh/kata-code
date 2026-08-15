@@ -263,11 +263,14 @@ const runContext = Effect.gen(function* () {
 
 const runComplete = (input: { readonly summary: string; readonly artifactFile: string }) =>
   Effect.gen(function* () {
-    const markdown = yield* readArtifactMarkdown(input.artifactFile).pipe(
-      Effect.catchTag("TaskCliArtifactReadError", (error) =>
-        failTaskCliInvalidRequest(error.message, "complete"),
-      ),
-    );
+    const markdown =
+      input.artifactFile === ""
+        ? ""
+        : yield* readArtifactMarkdown(input.artifactFile).pipe(
+            Effect.catchTag("TaskCliArtifactReadError", (error) =>
+              failTaskCliInvalidRequest(error.message, "complete"),
+            ),
+          );
     const endpoint = endpointFromEnvironment();
     const token = invocationTokenFromEnvironment();
     const envelope =
@@ -310,18 +313,17 @@ export const taskCompleteCommand = Command.make("complete", {
   ),
 }).pipe(
   Command.withDescription(
-    "Propose completion of the active planning stage with a summary and artifact Markdown.",
+    "Propose completion of the active stage. Planning stages require --artifact-file; Build omits it.",
   ),
   Command.withHandler((flags) => {
     const summary = Option.getOrUndefined(flags.summary)?.trim();
     const artifactFile = Option.getOrUndefined(flags.artifactFile)?.trim();
-    if (!summary || !artifactFile) {
-      return failTaskCliInvalidRequest(
-        "Specify --summary and --artifact-file <file|->.",
-        "complete",
-      );
+    if (!summary) {
+      return failTaskCliInvalidRequest("Specify --summary <text>.", "complete");
     }
-    return runComplete({ summary, artifactFile });
+    // Build completion takes no artifact Markdown; the server rejects empty
+    // Markdown with a stable code only for planning stages.
+    return runComplete({ summary, artifactFile: artifactFile ?? "" });
   }),
 );
 

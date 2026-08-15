@@ -1450,6 +1450,15 @@ export const TaskWorkspaceCompletionProposal = Schema.Struct({
   rejectionReason: Schema.NullOr(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  // Build-stage completion basis captured at proposal time. Settlement
+  // revalidates the canonical worktree against these before advancing, so
+  // complete-then-mutate or commit drift rejects the proposal.
+  proposalCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  proposalStatusSnapshot: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });

@@ -216,6 +216,8 @@ describe("TaskWorkspaceStore", () => {
         terminalTurnOutcome: null,
         committedArtifactRevisionId: null,
         rejectionReason: null,
+        proposalCommitSha: null,
+        proposalStatusSnapshot: null,
         createdAt: now,
         settledAt: null,
       };
