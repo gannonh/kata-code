@@ -83,6 +83,38 @@ const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 
 const PROVIDER = ProviderDriverKind.make("codex");
+
+// Codex filters the environment its agent shell inherits by default, which
+// drops the injected KATACODE_TASK_CLI_* credential/endpoint variables. Task
+// sessions (planning and implement alike) therefore opt the app-server's
+// shell environment policy into inheriting those variables while keeping the
+// credential-bearing exclude patterns denied. This is environment
+// propagation, not a permission profile.
+const CODEX_SHELL_ENV_EXCLUDE_PATTERNS = [
+  MCP_BEARER_TOKEN_ENV_VAR,
+  "CODEX_HOME",
+  "OPENSSL_CONF",
+  "*MCP*",
+  "*OPENAI_API_KEY*",
+  "*ANTHROPIC_API_KEY*",
+  "*GITHUB_TOKEN*",
+  "*SECRET*",
+  "*KEY*",
+  "*BEARER*",
+  "*AUTH*",
+  "*CREDENTIAL*",
+] as const;
+const CODEX_TASK_SHELL_ENV_POLICY_ARGS = [
+  "-c",
+  // inherit=all so include_only can keep Task CLI vars that are not in Codex's core set.
+  'shell_environment_policy.inherit="all"',
+  "-c",
+  "shell_environment_policy.ignore_default_excludes=true",
+  "-c",
+  `shell_environment_policy.exclude=[${CODEX_SHELL_ENV_EXCLUDE_PATTERNS.map((pattern) => JSON.stringify(pattern)).join(",")}]`,
+  "-c",
+  `shell_environment_policy.include_only=["PATH","HOME","SHELL","USER","LOGNAME","CODEX_HOME",${JSON.stringify(TASK_CLI_ENDPOINT_ENVIRONMENT_KEY)},${JSON.stringify(TASK_CLI_EXECUTABLE_ENVIRONMENT_KEY)},${JSON.stringify(TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY)}]`,
+] as const;
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
@@ -1444,6 +1476,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.environment !== undefined ? { environment: input.environment } : {},
         );
         const taskToken = input.environment?.variables[TASK_CLI_INVOCATION_TOKEN_ENVIRONMENT_KEY];
+        const hasTaskCliInvocationEnvironment = Boolean(
+          taskToken ||
+          input.environment?.variables[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY] ||
+          input.environment?.executablePath,
+        );
         const removeTaskSecret = taskToken ? registerProviderSecret(taskToken) : () => {};
         let sessionAttached = false;
         yield* Effect.addFinalizer(() =>
@@ -1467,6 +1504,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { developerInstructions: input.developerInstructions }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(hasTaskCliInvocationEnvironment
+            ? { appServerArgs: [...CODEX_TASK_SHELL_ENV_POLICY_ARGS] }
+            : {}),
+          ...(hasTaskCliInvocationEnvironment ? { taskCliNetworkAccess: true as const } : {}),
           ...(mcpSession
             ? {
                 environment: {
@@ -1477,6 +1518,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   ),
                 },
                 appServerArgs: [
+                  ...(hasTaskCliInvocationEnvironment ? CODEX_TASK_SHELL_ENV_POLICY_ARGS : []),
                   "-c",
                   `mcp_servers.${MCP_SERVER_NAME}.url=${mcpSession.endpoint}`,
                   "-c",

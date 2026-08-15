@@ -121,6 +121,8 @@ export interface CodexSessionRuntimeOptions {
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly appServerArgs?: ReadonlyArray<string>;
+  /** Task CLI protocol sessions always need localhost network access. */
+  readonly taskCliNetworkAccess?: boolean;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -319,9 +321,12 @@ function buildThreadStartParams(input: {
   };
 }
 
-function runtimeModeToTurnSandboxPolicy(
-  input: RuntimeMode,
-): EffectCodexSchema.V2TurnStartParams__SandboxPolicy | undefined {
+type CodexRuntimeSandboxPolicy =
+  | { readonly type: "readOnly" }
+  | { readonly type: "workspaceWrite" }
+  | { readonly type: "dangerFullAccess" };
+
+function runtimeModeToTurnSandboxPolicy(input: RuntimeMode): CodexRuntimeSandboxPolicy | undefined {
   switch (input) {
     case "approval-required":
       return {
@@ -337,6 +342,24 @@ function runtimeModeToTurnSandboxPolicy(
         type: "dangerFullAccess",
       };
   }
+}
+
+/**
+ * Task sessions keep the sandbox shape of the selected runtime mode but must
+ * always reach the local Kata server over HTTP: `katacode task ...` is the
+ * workflow protocol, not a permission override. Standard-mode network
+ * defaults are restored otherwise.
+ */
+function withTaskCliNetworkAccess(
+  policy: CodexRuntimeSandboxPolicy | undefined,
+):
+  | CodexRuntimeSandboxPolicy
+  | { readonly type: "readOnly"; readonly networkAccess: true }
+  | { readonly type: "workspaceWrite"; readonly networkAccess: true }
+  | undefined {
+  if (policy === undefined) return undefined;
+  if (policy.type === "dangerFullAccess") return policy;
+  return { ...policy, networkAccess: true };
 }
 
 function buildCodexCollaborationMode(input: {
@@ -378,6 +401,7 @@ export function buildTurnStartParams(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly developerInstructions?: string;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly taskCliNetworkAccess?: boolean;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -394,7 +418,10 @@ export function buildTurnStartParams(input: {
   }
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
-  const sandboxPolicy = runtimeModeToTurnSandboxPolicy(input.runtimeMode);
+  const sandboxPolicy =
+    input.taskCliNetworkAccess === true
+      ? withTaskCliNetworkAccess(runtimeModeToTurnSandboxPolicy(input.runtimeMode))
+      : runtimeModeToTurnSandboxPolicy(input.runtimeMode);
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
@@ -1327,6 +1354,9 @@ export const makeCodexSessionRuntime = (
               ? { developerInstructions: input.developerInstructions }
               : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+            ...(options.taskCliNetworkAccess === true
+              ? { taskCliNetworkAccess: true as const }
+              : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

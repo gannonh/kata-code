@@ -93,6 +93,40 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it("enables localhost network for Task CLI protocol sessions only", () => {
+    const standard = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-standard",
+        runtimeMode: "auto-accept-edits",
+        prompt: "Implement it",
+      }),
+    );
+    assert.deepStrictEqual(standard.sandboxPolicy, { type: "workspaceWrite" });
+
+    const taskCli = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-task-cli",
+        runtimeMode: "auto-accept-edits",
+        prompt: "Implement it",
+        taskCliNetworkAccess: true,
+      }),
+    );
+    assert.deepStrictEqual(taskCli.sandboxPolicy, {
+      type: "workspaceWrite",
+      networkAccess: true,
+    });
+
+    const fullAccess = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-task-cli-full",
+        runtimeMode: "full-access",
+        prompt: "Implement it",
+        taskCliNetworkAccess: true,
+      }),
+    );
+    assert.deepStrictEqual(fullAccess.sandboxPolicy, { type: "dangerFullAccess" });
+  });
+
   it("keeps task-stage completion out of Codex native Plan Mode", () => {
     const params = Effect.runSync(
       buildTurnStartParams({

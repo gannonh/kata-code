@@ -327,8 +327,9 @@ validationLayer("CodexAdapterLive validation", (it) => {
         runtimeOptions.environment?.[TASK_CLI_ENDPOINT_ENVIRONMENT_KEY],
         "http://127.0.0.1:1",
       );
-      // Task Mode no longer installs a permission profile or shell
-      // environment policy: the session starts on the standard Codex contract.
+      // Task Mode no longer installs a permission profile, but the shell
+      // environment policy must remain: Codex would otherwise filter the
+      // injected KATACODE_TASK_CLI_* variables out of the agent shell.
       assert.equal(
         (runtimeOptions.appServerArgs ?? []).some((argument) => argument.includes("permissions.")),
         false,
@@ -337,7 +338,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         (runtimeOptions.appServerArgs ?? []).some((argument) =>
           argument.startsWith("shell_environment_policy."),
         ),
-        false,
+        true,
       );
       yield* adapter.stopSession(asThreadId("thread-shell-policy-token"));
     }),
