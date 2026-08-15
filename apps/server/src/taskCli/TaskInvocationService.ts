@@ -650,6 +650,9 @@ const make = Effect.gen(function* () {
     if (lower.includes("indeterminate")) {
       return toError("check_indeterminate", message, cause);
     }
+    if (lower.includes("not found in the active build")) {
+      return toError("invalid_request", message, cause);
+    }
     if (lower.includes("not implemented")) {
       return toError("internal_error", message, cause);
     }

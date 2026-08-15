@@ -602,6 +602,23 @@ describe("TaskInvocationService", () => {
         })
         .pipe(Effect.flip);
       expect(failure.code).toBe("not_active");
+
+      test.failProgress(
+        new TaskWorkspaceError({
+          message: "Work item 'work:missing' was not found in the active Build.",
+          commandType: "task.internal",
+        }),
+      );
+      const unknownId = yield* service
+        .progress({
+          token: issued.token,
+          target: "work-item",
+          id: "work:missing",
+          status: "running",
+          summary: "Should not persist.",
+        })
+        .pipe(Effect.flip);
+      expect(unknownId.code).toBe("invalid_request");
     }).pipe(Effect.provide(test.layer));
   });
 });

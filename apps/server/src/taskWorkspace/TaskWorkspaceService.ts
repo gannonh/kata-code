@@ -6611,16 +6611,6 @@ export const make = Effect.gen(function* () {
           taskId: task.id,
         });
       }
-      const session = occurrence.sessionId
-        ? task.sessions.find((candidate) => candidate.id === occurrence.sessionId)
-        : undefined;
-      if (!session || session.status !== "active" || session.role !== "primary") {
-        return yield* new TaskWorkspaceError({
-          message: "The Task primary session is not active.",
-          commandType: "task.internal",
-          taskId: task.id,
-        });
-      }
       const phaseId =
         input.target === "phase"
           ? input.id
