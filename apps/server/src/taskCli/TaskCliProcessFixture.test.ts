@@ -3,6 +3,7 @@
 // @effect-diagnostics missingEffectContext:off
 // @effect-diagnostics missingLayerContext:off
 // @effect-diagnostics anyUnknownInErrorContext:off
+import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import * as NodePath from "node:path";
 
@@ -12,12 +13,15 @@ import * as Schema from "effect/Schema";
 
 import {
   TASK_CLI_PLANNING_COMMANDS,
+  TaskCliCheckBeginEnvelope,
+  TaskCliCheckFinalizeEnvelope,
   TaskCliCompleteEnvelope,
   TaskCliContextEnvelope,
   TaskCliProgressEnvelope,
 } from "@kata-sh/code-contracts";
 import {
   ensureTaskCliBundle,
+  makeTaskCliBuildFixture,
   makeTaskCliProcessFixture,
   TASK_CLI_BUNDLE_PATH,
 } from "./TaskCliProcessFixture.ts";
@@ -39,6 +43,12 @@ const decodeCompleteEnvelope = (stdout: string) =>
 
 const decodeProgressEnvelope = (stdout: string) =>
   Schema.decodeUnknownSync(TaskCliProgressEnvelope)(parseSingleEnvelope(stdout));
+
+const decodeCheckBeginEnvelope = (stdout: string) =>
+  Schema.decodeUnknownSync(TaskCliCheckBeginEnvelope)(parseSingleEnvelope(stdout));
+
+const decodeCheckFinalizeEnvelope = (stdout: string) =>
+  Schema.decodeUnknownSync(TaskCliCheckFinalizeEnvelope)(parseSingleEnvelope(stdout));
 
 describe("built Task CLI process", () => {
   it("materializes the packaged CLI bundle before process proofs run", () => {
@@ -314,6 +324,98 @@ describe("built Task CLI process", () => {
         operation: "context",
         error: { code: "invalid_request" },
       });
+    }).pipe(Effect.scoped as never),
+  );
+});
+
+const hostHasCheckSandbox = (): boolean => {
+  if (process.platform === "darwin") return existsSync("/usr/bin/sandbox-exec");
+  if (process.platform === "linux") {
+    try {
+      execFileSync("which", ["bwrap"], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
+
+describe("built Task CLI check flow", () => {
+  it.effect("executes an approved check through begin, local run, and finalize", () =>
+    Effect.gen(function* () {
+      if (!hostHasCheckSandbox()) return;
+      const fixture = yield* makeTaskCliBuildFixture();
+      const result = yield* fixture.runCli({}, ["task", "check", "run", "check:pass"]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain(fixture.token);
+      const envelope = decodeCheckFinalizeEnvelope(result.stdout);
+      expect(envelope).toMatchObject({ protocol: "task-cli@1", ok: true, operation: "check" });
+      if (envelope.ok) {
+        expect(envelope.status).toBe("pass");
+        expect(envelope.checkId).toBe("check:pass");
+      }
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects an unknown check id with a stable invalid_request envelope", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliBuildFixture();
+      const result = yield* fixture.runCli({}, ["task", "check", "run", "check:missing"]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeCheckBeginEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "check",
+        error: { code: "invalid_request" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("returns the stable settled-pass result without re-running a passed check", () =>
+    Effect.gen(function* () {
+      if (!hostHasCheckSandbox()) return;
+      const fixture = yield* makeTaskCliBuildFixture();
+      const first = yield* fixture.runCli({}, ["task", "check", "run", "check:pass"]);
+      expect(first.exitCode).toBe(0);
+      expect(decodeCheckFinalizeEnvelope(first.stdout)).toMatchObject({ ok: true });
+
+      const second = yield* fixture.runCli({}, ["task", "check", "run", "check:pass"]);
+      expect(second.exitCode).toBe(0);
+      expect(second.stderr).toBe("");
+      const envelope = decodeCheckBeginEnvelope(second.stdout);
+      expect(envelope).toMatchObject({ ok: true, operation: "check" });
+      if (envelope.ok) {
+        expect(envelope.outcome).toBe("settled-pass");
+        expect(envelope.finalizerToken).toBeNull();
+      }
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("settles a failing check and allocates the next attempt on rerun", () =>
+    Effect.gen(function* () {
+      if (!hostHasCheckSandbox()) return;
+      const fixture = yield* makeTaskCliBuildFixture();
+      const first = yield* fixture.runCli({}, ["task", "check", "run", "check:fail"]);
+      expect(first.exitCode).toBe(0);
+      expect(first.stderr).toBe("");
+      const firstEnvelope = decodeCheckFinalizeEnvelope(first.stdout);
+      expect(firstEnvelope).toMatchObject({ ok: true });
+      if (!firstEnvelope.ok || firstEnvelope.status !== "fail") return;
+      expect(firstEnvelope.attemptId).toBe("check-attempt-1");
+
+      const second = yield* fixture.runCli({}, ["task", "check", "run", "check:fail"]);
+      expect(second.exitCode).toBe(0);
+      const secondEnvelope = decodeCheckFinalizeEnvelope(second.stdout);
+      expect(secondEnvelope).toMatchObject({ ok: true });
+      if (secondEnvelope.ok) {
+        expect(secondEnvelope.status).toBe("fail");
+        expect(secondEnvelope.attemptId).toBe("check-attempt-2");
+      }
     }).pipe(Effect.scoped as never),
   );
 });

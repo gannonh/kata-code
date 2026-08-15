@@ -1,12 +1,14 @@
 // @effect-diagnostics nodeBuiltinImport:off - the fixture owns a real SQLite file, HTTP listener, and child process.
 // @effect-diagnostics anyUnknownInErrorContext:off - inert external-service doubles are intentionally boundary-shaped.
 // @effect-diagnostics globalDate:off - bundle lock wait uses wall-clock timeout around spawnSync.
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import * as NodeFs from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
@@ -32,6 +34,8 @@ import * as HttpServer from "effect/unstable/http/HttpServer";
 
 import { ServerConfig } from "../config.ts";
 import {
+  TaskWorkspaceSourceError,
+  TaskWorkspaceSourceErrorKind,
   TaskWorkspaceSourceResolver,
   type TaskWorkspaceSourceResolverShape,
 } from "../taskWorkspace/Services/TaskWorkspaceSourceResolver.ts";
@@ -41,6 +45,7 @@ import {
 } from "../taskWorkspace/TaskWorkspaceService.ts";
 import { TaskWorkspaceStoreLive } from "../persistence/Layers/TaskWorkspaceStore.ts";
 import { layerConfig as SqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
+import { TaskCheckFinalizerServiceLive } from "./TaskCheckFinalizerService.ts";
 import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
 import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSessionDirectory.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../persistence/Layers/ProviderSessionRuntime.ts";
@@ -113,6 +118,63 @@ export const ensureTaskCliBundle = (): void => {
 
 const unsupported = (operation: string): Effect.Effect<never, never> =>
   Effect.die(new Error(`Unexpected external Git operation in Task CLI fixture: ${operation}`));
+
+const execFileAsync = promisify(execFile);
+
+async function gitExec(cwd: string, args: readonly string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", [...args], {
+    cwd,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Kata Code Test",
+      GIT_AUTHOR_EMAIL: "test@kata.sh",
+      GIT_COMMITTER_NAME: "Kata Code Test",
+      GIT_COMMITTER_EMAIL: "test@kata.sh",
+    },
+  });
+  return stdout.trim();
+}
+
+const buildGitWorkflow = (baseDir: string) => ({
+  status: () => unsupported("status"),
+  localStatus: () => unsupported("localStatus"),
+  remoteStatus: () => unsupported("remoteStatus"),
+  invalidateLocalStatus: () => Effect.void,
+  invalidateRemoteStatus: () => Effect.void,
+  invalidateStatus: () => Effect.void,
+  pullCurrentBranch: () => unsupported("pullCurrentBranch"),
+  runStackedAction: () => unsupported("runStackedAction"),
+  resolvePullRequest: () => unsupported("resolvePullRequest"),
+  preparePullRequestThread: () => unsupported("preparePullRequestThread"),
+  listRefs: () => unsupported("listRefs"),
+  createWorktree: (input: {
+    readonly cwd: string;
+    readonly refName: string;
+    readonly newRefName?: string;
+    readonly path: string | null;
+  }) =>
+    Effect.tryPromise({
+      try: async () => {
+        const newRefName = input.newRefName ?? "katacode/task-build";
+        const worktreePath =
+          input.path ?? NodePath.join(baseDir, "task-worktree", newRefName.replace(/\//g, "-"));
+        await gitExec(input.cwd, [
+          "worktree",
+          "add",
+          "-b",
+          newRefName,
+          worktreePath,
+          input.refName,
+        ]);
+        return { worktree: { path: worktreePath, refName: newRefName } };
+      },
+      catch: (cause) => cause as never,
+    }),
+  removeWorktree: () => unsupported("removeWorktree"),
+  createRef: () => unsupported("createRef"),
+  switchRef: () => unsupported("switchRef"),
+  renameBranch: () => unsupported("renameBranch"),
+});
 
 const inertGit = {
   status: () => unsupported("status"),
@@ -429,6 +491,398 @@ export const makeTaskCliProcessFixture = Effect.fn("makeTaskCliProcessFixture")(
     providerTurnId,
     token: issued.token,
     task,
+    taskService,
+    invocationService,
+    providerDirectory: directory,
+    runCli,
+  } satisfies TaskCliProcessFixture;
+});
+
+const buildSourceResolver = (repoRoot: string): TaskWorkspaceSourceResolverShape => ({
+  resolve: ({ worktreePolicy }) =>
+    Effect.tryPromise({
+      try: async () => {
+        const headSha = await gitExec(repoRoot, ["rev-parse", "HEAD"]);
+        const status = await gitExec(repoRoot, ["status", "--porcelain=v2"]);
+        const planningRootFingerprint = createHash("sha256")
+          .update(`${headSha}\n${status}`)
+          .digest("hex");
+        return {
+          workspaceRoot: repoRoot,
+          baseCommitSha: headSha,
+          planningRootFingerprint: worktreePolicy === "now" ? null : planningRootFingerprint,
+        };
+      },
+      catch: (cause) =>
+        new TaskWorkspaceSourceError(TaskWorkspaceSourceErrorKind.NotARepository, String(cause)),
+    }),
+});
+
+const at = (second: number) => `2026-08-13T00:00:${String(second).padStart(2, "0")}.000Z`;
+
+const planningBootstrapEntry = (task: TaskWorkspace) => {
+  const bootstrap = task.bootstrap;
+  if (!bootstrap) throw new Error("Expected Task bootstrap reservation.");
+  const parsed = /:bootstrap:([^:]+):(\d+):primary$/u.exec(bootstrap.operationKey)!;
+  return {
+    id: `bootstrap-${parsed[1]}`,
+    environmentId,
+    taskId: task.id,
+    operationKey: bootstrap.operationKey,
+    target: "bootstrap" as const,
+    status: "pending" as const,
+    payload: {
+      stage: parsed[1]!,
+      occurrence: Number(parsed[2]),
+      sessionId: bootstrap.reservedSessionId,
+      threadId: bootstrap.reservedThreadId,
+      threadCreateCommandId: bootstrap.threadCreateCommandId,
+      turnStartCommandId: bootstrap.turnStartCommandId,
+      kickoffMessageId: bootstrap.kickoffMessageId,
+      runtimeMode: task.preferences.runtimeMode,
+      worktreeBranch: null,
+      worktreePath: null,
+    },
+    attemptCount: 0,
+    createdAt: at(0),
+    updatedAt: at(0),
+    completedAt: null,
+  } as const;
+};
+
+const buildBootstrapEntry = (task: TaskWorkspace) => {
+  const bootstrap = task.bootstrap!;
+  const parsed = /:bootstrap:([^:]+):(\d+):primary$/u.exec(bootstrap.operationKey)!;
+  const repository = task.workspace.repositories[0]!;
+  return {
+    id: "bootstrap-build",
+    environmentId,
+    taskId: task.id,
+    operationKey: bootstrap.operationKey,
+    target: "bootstrap" as const,
+    status: "pending" as const,
+    payload: {
+      stage: parsed[1]!,
+      occurrence: Number(parsed[2]),
+      sessionId: bootstrap.reservedSessionId,
+      threadId: bootstrap.reservedThreadId,
+      threadCreateCommandId: bootstrap.threadCreateCommandId,
+      turnStartCommandId: bootstrap.turnStartCommandId,
+      kickoffMessageId: bootstrap.kickoffMessageId,
+      worktreeBranch: repository.branch,
+      worktreePath: repository.worktreePath,
+    },
+    attemptCount: 0,
+    createdAt: at(0),
+    updatedAt: at(0),
+    completedAt: null,
+  } as const;
+};
+
+/**
+ * Drive a real guided Task to the Build stage with a provisioned worktree and
+ * a primary session, then expose the same CLI child-process surface as
+ * `makeTaskCliProcessFixture`. Used to prove `katacode task check run` end to
+ * end against a real task authority and a real git worktree.
+ */
+export const makeTaskCliBuildFixture = Effect.fn("makeTaskCliBuildFixture")(function* () {
+  yield* Effect.sync(ensureTaskCliBundle);
+  const root = yield* Effect.tryPromise(() =>
+    NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-task-cli-build-")),
+  );
+  yield* Effect.addFinalizer(() =>
+    Effect.promise(() => NodeFs.rm(root, { recursive: true, force: true })),
+  );
+  const repoRoot = NodePath.join(root, "repo");
+  const baseDir = NodePath.join(root, "state");
+  yield* Effect.promise(() => NodeFs.mkdir(repoRoot, { recursive: true }));
+  yield* Effect.promise(() => gitExec(repoRoot, ["init", "-b", "main"]));
+  yield* Effect.promise(() =>
+    NodeFs.writeFile(NodePath.join(repoRoot, "README.md"), "# fixture\n"),
+  );
+  yield* Effect.promise(() => gitExec(repoRoot, ["add", "README.md"]));
+  yield* Effect.promise(() =>
+    gitExec(repoRoot, ["commit", "-m", "chore: seed fixture repository"]),
+  );
+
+  const configLayer = ServerConfig.layerTest(repoRoot, baseDir);
+  const persistenceLayer = SqlitePersistenceLive.pipe(
+    Layer.provide(configLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  const workspaceLayer = TaskWorkspaceServiceLive.pipe(
+    Layer.provide(
+      Layer.succeed(
+        GitWorkflowService,
+        buildGitWorkflow(baseDir) as unknown as GitWorkflowServiceShape,
+      ),
+    ),
+    Layer.provide(environmentLayer),
+    Layer.provide(Layer.succeed(TaskWorkspaceSourceResolver, buildSourceResolver(repoRoot))),
+    Layer.provide(
+      Layer.succeed(
+        OrchestrationEngineService,
+        makeInertOrchestration() as OrchestrationEngineShape,
+      ),
+    ),
+    Layer.provide(TaskWorkspaceStoreLive),
+    Layer.provideMerge(TaskCheckFinalizerServiceLive),
+    Layer.provide(configLayer),
+    Layer.provideMerge(persistenceLayer),
+  );
+  const directoryLayer = ProviderSessionDirectoryLive.pipe(
+    Layer.provide(ProviderSessionRuntimeRepositoryLive),
+    Layer.provideMerge(persistenceLayer),
+  );
+  const invocationLayer = TaskInvocationServiceLive.pipe(
+    Layer.provideMerge(workspaceLayer),
+    Layer.provideMerge(directoryLayer),
+    Layer.provideMerge(persistenceLayer),
+  );
+  const scope = yield* Effect.scope;
+  const services = yield* Layer.buildWithScope(
+    Layer.mergeAll(workspaceLayer, directoryLayer, invocationLayer),
+    scope,
+  );
+  const taskService = Context.get(services, TaskWorkspaceService);
+  const directory = Context.get(services, ProviderSessionDirectory);
+  const rawInvocation = Context.get(services, TaskInvocationService);
+  const invocationService: TaskInvocationServiceShape = {
+    issue: (input) => rawInvocation.issue(input).pipe(Effect.provide(services)),
+    bind: (input) => rawInvocation.bind(input).pipe(Effect.provide(services)),
+    resolve: (token) => rawInvocation.resolve(token).pipe(Effect.provide(services)),
+    complete: (input) => rawInvocation.complete(input).pipe(Effect.provide(services)),
+    progress: (input) => rawInvocation.progress(input).pipe(Effect.provide(services)),
+    checkBegin: (input) => rawInvocation.checkBegin(input).pipe(Effect.provide(services)),
+    checkFinalize: (input) => rawInvocation.checkFinalize(input).pipe(Effect.provide(services)),
+    amendmentPropose: (input) =>
+      rawInvocation.amendmentPropose(input).pipe(Effect.provide(services)),
+    revokeThread: (threadId) => rawInvocation.revokeThread(threadId).pipe(Effect.provide(services)),
+    revokeTurn: (input) => rawInvocation.revokeTurn(input).pipe(Effect.provide(services)),
+    revokeAll: rawInvocation.revokeAll.pipe(Effect.provide(services)),
+    reconcile: rawInvocation.reconcile.pipe(Effect.provide(services)),
+  };
+
+  const taskId = TaskWorkspaceId.make("task-cli-build");
+  const projectId = "project-task-cli-build";
+  const created = yield* taskService.dispatch({
+    type: "task.create",
+    commandId: "task-cli-build-create",
+    taskId,
+    createdAt: at(1),
+    title: "Task CLI build proof",
+    projectId,
+    baseRef: "main",
+    preset: "guided",
+    approvalPolicy: "before-build",
+    operationKey: "task-cli-build-create-op",
+    brief: "Prove the built Task CLI check flow against a real worktree.",
+    source: {
+      kind: "inline",
+      body: "Prove the built Task CLI check flow against a real worktree.",
+    },
+    worktreePolicy: "later",
+    modelSelection: { instanceId: providerInstanceId, model: "fixture-model", options: [] },
+  } as never);
+  yield* taskService.processBootstrap(planningBootstrapEntry(created.task) as never);
+  let task = (yield* taskService
+    .getTask(taskId)
+    .pipe(
+      Effect.flatMap((value) =>
+        value ? Effect.succeed(value) : Effect.die("Task bootstrap disappeared."),
+      ),
+    ))!;
+
+  for (const stage of ["questions", "research", "design"] as const) {
+    const occurrence = task.occurrences.find(
+      (candidate) => candidate.stage === stage && candidate.status === "running",
+    )!;
+    const session = task.sessions.find((candidate) => candidate.stage === stage)!;
+    yield* taskService.proposeStageCompletion({
+      taskId: task.id,
+      sessionId: session.id,
+      providerTurnId: `turn-${stage}`,
+      payloadDigest: `digest-${stage}`,
+      summary: `${stage} done`,
+      markdown: `# ${stage}\n`,
+    });
+    task = (yield* taskService.settleProposal({
+      taskId: task.id,
+      occurrence: occurrence.ordinal,
+      providerTurnId: `turn-${stage}`,
+      outcome: "completed",
+    }))!;
+    yield* taskService.processBootstrap(planningBootstrapEntry(task) as never);
+    task = (yield* taskService
+      .getTask(taskId)
+      .pipe(
+        Effect.flatMap((value) =>
+          value ? Effect.succeed(value) : Effect.die("Task bootstrap disappeared."),
+        ),
+      ))!;
+  }
+  const planOccurrence = task.occurrences.find(
+    (candidate) => candidate.stage === "plan" && candidate.status === "running",
+  )!;
+  const planSession = task.sessions.find((candidate) => candidate.stage === "plan")!;
+  const planMarkdown = [
+    "## Phase [phase:foundation] Foundation",
+    "Checkpoint: never",
+    "",
+    "### Work item [work:implement] Implement approved Plan",
+    "",
+    "- Automated check [check:pass]: Pass | printf ok",
+    "",
+    '- Automated check [check:fail]: Fail | node -e "process.exit(3)"',
+    "",
+  ].join("\n");
+  yield* taskService.proposeStageCompletion({
+    taskId: task.id,
+    sessionId: planSession.id,
+    providerTurnId: "turn-plan",
+    payloadDigest: "digest-plan",
+    summary: "Plan ready.",
+    markdown: planMarkdown,
+  });
+  task = (yield* taskService.settleProposal({
+    taskId: task.id,
+    occurrence: planOccurrence.ordinal,
+    providerTurnId: "turn-plan",
+    outcome: "completed",
+  }))!;
+
+  const approved = yield* taskService.dispatch({
+    type: "task.plan.approve",
+    commandId: "task-cli-build-approve",
+    taskId,
+    createdAt: at(20),
+    expectedTaskRevision: task.taskRevision,
+    operationKey: "task-cli-build-approve-op",
+  } as never);
+  const repository = approved.task.workspace.repositories[0]!;
+  const branch = `katacode/task-${approved.task.id}`;
+  const worktreePath = NodePath.join(
+    baseDir,
+    "worktrees",
+    NodePath.basename(repoRoot),
+    branch.replace(/\//g, "-"),
+  );
+  yield* taskService.processWorktree({
+    id: "worktree-task-cli-build",
+    environmentId,
+    taskId: approved.task.id,
+    operationKey: `${approved.task.id}:worktree:${repository.baseCommitSha}:later`,
+    target: "worktree",
+    status: "pending",
+    payload: {
+      branch,
+      path: worktreePath,
+      baseCommitSha: repository.baseCommitSha!,
+      sourceWorkspaceRoot: repository.workspaceRoot,
+    },
+    attemptCount: 0,
+    createdAt: at(21),
+    updatedAt: at(21),
+    completedAt: null,
+  } as never);
+  let provisioned = (yield* taskService
+    .getTask(taskId)
+    .pipe(
+      Effect.flatMap((value) =>
+        value ? Effect.succeed(value) : Effect.die("Task disappeared after worktree provisioning."),
+      ),
+    ))!;
+  yield* taskService.processBootstrap(buildBootstrapEntry(provisioned) as never);
+  provisioned = (yield* taskService
+    .getTask(taskId)
+    .pipe(
+      Effect.flatMap((value) =>
+        value ? Effect.succeed(value) : Effect.die("Task disappeared after build bootstrap."),
+      ),
+    ))!;
+
+  yield* taskService.implementationProgressCli({
+    taskId,
+    target: "work-item",
+    id: "work:implement",
+    status: "running",
+    summary: "Implementing.",
+  });
+
+  const threadId = ThreadId.make(
+    provisioned.occurrences.find((o) => o.stage === "build")?.threadId ?? "missing-build-thread",
+  );
+  yield* directory.upsert({
+    threadId,
+    provider: ProviderDriverKind.make("codex"),
+    providerInstanceId,
+    adapterKey: "codex-task-cli-build-test",
+    status: "running",
+    runtimeMode: "full-access",
+    runtimePayload: { activeTurnId: pendingProviderTurnId },
+  });
+  const issued = yield* invocationService.issue({
+    environmentId,
+    threadId,
+    providerInstanceId,
+    providerTurnId: pendingProviderTurnId,
+  });
+  yield* directory.upsert({
+    threadId,
+    provider: ProviderDriverKind.make("codex"),
+    providerInstanceId,
+    adapterKey: "codex-task-cli-build-test",
+    status: "running",
+    runtimeMode: "full-access",
+    runtimePayload: { activeTurnId: providerTurnId },
+  });
+  yield* invocationService.bind({
+    token: issued.token,
+    threadId,
+    providerInstanceId,
+    providerTurnId,
+  });
+
+  const routeLayer = HttpApiBuilder.layer(TaskCliTestHttpApi).pipe(
+    Layer.provide(taskCliHttpApiLayer as never),
+    Layer.provideMerge(Layer.succeedContext(services)),
+  );
+  const serverLayer = HttpRouter.serve(routeLayer, {
+    disableListenLog: true,
+    disableLogger: true,
+  }).pipe(
+    Layer.provideMerge(NodeHttpServer.layer(NodeHttp.createServer, { host: "127.0.0.1", port: 0 })),
+    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.succeedContext(services)),
+  );
+  const serverContext = yield* Layer.buildWithScope(serverLayer, scope);
+  const server = Context.get(serverContext, HttpServer.HttpServer);
+  const address = server.address;
+  if (typeof address === "string" || !("port" in address))
+    throw new Error("Expected TCP server address.");
+  const endpoint = `http://127.0.0.1:${address.port}`;
+  const runCli = (
+    env: Record<string, string | undefined> = {},
+    argv: ReadonlyArray<string> = ["task", "context"],
+  ) =>
+    runChild(
+      TASK_CLI_BUNDLE_PATH,
+      {
+        KATACODE_TASK_CLI_ENDPOINT: endpoint,
+        KATACODE_TASK_INVOCATION_TOKEN: issued.token,
+        ...env,
+      },
+      argv,
+    ).pipe(Effect.orDie);
+  return {
+    root,
+    endpoint,
+    taskId,
+    threadId,
+    providerInstanceId,
+    providerTurnId,
+    token: issued.token,
+    task: provisioned,
     taskService,
     invocationService,
     providerDirectory: directory,
