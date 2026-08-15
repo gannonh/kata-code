@@ -225,6 +225,7 @@ describe("implementation Task CLI contracts", () => {
       Schema.decodeUnknownSync(TaskCliCheckFinalizeRequest)({
         finalizerToken: "opaque-token",
         exitCode: 0,
+        status: "pass",
         output: "ok",
         timedOut: false,
         startingCommitSha: "deadbeef",
@@ -232,7 +233,7 @@ describe("implementation Task CLI contracts", () => {
         startingStatus: "",
         endingStatus: "",
       }),
-    ).toMatchObject({ finalizerToken: "opaque-token", exitCode: 0 });
+    ).toMatchObject({ finalizerToken: "opaque-token", exitCode: 0, status: "pass" });
     expect(
       Schema.decodeUnknownSync(TaskCliAmendmentRequest)({
         phaseId: "phase:foundation",

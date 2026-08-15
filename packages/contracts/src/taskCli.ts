@@ -181,9 +181,13 @@ export const TaskCliCheckBeginSuccessEnvelope = Schema.Struct({
 });
 export type TaskCliCheckBeginSuccessEnvelope = typeof TaskCliCheckBeginSuccessEnvelope.Type;
 
+export const TaskCliCheckFinalizeStatus = Schema.Literals(["pass", "fail", "indeterminate"]);
+export type TaskCliCheckFinalizeStatus = typeof TaskCliCheckFinalizeStatus.Type;
+
 export const TaskCliCheckFinalizeRequest = Schema.Struct({
   finalizerToken: TrimmedNonEmptyString,
   exitCode: Schema.NullOr(Schema.Int),
+  status: TaskCliCheckFinalizeStatus,
   output: Schema.String.check(Schema.isMaxLength(TASK_CLI_CHECK_OUTPUT_MAX_CHARS)),
   timedOut: Schema.Boolean,
   startingCommitSha: TrimmedNonEmptyString,
@@ -194,9 +198,6 @@ export const TaskCliCheckFinalizeRequest = Schema.Struct({
   ),
 });
 export type TaskCliCheckFinalizeRequest = typeof TaskCliCheckFinalizeRequest.Type;
-
-export const TaskCliCheckFinalizeStatus = Schema.Literals(["pass", "fail", "indeterminate"]);
-export type TaskCliCheckFinalizeStatus = typeof TaskCliCheckFinalizeStatus.Type;
 
 export const TaskCliCheckFinalizeSuccessEnvelope = Schema.Struct({
   protocol: Schema.Literal(TASK_CLI_PROTOCOL),

@@ -1640,6 +1640,7 @@ export interface TaskWorkspaceServiceShape {
   readonly implementationCheckFinalize: (input: {
     readonly finalizerToken: string;
     readonly exitCode: number | null;
+    readonly status: TaskCliCheckFinalizeStatus;
     readonly output: string;
     readonly timedOut: boolean;
     readonly startingCommitSha: string;
@@ -7086,11 +7087,16 @@ export const make = Effect.gen(function* () {
             taskId: task.id,
           });
         }
-        const status = input.timedOut
-          ? ("indeterminate" as const)
-          : input.exitCode === 0
-            ? ("pass" as const)
-            : ("fail" as const);
+        // The client-observed indeterminate classification (no supported
+        // sandbox, unobservable after-state, malformed command) is the only
+        // evidence available for those outcomes; exit codes alone cannot
+        // distinguish them from fail/pass.
+        const status =
+          input.timedOut || input.status === "indeterminate"
+            ? ("indeterminate" as const)
+            : input.exitCode === 0
+              ? ("pass" as const)
+              : ("fail" as const);
         // Settle BEFORE consuming: a crash between consume and settle would
         // leave the token spent with the attempt wedged pending and no
         // reconciliation path (the startup fence only revokes pending rows).

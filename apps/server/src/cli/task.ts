@@ -485,6 +485,7 @@ const runCheck = (checkId: string) =>
         ? {
             finalizerToken,
             exitCode: executed.result.exitCode,
+            status: executed.result.status,
             output: executed.result.output.slice(0, beginEnvelope.maxOutputBytes),
             timedOut: executed.result.timedOut,
             startingCommitSha: executed.result.startingCommitSha,
@@ -495,6 +496,7 @@ const runCheck = (checkId: string) =>
         : {
             finalizerToken,
             exitCode: null,
+            status: "indeterminate" as const,
             output: executed.message,
             timedOut: false,
             startingCommitSha: beginEnvelope.startingCommitSha,

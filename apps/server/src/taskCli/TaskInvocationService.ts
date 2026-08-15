@@ -110,6 +110,7 @@ export interface TaskInvocationServiceShape {
   readonly checkFinalize: (input: {
     readonly finalizerToken: string;
     readonly exitCode: number | null;
+    readonly status: TaskCliCheckFinalizeStatus;
     readonly output: string;
     readonly timedOut: boolean;
     readonly startingCommitSha: string;

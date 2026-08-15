@@ -7241,6 +7241,12 @@ describe("TaskWorkspaceService guided implementation", () => {
     service.implementationCheckFinalize({
       finalizerToken: token,
       exitCode: input.exitCode ?? 0,
+      status:
+        input.timedOut === true
+          ? "indeterminate"
+          : input.exitCode === 0 || input.exitCode === null || input.exitCode === undefined
+            ? "pass"
+            : "fail",
       output: input.output ?? "",
       timedOut: input.timedOut ?? false,
       startingCommitSha: input.overrideStartingCommitSha ?? startingCommitSha,

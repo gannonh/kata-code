@@ -10,8 +10,11 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { FetchHttpClient } from "effect/unstable/http";
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
 import {
+  EnvironmentHttpApi,
   TASK_CLI_PLANNING_COMMANDS,
   TaskCliCheckBeginEnvelope,
   TaskCliCheckFinalizeEnvelope,
@@ -417,5 +420,46 @@ describe("built Task CLI check flow", () => {
         expect(secondEnvelope.attemptId).toBe("check-attempt-2");
       }
     }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects a finalize with an altered starting Git state", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliBuildFixture();
+      const client = yield* HttpApiClient.make(EnvironmentHttpApi, {
+        baseUrl: fixture.endpoint,
+      });
+      const begin = yield* client.taskCli.checkBegin({
+        headers: { authorization: `Bearer ${fixture.token}` },
+        payload: { checkId: "check:pass" },
+      });
+      expect(begin).toMatchObject({ ok: true, outcome: "spawn" });
+      const token = begin.ok ? begin.finalizerToken : null;
+      const startingCommitSha = begin.ok ? begin.startingCommitSha : null;
+      expect(token).toBeTruthy();
+      expect(startingCommitSha).toBeTruthy();
+
+      const tampered = yield* client.taskCli.checkFinalize({
+        headers: {},
+        payload: {
+          finalizerToken: token!,
+          exitCode: 0,
+          status: "pass",
+          output: "ok",
+          timedOut: false,
+          startingCommitSha: "tampered-sha",
+          endingCommitSha: startingCommitSha,
+          startingStatus: "",
+          endingStatus: "",
+        },
+      });
+      expect(tampered).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "check",
+        error: { code: "conflict" },
+      });
+    })
+      .pipe(Effect.provide(FetchHttpClient.layer))
+      .pipe(Effect.scoped as never),
   );
 });
