@@ -123,8 +123,8 @@ export const TaskCliCompleteEnvelope = Schema.Union([
 export type TaskCliCompleteEnvelope = typeof TaskCliCompleteEnvelope.Type;
 
 export const TaskCliCompleteRequest = Schema.Struct({
-  summary: Schema.String,
-  markdown: Schema.String,
+  summary: Schema.String.check(Schema.isMaxLength(TASK_CLI_SUMMARY_MAX_CHARS)),
+  markdown: Schema.String.check(Schema.isMaxLength(TASK_CLI_ARTIFACT_MAX_CHARS)),
 });
 export type TaskCliCompleteRequest = typeof TaskCliCompleteRequest.Type;
 
@@ -133,9 +133,9 @@ export type TaskCliProgressStatus = typeof TaskCliProgressStatus.Type;
 
 export const TaskCliProgressRequest = Schema.Struct({
   target: Schema.Literals(["phase", "work-item"]),
-  id: TrimmedNonEmptyString,
+  id: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
   status: TaskCliProgressStatus,
-  summary: Schema.String,
+  summary: Schema.String.check(Schema.isMaxLength(TASK_CLI_SUMMARY_MAX_CHARS)),
 });
 export type TaskCliProgressRequest = typeof TaskCliProgressRequest.Type;
 
@@ -152,7 +152,7 @@ export const TaskCliProgressSuccessEnvelope = Schema.Struct({
 export type TaskCliProgressSuccessEnvelope = typeof TaskCliProgressSuccessEnvelope.Type;
 
 export const TaskCliCheckBeginRequest = Schema.Struct({
-  checkId: TrimmedNonEmptyString,
+  checkId: TrimmedNonEmptyString.check(Schema.isMaxLength(TASK_CLI_CHECK_ID_MAX_CHARS)),
 });
 export type TaskCliCheckBeginRequest = typeof TaskCliCheckBeginRequest.Type;
 
@@ -183,12 +183,14 @@ export type TaskCliCheckBeginSuccessEnvelope = typeof TaskCliCheckBeginSuccessEn
 export const TaskCliCheckFinalizeRequest = Schema.Struct({
   finalizerToken: TrimmedNonEmptyString,
   exitCode: Schema.NullOr(Schema.Int),
-  output: Schema.String,
+  output: Schema.String.check(Schema.isMaxLength(TASK_CLI_CHECK_OUTPUT_MAX_CHARS)),
   timedOut: Schema.Boolean,
   startingCommitSha: TrimmedNonEmptyString,
   endingCommitSha: Schema.NullOr(TrimmedNonEmptyString),
-  startingStatus: Schema.String,
-  endingStatus: Schema.NullOr(Schema.String),
+  startingStatus: Schema.String.check(Schema.isMaxLength(TASK_CLI_CHECK_OUTPUT_MAX_CHARS)),
+  endingStatus: Schema.NullOr(
+    Schema.String.check(Schema.isMaxLength(TASK_CLI_CHECK_OUTPUT_MAX_CHARS)),
+  ),
 });
 export type TaskCliCheckFinalizeRequest = typeof TaskCliCheckFinalizeRequest.Type;
 
@@ -208,13 +210,13 @@ export const TaskCliCheckFinalizeSuccessEnvelope = Schema.Struct({
 export type TaskCliCheckFinalizeSuccessEnvelope = typeof TaskCliCheckFinalizeSuccessEnvelope.Type;
 
 export const TaskCliAmendmentRequest = Schema.Struct({
-  phaseId: TrimmedNonEmptyString,
-  workItemId: TrimmedNonEmptyString,
-  triggeringCheckId: Schema.NullOr(TrimmedNonEmptyString),
-  expected: TrimmedNonEmptyString,
-  found: TrimmedNonEmptyString,
-  impact: TrimmedNonEmptyString,
-  proposedPlanMarkdown: Schema.String,
+  phaseId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  workItemId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  triggeringCheckId: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+  expected: Schema.String.check(Schema.isMaxLength(TASK_CLI_SUMMARY_MAX_CHARS)),
+  found: Schema.String.check(Schema.isMaxLength(TASK_CLI_SUMMARY_MAX_CHARS)),
+  impact: Schema.String.check(Schema.isMaxLength(TASK_CLI_SUMMARY_MAX_CHARS)),
+  proposedPlanMarkdown: Schema.String.check(Schema.isMaxLength(TASK_CLI_ARTIFACT_MAX_CHARS)),
 });
 export type TaskCliAmendmentRequest = typeof TaskCliAmendmentRequest.Type;
 
@@ -352,10 +354,11 @@ export const TASK_CLI_IMPLEMENTATION_COMMAND_CONTRACT = {
       errorCodes: TaskCliErrorCode.literals,
     },
     {
-      command: "katacode task complete --summary <text>",
+      command:
+        "katacode task complete --summary <text> --artifact-file <file|-> (build stages omit --artifact-file)",
       method: "POST",
       path: TASK_CLI_COMPLETE_PATH,
-      successSchema: "TaskCliCompleteEnvelope",
+      successSchema: "TaskCliCompleteSuccessEnvelope",
       successFields: ["accepted", "stage", "occurrence", "proposalId", "providerTurnId"] as const,
       maxRequestChars: TASK_CLI_SUMMARY_MAX_CHARS,
       maxResponseChars: TASK_CLI_RESPONSE_MAX_CHARS,

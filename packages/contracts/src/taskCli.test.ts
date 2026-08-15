@@ -234,7 +234,7 @@ describe("implementation command contract table", () => {
       "katacode task check run <check-id> (begin)",
       "katacode task check run <check-id> (finalize)",
       "katacode task amendment propose --phase <id> --work-item <id> --expected <text> --found <text> --impact <text> --input <file|->",
-      "katacode task complete --summary <text>",
+      "katacode task complete --summary <text> --artifact-file <file|-> (build stages omit --artifact-file)",
     ]);
     expect(rows.map((row) => row.path)).toEqual([
       TASK_CLI_CONTEXT_PATH,
@@ -247,9 +247,128 @@ describe("implementation command contract table", () => {
     for (const row of rows) {
       expect(row.successExit).toBe(0);
       expect(row.failureExit).toBe(1);
+      expect(row.successFields.length).toBeGreaterThan(0);
       expect(row.maxResponseChars).toBeLessThanOrEqual(TASK_CLI_RESPONSE_MAX_CHARS);
+      expect(row.maxRequestChars).toBeGreaterThanOrEqual(0);
+      expect(row.successSchema.length).toBeGreaterThan(0);
       for (const code of row.errorCodes) {
         expect(Schema.decodeUnknownSync(TaskCliErrorCode)(code)).toBe(code);
+      }
+    }
+  });
+
+  it("binds every successSchema to a decodable envelope exposing its successFields", () => {
+    const schemasByName = new Map<string, Schema.Schema<any>>([
+      ["TaskCliSuccessEnvelope", TaskCliContextEnvelope],
+      ["TaskCliProgressSuccessEnvelope", TaskCliProgressEnvelope],
+      ["TaskCliCheckBeginSuccessEnvelope", TaskCliCheckBeginEnvelope],
+      ["TaskCliCheckFinalizeSuccessEnvelope", TaskCliCheckFinalizeEnvelope],
+      ["TaskCliAmendmentSuccessEnvelope", TaskCliAmendmentEnvelope],
+      ["TaskCliCompleteSuccessEnvelope", TaskCliCompleteEnvelope],
+    ]);
+    const envelopes: ReadonlyArray<{ readonly schemaName: string; readonly envelope: unknown }> = [
+      {
+        schemaName: "TaskCliSuccessEnvelope",
+        envelope: {
+          protocol: TASK_CLI_PROTOCOL,
+          ok: true,
+          operation: "context",
+          context: {
+            stage: "plan",
+            occurrence: 0,
+            brief: "b",
+            feedback: null,
+            artifacts: [],
+          },
+          commands: TASK_CLI_PLANNING_COMMANDS,
+        },
+      },
+      {
+        schemaName: "TaskCliProgressSuccessEnvelope",
+        envelope: {
+          protocol: TASK_CLI_PROTOCOL,
+          ok: true,
+          operation: "progress",
+          accepted: true,
+          phaseId: "phase:1",
+          workItemId: null,
+          status: "running",
+          taskRevision: 3,
+        },
+      },
+      {
+        schemaName: "TaskCliCheckBeginSuccessEnvelope",
+        envelope: {
+          protocol: TASK_CLI_PROTOCOL,
+          ok: true,
+          operation: "check",
+          accepted: true,
+          attemptId: "check-attempt-1",
+          checkId: "check:typecheck",
+          attemptNumber: 0,
+          command: "vp run typecheck",
+          cwd: "/tmp",
+          timeoutMs: 120_000,
+          maxOutputBytes: 1_048_576,
+          finalizerToken: "opaque-token",
+          startingCommitSha: "0123456789abcdef",
+          startingStatus: "",
+          taskRevision: 3,
+        },
+      },
+      {
+        schemaName: "TaskCliCheckFinalizeSuccessEnvelope",
+        envelope: {
+          protocol: TASK_CLI_PROTOCOL,
+          ok: true,
+          operation: "check",
+          accepted: true,
+          checkId: "check:typecheck",
+          attemptId: "check-attempt-1",
+          status: "pass",
+          taskRevision: 4,
+        },
+      },
+      {
+        schemaName: "TaskCliAmendmentSuccessEnvelope",
+        envelope: {
+          protocol: TASK_CLI_PROTOCOL,
+          ok: true,
+          operation: "amendment",
+          accepted: true,
+          amendmentId: "amendment-1",
+          taskRevision: 5,
+        },
+      },
+      {
+        schemaName: "TaskCliCompleteSuccessEnvelope",
+        envelope: {
+          protocol: TASK_CLI_PROTOCOL,
+          ok: true,
+          operation: "complete",
+          completion: {
+            accepted: true,
+            stage: "build",
+            occurrence: 1,
+            proposalId: "proposal-build-1",
+            providerTurnId: "turn-9",
+          },
+        },
+      },
+    ];
+    const byName = new Map(envelopes.map((entry) => [entry.schemaName, entry.envelope]));
+    for (const row of TASK_CLI_IMPLEMENTATION_COMMAND_CONTRACT.commands) {
+      const envelope = byName.get(row.successSchema);
+      const schema = schemasByName.get(row.successSchema);
+      expect(envelope, `successSchema '${row.successSchema}' must have a fixture`).toBeDefined();
+      expect(schema, `successSchema '${row.successSchema}' must map to a schema`).toBeDefined();
+      const decoded = Schema.decodeUnknownSync(schema! as never)(envelope);
+      const scope =
+        row.successSchema === "TaskCliCompleteSuccessEnvelope"
+          ? (decoded as { readonly completion: unknown }).completion
+          : decoded;
+      for (const field of row.successFields) {
+        expect(scope, `success schema '${row.successSchema}'`).toHaveProperty(field);
       }
     }
   });

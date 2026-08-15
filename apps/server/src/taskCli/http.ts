@@ -63,18 +63,6 @@ const TASK_CLI_IDENTITY_QUERY_KEYS = new Set([
   "providerinstanceid",
   "provider-instance-id",
   "task",
-  "checkid",
-  "check-id",
-  "attempt",
-  "attemptid",
-  "attempt-id",
-  "finalizertoken",
-  "finalizer-token",
-  "phaseid",
-  "phase-id",
-  "workitemid",
-  "work-item-id",
-  "amendment",
 ]);
 
 const TASK_CLI_IDENTITY_BODY_KEYS = new Set([
@@ -95,23 +83,6 @@ const TASK_CLI_IDENTITY_BODY_KEYS = new Set([
   "provider-instance-id",
   "provider_instance_id",
   "task",
-  "checkid",
-  "check-id",
-  "check_id",
-  "attempt",
-  "attemptid",
-  "attempt-id",
-  "attempt_id",
-  "finalizertoken",
-  "finalizer-token",
-  "finalizer_token",
-  "phaseid",
-  "phase-id",
-  "phase_id",
-  "workitemid",
-  "work-item-id",
-  "work_item_id",
-  "amendment",
 ]);
 
 const identityQueryKey = (url: string): string | undefined => {
