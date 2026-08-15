@@ -7075,6 +7075,120 @@ describe("TaskWorkspaceService guided implementation", () => {
     }),
   );
 
+  it.effect("CLI amendment propose opens the review gate with the structural Plan diff", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-amend-open-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Manual check [check:review]: Review the implementation",
+        "",
+      ].join("\n");
+      const amendedMarkdown = planMarkdown.replace("Review the implementation", "Run typecheck");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const ack = yield* runtime.runPromise(
+        service.implementationAmendmentProposeCli({
+          taskId: task.id,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          triggeringCheckId: null,
+          expected: "The Plan covers implementation.",
+          found: "The Plan needs a typecheck.",
+          impact: "Typecheck must run.",
+          proposedPlanMarkdown: amendedMarkdown,
+        }),
+      );
+      expect(ack).toMatchObject({ accepted: true, amendmentId: "amendment-1" });
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.build.amendmentGateId).toBe("amendment-1");
+      expect(after.build.amendments[0]).toMatchObject({
+        status: "requested",
+        proposedPlanMarkdown: amendedMarkdown,
+      });
+    }),
+  );
+
+  it.effect("CLI amendment propose rejects a second proposal while a gate is open", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-amend-dup-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Manual check [check:review]: Review the implementation",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(
+        service.implementationAmendmentProposeCli({
+          taskId: task.id,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          triggeringCheckId: null,
+          expected: "The Plan covers implementation.",
+          found: "The Plan needs a typecheck.",
+          impact: "Typecheck must run.",
+          proposedPlanMarkdown: planMarkdown.replace("Review the implementation", "Run typecheck"),
+        }),
+      );
+      const duplicate = yield* runtime.runPromiseExit(
+        service.implementationAmendmentProposeCli({
+          taskId: task.id,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          triggeringCheckId: null,
+          expected: "The Plan covers implementation.",
+          found: "The Plan needs lint too.",
+          impact: "Lint must run.",
+          proposedPlanMarkdown: planMarkdown.replace("Review the implementation", "Run lint"),
+        }),
+      );
+      expect(Exit.isFailure(duplicate)).toBe(true);
+      if (Exit.isFailure(duplicate)) {
+        expect((Cause.squash(duplicate.cause) as Error).message).toContain("Conflict:");
+        expect((Cause.squash(duplicate.cause) as Error).message).toContain("already open");
+      }
+    }),
+  );
+
+  it.effect("CLI amendment propose rejects an unknown work item without opening a gate", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-amend-unknown-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+        "- Manual check [check:review]: Review the implementation",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const before = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const result = yield* runtime.runPromiseExit(
+        service.implementationAmendmentProposeCli({
+          taskId: task.id,
+          phaseId: "phase:foundation",
+          workItemId: "work:missing",
+          triggeringCheckId: null,
+          expected: "The Plan covers implementation.",
+          found: "Missing item.",
+          impact: "None.",
+          proposedPlanMarkdown: planMarkdown,
+        }),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.taskRevision).toBe(before.taskRevision);
+      expect(after.build.amendmentGateId).toBeNull();
+    }),
+  );
+
   it.effect("CLI progress rejects progress while a waiting checkpoint blocks", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime(

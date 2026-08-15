@@ -6711,6 +6711,40 @@ export const make = Effect.gen(function* () {
           return yield* new TaskWorkspaceError({
             message: `Task '${input.taskId}' was not found.`,
           });
+        if (currentRun(task).currentStage !== "build") {
+          return yield* new TaskWorkspaceError({
+            message: "No active Build implementation for this Task.",
+            commandType: "task.cli.amendment",
+            taskId: task.id,
+          });
+        }
+        const occurrence = activeOccurrence(task, "build");
+        if (
+          !occurrence ||
+          (occurrence.status !== "running" && occurrence.status !== "finalizing")
+        ) {
+          return yield* new TaskWorkspaceError({
+            message: "The Build occurrence is not active.",
+            commandType: "task.cli.amendment",
+            taskId: task.id,
+          });
+        }
+        // Idempotency keys dedupe retries of the SAME proposal: retrying an
+        // identical payload replays the durable receipt, while a different
+        // payload reaches the reducer's already-open gate check.
+        const proposalPayloadDigest = createHash("sha256")
+          .update(
+            [
+              input.phaseId,
+              input.workItemId,
+              input.triggeringCheckId ?? "",
+              input.expected,
+              input.found,
+              input.impact,
+              input.proposedPlanMarkdown,
+            ].join("\n"),
+          )
+          .digest("hex");
         return yield* implementationAmendmentPropose({
           taskId: input.taskId,
           expectedTaskRevision: task.taskRevision,
@@ -6721,8 +6755,33 @@ export const make = Effect.gen(function* () {
           found: input.found,
           impact: input.impact,
           proposedPlanMarkdown: input.proposedPlanMarkdown,
-          operationKey: `implementation-amendment-cli:${input.taskId}:${input.phaseId}:${input.workItemId}:${input.triggeringCheckId ?? "none"}`,
-        });
+          operationKey: `implementation-amendment-cli:${input.taskId}:${proposalPayloadDigest}`,
+        }).pipe(
+          Effect.mapError((cause) => {
+            if (!isTaskWorkspaceError(cause)) return cause;
+            const message = cause.message;
+            const lower = message.toLowerCase();
+            if (
+              lower.includes("already open") ||
+              lower.includes("waiting checkpoint") ||
+              lower.includes("revision is stale") ||
+              lower.includes("already used with a different payload")
+            ) {
+              return new TaskWorkspaceError({
+                message: `Conflict: ${message}`,
+                commandType: "task.cli.amendment",
+                taskId: input.taskId,
+                ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+              });
+            }
+            return new TaskWorkspaceError({
+              message: cause.message,
+              commandType: "task.cli.amendment",
+              taskId: input.taskId,
+              ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+            });
+          }),
+        );
       });
 
   const requireCheckFinalizerService = Effect.gen(function* () {

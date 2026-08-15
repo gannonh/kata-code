@@ -16,6 +16,7 @@ import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 import {
   EnvironmentHttpApi,
   TASK_CLI_PLANNING_COMMANDS,
+  TaskCliAmendmentEnvelope,
   TaskCliCheckBeginEnvelope,
   TaskCliCheckFinalizeEnvelope,
   TaskCliCompleteEnvelope,
@@ -46,6 +47,9 @@ const decodeCompleteEnvelope = (stdout: string) =>
 
 const decodeProgressEnvelope = (stdout: string) =>
   Schema.decodeUnknownSync(TaskCliProgressEnvelope)(parseSingleEnvelope(stdout));
+
+const decodeAmendmentEnvelope = (stdout: string) =>
+  Schema.decodeUnknownSync(TaskCliAmendmentEnvelope)(parseSingleEnvelope(stdout));
 
 const decodeCheckBeginEnvelope = (stdout: string) =>
   Schema.decodeUnknownSync(TaskCliCheckBeginEnvelope)(parseSingleEnvelope(stdout));
@@ -461,5 +465,45 @@ describe("built Task CLI check flow", () => {
     })
       .pipe(Effect.provide(FetchHttpClient.layer))
       .pipe(Effect.scoped as never),
+  );
+
+  it.effect("proposes an amendment through the CLI and opens the review gate", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliBuildFixture();
+      const diffPath = NodePath.join(fixture.root, "plan-diff.md");
+      writeFileSync(diffPath, "# Plan\n\nUpdated check command.\n");
+      const result = yield* fixture.runCli({}, [
+        "task",
+        "amendment",
+        "propose",
+        "--phase",
+        "phase:foundation",
+        "--work-item",
+        "work:implement",
+        "--expected",
+        "The approved check passes.",
+        "--found",
+        "The check command needs to change.",
+        "--impact",
+        "The Plan must update the check command.",
+        "--input",
+        diffPath,
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(decodeAmendmentEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: true,
+        operation: "amendment",
+        accepted: true,
+        amendmentId: "amendment-1",
+      });
+      const task = yield* fixture.taskService.getTask(fixture.taskId);
+      expect(task?.build.amendmentGateId).toBe("amendment-1");
+      expect(task?.build.amendments[0]?.proposedPlanMarkdown).toBe(
+        "# Plan\n\nUpdated check command.\n",
+      );
+    }).pipe(Effect.scoped as never),
   );
 });

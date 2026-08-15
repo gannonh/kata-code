@@ -572,25 +572,26 @@ export const taskCheckCommand = Command.make("check").pipe(
 );
 
 export const taskAmendmentProposeCommand = Command.make("propose", {
-  phase: Flag.string("phase"),
-  workItem: Flag.string("work-item"),
+  phase: Flag.string("phase").pipe(Flag.optional),
+  workItem: Flag.string("work-item").pipe(Flag.optional),
   check: Flag.string("check").pipe(Flag.optional),
-  expected: Flag.string("expected"),
-  found: Flag.string("found"),
-  impact: Flag.string("impact"),
+  expected: Flag.string("expected").pipe(Flag.optional),
+  found: Flag.string("found").pipe(Flag.optional),
+  impact: Flag.string("impact").pipe(Flag.optional),
   input: Flag.string("input").pipe(
     Flag.withDescription("Path to the structural Plan diff Markdown, or - to read stdin."),
+    Flag.optional,
   ),
 }).pipe(
   Command.withDescription("Propose a Plan amendment for human review."),
   Command.withHandler((flags) => {
-    const phaseId = flags.phase.trim();
-    const workItemId = flags.workItem.trim();
+    const phaseId = Option.getOrUndefined(flags.phase)?.trim();
+    const workItemId = Option.getOrUndefined(flags.workItem)?.trim();
     const triggeringCheckId = Option.getOrUndefined(flags.check)?.trim() ?? null;
-    const expected = flags.expected.trim();
-    const found = flags.found.trim();
-    const impact = flags.impact.trim();
-    const artifactFile = flags.input.trim();
+    const expected = Option.getOrUndefined(flags.expected)?.trim();
+    const found = Option.getOrUndefined(flags.found)?.trim();
+    const impact = Option.getOrUndefined(flags.impact)?.trim();
+    const artifactFile = Option.getOrUndefined(flags.input)?.trim();
     if (!phaseId || !workItemId || !expected || !found || !impact || !artifactFile) {
       return failTaskCliInvalidRequest(
         "Amendment propose requires --phase, --work-item, --expected, --found, --impact, and --input <file|->.",
