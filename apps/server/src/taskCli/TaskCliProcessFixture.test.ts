@@ -14,6 +14,7 @@ import {
   TASK_CLI_PLANNING_COMMANDS,
   TaskCliCompleteEnvelope,
   TaskCliContextEnvelope,
+  TaskCliProgressEnvelope,
 } from "@kata-sh/code-contracts";
 import {
   ensureTaskCliBundle,
@@ -35,6 +36,9 @@ const decodeContextEnvelope = (stdout: string) =>
 
 const decodeCompleteEnvelope = (stdout: string) =>
   Schema.decodeUnknownSync(TaskCliCompleteEnvelope)(parseSingleEnvelope(stdout));
+
+const decodeProgressEnvelope = (stdout: string) =>
+  Schema.decodeUnknownSync(TaskCliProgressEnvelope)(parseSingleEnvelope(stdout));
 
 describe("built Task CLI process", () => {
   it("materializes the packaged CLI bundle before process proofs run", () => {
@@ -178,7 +182,7 @@ describe("built Task CLI process", () => {
   it.effect("rejects an unknown Task verb with one invalid_request envelope", () =>
     Effect.gen(function* () {
       const fixture = yield* makeTaskCliProcessFixture();
-      const result = yield* fixture.runCli({}, ["task", "progress"]);
+      const result = yield* fixture.runCli({}, ["task", "frobnicate"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toBe("");
@@ -186,6 +190,22 @@ describe("built Task CLI process", () => {
         protocol: "task-cli@1",
         ok: false,
         operation: "context",
+        error: { code: "invalid_request" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects a bare task progress command with one invalid_request envelope", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliProcessFixture();
+      const result = yield* fixture.runCli({}, ["task", "progress"]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeProgressEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "progress",
         error: { code: "invalid_request" },
       });
     }).pipe(Effect.scoped as never),

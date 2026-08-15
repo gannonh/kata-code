@@ -131,6 +131,26 @@ export const inspectTaskCliInvocationArgs = (
       operation: "context",
     };
   }
+  if (verbs[0] === "progress" && verbs.length < 3) {
+    return {
+      message:
+        "Specify `katacode task progress phase <id>` or `katacode task progress work-item <id>` with --status and --summary.",
+      operation: "progress",
+    };
+  }
+  if (verbs[0] === "check" && !(verbs[1] === "run" && verbs.length >= 3)) {
+    return {
+      message: "Specify `katacode task check run <check-id>`.",
+      operation: "check",
+    };
+  }
+  if (verbs[0] === "amendment" && verbs[1] !== "propose") {
+    return {
+      message:
+        "Specify `katacode task amendment propose` with --phase, --work-item, --expected, --found, --impact, and --input <file|->.",
+      operation: "amendment",
+    };
+  }
   return undefined;
 };
 
