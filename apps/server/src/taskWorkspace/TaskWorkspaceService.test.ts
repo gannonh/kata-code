@@ -6132,6 +6132,9 @@ describe("TaskWorkspaceService guided implementation", () => {
           markdown: "",
         }),
       );
+      // The CLI path relies on the completion reactor; this test drives it
+      // synchronously against the durable terminal evidence.
+      yield* runtime.runPromise(service.reconcilePendingProposals);
 
       const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(settled.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
