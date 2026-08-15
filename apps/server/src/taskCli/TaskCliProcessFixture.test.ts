@@ -333,6 +333,22 @@ describe("built Task CLI process", () => {
       });
     }).pipe(Effect.scoped as never),
   );
+
+  it.effect("rejects planning completion without an artifact file", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliProcessFixture();
+      const result = yield* fixture.runCli({}, ["task", "complete", "--summary", "Done."]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeCompleteEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "complete",
+        error: { code: "invalid_artifact" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
 });
 
 const hostHasCheckSandbox = (): boolean => {
@@ -504,6 +520,34 @@ describe("built Task CLI check flow", () => {
       expect(task?.build.amendments[0]?.proposedPlanMarkdown).toBe(
         "# Plan\n\nUpdated check command.\n",
       );
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("proposes Build completion without an artifact file and binds the worktree HEAD", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliBuildFixture();
+      const result = yield* fixture.runCli({}, [
+        "task",
+        "complete",
+        "--summary",
+        "Build complete.",
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(decodeCompleteEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: true,
+        operation: "complete",
+        completion: {
+          accepted: true,
+          stage: "build",
+        },
+      });
+      const task = yield* fixture.taskService.getTask(fixture.taskId);
+      const buildOccurrence = task?.occurrences.find((candidate) => candidate.stage === "build");
+      expect(buildOccurrence?.status).toBe("finalizing");
+      expect(buildOccurrence?.completionProposalId).toBeTruthy();
     }).pipe(Effect.scoped as never),
   );
 });

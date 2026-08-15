@@ -7075,6 +7075,274 @@ describe("TaskWorkspaceService guided implementation", () => {
     }),
   );
 
+  const completeBuildStage = (
+    service: typeof TaskWorkspaceService.Service,
+    task: TaskWorkspace,
+    summary: string,
+    providerTurnId: string,
+  ) => {
+    const buildOccurrence = task.occurrences.find((candidate) => candidate.stage === "build")!;
+    return service.proposeTaskCliCompletion({
+      environmentId: EnvironmentId.make("environment-local"),
+      threadId: buildOccurrence.threadId ?? task.bootstrap?.reservedThreadId!,
+      providerInstanceId: "instance-1",
+      providerTurnId,
+      summary,
+      markdown: "",
+    });
+  };
+
+  const completeBuildWorkItem = (service: typeof TaskWorkspaceService.Service, taskId: string) =>
+    Effect.gen(function* () {
+      yield* service.implementationProgressCli({
+        taskId,
+        target: "work-item",
+        id: "work:implement",
+        status: "running",
+        summary: "Implementing.",
+      });
+      yield* service.implementationProgressCli({
+        taskId,
+        target: "work-item",
+        id: "work:implement",
+        status: "completed",
+        summary: "Implemented.",
+      });
+    });
+
+  it.effect("CLI build complete proposes with the proposal-time Git basis", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-build-complete-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(completeBuildWorkItem(service, task.id));
+      const head = yield* Effect.tryPromise(() =>
+        git(task.workspace.repositories[0]!.worktreePath!, ["rev-parse", "HEAD"]),
+      );
+
+      const ack = yield* runtime.runPromise(
+        completeBuildStage(service, task, "Build complete.", "turn-build-1"),
+      );
+      expect(ack).toMatchObject({ accepted: true, stage: "build" });
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const buildOccurrence = after.occurrences.find((candidate) => candidate.stage === "build")!;
+      expect(buildOccurrence.status).toBe("finalizing");
+      const stored = yield* runtime.runPromise(Effect.serviceOption(TaskWorkspaceStore));
+      if (Option.isSome(stored)) {
+        const row = yield* runtime.runPromise(
+          stored.value.getProposal({
+            taskId: task.id,
+            occurrence: buildOccurrence.ordinal,
+            providerTurnId: "turn-build-1",
+          }),
+        );
+        expect(Option.getOrThrow(row).proposalCommitSha).toBe(head);
+        expect(Option.getOrThrow(row).proposalStatusSnapshot).toBe("");
+      }
+    }),
+  );
+
+  it.effect("CLI build complete retries idempotently and conflicts on a changed summary", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-build-complete-idem-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(completeBuildWorkItem(service, task.id));
+
+      const first = yield* runtime.runPromise(
+        completeBuildStage(service, task, "Build complete.", "turn-build-1"),
+      );
+      const replay = yield* runtime.runPromise(
+        completeBuildStage(service, task, "Build complete.", "turn-build-1"),
+      );
+      expect(replay.proposalId).toBe(first.proposalId);
+
+      const changed = yield* runtime.runPromiseExit(
+        completeBuildStage(service, task, "Build complete, revised.", "turn-build-1"),
+      );
+      expect(Exit.isFailure(changed)).toBe(true);
+    }),
+  );
+
+  it.effect("CLI build complete rejects commit drift at settlement", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-build-complete-drift-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(completeBuildWorkItem(service, task.id));
+      const ack = yield* runtime.runPromise(
+        completeBuildStage(service, task, "Build complete.", "turn-build-1"),
+      );
+      const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+      yield* Effect.tryPromise(() =>
+        git(worktreePath, ["commit", "--allow-empty", "-m", "drift after proposal"]),
+      );
+      const buildOccurrence = task.occurrences.find((candidate) => candidate.stage === "build")!;
+      const settled = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: buildOccurrence.ordinal,
+          providerTurnId: "turn-build-1",
+          outcome: "completed",
+        }),
+      );
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const occurrence = after.occurrences.find((candidate) => candidate.stage === "build")!;
+      expect(occurrence.status).toBe("running");
+      expect(occurrence.completionProposalId).toBeNull();
+      void ack;
+      void settled;
+    }),
+  );
+
+  it.effect("CLI build complete rejects status drift at settlement", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-build-complete-status-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(completeBuildWorkItem(service, task.id));
+      yield* runtime.runPromise(
+        completeBuildStage(service, task, "Build complete.", "turn-build-1"),
+      );
+      const worktreePath = task.workspace.repositories[0]!.worktreePath!;
+      yield* Effect.tryPromise(() =>
+        NodeFs.writeFile(NodePath.join(worktreePath, "drift.txt"), "drift"),
+      );
+      const buildOccurrence = task.occurrences.find((candidate) => candidate.stage === "build")!;
+      yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: buildOccurrence.ordinal,
+          providerTurnId: "turn-build-1",
+          outcome: "completed",
+        }),
+      );
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(after.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
+        "running",
+      );
+    }),
+  );
+
+  it.effect("CLI build complete settles cleanly and records the resulting commit", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-build-complete-clean-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(completeBuildWorkItem(service, task.id));
+      const ack = yield* runtime.runPromise(
+        completeBuildStage(service, task, "Build complete.", "turn-build-1"),
+      );
+      const buildOccurrence = task.occurrences.find((candidate) => candidate.stage === "build")!;
+      const settled = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: buildOccurrence.ordinal,
+          providerTurnId: "turn-build-1",
+          outcome: "completed",
+        }),
+      );
+      expect(settled.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
+        "completed",
+      );
+      expect(settled.build.resultingCommitSha).toBe(
+        yield* Effect.tryPromise(() =>
+          git(task.workspace.repositories[0]!.worktreePath!, ["rev-parse", "HEAD"]),
+        ),
+      );
+      // Exactly-once: a duplicate terminal event leaves the settled task unchanged.
+      const replay = yield* runtime.runPromise(
+        service.settleProposal({
+          taskId: task.id,
+          occurrence: buildOccurrence.ordinal,
+          providerTurnId: "turn-build-1",
+          outcome: "completed",
+        }),
+      );
+      expect(replay.taskRevision).toBe(settled.taskRevision);
+      expect(ack.accepted).toBe(true);
+    }),
+  );
+
+  it.effect("CLI build complete rejects aborted turns and settles once after restart", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-build-complete-abort-",
+      );
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      yield* runtime.runPromise(completeBuildWorkItem(service, task.id));
+      yield* runtime.runPromise(
+        completeBuildStage(service, task, "Build complete.", "turn-build-abort"),
+      );
+      const buildOccurrence = task.occurrences.find((candidate) => candidate.stage === "build")!;
+      const threadId = buildOccurrence.threadId!;
+      // Restart reconciliation with no terminal activity leaves the proposal
+      // proposed.
+      yield* runtime.runPromise(service.reconcilePendingProposals);
+      const stillProposed = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(
+        stillProposed.occurrences.find((candidate) => candidate.stage === "build")?.status,
+      ).toBe("finalizing");
+      // The terminal arrives later as aborted: the proposal rejects once.
+      yield* runtime.runPromise(
+        service.settleProviderTurn({
+          threadId,
+          providerTurnId: "turn-build-abort",
+          outcome: "aborted",
+        }),
+      );
+      const rejected = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(rejected.occurrences.find((candidate) => candidate.stage === "build")?.status).toBe(
+        "running",
+      );
+    }),
+  );
+
   it.effect("CLI amendment propose opens the review gate with the structural Plan diff", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-amend-open-");
