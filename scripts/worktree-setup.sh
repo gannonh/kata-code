@@ -19,13 +19,8 @@ pnpm install
 vp run --filter @kata-sh/code-desktop ensure:electron
 
 if [[ -f "$env_source" ]]; then
-  dest="$worktree_root/.env"
-  # Drop a leftover symlink so we write a regular file, not through to the store.
-  if [[ -L "$dest" ]]; then
-    rm "$dest"
-  fi
-  cp "$env_source" "$dest"
-  echo "copied .env from $env_source"
+  ln -sfn "$env_source" "$worktree_root/.env"
+  echo "linked .env ← $env_source"
 else
-  echo "warn: central env not found at $env_source — .env not copied" >&2
+  echo "warn: central env not found at $env_source — .env not linked" >&2
 fi
