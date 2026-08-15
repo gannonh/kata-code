@@ -343,20 +343,19 @@ export async function createIsolatedRun(input: {
   // Claude OAuth staging does not strip the OpenAI key: Codex fallback auth
   // must keep working for mixed-provider suites in the same isolated run.
   // The keychain credential item is the real OAuth material; ambient
-  // Anthropic keys fall back only when it could not be staged.
-  const inheritedEnvWithClaudeFallback = claudeKeychainStaged
-    ? inheritedEnv
-    : {
+  // Anthropic keys are forwarded for explicit api-key mode or as the
+  // oauth-or-api-key fallback when the keychain item could not be staged.
+  const claudeAuthMode = readClaudeE2eAuthMode();
+  const forwardAnthropicKeys =
+    claudeAuthMode === "api-key" ||
+    (claudeAuthMode === "oauth-or-api-key" && !claudeKeychainStaged);
+  const inheritedEnvWithClaudeFallback = forwardAnthropicKeys
+    ? {
         ...inheritedEnv,
-        ...(readClaudeE2eAuthMode() === "oauth-or-api-key"
-          ? {
-              ...(_ambientAnthropicApiKey ? { ANTHROPIC_API_KEY: _ambientAnthropicApiKey } : {}),
-              ...(_ambientAnthropicAuthToken
-                ? { ANTHROPIC_AUTH_TOKEN: _ambientAnthropicAuthToken }
-                : {}),
-            }
-          : {}),
-      };
+        ...(_ambientAnthropicApiKey ? { ANTHROPIC_API_KEY: _ambientAnthropicApiKey } : {}),
+        ...(_ambientAnthropicAuthToken ? { ANTHROPIC_AUTH_TOKEN: _ambientAnthropicAuthToken } : {}),
+      }
+    : inheritedEnv;
 
   const baseEnv = {
     ...inheritedEnvWithClaudeFallback,
