@@ -8287,7 +8287,7 @@ describe("Task CLI planning completion", () => {
             task,
             "Clarify complete.",
             "# Clarify\n\nThe scope is clear.\n",
-            "pending-task-cli-claude-research",
+            "pending-task-cli-claude-questions",
           ),
         );
         const proposed = (yield* runtime.runPromise(service.getTask(task.id)))!;
@@ -8375,6 +8375,82 @@ describe("Task CLI planning completion", () => {
           outcome: "completed",
         }),
       );
+      const stillProposed = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(stillProposed.occurrences[0]?.status).toBe("finalizing");
+      expect(stillProposed.workflowRuns.at(-1)?.currentStage).toBe("questions");
+    }),
+  );
+
+  it.effect("does not alias a native-keyed proposal to a different native turn id", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-native-keyed-no-alias-",
+      );
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const threadId = task.bootstrap?.reservedThreadId!;
+      yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "Clarify complete.",
+          "# Clarify\n\nThe scope is clear.\n",
+          "native-bound-claude-turn",
+        ),
+      );
+      yield* runtime.runPromise(
+        service.settleProviderTurn({
+          threadId,
+          providerTurnId: "native-unrelated-later-turn",
+          outcome: "completed",
+        }),
+      );
+      const stillProposed = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(stillProposed.occurrences[0]?.status).toBe("finalizing");
+      expect(stillProposed.workflowRuns.at(-1)?.currentStage).toBe("questions");
+    }),
+  );
+
+  it.effect("does not reconcile a Task CLI lease proposal from an older terminal", () =>
+    Effect.gen(function* () {
+      const observation: BootstrapObservation = { mode: "running", durableEvents: [] };
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-lease-stale-terminal-",
+        observation,
+      );
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const threadId = task.bootstrap?.reservedThreadId!;
+      yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "Clarify complete.",
+          "# Clarify\n\nThe scope is clear.\n",
+          "pending-task-cli-claude-clarify",
+        ),
+      );
+      observation.durableEvents!.push({
+        type: "thread.activity-appended",
+        payload: {
+          threadId,
+          activity: {
+            kind: "provider-turn-terminal",
+            turnId: "native-claude-turn-stale",
+            payload: { outcome: "completed" },
+            createdAt: "1969-12-31T00:00:00.000Z",
+          },
+        },
+      } as never);
+      yield* runtime.runPromise(service.reconcilePendingProposals);
       const stillProposed = (yield* runtime.runPromise(service.getTask(task.id)))!;
       expect(stillProposed.occurrences[0]?.status).toBe("finalizing");
       expect(stillProposed.workflowRuns.at(-1)?.currentStage).toBe("questions");

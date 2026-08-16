@@ -1744,11 +1744,17 @@ function isInternalImplementationCommand(command: TaskWorkspaceCommand): boolean
   return (command as InternallyDispatchedCommand)[INTERNAL_IMPLEMENTATION_COMMAND] === true;
 }
 
+const TASK_CLI_LEASE_TURN_PREFIX = "pending-task-cli-";
+
+function isTaskCliLeaseTurnId(providerTurnId: string): boolean {
+  return providerTurnId.startsWith(TASK_CLI_LEASE_TURN_PREFIX);
+}
+
 /**
  * Match a pending completion proposal to a provider terminal. Exact turn-id
- * equality is preferred. Claude (and a pre-bind Task CLI lease) can publish
- * the terminal under a different id than the proposal, so a unique pending
- * proposal on the same thread is accepted as the same turn.
+ * equality is preferred. A unique pending-task-cli lease on the same thread
+ * may also match a native terminal (Claude / pre-bind complete). Native-keyed
+ * proposals never alias, so a later terminal cannot settle the next stage.
  */
 function findPendingProposalForTerminal<
   T extends { readonly threadId: string; readonly providerTurnId: string },
@@ -1756,7 +1762,9 @@ function findPendingProposalForTerminal<
   const onThread = pendingProposals.filter((candidate) => candidate.threadId === threadId);
   const exact = onThread.find((candidate) => candidate.providerTurnId === providerTurnId);
   if (exact) return exact;
-  return onThread.length === 1 ? onThread[0] : undefined;
+  if (onThread.length !== 1) return undefined;
+  const only = onThread[0];
+  return only !== undefined && isTaskCliLeaseTurnId(only.providerTurnId) ? only : undefined;
 }
 
 let activeTaskWorkspaceService: TaskWorkspaceServiceShape | undefined;
@@ -1919,10 +1927,9 @@ export const make = Effect.gen(function* () {
 
   const settleProviderTurn: TaskWorkspaceServiceShape["settleProviderTurn"] = (input) =>
     Effect.gen(function* () {
-      // Prefer the proposal bound to this exact provider turn id. Claude Task
-      // CLI completions can land under a pending-task-cli lease id while the
-      // terminal publishes the native turn id, so a unique pending proposal on
-      // the same thread is treated as the same turn.
+      // Prefer the proposal bound to this exact provider turn id. A unique
+      // pending-task-cli lease on the same thread may also match a native
+      // terminal; native-keyed proposals never alias.
       const pendingProposals = yield* store.readPendingProposals().pipe(
         Effect.mapError(
           (cause) =>
@@ -8329,7 +8336,9 @@ export const make = Effect.gen(function* () {
         const uniqueOnThread =
           pending.filter((candidate) => candidate.threadId === proposal.threadId).length === 1;
         const aliasedTerminal =
-          exactTerminal === undefined && uniqueOnThread
+          exactTerminal === undefined &&
+          uniqueOnThread &&
+          isTaskCliLeaseTurnId(proposal.providerTurnId)
             ? terminalsOnThread.find((event) => {
                 if (event.type !== "thread.activity-appended") return false;
                 const terminalAt = event.payload.activity.createdAt;
