@@ -100,7 +100,9 @@ test.describe(`Task workspaces provider parity ${E2E_TAGS.taskWorkspaces} ${E2E_
       await appWindow.getByTestId("task-brief-input").fill(GUIDED_PARITY_BRIEF);
       await appWindow.getByTestId("task-base-ref-input").fill("main");
       await appWindow.getByTestId("task-worktree-option-later").click();
-      await appWindow.getByTestId("task-permissions-option-auto-accept-edits").click();
+      // Provider parity is non-interactive; Build must be able to run the
+      // Task CLI context/check commands without stopping for approval.
+      await appWindow.getByTestId("task-permissions-option-full-access").click();
       await selectTaskProvider(
         appWindow,
         candidate.provider,
@@ -116,11 +118,12 @@ test.describe(`Task workspaces provider parity ${E2E_TAGS.taskWorkspaces} ${E2E_
       });
       await expectNoTaskThreadsInChatSidebar(appWindow);
 
-      await answerGuidedClarifyQuestions(appWindow);
-      // Claude's OAuth-backed agent turns are far slower than Codex's
-      // (clarify ~4 min, research ~10 min observed); budget each stage
-      // generously instead of the Codex-tuned default.
-      const stageDeadlineMs = candidate.provider === "claude" ? 15 * 60_000 : 180_000;
+      await answerGuidedClarifyQuestions(appWindow, {
+        deadlineMs: candidate.provider === "claude" ? 5 * 60_000 : undefined,
+      });
+      // Keep provider parity fail-fast: a stalled provider should expose its
+      // error instead of holding the acceptance run for the suite timeout.
+      const stageDeadlineMs = candidate.provider === "claude" ? 5 * 60_000 : 180_000;
       await expectActiveStage(appWindow, "research", stageDeadlineMs);
       await expectActiveStage(appWindow, "design", stageDeadlineMs);
       await expectActiveStage(appWindow, "plan", stageDeadlineMs);
@@ -140,8 +143,14 @@ test.describe(`Task workspaces provider parity ${E2E_TAGS.taskWorkspaces} ${E2E_
       // and the operator continues it — exactly like the human desktop flow.
       const resultingCommit = appWindow.getByTestId("guided-resulting-commit");
       const checkpointContinue = appWindow.locator('[data-testid^="guided-checkpoint-continue-"]');
-      const commitDeadline = Date.now() + 15 * 60_000;
+      const taskError = appWindow.getByTestId("guided-task-error");
+      const commitDeadline = Date.now() + 5 * 60_000;
       while (Date.now() < commitDeadline) {
+        if (await taskError.isVisible().catch(() => false)) {
+          throw new Error(
+            `Guided task failed during Implement: ${(await taskError.innerText()).trim()}`,
+          );
+        }
         if (await resultingCommit.isVisible().catch(() => false)) break;
         // Checkpoint rows keep rendering their Continue buttons after
         // continuation (disabled), so skip to the first enabled one.

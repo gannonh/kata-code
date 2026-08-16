@@ -11,6 +11,8 @@ describe("trusted planning instructions", () => {
     "directs %s to begin with context and finish with complete",
     (stage) => {
       const instructions = trustedInstructionsForStage(stage);
+      expect(instructions).toContain("This is a planning-only stage.");
+      expect(instructions).toContain("Do not implement the brief");
       expect(instructions).toContain("katacode task context");
       expect(instructions).toContain(
         "katacode task complete --summary <text> --artifact-file <file|->",

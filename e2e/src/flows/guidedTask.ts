@@ -136,11 +136,18 @@ export async function expectActiveStage(
   deadlineMs: number = Math.max(E2E_TIMEOUTS.agentReplyMs, 180_000),
 ): Promise<void> {
   const stageItem = page.getByTestId(`guided-stage-${stage}`);
+  const planGate = page.getByTestId("guided-plan-gate");
   const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
   const deadline = Date.now() + deadlineMs;
 
   while (Date.now() < deadline) {
-    if ((await stageItem.getAttribute("data-active")) === "true") {
+    if (stage === "plan") {
+      // Plan's active attribute is transient: completion replaces it with the
+      // approval gate. Wait for the observable terminal state directly.
+      if (await planGate.isVisible().catch(() => false)) {
+        return;
+      }
+    } else if ((await stageItem.getAttribute("data-active")) === "true") {
       return;
     }
     if (await approveOnce.isVisible().catch(() => false)) {
@@ -152,23 +159,34 @@ export async function expectActiveStage(
     await page.waitForTimeout(500);
   }
 
+  if (stage === "plan") {
+    await expect(planGate).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
+    return;
+  }
   await expect(stageItem).toHaveAttribute("data-active", "true", {
     timeout: E2E_TIMEOUTS.assertionMs,
   });
 }
 
-export async function answerGuidedClarifyQuestions(page: Page): Promise<void> {
+export async function answerGuidedClarifyQuestions(
+  page: Page,
+  options?: { readonly deadlineMs?: number },
+): Promise<void> {
   const panel = page.getByTestId("pending-user-input-panel");
   const researchStage = page.getByTestId("guided-stage-research");
   const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
   const assistantMessages = page.locator('[data-message-role="assistant"] .chat-markdown');
   const clarificationReply =
     "Use a small web onboarding flow with three ordered steps. Persist progress across refreshes and sessions, and store the readable Plan as repository Markdown.";
-  const deadline = Date.now() + E2E_TIMEOUTS.guidedAgentTestMs;
+  const taskError = page.getByTestId("guided-task-error");
+  const deadline = Date.now() + (options?.deadlineMs ?? E2E_TIMEOUTS.guidedAgentTestMs);
   let lastConversationalQuestion = "";
   let lastAssistantText = "";
 
   while (Date.now() < deadline) {
+    if (await taskError.isVisible().catch(() => false)) {
+      throw new Error(`Guided task failed during Clarify: ${(await taskError.innerText()).trim()}`);
+    }
     if ((await researchStage.getAttribute("data-active")) === "true") {
       return;
     }
