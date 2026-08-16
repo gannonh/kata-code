@@ -1751,10 +1751,11 @@ function isTaskCliLeaseTurnId(providerTurnId: string): boolean {
 }
 
 /**
- * Match a pending completion proposal to a provider terminal. Exact turn-id
- * equality is preferred. A unique pending-task-cli lease on the same thread
- * may also match a native terminal (Claude / pre-bind complete). Native-keyed
- * proposals never alias, so a later terminal cannot settle the next stage.
+ * Match a pending completion proposal to a live provider terminal. Exact
+ * turn-id equality is preferred. A unique pending-task-cli lease on the same
+ * thread may also match a native terminal (Claude / pre-bind complete).
+ * Durable reconciliation applies the same thread-local uniqueness rule to a
+ * later terminal activity after the proposal is persisted.
  */
 function findPendingProposalForTerminal<
   T extends { readonly threadId: string; readonly providerTurnId: string },
@@ -8335,10 +8336,12 @@ export const make = Effect.gen(function* () {
         );
         const uniqueOnThread =
           pending.filter((candidate) => candidate.threadId === proposal.threadId).length === 1;
+        // ProviderService.bind may replace the pending lease id with the
+        // native id before the CLI proposal is written. A later durable
+        // terminal on the same thread is the safe recovery signal; live
+        // native-keyed proposals remain exact-match-only.
         const aliasedTerminal =
-          exactTerminal === undefined &&
-          uniqueOnThread &&
-          isTaskCliLeaseTurnId(proposal.providerTurnId)
+          exactTerminal === undefined && uniqueOnThread
             ? terminalsOnThread.find((event) => {
                 if (event.type !== "thread.activity-appended") return false;
                 const terminalAt = event.payload.activity.createdAt;
