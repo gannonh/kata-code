@@ -584,7 +584,9 @@ const buildBootstrapEntry = (task: TaskWorkspace) => {
  * `makeTaskCliProcessFixture`. Used to prove `katacode task check run` end to
  * end against a real task authority and a real git worktree.
  */
-export const makeTaskCliBuildFixture = Effect.fn("makeTaskCliBuildFixture")(function* () {
+export const makeTaskCliBuildFixture = Effect.fn("makeTaskCliBuildFixture")(function* (options?: {
+  readonly completionReady?: boolean;
+}) {
   yield* Effect.sync(ensureTaskCliBundle);
   const root = yield* Effect.tryPromise(() =>
     NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-task-cli-build-")),
@@ -730,10 +732,14 @@ export const makeTaskCliBuildFixture = Effect.fn("makeTaskCliBuildFixture")(func
     "",
     "### Work item [work:implement] Implement approved Plan",
     "",
-    "- Automated check [check:pass]: Pass | printf ok",
-    "",
-    '- Automated check [check:fail]: Fail | node -e "process.exit(3)"',
-    "",
+    ...(options?.completionReady
+      ? []
+      : [
+          "- Automated check [check:pass]: Pass | printf ok",
+          "",
+          '- Automated check [check:fail]: Fail | node -e "process.exit(3)"',
+          "",
+        ]),
   ].join("\n");
   yield* taskService.proposeStageCompletion({
     taskId: task.id,
@@ -807,6 +813,15 @@ export const makeTaskCliBuildFixture = Effect.fn("makeTaskCliBuildFixture")(func
     status: "running",
     summary: "Implementing.",
   });
+  if (options?.completionReady) {
+    yield* taskService.implementationProgressCli({
+      taskId,
+      target: "work-item",
+      id: "work:implement",
+      status: "completed",
+      summary: "Implemented.",
+    });
+  }
 
   const threadId = ThreadId.make(
     provisioned.occurrences.find((o) => o.stage === "build")?.threadId ?? "missing-build-thread",

@@ -529,7 +529,7 @@ describe("built Task CLI check flow", () => {
 
   it.effect("proposes Build completion without an artifact file and binds the worktree HEAD", () =>
     Effect.gen(function* () {
-      const fixture = yield* makeTaskCliBuildFixture();
+      const fixture = yield* makeTaskCliBuildFixture({ completionReady: true });
       const result = yield* fixture.runCli({}, [
         "task",
         "complete",
