@@ -7072,6 +7072,33 @@ describe("TaskWorkspaceService guided implementation", () => {
       });
     });
 
+  it.effect("CLI build complete rejects incomplete work before persisting a proposal", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-build-incomplete-");
+      const planMarkdown = [
+        "## Phase [phase:foundation] Foundation",
+        "Checkpoint: never",
+        "",
+        "### Work item [work:implement] Implement approved Plan",
+        "",
+      ].join("\n");
+      const { service, task } = yield* driveToBuildStage(runtime, baseDir, repoRoot, planMarkdown);
+      const result = yield* runtime.runPromiseExit(
+        completeBuildStage(service, task, "Build complete.", "turn-build-incomplete"),
+      );
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) {
+        expect((Cause.squash(result.cause) as Error).message).toContain(
+          "Build has incomplete phases or work items",
+        );
+      }
+      const after = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      const buildOccurrence = after.occurrences.find((candidate) => candidate.stage === "build")!;
+      expect(buildOccurrence.status).toBe("running");
+      expect(buildOccurrence.completionProposalId).toBeNull();
+    }),
+  );
+
   it.effect("CLI build complete proposes with the proposal-time Git basis", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-build-complete-");

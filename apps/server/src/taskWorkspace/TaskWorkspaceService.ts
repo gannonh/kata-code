@@ -2219,6 +2219,10 @@ export const make = Effect.gen(function* () {
             taskId: resolved.taskId,
           });
         }
+        // Reject an incomplete Build before persisting a proposal. A proposal
+        // that cannot satisfy the completion invariant would otherwise remain
+        // pending forever while terminal reconciliation retries it.
+        yield* validateBuildCompletion(buildTask);
         const buildOccurrence = activeOccurrence(buildTask, "build");
         if (
           !buildOccurrence ||
