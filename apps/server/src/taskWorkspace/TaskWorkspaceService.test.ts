@@ -8210,6 +8210,38 @@ describe("Task CLI planning completion", () => {
       markdown,
     });
 
+  const persistBoundTaskCliLease = (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly occurrence: number;
+    readonly stage: TaskWorkspaceStage;
+    readonly threadId: ThreadId;
+    readonly leaseTurnId: string;
+    readonly boundTurnId: string;
+  }) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO task_invocation_lease_owner (owner_id, owner_generation, claimed_at)
+        VALUES (1, 'task-workspace-test-owner', '2026-07-28T16:00:00.000Z')
+        ON CONFLICT(owner_id) DO UPDATE SET
+          owner_generation = excluded.owner_generation,
+          claimed_at = excluded.claimed_at
+      `;
+      yield* sql`
+        INSERT INTO task_invocation_leases (
+          token_hash, environment_id, task_id, occurrence, stage,
+          thread_id, provider_instance_id, provider_turn_id, bound_turn_id,
+          owner_generation, status, issued_at, expires_at, revoked_at, revocation_reason
+        )
+        VALUES (
+          ${`test-token-${input.leaseTurnId}`}, 'environment-local', ${input.taskId},
+          ${input.occurrence}, ${input.stage}, ${input.threadId}, 'instance-1',
+          ${input.leaseTurnId}, ${input.boundTurnId}, 'task-workspace-test-owner', 'active',
+          '2026-07-28T16:00:00.000Z', NULL, NULL, NULL
+        )
+      `;
+    });
+
   it.effect("loads selected context, proposes one completion, and rejects a changed replay", () =>
     Effect.gen(function* () {
       const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-complete-");
@@ -8319,6 +8351,16 @@ describe("Task CLI planning completion", () => {
         );
         const proposed = (yield* runtime.runPromise(service.getTask(task.id)))!;
         expect(proposed.occurrences[0]?.status).toBe("finalizing");
+        yield* runtime.runPromise(
+          persistBoundTaskCliLease({
+            taskId: task.id,
+            occurrence: 0,
+            stage: "questions",
+            threadId,
+            leaseTurnId: "pending-task-cli-claude-questions",
+            boundTurnId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          }),
+        );
 
         yield* runtime.runPromise(
           service.settleProviderTurn({
@@ -8356,6 +8398,16 @@ describe("Task CLI planning completion", () => {
           "pending-task-cli-claude-clarify",
         ),
       );
+      yield* runtime.runPromise(
+        persistBoundTaskCliLease({
+          taskId: task.id,
+          occurrence: 0,
+          stage: "questions",
+          threadId,
+          leaseTurnId: "pending-task-cli-claude-clarify",
+          boundTurnId: "native-claude-turn-clarify",
+        }),
+      );
       observation.durableEvents!.push({
         type: "thread.activity-appended",
         payload: {
@@ -8375,13 +8427,54 @@ describe("Task CLI planning completion", () => {
     }),
   );
 
-  it.effect("reconciles a native-keyed proposal from a later native terminal activity", () =>
+  it.effect(
+    "does not reconcile a native-keyed proposal from a later native terminal activity",
+    () =>
+      Effect.gen(function* () {
+        const observation: BootstrapObservation = { mode: "running", durableEvents: [] };
+        const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+          "kata-task-cli-native-reconcile-",
+          observation,
+        );
+        const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+        const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+        yield* runtime.runPromise(
+          service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+        );
+        const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+        const threadId = task.bootstrap?.reservedThreadId!;
+        yield* runtime.runPromise(
+          completePlanningStage(
+            service,
+            task,
+            "Clarify complete.",
+            "# Clarify\n\nThe scope is clear.\n",
+            "native-bound-claude-turn",
+          ),
+        );
+        observation.durableEvents!.push({
+          type: "thread.activity-appended",
+          payload: {
+            threadId,
+            activity: {
+              kind: "provider-turn-terminal",
+              turnId: "native-claude-turn-later",
+              payload: { outcome: "completed" },
+              createdAt: "2099-01-01T00:00:00.000Z",
+            },
+          },
+        } as never);
+        yield* runtime.runPromise(service.reconcilePendingProposals);
+        const stillProposed = (yield* runtime.runPromise(service.getTask(task.id)))!;
+        expect(stillProposed.occurrences[0]?.status).toBe("finalizing");
+        expect(stillProposed.occurrences[0]?.completionProposalId).not.toBeNull();
+        expect(stillProposed.workflowRuns.at(-1)?.currentStage).toBe("questions");
+      }),
+  );
+
+  it.effect("does not settle a lease proposal from a delayed replaced-session terminal", () =>
     Effect.gen(function* () {
-      const observation: BootstrapObservation = { mode: "running", durableEvents: [] };
-      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
-        "kata-task-cli-native-reconcile-",
-        observation,
-      );
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime("kata-task-cli-lease-stale-live-");
       const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
       const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
       yield* runtime.runPromise(
@@ -8395,26 +8488,29 @@ describe("Task CLI planning completion", () => {
           task,
           "Clarify complete.",
           "# Clarify\n\nThe scope is clear.\n",
-          "native-bound-claude-turn",
+          "pending-task-cli-claude-stale-live",
         ),
       );
-      observation.durableEvents!.push({
-        type: "thread.activity-appended",
-        payload: {
+      yield* runtime.runPromise(
+        persistBoundTaskCliLease({
+          taskId: task.id,
+          occurrence: 0,
+          stage: "questions",
           threadId,
-          activity: {
-            kind: "provider-turn-terminal",
-            turnId: "native-claude-turn-later",
-            payload: { outcome: "completed" },
-            createdAt: "2099-01-01T00:00:00.000Z",
-          },
-        },
-      } as never);
-      yield* runtime.runPromise(service.reconcilePendingProposals);
-      const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
-      expect(settled.occurrences[0]?.status).toBe("completed");
-      expect(settled.occurrences[0]?.completionProposalId).toBeNull();
-      expect(settled.workflowRuns.at(-1)?.currentStage).toBe("research");
+          leaseTurnId: "pending-task-cli-claude-stale-live",
+          boundTurnId: "native-current-session-turn",
+        }),
+      );
+      yield* runtime.runPromise(
+        service.settleProviderTurn({
+          threadId,
+          providerTurnId: "native-replaced-session-turn",
+          outcome: "completed",
+        }),
+      );
+      const stillProposed = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(stillProposed.occurrences[0]?.status).toBe("finalizing");
+      expect(stillProposed.workflowRuns.at(-1)?.currentStage).toBe("questions");
     }),
   );
 
@@ -8485,7 +8581,7 @@ describe("Task CLI planning completion", () => {
     }),
   );
 
-  it.effect("does not reconcile a Task CLI lease proposal from an older terminal", () =>
+  it.effect("does not reconcile a Task CLI lease proposal from a replaced session", () =>
     Effect.gen(function* () {
       const observation: BootstrapObservation = { mode: "running", durableEvents: [] };
       const { runtime, repoRoot, baseDir } = yield* setupRuntime(
@@ -8508,6 +8604,16 @@ describe("Task CLI planning completion", () => {
           "pending-task-cli-claude-clarify",
         ),
       );
+      yield* runtime.runPromise(
+        persistBoundTaskCliLease({
+          taskId: task.id,
+          occurrence: 0,
+          stage: "questions",
+          threadId,
+          leaseTurnId: "pending-task-cli-claude-clarify",
+          boundTurnId: "native-claude-turn-current",
+        }),
+      );
       observation.durableEvents!.push({
         type: "thread.activity-appended",
         payload: {
@@ -8516,7 +8622,7 @@ describe("Task CLI planning completion", () => {
             kind: "provider-turn-terminal",
             turnId: "native-claude-turn-stale",
             payload: { outcome: "completed" },
-            createdAt: "1969-12-31T00:00:00.000Z",
+            createdAt: "2099-01-01T00:00:00.000Z",
           },
         },
       } as never);

@@ -76,6 +76,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
@@ -1746,26 +1747,54 @@ function isInternalImplementationCommand(command: TaskWorkspaceCommand): boolean
 
 const TASK_CLI_LEASE_TURN_PREFIX = "pending-task-cli-";
 
+type ActiveBoundLease = {
+  readonly threadId: string;
+  readonly leaseTurnId: string;
+  readonly boundTurnId: string;
+};
+
 function isTaskCliLeaseTurnId(providerTurnId: string): boolean {
   return providerTurnId.startsWith(TASK_CLI_LEASE_TURN_PREFIX);
+}
+
+function isActiveBoundLease(
+  leases: readonly ActiveBoundLease[],
+  threadId: string,
+  leaseTurnId: string,
+  boundTurnId: string,
+): boolean {
+  return leases.some(
+    (lease) =>
+      lease.threadId === threadId &&
+      lease.leaseTurnId === leaseTurnId &&
+      lease.boundTurnId === boundTurnId,
+  );
 }
 
 /**
  * Match a pending completion proposal to a live provider terminal. Exact
  * turn-id equality is preferred. A unique pending-task-cli lease on the same
- * thread may also match a native terminal (Claude / pre-bind complete).
- * Durable reconciliation applies the same thread-local uniqueness rule to a
- * later terminal activity after the proposal is persisted.
+ * thread may also match a native terminal when its active lease is bound to
+ * that native turn. Durable reconciliation applies the same binding rule.
  */
 function findPendingProposalForTerminal<
   T extends { readonly threadId: string; readonly providerTurnId: string },
->(pendingProposals: readonly T[], threadId: string, providerTurnId: string): T | undefined {
+>(
+  pendingProposals: readonly T[],
+  threadId: string,
+  providerTurnId: string,
+  activeBoundLeases: readonly ActiveBoundLease[],
+): T | undefined {
   const onThread = pendingProposals.filter((candidate) => candidate.threadId === threadId);
   const exact = onThread.find((candidate) => candidate.providerTurnId === providerTurnId);
   if (exact) return exact;
   if (onThread.length !== 1) return undefined;
   const only = onThread[0];
-  return only !== undefined && isTaskCliLeaseTurnId(only.providerTurnId) ? only : undefined;
+  return only !== undefined &&
+    isTaskCliLeaseTurnId(only.providerTurnId) &&
+    isActiveBoundLease(activeBoundLeases, threadId, only.providerTurnId, providerTurnId)
+    ? only
+    : undefined;
 }
 
 let activeTaskWorkspaceService: TaskWorkspaceServiceShape | undefined;
@@ -1834,6 +1863,7 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const gitWorkflow = yield* GitWorkflowService;
   const crypto = yield* Crypto.Crypto;
+  const sql = yield* SqlClient.SqlClient;
   const store = yield* TaskWorkspaceStore;
   const sourceResolver = yield* TaskWorkspaceSourceResolver;
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -1865,6 +1895,33 @@ export const make = Effect.gen(function* () {
     ),
   );
   const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
+  // ProviderService revokes a lease while publishing its terminal event. A
+  // terminally revoked binding remains eligible for the matching proposal;
+  // superseded and prior-owner leases do not.
+  const readActiveBoundLeases = sql<ActiveBoundLease>`
+    SELECT
+      lease.thread_id AS "threadId",
+      lease.provider_turn_id AS "leaseTurnId",
+      lease.bound_turn_id AS "boundTurnId"
+    FROM task_invocation_leases AS lease
+    INNER JOIN task_invocation_lease_owner AS owner
+      ON owner.owner_id = 1
+     AND owner.owner_generation = lease.owner_generation
+    WHERE (
+        lease.status = 'active'
+        OR (lease.status = 'revoked' AND lease.revocation_reason = 'terminal')
+      )
+      AND lease.bound_turn_id IS NOT NULL
+  `.pipe(
+    Effect.mapError(
+      (cause) =>
+        new TaskWorkspaceError({
+          message: "Failed to read active Task CLI lease bindings.",
+          commandType: "task.internal",
+          cause,
+        }),
+    ),
+  );
 
   // One-time transactional NDJSON import. The legacy file is retained read-only
   // after a successful import; the store's marker row makes the import idempotent.
@@ -1930,7 +1987,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       // Prefer the proposal bound to this exact provider turn id. A unique
       // pending-task-cli lease on the same thread may also match a native
-      // terminal; native-keyed proposals never alias.
+      // terminal only when its active lease is bound to that native turn.
       const pendingProposals = yield* store.readPendingProposals().pipe(
         Effect.mapError(
           (cause) =>
@@ -1941,10 +1998,12 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
+      const activeBoundLeases = yield* readActiveBoundLeases;
       const proposal = findPendingProposalForTerminal(
         pendingProposals,
         input.threadId,
         input.providerTurnId,
+        activeBoundLeases,
       );
       if (!proposal) {
         yield* Effect.logWarning("task workspace completion terminal had no pending proposal", {
@@ -8326,6 +8385,7 @@ export const make = Effect.gen(function* () {
         ),
         Effect.map((chunk) => Array.from(chunk)),
       );
+      const activeBoundLeases = yield* readActiveBoundLeases;
       for (const proposal of pending) {
         const terminalsOnThread = events.filter(
           (event) =>
@@ -8340,16 +8400,28 @@ export const make = Effect.gen(function* () {
         );
         const uniqueOnThread =
           pending.filter((candidate) => candidate.threadId === proposal.threadId).length === 1;
-        // ProviderService.bind may replace the pending lease id with the
-        // native id before the CLI proposal is written. A later durable
-        // terminal on the same thread is the safe recovery signal; live
-        // native-keyed proposals remain exact-match-only.
+        // ProviderService.bind keeps the lease id stable and records the
+        // native id separately. A later durable terminal can recover a
+        // proposal only when that active lease is bound to the terminal.
         const aliasedTerminal =
-          exactTerminal === undefined && uniqueOnThread
+          exactTerminal === undefined &&
+          uniqueOnThread &&
+          isTaskCliLeaseTurnId(proposal.providerTurnId)
             ? terminalsOnThread.find((event) => {
                 if (event.type !== "thread.activity-appended") return false;
+                const terminalTurnId = event.payload.activity.turnId;
                 const terminalAt = event.payload.activity.createdAt;
-                return typeof terminalAt === "string" && terminalAt >= proposal.createdAt;
+                return (
+                  typeof terminalTurnId === "string" &&
+                  isActiveBoundLease(
+                    activeBoundLeases,
+                    proposal.threadId,
+                    proposal.providerTurnId,
+                    terminalTurnId,
+                  ) &&
+                  typeof terminalAt === "string" &&
+                  terminalAt >= proposal.createdAt
+                );
               })
             : undefined;
         const terminalEvent = exactTerminal ?? aliasedTerminal;
