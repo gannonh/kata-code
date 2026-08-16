@@ -1151,6 +1151,42 @@ export default function (pi) {
     }),
   );
 
+  it.effect("prepends trusted stage instructions to the first turn only", () =>
+    Effect.gen(function* () {
+      const recorder = makeEventRecorder();
+      const { session, hooks } = makeFakeSession();
+      const adapter = yield* makePiAdapter(decodePiSettings({}), {
+        instanceId: ProviderInstanceId.make("pi"),
+        availableModels: [SAMPLE_MODEL],
+        createSession: (() => Promise.resolve({ session })) as never,
+        onEvent: recorder.onEvent,
+      });
+
+      const threadId = ThreadId.make("pi-thread-instructions");
+      const instructions = "You are running the Clarify stage for a Kata Code task.";
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: MODEL_SELECTION,
+        developerInstructions: instructions,
+      });
+      yield* adapter.sendTurn({ threadId, input: "first prompt" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+      hooks.resolvePrompt();
+      yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
+
+      const firstArgs = hooks.lastPromptArgs;
+      expect(firstArgs?.text).toBe(`${instructions}\n\nfirst prompt`);
+
+      yield* adapter.sendTurn({ threadId, input: "second prompt" });
+      yield* Effect.tryPromise(() => hooks.promptStarted);
+      hooks.resolvePrompt();
+      yield* Effect.tryPromise(() => recorder.waitFor((event) => event.type === "turn.completed"));
+      const secondArgs = hooks.lastPromptArgs;
+      expect(secondArgs?.text).toBe("second prompt");
+    }),
+  );
+
   it.effect("allows a new turn after the previous turn settles", () =>
     Effect.gen(function* () {
       const recorder = makeEventRecorder();

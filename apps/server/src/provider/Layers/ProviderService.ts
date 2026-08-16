@@ -65,10 +65,7 @@ import {
   ensureTaskCliInvocationPath,
   resolveTaskCliLaunchTarget,
 } from "../../taskCli/taskCliInvocationPath.ts";
-import {
-  supportsTaskWorktreeWrite,
-  type ProviderAdapterShape,
-} from "../Services/ProviderAdapter.ts";
+import { type ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
@@ -523,17 +520,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         },
       });
     });
-  const prepareMcpSession = (
-    threadId: ThreadId,
-    providerInstanceId: ProviderInstanceId,
-    taskStage: boolean,
-  ) =>
+  const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     Effect.gen(function* () {
       // Native provider runtimes capture the MCP authorization header when a
       // session starts. Reuse a live thread-bound lease and rotate an expired
       // one so the caller can restart the native session with the new header.
       const existing = McpProviderSession.readMcpProviderSession(threadId);
-      const activeStage = taskStage ? yield* activeTaskStageForThread(threadId) : undefined;
       if (existing?.providerInstanceId === providerInstanceId) {
         if (!McpSessionRegistry.hasActiveMcpSessionRegistry()) {
           McpProviderSession.clearMcpProviderSession(threadId);
@@ -542,11 +534,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const scope = yield* McpSessionRegistry.resolveActiveMcpCredential(
           existing.authorizationHeader,
         );
-        if (
-          scope?.threadId === threadId &&
-          scope.providerInstanceId === providerInstanceId &&
-          (!taskStage || activeStage !== "build" || scope.capabilities.has("task-implementation"))
-        ) {
+        if (scope?.threadId === threadId && scope.providerInstanceId === providerInstanceId) {
           return { rotated: false } as const;
         }
       }
@@ -709,7 +697,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         activeTaskContext,
         providerInstanceId: input.providerInstanceId,
       });
-      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
       const developerInstructions = activeTaskStage
         ? trustedInstructionsForStage(activeTaskStage)
         : (input.developerInstructions ?? persistedDeveloperInstructions);
@@ -725,9 +712,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
         ...(input.environment ? { environment: input.environment } : {}),
-        taskStage: activeTaskStage === "build",
-        taskExecutionProfile,
-        ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
         ...(binding.resumeCursor !== null && binding.resumeCursor !== undefined
           ? { resumeCursor: binding.resumeCursor }
           : {}),
@@ -872,22 +856,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "The active Build task has no canonical worktree/provider profile.",
         );
       }
-      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
-      if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(adapter.capabilities)) {
-        return yield* toValidationError(
-          input.operation,
-          `Provider '${adapter.provider}' cannot enforce task-worktree-write.`,
-        );
-      }
       const developerInstructions = activeTaskStage
         ? trustedInstructionsForStage(activeTaskStage)
         : persistedDeveloperInstructions;
 
-      yield* prepareMcpSession(
-        input.binding.threadId,
-        bindingInstanceId,
-        activeTaskStage === "build",
-      );
+      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
       const resumedTaskEnvironment =
         activeTaskStage !== undefined
           ? yield* taskCliEnvironmentForTurn({
@@ -923,9 +896,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
           ...(resumedTaskEnvironment ? { environment: resumedTaskEnvironment.environment } : {}),
-          taskStage: activeTaskStage === "build",
-          taskExecutionProfile,
-          ...(activeTaskContext ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: activeTaskContext
             ? activeTaskContext.runtimeMode
@@ -1165,13 +1135,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           activeTaskContext,
           providerInstanceId: resolvedInstanceId,
         });
-        const activeTaskProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
-        if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(adapter.capabilities)) {
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            `Provider '${resolvedProvider}' cannot enforce task-worktree-write.`,
-          );
-        }
         const persistedDeveloperInstructions =
           persistedBinding?.providerInstanceId === resolvedInstanceId
             ? readPersistedDeveloperInstructions(persistedBinding.runtimePayload)
@@ -1184,7 +1147,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const sessionWithInstance = yield* withMcpRotationLock(
           threadId,
           Effect.gen(function* () {
-            yield* prepareMcpSession(threadId, resolvedInstanceId, activeTaskStage === "build");
+            yield* prepareMcpSession(threadId, resolvedInstanceId);
             const startedTaskEnvironment =
               activeTaskStage !== undefined
                 ? yield* taskCliEnvironmentForTurn({
@@ -1225,11 +1188,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                     : {}),
                 ...(developerInstructions ? { developerInstructions } : {}),
                 ...(sessionEnvironment ? { environment: sessionEnvironment } : {}),
-                taskStage: activeTaskStage === "build",
-                taskExecutionProfile: activeTaskProfile,
-                ...(activeTaskContext
-                  ? { taskWorkspaceRoot: activeTaskContext.workspaceRoot }
-                  : {}),
                 runtimeMode: activeTaskContext ? activeTaskContext.runtimeMode : input.runtimeMode,
                 ...(effectiveResumeCursor !== undefined
                   ? { resumeCursor: effectiveResumeCursor }
@@ -1358,22 +1316,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         isTaskStage: activeTaskStage !== undefined,
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
       });
-      const taskExecutionProfile = activeTaskStage === "build" ? "task-worktree-write" : "planning";
-      if (activeTaskStage === "build" && !supportsTaskWorktreeWrite(routed.adapter.capabilities)) {
-        return yield* toValidationError(
-          "ProviderService.sendTurn",
-          `Provider '${routed.adapter.provider}' cannot enforce task-worktree-write.`,
-        );
-      }
       const providerInput =
         activeTaskStage === undefined
-          ? { ...input, taskStage: false }
+          ? input
           : {
               ...input,
               ...(activeTaskContext ? { modelSelection: activeTaskContext.modelSelection } : {}),
               developerInstructions: trustedInstructionsForStage(activeTaskStage),
-              taskStage: activeTaskStage === "build",
-              taskExecutionProfile: taskExecutionProfile as "planning" | "task-worktree-write",
               interactionMode: providerInteractionMode ?? "default",
             };
       yield* Effect.annotateCurrentSpan({
@@ -1410,11 +1359,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
       }
       yield* Effect.gen(function* () {
-        const mcpPreparation = yield* prepareMcpSession(
-          input.threadId,
-          routed.instanceId,
-          activeTaskStage === "build",
-        );
+        const mcpPreparation = yield* prepareMcpSession(input.threadId, routed.instanceId);
         if (mcpPreparation.rotated || issuedTaskEnvironment) {
           yield* restartSessionForMcpCredential({
             threadId: input.threadId,

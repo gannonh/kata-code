@@ -17,14 +17,11 @@ import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
 } from "./toolkits/preview/handlers.ts";
-import { TaskImplementationToolkitHandlersLive } from "./toolkits/taskImplementation/handlers.ts";
 import {
   PreviewSnapshotTool,
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
-import { TaskImplementationToolkit } from "./toolkits/taskImplementation/tools.ts";
-import { TaskImplementationBridgeLive } from "../taskWorkspace/TaskImplementationBridge.ts";
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -177,17 +174,9 @@ const PreviewSnapshotRegistrationLive = Layer.effectDiscard(registerPreviewSnaps
   Layer.provide(PreviewSnapshotToolkitHandlersLive),
 );
 
-const TaskImplementationToolkitRegistrationLive = McpServer.toolkit(TaskImplementationToolkit).pipe(
-  Layer.provide(TaskImplementationToolkitHandlersLive),
-);
-
 export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewStandardToolkitRegistrationLive,
   PreviewSnapshotRegistrationLive,
-);
-
-export const TaskImplementationRegistrationLive = TaskImplementationToolkitRegistrationLive.pipe(
-  Layer.provide(TaskImplementationBridgeLive),
 );
 
 const McpTransportLive = McpServer.layerHttp({
@@ -196,7 +185,7 @@ const McpTransportLive = McpServer.layerHttp({
   path: "/mcp",
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = Layer.mergeAll(
-  PreviewToolkitRegistrationLive,
-  TaskImplementationRegistrationLive,
-).pipe(Layer.provideMerge(McpTransportLive), Layer.provide(PreviewAutomationBroker.layer));
+export const layer = PreviewToolkitRegistrationLive.pipe(
+  Layer.provideMerge(McpTransportLive),
+  Layer.provide(PreviewAutomationBroker.layer),
+);

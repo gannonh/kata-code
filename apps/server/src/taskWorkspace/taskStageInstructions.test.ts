@@ -22,10 +22,13 @@ describe("trusted planning instructions", () => {
     },
   );
 
-  it("keeps Implement on task_implementation tools", () => {
+  it("directs Implement to the Task CLI", () => {
     const instructions = trustedInstructionsForStage("build");
     expect(instructions).toBe(trustedImplementationInstructions());
-    expect(instructions).toContain("task_implementation_complete");
-    expect(instructions).toContain("Do not call `katacode task complete` for the Implement stage.");
+    expect(instructions).toContain("katacode task progress");
+    expect(instructions).toContain("katacode task check run <id>");
+    expect(instructions).toContain("katacode task amendment propose");
+    expect(instructions).toContain("katacode task complete --summary <text>");
+    expect(instructions).not.toContain("task_implementation_");
   });
 });

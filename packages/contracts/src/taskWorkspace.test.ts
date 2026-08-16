@@ -119,7 +119,6 @@ it.effect("decodes Slice 2 workflow and implementation contracts additively", ()
     const continuationPayload = yield* decodeBootstrapPayload({
       stage: "build",
       occurrence: 0,
-      executionProfile: "task-worktree-write",
       sessionId: "session-1",
       threadId: "thread-1",
       threadCreateCommandId: "command-thread-1",

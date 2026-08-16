@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - the runner executes real git and node processes in a fixture worktree.
+// @effect-diagnostics nodeBuiltinImport:off - the executor runs real git and node processes in a fixture worktree.
 import { execFile } from "node:child_process";
 import * as NodeFileSystem from "node:fs";
 import * as NodeFs from "node:fs/promises";
@@ -20,9 +20,9 @@ import {
   taskCheckEnvironment,
   taskCheckTempPath,
   taskGitMetadataReadPaths,
-  TaskWorktreeCommandRunner,
-  TaskWorktreeCommandRunnerLive,
-} from "./TaskWorktreeCommandRunner.ts";
+  TaskCheckExecutor,
+  TaskCheckExecutorLive,
+} from "./TaskCheckExecutor.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -40,14 +40,14 @@ async function git(cwd: string, args: readonly string[]): Promise<string> {
   return stdout.trim();
 }
 
-const runnerLayer = TaskWorktreeCommandRunnerLive.pipe(
+const executorLayer = TaskCheckExecutorLive.pipe(
   Layer.provide(ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer))),
 );
 
 // Wraps the real ProcessRunner so the two after-state git observations of a
 // check run report a timeout; everything else (including the check command
 // itself) executes normally.
-const afterStateTimeoutRunnerLayer = TaskWorktreeCommandRunnerLive.pipe(
+const afterStateTimeoutRunnerLayer = TaskCheckExecutorLive.pipe(
   Layer.provide(
     Layer.effect(
       ProcessRunner.ProcessRunner,
@@ -58,9 +58,10 @@ const afterStateTimeoutRunnerLayer = TaskWorktreeCommandRunnerLive.pipe(
           run: (input) => {
             if (input.command === "git") {
               gitCalls += 1;
-              // The runner makes four git observations before the command;
-              // the two after-state observations come next.
-              if (gitCalls >= 5) {
+              // The executor makes two git observations before the command
+              // (rev-parse and status); the two after-state observations come
+              // next.
+              if (gitCalls >= 3) {
                 return Effect.succeed({
                   stdout: "",
                   stderr: "",
@@ -81,7 +82,7 @@ const afterStateTimeoutRunnerLayer = TaskWorktreeCommandRunnerLive.pipe(
 
 const setup = Effect.gen(function* () {
   const root = yield* Effect.tryPromise(() =>
-    NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-check-runner-")),
+    NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "kata-check-executor-")),
   );
   yield* Effect.addFinalizer(() =>
     Effect.tryPromise(() => NodeFs.rm(root, { recursive: true, force: true })).pipe(Effect.orDie),
@@ -90,8 +91,8 @@ const setup = Effect.gen(function* () {
   yield* Effect.tryPromise(() => NodeFs.writeFile(NodePath.join(root, "README.md"), "# fixture\n"));
   yield* Effect.tryPromise(() => git(root, ["add", "README.md"]));
   yield* Effect.tryPromise(() => git(root, ["commit", "-m", "chore: seed"]));
-  const baseCommitSha = yield* Effect.tryPromise(() => git(root, ["rev-parse", "HEAD"]));
-  return { worktreePath: root, expectedBranch: "main", expectedBaseCommitSha: baseCommitSha };
+  const startingCommitSha = yield* Effect.tryPromise(() => git(root, ["rev-parse", "HEAD"]));
+  return { worktreePath: root, startingCommitSha };
 });
 
 // A real linked worktree: the worktree's `.git` is a gitfile pointing at
@@ -115,23 +116,25 @@ const setupLinkedWorktree = Effect.gen(function* () {
   yield* Effect.tryPromise(() =>
     git(mainRepo, ["worktree", "add", "-b", "katacode/task-linked", worktreePath]),
   );
-  const baseCommitSha = yield* Effect.tryPromise(() => git(worktreePath, ["rev-parse", "HEAD"]));
+  const startingCommitSha = yield* Effect.tryPromise(() =>
+    git(worktreePath, ["rev-parse", "HEAD"]),
+  );
   return {
     worktreePath,
     expectedBranch: "katacode/task-linked",
-    expectedBaseCommitSha: baseCommitSha,
+    startingCommitSha,
   };
 });
 
-effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
+effectIt.layer(executorLayer)("TaskCheckExecutor", (it) => {
   it.effect("runs a bare executable resolved through PATH", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner.run({
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
         worktreePath,
-        expectedBranch,
-        expectedBaseCommitSha,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "pwd",
         timeoutMs: 15_000,
       });
@@ -144,7 +147,7 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
   it.effect("runs git checks in a linked worktree with canonical metadata mounted", () =>
     Effect.gen(function* () {
       const platform = yield* HostProcessPlatform;
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setupLinkedWorktree;
+      const { worktreePath, expectedBranch, startingCommitSha } = yield* setupLinkedWorktree;
       const sandboxed = sandboxApprovedCheckCommand({
         argv: ["git", "status", "--porcelain"],
         worktreePath,
@@ -162,11 +165,11 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
           expect(profile).toContain(`(subpath "${gitPath}")`);
         }
       }
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner.run({
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
         worktreePath,
-        expectedBranch,
-        expectedBaseCommitSha,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "git status --porcelain",
         timeoutMs: 15_000,
       });
@@ -200,12 +203,12 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
 
   it.effect("runs a multi-word command as argv with PATH resolution", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner.run({
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
         worktreePath,
-        expectedBranch,
-        expectedBaseCommitSha,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "git rev-parse --abbrev-ref HEAD",
         timeoutMs: 15_000,
       });
@@ -217,12 +220,12 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
 
   it.effect("preserves quoted arguments across process boundaries", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner.run({
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
         worktreePath,
-        expectedBranch,
-        expectedBaseCommitSha,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "node -e \"const s = 'hello world'; process.stdout.write(s)\"",
         timeoutMs: 15_000,
       });
@@ -233,12 +236,12 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
 
   it.effect("fails an attempt whose command moves HEAD and returns the before/after state", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner.run({
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
         worktreePath,
-        expectedBranch,
-        expectedBaseCommitSha,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "git commit --allow-empty -m move-head",
         timeoutMs: 15_000,
       });
@@ -253,12 +256,12 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
 
   it.effect("fails an attempt whose command dirties the canonical worktree status", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner.run({
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
         worktreePath,
-        expectedBranch,
-        expectedBaseCommitSha,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command: "node -e \"require('node:fs').writeFileSync('dirty.txt', 'x')\"",
         timeoutMs: 15_000,
       });
@@ -275,12 +278,12 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
 
   it.effect("ignores task-local temp files after cleaning TMPDIR before status observation", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner.run({
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
         worktreePath,
-        expectedBranch,
-        expectedBaseCommitSha,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
         command:
           "node -e \"require('node:fs').writeFileSync(require('node:path').join(process.env.TMPDIR, 'scratch.txt'), 'x')\"",
         timeoutMs: 15_000,
@@ -300,8 +303,8 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
 
   it.effect("surfaces task temp cleanup failures as handled command errors", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
       const rmSpy = vi
         .spyOn(NodeFileSystem.promises, "rm")
         .mockRejectedValueOnce(new Error("rm denied"));
@@ -309,11 +312,11 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
       // change the temp-directory cleanup of later tests and the setup
       // finalizer.
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSpy.mockRestore()));
-      const result = yield* runner
+      const result = yield* executor
         .run({
           worktreePath,
-          expectedBranch,
-          expectedBaseCommitSha,
+          expectedStartingCommitSha: startingCommitSha,
+          expectedStartingStatus: "",
           command: "pwd",
           timeoutMs: 15_000,
         })
@@ -326,15 +329,15 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
     }),
   );
 
-  it.effect("rejects a non-canonical branch before running any command", () =>
+  it.effect("rejects a mismatched starting commit before running any command", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner
+      const { worktreePath } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor
         .run({
           worktreePath,
-          expectedBranch: "katacode/task-other",
-          expectedBaseCommitSha,
+          expectedStartingCommitSha: "0123456789abcdef0123456789abcdef01234567",
+          expectedStartingStatus: "",
           command: "git status",
           timeoutMs: 15_000,
         })
@@ -343,47 +346,81 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
     }),
   );
 
-  it.effect("rejects an empty command without spawning a process", () =>
+  it.effect("rejects a starting worktree status that differs from the bound attempt", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const result = yield* runner
+      const { worktreePath, startingCommitSha } = yield* setup;
+      // A background change (e.g. a formatter) after the server bound the
+      // attempt must never be adopted as the check baseline.
+      yield* Effect.tryPromise(() =>
+        NodeFs.writeFile(NodePath.join(worktreePath, "dirty.txt"), "x"),
+      );
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor
         .run({
           worktreePath,
-          expectedBranch,
-          expectedBaseCommitSha,
-          command: "   ",
+          expectedStartingCommitSha: startingCommitSha,
+          expectedStartingStatus: "",
+          command: "pwd",
           timeoutMs: 15_000,
         })
         .pipe(Effect.exit);
       expect(result._tag).toBe("Failure");
+      // The bound status is still accepted when it matches the observation.
+      const dirtyStatus = yield* Effect.tryPromise(() =>
+        execFileAsync("git", ["status", "--porcelain=v2"], { cwd: worktreePath }).then(
+          ({ stdout }) => stdout.trim(),
+        ),
+      );
+      const accepted = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: dirtyStatus,
+        command: "pwd",
+        timeoutMs: 15_000,
+      });
+      expect(accepted.status).toBe("pass");
     }),
   );
 
-  it.effect("settles a malformed command line as a handled failure, not a defect", () =>
+  it.effect("rejects an empty command as an indeterminate result without spawning", () =>
     Effect.gen(function* () {
-      const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-      const runner = yield* TaskWorktreeCommandRunner;
-      const trailingBackslash = yield* runner
-        .run({
-          worktreePath,
-          expectedBranch,
-          expectedBaseCommitSha,
-          command: "echo \\",
-          timeoutMs: 15_000,
-        })
-        .pipe(Effect.exit);
-      expect(trailingBackslash._tag).toBe("Failure");
-      const unterminatedQuote = yield* runner
-        .run({
-          worktreePath,
-          expectedBranch,
-          expectedBaseCommitSha,
-          command: "echo 'unterminated",
-          timeoutMs: 15_000,
-        })
-        .pipe(Effect.exit);
-      expect(unterminatedQuote._tag).toBe("Failure");
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
+        command: "   ",
+        timeoutMs: 15_000,
+      });
+      expect(result.status).toBe("indeterminate");
+      expect(result.output).toContain("empty");
+      expect(result.endingCommitSha).toBe(result.startingCommitSha);
+    }),
+  );
+
+  it.effect("settles a malformed command line as an indeterminate result, not a defect", () =>
+    Effect.gen(function* () {
+      const { worktreePath, startingCommitSha } = yield* setup;
+      const executor = yield* TaskCheckExecutor;
+      const trailingBackslash = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
+        command: "echo \\",
+        timeoutMs: 15_000,
+      });
+      expect(trailingBackslash.status).toBe("indeterminate");
+      expect(trailingBackslash.output).toContain("Malformed");
+      const unterminatedQuote = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
+        command: "echo 'unterminated",
+        timeoutMs: 15_000,
+      });
+      expect(unterminatedQuote.status).toBe("indeterminate");
+      expect(unterminatedQuote.output).toContain("Malformed");
     }),
   );
 
@@ -462,37 +499,34 @@ effectIt.layer(runnerLayer)("TaskWorktreeCommandRunner", (it) => {
   });
 });
 
-effectIt.layer(afterStateTimeoutRunnerLayer)(
-  "TaskWorktreeCommandRunner after-state timeout",
-  (it) => {
-    it.effect("reports indeterminate when the after-state observation times out", () =>
-      Effect.gen(function* () {
-        const platform = yield* HostProcessPlatform;
-        const { worktreePath, expectedBranch, expectedBaseCommitSha } = yield* setup;
-        // The after-state timeout path only runs the check command when a
-        // sandbox is available; without sandbox-exec/bwrap the runner
-        // short-circuits with the no-sandbox indeterminate result before the
-        // mocked after-observations, so there is nothing to assert.
-        const sandboxed = sandboxApprovedCheckCommand({
-          argv: ["true"],
-          worktreePath,
-          platform,
-        });
-        if (sandboxed === null) return;
-        const runner = yield* TaskWorktreeCommandRunner;
-        const result = yield* runner.run({
-          worktreePath,
-          expectedBranch,
-          expectedBaseCommitSha,
-          command: "pwd",
-          timeoutMs: 15_000,
-        });
-        // A pass cannot be claimed on evidence the worktree is unchanged when
-        // the after-state was never observed.
-        expect(result.status).toBe("indeterminate");
-        expect(result.endingCommitSha).toBeNull();
-        expect(result.endingStatus).toBeNull();
-      }),
-    );
-  },
-);
+effectIt.layer(afterStateTimeoutRunnerLayer)("TaskCheckExecutor after-state timeout", (it) => {
+  it.effect("reports indeterminate when the after-state observation times out", () =>
+    Effect.gen(function* () {
+      const platform = yield* HostProcessPlatform;
+      const { worktreePath, startingCommitSha } = yield* setup;
+      // The after-state timeout path only runs the check command when a
+      // sandbox is available; without sandbox-exec/bwrap the executor
+      // short-circuits with the no-sandbox indeterminate result before the
+      // mocked after-observations, so there is nothing to assert.
+      const sandboxed = sandboxApprovedCheckCommand({
+        argv: ["true"],
+        worktreePath,
+        platform,
+      });
+      if (sandboxed === null) return;
+      const executor = yield* TaskCheckExecutor;
+      const result = yield* executor.run({
+        worktreePath,
+        expectedStartingCommitSha: startingCommitSha,
+        expectedStartingStatus: "",
+        command: "pwd",
+        timeoutMs: 15_000,
+      });
+      // A pass cannot be claimed on evidence the worktree is unchanged when
+      // the after-state was never observed.
+      expect(result.status).toBe("indeterminate");
+      expect(result.endingCommitSha).toBeNull();
+      expect(result.endingStatus).toBeNull();
+    }),
+  );
+});

@@ -557,7 +557,6 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
         developerInstructions: "Use katacode task context before task data.",
-        taskStage: true,
       });
 
       assert.deepEqual(harness.getLastCreateQueryInput()?.options.systemPrompt, {
@@ -567,7 +566,7 @@ describe("ClaudeAdapterLive", () => {
       });
       const options = harness.getLastCreateQueryInput()?.options;
       assert.equal(options?.permissionMode, undefined);
-      assert.deepEqual(options?.disallowedTools, ["EnterPlanMode", "ExitPlanMode"]);
+      assert.equal(options?.disallowedTools, undefined);
       assert.equal(
         ((options?.tools ?? []) as ReadonlyArray<string>).includes("ExitPlanMode"),
         false,

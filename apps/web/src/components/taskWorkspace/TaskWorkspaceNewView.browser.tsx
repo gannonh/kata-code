@@ -22,8 +22,6 @@ const mocks = vi.hoisted(() => ({
       version: null,
       status: "ready",
       availability: "available",
-      supportsTaskStage: true,
-      supportsTaskWorktreeWrite: true,
       auth: { status: "authenticated" },
       checkedAt: "2026-08-01T00:00:00.000Z",
       models: [
@@ -56,9 +54,6 @@ const mocks = vi.hoisted(() => ({
       version: null,
       status: "ready",
       availability: "available",
-      supportsTaskStage: true,
-      // Planning no longer requires worktree-write; Implement still does.
-      supportsTaskWorktreeWrite: false,
       auth: { status: "authenticated" },
       checkedAt: "2026-08-01T00:00:00.000Z",
       models: [
@@ -91,8 +86,6 @@ const mocks = vi.hoisted(() => ({
       version: null,
       status: "ready",
       availability: "available",
-      supportsTaskStage: false,
-      supportsTaskWorktreeWrite: false,
       auth: { status: "authenticated" },
       checkedAt: "2026-08-01T00:00:00.000Z",
       models: [

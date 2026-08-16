@@ -115,9 +115,10 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
         );
       }),
     );
-    // Reconcile persisted proposals after a provider/runtime event can be
-    // lost at a process boundary. This only settles proposals against durable
-    // terminal activities; it never reruns checks or other external commands.
+    // Reconcile persisted proposals and begun-but-unfinalized checks after a
+    // provider/runtime event can be lost at a process boundary. This only
+    // settles durable terminal activities and never reruns checks or other
+    // external commands.
     yield* Effect.forkScoped(
       Effect.forever(
         taskWorkspaces.reconcilePendingProposals.pipe(
@@ -127,6 +128,16 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
             }),
           ),
           Effect.ignore,
+          Effect.andThen(
+            taskWorkspaces.reconcilePendingChecks().pipe(
+              Effect.tapError((cause) =>
+                Effect.logWarning("task workspace check reconciliation failed", {
+                  cause: cause.message,
+                }),
+              ),
+              Effect.ignore,
+            ),
+          ),
           Effect.andThen(Effect.sleep("1 second")),
         ),
       ),

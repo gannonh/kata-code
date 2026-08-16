@@ -3,20 +3,31 @@
 // @effect-diagnostics missingEffectContext:off
 // @effect-diagnostics missingLayerContext:off
 // @effect-diagnostics anyUnknownInErrorContext:off
+// @effect-diagnostics no-global-process-runtime:off - test-only host probe for the OS-enforced check sandbox binary.
+import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import * as NodePath from "node:path";
 
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { FetchHttpClient } from "effect/unstable/http";
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 
 import {
+  EnvironmentHttpApi,
   TASK_CLI_PLANNING_COMMANDS,
+  TaskCliAmendmentEnvelope,
+  TaskCliCheckBeginEnvelope,
+  TaskCliCheckFinalizeEnvelope,
   TaskCliCompleteEnvelope,
   TaskCliContextEnvelope,
+  TaskCliProgressEnvelope,
 } from "@kata-sh/code-contracts";
 import {
   ensureTaskCliBundle,
+  makeTaskCliBuildFixture,
   makeTaskCliProcessFixture,
   TASK_CLI_BUNDLE_PATH,
 } from "./TaskCliProcessFixture.ts";
@@ -35,6 +46,18 @@ const decodeContextEnvelope = (stdout: string) =>
 
 const decodeCompleteEnvelope = (stdout: string) =>
   Schema.decodeUnknownSync(TaskCliCompleteEnvelope)(parseSingleEnvelope(stdout));
+
+const decodeProgressEnvelope = (stdout: string) =>
+  Schema.decodeUnknownSync(TaskCliProgressEnvelope)(parseSingleEnvelope(stdout));
+
+const decodeAmendmentEnvelope = (stdout: string) =>
+  Schema.decodeUnknownSync(TaskCliAmendmentEnvelope)(parseSingleEnvelope(stdout));
+
+const decodeCheckBeginEnvelope = (stdout: string) =>
+  Schema.decodeUnknownSync(TaskCliCheckBeginEnvelope)(parseSingleEnvelope(stdout));
+
+const decodeCheckFinalizeEnvelope = (stdout: string) =>
+  Schema.decodeUnknownSync(TaskCliCheckFinalizeEnvelope)(parseSingleEnvelope(stdout));
 
 describe("built Task CLI process", () => {
   it("materializes the packaged CLI bundle before process proofs run", () => {
@@ -178,7 +201,7 @@ describe("built Task CLI process", () => {
   it.effect("rejects an unknown Task verb with one invalid_request envelope", () =>
     Effect.gen(function* () {
       const fixture = yield* makeTaskCliProcessFixture();
-      const result = yield* fixture.runCli({}, ["task", "progress"]);
+      const result = yield* fixture.runCli({}, ["task", "frobnicate"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toBe("");
@@ -186,6 +209,22 @@ describe("built Task CLI process", () => {
         protocol: "task-cli@1",
         ok: false,
         operation: "context",
+        error: { code: "invalid_request" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects a bare task progress command with one invalid_request envelope", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliProcessFixture();
+      const result = yield* fixture.runCli({}, ["task", "progress"]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeProgressEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "progress",
         error: { code: "invalid_request" },
       });
     }).pipe(Effect.scoped as never),
@@ -294,6 +333,225 @@ describe("built Task CLI process", () => {
         operation: "context",
         error: { code: "invalid_request" },
       });
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects planning completion without an artifact file", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliProcessFixture();
+      const result = yield* fixture.runCli({}, ["task", "complete", "--summary", "Done."]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeCompleteEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "complete",
+        error: { code: "invalid_artifact" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
+});
+
+const hostHasCheckSandbox = Effect.gen(function* () {
+  const platform = yield* HostProcessPlatform;
+  if (platform === "darwin") return existsSync("/usr/bin/sandbox-exec");
+  if (platform === "linux") {
+    try {
+      execFileSync("which", ["bwrap"], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+});
+
+describe("built Task CLI check flow", () => {
+  it.effect("executes an approved check through begin, local run, and finalize", () =>
+    Effect.gen(function* () {
+      if (!(yield* hostHasCheckSandbox)) return;
+      const fixture = yield* makeTaskCliBuildFixture();
+      const result = yield* fixture.runCli({}, ["task", "check", "run", "check:pass"]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain(fixture.token);
+      const envelope = decodeCheckFinalizeEnvelope(result.stdout);
+      expect(envelope).toMatchObject({ protocol: "task-cli@1", ok: true, operation: "check" });
+      if (envelope.ok) {
+        expect(envelope.status).toBe("pass");
+        expect(envelope.checkId).toBe("check:pass");
+      }
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects an unknown check id with a stable invalid_request envelope", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliBuildFixture();
+      const result = yield* fixture.runCli({}, ["task", "check", "run", "check:missing"]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(decodeCheckBeginEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "check",
+        error: { code: "invalid_request" },
+      });
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("returns the stable settled-pass result without re-running a passed check", () =>
+    Effect.gen(function* () {
+      if (!(yield* hostHasCheckSandbox)) return;
+      const fixture = yield* makeTaskCliBuildFixture();
+      const first = yield* fixture.runCli({}, ["task", "check", "run", "check:pass"]);
+      expect(first.exitCode).toBe(0);
+      expect(decodeCheckFinalizeEnvelope(first.stdout)).toMatchObject({ ok: true });
+
+      const second = yield* fixture.runCli({}, ["task", "check", "run", "check:pass"]);
+      expect(second.exitCode).toBe(0);
+      expect(second.stderr).toBe("");
+      const envelope = decodeCheckBeginEnvelope(second.stdout);
+      expect(envelope).toMatchObject({ ok: true, operation: "check" });
+      if (envelope.ok) {
+        expect(envelope.outcome).toBe("settled-pass");
+        expect(envelope.finalizerToken).toBeNull();
+      }
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("settles a failing check and allocates the next attempt on rerun", () =>
+    Effect.gen(function* () {
+      if (!(yield* hostHasCheckSandbox)) return;
+      const fixture = yield* makeTaskCliBuildFixture();
+      const first = yield* fixture.runCli({}, ["task", "check", "run", "check:fail"]);
+      expect(first.exitCode).toBe(0);
+      expect(first.stderr).toBe("");
+      const firstEnvelope = decodeCheckFinalizeEnvelope(first.stdout);
+      expect(firstEnvelope).toMatchObject({ ok: true });
+      if (!firstEnvelope.ok || firstEnvelope.status !== "fail") return;
+      expect(firstEnvelope.attemptId).toBe("check-attempt-1");
+
+      const second = yield* fixture.runCli({}, ["task", "check", "run", "check:fail"]);
+      expect(second.exitCode).toBe(0);
+      const secondEnvelope = decodeCheckFinalizeEnvelope(second.stdout);
+      expect(secondEnvelope).toMatchObject({ ok: true });
+      if (secondEnvelope.ok) {
+        expect(secondEnvelope.status).toBe("fail");
+        expect(secondEnvelope.attemptId).toBe("check-attempt-2");
+      }
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("rejects a finalize with an altered starting Git state", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliBuildFixture();
+      const client = yield* HttpApiClient.make(EnvironmentHttpApi, {
+        baseUrl: fixture.endpoint,
+      });
+      const begin = yield* client.taskCli.checkBegin({
+        headers: { authorization: `Bearer ${fixture.token}` },
+        payload: { checkId: "check:pass" },
+      });
+      expect(begin).toMatchObject({ ok: true, outcome: "spawn" });
+      const token = begin.ok ? begin.finalizerToken : null;
+      const startingCommitSha = begin.ok ? begin.startingCommitSha : null;
+      const startingStatus = begin.ok ? begin.startingStatus : "";
+      expect(token).toBeTruthy();
+      expect(startingCommitSha).toBeTruthy();
+
+      const tampered = yield* client.taskCli.checkFinalize({
+        headers: {},
+        payload: {
+          finalizerToken: token!,
+          exitCode: 0,
+          status: "pass",
+          output: "ok",
+          timedOut: false,
+          startingCommitSha: "tampered-sha",
+          endingCommitSha: startingCommitSha,
+          startingStatus,
+          endingStatus: startingStatus,
+        },
+      });
+      expect(tampered).toMatchObject({
+        protocol: "task-cli@1",
+        ok: false,
+        operation: "check",
+        error: { code: "conflict" },
+      });
+    })
+      .pipe(Effect.provide(FetchHttpClient.layer))
+      .pipe(Effect.scoped as never),
+  );
+
+  it.effect("proposes an amendment through the CLI and opens the review gate", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliBuildFixture();
+      const diffPath = NodePath.join(fixture.root, "plan-diff.md");
+      writeFileSync(diffPath, "# Plan\n\nUpdated check command.\n");
+      const result = yield* fixture.runCli({}, [
+        "task",
+        "amendment",
+        "propose",
+        "--phase",
+        "phase:foundation",
+        "--work-item",
+        "work:implement",
+        "--expected",
+        "The approved check passes.",
+        "--found",
+        "The check command needs to change.",
+        "--impact",
+        "The Plan must update the check command.",
+        "--input",
+        diffPath,
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(decodeAmendmentEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: true,
+        operation: "amendment",
+        accepted: true,
+        amendmentId: "amendment-1",
+      });
+      const task = yield* fixture.taskService.getTask(fixture.taskId);
+      expect(task?.build.amendmentGateId).toBe("amendment-1");
+      expect(task?.build.amendments[0]?.proposedPlanMarkdown).toBe(
+        "# Plan\n\nUpdated check command.\n",
+      );
+    }).pipe(Effect.scoped as never),
+  );
+
+  it.effect("proposes Build completion without an artifact file and binds the worktree HEAD", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeTaskCliBuildFixture();
+      const result = yield* fixture.runCli({}, [
+        "task",
+        "complete",
+        "--summary",
+        "Build complete.",
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(decodeCompleteEnvelope(result.stdout)).toMatchObject({
+        protocol: "task-cli@1",
+        ok: true,
+        operation: "complete",
+        completion: {
+          accepted: true,
+          stage: "build",
+        },
+      });
+      const task = yield* fixture.taskService.getTask(fixture.taskId);
+      const buildOccurrence = task?.occurrences.find((candidate) => candidate.stage === "build");
+      expect(buildOccurrence?.status).toBe("finalizing");
+      expect(buildOccurrence?.completionProposalId).toBeTruthy();
     }).pipe(Effect.scoped as never),
   );
 });

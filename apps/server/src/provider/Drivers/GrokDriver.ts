@@ -59,7 +59,6 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
   metadata: {
     displayName: "Grok",
     supportsMultipleInstances: true,
-    supportsTaskStage: false,
   },
   configSchema: GrokSettings,
   defaultConfig: (): GrokSettings => decodeGrokSettings({}),

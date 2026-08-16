@@ -12,16 +12,23 @@ import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { tokenizeCommandLine } from "@kata-sh/code-shared/shell";
 import { ProcessRunner } from "../processRunner.ts";
 
-export interface TaskWorktreeCommandInput {
+export interface TaskCheckExecutorInput {
   readonly worktreePath: string;
-  readonly expectedBranch: string;
-  readonly expectedBaseCommitSha: string;
+  /** The commit the server bound to this attempt. The CLI runs the check only
+   * when its own before-observation matches this sha; the branch and base are
+   * server-side concerns the CLI never learns (and never needs). */
+  readonly expectedStartingCommitSha: string;
+  /** The worktree status the server bound to this attempt. Mirrors
+   * `expectedStartingCommitSha`: a background change (e.g. a formatter)
+   * between the server's begin snapshot and the CLI's own before-observation
+   * must never be adopted as the check baseline. */
+  readonly expectedStartingStatus: string;
   readonly command: string;
   readonly timeoutMs: number;
   readonly maxOutputBytes?: number;
 }
 
-export interface TaskWorktreeCommandResult {
+export interface TaskCheckExecutorResult {
   readonly status: "pass" | "fail" | "indeterminate";
   readonly output: string;
   readonly exitCode: number | null;
@@ -32,21 +39,24 @@ export interface TaskWorktreeCommandResult {
   readonly endingStatus: string | null;
 }
 
-export class TaskWorktreeCommandError extends Data.TaggedError("TaskWorktreeCommandError")<{
+export class TaskCheckExecutorError extends Data.TaggedError("TaskCheckExecutorError")<{
   readonly message: string;
+  /** "git-state" failures mean the CLI cannot trust its before-observation
+   * against the server-bound attempt and must not finalize; "execution"
+   * failures still finalize as indeterminate so the server learns the outcome. */
+  readonly kind: "git-state" | "execution";
   readonly cause?: unknown;
 }> {}
 
-export interface TaskWorktreeCommandRunnerShape {
+export interface TaskCheckExecutorShape {
   readonly run: (
-    input: TaskWorktreeCommandInput,
-  ) => Effect.Effect<TaskWorktreeCommandResult, TaskWorktreeCommandError>;
+    input: TaskCheckExecutorInput,
+  ) => Effect.Effect<TaskCheckExecutorResult, TaskCheckExecutorError>;
 }
 
-export class TaskWorktreeCommandRunner extends Context.Service<
-  TaskWorktreeCommandRunner,
-  TaskWorktreeCommandRunnerShape
->()("@kata-sh/code-cli/taskWorkspace/TaskWorktreeCommandRunner") {}
+export class TaskCheckExecutor extends Context.Service<TaskCheckExecutor, TaskCheckExecutorShape>()(
+  "@kata-sh/code-cli/taskCli/TaskCheckExecutor",
+) {}
 
 const scrubEnvironment = (): NodeJS.ProcessEnv => {
   const blocked = /(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY|AUTH|BEARER|MCP|CREDENTIAL|PROVIDER)/iu;
@@ -115,13 +125,16 @@ function realPath(path: string): string {
 /**
  * Resolve the canonical git metadata a linked task worktree needs to run git
  * read commands inside the check sandbox. The worktree's `.git` gitfile is
- * writable by the task implementation, so the resolved gitdir is only trusted
- * when its HEAD references the task's own expected branch; anything else
- * yields no mounts and the check fails closed at the branch observation.
+ * writable by the task implementation; when `expectedBranch` is supplied, the
+ * resolved gitdir is only trusted when its HEAD references that branch and
+ * anything else yields no mounts. When the branch is omitted (CLI check
+ * executor), the server has already bound the starting commit and cwd, so the
+ * resolved gitdir and common directory are mounted read-only without a HEAD
+ * branch assertion.
  */
 export function taskGitMetadataReadPaths(
   worktreePath: string,
-  expectedBranch: string,
+  expectedBranch?: string,
 ): ReadonlyArray<string> {
   const gitFile = (() => {
     try {
@@ -137,14 +150,16 @@ export function taskGitMetadataReadPaths(
     ? gitDirectoryValue
     : NodePath.resolve(worktreePath, gitDirectoryValue);
   const gitDirectory = realPath(gitDirectoryPath);
-  const head = (() => {
-    try {
-      return NodeFs.readFileSync(NodePath.join(gitDirectory, "HEAD"), "utf8");
-    } catch {
-      return "";
-    }
-  })();
-  if (head.trim() !== `ref: refs/heads/${expectedBranch}`) return [];
+  if (expectedBranch !== undefined) {
+    const head = (() => {
+      try {
+        return NodeFs.readFileSync(NodePath.join(gitDirectory, "HEAD"), "utf8");
+      } catch {
+        return "";
+      }
+    })();
+    if (head.trim() !== `ref: refs/heads/${expectedBranch}`) return [];
+  }
   const commonDirectoryValue = (() => {
     try {
       return NodeFs.readFileSync(NodePath.join(gitDirectory, "commondir"), "utf8").trim();
@@ -213,13 +228,14 @@ export function macSandboxProfile(
 
 function cleanupTaskCheckTempPath(
   worktreePath: string,
-): Effect.Effect<void, TaskWorktreeCommandError> {
+): Effect.Effect<void, TaskCheckExecutorError> {
   return Effect.tryPromise({
     try: () =>
       NodeFs.promises.rm(taskCheckTempPath(worktreePath), { recursive: true, force: true }),
     catch: (cause) =>
-      new TaskWorktreeCommandError({
+      new TaskCheckExecutorError({
         message: "Unable to clean the task check temp directory.",
+        kind: "execution",
         cause,
       }),
   });
@@ -272,10 +288,7 @@ export function sandboxApprovedCheckCommand(input: {
   readonly platform: NodeJS.Platform;
 }): { readonly command: string; readonly args: ReadonlyArray<string> } | null {
   const platform = input.platform;
-  const gitMetadataReadPaths =
-    input.expectedBranch !== undefined
-      ? taskGitMetadataReadPaths(input.worktreePath, input.expectedBranch)
-      : [];
+  const gitMetadataReadPaths = taskGitMetadataReadPaths(input.worktreePath, input.expectedBranch);
   if (platform === "darwin" && NodeFs.existsSync("/usr/bin/sandbox-exec")) {
     return {
       command: "/usr/bin/sandbox-exec",
@@ -313,25 +326,8 @@ const make = Effect.gen(function* () {
       timeoutBehavior: "timedOutResult",
     });
 
-  const run: TaskWorktreeCommandRunnerShape["run"] = (input) =>
+  const run: TaskCheckExecutorShape["run"] = (input) =>
     Effect.gen(function* () {
-      const branch = yield* git(input.worktreePath, ["symbolic-ref", "--short", "HEAD"]);
-      if (branch.timedOut || branch.code !== 0 || branch.stdout.trim() !== input.expectedBranch) {
-        return yield* new TaskWorktreeCommandError({
-          message: "The task worktree branch is not canonical.",
-        });
-      }
-      const base = yield* git(input.worktreePath, [
-        "merge-base",
-        "--is-ancestor",
-        input.expectedBaseCommitSha,
-        "HEAD",
-      ]);
-      if (base.timedOut || base.code !== 0) {
-        return yield* new TaskWorktreeCommandError({
-          message: "The task worktree base is not an ancestor.",
-        });
-      }
       // A previous interrupted run may have left the check temp directory
       // behind. Remove it before observing the before-state so a stale
       // directory cannot be counted as a change the check itself made.
@@ -344,22 +340,60 @@ const make = Effect.gen(function* () {
         beforeStatus.timedOut ||
         beforeStatus.code !== 0
       ) {
-        return yield* new TaskWorktreeCommandError({
+        return yield* new TaskCheckExecutorError({
           message: "Unable to observe the task worktree.",
+          kind: "git-state",
         });
       }
-      // A malformed command line (unterminated quote or escape) throws; keep it
-      // a handled failure so the worker's indeterminate fallback absorbs it
-      // instead of a Die defect killing the poll loop.
+      const startingCommitSha = beforeHead.stdout.trim();
+      if (startingCommitSha !== input.expectedStartingCommitSha) {
+        return yield* new TaskCheckExecutorError({
+          message: "The starting Git state does not match the bound attempt.",
+          kind: "git-state",
+        });
+      }
+      const startingStatus = beforeStatus.stdout.trim();
+      if (startingStatus !== input.expectedStartingStatus) {
+        return yield* new TaskCheckExecutorError({
+          message: "The starting worktree status does not match the bound attempt.",
+          kind: "git-state",
+        });
+      }
+      // A malformed command line (unterminated quote or escape) cannot be
+      // executed; settle it as indeterminate so the server records the attempt
+      // instead of a Die defect killing the CLI command.
       const argv = yield* Effect.try({
         try: () => tokenizeCommandLine(input.command),
         catch: (cause) =>
-          new TaskWorktreeCommandError({ message: "Malformed check command.", cause }),
-      });
+          new TaskCheckExecutorError({
+            message: "Malformed check command.",
+            kind: "execution",
+            cause,
+          }),
+      }).pipe(Effect.orElseSucceed(() => null));
+      if (argv === null) {
+        return {
+          status: "indeterminate" as const,
+          output: "Malformed check command.",
+          exitCode: null,
+          timedOut: false,
+          startingCommitSha,
+          endingCommitSha: startingCommitSha,
+          startingStatus,
+          endingStatus: startingStatus,
+        } satisfies TaskCheckExecutorResult;
+      }
       if (argv.length === 0) {
-        return yield* new TaskWorktreeCommandError({
-          message: "The approved check command is empty.",
-        });
+        return {
+          status: "indeterminate" as const,
+          output: "The approved check command is empty.",
+          exitCode: null,
+          timedOut: false,
+          startingCommitSha,
+          endingCommitSha: startingCommitSha,
+          startingStatus,
+          endingStatus: startingStatus,
+        } satisfies TaskCheckExecutorResult;
       }
       // Scope the temp directory to the execution block: the finalizer removes
       // it on every exit path, including interruption, so it can never leak
@@ -370,15 +404,15 @@ const make = Effect.gen(function* () {
           try: () =>
             NodeFs.promises.mkdir(taskCheckTempPath(input.worktreePath), { recursive: true }),
           catch: (cause) =>
-            new TaskWorktreeCommandError({
+            new TaskCheckExecutorError({
               message: "Unable to create the task check temp directory.",
+              kind: "execution",
               cause,
             }),
         });
         const sandboxed = sandboxApprovedCheckCommand({
           argv,
           worktreePath: input.worktreePath,
-          expectedBranch: input.expectedBranch,
           platform: hostPlatform,
         });
         if (!sandboxed) return null;
@@ -393,9 +427,14 @@ const make = Effect.gen(function* () {
           timeoutBehavior: "timedOutResult",
         });
       }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new TaskWorktreeCommandError({ message: "Task check execution failed.", cause }),
+        Effect.mapError((cause) =>
+          cause instanceof TaskCheckExecutorError
+            ? cause
+            : new TaskCheckExecutorError({
+                message: "Task check execution failed.",
+                kind: "execution",
+                cause,
+              }),
         ),
         Effect.ensuring(cleanupTaskCheckTempPath(input.worktreePath).pipe(Effect.orDie)),
       );
@@ -405,11 +444,11 @@ const make = Effect.gen(function* () {
           output: "No supported OS-enforced task check sandbox is available on this host.",
           exitCode: null,
           timedOut: false,
-          startingCommitSha: beforeHead.stdout.trim(),
-          endingCommitSha: beforeHead.stdout.trim(),
+          startingCommitSha,
+          endingCommitSha: startingCommitSha,
           startingStatus: beforeStatus.stdout.trim(),
           endingStatus: beforeStatus.stdout.trim(),
-        } satisfies TaskWorktreeCommandResult;
+        } satisfies TaskCheckExecutorResult;
       }
       const result = executed;
       // Explicit release point: the temp directory must be gone before the
@@ -418,10 +457,8 @@ const make = Effect.gen(function* () {
       yield* cleanupTaskCheckTempPath(input.worktreePath);
       const afterHead = yield* git(input.worktreePath, ["rev-parse", "HEAD"]);
       const afterStatus = yield* git(input.worktreePath, ["status", "--porcelain=v2"]);
-      const startingCommitSha = beforeHead.stdout.trim();
       const endingCommitSha =
         afterHead.code === 0 && !afterHead.timedOut ? afterHead.stdout.trim() : null;
-      const startingStatus = beforeStatus.stdout.trim();
       const endingStatus =
         afterStatus.code === 0 && !afterStatus.timedOut ? afterStatus.stdout.trim() : null;
       // A failed after-observation is insufficient evidence that the worktree is
@@ -458,16 +495,20 @@ const make = Effect.gen(function* () {
         endingCommitSha,
         startingStatus,
         endingStatus,
-      } satisfies TaskWorktreeCommandResult;
+      } satisfies TaskCheckExecutorResult;
     }).pipe(
       Effect.mapError((cause) =>
-        cause instanceof TaskWorktreeCommandError
+        cause instanceof TaskCheckExecutorError
           ? cause
-          : new TaskWorktreeCommandError({ message: "Task worktree command failed.", cause }),
+          : new TaskCheckExecutorError({
+              message: "Task worktree command failed.",
+              kind: "execution",
+              cause,
+            }),
       ),
     );
 
-  return { run } satisfies TaskWorktreeCommandRunnerShape;
+  return { run } satisfies TaskCheckExecutorShape;
 });
 
-export const TaskWorktreeCommandRunnerLive = Layer.effect(TaskWorktreeCommandRunner, make);
+export const TaskCheckExecutorLive = Layer.effect(TaskCheckExecutor, make);

@@ -67,11 +67,29 @@ const makeLayer = () => {
   };
   let resolveFailure: TaskWorkspaceError | undefined;
   let completeFailure: TaskWorkspaceError | undefined;
+  let progressFailure: TaskWorkspaceError | undefined;
+  let amendmentFailure: TaskWorkspaceError | undefined;
   let lastComplete:
     | {
         readonly summary: string;
         readonly markdown: string;
         readonly providerTurnId: string;
+      }
+    | undefined;
+  let lastProgress:
+    | {
+        readonly taskId: TaskWorkspaceId;
+        readonly target: "phase" | "work-item";
+        readonly id: string;
+        readonly status: "running" | "completed" | "blocked";
+        readonly summary: string;
+      }
+    | undefined;
+  let lastAmendment:
+    | {
+        readonly taskId: TaskWorkspaceId;
+        readonly phaseId: string;
+        readonly workItemId: string;
       }
     | undefined;
 
@@ -115,6 +133,53 @@ const makeLayer = () => {
           })
         : Effect.fail(completeFailure);
     },
+    implementationProgressCli: (input: {
+      readonly taskId: TaskWorkspaceId;
+      readonly target: "phase" | "work-item";
+      readonly id: string;
+      readonly status: "running" | "completed" | "blocked";
+      readonly summary: string;
+    }) => {
+      lastProgress = {
+        taskId: input.taskId,
+        target: input.target,
+        id: input.id,
+        status: input.status,
+        summary: input.summary,
+      };
+      return progressFailure === undefined
+        ? Effect.succeed({
+            accepted: true as const,
+            phaseId: input.target === "phase" ? input.id : "phase:foundation",
+            workItemId: input.target === "work-item" ? input.id : null,
+            status: input.status,
+            taskRevision: 7,
+          })
+        : Effect.fail(progressFailure);
+    },
+    implementationAmendmentProposeCli: (input: {
+      readonly taskId: TaskWorkspaceId;
+      readonly phaseId: string;
+      readonly workItemId: string;
+      readonly triggeringCheckId: string | null;
+      readonly expected: string;
+      readonly found: string;
+      readonly impact: string;
+      readonly proposedPlanMarkdown: string;
+    }) => {
+      lastAmendment = {
+        taskId: input.taskId,
+        phaseId: input.phaseId,
+        workItemId: input.workItemId,
+      };
+      return amendmentFailure === undefined
+        ? Effect.succeed({
+            accepted: true as const,
+            amendmentId: "amendment-1",
+            taskRevision: 7,
+          })
+        : Effect.fail(amendmentFailure);
+    },
   } as unknown as TaskWorkspaceServiceShape;
 
   const collaborators = Layer.mergeAll(
@@ -149,7 +214,15 @@ const makeLayer = () => {
     failComplete: (error: TaskWorkspaceError) => {
       completeFailure = error;
     },
+    failProgress: (error: TaskWorkspaceError) => {
+      progressFailure = error;
+    },
+    failAmendment: (error: TaskWorkspaceError) => {
+      amendmentFailure = error;
+    },
     lastComplete: () => lastComplete,
+    lastProgress: () => lastProgress,
+    lastAmendment: () => lastAmendment,
     clearResolveFailure: () => {
       resolveFailure = undefined;
     },
@@ -518,6 +591,114 @@ describe("TaskInvocationService", () => {
         })
         .pipe(Effect.flip);
       expect(oversized.code).toBe("payload_too_large");
+    }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect("progresses through the bound lease and maps workflow errors to CLI codes", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("turn-progress");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("turn-progress"));
+      const acknowledgement = yield* service.progress({
+        token: issued.token,
+        target: "phase",
+        id: "phase:foundation",
+        status: "running",
+        summary: "Foundation started.",
+      });
+      expect(acknowledgement).toMatchObject({
+        accepted: true,
+        phaseId: "phase:foundation",
+        workItemId: null,
+        status: "running",
+      });
+      expect(test.lastProgress()).toEqual({
+        taskId: TaskWorkspaceId.make("task-cli-test"),
+        target: "phase",
+        id: "phase:foundation",
+        status: "running",
+        summary: "Foundation started.",
+      });
+
+      test.failProgress(
+        new TaskWorkspaceError({
+          message: "The Build occurrence is not active.",
+          commandType: "task.internal",
+        }),
+      );
+      const failure = yield* service
+        .progress({
+          token: issued.token,
+          target: "work-item",
+          id: "work:implement",
+          status: "running",
+          summary: "Should not persist.",
+        })
+        .pipe(Effect.flip);
+      expect(failure.code).toBe("not_active");
+
+      test.failProgress(
+        new TaskWorkspaceError({
+          message: "Work item 'work:missing' was not found in the active Build.",
+          commandType: "task.internal",
+        }),
+      );
+      const unknownId = yield* service
+        .progress({
+          token: issued.token,
+          target: "work-item",
+          id: "work:missing",
+          status: "running",
+          summary: "Should not persist.",
+        })
+        .pipe(Effect.flip);
+      expect(unknownId.code).toBe("invalid_request");
+    }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect("proposes amendments through the bound lease and maps gate conflicts", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("turn-amendment");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("turn-amendment"));
+      const acknowledgement = yield* service.amendmentPropose({
+        token: issued.token,
+        phaseId: "phase:foundation",
+        workItemId: "work:implement",
+        triggeringCheckId: null,
+        expected: "The Plan covers implementation.",
+        found: "The Plan needs a typecheck.",
+        impact: "Typecheck must run.",
+        proposedPlanMarkdown: "# Plan\n",
+      });
+      expect(acknowledgement).toMatchObject({ accepted: true, amendmentId: "amendment-1" });
+      expect(test.lastAmendment()).toEqual({
+        taskId: TaskWorkspaceId.make("task-cli-test"),
+        phaseId: "phase:foundation",
+        workItemId: "work:implement",
+      });
+
+      test.failAmendment(
+        new TaskWorkspaceError({
+          message: "Conflict: an implementation amendment is already open.",
+          commandType: "task.cli.amendment",
+        }),
+      );
+      const conflict = yield* service
+        .amendmentPropose({
+          token: issued.token,
+          phaseId: "phase:foundation",
+          workItemId: "work:implement",
+          triggeringCheckId: null,
+          expected: "The Plan covers implementation.",
+          found: "The Plan needs lint too.",
+          impact: "Lint must run.",
+          proposedPlanMarkdown: "# Plan 2\n",
+        })
+        .pipe(Effect.flip);
+      expect(conflict.code).toBe("conflict");
     }).pipe(Effect.provide(test.layer));
   });
 });

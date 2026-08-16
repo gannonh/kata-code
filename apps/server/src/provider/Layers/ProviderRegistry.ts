@@ -29,7 +29,6 @@ import {
   type ServerProvider,
   type ServerProviderUpdateState,
 } from "@kata-sh/code-contracts";
-import { supportsTaskWorktreeWrite as hasTaskWorktreeWriteCapability } from "../Services/ProviderAdapter.ts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -53,7 +52,6 @@ import {
   writeProviderStatusCache,
 } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
-import { declaredTaskStageSupport } from "../builtInDrivers.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
@@ -179,18 +177,7 @@ const snapshotInstanceKey = (provider: ServerProvider): ProviderInstanceId => {
 // its settings changed), a fresh source rides the new PubSub instead
 // of a closed one.
 const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => {
-  const supportsTaskStage =
-    instance.adapter?.capabilities?.supportsTaskStage ??
-    instance.supportsTaskStage ??
-    declaredTaskStageSupport(instance.driverKind);
-  const supportsTaskWorktreeWrite = instance.adapter?.capabilities
-    ? hasTaskWorktreeWriteCapability(instance.adapter.capabilities)
-    : undefined;
-  const augment = (snapshot: ServerProvider): ServerProvider => ({
-    ...snapshot,
-    ...(supportsTaskStage === undefined ? {} : { supportsTaskStage }),
-    ...(supportsTaskWorktreeWrite === undefined ? {} : { supportsTaskWorktreeWrite }),
-  });
+  const augment = (snapshot: ServerProvider): ServerProvider => snapshot;
   return {
     instanceId: instance.instanceId,
     driverKind: instance.driverKind,

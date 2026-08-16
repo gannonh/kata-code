@@ -65,14 +65,6 @@ export type TaskWorkspacePreset = typeof TaskWorkspacePreset.Type;
 export const TaskWorkspaceWorktreePolicy = Schema.Literals(["now", "later", "never"]);
 export type TaskWorkspaceWorktreePolicy = typeof TaskWorkspaceWorktreePolicy.Type;
 
-/**
- * Enforced execution profile for pre-Implement stages. Only `planning` exists
- * in this slice; it forbids write effects during Clarify, Research, Design, and
- * Plan.
- */
-export const TaskWorkspaceExecutionProfile = Schema.Literals(["planning", "task-worktree-write"]);
-export type TaskWorkspaceExecutionProfile = typeof TaskWorkspaceExecutionProfile.Type;
-
 /** Canonical repository provisioning status; `provisioned` stays decode-only. */
 export const TaskWorkspaceProvisioningStatus = Schema.Literals([
   "not-requested",
@@ -102,9 +94,6 @@ export const TaskWorkspacePreferences = Schema.Struct({
   ),
   modelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  executionProfile: TaskWorkspaceExecutionProfile.pipe(
-    Schema.withDecodingDefault(Effect.succeed("planning")),
   ),
   /**
    * One task-wide agent permission governing every stage session, including
@@ -144,9 +133,6 @@ export type TaskWorkspaceBootstrapConversationTarget =
  */
 export const TaskWorkspaceBootstrapState = Schema.Struct({
   operationKey: TrimmedNonEmptyString,
-  executionProfile: TaskWorkspaceExecutionProfile.pipe(
-    Schema.withDecodingDefault(Effect.succeed("planning")),
-  ),
   presentation: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(Effect.succeed("stage"))),
   status: TaskWorkspaceBootstrapStatus,
   currentStep: Schema.NullOr(TrimmedNonEmptyString).pipe(
@@ -334,6 +320,9 @@ export const TaskWorkspaceCheckAttempt = Schema.Struct({
   startedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   completedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   endingCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  indeterminateAcknowledgedAt: Schema.NullOr(IsoDateTime).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
 });
@@ -672,7 +661,6 @@ export const TaskWorkspace = Schema.Struct({
       Effect.succeed({
         worktreePolicy: "later",
         modelSelection: null,
-        executionProfile: "planning",
         runtimeMode: DEFAULT_RUNTIME_MODE,
       }),
     ),
@@ -1020,6 +1008,20 @@ const TaskImplementationCheckRunCommand = Schema.Struct({
   operationKey: TrimmedNonEmptyString,
 });
 
+/**
+ * Human/server acknowledgement of an indeterminate check attempt. Recording
+ * the unknown outcome authorizes the next numbered attempt for the check.
+ */
+const TaskImplementationCheckAckCommand = Schema.Struct({
+  ...TaskCommandBase,
+  type: Schema.Literal("task.implementation.check.ack"),
+  checkId: TrimmedNonEmptyString,
+  attemptId: TrimmedNonEmptyString,
+  acknowledgedBy: TrimmedNonEmptyString,
+  expectedTaskRevision: Schema.optional(NonNegativeInt),
+  operationKey: Schema.optional(TrimmedNonEmptyString),
+});
+
 const TaskImplementationAmendmentProposeCommand = Schema.Struct({
   ...TaskCommandBase,
   type: Schema.Literal("task.implementation.amendment.propose"),
@@ -1171,6 +1173,7 @@ export const TaskWorkspaceCommand = Schema.Union([
   TaskImplementationStartCommand,
   TaskImplementationProgressCommand,
   TaskImplementationCheckRunCommand,
+  TaskImplementationCheckAckCommand,
   TaskImplementationAmendmentProposeCommand,
   TaskImplementationCompleteCommand,
   TaskBuildPhaseStartCommand,
@@ -1216,6 +1219,7 @@ export const TaskWorkspaceEventType = Schema.Literals([
   "task.implementation.progress",
   "task.implementation.check.run",
   "task.implementation.check.updated",
+  "task.implementation.check.ack",
   "task.implementation.amendment.propose",
   "task.implementation.amendment.updated",
   "task.implementation.complete",
@@ -1431,6 +1435,15 @@ export const TaskWorkspaceCompletionProposal = Schema.Struct({
   rejectionReason: Schema.NullOr(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  // Build-stage completion basis captured at proposal time. Settlement
+  // revalidates the canonical worktree against these before advancing, so
+  // complete-then-mutate or commit drift rejects the proposal.
+  proposalCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  proposalStatusSnapshot: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
@@ -1440,7 +1453,6 @@ export const TaskWorkspaceOutboxTarget = Schema.Literals([
   "worktree",
   "bootstrap",
   "proposal-commit",
-  "implementation-check",
 ]);
 export type TaskWorkspaceOutboxTarget = typeof TaskWorkspaceOutboxTarget.Type;
 
@@ -1479,9 +1491,6 @@ export type TaskWorkspaceOutboxEntry = typeof TaskWorkspaceOutboxEntry.Type;
 export const TaskWorkspaceBootstrapOutboxPayload = Schema.Struct({
   stage: TaskWorkspaceStage,
   occurrence: NonNegativeInt,
-  executionProfile: TaskWorkspaceExecutionProfile.pipe(
-    Schema.withDecodingDefault(Effect.succeed("planning")),
-  ),
   // Captured from task preferences when the bootstrap is allocated so the
   // worker starts every stage session in the task's current permission.
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
@@ -1518,17 +1527,6 @@ export const TaskWorkspaceWorktreeOutboxPayload = Schema.Struct({
   sourceWorkspaceRoot: TrimmedNonEmptyString,
 });
 export type TaskWorkspaceWorktreeOutboxPayload = typeof TaskWorkspaceWorktreeOutboxPayload.Type;
-
-export const TaskWorkspaceImplementationCheckOutboxPayload = Schema.Struct({
-  attemptId: TrimmedNonEmptyString,
-  checkId: TrimmedNonEmptyString,
-  worktreePath: TrimmedNonEmptyString,
-  command: TrimmedNonEmptyString,
-  commandDigest: TrimmedNonEmptyString,
-  timeoutMs: NonNegativeInt,
-});
-export type TaskWorkspaceImplementationCheckOutboxPayload =
-  typeof TaskWorkspaceImplementationCheckOutboxPayload.Type;
 
 /**
  * Provider-neutral task-stage bridge payloads. The context result contains
@@ -1567,9 +1565,6 @@ export const TaskStageCompletionAck = Schema.Struct({
 });
 export type TaskStageCompletionAck = typeof TaskStageCompletionAck.Type;
 
-export const TaskImplementationContextInput = Schema.Struct({});
-export type TaskImplementationContextInput = typeof TaskImplementationContextInput.Type;
-
 export const TaskWorkspaceImplementationProgress = Schema.Struct({
   phaseId: TrimmedNonEmptyString,
   workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
@@ -1579,35 +1574,6 @@ export const TaskWorkspaceImplementationProgress = Schema.Struct({
   summary: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type TaskWorkspaceImplementationProgress = typeof TaskWorkspaceImplementationProgress.Type;
-
-export const TaskImplementationProgressInput = Schema.Struct({
-  phaseId: TrimmedNonEmptyString,
-  workItemId: Schema.NullOr(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  status: Schema.Literals(["running", "completed", "blocked"]),
-  summary: TrimmedNonEmptyString,
-});
-export type TaskImplementationProgressInput = typeof TaskImplementationProgressInput.Type;
-
-export const TaskImplementationContextResult = Schema.Struct({
-  stage: Schema.Literal("build"),
-  occurrence: NonNegativeInt,
-  brief: Schema.String,
-  planRevisionId: TrimmedNonEmptyString,
-  planMarkdown: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  phases: Schema.Array(TaskWorkspaceBuildPhase),
-  checks: Schema.Array(TaskWorkspaceBuildCheck),
-  checkpoints: Schema.Array(TaskWorkspaceBuildCheckpoint),
-  amendments: Schema.Array(TaskWorkspaceAmendment),
-  checkAttempts: Schema.Array(TaskWorkspaceCheckAttempt).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
-  currentCommitSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-});
-export type TaskImplementationContextResult = typeof TaskImplementationContextResult.Type;
 
 export const TaskImplementationProgressAck = Schema.Struct({
   accepted: Schema.Literal(true),
@@ -1620,67 +1586,12 @@ export const TaskImplementationProgressAck = Schema.Struct({
 });
 export type TaskImplementationProgressAck = typeof TaskImplementationProgressAck.Type;
 
-export const TaskImplementationCheckRunInput = Schema.Struct({ checkId: TrimmedNonEmptyString });
-export type TaskImplementationCheckRunInput = typeof TaskImplementationCheckRunInput.Type;
-
-export const TaskImplementationCheckRunAck = Schema.Struct({
-  accepted: Schema.Literal(true),
-  checkId: TrimmedNonEmptyString,
-  attemptId: TrimmedNonEmptyString,
-  status: TaskWorkspaceBuildCheckStatus,
-  taskRevision: NonNegativeInt,
-});
-export type TaskImplementationCheckRunAck = typeof TaskImplementationCheckRunAck.Type;
-
-export const TaskImplementationAmendmentInput = Schema.Struct({
-  phaseId: TrimmedNonEmptyString,
-  workItemId: TrimmedNonEmptyString,
-  triggeringCheckId: Schema.NullOr(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
-  expected: TrimmedNonEmptyString,
-  found: TrimmedNonEmptyString,
-  impact: TrimmedNonEmptyString,
-  proposedPlanMarkdown: Schema.String,
-});
-export type TaskImplementationAmendmentInput = typeof TaskImplementationAmendmentInput.Type;
-
 export const TaskImplementationAmendmentAck = Schema.Struct({
   accepted: Schema.Literal(true),
   amendmentId: TrimmedNonEmptyString,
   taskRevision: NonNegativeInt,
 });
 export type TaskImplementationAmendmentAck = typeof TaskImplementationAmendmentAck.Type;
-
-export const TaskImplementationCompleteInput = Schema.Struct({ summary: TrimmedNonEmptyString });
-export type TaskImplementationCompleteInput = typeof TaskImplementationCompleteInput.Type;
-
-export const TaskImplementationCompleteAck = Schema.Struct({
-  accepted: Schema.Literal(true),
-  proposalId: TrimmedNonEmptyString,
-  providerTurnId: TrimmedNonEmptyString,
-});
-export type TaskImplementationCompleteAck = typeof TaskImplementationCompleteAck.Type;
-
-export const TaskImplementationToolErrorCode = Schema.Literals([
-  "unauthorized",
-  "not-active",
-  "turn-unavailable",
-  "conflict",
-  "invalid",
-  "stale-revision",
-  "unknown-id",
-  "dependency-blocked",
-  "check-blocked",
-  "gate-open",
-  "worktree-invalid",
-]);
-export type TaskImplementationToolErrorCode = typeof TaskImplementationToolErrorCode.Type;
-
-export class TaskImplementationToolError extends Schema.TaggedErrorClass<TaskImplementationToolError>()(
-  "TaskImplementationToolError",
-  { code: TaskImplementationToolErrorCode, message: Schema.String },
-) {}
 
 export const TaskStageToolErrorCode = Schema.Literals([
   "unauthorized",

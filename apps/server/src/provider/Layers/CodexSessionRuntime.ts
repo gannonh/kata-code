@@ -8,7 +8,6 @@ import {
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderInteractionMode,
-  type ProviderTaskExecutionProfile,
   type ProviderRequestKind,
   type ProviderSession,
   type ProviderTurnStartResult,
@@ -17,7 +16,6 @@ import {
   ThreadId,
   TurnId,
 } from "@kata-sh/code-contracts";
-import { MCP_SERVER_NAME } from "@kata-sh/code-shared/branding";
 import { normalizeModelSlug } from "@kata-sh/code-shared/model";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import * as Crypto from "effect/Crypto";
@@ -69,34 +67,13 @@ export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | un
   return appServerArgs?.some((argument) => argument.includes("mcp_servers.")) === true;
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+export function buildMcpServerElicitationResponse(): EffectCodexSchema.McpServerElicitationRequestResponse {
+  return { action: "decline", content: null };
 }
 
-export function buildMcpServerElicitationResponse(input: {
-  readonly taskStage: boolean;
-  readonly serverName: string;
-  readonly meta: unknown;
-}): EffectCodexSchema.McpServerElicitationRequestResponse {
-  const isTaskStageToolApproval =
-    input.taskStage &&
-    input.serverName === MCP_SERVER_NAME &&
-    isRecord(input.meta) &&
-    input.meta.codex_approval_kind === "mcp_tool_call";
-
-  return isTaskStageToolApproval ? { action: "accept" } : { action: "decline", content: null };
-}
-
-export function buildPermissionsRequestApprovalResponse(input: {
-  readonly taskStage: boolean;
-  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
-  readonly requested: EffectCodexSchema.PermissionsRequestApprovalParams["permissions"];
-}): EffectCodexSchema.PermissionsRequestApprovalResponse {
-  const grantsNetwork =
-    input.taskExecutionProfile === "planning" && input.requested.network?.enabled === true;
-
+export function buildPermissionsRequestApprovalResponse(): EffectCodexSchema.PermissionsRequestApprovalResponse {
   return {
-    permissions: grantsNetwork ? { network: { enabled: true } } : {},
+    permissions: {},
     scope: "turn",
   };
 }
@@ -141,17 +118,11 @@ export interface CodexSessionRuntimeOptions {
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
   readonly developerInstructions?: string;
-  readonly taskStage?: boolean;
-  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly appServerArgs?: ReadonlyArray<string>;
-  /**
-   * Extra writable roots for the task implementation shell sandbox: the task's
-   * git metadata and its agent home. The permission profile still governs the
-   * file tools; this only widens what the shell may write outside the worktree.
-   */
-  readonly taskSandboxWritableRoots?: ReadonlyArray<string>;
+  /** Task CLI protocol sessions always need localhost network access. */
+  readonly taskCliNetworkAccess?: boolean;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -164,8 +135,6 @@ export interface CodexSessionRuntimeSendTurnInput {
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
   readonly developerInstructions?: string;
-  readonly taskStage?: boolean;
-  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly interactionMode?: ProviderInteractionMode;
 }
 
@@ -337,7 +306,6 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
 function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
-  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly model: string | undefined;
   readonly developerInstructions?: string;
   readonly serviceTier: CodexServiceTier | undefined;
@@ -346,42 +314,19 @@ function buildThreadStartParams(input: {
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
-    ...(input.taskExecutionProfile === "task-worktree-write" ? {} : { sandbox: config.sandbox }),
+    sandbox: config.sandbox,
     ...(input.model ? { model: input.model } : {}),
     ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
 }
 
-function runtimeModeToTurnSandboxPolicy(
-  input: RuntimeMode,
-  taskExecutionProfile?: ProviderTaskExecutionProfile,
-  taskSandboxWritableRoots: ReadonlyArray<string> = [],
-): EffectCodexSchema.V2TurnStartParams__SandboxPolicy | undefined {
-  if (taskExecutionProfile === "task-worktree-write") {
-    // The permission profile's filesystem map governs the file tools. This
-    // policy governs the shell sandbox, and it must keep the per-user TMPDIR
-    // and /tmp writable: with them excluded, git's xcrun cache, python, and
-    // the patch helper all fail with "couldn't create cache file ... Operation
-    // not permitted", which made implementation sessions unable to work.
-    return {
-      type: "workspaceWrite",
-      networkAccess: false,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false,
-      writableRoots: [...taskSandboxWritableRoots],
-    };
-  }
+type CodexRuntimeSandboxPolicy =
+  | { readonly type: "readOnly" }
+  | { readonly type: "workspaceWrite" }
+  | { readonly type: "dangerFullAccess" };
 
-  if (taskExecutionProfile === "planning") {
-    // Planning artifacts are submitted through the Task CLI. Writes in the
-    // planning checkout change the pinned root fingerprint and block complete.
-    return {
-      type: "readOnly",
-      networkAccess: true,
-    };
-  }
-
+function runtimeModeToTurnSandboxPolicy(input: RuntimeMode): CodexRuntimeSandboxPolicy | undefined {
   switch (input) {
     case "approval-required":
       return {
@@ -397,6 +342,24 @@ function runtimeModeToTurnSandboxPolicy(
         type: "dangerFullAccess",
       };
   }
+}
+
+/**
+ * Task sessions keep the sandbox shape of the selected runtime mode but must
+ * always reach the local Kata server over HTTP: `katacode task ...` is the
+ * workflow protocol, not a permission override. Standard-mode network
+ * defaults are restored otherwise.
+ */
+function withTaskCliNetworkAccess(
+  policy: CodexRuntimeSandboxPolicy | undefined,
+):
+  | CodexRuntimeSandboxPolicy
+  | { readonly type: "readOnly"; readonly networkAccess: true }
+  | { readonly type: "workspaceWrite"; readonly networkAccess: true }
+  | undefined {
+  if (policy === undefined) return undefined;
+  if (policy.type === "dangerFullAccess") return policy;
+  return { ...policy, networkAccess: true };
 }
 
 function buildCodexCollaborationMode(input: {
@@ -437,10 +400,8 @@ export function buildTurnStartParams(input: {
   readonly serviceTier?: CodexServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly developerInstructions?: string;
-  readonly taskStage?: boolean;
-  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
-  readonly taskSandboxWritableRoots?: ReadonlyArray<string>;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly taskCliNetworkAccess?: boolean;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -457,11 +418,10 @@ export function buildTurnStartParams(input: {
   }
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
-  const sandboxPolicy = runtimeModeToTurnSandboxPolicy(
-    input.runtimeMode,
-    input.taskExecutionProfile,
-    input.taskSandboxWritableRoots,
-  );
+  const sandboxPolicy =
+    input.taskCliNetworkAccess === true
+      ? withTaskCliNetworkAccess(runtimeModeToTurnSandboxPolicy(input.runtimeMode))
+      : runtimeModeToTurnSandboxPolicy(input.runtimeMode);
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
@@ -528,7 +488,6 @@ export const openCodexThread = (input: {
   readonly client: CodexThreadOpenClient;
   readonly threadId: ThreadId;
   readonly runtimeMode: RuntimeMode;
-  readonly taskExecutionProfile?: ProviderTaskExecutionProfile;
   readonly cwd: string;
   readonly requestedModel: string | undefined;
   readonly developerInstructions?: string;
@@ -539,7 +498,6 @@ export const openCodexThread = (input: {
   const startParams = buildThreadStartParams({
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
-    ...(input.taskExecutionProfile ? { taskExecutionProfile: input.taskExecutionProfile } : {}),
     model: input.requestedModel,
     ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     serviceTier: input.serviceTier,
@@ -1209,26 +1167,12 @@ export const makeCodexSessionRuntime = (
       }),
     );
 
-    yield* client.handleServerRequest("mcpServer/elicitation/request", (payload) =>
-      Effect.succeed(
-        buildMcpServerElicitationResponse({
-          taskStage: options.taskStage === true,
-          serverName: payload.serverName,
-          meta: payload._meta,
-        }),
-      ),
+    yield* client.handleServerRequest("mcpServer/elicitation/request", () =>
+      Effect.succeed(buildMcpServerElicitationResponse()),
     );
 
-    yield* client.handleServerRequest("item/permissions/requestApproval", (payload) =>
-      Effect.succeed(
-        buildPermissionsRequestApprovalResponse({
-          taskStage: options.taskStage === true,
-          ...(options.taskExecutionProfile
-            ? { taskExecutionProfile: options.taskExecutionProfile }
-            : {}),
-          requested: payload.permissions,
-        }),
-      ),
+    yield* client.handleServerRequest("item/permissions/requestApproval", () =>
+      Effect.succeed(buildPermissionsRequestApprovalResponse()),
     );
 
     yield* client.handleUnknownServerRequest((method) =>
@@ -1326,9 +1270,6 @@ export const makeCodexSessionRuntime = (
         client,
         threadId: options.threadId,
         runtimeMode: options.runtimeMode,
-        ...(options.taskExecutionProfile
-          ? { taskExecutionProfile: options.taskExecutionProfile }
-          : {}),
         cwd: options.cwd,
         requestedModel,
         ...(options.developerInstructions
@@ -1412,16 +1353,10 @@ export const makeCodexSessionRuntime = (
             ...(input.developerInstructions
               ? { developerInstructions: input.developerInstructions }
               : {}),
-            ...(input.taskStage === true ? { taskStage: true } : {}),
-            ...((input.taskExecutionProfile ?? options.taskExecutionProfile)
-              ? {
-                  taskExecutionProfile: input.taskExecutionProfile ?? options.taskExecutionProfile,
-                }
-              : {}),
-            ...(options.taskSandboxWritableRoots && options.taskSandboxWritableRoots.length > 0
-              ? { taskSandboxWritableRoots: options.taskSandboxWritableRoots }
-              : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+            ...(options.taskCliNetworkAccess === true
+              ? { taskCliNetworkAccess: true as const }
+              : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

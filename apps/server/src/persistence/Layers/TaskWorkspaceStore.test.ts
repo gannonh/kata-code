@@ -39,7 +39,6 @@ function task(revision: number): TaskWorkspace {
     preferences: {
       worktreePolicy: "later",
       modelSelection: null,
-      executionProfile: "planning",
       runtimeMode: "full-access",
     },
     bootstrap: null,
@@ -216,6 +215,8 @@ describe("TaskWorkspaceStore", () => {
         terminalTurnOutcome: null,
         committedArtifactRevisionId: null,
         rejectionReason: null,
+        proposalCommitSha: null,
+        proposalStatusSnapshot: null,
         createdAt: now,
         settledAt: null,
       };

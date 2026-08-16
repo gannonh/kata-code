@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { inspectTaskCliInvocationArgs } from "./task.ts";
 
 describe("inspectTaskCliInvocationArgs", () => {
-  it("accepts the Task context and complete verbs as the first positional argument", () => {
+  it("accepts the Task context, complete, progress, check, and amendment verbs", () => {
     expect(inspectTaskCliInvocationArgs(["task", "context"])).toBeUndefined();
     expect(inspectTaskCliInvocationArgs(["--no-browser", "task", "context"])).toBeUndefined();
     expect(
@@ -13,6 +13,38 @@ describe("inspectTaskCliInvocationArgs", () => {
         "--summary",
         "Done.",
         "--artifact-file",
+        "-",
+      ]),
+    ).toBeUndefined();
+    expect(
+      inspectTaskCliInvocationArgs([
+        "task",
+        "progress",
+        "phase",
+        "phase:a",
+        "--status",
+        "running",
+        "--summary",
+        "s",
+      ]),
+    ).toBeUndefined();
+    expect(inspectTaskCliInvocationArgs(["task", "check", "run", "check:a"])).toBeUndefined();
+    expect(
+      inspectTaskCliInvocationArgs([
+        "task",
+        "amendment",
+        "propose",
+        "--phase",
+        "p",
+        "--work-item",
+        "w",
+        "--expected",
+        "e",
+        "--found",
+        "f",
+        "--impact",
+        "i",
+        "--input",
         "-",
       ]),
     ).toBeUndefined();
@@ -28,12 +60,12 @@ describe("inspectTaskCliInvocationArgs", () => {
     expect(inspectTaskCliInvocationArgs(["task"])).toEqual({
       operation: "context",
       message:
-        "Specify a Task command. The available commands are `katacode task context` and `katacode task complete`.",
+        "Specify a Task command. The available commands are `katacode task context`, `katacode task progress`, `katacode task check run`, `katacode task amendment propose`, and `katacode task complete`.",
     });
-    expect(inspectTaskCliInvocationArgs(["task", "progress"])).toEqual({
+    expect(inspectTaskCliInvocationArgs(["task", "explain"])).toEqual({
       operation: "context",
       message:
-        "Unknown Task command `progress`. The available commands are `katacode task context` and `katacode task complete`.",
+        "Unknown Task command `explain`. The available commands are `katacode task context`, `katacode task progress`, `katacode task check run`, `katacode task amendment propose`, and `katacode task complete`.",
     });
   });
 

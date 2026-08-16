@@ -9,8 +9,11 @@ const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
 const DELETED_PATHS = [
   "apps/server/src/taskWorkspace/TaskStageBridge.ts",
+  "apps/server/src/taskWorkspace/TaskImplementationBridge.ts",
   "apps/server/src/mcp/toolkits/taskStage/tools.ts",
   "apps/server/src/mcp/toolkits/taskStage/handlers.ts",
+  "apps/server/src/mcp/toolkits/taskImplementation/tools.ts",
+  "apps/server/src/mcp/toolkits/taskImplementation/handlers.ts",
 ] as const;
 
 const SEARCH_ROOTS = [
@@ -24,9 +27,17 @@ const SEARCH_ROOTS = [
 const FORBIDDEN = [
   /task_stage_context/u,
   /task_stage_complete/u,
+  /task_implementation_context/u,
+  /task_implementation_progress/u,
+  /task_implementation_check_run/u,
+  /task_implementation_amendment_propose/u,
+  /task_implementation_complete/u,
   /TaskStageBridge/u,
+  /TaskImplementationBridge/u,
   /mcp\/toolkits\/taskStage/u,
+  /mcp\/toolkits\/taskImplementation/u,
   /has\("task-stage"\)/u,
+  /has\("task-implementation"\)/u,
 ];
 
 const collectSourceFiles = (dir: string, acc: string[]): void => {
@@ -44,8 +55,8 @@ const collectSourceFiles = (dir: string, acc: string[]): void => {
   }
 };
 
-describe("Task-stage MCP deletion", () => {
-  it("removes the planning MCP bridge, toolkit, and capability registration", () => {
+describe("Task MCP deletion", () => {
+  it("removes the planning and implementation MCP bridges, toolkits, and capabilities", () => {
     for (const relative of DELETED_PATHS) {
       expect(existsSync(NodePath.join(repoRoot, relative))).toBe(false);
     }
@@ -54,14 +65,15 @@ describe("Task-stage MCP deletion", () => {
       NodePath.join(repoRoot, "apps/server/src/mcp/McpInvocationContext.ts"),
       "utf8",
     );
-    expect(capabilitySource).toContain('"preview" | "task-implementation"');
+    expect(capabilitySource).toContain('"preview"');
+    expect(capabilitySource).not.toContain('"task-implementation"');
     expect(capabilitySource).not.toContain('"task-stage"');
 
     const httpSource = readFileSync(
       NodePath.join(repoRoot, "apps/server/src/mcp/McpHttpServer.ts"),
       "utf8",
     );
-    expect(httpSource).toContain("TaskImplementationToolkit");
+    expect(httpSource).not.toContain("TaskImplementationToolkit");
     expect(httpSource).not.toMatch(/TaskStageToolkit|taskStage\/tools|task_stage_/u);
 
     const hits: string[] = [];

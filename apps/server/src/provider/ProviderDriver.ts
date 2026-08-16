@@ -50,8 +50,6 @@ export interface ProviderDriverMetadata {
    * rejects multi-instance configurations with a clear error.
    */
   readonly supportsMultipleInstances?: boolean;
-  /** Whether instances from this driver can run Guided task stages. */
-  readonly supportsTaskStage?: boolean;
 }
 
 /**
@@ -67,8 +65,6 @@ export interface ProviderInstance {
   readonly instanceId: ProviderInstanceId;
   readonly driverKind: ProviderDriverKind;
   readonly continuationIdentity: ProviderContinuationIdentity;
-  /** Static driver capability used when an adapter snapshot is still pending. */
-  readonly supportsTaskStage?: boolean;
   readonly displayName: string | undefined;
   readonly accentColor?: string | undefined;
   readonly enabled: boolean;

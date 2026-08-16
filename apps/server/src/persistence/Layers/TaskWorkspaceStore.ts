@@ -85,6 +85,8 @@ const ProposalRow = Schema.Struct({
   terminalTurnOutcome: Schema.NullOr(Schema.String),
   committedArtifactRevisionId: Schema.NullOr(Schema.String),
   rejectionReason: Schema.NullOr(Schema.String),
+  proposalCommitSha: Schema.NullOr(Schema.String),
+  proposalStatusSnapshot: Schema.NullOr(Schema.String),
   createdAt: IsoDateTime,
   settledAt: Schema.NullOr(Schema.String),
 });
@@ -270,7 +272,7 @@ const makeStore = Effect.gen(function* () {
           proposal_id, environment_id, task_id, stage, occurrence, session_id,
           thread_id, provider_turn_id, payload_digest, summary, markdown, status,
           terminal_turn_outcome, committed_artifact_revision_id, rejection_reason,
-          created_at, settled_at
+          proposal_commit_sha, proposal_status_snapshot, created_at, settled_at
         )
         VALUES (
           ${request.proposalId}, ${request.environmentId}, ${request.taskId},
@@ -278,13 +280,16 @@ const makeStore = Effect.gen(function* () {
           ${request.threadId}, ${request.providerTurnId}, ${request.payloadDigest},
           ${request.summary}, ${request.markdown}, ${request.status},
           ${request.terminalTurnOutcome}, ${request.committedArtifactRevisionId},
-          ${request.rejectionReason}, ${request.createdAt}, ${request.settledAt}
+          ${request.rejectionReason}, ${request.proposalCommitSha},
+          ${request.proposalStatusSnapshot}, ${request.createdAt}, ${request.settledAt}
         )
         ON CONFLICT (task_id, occurrence, provider_turn_id) DO UPDATE SET
           status = excluded.status,
           terminal_turn_outcome = excluded.terminal_turn_outcome,
           committed_artifact_revision_id = excluded.committed_artifact_revision_id,
           rejection_reason = excluded.rejection_reason,
+          proposal_commit_sha = excluded.proposal_commit_sha,
+          proposal_status_snapshot = excluded.proposal_status_snapshot,
           settled_at = excluded.settled_at
       `,
   });
@@ -348,23 +353,6 @@ const makeStore = Effect.gen(function* () {
       `,
   });
 
-  const readRunningImplementationCheckRows = SqlSchema.findAll({
-    Request: Schema.Struct({ environmentId: EnvironmentId, limit: Schema.Number }),
-    Result: OutboxRow,
-    execute: (request) =>
-      sql`
-        SELECT outbox_id AS "outboxId", environment_id AS "environmentId",
-          task_id AS "taskId", operation_key AS "operationKey", target, status,
-          payload_json AS "payloadJson", attempt_count AS "attemptCount",
-          created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt"
-        FROM task_workspace_outbox
-        WHERE environment_id = ${request.environmentId}
-          AND target = 'implementation-check' AND status = 'running'
-        ORDER BY created_at ASC
-        LIMIT ${request.limit}
-      `,
-  });
-
   const findProposal = SqlSchema.findOneOption({
     Request: Schema.Struct({
       taskId: TaskWorkspaceId,
@@ -380,8 +368,10 @@ const makeStore = Effect.gen(function* () {
           payload_digest AS "payloadDigest", summary, markdown, status,
           terminal_turn_outcome AS "terminalTurnOutcome",
           committed_artifact_revision_id AS "committedArtifactRevisionId",
-          rejection_reason AS "rejectionReason", created_at AS "createdAt",
-          settled_at AS "settledAt"
+          rejection_reason AS "rejectionReason",
+          proposal_commit_sha AS "proposalCommitSha",
+          proposal_status_snapshot AS "proposalStatusSnapshot",
+          created_at AS "createdAt", settled_at AS "settledAt"
         FROM task_workspace_completion_proposals
         WHERE task_id = ${request.taskId} AND occurrence = ${request.occurrence}
           AND provider_turn_id = ${request.providerTurnId}
@@ -399,8 +389,10 @@ const makeStore = Effect.gen(function* () {
           payload_digest AS "payloadDigest", summary, markdown, status,
           terminal_turn_outcome AS "terminalTurnOutcome",
           committed_artifact_revision_id AS "committedArtifactRevisionId",
-          rejection_reason AS "rejectionReason", created_at AS "createdAt",
-          settled_at AS "settledAt"
+          rejection_reason AS "rejectionReason",
+          proposal_commit_sha AS "proposalCommitSha",
+          proposal_status_snapshot AS "proposalStatusSnapshot",
+          created_at AS "createdAt", settled_at AS "settledAt"
         FROM task_workspace_completion_proposals
         WHERE status = 'proposed'
         ORDER BY created_at ASC
@@ -498,6 +490,8 @@ const makeStore = Effect.gen(function* () {
               terminalTurnOutcome: input.proposal.terminalTurnOutcome,
               committedArtifactRevisionId: input.proposal.committedArtifactRevisionId,
               rejectionReason: input.proposal.rejectionReason,
+              proposalCommitSha: input.proposal.proposalCommitSha,
+              proposalStatusSnapshot: input.proposal.proposalStatusSnapshot,
               createdAt: input.proposal.createdAt,
               settledAt: input.proposal.settledAt,
             }).pipe(Effect.mapError(toSqlError("TaskWorkspaceStore.commit:upsertProposal")));
@@ -652,6 +646,8 @@ const makeStore = Effect.gen(function* () {
       terminalTurnOutcome: proposal.terminalTurnOutcome,
       committedArtifactRevisionId: proposal.committedArtifactRevisionId,
       rejectionReason: proposal.rejectionReason,
+      proposalCommitSha: proposal.proposalCommitSha,
+      proposalStatusSnapshot: proposal.proposalStatusSnapshot,
       createdAt: proposal.createdAt,
       settledAt: proposal.settledAt,
     }).pipe(Effect.mapError(toSqlError("TaskWorkspaceStore.upsertProposal")));
@@ -704,31 +700,6 @@ const makeStore = Effect.gen(function* () {
       ),
     importLegacy,
     readPendingOutbox,
-    readRunningImplementationChecks: ({ environmentId, limit }) =>
-      readRunningImplementationCheckRows({ environmentId, limit }).pipe(
-        Effect.mapError(toSqlError("TaskWorkspaceStore.readRunningImplementationChecks:query")),
-        Effect.flatMap((rows) =>
-          Effect.forEach(rows, (row) =>
-            decodeOutbox({
-              id: row.outboxId,
-              environmentId: row.environmentId,
-              taskId: row.taskId,
-              operationKey: row.operationKey,
-              target: row.target,
-              status: row.status,
-              payload: JSON.parse(row.payloadJson) as unknown,
-              attemptCount: row.attemptCount,
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-              completedAt: row.completedAt,
-            }).pipe(
-              Effect.mapError(
-                toDecodeError("TaskWorkspaceStore.readRunningImplementationChecks:row"),
-              ),
-            ),
-          ),
-        ),
-      ),
     getOutboxByOperationKey: (input) =>
       findOutboxByOperationKey(input).pipe(
         Effect.mapError(toSqlError("TaskWorkspaceStore.getOutboxByOperationKey:query")),
@@ -773,6 +744,8 @@ const makeStore = Effect.gen(function* () {
               terminalTurnOutcome: row.terminalTurnOutcome,
               committedArtifactRevisionId: row.committedArtifactRevisionId,
               rejectionReason: row.rejectionReason,
+              proposalCommitSha: row.proposalCommitSha,
+              proposalStatusSnapshot: row.proposalStatusSnapshot,
               createdAt: row.createdAt,
               settledAt: row.settledAt,
             }),
@@ -800,6 +773,8 @@ const makeStore = Effect.gen(function* () {
               terminalTurnOutcome: row.terminalTurnOutcome,
               committedArtifactRevisionId: row.committedArtifactRevisionId,
               rejectionReason: row.rejectionReason,
+              proposalCommitSha: row.proposalCommitSha,
+              proposalStatusSnapshot: row.proposalStatusSnapshot,
               createdAt: row.createdAt,
               settledAt: row.settledAt,
             }),

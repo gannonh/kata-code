@@ -76,6 +76,7 @@ interface ActiveLogin {
 
 const activeLogins = new Map<string, ActiveLogin>();
 
+// eslint-disable-next-line no-control-regex -- OSC 8 hyperlink control sequences are intentional terminal output.
 const OSC8_HYPERLINK_PATTERN = /\x1b\]8;[^\x07\x1b;]*;(https?:\/\/[^\x07\x1b]+)(?:\x07|\x1b\\)/gu;
 
 /** Strip ANSI escape sequences and OSC hyperlinks from terminal output. */

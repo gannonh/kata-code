@@ -33,7 +33,6 @@ export function makeTaskWorkspace(overrides: Partial<TaskWorkspace> = {}): TaskW
     preferences: {
       worktreePolicy: "later",
       modelSelection: null,
-      executionProfile: "planning",
       runtimeMode: "full-access",
     },
     bootstrap: null,

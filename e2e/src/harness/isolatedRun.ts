@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdtemp, mkdir, rm } from "node:fs/promises";
-import { homedir, tmpdir, platform } from "node:os";
+import { homedir, tmpdir, platform, userInfo } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
@@ -141,6 +141,98 @@ async function stageCodexOAuthAuth(katacodeHome: string): Promise<boolean> {
   }
 }
 
+type ClaudeE2eAuthMode = "oauth" | "oauth-or-api-key" | "api-key";
+
+function readClaudeE2eAuthMode(): ClaudeE2eAuthMode {
+  const value = process.env.KATACODE_E2E_CLAUDE_AUTH_MODE?.trim().toLowerCase();
+  if (value === "oauth" || value === "oauth-or-api-key" || value === "api-key") {
+    return value;
+  }
+  return "api-key";
+}
+
+/**
+ * Claude OAuth state lives in the host `~/.claude.json` (`oauthAccount`),
+ * resolved by the Claude agent SDK under its HOME. Stage it into the isolated
+ * HOME exactly like Codex's auth.json so E2E runs can reuse the host OAuth
+ * session without re-authenticating interactively.
+ */
+async function stageClaudeOAuth(katacodeHome: string): Promise<boolean> {
+  const mode = readClaudeE2eAuthMode();
+  if (mode === "api-key") return false;
+
+  const sourceAuthPath = join(homedir(), ".claude.json");
+  const destinationAuthPath = join(katacodeHome, ".claude.json");
+
+  try {
+    await copyFile(sourceAuthPath, destinationAuthPath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" && mode === "oauth-or-api-key") {
+      return false;
+    }
+    throw new Error(
+      `Claude OAuth auth is required for KATACODE_E2E_CLAUDE_AUTH_MODE=${mode}, but ${sourceAuthPath} could not be staged.`,
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * Claude Code stores its OAuth credentials in the macOS login keychain under
+ * the "Claude Code-credentials" generic password; `~/.claude.json` only
+ * mirrors the account profile (no token). The isolated E2E keychain starts
+ * empty, so the host credential item is read (the item ACL permits the
+ * harness's `security` calls without prompting on the maintainer machine) and
+ * re-added to the isolated keychain, exactly like Codex's auth.json staging.
+ */
+async function stageClaudeKeychainCredentials(katacodeHome: string): Promise<boolean> {
+  const mode = readClaudeE2eAuthMode();
+  if (mode === "api-key" || process.platform !== "darwin") return false;
+
+  try {
+    const { stdout } = await execFileAsync(
+      "security",
+      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      { env: process.env },
+    );
+    const secret = stdout.trim();
+    if (secret.length === 0) throw new Error("The host Claude credential item is empty.");
+    const keychainPath = join(katacodeHome, "Library", "Keychains", "login.keychain-db");
+    await execFileAsync(
+      "security",
+      [
+        "add-generic-password",
+        "-U",
+        "-a",
+        userInfo().username,
+        "-s",
+        "Claude Code-credentials",
+        "-w",
+        secret,
+        keychainPath,
+      ],
+      { env: { ...process.env, HOME: katacodeHome } },
+    );
+    return true;
+  } catch (error) {
+    if (mode === "oauth-or-api-key") {
+      // Surface the reason in the harness log; the run continues on the
+      // ambient-key fallback but the operator must see why OAuth was skipped.
+      console.error(
+        `[e2e] Claude keychain OAuth staging failed; falling back: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return false;
+    }
+    throw new Error(
+      `Claude OAuth auth is required for KATACODE_E2E_CLAUDE_AUTH_MODE=${mode}, but the host "Claude Code-credentials" keychain item could not be staged.`,
+      { cause: error },
+    );
+  }
+}
+
 /** Provision an isolated E2E home, ports, and dev env for one Playwright worker. */
 export async function createIsolatedRun(input: {
   readonly projectName: string;
@@ -218,6 +310,13 @@ export async function createIsolatedRun(input: {
   // available only for the explicit oauth-or-api-key fallback mode.
   const codexOAuthStaged = await stageCodexOAuthAuth(katacodeHome);
 
+  // Claude OAuth lives in the host ~/.claude.json (oauthAccount). Stage it
+  // into the isolated HOME like Codex auth when the repository .env requests
+  // OAuth-first Claude auth. The ambient Anthropic keys are only forwarded as
+  // the explicit oauth-or-api-key fallback when staging fails.
+  await stageClaudeOAuth(katacodeHome);
+  const claudeKeychainStaged = await stageClaudeKeychainCredentials(katacodeHome);
+
   // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
   // name. The isolated HOME has no macOS login keychain, so interactive
   // `agent login` token storage is unavailable; the API-key auth path skips
@@ -239,9 +338,27 @@ export async function createIsolatedRun(input: {
         ...envWithoutProviderSecrets,
         ...(ambientOpenAiApiKey ? { OPENAI_API_KEY: ambientOpenAiApiKey } : {}),
       };
+  // Claude OAuth staging does not strip the OpenAI key: Codex fallback auth
+  // must keep working for mixed-provider suites in the same isolated run.
+  // Claude OAuth staging does not strip the OpenAI key: Codex fallback auth
+  // must keep working for mixed-provider suites in the same isolated run.
+  // The keychain credential item is the real OAuth material; ambient
+  // Anthropic keys are forwarded for explicit api-key mode or as the
+  // oauth-or-api-key fallback when the keychain item could not be staged.
+  const claudeAuthMode = readClaudeE2eAuthMode();
+  const forwardAnthropicKeys =
+    claudeAuthMode === "api-key" ||
+    (claudeAuthMode === "oauth-or-api-key" && !claudeKeychainStaged);
+  const inheritedEnvWithClaudeFallback = forwardAnthropicKeys
+    ? {
+        ...inheritedEnv,
+        ...(_ambientAnthropicApiKey ? { ANTHROPIC_API_KEY: _ambientAnthropicApiKey } : {}),
+        ...(_ambientAnthropicAuthToken ? { ANTHROPIC_AUTH_TOKEN: _ambientAnthropicAuthToken } : {}),
+      }
+    : inheritedEnv;
 
   const baseEnv = {
-    ...inheritedEnv,
+    ...inheritedEnvWithClaudeFallback,
     KATACODE_HOME: katacodeHome,
     HOME: katacodeHome,
     USERPROFILE: katacodeHome,

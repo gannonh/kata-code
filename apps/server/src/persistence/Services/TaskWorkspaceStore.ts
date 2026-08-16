@@ -81,15 +81,6 @@ export interface TaskWorkspaceStoreShape {
     readonly environmentId: EnvironmentId;
     readonly limit: number;
   }) => Effect.Effect<ReadonlyArray<TaskWorkspaceOutboxEntry>, TaskWorkspaceStoreError>;
-  /**
-   * Rows that a previous worker process left `running` for the
-   * `implementation-check` target. Startup reconciliation marks them and their
-   * attempts indeterminate; the poll loop never re-reads them.
-   */
-  readonly readRunningImplementationChecks: (input: {
-    readonly environmentId: EnvironmentId;
-    readonly limit: number;
-  }) => Effect.Effect<ReadonlyArray<TaskWorkspaceOutboxEntry>, TaskWorkspaceStoreError>;
   readonly getOutboxByOperationKey: (input: {
     readonly environmentId: EnvironmentId;
     readonly taskId: TaskWorkspaceId;

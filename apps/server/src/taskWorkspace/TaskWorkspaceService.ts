@@ -20,6 +20,8 @@ import {
   TaskWorkspaceWorktreeOutboxPayload,
   CommandId,
   DEFAULT_RUNTIME_MODE,
+  type TaskCliCheckBeginResult,
+  type TaskCliCheckFinalizeStatus,
   type TaskWorkspace,
   type TaskWorkspaceArtifact,
   type TaskWorkspaceArtifactKind,
@@ -35,11 +37,8 @@ import {
   type TaskWorkspaceContextManifest,
   type TaskWorkspaceDispatchOperationStatus,
   type TaskWorkspaceDispatchResult,
-  type TaskImplementationContextResult,
   type TaskImplementationProgressAck,
-  type TaskImplementationCheckRunAck,
   type TaskImplementationAmendmentAck,
-  type TaskImplementationCompleteAck,
   type TaskStageCompletionAck,
   type TaskStageContextResult,
   type TaskWorkspaceOperationReceipt,
@@ -83,21 +82,21 @@ import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts"
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
-import { supportsTaskWorktreeWrite } from "../provider/Services/ProviderAdapter.ts";
 import { TaskWorkspaceStore } from "../persistence/Services/TaskWorkspaceStore.ts";
 import {
   TaskWorkspaceSourceResolver,
   type TaskWorkspaceSourceResolution,
 } from "./Services/TaskWorkspaceSourceResolver.ts";
 import {
+  TaskCheckFinalizerService,
+  TaskCheckFinalizerError,
+} from "../taskCli/TaskCheckFinalizerService.ts";
+import {
   TASK_ARTIFACT_CONTRACT_VERSION_0_3_0,
   TASK_WORKSPACE_CONTRACT_VERSION_0_3_0,
   deriveImportedEvents,
 } from "./taskWorkspaceNormalizer.ts";
-import {
-  trustedImplementationInstructions,
-  trustedStageInstructions,
-} from "./taskStageInstructions.ts";
+import { trustedInstructionsForStage, trustedStageInstructions } from "./taskStageInstructions.ts";
 import {
   allowsExplicitEntry,
   artifactKindForStage,
@@ -162,6 +161,7 @@ function operationKeyFor(command: TaskWorkspaceCommand): string | null {
     case "task.workflow.upgrade":
     case "task.implementation.start":
     case "task.implementation.check.run":
+    case "task.implementation.check.ack":
     case "task.implementation.amendment.propose":
     case "task.implementation.complete":
     case "task.build.checkpoint.continue":
@@ -807,7 +807,6 @@ function initialTask(
     preferences: {
       worktreePolicy,
       modelSelection: command.modelSelection ?? null,
-      executionProfile: "planning",
       runtimeMode: command.runtimeMode ?? DEFAULT_RUNTIME_MODE,
     },
     bootstrap: bootstrap ?? null,
@@ -1169,11 +1168,12 @@ function boundedImplementationStateForManifest(task: TaskWorkspace): string {
   );
 }
 
-const IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS = TASK_WORKSPACE_PLAN_MAX_CHARS;
 const IMPLEMENTATION_CONTEXT_DIAGNOSTIC_MAX_CHARS = 2_000;
 const IMPLEMENTATION_CONTEXT_MAX_ENTRIES = 128;
 const IMPLEMENTATION_MANIFEST_DIAGNOSTIC_MAX_CHARS = 2_000;
 const IMPLEMENTATION_MANIFEST_MAX_CHARS = 16_000;
+const CHECK_TIMEOUT_MS = 120_000;
+const CHECK_MAX_OUTPUT_BYTES = 1_048_576;
 
 function truncateDiagnosticField(value: string | null, maxChars: number): string | null {
   if (value === null || value.length <= maxChars) return value;
@@ -1578,26 +1578,15 @@ export interface TaskWorkspaceServiceShape {
   readonly dispatch: (
     command: TaskWorkspaceCommand,
   ) => Effect.Effect<TaskWorkspaceDispatchResult, TaskWorkspaceError>;
-  readonly implementationContext: (
-    taskId: TaskWorkspaceId,
-  ) => Effect.Effect<TaskImplementationContextResult, TaskWorkspaceError>;
-  readonly implementationProgress: (input: {
+  readonly implementationProgressCli: (input: {
     readonly taskId: TaskWorkspaceId;
-    readonly expectedTaskRevision: number;
-    readonly phaseId: string;
-    readonly workItemId: string | null;
+    readonly target: "phase" | "work-item";
+    readonly id: string;
     readonly status: "running" | "completed" | "blocked";
     readonly summary: string;
   }) => Effect.Effect<TaskImplementationProgressAck, TaskWorkspaceError>;
-  readonly implementationCheckRun: (input: {
+  readonly implementationAmendmentProposeCli: (input: {
     readonly taskId: TaskWorkspaceId;
-    readonly expectedTaskRevision: number;
-    readonly checkId: string;
-    readonly operationKey: string;
-  }) => Effect.Effect<TaskImplementationCheckRunAck, TaskWorkspaceError>;
-  readonly implementationAmendmentPropose: (input: {
-    readonly taskId: TaskWorkspaceId;
-    readonly expectedTaskRevision: number;
     readonly phaseId: string;
     readonly workItemId: string;
     readonly triggeringCheckId: string | null;
@@ -1605,11 +1594,38 @@ export interface TaskWorkspaceServiceShape {
     readonly found: string;
     readonly impact: string;
     readonly proposedPlanMarkdown: string;
-    readonly operationKey: string;
   }) => Effect.Effect<TaskImplementationAmendmentAck, TaskWorkspaceError>;
-  readonly startImplementationCheck: (input: {
+  readonly implementationCheckBegin: (input: {
     readonly taskId: TaskWorkspaceId;
+    readonly checkId: string;
+  }) => Effect.Effect<TaskCliCheckBeginResult, TaskWorkspaceError>;
+  readonly implementationCheckFinalize: (input: {
+    readonly finalizerToken: string;
+    readonly exitCode: number | null;
+    readonly status: TaskCliCheckFinalizeStatus;
+    readonly output: string;
+    readonly timedOut: boolean;
+    readonly startingCommitSha: string;
+    readonly endingCommitSha: string | null;
+    readonly startingStatus: string;
+    readonly endingStatus: string | null;
+  }) => Effect.Effect<
+    {
+      readonly checkId: string;
+      readonly attemptId: string;
+      readonly status: TaskCliCheckFinalizeStatus;
+      readonly taskRevision: number;
+    },
+    TaskWorkspaceError
+  >;
+  readonly acknowledgeImplementationCheck: (input: {
+    readonly taskId: TaskWorkspaceId;
+    readonly checkId: string;
     readonly attemptId: string;
+    readonly acknowledgedBy: string;
+  }) => Effect.Effect<void, TaskWorkspaceError>;
+  readonly reconcilePendingChecks: (input?: {
+    readonly olderThanMs?: number;
   }) => Effect.Effect<void, TaskWorkspaceError>;
   readonly processImplementationCheck: (input: {
     readonly taskId: TaskWorkspaceId;
@@ -1620,14 +1636,6 @@ export interface TaskWorkspaceServiceShape {
     readonly endingCommitSha: string | null;
     readonly startingCommitSha?: string;
   }) => Effect.Effect<void, TaskWorkspaceError>;
-  readonly implementationComplete: (input: {
-    readonly taskId: TaskWorkspaceId;
-    readonly expectedTaskRevision: number;
-    readonly summary: string;
-    readonly operationKey: string;
-    readonly sessionId: string;
-    readonly providerTurnId: string;
-  }) => Effect.Effect<TaskImplementationCompleteAck, TaskWorkspaceError>;
   readonly getSnapshot: Effect.Effect<TaskWorkspaceSnapshot, never>;
   readonly getTask: (taskId: TaskWorkspaceId) => Effect.Effect<TaskWorkspace | null, never>;
   readonly streamEvents: Stream.Stream<TaskWorkspaceEventValue>;
@@ -1644,8 +1652,9 @@ export interface TaskWorkspaceServiceShape {
   ) => Effect.Effect<void, TaskWorkspaceError>;
   /**
    * Persist a typed completion proposal for the active stage occurrence and
-   * provider turn (the task-stage bridge entry point). One proposal per
-   * occurrence and turn; a different payload on the same key conflicts.
+   * provider turn (the katacode Task CLI completion entry point). One
+   * proposal per occurrence and turn; a different payload on the same key
+   * conflicts.
    */
   readonly proposeStageCompletion: (input: {
     readonly taskId: TaskWorkspaceId;
@@ -1654,6 +1663,8 @@ export interface TaskWorkspaceServiceShape {
     readonly payloadDigest: string;
     readonly summary: string;
     readonly markdown: string;
+    readonly proposalCommitSha?: string | null;
+    readonly proposalStatusSnapshot?: string | null;
   }) => Effect.Effect<TaskWorkspace, TaskWorkspaceError>;
   /**
    * Settle a proposal once the provider turn reaches a terminal state.
@@ -1676,11 +1687,6 @@ export interface TaskWorkspaceServiceShape {
     taskId: TaskWorkspaceId,
   ) => Effect.Effect<void, TaskWorkspaceError>;
   readonly validateProviderTurn: (input: {
-    readonly threadId: ThreadId;
-    readonly providerInstanceId: string;
-  }) => Effect.Effect<void, TaskWorkspaceError>;
-  readonly authorizeTaskStage: (input: {
-    readonly environmentId: EnvironmentId;
     readonly threadId: ThreadId;
     readonly providerInstanceId: string;
   }) => Effect.Effect<void, TaskWorkspaceError>;
@@ -1748,7 +1754,6 @@ export interface ActiveTaskProviderContext {
   readonly workspaceRoot: string;
   readonly branch: string;
   readonly baseCommitSha: string;
-  readonly executionProfile: "planning" | "task-worktree-write";
   readonly runtimeMode: "approval-required" | "auto-accept-edits" | "full-access";
   readonly modelSelection: NonNullable<TaskWorkspace["preferences"]["modelSelection"]>;
 }
@@ -1800,31 +1805,6 @@ export const activeTaskStageForThread = (
   activeTaskWorkspaceService
     ? activeTaskWorkspaceService.getActiveTaskStage(threadId)
     : Effect.succeed(undefined);
-
-export const authorizeActiveTaskImplementation = (input: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly providerInstanceId: string;
-}): Effect.Effect<boolean> =>
-  activeTaskWorkspaceService
-    ? activeTaskWorkspaceService.authorizeTaskStage(input).pipe(
-        Effect.flatMap(() => activeTaskWorkspaceService!.getActiveTaskStage(input.threadId)),
-        Effect.map((stage) => stage === "build"),
-        Effect.catch(() => Effect.succeed(false)),
-      )
-    : Effect.succeed(false);
-
-export const authorizeActiveTaskStage = (input: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly providerInstanceId: string;
-}): Effect.Effect<boolean> =>
-  activeTaskWorkspaceService
-    ? activeTaskWorkspaceService.authorizeTaskStage(input).pipe(
-        Effect.as(true),
-        Effect.catch(() => Effect.succeed(false)),
-      )
-    : Effect.succeed(false);
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
@@ -2188,14 +2168,6 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
-      if (resolved.stage === "build") {
-        return yield* new TaskWorkspaceError({
-          message:
-            "Planning completion requires an active Clarify, Research, Design, or Plan stage.",
-          commandType: "task.cli.complete",
-          taskId: resolved.taskId,
-        });
-      }
       const summary = input.summary.trim();
       if (summary.length === 0) {
         return yield* new TaskWorkspaceError({
@@ -2210,6 +2182,116 @@ export const make = Effect.gen(function* () {
           commandType: "task.cli.complete",
           taskId: resolved.taskId,
         });
+      }
+      if (resolved.stage === "build") {
+        // Build completion binds the proposal to the proposal-time Git basis
+        // so terminal settlement can reject complete-then-mutate/commit drift.
+        // Markdown is not required for Build; the resulting commit is the
+        // artifact evidence.
+        const buildTask = taskById.get(resolved.taskId);
+        if (!buildTask) {
+          return yield* new TaskWorkspaceError({
+            message: `Task '${resolved.taskId}' was not found.`,
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        const buildOccurrence = activeOccurrence(buildTask, "build");
+        if (
+          !buildOccurrence ||
+          (buildOccurrence.status !== "running" && buildOccurrence.status !== "finalizing")
+        ) {
+          return yield* new TaskWorkspaceError({
+            message: "The Build occurrence is not active.",
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        const repository = buildTask.workspace.repositories[0];
+        if (!repository?.worktreePath) {
+          return yield* new TaskWorkspaceError({
+            message: "The canonical Build worktree is unavailable.",
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        const sessionId = buildOccurrence.sessionId ?? buildTask.bootstrap?.reservedSessionId;
+        if (!sessionId) {
+          return yield* new TaskWorkspaceError({
+            message: "The Task primary session is not active.",
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        const proposalCommitSha = yield* runGit(repository.worktreePath, [
+          "rev-parse",
+          "HEAD",
+        ]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to observe the Build worktree HEAD.",
+                commandType: "task.cli.complete",
+                taskId: resolved.taskId,
+                cause,
+              }),
+          ),
+        );
+        const proposalStatusSnapshot = yield* runGit(repository.worktreePath, [
+          "status",
+          "--porcelain=v2",
+        ]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to observe the Build worktree status.",
+                commandType: "task.cli.complete",
+                taskId: resolved.taskId,
+                cause,
+              }),
+          ),
+        );
+        const payloadDigest = createHash("sha256")
+          .update(`${summary}\n${input.markdown}`)
+          .digest("hex");
+        const proposed = yield* proposeStageCompletion({
+          taskId: resolved.taskId,
+          sessionId,
+          providerTurnId: input.providerTurnId,
+          payloadDigest,
+          summary,
+          markdown: input.markdown,
+          proposalCommitSha,
+          proposalStatusSnapshot,
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: cause.message,
+                commandType: "task.cli.complete",
+                taskId: resolved.taskId,
+                ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+              }),
+          ),
+        );
+        const proposedOccurrence = proposed.occurrences
+          .filter((candidate) => candidate.stage === "build")
+          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+        const proposalId = proposedOccurrence?.completionProposalId;
+        if (!proposalId) {
+          return yield* new TaskWorkspaceError({
+            message: "The completion proposal was not persisted.",
+            commandType: "task.cli.complete",
+            taskId: resolved.taskId,
+          });
+        }
+        return {
+          accepted: true as const,
+          stage: resolved.stage,
+          occurrence: resolved.occurrence,
+          proposalId,
+          providerTurnId: input.providerTurnId,
+        } satisfies TaskStageCompletionAck;
       }
       if (input.markdown.trim().length === 0) {
         return yield* new TaskWorkspaceError({
@@ -2326,90 +2408,11 @@ export const make = Effect.gen(function* () {
           workspaceRoot: repository.workspaceRoot,
           branch: expectedBranch,
           baseCommitSha: repository.baseCommitSha,
-          executionProfile: "task-worktree-write" as const,
           runtimeMode: task.preferences.runtimeMode,
           modelSelection,
         } satisfies ActiveTaskProviderContext;
       }
       return undefined;
-    });
-
-  const authorizeTaskStage: TaskWorkspaceServiceShape["authorizeTaskStage"] = (input) =>
-    Effect.gen(function* () {
-      const task = [...taskById.values()].find(
-        (candidate) =>
-          candidate.environmentId === input.environmentId &&
-          (candidate.bootstrap?.reservedThreadId === input.threadId ||
-            candidate.occurrences.some((occurrence) => occurrence.threadId === input.threadId)),
-      );
-      if (!task) {
-        return yield* new TaskWorkspaceError({
-          message: "No matching task-stage session exists.",
-          commandType: "task.internal",
-          taskId: "unknown",
-        });
-      }
-      const run = currentRun(task);
-      if (run.preset !== "guided") {
-        return yield* new TaskWorkspaceError({
-          message: `Task '${task.id}' does not use the Guided workflow.`,
-          commandType: "task.internal",
-          taskId: task.id,
-        });
-      }
-      if (task.preferences.modelSelection?.instanceId !== input.providerInstanceId) {
-        return yield* new TaskWorkspaceError({
-          message: `Provider instance '${input.providerInstanceId}' is not authorized for task '${task.id}'.`,
-          commandType: "task.internal",
-          taskId: task.id,
-        });
-      }
-      if (Option.isSome(providerInstanceRegistry)) {
-        const providerInstance = yield* providerInstanceRegistry.value.getInstance(
-          ProviderInstanceId.make(input.providerInstanceId),
-        );
-        if (
-          !providerInstance ||
-          !providerInstance.enabled ||
-          (run.currentStage === "build" &&
-            !supportsTaskWorktreeWrite(providerInstance.adapter.capabilities))
-        ) {
-          return yield* new TaskWorkspaceError({
-            message:
-              run.currentStage === "build"
-                ? `Provider instance '${input.providerInstanceId}' cannot enforce task-worktree-write.`
-                : `Provider instance '${input.providerInstanceId}' is not available for this Task.`,
-            commandType: "task.internal",
-            taskId: task.id,
-          });
-        }
-      }
-      const occurrence = task.occurrences
-        .filter((candidate) => candidate.stage === run.currentStage)
-        .toSorted((left, right) => right.ordinal - left.ordinal)[0];
-      const reservedThreadId = task.bootstrap?.reservedThreadId;
-      const isBootstrapPrimary =
-        occurrence?.status === "starting" &&
-        task.bootstrap?.status === "running" &&
-        reservedThreadId === input.threadId;
-      const isActivePrimary =
-        (occurrence?.status === "running" || occurrence?.status === "finalizing") &&
-        occurrence.threadId === input.threadId &&
-        occurrence.sessionId !== null &&
-        task.sessions.some(
-          (session) =>
-            session.id === occurrence.sessionId &&
-            session.role === "primary" &&
-            session.status === "active",
-        );
-      if (!isBootstrapPrimary && !isActivePrimary) {
-        return yield* new TaskWorkspaceError({
-          message: `Thread '${input.threadId}' is not the active task primary.`,
-          commandType: "task.internal",
-          taskId: task.id,
-        });
-      }
-      if (run.currentStage !== "build") yield* validatePlanningRoot(task.id);
     });
 
   const validateProviderTurn: TaskWorkspaceServiceShape["validateProviderTurn"] = (input) =>
@@ -2529,7 +2532,6 @@ export const make = Effect.gen(function* () {
           : null;
       const bootstrap: TaskWorkspaceBootstrapState = {
         operationKey,
-        executionProfile: "planning",
         presentation: "stage",
         status: "pending",
         currentStep: null,
@@ -2546,7 +2548,6 @@ export const make = Effect.gen(function* () {
       const outboxPayload: TaskWorkspaceBootstrapOutboxPayload = {
         stage,
         occurrence,
-        executionProfile: "planning",
         runtimeMode: command.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         presentation: "stage",
         sessionId,
@@ -2983,7 +2984,7 @@ export const make = Effect.gen(function* () {
       ) {
         return yield* taskError(
           command,
-          "Guided implementation provider operations are server-owned; use the task implementation bridge from the active conversation.",
+          "Guided implementation provider operations are server-owned; use the katacode Task CLI commands from the active conversation.",
         );
       }
 
@@ -3655,7 +3656,6 @@ export const make = Effect.gen(function* () {
             "build",
             occurrence.ordinal,
             {
-              executionProfile: "task-worktree-write",
               presentation: "implementation",
               worktreeBranch: repository.branch,
               worktreePath: repository.worktreePath,
@@ -3663,11 +3663,10 @@ export const make = Effect.gen(function* () {
           );
           const startedTask: TaskWorkspace = {
             ...approvedTask,
-            preferences: { ...approvedTask.preferences, executionProfile: "task-worktree-write" },
+            preferences: approvedTask.preferences,
             bootstrap: bootstrapStateFor(
               {
                 operationKey: bootstrap.operationKey,
-                executionProfile: "task-worktree-write",
                 presentation: "implementation",
                 sessionId: bootstrap.outboxPayload.sessionId,
                 threadId: bootstrap.outboxPayload.threadId,
@@ -3905,7 +3904,6 @@ export const make = Effect.gen(function* () {
               "build",
               buildOccurrence.ordinal,
               {
-                executionProfile: "task-worktree-write",
                 presentation: "implementation",
                 worktreeBranch: repository.branch,
                 worktreePath: repository.worktreePath,
@@ -3913,11 +3911,10 @@ export const make = Effect.gen(function* () {
             );
             const startedTask: TaskWorkspace = {
               ...approvedBase,
-              preferences: { ...approvedBase.preferences, executionProfile: "task-worktree-write" },
+              preferences: approvedBase.preferences,
               bootstrap: bootstrapStateFor(
                 {
                   operationKey: bootstrap.operationKey,
-                  executionProfile: "task-worktree-write",
                   presentation: "implementation",
                   sessionId: bootstrap.outboxPayload.sessionId,
                   threadId: bootstrap.outboxPayload.threadId,
@@ -4374,6 +4371,7 @@ export const make = Effect.gen(function* () {
             startedAt: null,
             completedAt: null,
             endingCommitSha: null,
+            indeterminateAcknowledgedAt: null,
           };
           const build: TaskWorkspace["build"] = {
             ...task.build,
@@ -4406,22 +4404,73 @@ export const make = Effect.gen(function* () {
                 },
                 command.createdAt,
               ),
-              outbox: [
-                {
-                  target: "implementation-check",
-                  // One unique row per attempt: a slow older attempt must never
-                  // clobber the row of a newer rerun of the same check.
-                  operationKey: `${command.operationKey}:${attemptId}`,
-                  payload: {
-                    attemptId,
-                    checkId: check.id,
-                    worktreePath: repository.worktreePath,
-                    command: check.command,
-                    commandDigest,
-                    timeoutMs: 120_000,
-                  },
-                },
-              ],
+            },
+          );
+        }
+        case "task.implementation.check.ack": {
+          requireStage(task, "build");
+          if (
+            command.expectedTaskRevision !== undefined &&
+            command.expectedTaskRevision !== task.taskRevision
+          )
+            throw new Error("The implementation task revision is stale.");
+          const attempt = task.build.checkAttempts.find(
+            (candidate) => candidate.id === command.attemptId,
+          );
+          if (!attempt || attempt.checkId !== command.checkId)
+            throw new Error(`Check attempt '${command.attemptId}' was not found.`);
+          if (attempt.status !== "indeterminate")
+            throw new Error(`Check attempt '${command.attemptId}' is not indeterminate.`);
+          const newest = task.build.checkAttempts
+            .toReversed()
+            .find((candidate) => candidate.checkId === attempt.checkId);
+          if (!newest || newest.id !== attempt.id)
+            throw new Error("The check attempt is no longer the newest for the check.");
+          // Idempotent replay: an already-acknowledged attempt produces no new
+          // event and returns the current dispatch outcome unchanged.
+          if (attempt.indeterminateAcknowledgedAt !== null) {
+            return {
+              sequence,
+              task,
+              operation: {
+                key: command.operationKey ?? command.type,
+                status: "completed" as const,
+                attempt: 0,
+                error: null,
+              },
+              taskRoute: { environmentId, taskId: command.taskId },
+              conversationTarget: task.bootstrap?.conversationTarget ?? null,
+            };
+          }
+          const build: TaskWorkspace["build"] = {
+            ...task.build,
+            checkAttempts: task.build.checkAttempts.map((candidate) =>
+              candidate.id === attempt.id
+                ? { ...candidate, indeterminateAcknowledgedAt: command.createdAt }
+                : candidate,
+            ),
+          };
+          return yield* append(
+            command,
+            { ...task, build, updatedAt: command.createdAt },
+            {
+              eventType: "task.implementation.check.ack",
+              ...(command.operationKey !== undefined
+                ? {
+                    operationReceipt: makeOperationReceipt(
+                      command,
+                      {
+                        operationType: "task.implementation.check.ack",
+                        operationKey: command.operationKey,
+                        payloadDigest: canonicalTaskCommandDigest(command),
+                        status: "completed",
+                        attemptCount: 1,
+                        sourceCommandIds: [command.commandId],
+                      },
+                      command.createdAt,
+                    ),
+                  }
+                : {}),
             },
           );
         }
@@ -4528,6 +4577,8 @@ export const make = Effect.gen(function* () {
             terminalTurnOutcome: null,
             committedArtifactRevisionId: null,
             rejectionReason: null,
+            proposalCommitSha: null,
+            proposalStatusSnapshot: null,
             createdAt: command.createdAt,
             settledAt: null,
           };
@@ -4795,9 +4846,7 @@ export const make = Effect.gen(function* () {
             );
           }
           const repository = task.workspace.repositories[0];
-          const shouldObserveHead =
-            task.versions.workflowDefinition === "guided@0.3.0" &&
-            task.preferences.executionProfile === "task-worktree-write";
+          const shouldObserveHead = task.versions.workflowDefinition === "guided@0.3.0";
           let observedCommitSha = command.commitSha ?? task.build.resultingCommitSha;
           if (shouldObserveHead) {
             if (!repository?.worktreePath) {
@@ -6211,65 +6260,6 @@ export const make = Effect.gen(function* () {
   const dispatch: TaskWorkspaceServiceShape["dispatch"] = (command) =>
     semaphore.withPermits(1)(dispatchUnlocked(command));
 
-  const implementationContext: TaskWorkspaceServiceShape["implementationContext"] = (taskId) =>
-    Effect.gen(function* () {
-      const task = taskById.get(taskId);
-      if (!task)
-        return yield* new TaskWorkspaceError({ message: `Task '${taskId}' was not found.` });
-      const plan = latestPlanRevision(task);
-      if (!plan || task.build.currentPlanRevisionId !== plan.id) {
-        return yield* new TaskWorkspaceError({
-          message: "The approved implementation Plan is unavailable.",
-        });
-      }
-      if (plan.markdown.length > IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS) {
-        return yield* new TaskWorkspaceError({
-          message: `Approved Plan revision '${plan.id}' is too large for implementation context (${plan.markdown.length} chars, max ${IMPLEMENTATION_CONTEXT_PLAN_MARKDOWN_MAX_CHARS}).`,
-          taskId,
-        });
-      }
-      const repository = task.workspace.repositories[0];
-      const currentCommitSha = repository?.worktreePath
-        ? yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
-            Effect.mapError(
-              (cause) =>
-                new TaskWorkspaceError({
-                  message: "Failed to inspect the task worktree HEAD.",
-                  commandType: "task.internal",
-                  taskId,
-                  cause,
-                }),
-            ),
-          )
-        : null;
-      return {
-        stage: "build",
-        occurrence: latestOccurrence(task, "build")?.ordinal ?? 0,
-        brief: task.intake.brief,
-        planRevisionId: plan.id,
-        planMarkdown: plan.markdown,
-        phases: boundedCollection(task.build.phases, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
-          boundPhaseForImplementationContext,
-        ),
-        checks: boundedCollection(task.build.checks, IMPLEMENTATION_CONTEXT_MAX_ENTRIES).map(
-          boundCheckForImplementationContext,
-        ),
-        checkpoints: boundedCollection(
-          task.build.checkpoints,
-          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
-        ).map(boundCheckpointForImplementationContext),
-        amendments: boundedCollection(
-          task.build.amendments,
-          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
-        ).map(boundAmendmentForImplementationContext),
-        checkAttempts: boundedCollection(
-          task.build.checkAttempts,
-          IMPLEMENTATION_CONTEXT_MAX_ENTRIES,
-        ).map(boundAttemptForImplementationContext),
-        currentCommitSha,
-      } satisfies TaskImplementationContextResult;
-    });
-
   const serverCommand = (taskId: TaskWorkspaceId, type: string, fields: Record<string, unknown>) =>
     Effect.gen(function* () {
       const commandId = CommandId.make(`server:implementation:${yield* serverUuid}`);
@@ -6282,71 +6272,6 @@ export const make = Effect.gen(function* () {
         ...fields,
       } as TaskWorkspaceCommand;
       return yield* dispatch(markInternalImplementationCommand(command));
-    });
-
-  const implementationProgress: TaskWorkspaceServiceShape["implementationProgress"] = (input) =>
-    serverCommand(input.taskId, "task.implementation.progress", input).pipe(
-      Effect.map((result) => ({
-        accepted: true as const,
-        phaseId: input.phaseId,
-        workItemId: input.workItemId,
-        status: input.status,
-        taskRevision: result.task.taskRevision,
-      })),
-    );
-  const implementationCheckRun: TaskWorkspaceServiceShape["implementationCheckRun"] = (input) =>
-    serverCommand(input.taskId, "task.implementation.check.run", input).pipe(
-      Effect.map((result) => {
-        const check = result.task.build.checks.find((candidate) => candidate.id === input.checkId);
-        const attempt =
-          result.task.build.checkAttempts.find(
-            (candidate) =>
-              candidate.checkId === input.checkId && candidate.operationKey === input.operationKey,
-          ) ??
-          result.task.build.checkAttempts
-            .toReversed()
-            .find((candidate) => candidate.checkId === input.checkId);
-        const attemptId = attempt?.id ?? `attempt-${input.operationKey}`;
-        return {
-          accepted: true as const,
-          checkId: input.checkId,
-          attemptId,
-          status: check?.status ?? "pending",
-          taskRevision: result.task.taskRevision,
-        };
-      }),
-    );
-  const startImplementationCheck: TaskWorkspaceServiceShape["startImplementationCheck"] = (input) =>
-    Effect.gen(function* () {
-      const task = taskById.get(input.taskId);
-      if (!task)
-        return yield* new TaskWorkspaceError({ message: `Task '${input.taskId}' was not found.` });
-      const attempt = task.build.checkAttempts.find(
-        (candidate) => candidate.id === input.attemptId,
-      );
-      if (!attempt || attempt.status !== "pending") return;
-      const newestAttempt = task.build.checkAttempts
-        .toReversed()
-        .find((candidate) => candidate.checkId === attempt.checkId);
-      if (!newestAttempt || newestAttempt.id !== attempt.id) return;
-      const now = yield* serverNow;
-      const build: TaskWorkspace["build"] = {
-        ...task.build,
-        checkAttempts: task.build.checkAttempts.map((candidate) =>
-          candidate.id === attempt.id
-            ? { ...candidate, status: "running" as const, startedAt: now }
-            : candidate,
-        ),
-      };
-      yield* internalAppend(
-        "task.implementation.check.updated",
-        {
-          ...task,
-          build,
-          updatedAt: now,
-        },
-        { occurredAt: now },
-      );
     });
 
   const processImplementationCheck: TaskWorkspaceServiceShape["processImplementationCheck"] = (
@@ -6522,29 +6447,635 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const implementationAmendmentPropose: TaskWorkspaceServiceShape["implementationAmendmentPropose"] =
-    (input) =>
-      serverCommand(input.taskId, "task.implementation.amendment.propose", input).pipe(
+  const implementationProgressCli: TaskWorkspaceServiceShape["implementationProgressCli"] = (
+    input,
+  ) =>
+    Effect.gen(function* () {
+      const task = taskById.get(input.taskId);
+      if (!task)
+        return yield* new TaskWorkspaceError({
+          message: `Task '${input.taskId}' was not found.`,
+        });
+      if (currentRun(task).currentStage !== "build") {
+        return yield* new TaskWorkspaceError({
+          message: "No active Build implementation for this Task.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      const occurrence = activeOccurrence(task, "build");
+      if (!occurrence || (occurrence.status !== "running" && occurrence.status !== "finalizing")) {
+        return yield* new TaskWorkspaceError({
+          message: "The Build occurrence is not active.",
+          commandType: "task.internal",
+          taskId: task.id,
+        });
+      }
+      const phaseId =
+        input.target === "phase"
+          ? input.id
+          : task.build.phases.find((phase) => phase.workItems.some((item) => item.id === input.id))
+              ?.id;
+      if (!phaseId)
+        return yield* new TaskWorkspaceError({
+          message:
+            input.target === "phase"
+              ? `Phase '${input.id}' was not found in the active Build.`
+              : `Work item '${input.id}' was not found in the active Build.`,
+          taskId: task.id,
+        });
+      return yield* serverCommand(input.taskId, "task.implementation.progress", {
+        expectedTaskRevision: task.taskRevision,
+        phaseId,
+        workItemId: input.target === "work-item" ? input.id : null,
+        status: input.status,
+        summary: input.summary,
+      }).pipe(
         Effect.map((result) => ({
           accepted: true as const,
-          amendmentId: result.task.build.amendments.at(-1)!.id,
+          phaseId,
+          workItemId: input.target === "work-item" ? input.id : null,
+          status: input.status,
           taskRevision: result.task.taskRevision,
         })),
       );
-  const implementationComplete: TaskWorkspaceServiceShape["implementationComplete"] = (input) =>
-    serverCommand(input.taskId, "task.implementation.complete", input).pipe(
-      // The durable terminal activity and proposal can cross a process or
-      // subscription boundary in either order. Reconcile immediately after
-      // persisting the proposal so terminal-first completion cannot stall.
-      Effect.tap(() => reconcilePendingProposals),
-      Effect.map((result) => ({
+    });
+
+  const implementationAmendmentProposeCli: TaskWorkspaceServiceShape["implementationAmendmentProposeCli"] =
+    (input) =>
+      Effect.gen(function* () {
+        const task = taskById.get(input.taskId);
+        if (!task)
+          return yield* new TaskWorkspaceError({
+            message: `Task '${input.taskId}' was not found.`,
+          });
+        if (currentRun(task).currentStage !== "build") {
+          return yield* new TaskWorkspaceError({
+            message: "No active Build implementation for this Task.",
+            commandType: "task.cli.amendment",
+            taskId: task.id,
+          });
+        }
+        const occurrence = activeOccurrence(task, "build");
+        if (
+          !occurrence ||
+          (occurrence.status !== "running" && occurrence.status !== "finalizing")
+        ) {
+          return yield* new TaskWorkspaceError({
+            message: "The Build occurrence is not active.",
+            commandType: "task.cli.amendment",
+            taskId: task.id,
+          });
+        }
+        // Idempotency keys dedupe retries of the SAME proposal: retrying an
+        // identical payload replays the durable receipt, while a different
+        // payload reaches the reducer's already-open gate check.
+        const proposalPayloadDigest = createHash("sha256")
+          .update(
+            [
+              input.phaseId,
+              input.workItemId,
+              input.triggeringCheckId ?? "",
+              input.expected,
+              input.found,
+              input.impact,
+              input.proposedPlanMarkdown,
+            ].join("\n"),
+          )
+          .digest("hex");
+        return yield* serverCommand(input.taskId, "task.implementation.amendment.propose", {
+          expectedTaskRevision: task.taskRevision,
+          phaseId: input.phaseId,
+          workItemId: input.workItemId,
+          triggeringCheckId: input.triggeringCheckId,
+          expected: input.expected,
+          found: input.found,
+          impact: input.impact,
+          proposedPlanMarkdown: input.proposedPlanMarkdown,
+          operationKey: `implementation-amendment-cli:${input.taskId}:${proposalPayloadDigest}`,
+        }).pipe(
+          Effect.map((result) => ({
+            accepted: true as const,
+            amendmentId: result.task.build.amendments.at(-1)!.id,
+            taskRevision: result.task.taskRevision,
+          })),
+          Effect.mapError((cause) => {
+            if (!isTaskWorkspaceError(cause)) return cause;
+            const message = cause.message;
+            const lower = message.toLowerCase();
+            if (
+              lower.includes("already open") ||
+              lower.includes("waiting checkpoint") ||
+              lower.includes("revision is stale") ||
+              lower.includes("already used with a different payload")
+            ) {
+              return new TaskWorkspaceError({
+                message: `Conflict: ${message}`,
+                commandType: "task.cli.amendment",
+                taskId: input.taskId,
+                ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+              });
+            }
+            return new TaskWorkspaceError({
+              message: cause.message,
+              commandType: "task.cli.amendment",
+              taskId: input.taskId,
+              ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+            });
+          }),
+        );
+      });
+
+  const requireCheckFinalizerService = Effect.gen(function* () {
+    const finalizers = yield* Effect.serviceOption(TaskCheckFinalizerService);
+    if (Option.isNone(finalizers)) {
+      return yield* new TaskWorkspaceError({
+        message: "The check finalization service is unavailable.",
+        commandType: "task.cli.check",
+      });
+    }
+    return finalizers.value;
+  });
+
+  const mapFinalizerError = (cause: unknown): TaskWorkspaceError => {
+    if (cause instanceof TaskCheckFinalizerError) {
+      if (cause.code === "replay" && cause.attemptId !== undefined) {
+        const owner = [...taskById.values()].find((candidate) =>
+          candidate.build.checkAttempts.some((attempt) => attempt.id === cause.attemptId),
+        );
+        const attempt = owner?.build.checkAttempts.find(
+          (candidate) => candidate.id === cause.attemptId,
+        );
+        return new TaskWorkspaceError({
+          message: `Conflict: the check attempt has already settled (status '${attempt?.status ?? "unknown"}').`,
+          commandType: "task.cli.check",
+          ...(owner !== undefined ? { taskId: owner.id } : {}),
+        });
+      }
+      const message =
+        cause.code === "replay"
+          ? "Conflict: the check finalization credential was already consumed (replay rejected)."
+          : cause.code === "stale"
+            ? "Conflict: the check finalization credential is no longer active."
+            : "Unauthorized: the check finalization credential is not valid.";
+      return new TaskWorkspaceError({
+        message,
+        commandType: "task.cli.check",
+        ...(cause.cause !== undefined ? { cause: cause.cause } : {}),
+      });
+    }
+    return new TaskWorkspaceError({
+      message: describeFailure(cause),
+      commandType: "task.cli.check",
+    });
+  };
+
+  const checkAttemptNumber = (task: TaskWorkspace, attemptId: string): number =>
+    task.build.checkAttempts
+      .filter(
+        (candidate) =>
+          candidate.checkId === task.build.checkAttempts.find((a) => a.id === attemptId)?.checkId,
+      )
+      .findIndex((candidate) => candidate.id === attemptId);
+
+  const implementationCheckBegin: TaskWorkspaceServiceShape["implementationCheckBegin"] = (input) =>
+    Effect.gen(function* () {
+      const finalizers = yield* requireCheckFinalizerService;
+      const task = taskById.get(input.taskId);
+      if (!task) {
+        return yield* new TaskWorkspaceError({
+          message: `Task '${input.taskId}' was not found.`,
+          commandType: "task.cli.check",
+          taskId: input.taskId,
+        });
+      }
+      if (currentRun(task).currentStage !== "build") {
+        return yield* new TaskWorkspaceError({
+          message: "No active Build implementation for this Task.",
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const activeBuild = activeOccurrence(task, "build");
+      if (
+        !activeBuild ||
+        (activeBuild.status !== "running" && activeBuild.status !== "finalizing")
+      ) {
+        return yield* new TaskWorkspaceError({
+          message: "The Build occurrence is not active.",
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const check = task.build.checks.find((candidate) => candidate.id === input.checkId);
+      if (!check) {
+        return yield* new TaskWorkspaceError({
+          message: `Check '${input.checkId}' was not found in the active Build.`,
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      if (check.kind !== "automated" || !check.command) {
+        return yield* new TaskWorkspaceError({
+          message: `Check '${check.id}' is not an approved automated command.`,
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const repository = task.workspace.repositories[0];
+      if (!repository?.worktreePath) {
+        return yield* new TaskWorkspaceError({
+          message: "The canonical Build worktree is unavailable.",
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const newestAttempt = task.build.checkAttempts
+        .toReversed()
+        .find((candidate) => candidate.checkId === check.id);
+
+      if (newestAttempt?.status === "pass") {
+        return {
+          accepted: true as const,
+          attemptId: newestAttempt.id,
+          checkId: check.id,
+          attemptNumber: checkAttemptNumber(task, newestAttempt.id),
+          command: check.command,
+          cwd: repository.worktreePath,
+          timeoutMs: newestAttempt.timeoutMs,
+          maxOutputBytes: CHECK_MAX_OUTPUT_BYTES,
+          outcome: "settled-pass" as const,
+          finalizerToken: null,
+          startingCommitSha: newestAttempt.startingCommitSha,
+          startingStatus: "",
+          taskRevision: task.taskRevision,
+        } satisfies TaskCliCheckBeginResult;
+      }
+
+      if (newestAttempt?.status === "indeterminate" && !newestAttempt.indeterminateAcknowledgedAt) {
+        return yield* new TaskWorkspaceError({
+          message: `The latest attempt for check '${check.id}' is indeterminate and has not been acknowledged.`,
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+
+      let attemptId: string;
+      let refreshed: TaskWorkspace = task;
+      if (
+        newestAttempt &&
+        (newestAttempt.status === "pending" || newestAttempt.status === "running")
+      ) {
+        // Response-retry semantics: reuse the same pending semantic attempt.
+        // If the prior begin crashed before issuing its finalizer, the
+        // attempt can never settle from a client finalize; reconcile it to
+        // indeterminate and surface the stable CHECK_INDETERMINATE result.
+        const hasPending = yield* finalizers
+          .pendingForAttempt({ taskId: task.id, attemptId: newestAttempt.id })
+          .pipe(Effect.mapError(mapFinalizerError));
+        if (!hasPending) {
+          yield* processImplementationCheck({
+            taskId: task.id,
+            attemptId: newestAttempt.id,
+            status: "indeterminate",
+            output: "The check begin could not be reconciled.",
+            exitCode: null,
+            endingCommitSha: null,
+          });
+          return yield* new TaskWorkspaceError({
+            message: `The latest attempt for check '${check.id}' is indeterminate and has not been acknowledged.`,
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        attemptId = newestAttempt.id;
+        const observedHead = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to inspect the task worktree HEAD.",
+                commandType: "task.cli.check",
+                taskId: task.id,
+                cause,
+              }),
+          ),
+        );
+        if (observedHead !== newestAttempt.startingCommitSha) {
+          return yield* new TaskWorkspaceError({
+            message: "The worktree moved since the check attempt was persisted.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+      } else {
+        // Settled failure, acknowledged indeterminate, or no prior attempt:
+        // allocate the next numbered attempt through the durable reducer.
+        const attemptNumber = task.build.checkAttempts.filter(
+          (candidate) => candidate.checkId === check.id,
+        ).length;
+        const dispatched = yield* serverCommand(task.id, "task.implementation.check.run", {
+          expectedTaskRevision: task.taskRevision,
+          checkId: check.id,
+          operationKey: `implementation-check:${task.id}:${check.id}:${attemptNumber + 1}`,
+        });
+        refreshed = dispatched.task;
+        const created = refreshed.build.checkAttempts
+          .toReversed()
+          .find((candidate) => candidate.checkId === check.id);
+        if (!created) {
+          return yield* new TaskWorkspaceError({
+            message: "The check attempt was not persisted.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        attemptId = created.id;
+      }
+
+      const attempt = refreshed.build.checkAttempts.find((candidate) => candidate.id === attemptId);
+      if (!attempt) {
+        return yield* new TaskWorkspaceError({
+          message: "The check attempt was not persisted.",
+          commandType: "task.cli.check",
+          taskId: task.id,
+        });
+      }
+      const startingStatus = yield* runGit(repository.worktreePath, [
+        "status",
+        "--porcelain=v2",
+      ]).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TaskWorkspaceError({
+              message: "Failed to inspect the task worktree status.",
+              commandType: "task.cli.check",
+              taskId: task.id,
+              cause,
+            }),
+        ),
+      );
+      yield* finalizers
+        .revokeForAttempt({
+          taskId: task.id,
+          attemptId,
+          reason: "superseded",
+        })
+        .pipe(Effect.mapError(mapFinalizerError));
+      const issued = yield* finalizers
+        .issue({
+          taskId: task.id,
+          checkId: check.id,
+          attemptId,
+          occurrence: activeBuild.ordinal,
+          commandDigest: attempt.commandDigest,
+          canonicalCwd: repository.worktreePath,
+          timeoutMs: attempt.timeoutMs,
+          maxOutputBytes: CHECK_MAX_OUTPUT_BYTES,
+          startingCommitSha: attempt.startingCommitSha,
+          startingStatus,
+        })
+        .pipe(Effect.mapError(mapFinalizerError));
+      return {
         accepted: true as const,
-        proposalId:
-          result.task.occurrences.find((candidate) => candidate.stage === "build")
-            ?.completionProposalId ?? `proposal-${input.operationKey}`,
-        providerTurnId: input.providerTurnId,
-      })),
+        attemptId,
+        checkId: check.id,
+        attemptNumber: checkAttemptNumber(refreshed, attemptId),
+        command: check.command,
+        cwd: repository.worktreePath,
+        timeoutMs: attempt.timeoutMs,
+        maxOutputBytes: CHECK_MAX_OUTPUT_BYTES,
+        outcome: "spawn" as const,
+        finalizerToken: issued.finalizerToken,
+        startingCommitSha: attempt.startingCommitSha,
+        startingStatus,
+        taskRevision: refreshed.taskRevision,
+      } satisfies TaskCliCheckBeginResult;
+    });
+
+  const implementationCheckFinalize: TaskWorkspaceServiceShape["implementationCheckFinalize"] = (
+    input,
+  ) =>
+    semaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const finalizers = yield* requireCheckFinalizerService;
+        // Validate against the pending row before consuming so a rejected
+        // finalization (altered state, oversized output, drift, swap, or
+        // cross-occurrence use) leaves the token usable for a corrected retry.
+        const pending = yield* finalizers
+          .read({ finalizerToken: input.finalizerToken })
+          .pipe(Effect.mapError(mapFinalizerError));
+        const task = taskById.get(pending.taskId);
+        if (!task) {
+          return yield* new TaskWorkspaceError({
+            message: "The finalization task is no longer available.",
+            commandType: "task.cli.check",
+            taskId: pending.taskId,
+          });
+        }
+        const attempt = task.build.checkAttempts.find(
+          (candidate) => candidate.id === pending.attemptId,
+        );
+        if (!attempt) {
+          return yield* new TaskWorkspaceError({
+            message: "The finalization attempt is no longer available.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        if (attempt.status !== "pending" && attempt.status !== "running") {
+          return yield* new TaskWorkspaceError({
+            message: `Conflict: the check attempt has already settled (status '${attempt.status}').`,
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const newest = task.build.checkAttempts
+          .toReversed()
+          .find((candidate) => candidate.checkId === pending.checkId);
+        if (!newest || newest.id !== attempt.id) {
+          return yield* new TaskWorkspaceError({
+            message: "Conflict: the finalization attempt is no longer the newest for the check.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const activeBuild = activeOccurrence(task, "build");
+        if (!activeBuild || activeBuild.ordinal !== pending.occurrence) {
+          return yield* new TaskWorkspaceError({
+            message: "Conflict: the finalization token belongs to another Task occurrence.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        if (input.startingCommitSha !== pending.startingCommitSha) {
+          return yield* new TaskWorkspaceError({
+            message: "Conflict: the check starting Git state does not match the bound attempt.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        if (input.startingStatus !== pending.startingStatus) {
+          return yield* new TaskWorkspaceError({
+            message:
+              "Conflict: the check starting worktree status does not match the bound attempt.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        if (input.output.length > pending.maxOutputBytes) {
+          return yield* new TaskWorkspaceError({
+            message: "Check output exceeds the configured output bounds.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const repository = task.workspace.repositories[0];
+        if (!repository?.worktreePath) {
+          return yield* new TaskWorkspaceError({
+            message: "The canonical Build worktree is unavailable.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        const observedHead = yield* runGit(repository.worktreePath, ["rev-parse", "HEAD"]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TaskWorkspaceError({
+                message: "Failed to inspect the task worktree HEAD.",
+                commandType: "task.cli.check",
+                taskId: task.id,
+                cause,
+              }),
+          ),
+        );
+        const effectiveEnding = input.endingCommitSha ?? pending.startingCommitSha;
+        if (effectiveEnding !== observedHead) {
+          return yield* new TaskWorkspaceError({
+            message: "Conflict: the worktree drifted during the check.",
+            commandType: "task.cli.check",
+            taskId: task.id,
+          });
+        }
+        // The client-claimed after-state must match what the server observes
+        // now: a background change after the CLI's own after-observation (or a
+        // fabricated ending status) must not let a pass settle against Git
+        // state that no longer matches the claim. Indeterminate finalizations
+        // carry no ending status and are excluded — they bless nothing.
+        if (input.endingStatus !== null) {
+          const observedStatus = yield* runGit(repository.worktreePath, [
+            "status",
+            "--porcelain=v2",
+          ]).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TaskWorkspaceError({
+                  message: "Failed to inspect the task worktree status.",
+                  commandType: "task.cli.check",
+                  taskId: task.id,
+                  cause,
+                }),
+            ),
+          );
+          if (observedStatus !== input.endingStatus) {
+            return yield* new TaskWorkspaceError({
+              message: "Conflict: the worktree status drifted during the check.",
+              commandType: "task.cli.check",
+              taskId: task.id,
+            });
+          }
+        }
+        // The client-observed indeterminate classification (no supported
+        // sandbox, unobservable after-state, malformed command) is the only
+        // evidence available for those outcomes; exit codes alone cannot
+        // distinguish them from fail/pass.
+        const status =
+          input.timedOut || input.status === "indeterminate"
+            ? ("indeterminate" as const)
+            : input.exitCode === 0
+              ? ("pass" as const)
+              : ("fail" as const);
+        // Settle BEFORE consuming: a crash between consume and settle would
+        // leave the token spent with the attempt wedged pending and no
+        // reconciliation path (the startup fence only revokes pending rows).
+        // In this order a crash leaves the attempt durably settled and the
+        // token pending: a retried finalize hits the already-settled conflict
+        // (message carries the settled status) and the periodic reconcile
+        // revokes the orphaned pending token.
+        yield* processImplementationCheck({
+          taskId: task.id,
+          attemptId: pending.attemptId,
+          status,
+          output: input.output,
+          exitCode: input.exitCode,
+          endingCommitSha: input.endingCommitSha,
+          startingCommitSha: input.startingCommitSha,
+        });
+        yield* finalizers
+          .consume({ finalizerToken: input.finalizerToken })
+          .pipe(Effect.mapError(mapFinalizerError));
+        const after = taskById.get(task.id);
+        const settled = after?.build.checkAttempts.find(
+          (candidate) => candidate.id === pending.attemptId,
+        );
+        return {
+          checkId: pending.checkId,
+          attemptId: pending.attemptId,
+          status: (settled?.status as TaskCliCheckFinalizeStatus | undefined) ?? status,
+          taskRevision: after?.taskRevision ?? task.taskRevision,
+        };
+      }),
     );
+
+  const acknowledgeImplementationCheck: TaskWorkspaceServiceShape["acknowledgeImplementationCheck"] =
+    (input) =>
+      Effect.gen(function* () {
+        const task = taskById.get(input.taskId);
+        if (!task) {
+          return yield* new TaskWorkspaceError({
+            message: `Task '${input.taskId}' was not found.`,
+            commandType: "task.internal",
+            taskId: input.taskId,
+          });
+        }
+        yield* serverCommand(input.taskId, "task.implementation.check.ack", {
+          checkId: input.checkId,
+          attemptId: input.attemptId,
+          acknowledgedBy: input.acknowledgedBy,
+          operationKey: `implementation-check-ack:${input.taskId}:${input.attemptId}`,
+        }).pipe(Effect.asVoid);
+      });
+
+  const reconcilePendingChecks: TaskWorkspaceServiceShape["reconcilePendingChecks"] = (input) =>
+    Effect.gen(function* () {
+      const finalizers = yield* requireCheckFinalizerService;
+      const affected = yield* finalizers
+        .reconcile({ olderThanMs: input?.olderThanMs ?? CHECK_TIMEOUT_MS * 2 + 10_000 })
+        .pipe(Effect.mapError(mapFinalizerError));
+      for (const entry of affected) {
+        const task = taskById.get(entry.taskId);
+        if (!task) continue;
+        const attempt = task.build.checkAttempts.find(
+          (candidate) => candidate.id === entry.attemptId,
+        );
+        if (!attempt || (attempt.status !== "pending" && attempt.status !== "running")) continue;
+        yield* processImplementationCheck({
+          taskId: entry.taskId,
+          attemptId: entry.attemptId,
+          status: "indeterminate",
+          output: "The check result could not be reconciled.",
+          exitCode: null,
+          endingCommitSha: null,
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("task check reconciliation settlement failed", {
+              taskId: entry.taskId,
+              attemptId: entry.attemptId,
+              cause: cause instanceof Error ? cause.message : String(cause),
+            }),
+          ),
+        );
+      }
+    });
 
   const latestOccurrence = (
     task: TaskWorkspace,
@@ -6597,7 +7128,6 @@ export const make = Effect.gen(function* () {
     stage: TaskWorkspaceStage,
     occurrence: number,
     options?: {
-      readonly executionProfile?: TaskWorkspace["preferences"]["executionProfile"];
       readonly presentation?: string;
       readonly worktreeBranch?: string | null;
       readonly worktreePath?: string | null;
@@ -6634,13 +7164,11 @@ export const make = Effect.gen(function* () {
           : branch && repository
             ? expectedTaskWorktreePath(config.worktreesDir, repository.workspaceRoot, branch)
             : null;
-      const executionProfile = options?.executionProfile ?? task.preferences.executionProfile;
       const presentation =
         options?.presentation ?? (stage === "build" ? "implementation" : "stage");
       const outboxPayload: TaskWorkspaceBootstrapOutboxPayload = {
         stage,
         occurrence,
-        executionProfile,
         runtimeMode: task.preferences.runtimeMode,
         presentation,
         sessionId,
@@ -6648,10 +7176,7 @@ export const make = Effect.gen(function* () {
         threadCreateCommandId,
         turnStartCommandId,
         kickoffMessageId,
-        trustedInstructions:
-          executionProfile === "task-worktree-write"
-            ? trustedImplementationInstructions()
-            : trustedStageInstructions(stage),
+        trustedInstructions: trustedInstructionsForStage(stage),
         contextManifestId: options?.contextManifestId ?? null,
         continuationCheckpointId: options?.continuationCheckpointId ?? null,
         continuationMode: options?.continuationMode ?? null,
@@ -6665,7 +7190,6 @@ export const make = Effect.gen(function* () {
   const bootstrapStateFor = (
     input: {
       readonly operationKey: string;
-      readonly executionProfile?: TaskWorkspace["preferences"]["executionProfile"];
       readonly presentation?: string;
       readonly sessionId: string;
       readonly threadId: ThreadId;
@@ -6676,7 +7200,6 @@ export const make = Effect.gen(function* () {
     now: string,
   ): TaskWorkspaceBootstrapState => ({
     operationKey: input.operationKey,
-    executionProfile: input.executionProfile ?? "planning",
     presentation: input.presentation ?? "stage",
     status: "pending",
     currentStep: null,
@@ -6751,7 +7274,6 @@ export const make = Effect.gen(function* () {
         "build",
         buildOccurrence.ordinal,
         {
-          executionProfile: "task-worktree-write",
           presentation: "implementation",
           worktreeBranch: input.task.workspace.repositories[0]?.branch ?? null,
           worktreePath: input.task.workspace.repositories[0]?.worktreePath ?? null,
@@ -6787,7 +7309,6 @@ export const make = Effect.gen(function* () {
           bootstrap: bootstrapStateFor(
             {
               operationKey: bootstrap.operationKey,
-              executionProfile: "task-worktree-write",
               presentation: "implementation",
               sessionId: bootstrap.outboxPayload.sessionId,
               threadId: bootstrap.outboxPayload.threadId,
@@ -7105,6 +7626,8 @@ export const make = Effect.gen(function* () {
           terminalTurnOutcome: null,
           committedArtifactRevisionId: null,
           rejectionReason: null,
+          proposalCommitSha: input.proposalCommitSha ?? null,
+          proposalStatusSnapshot: input.proposalStatusSnapshot ?? null,
           createdAt: now,
           settledAt: null,
         };
@@ -7624,6 +8147,84 @@ export const make = Effect.gen(function* () {
               taskId: task.id,
             });
           }
+          // Reject complete-then-mutate and commit drift against the
+          // proposal-time Git basis before any further validation or
+          // advancement. Proposals without a basis (legacy internal path)
+          // keep their existing behavior.
+          if (pending.proposalCommitSha !== null) {
+            const repository = task.workspace.repositories[0];
+            const rejectBuildDrift = (rejectionReason: string) => {
+              const rejectedTask: TaskWorkspace = {
+                ...task,
+                occurrences: task.occurrences.map((candidate) =>
+                  candidate.id === occurrence.id
+                    ? {
+                        ...candidate,
+                        status: "running" as const,
+                        completionProposalId: null,
+                      }
+                    : candidate,
+                ),
+              };
+              return internalAppend("task.proposal.rejected", rejectedTask, {
+                occurredAt: now,
+                proposal: {
+                  ...pending,
+                  status: "rejected",
+                  terminalTurnOutcome: "completed",
+                  rejectionReason,
+                  settledAt: now,
+                },
+              });
+            };
+            if (!repository?.worktreePath) {
+              return yield* new TaskWorkspaceError({
+                message: "The canonical Build worktree is unavailable.",
+                commandType: "task.internal",
+                taskId: task.id,
+              });
+            }
+            const observedCommitSha = yield* runGit(repository.worktreePath, [
+              "rev-parse",
+              "HEAD",
+            ]).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TaskWorkspaceError({
+                    message: "Failed to re-observe the Build worktree HEAD.",
+                    commandType: "task.internal",
+                    taskId: task.id,
+                    cause,
+                  }),
+              ),
+            );
+            if (observedCommitSha !== pending.proposalCommitSha) {
+              return yield* rejectBuildDrift(
+                "The worktree commit drifted after the completion proposal.",
+              );
+            }
+            if (pending.proposalStatusSnapshot !== null) {
+              const observedStatus = yield* runGit(repository.worktreePath, [
+                "status",
+                "--porcelain=v2",
+              ]).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new TaskWorkspaceError({
+                      message: "Failed to re-observe the Build worktree status.",
+                      commandType: "task.internal",
+                      taskId: task.id,
+                      cause,
+                    }),
+                ),
+              );
+              if (observedStatus !== pending.proposalStatusSnapshot) {
+                return yield* rejectBuildDrift(
+                  "The worktree status drifted after the completion proposal.",
+                );
+              }
+            }
+          }
           const normalizedBuild = normalizeCompletedBuildPhases(task.build, now);
           if (normalizedBuild !== task.build) {
             taskForCompletion = yield* internalAppend(
@@ -7872,9 +8473,7 @@ export const make = Effect.gen(function* () {
             const provider = yield* providerInstanceRegistry.value.getInstance(
               readyTask.preferences.modelSelection.instanceId,
             );
-            implementationEligible = Boolean(
-              provider?.enabled && supportsTaskWorktreeWrite(provider.adapter.capabilities),
-            );
+            implementationEligible = Boolean(provider?.enabled);
           }
           const shouldStartImplementation =
             implementationEligible &&
@@ -7899,7 +8498,6 @@ export const make = Effect.gen(function* () {
               "build",
               buildOccurrence.ordinal,
               {
-                executionProfile: "task-worktree-write",
                 presentation: "implementation",
                 worktreeBranch: worktree.worktree.refName,
                 worktreePath: worktree.worktree.path,
@@ -7907,11 +8505,10 @@ export const make = Effect.gen(function* () {
             );
             readyTask = {
               ...readyTask,
-              preferences: { ...readyTask.preferences, executionProfile: "task-worktree-write" },
+              preferences: readyTask.preferences,
               bootstrap: bootstrapStateFor(
                 {
                   operationKey: bootstrap.operationKey,
-                  executionProfile: "task-worktree-write",
                   presentation: "implementation",
                   sessionId: bootstrap.outboxPayload.sessionId,
                   threadId: bootstrap.outboxPayload.threadId,
@@ -8076,7 +8673,7 @@ export const make = Effect.gen(function* () {
           // Step 1: provision or reconcile the worktree when policy requires it.
           let working = task;
           const repository = working.workspace.repositories[0]!;
-          if (payload.executionProfile === "task-worktree-write") {
+          if (payload.stage === "build") {
             const expectedBranch = `katacode/task-${safeBranchSegment(entry.taskId)}`;
             const expectedPath = expectedTaskWorktreePath(
               config.worktreesDir,
@@ -8261,16 +8858,13 @@ export const make = Effect.gen(function* () {
                 messageId: payload.kickoffMessageId,
                 role: "user",
                 text:
-                  payload.executionProfile === "task-worktree-write"
+                  payload.stage === "build"
                     ? `Implement the approved Plan for task '${working.title}'. Use the implementation context tool and begin with the first eligible work item.`
                     : working.intake.brief,
                 attachments: [],
               },
               developerInstructions:
-                payload.trustedInstructions ??
-                (payload.executionProfile === "task-worktree-write"
-                  ? trustedImplementationInstructions()
-                  : trustedStageInstructions(payload.stage)),
+                payload.trustedInstructions ?? trustedInstructionsForStage(payload.stage),
               modelSelection,
               runtimeMode: payload.runtimeMode,
               interactionMode: "default",
@@ -8295,7 +8889,6 @@ export const make = Effect.gen(function* () {
             ...working,
             bootstrap: {
               operationKey: working.bootstrap!.operationKey,
-              executionProfile: payload.executionProfile,
               presentation: payload.presentation,
               status: "ready",
               currentStep: null,
@@ -8362,13 +8955,13 @@ export const make = Effect.gen(function* () {
 
   return TaskWorkspaceService.of({
     dispatch,
-    implementationContext,
-    implementationProgress,
-    implementationCheckRun,
-    startImplementationCheck,
     processImplementationCheck,
-    implementationAmendmentPropose,
-    implementationComplete,
+    implementationProgressCli,
+    implementationAmendmentProposeCli,
+    implementationCheckBegin,
+    implementationCheckFinalize,
+    acknowledgeImplementationCheck,
+    reconcilePendingChecks,
     processBootstrap,
     processWorktree,
     proposeStageCompletion,
@@ -8377,7 +8970,6 @@ export const make = Effect.gen(function* () {
     reconcilePendingProposals,
     validatePlanningRoot,
     validateProviderTurn,
-    authorizeTaskStage,
     getActiveTaskStage,
     getActiveTaskProviderContext,
     resolveTaskCliInvocation,
