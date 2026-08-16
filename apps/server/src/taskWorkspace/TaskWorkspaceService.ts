@@ -1744,6 +1744,21 @@ function isInternalImplementationCommand(command: TaskWorkspaceCommand): boolean
   return (command as InternallyDispatchedCommand)[INTERNAL_IMPLEMENTATION_COMMAND] === true;
 }
 
+/**
+ * Match a pending completion proposal to a provider terminal. Exact turn-id
+ * equality is preferred. Claude (and a pre-bind Task CLI lease) can publish
+ * the terminal under a different id than the proposal, so a unique pending
+ * proposal on the same thread is accepted as the same turn.
+ */
+function findPendingProposalForTerminal<
+  T extends { readonly threadId: string; readonly providerTurnId: string },
+>(pendingProposals: readonly T[], threadId: string, providerTurnId: string): T | undefined {
+  const onThread = pendingProposals.filter((candidate) => candidate.threadId === threadId);
+  const exact = onThread.find((candidate) => candidate.providerTurnId === providerTurnId);
+  if (exact) return exact;
+  return onThread.length === 1 ? onThread[0] : undefined;
+}
+
 let activeTaskWorkspaceService: TaskWorkspaceServiceShape | undefined;
 
 export interface ActiveTaskProviderContext {
@@ -1904,10 +1919,10 @@ export const make = Effect.gen(function* () {
 
   const settleProviderTurn: TaskWorkspaceServiceShape["settleProviderTurn"] = (input) =>
     Effect.gen(function* () {
-      // Resolve the exact pending proposal by its durable provider binding. The
-      // latest task occurrence can change while a terminal event and proposal
-      // are racing, so deriving the occurrence from the current run can miss
-      // an otherwise valid proposal.
+      // Prefer the proposal bound to this exact provider turn id. Claude Task
+      // CLI completions can land under a pending-task-cli lease id while the
+      // terminal publishes the native turn id, so a unique pending proposal on
+      // the same thread is treated as the same turn.
       const pendingProposals = yield* store.readPendingProposals().pipe(
         Effect.mapError(
           (cause) =>
@@ -1918,10 +1933,10 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
-      const proposal = pendingProposals.find(
-        (candidate) =>
-          candidate.threadId === input.threadId &&
-          candidate.providerTurnId === input.providerTurnId,
+      const proposal = findPendingProposalForTerminal(
+        pendingProposals,
+        input.threadId,
+        input.providerTurnId,
       );
       if (!proposal) {
         yield* Effect.logWarning("task workspace completion terminal had no pending proposal", {
@@ -1937,7 +1952,7 @@ export const make = Effect.gen(function* () {
       yield* settleProposal({
         taskId: proposal.taskId,
         occurrence: proposal.occurrence,
-        providerTurnId: input.providerTurnId,
+        providerTurnId: proposal.providerTurnId,
         outcome: input.outcome,
       }).pipe(Effect.asVoid);
     });
@@ -8300,13 +8315,28 @@ export const make = Effect.gen(function* () {
         Effect.map((chunk) => Array.from(chunk)),
       );
       for (const proposal of pending) {
-        const terminalEvent = events.find(
+        const terminalsOnThread = events.filter(
           (event) =>
             event.type === "thread.activity-appended" &&
             event.payload.threadId === proposal.threadId &&
-            event.payload.activity.turnId === proposal.providerTurnId &&
             event.payload.activity.kind === "provider-turn-terminal",
         );
+        const exactTerminal = terminalsOnThread.find(
+          (event) =>
+            event.type === "thread.activity-appended" &&
+            event.payload.activity.turnId === proposal.providerTurnId,
+        );
+        const uniqueOnThread =
+          pending.filter((candidate) => candidate.threadId === proposal.threadId).length === 1;
+        const aliasedTerminal =
+          exactTerminal === undefined && uniqueOnThread
+            ? terminalsOnThread.find((event) => {
+                if (event.type !== "thread.activity-appended") return false;
+                const terminalAt = event.payload.activity.createdAt;
+                return typeof terminalAt === "string" && terminalAt >= proposal.createdAt;
+              })
+            : undefined;
+        const terminalEvent = exactTerminal ?? aliasedTerminal;
         if (!terminalEvent || terminalEvent.type !== "thread.activity-appended") {
           yield* Effect.logWarning(
             "task workspace completion proposal has no matching terminal activity",
