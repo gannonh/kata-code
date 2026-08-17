@@ -94,6 +94,11 @@ jobs:
       - name: Test
         run: vp run test
 
+      # The root suite excludes `e2e/**`; without this step the E2E harness's
+      # own unit tests never run anywhere.
+      - name: Test E2E harness units
+        run: vp run test:e2e-unit
+
   test_browser:
     name: Test Browser
     runs-on: ubuntu-24.04

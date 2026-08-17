@@ -9,7 +9,7 @@ import { createOrOpenProject, createSeededGitWorkspace } from "./workspace.ts";
 const execFile = promisify(execFileCallback);
 
 /**
- * Deterministic Guided brief used by provider-parity acceptance runs. The
+ * Deterministic Guided brief used by the guided-task acceptance runs. The
  * approved Plan must contain exactly one phase with `Checkpoint: always`, one
  * work item, and one automated check (`node --test test/onboarding.test.js`),
  * so every provider proves the same implement contract: progress, check run
@@ -270,6 +270,57 @@ export async function answerGuidedClarifyQuestions(
   throw new Error(
     `Guided Clarify questions did not settle within the E2E timeout. Last assistant message: ${JSON.stringify(lastAssistantText.slice(0, 800))}. Visible assistant messages: ${JSON.stringify(visibleMessages.slice(-6).map((text) => text.slice(0, 300)))}.`,
   );
+}
+
+export async function expectCompletedGuidedImplement(
+  page: Page,
+  options?: { readonly deadlineMs?: number },
+): Promise<void> {
+  const check = page.getByTestId("guided-build-check-check:typecheck");
+  await expect(check).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+  await expect(check).toContainText("automated");
+  await expect(check).toContainText("node --test test/onboarding.test.js");
+
+  const resultingCommit = page.getByTestId("guided-resulting-commit");
+  const checkpointContinue = page.locator('[data-testid^="guided-checkpoint-continue-"]');
+  const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
+  const taskError = page.getByTestId("guided-task-error");
+  const deadline = Date.now() + (options?.deadlineMs ?? 5 * 60_000);
+  while (Date.now() < deadline) {
+    if (await taskError.isVisible().catch(() => false)) {
+      throw new Error(
+        `Guided task failed during Implement: ${(await taskError.innerText()).trim()}`,
+      );
+    }
+    if (await resultingCommit.isVisible().catch(() => false)) break;
+
+    // auto-accept-edits still gates command tools (e.g. Bash) behind an
+    // approval request on some providers; service it so Implement keeps
+    // moving instead of blocking until the suite timeout.
+    if (await approveOnce.isVisible().catch(() => false)) {
+      await expect(approveOnce).toBeEnabled();
+      await approveOnce.click();
+      await page.waitForTimeout(350);
+      continue;
+    }
+
+    const count = await checkpointContinue.count();
+    for (let index = 0; index < count; index += 1) {
+      const button = checkpointContinue.nth(index);
+      if (await button.isEnabled().catch(() => false)) {
+        await button.click();
+        break;
+      }
+    }
+    await page.waitForTimeout(500);
+  }
+
+  await expect(resultingCommit).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
+  await expect(check).toContainText("pass", { timeout: E2E_TIMEOUTS.assertionMs });
+  await expect(page.getByTestId("guided-check-attempts-check:typecheck")).toContainText("pass");
+  const resultingCommitSha = (await resultingCommit.innerText()).trim();
+  expect(resultingCommitSha).toMatch(/^[0-9a-f]{40}$/);
+  await expect(page.getByTestId("guided-implementation-complete")).toBeVisible();
 }
 
 export { createOrOpenProject };

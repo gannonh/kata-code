@@ -5,6 +5,8 @@ export const E2E_TAGS = {
   settings: "@settings",
   agent: "@agent",
   pi: "@pi",
+  codex: "@codex",
+  claude: "@claude",
   piUpdate: "@pi-update",
   cursor: "@cursor",
   sandbox: "@sandbox",

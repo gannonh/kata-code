@@ -112,7 +112,8 @@ function readCodexE2eAuthMode(): CodexE2eAuthMode {
   if (value === "oauth" || value === "oauth-or-api-key" || value === "api-key") {
     return value;
   }
-  return "api-key";
+  // OAuth-first is the local policy; OPENAI_API_KEY remains the fallback.
+  return "oauth-or-api-key";
 }
 
 async function stageCodexOAuthAuth(katacodeHome: string): Promise<boolean> {
@@ -148,7 +149,9 @@ function readClaudeE2eAuthMode(): ClaudeE2eAuthMode {
   if (value === "oauth" || value === "oauth-or-api-key" || value === "api-key") {
     return value;
   }
-  return "api-key";
+  // OAuth-first is the local policy: an unset knob must not silently bill the
+  // ambient ANTHROPIC_API_KEY when the host has a Claude subscription staged.
+  return "oauth-or-api-key";
 }
 
 /**
@@ -281,7 +284,18 @@ export async function createIsolatedRun(input: {
 
   cleanupCallbacks.push(async () => {
     await releasePortClaimIdempotent();
+    // Provider-agent failures are only diagnosable from the isolated HOME's
+    // server/provider logs, which normally die with the run. The copied
+    // Electron runtime is a pure cache with no diagnostic value, so it is
+    // removed even when HOME and the seeded workspace are retained.
     const removeOptions = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
+    if (process.env.KATACODE_E2E_KEEP_HOME === "1") {
+      console.error(
+        `[e2e] KATACODE_E2E_KEEP_HOME=1 — retained isolated HOME: ${katacodeHome} and workspace: ${workspaceRoot}`,
+      );
+      await rm(electronRuntimeDir, removeOptions);
+      return;
+    }
     await rm(katacodeHome, removeOptions);
     await rm(workspaceRoot, removeOptions);
     await rm(electronRuntimeDir, removeOptions);
@@ -304,18 +318,24 @@ export async function createIsolatedRun(input: {
     }
   }
 
-  // Codex OAuth lives in the host user's auth file. Stage only that file into
-  // the isolated HOME when the repository .env requests OAuth-first auth.
-  // Codex itself chooses OAuth before an inherited API key; the API key remains
-  // available only for the explicit oauth-or-api-key fallback mode.
-  const codexOAuthStaged = await stageCodexOAuthAuth(katacodeHome);
-
-  // Claude OAuth lives in the host ~/.claude.json (oauthAccount). Stage it
-  // into the isolated HOME like Codex auth when the repository .env requests
-  // OAuth-first Claude auth. The ambient Anthropic keys are only forwarded as
-  // the explicit oauth-or-api-key fallback when staging fails.
-  await stageClaudeOAuth(katacodeHome);
-  const claudeKeychainStaged = await stageClaudeKeychainCredentials(katacodeHome);
+  // Shared harness authentication stays independent of the guided provider
+  // allowlist (KATACODE_E2E_PROVIDERS filters guided test generation only):
+  // every spec in the run may need Codex or Claude credentials. Staging is
+  // graceful — hosts without a provider's OAuth keep the ambient-key fallback.
+  let codexOAuthStaged = false;
+  let claudeKeychainStaged = false;
+  try {
+    // Codex OAuth lives in the host user's auth file; Codex itself chooses
+    // OAuth before an inherited API key.
+    codexOAuthStaged = await stageCodexOAuthAuth(katacodeHome);
+    // Claude OAuth lives in the host ~/.claude.json (oauthAccount) and the
+    // macOS keychain credential item.
+    await stageClaudeOAuth(katacodeHome);
+    claudeKeychainStaged = await stageClaudeKeychainCredentials(katacodeHome);
+  } catch (error) {
+    await Promise.allSettled(cleanupCallbacks.map((callback) => callback()));
+    throw error;
+  }
 
   // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
   // name. The isolated HOME has no macOS login keychain, so interactive
@@ -338,8 +358,6 @@ export async function createIsolatedRun(input: {
         ...envWithoutProviderSecrets,
         ...(ambientOpenAiApiKey ? { OPENAI_API_KEY: ambientOpenAiApiKey } : {}),
       };
-  // Claude OAuth staging does not strip the OpenAI key: Codex fallback auth
-  // must keep working for mixed-provider suites in the same isolated run.
   // Claude OAuth staging does not strip the OpenAI key: Codex fallback auth
   // must keep working for mixed-provider suites in the same isolated run.
   // The keychain credential item is the real OAuth material; ambient

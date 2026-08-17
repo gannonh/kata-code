@@ -5,7 +5,10 @@ import * as Stream from "effect/Stream";
 
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
-import { TaskWorkspaceService } from "./TaskWorkspaceService.ts";
+import {
+  providerInstanceIdFromActivityPayload,
+  TaskWorkspaceService,
+} from "./TaskWorkspaceService.ts";
 
 type ActivityAppendedEvent = Extract<
   OrchestrationEvent,
@@ -38,20 +41,28 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
     const settle = (
       threadId: ProviderRuntimeEvent["threadId"],
       providerTurnId: string,
+      providerInstanceId: ProviderRuntimeEvent["providerInstanceId"],
       outcome: "completed" | "aborted" | "failed",
       eventType: string,
     ) =>
-      taskWorkspaces.settleProviderTurn({ threadId, providerTurnId, outcome }).pipe(
-        Effect.tapError((cause) =>
-          Effect.logWarning("task workspace completion settlement failed", {
-            threadId,
-            providerTurnId,
-            eventType,
-            cause: cause.message,
-          }),
-        ),
-        Effect.ignore,
-      );
+      taskWorkspaces
+        .settleProviderTurn({
+          threadId,
+          providerTurnId,
+          providerInstanceId,
+          outcome,
+        })
+        .pipe(
+          Effect.tapError((cause) =>
+            Effect.logWarning("task workspace completion settlement failed", {
+              threadId,
+              providerTurnId,
+              eventType,
+              cause: cause.message,
+            }),
+          ),
+          Effect.ignore,
+        );
     yield* taskWorkspaces.reconcilePendingProposals.pipe(
       Effect.tapError((cause) =>
         Effect.logWarning("task workspace startup proposal reconciliation failed", {
@@ -68,7 +79,13 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
                 const outcome = terminalOutcome(event);
                 const providerTurnId = event.payload.activity.turnId;
                 if (!outcome || providerTurnId === null) return Effect.void;
-                return settle(event.payload.threadId, providerTurnId, outcome, event.type);
+                return settle(
+                  event.payload.threadId,
+                  providerTurnId,
+                  providerInstanceIdFromActivityPayload(event.payload.activity.payload),
+                  outcome,
+                  event.type,
+                );
               })()
             : Effect.void;
         // A completion proposal and its durable terminal activity can be
@@ -97,9 +114,20 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
             ? Effect.logDebug("task workspace completion reactor observed provider terminal", {
                 threadId: event.threadId,
                 providerTurnId: event.turnId,
+                providerInstanceId: event.providerInstanceId,
                 outcome,
                 eventType: event.type,
-              }).pipe(Effect.andThen(settle(event.threadId, event.turnId, outcome, event.type)))
+              }).pipe(
+                Effect.andThen(
+                  settle(
+                    event.threadId,
+                    event.turnId,
+                    event.providerInstanceId,
+                    outcome,
+                    event.type,
+                  ),
+                ),
+              )
             : Effect.void;
         return settlement.pipe(
           Effect.andThen(

@@ -11,6 +11,13 @@
 
 Prove each acceptance criterion for user-facing features before marking work complete.
 
+**Provider E2E credentials are already configured.** Codex, Claude, and Pi all run locally from the
+repo-root `.env` (Claude uses the host OAuth session, staged from `~/.claude.json` + the
+`Claude Code-credentials` keychain item; `ANTHROPIC_API_KEY` is only a fallback). Any change on a
+provider path must run the real parity flow — e.g.
+`vp run e2e --project desktop-dev --grep "reaches completed Implement with Claude"` — and report the
+result. Never close work with "Claude E2E needs credentials"; verify with the run.
+
 1. **Manual validation with `playwright-cli`:** Launch the running app, walk through each
    acceptance criterion interactively, and capture snapshots that confirm the expected behavior.
 

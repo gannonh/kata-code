@@ -68,15 +68,16 @@ the runtime catalog labels).
 
 ### Pi provider runs
 
-Set `KATACODE_E2E_ENABLE_PI=1`, `KATACODE_E2E_PI_AGENT_DIR`, and
-`KATACODE_E2E_PI_MODEL` to an authenticated model. Pi sessions validate the model against the
-runtime-discovered catalog (not the staged cache), so `KATACODE_E2E_PI_MODEL` must exist in the
-account's live catalog — check with `pi --list-models <search>` before changing it. Optionally set
-`KATACODE_E2E_PI_MODEL_FALLBACKS` to a comma-separated priority list; provider-parity runs select
-the first model the task form actually offers.
+The guided provider registry ([`src/config/providers.ts`](./src/config/providers.ts)) already
+defaults the Pi agent directory and model, so no environment variable is required. Override with
+`KATACODE_E2E_PI_AGENT_DIR` and `KATACODE_E2E_PI_MODEL`. Pi sessions validate the model against the
+runtime-discovered catalog (not the staged cache), so the model must exist in the account's live
+catalog — check with `pi --list-models <search>` before changing it. `KATACODE_E2E_PI_MODEL_FALLBACKS`
+overrides the registry's comma-separated priority list; guided runs select the first model the task
+form actually offers.
 
 Pi runs the full Guided workflow (planning and Implement) through the Task CLI like Codex and
-Claude; see the provider-parity spec below. `@pi-update` omits the source `models.json` and does
+Claude; see `tests/task-workspaces/guided-task.spec.ts`. `@pi-update` omits the source `models.json` and does
 not register the model as custom, so model selection proves the installed Pi catalog discovered it.
 
 ### Cursor skill tests (`@cursor`)
@@ -199,16 +200,16 @@ On macOS, Playwright Electron launches always open a visible app window. **`e2e:
 
 ### Feature tags
 
-| Tag                | Coverage                                                                                                              |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `@smoke`           | App launch, pairing, and shell surface                                                                                |
-| `@auth`            | Clerk Google test-user sign-in                                                                                        |
-| `@settings`        | Settings theme persistence                                                                                            |
-| `@agent`           | Real LLM deterministic reply                                                                                          |
-| `@pi`              | Real Pi provider lifecycle                                                                                            |
-| `@pi-update`       | Built-in Pi catalog discovery and real-model reply                                                                    |
-| `@cursor`          | Cursor skill discovery and invocation                                                                                 |
-| `@task-workspaces` | Guided Task create through approved Plan (also `@agent`); provider-parity spec completes Implement with Pi and Claude |
+| Tag                | Coverage                                                                                                                                                        |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@smoke`           | App launch, pairing, and shell surface                                                                                                                          |
+| `@auth`            | Clerk Google test-user sign-in                                                                                                                                  |
+| `@settings`        | Settings theme persistence                                                                                                                                      |
+| `@agent`           | Real LLM deterministic reply                                                                                                                                    |
+| `@pi`              | Real Pi provider lifecycle                                                                                                                                      |
+| `@pi-update`       | Built-in Pi catalog discovery and real-model reply                                                                                                              |
+| `@cursor`          | Cursor skill discovery and invocation                                                                                                                           |
+| `@task-workspaces` | Full Guided Task flow through completed Implement (also `@agent`), one test per registry provider — filter a single provider with `@codex`, `@claude`, or `@pi` |
 
 Filter with `--grep`, for example `vp run e2e --project desktop-dev --grep @settings`.
 

@@ -242,12 +242,14 @@ const readLeaseRows = Effect.gen(function* () {
     readonly tokenHash: string;
     readonly status: string;
     readonly providerTurnId: string;
+    readonly boundTurnId: string | null;
     readonly revocationReason: string | null;
   }>`
     SELECT
       token_hash AS "tokenHash",
       status,
       provider_turn_id AS "providerTurnId",
+      bound_turn_id AS "boundTurnId",
       revocation_reason AS "revocationReason"
     FROM task_invocation_leases
     ORDER BY issued_at, rowid
@@ -302,7 +304,59 @@ describe("TaskInvocationService", () => {
         providerTurnId: TurnId.make("native-turn-1"),
       });
       const resolved = yield* service.resolve(issued.token);
+      const rows = yield* readLeaseRows;
       expect(resolved.scope.providerTurnId).toBe("native-turn-1");
+      expect(rows[0]?.providerTurnId).toBe("pending-task-cli-1");
+      expect(rows[0]?.boundTurnId).toBe("native-turn-1");
+    }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect("keeps completion proposals keyed by the immutable lease after binding", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("pending-task-cli-complete");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("pending-task-cli-complete"));
+      test.setBinding("native-turn-complete");
+      yield* service.bind({
+        token: issued.token,
+        threadId,
+        providerInstanceId,
+        providerTurnId: TurnId.make("native-turn-complete"),
+      });
+
+      const acknowledgement = yield* service.complete({
+        token: issued.token,
+        summary: "Complete after bind.",
+        markdown: "# Complete\n",
+      });
+
+      expect(acknowledgement.providerTurnId).toBe("pending-task-cli-complete");
+      expect(test.lastComplete()?.providerTurnId).toBe("pending-task-cli-complete");
+    }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect("binds a lease after terminal revocation wins the provider race", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("pending-task-cli-terminal-race");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("pending-task-cli-terminal-race"));
+      yield* service.revokeTurn({
+        threadId,
+        providerTurnId: TurnId.make("pending-task-cli-terminal-race"),
+      });
+
+      yield* service.bind({
+        token: issued.token,
+        threadId,
+        providerInstanceId,
+        providerTurnId: TurnId.make("native-turn-after-terminal"),
+      });
+
+      const rows = yield* readLeaseRows;
+      expect(rows[0]?.status).toBe("revoked");
+      expect(rows[0]?.boundTurnId).toBe("native-turn-after-terminal");
     }).pipe(Effect.provide(test.layer));
   });
 

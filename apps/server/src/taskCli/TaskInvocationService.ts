@@ -43,6 +43,7 @@ const LeaseRow = Schema.Struct({
   threadId: ThreadId,
   providerInstanceId: ProviderInstanceId,
   providerTurnId: TurnId,
+  boundTurnId: Schema.NullOr(TurnId),
   ownerGeneration: Schema.String,
   status: Schema.String,
   issuedAt: Schema.String,
@@ -172,6 +173,7 @@ const make = Effect.gen(function* () {
         thread_id AS "threadId",
         provider_instance_id AS "providerInstanceId",
         provider_turn_id AS "providerTurnId",
+        bound_turn_id AS "boundTurnId",
         owner_generation AS "ownerGeneration",
         status,
         issued_at AS "issuedAt",
@@ -377,12 +379,13 @@ const make = Effect.gen(function* () {
             const inserted = yield* sql<{ readonly tokenHash: string }>`
               INSERT INTO task_invocation_leases (
                 token_hash, environment_id, task_id, occurrence, stage,
-                thread_id, provider_instance_id, provider_turn_id, owner_generation, status,
-                issued_at, expires_at, revoked_at, revocation_reason
+                thread_id, provider_instance_id, provider_turn_id, bound_turn_id,
+                owner_generation, status, issued_at, expires_at, revoked_at, revocation_reason
               )
               SELECT
                 ${tokenHash}, ${scope.environmentId}, ${scope.taskId}, ${scope.occurrence}, ${scope.stage},
-                ${scope.threadId}, ${scope.providerInstanceId}, ${scope.providerTurnId}, ${ownerGeneration}, 'active',
+                ${scope.threadId}, ${scope.providerInstanceId}, ${scope.providerTurnId}, NULL,
+                ${ownerGeneration}, 'active',
                 ${issuedAt}, ${expiresAt}, NULL, NULL
               WHERE EXISTS (
                 SELECT 1 FROM task_invocation_lease_owner
@@ -416,12 +419,18 @@ const make = Effect.gen(function* () {
           toError("internal_error", "Failed to read invocation credential.", cause),
         ),
       );
-      if (Option.isNone(row) || row.value.status !== "active") {
+      if (Option.isNone(row)) {
+        return yield* toError("stale_lease", "The invocation credential is no longer active.");
+      }
+      const leaseRow = row.value;
+      const terminalRevoked =
+        leaseRow.status === "revoked" && leaseRow.revocationReason === "terminal";
+      if (leaseRow.status !== "active" && !terminalRevoked) {
         return yield* toError("stale_lease", "The invocation credential is no longer active.");
       }
       if (
-        row.value.threadId !== input.threadId ||
-        row.value.providerInstanceId !== input.providerInstanceId
+        leaseRow.threadId !== input.threadId ||
+        leaseRow.providerInstanceId !== input.providerInstanceId
       ) {
         return yield* toError(
           "stale_lease",
@@ -429,30 +438,36 @@ const make = Effect.gen(function* () {
         );
       }
       const bindingScope: TaskInvocationScopeValue = {
-        environmentId: row.value.environmentId,
-        taskId: row.value.taskId,
-        occurrence: row.value.occurrence,
-        stage: row.value.stage,
-        threadId: row.value.threadId,
-        providerInstanceId: row.value.providerInstanceId,
+        environmentId: leaseRow.environmentId,
+        taskId: leaseRow.taskId,
+        occurrence: leaseRow.occurrence,
+        stage: leaseRow.stage,
+        threadId: leaseRow.threadId,
+        providerInstanceId: leaseRow.providerInstanceId,
         providerTurnId: input.providerTurnId,
       };
-      const binding = yield* currentBinding(bindingScope);
-      if (!bindingHasTurn(binding, bindingScope)) {
-        return yield* toError(
-          "stale_lease",
-          "The invocation credential cannot bind to an inactive provider turn.",
-        );
+      if (!terminalRevoked) {
+        const binding = yield* currentBinding(bindingScope);
+        if (!bindingHasTurn(binding, bindingScope)) {
+          return yield* toError(
+            "stale_lease",
+            "The invocation credential cannot bind to an inactive provider turn.",
+          );
+        }
       }
       const updated = yield* sql<{ readonly tokenHash: string }>`
         UPDATE task_invocation_leases
-        SET provider_turn_id = ${input.providerTurnId}
+        SET bound_turn_id = ${input.providerTurnId}
         WHERE token_hash = ${tokenHash}
           AND thread_id = ${input.threadId}
           AND provider_instance_id = ${input.providerInstanceId}
-          AND provider_turn_id = ${row.value.providerTurnId}
+          AND provider_turn_id = ${leaseRow.providerTurnId}
+          AND (bound_turn_id IS NULL OR bound_turn_id = ${input.providerTurnId})
           AND owner_generation = ${ownerGeneration}
-          AND status = 'active'
+          AND (
+            status = 'active'
+            OR (status = 'revoked' AND revocation_reason = 'terminal')
+          )
           AND EXISTS (
             SELECT 1 FROM task_invocation_lease_owner
             WHERE owner_id = 1 AND owner_generation = ${ownerGeneration}
@@ -521,11 +536,13 @@ const make = Effect.gen(function* () {
           return yield* toError("stale_lease", "The invocation credential has expired.");
         }
       }
-      const scope = yield* decodeScope(row).pipe(
+      const leaseScope = yield* decodeScope(row).pipe(
         Effect.mapError((cause) =>
           toError("internal_error", "The persisted invocation scope is malformed.", cause),
         ),
       );
+      const scope =
+        row.boundTurnId === null ? leaseScope : { ...leaseScope, providerTurnId: row.boundTurnId };
       const active = yield* resolveActiveTaskInvocation(scope).pipe(
         Effect.tapError((error) =>
           error.code === "not_active" ? revokeToken(tokenHash).pipe(Effect.ignore) : Effect.void,
@@ -558,7 +575,7 @@ const make = Effect.gen(function* () {
       }
       const lease = yield* decodeLease({
         tokenHash: row.tokenHash,
-        scope,
+        scope: leaseScope,
         status: "active",
         issuedAt: row.issuedAt,
         expiresAt: row.expiresAt,
@@ -626,7 +643,7 @@ const make = Effect.gen(function* () {
         environmentId: resolved.scope.environmentId,
         threadId: resolved.scope.threadId,
         providerInstanceId: resolved.scope.providerInstanceId,
-        providerTurnId: resolved.scope.providerTurnId,
+        providerTurnId: resolved.lease.scope.providerTurnId,
         summary: input.summary,
         markdown: input.markdown,
       })
@@ -749,7 +766,7 @@ const make = Effect.gen(function* () {
         UPDATE task_invocation_leases
         SET status = 'revoked', revoked_at = ${revokedAt}, revocation_reason = 'terminal'
         WHERE thread_id = ${input.threadId}
-          AND provider_turn_id = ${input.providerTurnId}
+          AND (provider_turn_id = ${input.providerTurnId} OR bound_turn_id = ${input.providerTurnId})
           AND owner_generation = ${ownerGeneration}
           AND status = 'active'
       `;

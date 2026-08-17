@@ -1389,7 +1389,12 @@ const make = Effect.gen(function* () {
             tone: outcome === "failed" ? "error" : "info",
             kind: "provider-turn-terminal",
             summary: `Provider turn ${outcome}.`,
-            payload: { outcome },
+            payload: {
+              outcome,
+              ...(event.providerInstanceId !== undefined
+                ? { providerInstanceId: event.providerInstanceId }
+                : {}),
+            },
             turnId: eventTurnId,
             createdAt: now,
           },
