@@ -67,6 +67,16 @@ async function waitForExistingFile(filePath: string, timeoutMs = 20_000): Promis
   }
 }
 
+async function waitForRedactedEvent(events: readonly unknown[], timeoutMs = 20_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!JSON.stringify(events).includes(REDACTED)) {
+    if (Date.now() >= deadline) {
+      throw new Error("Claude child did not emit a redacted event.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 function spawnClaudeTestProcess(options: SpawnOptions): SpawnedProcess {
   const { spawn } = require("node:child_process") as typeof import("node:child_process");
   return spawn(
@@ -322,6 +332,7 @@ describe("ClaudeAdapterLive", () => {
       return Effect.gen(function* () {
         const fixture = yield* makeTaskCliProcessFixture();
         const childResultPath = path.join(fixture.root, "claude-child-result.json");
+        const resumedChildResultPath = path.join(fixture.root, "claude-resumed-child-result.json");
         const cliBundlePath = TASK_CLI_BUNDLE_PATH;
         const adapter = yield* makeClaudeAdapter(decodeClaudeSettings({}), {
           spawnClaudeCodeProcess: (options) => {
@@ -365,6 +376,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(active[0]?.threadId, threadId);
         assert.equal(session.resumeCursor !== undefined, true);
         yield* Effect.promise(() => waitForExistingFile(childResultPath));
+        yield* Effect.promise(() => waitForRedactedEvent(nativeEvents));
         if (yield* adapter.hasSession(threadId)) {
           yield* adapter.stopSession(threadId);
         }
@@ -379,13 +391,14 @@ describe("ClaudeAdapterLive", () => {
               KATACODE_TASK_CLI_ENDPOINT: fixture.endpoint,
               KATACODE_TASK_INVOCATION_TOKEN: fixture.token,
               KATACODE_TASK_CLI_BUNDLE: cliBundlePath,
-              KATACODE_CLAUDE_CHILD_RESULT: childResultPath,
+              KATACODE_CLAUDE_CHILD_RESULT: resumedChildResultPath,
             },
             executablePath: process.execPath,
             pathPrepend: ["/tmp/bin"],
           },
         });
-        const childResult = JSON.parse(readFileSync(childResultPath, "utf8")) as {
+        yield* Effect.promise(() => waitForExistingFile(resumedChildResultPath));
+        const childResult = JSON.parse(readFileSync(resumedChildResultPath, "utf8")) as {
           code: number;
           stdout: string;
           stderr: string;
