@@ -5,7 +5,10 @@ import * as Stream from "effect/Stream";
 
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
-import { TaskWorkspaceService } from "./TaskWorkspaceService.ts";
+import {
+  providerInstanceIdFromActivityPayload,
+  TaskWorkspaceService,
+} from "./TaskWorkspaceService.ts";
 
 type ActivityAppendedEvent = Extract<
   OrchestrationEvent,
@@ -28,19 +31,6 @@ function runtimeTerminalOutcome(
   if (event.type === "turn.aborted") return "aborted";
   if (event.type !== "turn.completed") return undefined;
   return event.payload.state === "failed" ? "failed" : "completed";
-}
-
-function activityProviderInstanceId(
-  event: ActivityAppendedEvent,
-): ProviderRuntimeEvent["providerInstanceId"] {
-  const payload = event.payload.activity.payload;
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    return undefined;
-  }
-  const value = (payload as Record<string, unknown>).providerInstanceId;
-  return typeof value === "string"
-    ? (value as ProviderRuntimeEvent["providerInstanceId"])
-    : undefined;
 }
 
 export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
@@ -92,7 +82,7 @@ export const TaskWorkspaceCompletionReactorLive = Layer.effectDiscard(
                 return settle(
                   event.payload.threadId,
                   providerTurnId,
-                  activityProviderInstanceId(event),
+                  providerInstanceIdFromActivityPayload(event.payload.activity.payload),
                   outcome,
                   event.type,
                 );

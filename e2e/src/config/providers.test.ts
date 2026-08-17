@@ -44,6 +44,15 @@ describe("guided provider registry", () => {
     ]);
   });
 
+  it("rejects unsupported auth mode overrides", async () => {
+    const codex = resolveGuidedProviders({}).find((provider) => provider.id === "codex")!;
+    await expect(
+      assertGuidedProviderCredentials(codex, {
+        KATACODE_E2E_CODEX_AUTH_MODE: "browser",
+      }),
+    ).rejects.toThrow("Invalid KATACODE_E2E_CODEX_AUTH_MODE=browser");
+  });
+
   it("fails selected providers when their credentials are missing", async () => {
     const codex = resolveGuidedProviders({}).find((provider) => provider.id === "codex")!;
     await expect(

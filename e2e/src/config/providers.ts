@@ -127,7 +127,9 @@ export const GUIDED_PROVIDERS = resolveGuidedProviders();
 
 function authMode(env: NodeJS.ProcessEnv, name: string): AuthMode {
   const value = nonEmptyEnv(env, name)?.toLowerCase();
-  return AUTH_MODES.includes(value as AuthMode) ? (value as AuthMode) : "oauth-or-api-key";
+  if (value === undefined) return "oauth-or-api-key";
+  if (AUTH_MODES.includes(value as AuthMode)) return value as AuthMode;
+  throw new Error(`Invalid ${name}=${value}. Expected one of: ${AUTH_MODES.join(", ")}.`);
 }
 
 async function fileExists(path: string): Promise<boolean> {

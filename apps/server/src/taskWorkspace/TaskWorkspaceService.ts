@@ -1759,7 +1759,9 @@ function isTaskCliLeaseTurnId(providerTurnId: string): boolean {
   return providerTurnId.startsWith(TASK_CLI_LEASE_TURN_PREFIX);
 }
 
-function providerInstanceIdFromActivityPayload(payload: unknown): ProviderInstanceId | undefined {
+export function providerInstanceIdFromActivityPayload(
+  payload: unknown,
+): ProviderInstanceId | undefined {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return undefined;
   }
