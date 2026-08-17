@@ -6115,6 +6115,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         service.settleProviderTurn({
           threadId: buildOccurrence.threadId!,
           providerTurnId: "turn-build-final",
+          providerInstanceId: ProviderInstanceId.make("instance-1"),
           outcome: "completed",
         }),
       );
@@ -7351,6 +7352,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         service.settleProviderTurn({
           threadId,
           providerTurnId: "turn-build-abort",
+          providerInstanceId: ProviderInstanceId.make("instance-1"),
           outcome: "aborted",
         }),
       );
@@ -7383,6 +7385,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         service.settleProviderTurn({
           threadId: buildOccurrence.threadId!,
           providerTurnId: "turn-build-failed",
+          providerInstanceId: ProviderInstanceId.make("instance-1"),
           outcome: "failed",
         }),
       );
@@ -7638,6 +7641,7 @@ describe("TaskWorkspaceService guided implementation", () => {
         service.settleProviderTurn({
           threadId: buildOccurrence.threadId!,
           providerTurnId: "turn-build-cli-progress",
+          providerInstanceId: ProviderInstanceId.make("instance-1"),
           outcome: "completed",
         }),
       );
@@ -8216,7 +8220,8 @@ describe("Task CLI planning completion", () => {
     readonly stage: TaskWorkspaceStage;
     readonly threadId: ThreadId;
     readonly leaseTurnId: string;
-    readonly boundTurnId: string;
+    readonly boundTurnId: string | null;
+    readonly providerInstanceId?: string;
   }) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -8235,8 +8240,9 @@ describe("Task CLI planning completion", () => {
         )
         VALUES (
           ${`test-token-${input.leaseTurnId}`}, 'environment-local', ${input.taskId},
-          ${input.occurrence}, ${input.stage}, ${input.threadId}, 'instance-1',
-          ${input.leaseTurnId}, ${input.boundTurnId}, 'task-workspace-test-owner', 'active',
+          ${input.occurrence}, ${input.stage}, ${input.threadId},
+          ${input.providerInstanceId ?? "instance-1"}, ${input.leaseTurnId}, ${input.boundTurnId},
+          'task-workspace-test-owner', 'active',
           '2026-07-28T16:00:00.000Z', NULL, NULL, NULL
         )
       `;
@@ -8366,6 +8372,7 @@ describe("Task CLI planning completion", () => {
           service.settleProviderTurn({
             threadId,
             providerTurnId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            providerInstanceId: ProviderInstanceId.make("instance-1"),
             outcome: "completed",
           }),
         );
@@ -8373,6 +8380,106 @@ describe("Task CLI planning completion", () => {
         expect(settled.occurrences[0]?.status).toBe("completed");
         expect(settled.workflowRuns.at(-1)?.currentStage).toBe("research");
       }),
+  );
+
+  it.effect("settles an unbound Claude synthetic terminal from the same provider instance", () =>
+    Effect.gen(function* () {
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-lease-synthetic-live-",
+      );
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const threadId = task.bootstrap?.reservedThreadId!;
+      yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "Clarify complete.",
+          "# Clarify\n\nThe scope is clear.\n",
+          "pending-task-cli-claude-synthetic-live",
+        ),
+      );
+      yield* runtime.runPromise(
+        persistBoundTaskCliLease({
+          taskId: task.id,
+          occurrence: 0,
+          stage: "questions",
+          threadId,
+          leaseTurnId: "pending-task-cli-claude-synthetic-live",
+          boundTurnId: null,
+        }),
+      );
+      yield* runtime.runPromise(
+        service.settleProviderTurn({
+          threadId,
+          providerTurnId: "native-claude-synthetic-live",
+          providerInstanceId: ProviderInstanceId.make("instance-1"),
+          outcome: "completed",
+        }),
+      );
+      const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(settled.occurrences[0]?.status).toBe("completed");
+      expect(settled.workflowRuns.at(-1)?.currentStage).toBe("research");
+    }),
+  );
+
+  it.effect("reconciles an unbound Claude synthetic terminal from the same provider instance", () =>
+    Effect.gen(function* () {
+      const observation: BootstrapObservation = { mode: "running", durableEvents: [] };
+      const { runtime, repoRoot, baseDir } = yield* setupRuntime(
+        "kata-task-cli-lease-synthetic-durable-",
+        observation,
+      );
+      const service = yield* runtime.runPromise(Effect.service(TaskWorkspaceService));
+      const created = yield* runtime.runPromise(service.dispatch(guidedCreate()));
+      yield* runtime.runPromise(
+        service.processBootstrap(bootstrapEntry(created.task, baseDir, repoRoot)),
+      );
+      const task = (yield* runtime.runPromise(service.getTask(created.task.id)))!;
+      const threadId = task.bootstrap?.reservedThreadId!;
+      yield* runtime.runPromise(
+        completePlanningStage(
+          service,
+          task,
+          "Clarify complete.",
+          "# Clarify\n\nThe scope is clear.\n",
+          "pending-task-cli-claude-synthetic-durable",
+        ),
+      );
+      yield* runtime.runPromise(
+        persistBoundTaskCliLease({
+          taskId: task.id,
+          occurrence: 0,
+          stage: "questions",
+          threadId,
+          leaseTurnId: "pending-task-cli-claude-synthetic-durable",
+          boundTurnId: null,
+        }),
+      );
+      observation.durableEvents!.push({
+        type: "thread.activity-appended",
+        payload: {
+          threadId,
+          activity: {
+            kind: "provider-turn-terminal",
+            turnId: "native-claude-synthetic-durable",
+            payload: {
+              outcome: "completed",
+              providerInstanceId: "instance-1",
+            },
+            createdAt: "2099-01-01T00:00:00.000Z",
+          },
+        },
+      } as never);
+      yield* runtime.runPromise(service.reconcilePendingProposals);
+      const settled = (yield* runtime.runPromise(service.getTask(task.id)))!;
+      expect(settled.occurrences[0]?.status).toBe("completed");
+      expect(settled.workflowRuns.at(-1)?.currentStage).toBe("research");
+    }),
   );
 
   it.effect("reconciles a Task CLI lease proposal from a later native terminal activity", () =>
@@ -8415,7 +8522,10 @@ describe("Task CLI planning completion", () => {
           activity: {
             kind: "provider-turn-terminal",
             turnId: "native-claude-turn-clarify",
-            payload: { outcome: "completed" },
+            payload: {
+              outcome: "completed",
+              providerInstanceId: "instance-1",
+            },
             createdAt: "2099-01-01T00:00:00.000Z",
           },
         },
@@ -8505,6 +8615,7 @@ describe("Task CLI planning completion", () => {
         service.settleProviderTurn({
           threadId,
           providerTurnId: "native-replaced-session-turn",
+          providerInstanceId: ProviderInstanceId.make("instance-stale"),
           outcome: "completed",
         }),
       );
@@ -8538,6 +8649,7 @@ describe("Task CLI planning completion", () => {
         service.settleProviderTurn({
           threadId: ThreadId.make("thread-other-provider"),
           providerTurnId: "native-other-turn",
+          providerInstanceId: ProviderInstanceId.make("instance-1"),
           outcome: "completed",
         }),
       );
@@ -8572,6 +8684,7 @@ describe("Task CLI planning completion", () => {
         service.settleProviderTurn({
           threadId,
           providerTurnId: "native-unrelated-later-turn",
+          providerInstanceId: ProviderInstanceId.make("instance-1"),
           outcome: "completed",
         }),
       );
@@ -8621,7 +8734,10 @@ describe("Task CLI planning completion", () => {
           activity: {
             kind: "provider-turn-terminal",
             turnId: "native-claude-turn-stale",
-            payload: { outcome: "completed" },
+            payload: {
+              outcome: "completed",
+              providerInstanceId: "instance-stale",
+            },
             createdAt: "2099-01-01T00:00:00.000Z",
           },
         },

@@ -1681,6 +1681,7 @@ export interface TaskWorkspaceServiceShape {
   readonly settleProviderTurn: (input: {
     readonly threadId: ThreadId;
     readonly providerTurnId: string;
+    readonly providerInstanceId: ProviderInstanceId | undefined;
     readonly outcome: "completed" | "aborted" | "failed";
   }) => Effect.Effect<void, TaskWorkspaceError>;
   readonly reconcilePendingProposals: Effect.Effect<void, TaskWorkspaceError>;
@@ -1750,32 +1751,45 @@ const TASK_CLI_LEASE_TURN_PREFIX = "pending-task-cli-";
 type ActiveBoundLease = {
   readonly threadId: string;
   readonly leaseTurnId: string;
-  readonly boundTurnId: string;
+  readonly providerInstanceId: string;
+  readonly boundTurnId: string | null;
 };
 
 function isTaskCliLeaseTurnId(providerTurnId: string): boolean {
   return providerTurnId.startsWith(TASK_CLI_LEASE_TURN_PREFIX);
 }
 
+function providerInstanceIdFromActivityPayload(payload: unknown): ProviderInstanceId | undefined {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return undefined;
+  }
+  const value = (payload as Record<string, unknown>).providerInstanceId;
+  return typeof value === "string" ? ProviderInstanceId.make(value) : undefined;
+}
+
 function isActiveBoundLease(
   leases: readonly ActiveBoundLease[],
   threadId: string,
   leaseTurnId: string,
-  boundTurnId: string,
+  terminalTurnId: string,
+  terminalProviderInstanceId: ProviderInstanceId | undefined,
 ): boolean {
   return leases.some(
     (lease) =>
       lease.threadId === threadId &&
       lease.leaseTurnId === leaseTurnId &&
-      lease.boundTurnId === boundTurnId,
+      ((lease.boundTurnId !== null && lease.boundTurnId === terminalTurnId) ||
+        (terminalProviderInstanceId !== undefined &&
+          lease.providerInstanceId === terminalProviderInstanceId)),
   );
 }
 
 /**
  * Match a pending completion proposal to a live provider terminal. Exact
  * turn-id equality is preferred. A unique pending-task-cli lease on the same
- * thread may also match a native terminal when its active lease is bound to
- * that native turn. Durable reconciliation applies the same binding rule.
+ * thread may also match a native terminal when its current lease is bound to
+ * that turn or the terminal comes from the lease's provider instance. Durable
+ * reconciliation applies the same binding rule and requires a known instance.
  */
 function findPendingProposalForTerminal<
   T extends { readonly threadId: string; readonly providerTurnId: string },
@@ -1783,6 +1797,7 @@ function findPendingProposalForTerminal<
   pendingProposals: readonly T[],
   threadId: string,
   providerTurnId: string,
+  providerInstanceId: ProviderInstanceId | undefined,
   activeBoundLeases: readonly ActiveBoundLease[],
 ): T | undefined {
   const onThread = pendingProposals.filter((candidate) => candidate.threadId === threadId);
@@ -1792,7 +1807,13 @@ function findPendingProposalForTerminal<
   const only = onThread[0];
   return only !== undefined &&
     isTaskCliLeaseTurnId(only.providerTurnId) &&
-    isActiveBoundLease(activeBoundLeases, threadId, only.providerTurnId, providerTurnId)
+    isActiveBoundLease(
+      activeBoundLeases,
+      threadId,
+      only.providerTurnId,
+      providerTurnId,
+      providerInstanceId,
+    )
     ? only
     : undefined;
 }
@@ -1897,11 +1918,13 @@ export const make = Effect.gen(function* () {
   const decodeBootstrapPayload = Schema.decodeUnknownEffect(TaskWorkspaceBootstrapOutboxPayload);
   // ProviderService revokes a lease while publishing its terminal event. A
   // terminally revoked binding remains eligible for the matching proposal;
-  // superseded and prior-owner leases do not.
+  // superseded and prior-owner leases do not. Keep unbound terminal leases
+  // here so a terminal can race bind and still match by provider instance.
   const readActiveBoundLeases = sql<ActiveBoundLease>`
     SELECT
       lease.thread_id AS "threadId",
       lease.provider_turn_id AS "leaseTurnId",
+      lease.provider_instance_id AS "providerInstanceId",
       lease.bound_turn_id AS "boundTurnId"
     FROM task_invocation_leases AS lease
     INNER JOIN task_invocation_lease_owner AS owner
@@ -1911,7 +1934,6 @@ export const make = Effect.gen(function* () {
         lease.status = 'active'
         OR (lease.status = 'revoked' AND lease.revocation_reason = 'terminal')
       )
-      AND lease.bound_turn_id IS NOT NULL
   `.pipe(
     Effect.mapError(
       (cause) =>
@@ -1987,7 +2009,8 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       // Prefer the proposal bound to this exact provider turn id. A unique
       // pending-task-cli lease on the same thread may also match a native
-      // terminal only when its active lease is bound to that native turn.
+      // terminal when the current lease is bound to that turn or the terminal
+      // comes from the lease's provider instance.
       const pendingProposals = yield* store.readPendingProposals().pipe(
         Effect.mapError(
           (cause) =>
@@ -2003,6 +2026,7 @@ export const make = Effect.gen(function* () {
         pendingProposals,
         input.threadId,
         input.providerTurnId,
+        input.providerInstanceId,
         activeBoundLeases,
       );
       if (!proposal) {
@@ -8402,7 +8426,8 @@ export const make = Effect.gen(function* () {
           pending.filter((candidate) => candidate.threadId === proposal.threadId).length === 1;
         // ProviderService.bind keeps the lease id stable and records the
         // native id separately. A later durable terminal can recover a
-        // proposal only when that active lease is bound to the terminal.
+        // proposal only when its current lease matches the terminal's native
+        // turn or known provider instance.
         const aliasedTerminal =
           exactTerminal === undefined &&
           uniqueOnThread &&
@@ -8411,13 +8436,18 @@ export const make = Effect.gen(function* () {
                 if (event.type !== "thread.activity-appended") return false;
                 const terminalTurnId = event.payload.activity.turnId;
                 const terminalAt = event.payload.activity.createdAt;
+                const terminalProviderInstanceId = providerInstanceIdFromActivityPayload(
+                  event.payload.activity.payload,
+                );
                 return (
+                  terminalProviderInstanceId !== undefined &&
                   typeof terminalTurnId === "string" &&
                   isActiveBoundLease(
                     activeBoundLeases,
                     proposal.threadId,
                     proposal.providerTurnId,
                     terminalTurnId,
+                    terminalProviderInstanceId,
                   ) &&
                   typeof terminalAt === "string" &&
                   terminalAt >= proposal.createdAt

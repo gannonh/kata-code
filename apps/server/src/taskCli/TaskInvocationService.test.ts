@@ -336,6 +336,30 @@ describe("TaskInvocationService", () => {
     }).pipe(Effect.provide(test.layer));
   });
 
+  it.effect("binds a lease after terminal revocation wins the provider race", () => {
+    const test = makeLayer();
+    return Effect.gen(function* () {
+      test.setBinding("pending-task-cli-terminal-race");
+      const service = yield* TaskInvocationService;
+      const issued = yield* service.issue(issueInput("pending-task-cli-terminal-race"));
+      yield* service.revokeTurn({
+        threadId,
+        providerTurnId: TurnId.make("pending-task-cli-terminal-race"),
+      });
+
+      yield* service.bind({
+        token: issued.token,
+        threadId,
+        providerInstanceId,
+        providerTurnId: TurnId.make("native-turn-after-terminal"),
+      });
+
+      const rows = yield* readLeaseRows;
+      expect(rows[0]?.status).toBe("revoked");
+      expect(rows[0]?.boundTurnId).toBe("native-turn-after-terminal");
+    }).pipe(Effect.provide(test.layer));
+  });
+
   it.effect("atomically supersedes the old lease and keeps only one active row", () => {
     const test = makeLayer();
     return Effect.gen(function* () {
