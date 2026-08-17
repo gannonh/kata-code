@@ -9,7 +9,7 @@ import { createOrOpenProject, createSeededGitWorkspace } from "./workspace.ts";
 const execFile = promisify(execFileCallback);
 
 /**
- * Deterministic Guided brief used by provider-parity acceptance runs. The
+ * Deterministic Guided brief used by the guided-task acceptance runs. The
  * approved Plan must contain exactly one phase with `Checkpoint: always`, one
  * work item, and one automated check (`node --test test/onboarding.test.js`),
  * so every provider proves the same implement contract: progress, check run

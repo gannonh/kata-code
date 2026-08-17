@@ -71,7 +71,7 @@ describe("applyE2ERepoEnv", () => {
     });
   });
 
-  it("lets .env.local override .env while still beating the shell", () => {
+  it("ignores .env.local and keeps .env authoritative over the shell", () => {
     const repoRoot = makeRepoWithEnv({
       env: "KATACODE_E2E_PI_MODEL=from-env\n",
       local: "KATACODE_E2E_PI_MODEL=from-local\n",
@@ -82,6 +82,6 @@ describe("applyE2ERepoEnv", () => {
 
     applyE2ERepoEnv(targetEnv, { repoRoot });
 
-    expect(targetEnv.KATACODE_E2E_PI_MODEL).toBe("from-local");
+    expect(targetEnv.KATACODE_E2E_PI_MODEL).toBe("from-env");
   });
 });
