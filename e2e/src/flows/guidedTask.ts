@@ -272,4 +272,44 @@ export async function answerGuidedClarifyQuestions(
   );
 }
 
+export async function expectCompletedGuidedImplement(
+  page: Page,
+  options?: { readonly deadlineMs?: number },
+): Promise<void> {
+  const check = page.getByTestId("guided-build-check-check:typecheck");
+  await expect(check).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+  await expect(check).toContainText("automated");
+  await expect(check).toContainText("node --test test/onboarding.test.js");
+
+  const resultingCommit = page.getByTestId("guided-resulting-commit");
+  const checkpointContinue = page.locator('[data-testid^="guided-checkpoint-continue-"]');
+  const taskError = page.getByTestId("guided-task-error");
+  const deadline = Date.now() + (options?.deadlineMs ?? 5 * 60_000);
+  while (Date.now() < deadline) {
+    if (await taskError.isVisible().catch(() => false)) {
+      throw new Error(
+        `Guided task failed during Implement: ${(await taskError.innerText()).trim()}`,
+      );
+    }
+    if (await resultingCommit.isVisible().catch(() => false)) break;
+
+    const count = await checkpointContinue.count();
+    for (let index = 0; index < count; index += 1) {
+      const button = checkpointContinue.nth(index);
+      if (await button.isEnabled().catch(() => false)) {
+        await button.click();
+        break;
+      }
+    }
+    await page.waitForTimeout(500);
+  }
+
+  await expect(resultingCommit).toBeVisible({ timeout: E2E_TIMEOUTS.assertionMs });
+  await expect(check).toContainText("pass", { timeout: E2E_TIMEOUTS.assertionMs });
+  await expect(page.getByTestId("guided-check-attempts-check:typecheck")).toContainText("pass");
+  const resultingCommitSha = (await resultingCommit.innerText()).trim();
+  expect(resultingCommitSha).toMatch(/^[0-9a-f]{40}$/);
+  await expect(page.getByTestId("guided-implementation-complete")).toBeVisible();
+}
+
 export { createOrOpenProject };

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { resolveGuidedProviders } from "../config/providers.ts";
 import { claimAvailablePortOffset, resolveStartOffsetFromEnv } from "./ports.ts";
 import { resolveArtifactRoot } from "./artifacts.ts";
 
@@ -112,7 +113,8 @@ function readCodexE2eAuthMode(): CodexE2eAuthMode {
   if (value === "oauth" || value === "oauth-or-api-key" || value === "api-key") {
     return value;
   }
-  return "api-key";
+  // OAuth-first is the local policy; OPENAI_API_KEY remains the fallback.
+  return "oauth-or-api-key";
 }
 
 async function stageCodexOAuthAuth(katacodeHome: string): Promise<boolean> {
@@ -312,18 +314,25 @@ export async function createIsolatedRun(input: {
     }
   }
 
+  const selectedGuidedProviders = new Set(resolveGuidedProviders().map((provider) => provider.id));
+
   // Codex OAuth lives in the host user's auth file. Stage only that file into
-  // the isolated HOME when the repository .env requests OAuth-first auth.
+  // the isolated HOME when Codex is selected by the guided provider allowlist.
   // Codex itself chooses OAuth before an inherited API key; the API key remains
   // available only for the explicit oauth-or-api-key fallback mode.
-  const codexOAuthStaged = await stageCodexOAuthAuth(katacodeHome);
+  const codexOAuthStaged = selectedGuidedProviders.has("codex")
+    ? await stageCodexOAuthAuth(katacodeHome)
+    : false;
 
   // Claude OAuth lives in the host ~/.claude.json (oauthAccount). Stage it
-  // into the isolated HOME like Codex auth when the repository .env requests
-  // OAuth-first Claude auth. The ambient Anthropic keys are only forwarded as
-  // the explicit oauth-or-api-key fallback when staging fails.
-  await stageClaudeOAuth(katacodeHome);
-  const claudeKeychainStaged = await stageClaudeKeychainCredentials(katacodeHome);
+  // into the isolated HOME only when Claude is selected by the guided provider
+  // allowlist. The ambient Anthropic keys are only forwarded as the explicit
+  // oauth-or-api-key fallback when staging fails.
+  let claudeKeychainStaged = false;
+  if (selectedGuidedProviders.has("claude")) {
+    await stageClaudeOAuth(katacodeHome);
+    claudeKeychainStaged = await stageClaudeKeychainCredentials(katacodeHome);
+  }
 
   // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
   // name. The isolated HOME has no macOS login keychain, so interactive
@@ -355,8 +364,9 @@ export async function createIsolatedRun(input: {
   // oauth-or-api-key fallback when the keychain item could not be staged.
   const claudeAuthMode = readClaudeE2eAuthMode();
   const forwardAnthropicKeys =
-    claudeAuthMode === "api-key" ||
-    (claudeAuthMode === "oauth-or-api-key" && !claudeKeychainStaged);
+    selectedGuidedProviders.has("claude") &&
+    (claudeAuthMode === "api-key" ||
+      (claudeAuthMode === "oauth-or-api-key" && !claudeKeychainStaged));
   const inheritedEnvWithClaudeFallback = forwardAnthropicKeys
     ? {
         ...inheritedEnv,
