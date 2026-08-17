@@ -148,7 +148,9 @@ function readClaudeE2eAuthMode(): ClaudeE2eAuthMode {
   if (value === "oauth" || value === "oauth-or-api-key" || value === "api-key") {
     return value;
   }
-  return "api-key";
+  // OAuth-first is the local policy: an unset knob must not silently bill the
+  // ambient ANTHROPIC_API_KEY when the host has a Claude subscription staged.
+  return "oauth-or-api-key";
 }
 
 /**
