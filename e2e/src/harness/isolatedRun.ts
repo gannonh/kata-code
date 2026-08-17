@@ -283,6 +283,12 @@ export async function createIsolatedRun(input: {
 
   cleanupCallbacks.push(async () => {
     await releasePortClaimIdempotent();
+    // Provider-agent failures are only diagnosable from the isolated HOME's
+    // server/provider logs, which normally die with the run.
+    if (process.env.KATACODE_E2E_KEEP_HOME === "1") {
+      console.error(`[e2e] KATACODE_E2E_KEEP_HOME=1 — retained isolated HOME: ${katacodeHome}`);
+      return;
+    }
     const removeOptions = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
     await rm(katacodeHome, removeOptions);
     await rm(workspaceRoot, removeOptions);
