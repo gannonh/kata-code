@@ -93,7 +93,7 @@ test.describe(`${E2E_TAGS.taskWorkspaces} ${E2E_TAGS.agent}`, () => {
       await expect(appWindow.getByTestId("task-sessions-panel")).toHaveCount(0);
       await expectNoTaskThreadsInChatSidebar(appWindow);
 
-      const stageDeadlineMs = provider.id === "claude" ? 5 * 60_000 : 180_000;
+      const stageDeadlineMs = provider.stageDeadlineMs;
       await answerGuidedClarifyQuestions(appWindow, { deadlineMs: stageDeadlineMs });
       await expectActiveStage(appWindow, "research", stageDeadlineMs);
       await expectActiveStage(appWindow, "design", stageDeadlineMs);

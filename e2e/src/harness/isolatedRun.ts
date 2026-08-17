@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { resolveGuidedProviders } from "../config/providers.ts";
 import { claimAvailablePortOffset, resolveStartOffsetFromEnv } from "./ports.ts";
 import { resolveArtifactRoot } from "./artifacts.ts";
 
@@ -286,12 +285,17 @@ export async function createIsolatedRun(input: {
   cleanupCallbacks.push(async () => {
     await releasePortClaimIdempotent();
     // Provider-agent failures are only diagnosable from the isolated HOME's
-    // server/provider logs, which normally die with the run.
+    // server/provider logs, which normally die with the run. The copied
+    // Electron runtime is a pure cache with no diagnostic value, so it is
+    // removed even when HOME and the seeded workspace are retained.
+    const removeOptions = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
     if (process.env.KATACODE_E2E_KEEP_HOME === "1") {
-      console.error(`[e2e] KATACODE_E2E_KEEP_HOME=1 — retained isolated HOME: ${katacodeHome}`);
+      console.error(
+        `[e2e] KATACODE_E2E_KEEP_HOME=1 — retained isolated HOME: ${katacodeHome} and workspace: ${workspaceRoot}`,
+      );
+      await rm(electronRuntimeDir, removeOptions);
       return;
     }
-    const removeOptions = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
     await rm(katacodeHome, removeOptions);
     await rm(workspaceRoot, removeOptions);
     await rm(electronRuntimeDir, removeOptions);
@@ -314,24 +318,23 @@ export async function createIsolatedRun(input: {
     }
   }
 
-  const selectedGuidedProviders = new Set(resolveGuidedProviders().map((provider) => provider.id));
-
-  // Codex OAuth lives in the host user's auth file. Stage only that file into
-  // the isolated HOME when Codex is selected by the guided provider allowlist.
-  // Codex itself chooses OAuth before an inherited API key; the API key remains
-  // available only for the explicit oauth-or-api-key fallback mode.
-  const codexOAuthStaged = selectedGuidedProviders.has("codex")
-    ? await stageCodexOAuthAuth(katacodeHome)
-    : false;
-
-  // Claude OAuth lives in the host ~/.claude.json (oauthAccount). Stage it
-  // into the isolated HOME only when Claude is selected by the guided provider
-  // allowlist. The ambient Anthropic keys are only forwarded as the explicit
-  // oauth-or-api-key fallback when staging fails.
+  // Shared harness authentication stays independent of the guided provider
+  // allowlist (KATACODE_E2E_PROVIDERS filters guided test generation only):
+  // every spec in the run may need Codex or Claude credentials. Staging is
+  // graceful — hosts without a provider's OAuth keep the ambient-key fallback.
+  let codexOAuthStaged = false;
   let claudeKeychainStaged = false;
-  if (selectedGuidedProviders.has("claude")) {
+  try {
+    // Codex OAuth lives in the host user's auth file; Codex itself chooses
+    // OAuth before an inherited API key.
+    codexOAuthStaged = await stageCodexOAuthAuth(katacodeHome);
+    // Claude OAuth lives in the host ~/.claude.json (oauthAccount) and the
+    // macOS keychain credential item.
     await stageClaudeOAuth(katacodeHome);
     claudeKeychainStaged = await stageClaudeKeychainCredentials(katacodeHome);
+  } catch (error) {
+    await Promise.allSettled(cleanupCallbacks.map((callback) => callback()));
+    throw error;
   }
 
   // Forward the E2E Cursor API key to the Cursor Agent CLI's expected env
@@ -357,16 +360,13 @@ export async function createIsolatedRun(input: {
       };
   // Claude OAuth staging does not strip the OpenAI key: Codex fallback auth
   // must keep working for mixed-provider suites in the same isolated run.
-  // Claude OAuth staging does not strip the OpenAI key: Codex fallback auth
-  // must keep working for mixed-provider suites in the same isolated run.
   // The keychain credential item is the real OAuth material; ambient
   // Anthropic keys are forwarded for explicit api-key mode or as the
   // oauth-or-api-key fallback when the keychain item could not be staged.
   const claudeAuthMode = readClaudeE2eAuthMode();
   const forwardAnthropicKeys =
-    selectedGuidedProviders.has("claude") &&
-    (claudeAuthMode === "api-key" ||
-      (claudeAuthMode === "oauth-or-api-key" && !claudeKeychainStaged));
+    claudeAuthMode === "api-key" ||
+    (claudeAuthMode === "oauth-or-api-key" && !claudeKeychainStaged);
   const inheritedEnvWithClaudeFallback = forwardAnthropicKeys
     ? {
         ...inheritedEnv,

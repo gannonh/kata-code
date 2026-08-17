@@ -283,6 +283,7 @@ export async function expectCompletedGuidedImplement(
 
   const resultingCommit = page.getByTestId("guided-resulting-commit");
   const checkpointContinue = page.locator('[data-testid^="guided-checkpoint-continue-"]');
+  const approveOnce = page.getByRole("button", { name: "Approve once", exact: true });
   const taskError = page.getByTestId("guided-task-error");
   const deadline = Date.now() + (options?.deadlineMs ?? 5 * 60_000);
   while (Date.now() < deadline) {
@@ -292,6 +293,16 @@ export async function expectCompletedGuidedImplement(
       );
     }
     if (await resultingCommit.isVisible().catch(() => false)) break;
+
+    // auto-accept-edits still gates command tools (e.g. Bash) behind an
+    // approval request on some providers; service it so Implement keeps
+    // moving instead of blocking until the suite timeout.
+    if (await approveOnce.isVisible().catch(() => false)) {
+      await expect(approveOnce).toBeEnabled();
+      await approveOnce.click();
+      await page.waitForTimeout(350);
+      continue;
+    }
 
     const count = await checkpointContinue.count();
     for (let index = 0; index < count; index += 1) {

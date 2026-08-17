@@ -22,6 +22,9 @@ describe("guided provider registry", () => {
       "opencode-go/deepseek-v4-flash",
       "openai-codex/gpt-5.6-luna",
     ]);
+    expect(resolveGuidedProviders({}).map((provider) => provider.stageDeadlineMs)).toEqual([
+      180_000, 300_000, 180_000,
+    ]);
   });
 
   it("applies model, fallback, agent-directory, and provider-list overrides", () => {
@@ -42,6 +45,15 @@ describe("guided provider registry", () => {
         agentDir: "/tmp/pi-agent",
       }),
     ]);
+  });
+
+  it("rejects malformed provider allowlists", () => {
+    expect(() => resolveGuidedProviders({ KATACODE_E2E_PROVIDERS: "codex," })).toThrow(
+      "comma-separated allowlist",
+    );
+    expect(() => resolveGuidedProviders({ KATACODE_E2E_PROVIDERS: "codex,gemini" })).toThrow(
+      "unknown provider(s): gemini",
+    );
   });
 
   it("rejects unsupported auth mode overrides", async () => {

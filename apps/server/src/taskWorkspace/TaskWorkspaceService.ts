@@ -1766,7 +1766,9 @@ export function providerInstanceIdFromActivityPayload(
     return undefined;
   }
   const value = (payload as Record<string, unknown>).providerInstanceId;
-  return typeof value === "string" ? ProviderInstanceId.make(value) : undefined;
+  return typeof value === "string"
+    ? Option.getOrUndefined(Schema.decodeUnknownOption(ProviderInstanceId)(value))
+    : undefined;
 }
 
 function isActiveBoundLease(
@@ -1780,9 +1782,10 @@ function isActiveBoundLease(
     (lease) =>
       lease.threadId === threadId &&
       lease.leaseTurnId === leaseTurnId &&
-      ((lease.boundTurnId !== null && lease.boundTurnId === terminalTurnId) ||
-        (terminalProviderInstanceId !== undefined &&
-          lease.providerInstanceId === terminalProviderInstanceId)),
+      (lease.boundTurnId !== null
+        ? lease.boundTurnId === terminalTurnId
+        : terminalProviderInstanceId !== undefined &&
+          lease.providerInstanceId === terminalProviderInstanceId),
   );
 }
 
@@ -1790,8 +1793,9 @@ function isActiveBoundLease(
  * Match a pending completion proposal to a live provider terminal. Exact
  * turn-id equality is preferred. A unique pending-task-cli lease on the same
  * thread may also match a native terminal when its current lease is bound to
- * that turn or the terminal comes from the lease's provider instance. Durable
- * reconciliation applies the same binding rule and requires a known instance.
+ * that turn or, while the lease is still unbound, the terminal comes from the
+ * lease's provider instance. Durable reconciliation applies the same binding
+ * rule and requires a known instance.
  */
 function findPendingProposalForTerminal<
   T extends { readonly threadId: string; readonly providerTurnId: string },
@@ -1922,6 +1926,11 @@ export const make = Effect.gen(function* () {
   // terminally revoked binding remains eligible for the matching proposal;
   // superseded and prior-owner leases do not. Keep unbound terminal leases
   // here so a terminal can race bind and still match by provider instance.
+  // Terminal-revoked leases survive owner-generation changes: the durable
+  // revocation is the binding evidence a restarted process needs to settle a
+  // proposal whose lease belonged to the previous generation. Active leases
+  // stay fenced to the current owner — a prior owner's active lease is a
+  // stale session that cannot produce a trustworthy terminal match.
   const readActiveBoundLeases = sql<ActiveBoundLease>`
     SELECT
       lease.thread_id AS "threadId",
@@ -1929,11 +1938,15 @@ export const make = Effect.gen(function* () {
       lease.provider_instance_id AS "providerInstanceId",
       lease.bound_turn_id AS "boundTurnId"
     FROM task_invocation_leases AS lease
-    INNER JOIN task_invocation_lease_owner AS owner
-      ON owner.owner_id = 1
-     AND owner.owner_generation = lease.owner_generation
     WHERE (
-        lease.status = 'active'
+        (
+          lease.status = 'active'
+          AND lease.owner_generation = (
+            SELECT owner.owner_generation
+            FROM task_invocation_lease_owner AS owner
+            WHERE owner.owner_id = 1
+          )
+        )
         OR (lease.status = 'revoked' AND lease.revocation_reason = 'terminal')
       )
   `.pipe(

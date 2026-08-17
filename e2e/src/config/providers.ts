@@ -13,6 +13,8 @@ const execFile = promisify(execFileCallback);
 const AUTH_MODES = ["oauth", "oauth-or-api-key", "api-key"] as const;
 type AuthMode = (typeof AUTH_MODES)[number];
 
+export const DEFAULT_PI_AGENT_DIR = join(homedir(), ".pi", "agent");
+
 export type GuidedProviderId = "codex" | "claude" | "pi";
 
 export type GuidedProviderAuth = "host-oauth-or-api-key" | "agent-dir";
@@ -24,6 +26,8 @@ export interface GuidedProvider {
   readonly models: ReadonlyArray<string>;
   readonly auth: GuidedProviderAuth;
   readonly agentDir?: string;
+  /** Per-provider deadline for guided stage-advance polling loops. */
+  readonly stageDeadlineMs: number;
 }
 
 const PROVIDER_DEFAULTS = [
@@ -40,6 +44,7 @@ const PROVIDER_DEFAULTS = [
     auth: "host-oauth-or-api-key",
     defaultModel: "haiku-4.5",
     modelEnv: "KATACODE_E2E_CLAUDE_MODEL",
+    defaultStageDeadlineMs: 5 * 60_000,
   },
   {
     id: "pi",
@@ -49,7 +54,7 @@ const PROVIDER_DEFAULTS = [
     defaultModelFallbacks: ["opencode-go/deepseek-v4-flash", "openai-codex/gpt-5.6-luna"],
     modelEnv: "KATACODE_E2E_PI_MODEL",
     modelFallbacksEnv: "KATACODE_E2E_PI_MODEL_FALLBACKS",
-    defaultAgentDir: join(homedir(), ".pi", "agent"),
+    defaultAgentDir: DEFAULT_PI_AGENT_DIR,
     agentDirEnv: "KATACODE_E2E_PI_AGENT_DIR",
   },
 ] as const;
@@ -117,6 +122,8 @@ export function resolveGuidedProviders(
       id: provider.id,
       tag: provider.tag,
       auth: provider.auth,
+      stageDeadlineMs:
+        "defaultStageDeadlineMs" in provider ? provider.defaultStageDeadlineMs : 180_000,
       ...models,
       ...(agentDir ? { agentDir } : {}),
     };
@@ -170,7 +177,7 @@ export async function assertGuidedProviderCredentials(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   if (provider.id === "pi") {
-    const authPath = join(provider.agentDir ?? join(homedir(), ".pi", "agent"), "auth.json");
+    const authPath = join(provider.agentDir ?? DEFAULT_PI_AGENT_DIR, "auth.json");
     if (!(await fileExists(authPath))) {
       throw missingCredentialsMessage("pi", [`${authPath} (auth.json)`]);
     }
