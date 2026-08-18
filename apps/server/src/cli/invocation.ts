@@ -43,7 +43,7 @@ export function detectCliRunner(entryPath: string): CliRunner | null {
  * anything else suggests the bare package.
  */
 export function suggestedPackageSpec(version: string): string {
-  return version.includes("-nightly.") ? "@kata-sh/code-cli@nightly" : "t3";
+  return version.includes("-nightly.") ? "@kata-sh/code-cli@nightly" : "@kata-sh/code-cli";
 }
 
 /**

@@ -46,7 +46,7 @@ it("treats stable installs as direct invocations", () => {
 
 it("re-suggests the nightly channel only for nightly builds", () => {
   assert.equal(suggestedPackageSpec("0.0.31-nightly.20260729"), "@kata-sh/code-cli@nightly");
-  assert.equal(suggestedPackageSpec("0.0.31"), "t3");
+  assert.equal(suggestedPackageSpec("0.0.31"), "@kata-sh/code-cli");
 });
 
 it("formats serve suggestions to match the launching command", () => {
