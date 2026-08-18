@@ -1,7 +1,7 @@
-import { type EnvironmentShellSummary } from "@t3tools/client-runtime/state/shell";
-import { type NetworkStatus } from "@t3tools/client-runtime/connection";
-import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
-import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
+import { type EnvironmentShellSummary } from "@kata-sh/code-client-runtime/state/shell";
+import { type NetworkStatus } from "@kata-sh/code-client-runtime/connection";
+import { type EnvironmentConnectionPhase } from "@kata-sh/code-client-runtime/connection";
+import type { EnvironmentId, ServerConfig } from "@kata-sh/code-contracts";
 
 import type { EnvironmentPresentation } from "./environments";
 

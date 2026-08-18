@@ -1,6 +1,6 @@
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
-import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
+import { isBackgroundTaskActivity } from "@kata-sh/code-client-runtime/state/subagentRuntime";
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
@@ -12,7 +12,7 @@ import {
   type UserInputQuestion,
   type ThreadId,
   type TurnId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import type {
   ChatMessage,

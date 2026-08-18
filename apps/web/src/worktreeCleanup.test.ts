@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
@@ -100,7 +100,7 @@ describe("formatWorktreePathForDisplay", () => {
     expect(result).toBe("t3code-4e609bb8");
   });
 
-  it("uses the final segment even when outside ~/.t3/worktrees", () => {
+  it("uses the final segment even when outside ~/.katacode/worktrees", () => {
     const result = formatWorktreePathForDisplay("/tmp/custom-worktrees/my-worktree");
     expect(result).toBe("my-worktree");
   });

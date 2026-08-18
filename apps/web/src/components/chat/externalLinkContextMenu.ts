@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@kata-sh/code-contracts";
 
 export type ExternalLinkContextMenuAction = "open-in-preview" | "open-external" | "copy-link";
 

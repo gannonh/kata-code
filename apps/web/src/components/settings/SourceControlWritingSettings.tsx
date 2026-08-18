@@ -1,9 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useRef } from "react";
-import type { SourceControlWritingStyleMode } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { createModelSelection } from "@t3tools/shared/model";
-import { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
+import type { SourceControlWritingStyleMode } from "@kata-sh/code-contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@kata-sh/code-contracts/settings";
+import { createModelSelection } from "@kata-sh/code-shared/model";
+import { resolveSourceControlWriterModelSelection } from "@kata-sh/code-shared/serverSettings";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import {

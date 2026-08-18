@@ -1,17 +1,17 @@
-import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopedThreadKey } from "@kata-sh/code-client-runtime/environment";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kata-sh/code-client-runtime/state/runtime";
 import {
   canSnooze,
   effectiveSettled,
   effectiveSnoozed,
   type ChangeRequestStateLike,
-} from "@t3tools/client-runtime/state/thread-settled";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime/state/thread-settled";
+import type { ScopedThreadRef, ThreadId } from "@kata-sh/code-contracts";
 import { useCallback } from "react";
 
 import { resolveSnoozePresets, snoozeWakeDescription } from "../components/Sidebar.snooze";

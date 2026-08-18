@@ -1,6 +1,6 @@
-import { EnvironmentId } from "@t3tools/contracts";
-import { stripPairingTokenFromUrl } from "@t3tools/shared/remote";
-import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import { EnvironmentId } from "@kata-sh/code-contracts";
+import { stripPairingTokenFromUrl } from "@kata-sh/code-shared/remote";
+import { type EnvironmentConnectionPhase } from "@kata-sh/code-client-runtime/connection";
 
 export { authClientMetadata } from "./authClientMetadata";
 

@@ -1,4 +1,4 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { ThreadId } from "@kata-sh/code-contracts";
 
 /**
  * Opaque, exclusive cursor for windowed thread detail reads. Encodes the thread

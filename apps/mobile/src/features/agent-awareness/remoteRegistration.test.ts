@@ -9,10 +9,10 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
-import { ManagedRelay } from "@t3tools/client-runtime/relay";
+import { ManagedRelay } from "@kata-sh/code-client-runtime/relay";
 
-import type { EnvironmentId } from "@t3tools/contracts";
-import { verifyDpopProof } from "@t3tools/shared/dpop";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
+import { verifyDpopProof } from "@kata-sh/code-shared/dpop";
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { cryptoLayer } from "../cloud/dpop";
 import { managedRelayClientLayer } from "../cloud/managedRelayLayer";
@@ -294,13 +294,13 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         label: "Julius's iPhone",
         iosMajorVersion: 18,
         appVersion: "1.0.0",
-        bundleId: "com.t3tools.t3code.preview",
+        bundleId: "com.katacode.preview",
         apsEnvironment: resolveApsEnvironment("preview"),
         notificationsEnabled: true,
         preferences: {},
       }),
     ).toMatchObject({
-      bundleId: "com.t3tools.t3code.preview",
+      bundleId: "com.katacode.preview",
       apsEnvironment: "production",
     });
   });

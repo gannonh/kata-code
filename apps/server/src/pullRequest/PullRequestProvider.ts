@@ -30,8 +30,8 @@ import type {
   PullRequestUpdateMethod,
   PullRequestViewerPermissions,
   SourceControlProviderKind,
-} from "@t3tools/contracts";
-import { SourceControlProviderKind as SourceControlProviderKindSchema } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import { SourceControlProviderKind as SourceControlProviderKindSchema } from "@kata-sh/code-contracts";
 
 /**
  * The one failure shape every provider reports, so the service can decide what a failure means

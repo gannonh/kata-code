@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { BUILT_IN_THEMES, getThemeColorsForAppearance } from "@t3tools/shared/themePalettes";
+import { BUILT_IN_THEMES, getThemeColorsForAppearance } from "@kata-sh/code-shared/themePalettes";
 
 import { themeColorToNativeColor } from "../../lib/mobileTheme";
 

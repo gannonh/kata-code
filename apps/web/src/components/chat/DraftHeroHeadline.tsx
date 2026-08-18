@@ -1,5 +1,5 @@
-import type { ScopedProjectRef } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import type { ScopedProjectRef } from "@kata-sh/code-contracts";
+import { scopedProjectKey, scopeProjectRef } from "@kata-sh/code-client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 

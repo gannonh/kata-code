@@ -1,15 +1,15 @@
-import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+import { findErrorTraceId } from "@kata-sh/code-client-runtime/errors";
 import {
   type EnvironmentConnectionPresentation,
   RelayConnectionRegistration,
   RelayConnectionTarget,
-} from "@t3tools/client-runtime/connection";
+} from "@kata-sh/code-client-runtime/connection";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { RelayClientEnvironmentRecord } from "@t3tools/contracts/relay";
+} from "@kata-sh/code-client-runtime/state/runtime";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
+import type { RelayClientEnvironmentRecord } from "@kata-sh/code-contracts/relay";
 import * as Option from "effect/Option";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
@@ -45,7 +45,7 @@ export function RemoteEnvironmentRowsSkeleton() {
 }
 
 /**
- * The user's T3 Connect environments from relay discovery, each with a
+ * The user's Kata Code Connect environments from relay discovery, each with a
  * Connect button. The primary environment is always excluded; already-saved
  * environments are hidden unless `showSavedEnvironments` renders them with
  * their live connection state (used by onboarding, where the full device mesh
@@ -100,7 +100,7 @@ export function CloudEnvironmentConnectRows({
       toastManager.add({
         type: "success",
         title: "Environment added",
-        description: `Connecting to ${environment.label} through T3 Connect.`,
+        description: `Connecting to ${environment.label} through Kata Code Connect.`,
       });
       return;
     }
@@ -109,7 +109,7 @@ export function CloudEnvironmentConnectRows({
     }
     const cause = squashAtomCommandFailure(result);
     const message =
-      cause instanceof Error ? cause.message : "Could not connect the T3 Connect environment.";
+      cause instanceof Error ? cause.message : "Could not connect the Kata Code Connect environment.";
     const traceId = findErrorTraceId(cause);
     console.error("[t3-connect] Could not connect environment", { message, traceId, cause });
     toastManager.add({
@@ -154,7 +154,7 @@ export function CloudEnvironmentConnectRows({
       return (
         <div className={ITEM_ROW_CLASSNAME}>
           <p className="text-sm font-medium text-destructive">
-            Could not load T3 Connect environments
+            Could not load Kata Code Connect environments
           </p>
           <p className="mt-1 text-xs text-muted-foreground">{discoveryProblem}</p>
           <Button

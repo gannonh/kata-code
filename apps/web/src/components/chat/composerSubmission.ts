@@ -1,4 +1,4 @@
-import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@t3tools/contracts";
+import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@kata-sh/code-contracts";
 
 type ComposerSubmitEvent = { preventDefault: () => void };
 

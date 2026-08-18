@@ -1,7 +1,7 @@
 import type {
   RelayAgentActivityAggregateState,
   RelayAgentActivityState,
-} from "@t3tools/contracts/relay";
+} from "@kata-sh/code-contracts/relay";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeCrypto from "node:crypto";
@@ -38,7 +38,7 @@ const config = RelayConfiguration.RelayConfiguration.of({
     teamId: "team-id",
     keyId: "key-id",
     privateKey: Redacted.make("not-a-private-key"),
-    bundleId: "com.t3tools.t3code.dev",
+    bundleId: "com.katacode.dev",
   },
   apnsDeliveryJobSigningSecret: Redacted.make("job-signing-secret"),
   clerkSecretKey: Redacted.make("clerk-secret"),
@@ -77,7 +77,7 @@ const state: RelayAgentActivityState = {
 };
 
 const aggregate: RelayAgentActivityAggregateState = {
-  title: "T3 Code",
+  title: "Kata Code",
   subtitle: "Agent work in progress",
   activeCount: 1,
   updatedAt: state.updatedAt,
@@ -420,7 +420,7 @@ describe("ApnsDeliveries", () => {
       yield* deliveries.sendForTarget({
         target: {
           ...target,
-          bundle_id: "com.t3tools.t3code.preview",
+          bundle_id: "com.katacode.preview",
           aps_environment: "production",
           ended_at: "1970-01-01T00:00:05.000Z",
         },
@@ -434,7 +434,7 @@ describe("ApnsDeliveries", () => {
             kind: "live_activity_update",
             target: {
               token: "activity-token",
-              bundleId: "com.t3tools.t3code.preview",
+              bundleId: "com.katacode.preview",
               apsEnvironment: "production",
             },
           },
@@ -451,7 +451,7 @@ describe("ApnsDeliveries", () => {
       userId: target.user_id,
       deviceId: target.device_id,
       token: "activity-token",
-      bundleId: "com.t3tools.t3code.preview",
+      bundleId: "com.katacode.preview",
       apsEnvironment: "sandbox",
       aggregate,
       createdAt: "1970-01-01T00:00:00.000Z",
@@ -476,7 +476,7 @@ describe("ApnsDeliveries", () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]?.url).toBe("https://api.sandbox.push.apple.com/3/device/activity-token");
       expect(requests[0]?.headers["apns-topic"]).toBe(
-        "com.t3tools.t3code.preview.push-type.liveactivity",
+        "com.katacode.preview.push-type.liveactivity",
       );
     }).pipe(
       Effect.provide(

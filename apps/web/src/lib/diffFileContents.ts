@@ -2,7 +2,7 @@ import type { FileDiffContentsLoader } from "@pierre/diffs";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kata-sh/code-client-runtime/state/runtime";
 import type {
   EnvironmentId,
   PullRequestDiffFileContentsInput,
@@ -11,7 +11,7 @@ import type {
   ReviewDiffFileContentsInput,
   ReviewDiffFileContentsResult,
   ReviewDiffPreviewSourceKind,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import { resolveFileDiffPath } from "./diffRendering";
 

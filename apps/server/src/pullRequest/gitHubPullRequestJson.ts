@@ -25,8 +25,8 @@ import type {
   PullRequestReviewerKind,
   PullRequestState,
   PullRequestThreadComment,
-} from "@t3tools/contracts";
-import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+} from "@kata-sh/code-contracts";
+import { decodeJsonResult } from "@kata-sh/code-shared/schemaJson";
 
 import { dedupeChecks } from "./pullRequestChecks.ts";
 

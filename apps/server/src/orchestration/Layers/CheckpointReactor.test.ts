@@ -9,7 +9,7 @@ import {
   ProviderRuntimeEvent,
   ProviderSession,
   ProviderInstanceId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -18,7 +18,7 @@ import {
   ProjectId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -554,8 +554,8 @@ describe("CheckpointReactor", () => {
   it("adopts a drifted checkout as the thread branch on a dedicated worktree", async () => {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/renamed-by-agent",
+      threadBranch: "kata-code/original-branch",
+      localStatusRefName: "kata-code/renamed-by-agent",
     });
 
     harness.provider.emit({
@@ -574,19 +574,19 @@ describe("CheckpointReactor", () => {
       (event) =>
         event.type === "thread.meta-updated" &&
         (event as unknown as { payload: { branch?: string } }).payload.branch ===
-          "t3code/renamed-by-agent",
+          "kata-code/renamed-by-agent",
     );
 
     const snapshot = await harness.readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.branch).toBe("t3code/renamed-by-agent");
+    expect(thread?.branch).toBe("kata-code/renamed-by-agent");
   });
 
   it("does not adopt a drifted checkout when the worktree is shared by another thread", async () => {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/renamed-by-agent",
+      threadBranch: "kata-code/original-branch",
+      localStatusRefName: "kata-code/renamed-by-agent",
       secondThreadSharingWorktree: true,
     });
 
@@ -604,14 +604,14 @@ describe("CheckpointReactor", () => {
 
     const snapshot = await harness.readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.branch).toBe("t3code/original-branch");
+    expect(thread?.branch).toBe("kata-code/original-branch");
   });
 
   it("does not adopt a temporary placeholder checkout as the thread branch", async () => {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/0a1b2c3d",
+      threadBranch: "kata-code/original-branch",
+      localStatusRefName: "kata-code/0a1b2c3d",
     });
 
     harness.provider.emit({
@@ -628,7 +628,7 @@ describe("CheckpointReactor", () => {
 
     const snapshot = await harness.readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.branch).toBe("t3code/original-branch");
+    expect(thread?.branch).toBe("kata-code/original-branch");
   });
 
   it("ignores auxiliary thread turn completion while primary turn is active", async () => {

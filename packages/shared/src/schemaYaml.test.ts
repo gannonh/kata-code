@@ -21,7 +21,7 @@ tags:
   - effect
 `),
     ).toEqual({
-      name: "t3code",
+      name: "kata-code",
       enabled: true,
       tags: ["codex", "effect"],
     });
@@ -32,7 +32,7 @@ tags:
 
     expect(
       encodeConfig({
-        name: "t3code",
+        name: "kata-code",
         enabled: true,
         tags: ["codex"],
       }),

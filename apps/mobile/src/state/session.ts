@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
-import type { EnvironmentId } from "@t3tools/contracts";
+import { createEnvironmentSessionAtoms } from "@kata-sh/code-client-runtime/state/session";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
 

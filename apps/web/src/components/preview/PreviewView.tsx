@@ -1,14 +1,14 @@
 "use client";
 
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { scopedThreadKey } from "@kata-sh/code-client-runtime/environment";
+import { squashAtomCommandFailure } from "@kata-sh/code-client-runtime/state/runtime";
 import {
   FILL_PREVIEW_VIEWPORT,
   type PreviewAnnotationPayload,
   type PreviewViewportSetting,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
-import { normalizePreviewUrl } from "@t3tools/shared/preview";
+} from "@kata-sh/code-contracts";
+import { normalizePreviewUrl } from "@kata-sh/code-shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {

@@ -31,10 +31,10 @@ import {
   type TerminalSessionStatus,
   type TerminalSummary,
   type TerminalWriteInput,
-} from "@t3tools/contracts";
-import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+} from "@kata-sh/code-contracts";
+import { makeKeyedCoalescingWorker } from "@kata-sh/code-shared/KeyedCoalescingWorker";
+import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
+import { getTerminalLabel } from "@kata-sh/code-shared/terminalLabels";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -1016,7 +1016,7 @@ function toSessionKey(threadId: string, terminalId: string): string {
 
 function shouldExcludeTerminalEnvKey(key: string): boolean {
   const normalizedKey = key.toUpperCase();
-  if (normalizedKey.startsWith("T3CODE_")) {
+  if (normalizedKey.startsWith("KATACODE_")) {
     return true;
   }
   if (normalizedKey.startsWith("VITE_")) {

@@ -4,9 +4,9 @@ import { useParams } from "@tanstack/react-router";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime/state/runtime";
+import { safeErrorLogAttributes } from "@kata-sh/code-client-runtime/errors";
+import type { ScopedThreadRef, TurnId } from "@kata-sh/code-contracts";
 import {
   ArrowRightIcon,
   CheckIcon,

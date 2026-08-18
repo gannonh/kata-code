@@ -2,9 +2,9 @@ import { assert, describe } from "@effect/vitest";
 
 import { createOxlintRuleHarness } from "../test/utils.ts";
 
-const rule = createOxlintRuleHarness("t3code/namespace-node-imports");
+const rule = createOxlintRuleHarness("kata-code/namespace-node-imports");
 
-describe("t3code/namespace-node-imports", () => {
+describe("kata-code/namespace-node-imports", () => {
   rule.valid(
     "allows canonical Node namespaces",
     `

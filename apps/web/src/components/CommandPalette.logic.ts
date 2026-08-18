@@ -2,9 +2,9 @@ import {
   type FilesystemBrowseEntry,
   type KeybindingCommand,
   THREAD_JUMP_KEYBINDING_COMMANDS,
-} from "@t3tools/contracts";
-import { filterFilesystemBrowseEntries } from "@t3tools/client-runtime/state/filesystem";
-import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+} from "@kata-sh/code-contracts";
+import { filterFilesystemBrowseEntries } from "@kata-sh/code-client-runtime/state/filesystem";
+import type { SidebarThreadSortOrder } from "@kata-sh/code-contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { type ReactNode } from "react";

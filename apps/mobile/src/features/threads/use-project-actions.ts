@@ -1,15 +1,15 @@
 import { useCallback } from "react";
 
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { mapAtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import { scopeThreadRef } from "@kata-sh/code-client-runtime/environment";
+import { EnvironmentProject } from "@kata-sh/code-client-runtime/state/shell";
+import { mapAtomCommandResult } from "@kata-sh/code-client-runtime/state/runtime";
 import {
   ThreadId,
   type ModelSelection,
   type ProviderInteractionMode,
   type RuntimeMode,
-} from "@t3tools/contracts";
-import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
+} from "@kata-sh/code-contracts";
+import { buildTemporaryWorktreeBranchName } from "@kata-sh/code-shared/git";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 

@@ -6,8 +6,8 @@ import type {
   OrchestrationThreadShell,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import { ProviderInstanceId } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import { ProviderInstanceId } from "@kata-sh/code-contracts";
 
 import { projectThreadAwareness } from "./agentAwareness.ts";
 

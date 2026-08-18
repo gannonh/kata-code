@@ -14,8 +14,8 @@ import * as Schema from "effect/Schema";
 import {
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
-} from "@t3tools/contracts";
-import * as NetService from "@t3tools/shared/Net";
+} from "@kata-sh/code-contracts";
+import * as NetService from "@kata-sh/code-shared/Net";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { deriveServerPaths } from "../config.ts";
 import { resolveServerConfig } from "./config.ts";
@@ -94,17 +94,17 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_LOG_LEVEL: "Warn",
-                  T3CODE_MODE: "desktop",
-                  T3CODE_PORT: "4001",
-                  T3CODE_HOST: "0.0.0.0",
-                  T3CODE_HOME: baseDir,
+                  KATACODE_LOG_LEVEL: "Warn",
+                  KATACODE_MODE: "desktop",
+                  KATACODE_PORT: "4001",
+                  KATACODE_HOST: "0.0.0.0",
+                  KATACODE_HOME: baseDir,
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
-                  T3CODE_DEV_ALLOWED_ORIGINS:
+                  KATACODE_DEV_ALLOWED_ORIGINS:
                     "https://host.example.ts.net, https://phone.example.ts.net ",
-                  T3CODE_NO_BROWSER: "true",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
-                  T3CODE_LOG_WS_EVENTS: "true",
+                  KATACODE_NO_BROWSER: "true",
+                  KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
+                  KATACODE_LOG_WS_EVENTS: "true",
                 },
               }),
             ),
@@ -167,15 +167,15 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_LOG_LEVEL: "Warn",
-                  T3CODE_MODE: "desktop",
-                  T3CODE_PORT: "4001",
-                  T3CODE_HOST: "0.0.0.0",
-                  T3CODE_HOME: join(NodeOS.tmpdir(), "ignored-base"),
+                  KATACODE_LOG_LEVEL: "Warn",
+                  KATACODE_MODE: "desktop",
+                  KATACODE_PORT: "4001",
+                  KATACODE_HOST: "0.0.0.0",
+                  KATACODE_HOME: join(NodeOS.tmpdir(), "ignored-base"),
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
-                  T3CODE_NO_BROWSER: "false",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
-                  T3CODE_LOG_WS_EVENTS: "false",
+                  KATACODE_NO_BROWSER: "false",
+                  KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
+                  KATACODE_LOG_WS_EVENTS: "false",
                 },
               }),
             ),
@@ -245,10 +245,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_BOOTSTRAP_FD: String(fd),
-                  T3CODE_NO_BROWSER: "true",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
-                  T3CODE_LOG_WS_EVENTS: "true",
+                  KATACODE_BOOTSTRAP_FD: String(fd),
+                  KATACODE_NO_BROWSER: "true",
+                  KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
+                  KATACODE_LOG_WS_EVENTS: "true",
                 },
               }),
             ),
@@ -322,7 +322,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_BOOTSTRAP_FD: String(fd),
+                  KATACODE_BOOTSTRAP_FD: String(fd),
                 },
               }),
             ),
@@ -452,12 +452,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_MODE: "web",
-                  T3CODE_BOOTSTRAP_FD: String(fd),
-                  T3CODE_HOME: baseDir,
-                  T3CODE_NO_BROWSER: "true",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
-                  T3CODE_LOG_WS_EVENTS: "true",
+                  KATACODE_MODE: "web",
+                  KATACODE_BOOTSTRAP_FD: String(fd),
+                  KATACODE_HOME: baseDir,
+                  KATACODE_NO_BROWSER: "true",
+                  KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
+                  KATACODE_LOG_WS_EVENTS: "true",
                 },
               }),
             ),
@@ -588,8 +588,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_NO_BROWSER: "false",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
+                  KATACODE_NO_BROWSER: "false",
+                  KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
                 },
               }),
             ),

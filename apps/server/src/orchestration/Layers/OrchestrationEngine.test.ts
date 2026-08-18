@@ -8,7 +8,7 @@ import {
   TurnId,
   type OrchestrationEvent,
   ProviderInstanceId,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -546,7 +546,7 @@ describe("OrchestrationEngine", () => {
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        branch: "t3code/generated-branch-name",
+        branch: "kata-code/generated-branch-name",
         worktreePath: "/tmp/project-branch-race-worktree",
         createdAt,
       }),
@@ -557,13 +557,13 @@ describe("OrchestrationEngine", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-stale-temporary-branch-sync"),
         threadId: ThreadId.make("thread-branch-race"),
-        branch: "t3code/1234abcd",
-        expectedBranch: "t3code/1234abcd",
+        branch: "kata-code/1234abcd",
+        expectedBranch: "kata-code/1234abcd",
       }),
     );
 
     const snapshot = await system.readModel();
-    expect(snapshot.threads[0]?.branch).toBe("t3code/generated-branch-name");
+    expect(snapshot.threads[0]?.branch).toBe("kata-code/generated-branch-name");
     await system.dispose();
   });
 
@@ -609,13 +609,13 @@ describe("OrchestrationEngine", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-authoritative-worktree-bootstrap"),
         threadId: ThreadId.make("thread-worktree-bootstrap"),
-        branch: "t3code/1234abcd",
+        branch: "kata-code/1234abcd",
         worktreePath: "/tmp/project-worktree-bootstrap-worktree",
       }),
     );
 
     const snapshot = await system.readModel();
-    expect(snapshot.threads[0]?.branch).toBe("t3code/1234abcd");
+    expect(snapshot.threads[0]?.branch).toBe("kata-code/1234abcd");
     expect(snapshot.threads[0]?.worktreePath).toBe("/tmp/project-worktree-bootstrap-worktree");
     await system.dispose();
   });

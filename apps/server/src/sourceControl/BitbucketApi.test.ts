@@ -14,7 +14,7 @@ import {
   HttpClientResponse,
 } from "effect/unstable/http";
 
-import { GitCommandError } from "@t3tools/contracts";
+import { GitCommandError } from "@kata-sh/code-contracts";
 import * as BitbucketApi from "./BitbucketApi.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -151,9 +151,9 @@ function makeLayer(input: {
       ConfigProvider.layer(
         ConfigProvider.fromEnv({
           env: {
-            T3CODE_BITBUCKET_API_BASE_URL: "https://api.test.local/2.0",
-            T3CODE_BITBUCKET_EMAIL: "user@example.com",
-            T3CODE_BITBUCKET_API_TOKEN: "token",
+            KATACODE_BITBUCKET_API_BASE_URL: "https://api.test.local/2.0",
+            KATACODE_BITBUCKET_EMAIL: "user@example.com",
+            KATACODE_BITBUCKET_API_TOKEN: "token",
           },
         }),
       ),
@@ -761,17 +761,17 @@ it.effect("checks out fork pull requests through an ensured fork remote", () => 
       cwd: "/repo",
       remoteName: "octocat",
       remoteBranch: "main",
-      localBranch: "t3code/pr-42/main",
+      localBranch: "kata-code/pr-42/main",
     });
     assert.deepStrictEqual(git.setBranchUpstream.mock.calls[0]?.[0], {
       cwd: "/repo",
-      branch: "t3code/pr-42/main",
+      branch: "kata-code/pr-42/main",
       remoteName: "octocat",
       remoteBranch: "main",
     });
     assert.deepStrictEqual(git.switchRef.mock.calls[0]?.[0], {
       cwd: "/repo",
-      refName: "t3code/pr-42/main",
+      refName: "kata-code/pr-42/main",
     });
   }).pipe(Effect.provide(layer));
 });

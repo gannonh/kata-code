@@ -5,7 +5,7 @@ import {
   ApprovalRequestId,
   type ProviderApprovalDecision,
   type UserInputQuestion,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { threadEnvironment } from "../state/threads";

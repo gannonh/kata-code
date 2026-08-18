@@ -1,6 +1,6 @@
-import { effectiveSettled } from "@t3tools/client-runtime/state/thread-settled";
-import type { OrchestrationThreadShell } from "@t3tools/contracts";
-import { ProjectId, ProviderInstanceId, ThreadId, type VcsStatusResult } from "@t3tools/contracts";
+import { effectiveSettled } from "@kata-sh/code-client-runtime/state/thread-settled";
+import type { OrchestrationThreadShell } from "@kata-sh/code-contracts";
+import { ProjectId, ProviderInstanceId, ThreadId, type VcsStatusResult } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { AtomRegistry } from "effect/unstable/reactivity";

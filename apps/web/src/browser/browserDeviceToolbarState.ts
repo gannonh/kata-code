@@ -1,4 +1,4 @@
-import type { PreviewViewportSetting } from "@t3tools/contracts";
+import type { PreviewViewportSetting } from "@kata-sh/code-contracts";
 
 export function reconcileLockedAspectRatio(
   current: number | null,

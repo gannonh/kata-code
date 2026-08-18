@@ -2,11 +2,11 @@ import type {
   ProjectScript,
   ResolvedKeybindingsConfig,
   T3ProjectFileScript,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kata-sh/code-client-runtime/state/runtime";
 import { ChevronDownIcon, DownloadIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 

@@ -16,9 +16,9 @@ import {
   resolveWebIconOverrides,
 } from "../../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
-import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
-import { fromYaml } from "@t3tools/shared/schemaYaml";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { fromJsonStringPretty } from "@kata-sh/code-shared/schemaJson";
+import { fromYaml } from "@kata-sh/code-shared/schemaYaml";
+import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import serverPackageJson from "../package.json" with { type: "json" };
 import {
   ServerCliBuildAssetMissingError,
@@ -308,7 +308,7 @@ const publishCmd = Command.make(
 // ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("T3 server build & publish CLI."),
+  Command.withDescription("Kata server build & publish CLI."),
   Command.withSubcommands([buildCmd, publishCmd]),
 );
 

@@ -23,15 +23,15 @@ import {
   effectiveSettled,
   effectiveSnoozed,
   threadWokeAt,
-} from "@t3tools/client-runtime/state/thread-settled";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+} from "@kata-sh/code-client-runtime/state/thread-settled";
+import type { EnvironmentThreadShell } from "@kata-sh/code-client-runtime/state/models";
 import {
   scopeProjectRef,
   scopeThreadRef,
   scopedThreadKey,
-} from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+} from "@kata-sh/code-client-runtime/environment";
+import type { ScopedThreadRef, ThreadId } from "@kata-sh/code-contracts";
+import type { TimestampFormat } from "@kata-sh/code-contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -72,7 +72,7 @@ import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kata-sh/code-client-runtime/state/runtime";
 import { isElectron } from "../env";
 import {
   resolveShortcutCommand,

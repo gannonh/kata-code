@@ -1,7 +1,7 @@
 import {
   isWorkspaceBrowserPreviewPath,
   isWorkspaceImagePreviewPath,
-} from "@t3tools/shared/filePreview";
+} from "@kata-sh/code-shared/filePreview";
 
 export interface FileBreadcrumb {
   readonly label: string;

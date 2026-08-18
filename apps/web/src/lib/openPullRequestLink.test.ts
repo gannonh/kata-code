@@ -161,7 +161,7 @@ describe("findProjectForChangeRequest", () => {
         provider: "gitlab",
         displayName: "t3tools/platform/t3code",
         owner: "t3tools",
-        name: "t3code",
+        name: "kata-code",
       }),
     ];
     expect(
@@ -179,7 +179,7 @@ describe("findProjectForChangeRequest", () => {
         canonicalKey: "github.com/pingdotgg/t3code",
         provider: "github",
         owner: "pingdotgg",
-        name: "t3code",
+        name: "kata-code",
       }),
     ];
     expect(
@@ -197,7 +197,7 @@ describe("findProjectForChangeRequest", () => {
         canonicalKey: "github.com/pingdotgg/t3code",
         provider: "github",
         owner: "pingdotgg",
-        name: "t3code",
+        name: "kata-code",
       }),
     ];
     expect(

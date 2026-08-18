@@ -1,4 +1,4 @@
-import type { PreviewRenderedViewportSize, PreviewViewportSetting } from "@t3tools/contracts";
+import type { PreviewRenderedViewportSize, PreviewViewportSetting } from "@kata-sh/code-contracts";
 
 import { browserViewportSettingKey } from "~/browser/browserViewportLayout";
 

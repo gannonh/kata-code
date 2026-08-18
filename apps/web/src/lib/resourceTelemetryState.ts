@@ -1,4 +1,4 @@
-import type { ResourceTelemetryHistoryInput, ResourceTelemetrySnapshot } from "@t3tools/contracts";
+import type { ResourceTelemetryHistoryInput, ResourceTelemetrySnapshot } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import { useCallback } from "react";
 

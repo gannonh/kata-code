@@ -5,12 +5,12 @@ import {
   QUEUED_TURN_START_GRACE_MS,
   resolveSnoozePresets,
   snoozeWakeLabel,
-} from "@t3tools/client-runtime/state/thread-settled";
-import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime/state/thread-settled";
+import type { SnoozePreset } from "@kata-sh/code-client-runtime/state/thread-settled";
+import type { EnvironmentThreadShell } from "@kata-sh/code-client-runtime/state/shell";
+import { threadSearchMatchKey } from "@kata-sh/code-client-runtime/state/thread-search";
+import { sortPinnedThreadsByOrderKey } from "@kata-sh/code-client-runtime/state/thread-sort";
+import type { EnvironmentId, ProjectId } from "@kata-sh/code-contracts";
 
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 

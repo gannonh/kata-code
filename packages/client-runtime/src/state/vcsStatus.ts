@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 
 export interface VcsStatusTarget {
   readonly environmentId: EnvironmentId | null;

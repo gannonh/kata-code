@@ -14,7 +14,7 @@ import {
   VcsProcessSpawnError,
   VcsProcessStdinWriteError,
   VcsProcessTimeoutError,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import * as ProcessRunner from "../processRunner.ts";
 
 export interface VcsProcessInput {

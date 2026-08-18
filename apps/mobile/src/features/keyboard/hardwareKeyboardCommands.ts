@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 import { useEffect } from "react";
 
 export type HardwareKeyboardCommand =

@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind } from "@kata-sh/code-contracts";
 
 /**
  * Model slugs that show a gold "NEW" chip in the model picker list.

@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/tailscale",
+  "name": "@kata-sh/code-tailscale",
   "private": true,
   "type": "module",
   "exports": {
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
-    "@t3tools/shared": "workspace:*",
+    "@kata-sh/code-shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { classifyTaskAgentKind, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import { classifyTaskAgentKind, type OrchestrationThreadActivity } from "@kata-sh/code-contracts";
 import {
   deriveAgentPanelModel,
   foldSubagentActivities,

@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentShellStatus } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId, MessageId } from "@t3tools/contracts";
+import type { EnvironmentShellStatus } from "@kata-sh/code-client-runtime/state/shell";
+import type { EnvironmentId, MessageId } from "@kata-sh/code-contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { appAtomRegistry } from "./atom-registry";

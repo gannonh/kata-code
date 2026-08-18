@@ -33,7 +33,7 @@ describe("brand-assets", () => {
 
   it("maps server build web assets to development icons", () => {
     expect(DEVELOPMENT_ICON_OVERRIDES[0]).toEqual({
-      sourceRelativePath: BRAND_ASSET_PATHS.developmentWebFaviconIco,
+      sourceRelativePath: BRAND_ASSET_PATHS.productionWebFaviconIco,
       targetRelativePath: "dist/client/favicon.ico",
     });
   });
@@ -41,19 +41,19 @@ describe("brand-assets", () => {
   it("maps development web assets to the public splash and favicon files", () => {
     expect(DEVELOPMENT_PUBLIC_ICON_OVERRIDES).toEqual([
       {
-        sourceRelativePath: BRAND_ASSET_PATHS.developmentWebFaviconIco,
+        sourceRelativePath: BRAND_ASSET_PATHS.productionWebFaviconIco,
         targetRelativePath: "apps/web/public/favicon.ico",
       },
       {
-        sourceRelativePath: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
+        sourceRelativePath: BRAND_ASSET_PATHS.productionWebFavicon16Png,
         targetRelativePath: "apps/web/public/favicon-16x16.png",
       },
       {
-        sourceRelativePath: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
+        sourceRelativePath: BRAND_ASSET_PATHS.productionWebFavicon32Png,
         targetRelativePath: "apps/web/public/favicon-32x32.png",
       },
       {
-        sourceRelativePath: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
+        sourceRelativePath: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
         targetRelativePath: "apps/web/public/apple-touch-icon.png",
       },
     ]);
@@ -68,19 +68,21 @@ describe("brand-assets", () => {
 
   it("maps hosted nightly web assets to nightly icons", () => {
     expect(resolveWebIconOverrides("nightly", "apps/web/dist")).toContainEqual({
-      sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
+      sourceRelativePath: BRAND_ASSET_PATHS.productionWebFaviconIco,
       targetRelativePath: "apps/web/dist/favicon.ico",
     });
   });
 
   it("maps hosted release channels to web asset brands", () => {
     expect(resolveWebAssetBrandForChannel("latest")).toBe("production");
-    expect(resolveWebAssetBrandForChannel("nightly")).toBe("nightly");
+    expect(resolveWebAssetBrandForChannel("nightly")).toBe("production");
   });
 
   it("maps package versions to web asset brands", () => {
     expect(resolveWebAssetBrandForPackageVersion("0.0.29")).toBe("production");
-    expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe("nightly");
+    expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe(
+      "production",
+    );
   });
 
   it("keeps development, nightly, and production icon families separate", () => {

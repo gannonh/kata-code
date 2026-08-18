@@ -6,14 +6,14 @@ import {
   PullRequestListProjectError,
   PullRequestListResult,
   resolvePullRequestAuthorFilter,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import type {
   PullRequestDiffStat,
   PullRequestInvolvement,
   PullRequestListCursors,
   PullRequestListFilters,
   PullRequestListState,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 /**
  * A listed change request with the environment that read it. Nothing on a row says which machine

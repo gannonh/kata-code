@@ -1,4 +1,4 @@
-import { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
+import { RelayManagedEndpointRuntimeConfig } from "@kata-sh/code-contracts/relay";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

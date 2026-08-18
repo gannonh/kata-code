@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type { DesktopUpdateActionResult, DesktopUpdateState } from "@kata-sh/code-contracts";
 
 import {
   canCheckForUpdate,
@@ -232,7 +232,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: "1.1.0",
         downloadedVersion: "1.1.1",
       }),
-    ).toContain("Install update 1.1.1 and restart T3 Code?");
+    ).toContain("Install update 1.1.1 and restart Kata Code?");
   });
 
   it("falls back to generic install confirmation copy when no version is available", () => {
@@ -241,7 +241,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: null,
         downloadedVersion: null,
       }),
-    ).toContain("Install update and restart T3 Code?");
+    ).toContain("Install update and restart Kata Code?");
   });
 
   it("keeps the same install confirmation copy across desktop platforms", () => {
@@ -251,7 +251,7 @@ describe("desktop update UI helpers", () => {
         downloadedVersion: "1.1.0",
       }),
     ).toBe(
-      "Install update 1.1.0 and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
+      "Install update 1.1.0 and restart Kata Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
     );
   });
 });

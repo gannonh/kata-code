@@ -2,8 +2,8 @@ import {
   attachEnvironmentDescriptor,
   createKnownEnvironment,
   type KnownEnvironment,
-} from "@t3tools/client-runtime/environment";
-import type { ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+} from "@kata-sh/code-client-runtime/environment";
+import type { ExecutionEnvironmentDescriptor } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 
 import { PrimaryEnvironmentRequestError, retryTransientBootstrap } from "./auth";

@@ -1,5 +1,5 @@
-import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { scopedThreadKey, scopeProjectRef } from "@kata-sh/code-client-runtime/environment";
+import { squashAtomCommandFailure } from "@kata-sh/code-client-runtime/state/runtime";
 import type {
   EnvironmentId,
   PullRequestAction,
@@ -8,7 +8,7 @@ import type {
   PullRequestRef,
   PullRequestState,
   ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 import {
   ArrowDownUpIcon,
   ArrowLeftIcon,

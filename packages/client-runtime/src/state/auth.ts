@@ -2,8 +2,8 @@ import type {
   AuthAccessSnapshot,
   AuthAccessStreamEvent,
   AuthAccessStreamSnapshotEvent,
-} from "@t3tools/contracts";
-import { WS_METHODS } from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
+import { WS_METHODS } from "@kata-sh/code-contracts";
 import * as Stream from "effect/Stream";
 import { Atom } from "effect/unstable/reactivity";
 

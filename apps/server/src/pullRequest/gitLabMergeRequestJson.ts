@@ -16,9 +16,9 @@ import type {
   PullRequestReviewThread,
   PullRequestReviewerCandidate,
   PullRequestState,
-} from "@t3tools/contracts";
-import { TrimmedNonEmptyString } from "@t3tools/contracts";
-import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+} from "@kata-sh/code-contracts";
+import { TrimmedNonEmptyString } from "@kata-sh/code-contracts";
+import { decodeJsonResult } from "@kata-sh/code-shared/schemaJson";
 
 /**
  * GitLab's REST enums are decoded as plain strings and normalized here: a GitLab release that

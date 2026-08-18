@@ -9,9 +9,9 @@ import {
   type ProviderInteractionMode,
   type RuntimeMode,
   type ThreadId,
-} from "@t3tools/contracts";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
+} from "@kata-sh/code-contracts";
+import { safeErrorLogAttributes } from "@kata-sh/code-client-runtime/errors";
+import { deriveActiveWorkStartedAt } from "@kata-sh/code-shared/orchestrationTiming";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
 import {

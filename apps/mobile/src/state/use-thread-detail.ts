@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
 
 import { useEnvironmentThread } from "./threads";

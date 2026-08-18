@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "./models.ts";
@@ -18,8 +18,8 @@ const repositoryIdentity = {
   },
   provider: "github",
   owner: "t3tools",
-  name: "t3code",
-  displayName: "T3 Code",
+  name: "kata-code",
+  displayName: "Kata Code",
 };
 
 function makeProject(
@@ -89,7 +89,7 @@ describe("buildProjectGroups", () => {
     ];
 
     expect(buildProjectGroups({ projects, settings: settings("repository") })[0]?.label).toBe(
-      "T3 Code",
+      "Kata Code",
     );
   });
 

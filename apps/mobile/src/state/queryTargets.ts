@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 
 export interface CheckpointDiffTarget {
   readonly environmentId: EnvironmentId | null;

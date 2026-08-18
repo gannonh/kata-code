@@ -83,7 +83,7 @@ describe("resolveMarkdownFileLinkTarget", () => {
         "C:/Users/mike/dev-stuff/t3code",
       ),
     ).toMatchObject({
-      displayPath: "t3code/apps/web/src/session-logic.ts:501",
+      displayPath: "kata-code/apps/web/src/session-logic.ts:501",
       workspaceRelativePath: "apps/web/src/session-logic.ts",
     });
   });
@@ -96,7 +96,7 @@ describe("resolveMarkdownFileLinkTarget", () => {
       ),
     ).toMatchObject({
       displayPath:
-        "t3code/apps/web/src/components/chat/MessagesTimeline.virtualization.browser.tsx",
+        "kata-code/apps/web/src/components/chat/MessagesTimeline.virtualization.browser.tsx",
       workspaceRelativePath:
         "apps/web/src/components/chat/MessagesTimeline.virtualization.browser.tsx",
     });

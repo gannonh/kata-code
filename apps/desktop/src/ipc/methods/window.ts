@@ -11,8 +11,8 @@ import {
   REMOTE_CAPABLE_EDITOR_IDS,
   type DesktopEnvironmentBootstrap,
   type PickedThemeFile,
-} from "@t3tools/contracts";
-import { isCommandAvailable } from "@t3tools/shared/shell";
+} from "@kata-sh/code-contracts";
+import { isCommandAvailable } from "@kata-sh/code-shared/shell";
 import * as NodeOS from "node:os";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

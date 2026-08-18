@@ -16,7 +16,7 @@ import type {
   PullRequestReviewThread,
   PullRequestReviewVerdict,
   PullRequestReviewerCandidateList,
-} from "@t3tools/contracts";
+} from "@kata-sh/code-contracts";
 
 import * as BitbucketApi from "../sourceControl/BitbucketApi.ts";
 import {
