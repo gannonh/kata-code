@@ -1,6 +1,10 @@
 import * as NodeURL from "node:url";
 
-import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@kata-sh/code-contracts";
+import type {
+  ChatAttachment,
+  ProviderApprovalDecision,
+  RuntimeMode,
+} from "@kata-sh/code-contracts";
 import {
   createOpencodeClient,
   type Agent,

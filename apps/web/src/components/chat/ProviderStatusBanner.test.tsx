@@ -1,4 +1,8 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@kata-sh/code-contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@kata-sh/code-contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 

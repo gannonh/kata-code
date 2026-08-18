@@ -237,9 +237,9 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@kata-sh/code-contracts": "workspace:*",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
-    "@kata-sh/code-contracts": "workspace:*",
     "effect": "catalog:",
     "jose": "catalog:",
     "yaml": "catalog:"

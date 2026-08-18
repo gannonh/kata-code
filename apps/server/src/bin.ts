@@ -31,7 +31,9 @@ class ConnectPublicConfigMissingError extends CliError.UserError {
 const connectUnavailableCommand = Command.make("connect", {
   command: Argument.string("command").pipe(Argument.variadic),
 }).pipe(
-  Command.withDescription("Kata Code Connect is unavailable in builds without public configuration."),
+  Command.withDescription(
+    "Kata Code Connect is unavailable in builds without public configuration.",
+  ),
   Command.withHidden,
   Command.withHandler(() =>
     Effect.fail(

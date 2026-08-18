@@ -6,7 +6,10 @@ import * as Tracer from "effect/Tracer";
 import { HttpClient } from "effect/unstable/http";
 import { OtlpExporter, OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
-import { settleAsyncResult, squashAtomCommandFailure } from "@kata-sh/code-client-runtime/state/runtime";
+import {
+  settleAsyncResult,
+  squashAtomCommandFailure,
+} from "@kata-sh/code-client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@kata-sh/code-client-runtime/errors";
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary";
 import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";

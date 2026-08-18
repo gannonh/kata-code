@@ -1,5 +1,8 @@
 import type { ProjectId } from "@kata-sh/code-contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@kata-sh/code-contracts/settings";
+import type {
+  SidebarProjectSortOrder,
+  SidebarThreadSortOrder,
+} from "@kata-sh/code-contracts/settings";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 

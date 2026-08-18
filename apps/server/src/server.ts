@@ -634,7 +634,9 @@ export const makeServerLayer = Layer.unwrap(
                   Schedule.upTo({ duration: "10 minutes" }),
                 ),
               }),
-              Effect.tap(() => Effect.logInfo("Kata Code Connect desired link reconciled on startup")),
+              Effect.tap(() =>
+                Effect.logInfo("Kata Code Connect desired link reconciled on startup"),
+              ),
               Effect.catch((cause) =>
                 Effect.logWarning("Failed to reconcile Kata Code Connect desired link on startup", {
                   cause,

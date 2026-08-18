@@ -6,7 +6,10 @@ import {
   PREVIEW_VIEWPORT_MIN_DIMENSION,
   type PreviewViewportSetting,
 } from "@kata-sh/code-contracts";
-import { PREVIEW_VIEWPORT_PRESETS, resolvePreviewViewport } from "@kata-sh/code-shared/previewViewport";
+import {
+  PREVIEW_VIEWPORT_PRESETS,
+  resolvePreviewViewport,
+} from "@kata-sh/code-shared/previewViewport";
 import { Link2, Unlink2, X } from "lucide-react";
 import { useState } from "react";
 

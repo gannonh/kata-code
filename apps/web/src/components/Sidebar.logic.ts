@@ -1,6 +1,9 @@
 import * as React from "react";
 import type { ContextMenuItem } from "@kata-sh/code-contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@kata-sh/code-contracts/settings";
+import type {
+  SidebarProjectSortOrder,
+  SidebarThreadSortOrder,
+} from "@kata-sh/code-contracts/settings";
 import {
   getThreadSortTimestamp,
   sortThreads,

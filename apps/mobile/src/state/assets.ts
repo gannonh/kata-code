@@ -1,5 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
-import { createAssetEnvironmentAtoms, resolveAssetUrl } from "@kata-sh/code-client-runtime/state/assets";
+import {
+  createAssetEnvironmentAtoms,
+  resolveAssetUrl,
+} from "@kata-sh/code-client-runtime/state/assets";
 import type { AssetResource, EnvironmentId } from "@kata-sh/code-contracts";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 

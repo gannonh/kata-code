@@ -6,7 +6,10 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@kata-sh/code-shared/Net";
 import { resolveGitWorktreePath, resolveWorktreeKatacodeHome } from "@kata-sh/code-shared/devHome";
-import { HostProcessEnvironment, HostProcessWorkingDirectory } from "@kata-sh/code-shared/hostProcess";
+import {
+  HostProcessEnvironment,
+  HostProcessWorkingDirectory,
+} from "@kata-sh/code-shared/hostProcess";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";

@@ -1,5 +1,8 @@
 import type { EnvironmentId, ServerSelfUpdateCapability } from "@kata-sh/code-contracts";
-import type { ServerUpdateStage, ServerUpdateState } from "@kata-sh/code-client-runtime/state/server";
+import type {
+  ServerUpdateStage,
+  ServerUpdateState,
+} from "@kata-sh/code-client-runtime/state/server";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,

@@ -1,4 +1,8 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@kata-sh/code-contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@kata-sh/code-contracts";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@kata-sh/code-contracts/settings";
 import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "./providerInstances";

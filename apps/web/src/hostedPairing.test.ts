@@ -62,9 +62,7 @@ describe("hostedPairing", () => {
     expect(
       hasHostedPairingRequest(new URL("https://app.kata.sh/pair?host=backend.example.com")),
     ).toBe(false);
-    expect(hasHostedPairingRequest(new URL("https://app.kata.sh/pair?token=ABCD1234"))).toBe(
-      false,
-    );
+    expect(hasHostedPairingRequest(new URL("https://app.kata.sh/pair?token=ABCD1234"))).toBe(false);
   });
 
   it("detects the hosted static app only when no backend URL is configured", () => {

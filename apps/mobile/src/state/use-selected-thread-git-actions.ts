@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo } from "react";
 
-import { EnvironmentProject, EnvironmentThreadShell } from "@kata-sh/code-client-runtime/state/shell";
+import {
+  EnvironmentProject,
+  EnvironmentThreadShell,
+} from "@kata-sh/code-client-runtime/state/shell";
 import type { AtomCommandResult } from "@kata-sh/code-client-runtime/state/runtime";
 import {
   type GitActionRequestInput,

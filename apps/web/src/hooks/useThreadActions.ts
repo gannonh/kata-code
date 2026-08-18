@@ -4,8 +4,15 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@kata-sh/code-client-runtime/environment";
-import { settlePromise, squashAtomCommandFailure } from "@kata-sh/code-client-runtime/state/runtime";
-import { canSettle, canSnooze, threadWokeAt } from "@kata-sh/code-client-runtime/state/thread-settled";
+import {
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@kata-sh/code-client-runtime/state/runtime";
+import {
+  canSettle,
+  canSnooze,
+  threadWokeAt,
+} from "@kata-sh/code-client-runtime/state/thread-settled";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";

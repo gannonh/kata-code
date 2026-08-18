@@ -1,5 +1,8 @@
 import { useAuth, useClerk, useUser } from "@clerk/react";
-import { encodeConnectAuthCode, readConnectAuthorizeRequest } from "@kata-sh/code-shared/connectAuth";
+import {
+  encodeConnectAuthCode,
+  readConnectAuthorizeRequest,
+} from "@kata-sh/code-shared/connectAuth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {

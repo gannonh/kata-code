@@ -1,4 +1,7 @@
-import { managedRelaySessionAtom, setManagedRelaySession } from "@kata-sh/code-client-runtime/relay";
+import {
+  managedRelaySessionAtom,
+  setManagedRelaySession,
+} from "@kata-sh/code-client-runtime/relay";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";

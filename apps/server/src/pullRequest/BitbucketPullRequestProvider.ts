@@ -1,5 +1,8 @@
 import * as Effect from "effect/Effect";
-import type { PullRequestCapabilities, PullRequestViewerPermissions } from "@kata-sh/code-contracts";
+import type {
+  PullRequestCapabilities,
+  PullRequestViewerPermissions,
+} from "@kata-sh/code-contracts";
 
 import * as BitbucketPullRequestApi from "./BitbucketPullRequestApi.ts";
 import {

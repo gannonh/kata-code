@@ -4,7 +4,11 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@kata-sh/code-client-runtime/environment";
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@kata-sh/code-contracts";
+import {
+  DEFAULT_RUNTIME_MODE,
+  type ScopedProjectRef,
+  type ThreadId,
+} from "@kata-sh/code-contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {

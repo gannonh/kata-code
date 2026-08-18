@@ -16,7 +16,11 @@ import {
   type UsageSummary,
   type UsageSummaryInput,
 } from "@kata-sh/code-contracts";
-import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@kata-sh/code-shared/usageMerge";
+import {
+  mergeUsage,
+  type EnvironmentUsage,
+  type MergedUsage,
+} from "@kata-sh/code-shared/usageMerge";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useMemo } from "react";

@@ -1,5 +1,8 @@
 import type { ScopedThreadRef } from "@kata-sh/code-contracts";
-import { isWindowsAbsolutePath, normalizeProjectPathForComparison } from "@kata-sh/code-shared/path";
+import {
+  isWindowsAbsolutePath,
+  normalizeProjectPathForComparison,
+} from "@kata-sh/code-shared/path";
 
 import { useRightPanelStore } from "./rightPanelStore";
 import { resolvePathLinkTarget } from "./terminal-links";

@@ -3,7 +3,11 @@ import {
   scopedThreadKey,
   scopeProjectRef,
 } from "@kata-sh/code-client-runtime/environment";
-import type { DesktopPreviewFavicon, ScopedProjectRef, ScopedThreadRef } from "@kata-sh/code-contracts";
+import type {
+  DesktopPreviewFavicon,
+  ScopedProjectRef,
+  ScopedThreadRef,
+} from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
 import { useMemo } from "react";
 import { create } from "zustand";

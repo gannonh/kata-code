@@ -13,7 +13,10 @@ import {
   Connectivity,
   Wakeups,
 } from "@kata-sh/code-client-runtime/connection";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@kata-sh/code-client-runtime/relay";
+import {
+  managedRelayAccountChanges,
+  managedRelaySessionAtom,
+} from "@kata-sh/code-client-runtime/relay";
 import { AuthStandardClientScopes } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

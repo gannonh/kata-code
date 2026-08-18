@@ -26,7 +26,10 @@ import {
   type ReviewDiffPreviewSource,
   type VcsRef,
 } from "@kata-sh/code-contracts";
-import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@kata-sh/code-shared/git";
+import {
+  dedupeRemoteBranchesWithLocalMatches,
+  normalizeGitRemoteUrl,
+} from "@kata-sh/code-shared/git";
 import { compactTraceAttributes } from "@kata-sh/code-shared/observability";
 import { decodeJsonResult } from "@kata-sh/code-shared/schemaJson";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";

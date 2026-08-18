@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { ProjectId, ProviderInstanceId, ThreadId } from "@kata-sh/code-contracts";
-import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@kata-sh/code-contracts";
+import type {
+  OrchestrationShellSnapshot,
+  OrchestrationShellStreamEvent,
+} from "@kata-sh/code-contracts";
 
 import { applyShellStreamEvent } from "./shellReducer.ts";
 

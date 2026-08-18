@@ -1,4 +1,8 @@
-import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from "@kata-sh/code-contracts";
+import {
+  type EnvironmentId,
+  type ProjectReadFileResult,
+  WS_METHODS,
+} from "@kata-sh/code-contracts";
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
 

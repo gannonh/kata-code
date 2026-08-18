@@ -80,9 +80,7 @@ describe("brand-assets", () => {
 
   it("maps package versions to web asset brands", () => {
     expect(resolveWebAssetBrandForPackageVersion("0.0.29")).toBe("production");
-    expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe(
-      "production",
-    );
+    expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe("production");
   });
 
   it("keeps development, nightly, and production icon families separate", () => {

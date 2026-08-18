@@ -195,7 +195,10 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         assert.fail(`Expected ShowHelp, got ${error._tag}`);
       }
       assert.deepEqual(error.commandPath, ["t3", "connect"]);
-      assert.include(error.errors[0]?.message ?? "", "missing Kata Code Connect public configuration");
+      assert.include(
+        error.errors[0]?.message ?? "",
+        "missing Kata Code Connect public configuration",
+      );
 
       const output = (yield* TestConsole.errorLines).join("\n");
       assert.include(output, "ERROR");
@@ -252,7 +255,10 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       assert.include(output, "Kata Code Connect\n  Exposure: disabled");
       assert.include(output, "  Authorization: missing");
       assert.include(output, "  Environment link: not provisioned");
-      assert.include(output, "Next: Run `t3 connect link` to authorize and enable Kata Code Connect.");
+      assert.include(
+        output,
+        "Next: Run `t3 connect link` to authorize and enable Kata Code Connect.",
+      );
     }),
   );
 

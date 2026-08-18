@@ -1233,7 +1233,9 @@ const BuildEnvConfig = Config.all({
   signed: Config.boolean("KATACODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
   verbose: Config.boolean("KATACODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
   mockUpdates: Config.boolean("KATACODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
-  mockUpdateServerPort: Config.string("KATACODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
+  mockUpdateServerPort: Config.string("KATACODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
+    Config.option,
+  ),
   // Path to a prebuilt Linux node-pty binary (pty.node) for the target arch,
   // produced by the Linux CI job and handed to the Windows packaging job. Placed
   // into the staged node-pty so the WSL backend ships a ready binary and never
@@ -3110,7 +3112,9 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
   arch: Flag.choice("arch", BuildArch.literals).pipe(
-    Flag.withDescription("Build arch, for example arm64/x64/universal (env: KATACODE_DESKTOP_ARCH)."),
+    Flag.withDescription(
+      "Build arch, for example arm64/x64/universal (env: KATACODE_DESKTOP_ARCH).",
+    ),
     Flag.optional,
   ),
   buildVersion: Flag.string("build-version").pipe(
@@ -3147,7 +3151,9 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   ),
   mockUpdateServerPort: Flag.integer("mock-update-server-port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Mock update server port (env: KATACODE_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
+    Flag.withDescription(
+      "Mock update server port (env: KATACODE_DESKTOP_MOCK_UPDATE_SERVER_PORT).",
+    ),
     Flag.optional,
   ),
   wslPrebuild: Flag.string("wsl-prebuild").pipe(

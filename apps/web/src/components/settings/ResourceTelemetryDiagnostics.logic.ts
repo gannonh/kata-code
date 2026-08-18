@@ -1,4 +1,7 @@
-import type { ResourceTelemetryProcess, ResourceTelemetrySourceStatus } from "@kata-sh/code-contracts";
+import type {
+  ResourceTelemetryProcess,
+  ResourceTelemetrySourceStatus,
+} from "@kata-sh/code-contracts";
 
 function processIdentityKey(process: ResourceTelemetryProcess): string {
   return `${process.identity.pid}:${process.identity.startTimeMs}`;

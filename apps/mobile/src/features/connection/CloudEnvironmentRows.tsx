@@ -107,7 +107,9 @@ function CloudEnvironmentRowsContent(
     <View collapsable={false} className={cn("gap-3", showHeader && "mt-5")}>
       {showHeader ? (
         <View className="flex-row items-center justify-between px-1">
-          <Text className="text-sm font-t3-bold uppercase text-foreground-muted">Kata Code Connect</Text>
+          <Text className="text-sm font-t3-bold uppercase text-foreground-muted">
+            Kata Code Connect
+          </Text>
           {discoveryAvailable ? (
             <Pressable
               accessibilityRole="button"

@@ -1,4 +1,8 @@
-import type { ContextMenuItem, PreviewSessionSnapshot, PullRequestState } from "@kata-sh/code-contracts";
+import type {
+  ContextMenuItem,
+  PreviewSessionSnapshot,
+  PullRequestState,
+} from "@kata-sh/code-contracts";
 import { getTerminalLabel } from "@kata-sh/code-shared/terminalLabels";
 import {
   Bot,

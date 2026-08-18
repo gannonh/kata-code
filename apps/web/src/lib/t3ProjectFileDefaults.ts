@@ -1,4 +1,8 @@
-import { T3_PROJECT_FILE_NAME, type EnvironmentId, type ThreadEnvMode } from "@kata-sh/code-contracts";
+import {
+  T3_PROJECT_FILE_NAME,
+  type EnvironmentId,
+  type ThreadEnvMode,
+} from "@kata-sh/code-contracts";
 import { parseT3ProjectFile } from "@kata-sh/code-shared/t3ProjectFile";
 import { executeAtomQuery } from "@kata-sh/code-client-runtime/state/runtime";
 

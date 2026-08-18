@@ -23,7 +23,10 @@ import {
 } from "@kata-sh/code-client-runtime/connection";
 import { bootstrapRemoteBearerSession } from "@kata-sh/code-client-runtime/authorization";
 import { fetchRemoteEnvironmentDescriptor } from "@kata-sh/code-client-runtime/environment";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@kata-sh/code-client-runtime/relay";
+import {
+  managedRelayAccountChanges,
+  managedRelaySessionAtom,
+} from "@kata-sh/code-client-runtime/relay";
 import { EnvironmentRpcRequestObserver } from "@kata-sh/code-client-runtime/rpc";
 import {
   AuthStandardClientScopes,

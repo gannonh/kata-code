@@ -255,10 +255,10 @@
         <div class="eyebrow">Implemented architecture</div>
         <h1>Kata Code Connect Control Plane and Managed Endpoint Flow</h1>
         <p class="lede">
-          Kata Code Connect links a locally authorized T3 environment to a signed-in cloud user, provisions
-          a managed HTTPS/WSS endpoint for that environment, and brokers proof-bound remote
-          connections. The local environment remains the authority that issues environment access
-          credentials. The hosted relay stores links, reconciles managed endpoint resources,
+          Kata Code Connect links a locally authorized T3 environment to a signed-in cloud user,
+          provisions a managed HTTPS/WSS endpoint for that environment, and brokers proof-bound
+          remote connections. The local environment remains the authority that issues environment
+          access credentials. The hosted relay stores links, reconciles managed endpoint resources,
           validates signed proofs, and delivers agent-activity notifications.
         </p>
         <div class="badge-row">
@@ -1047,9 +1047,10 @@ sequenceDiagram
             <tr>
               <td>Source-built desktop/server cloud features</td>
               <td>
-                Optional <code>KATACODE_RELAY_URL</code>, <code>KATACODE_CLERK_PUBLISHABLE_KEY</code>,
-                and <code>KATACODE_CLERK_CLI_OAUTH_CLIENT_ID</code>. Release builds inject public
-                values at build time.
+                Optional <code>KATACODE_RELAY_URL</code>,
+                <code>KATACODE_CLERK_PUBLISHABLE_KEY</code>, and
+                <code>KATACODE_CLERK_CLI_OAUTH_CLIENT_ID</code>. Release builds inject public values
+                at build time.
               </td>
             </tr>
             <tr>

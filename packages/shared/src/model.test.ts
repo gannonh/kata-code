@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind, ProviderInstanceId, type ModelCapabilities } from "@kata-sh/code-contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ModelCapabilities,
+} from "@kata-sh/code-contracts";
 
 import {
   buildProviderOptionSelectionsFromDescriptors,
