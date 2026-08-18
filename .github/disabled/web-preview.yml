@@ -5,7 +5,7 @@ name: Web Preview
 # non-aliased) deploy into the existing hosted-web Vercel project, so the
 # latest/nightly channel aliases are never touched.
 #
-# The build intentionally omits the T3 Connect cloud config (Clerk keys, relay
+# The build intentionally omits the Kata Code Connect cloud config (Clerk keys, relay
 # URL): previews boot as the hosted-static app with manual pairing only. Pair a
 # server into a preview with `t3 pair --tailscale` (or any reachable HTTPS
 # backend) and open the pairing URL against the preview origin.
@@ -61,8 +61,8 @@ jobs:
           cache: true
           run-install: |
             args:
-              - --filter=@t3tools/scripts...
-              - --filter=@t3tools/web...
+              - --filter=@kata-sh/code-scripts...
+              - --filter=@kata-sh/code-web...
 
       - id: deploy
         name: Deploy preview
