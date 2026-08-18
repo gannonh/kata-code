@@ -192,9 +192,9 @@ function formatCloudStatus(status: CloudCliStatus, options?: { readonly json?: b
       ? "pending server startup"
       : "not provisioned";
   const nextStep = !status.authenticated
-    ? "Run `t3 connect link` to authorize and enable Kata Code Connect."
+    ? "Run `katacode connect link` to authorize and enable Kata Code Connect."
     : !status.desired
-      ? "Run `t3 connect link` to enable Kata Code Connect."
+      ? "Run `katacode connect link` to enable Kata Code Connect."
       : !status.linked
         ? "Start T3 to provision the environment link and launch its managed tunnel."
         : undefined;
@@ -382,7 +382,7 @@ export const reportCloudDisconnectResults = Effect.fn("cloud.cli.report_disconne
       yield* Console.warn(
         input.clearAuthorization
           ? "Could not revoke the relay-side environment record before signing out.\nThe stored CLI authorization was still removed locally."
-          : "Could not revoke the relay-side environment record yet.\nRun `t3 connect unlink` again when the relay is reachable.",
+          : "Could not revoke the relay-side environment record yet.\nRun `katacode connect unlink` again when the relay is reachable.",
       );
     } else if (input.relayResult.value.status === "revoked") {
       yield* Console.log("Revoked the relay-side environment record.");
@@ -411,7 +411,7 @@ const disconnectCloud = Effect.fn("cloud.cli.disconnect")(function* (options: {
 
   if (options.clearAuthorization) {
     yield* Console.log(
-      "Signed out of Kata Code Connect locally.\nThe background service is managed separately with `t3 service`.",
+      "Signed out of Kata Code Connect locally.\nThe background service is managed separately with `katacode service`.",
     );
   }
 });
@@ -631,11 +631,11 @@ const connectPublishCommand = Command.make("publish", {
         // out of band without Kata Code Connect.
         if (!(yield* tokens.hasCredential)) {
           yield* Console.log(
-            "Run `t3 connect login` first so this environment can be authorized to publish.",
+            "Run `katacode connect login` first so this environment can be authorized to publish.",
           );
           return;
         }
-        // A link may already be desired (e.g. `t3 connect link` before the
+        // A link may already be desired (e.g. `katacode connect link` before the
         // server's first start). Never downgrade it: a desired managed link
         // also covers publishing, so only request a publish-only link when no
         // link is pending at all.

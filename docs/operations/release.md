@@ -24,7 +24,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - Nightly runs are always GitHub prereleases and never marked latest.
   - Automatically generated release notes are pinned to the previous tag in the same channel, so stable compares to the previous stable tag and nightly compares to the previous nightly tag.
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
-- Publishes the CLI package (`apps/server`, npm package `t3`) with OIDC trusted publishing from the same workflow file:
+- Publishes the CLI package (`apps/server`, npm package `katacode`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
 - Deploys the hosted web app to Vercel only after a release is published:
@@ -168,13 +168,13 @@ One-time Vercel dashboard setup:
   - `make_latest` is always `false`
 - Uses the next stable patch version as the nightly base. For example, `0.0.17` produces nightlies on `0.0.18-nightly.*`.
 - Publishes Electron auto-update metadata to the dedicated `nightly` updater channel, so desktop users can opt into that track independently from stable.
-- Publishes the CLI package (`apps/server`, npm package `t3`) to the `nightly` npm dist-tag using the same nightly version.
+- Publishes the CLI package (`apps/server`, npm package `katacode`) to the `nightly` npm dist-tag using the same nightly version.
 - Does not commit version bumps back to `main`.
 
 ## Server self-update release invariant
 
 Connected servers update to the client's exact version, not to an npm dist-tag. Every released
-desktop or hosted client version must therefore have a matching `t3@<version>` package available on
+desktop or hosted client version must therefore have a matching `@kata-sh/code-cli@<version>` package available on
 npm before users can receive that client.
 
 The workflow enforces this ordering:
@@ -248,12 +248,12 @@ blockmaps, with a 60 MB maximum for a representative sidecar-to-sidecar update.
 ## 0) npm OIDC trusted publishing setup (CLI)
 
 The workflow invokes `node apps/server/scripts/cli.ts publish` after aligning package versions. That
-script temporarily prepares the `t3` package, then runs `vp pm publish --filter @kata-sh/code-cli ...` from the
+script temporarily prepares the `katacode` package, then runs `vp pm publish --filter @kata-sh/code-cli ...` from the
 repository root so workspace publish configuration is applied correctly.
 
 Checklist:
 
-1. Confirm npm org/user owns package `t3` (or rename package first if needed).
+1. Confirm npm org/user owns package `katacode` (or rename package first if needed).
 2. In npm package settings, configure Trusted Publisher:
    - Provider: GitHub Actions
    - Repository: this repo
@@ -269,7 +269,7 @@ Checklist:
 ## 1) Release validation and unsigned builds
 
 There is no dry-run tag path. Pushing any accepted non-nightly tag, including
-`v0.0.0-test.1`, classifies the run as the stable channel. It publishes `t3` with npm dist-tag
+`v0.0.0-test.1`, classifies the run as the stable channel. It publishes `katacode` with npm dist-tag
 `latest`, creates a real GitHub Release, aliases the hosted app to `latest.app.kata.sh` and
 `app.kata.sh`, and can commit a version bump to `main` in the finalize job. Do not push a test tag
 to validate the workflow.

@@ -51,7 +51,7 @@ export function formatServiceStatus(
     return "Kata Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd";
   }
   if (!status.installed) {
-    return "Kata Code service\n  Status: not installed\n  Next: Run `t3 service install`.";
+    return "Kata Code service\n  Status: not installed\n  Next: Run `katacode service install`.";
   }
   return [
     "Kata Code service",

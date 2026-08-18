@@ -490,7 +490,7 @@ export class EnvironmentAuth extends Context.Service<
       baseUrl: string,
     ) => Effect.Effect<string, ServerAuthInternalError>;
   }
->()("t3/auth/EnvironmentAuth") {}
+>()("@kata-sh/code-cli/auth/EnvironmentAuth") {}
 
 type BootstrapExchangeResult = {
   readonly response: AuthBrowserSessionResult;

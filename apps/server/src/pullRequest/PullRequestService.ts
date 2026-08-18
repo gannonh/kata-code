@@ -170,7 +170,7 @@ export class PullRequestService extends Context.Service<
     ) => Effect.Effect<void, PullRequestError>;
     readonly invalidate: (input: PullRequestInvalidateInput) => Effect.Effect<void>;
   }
->()("t3/pullRequest/PullRequestService") {}
+>()("@kata-sh/code-cli/pullRequest/PullRequestService") {}
 
 /** What a verdict is called when refusing it, so the sentence reads as an action. */
 const VERDICT_LABELS: Record<PullRequestReviewVerdict, string> = {

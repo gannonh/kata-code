@@ -43,7 +43,7 @@ export class ServerSelfUpdate extends Context.Service<
       reportProgress?: (stage: ServerSelfUpdateProgressStage) => Effect.Effect<void>,
     ) => Effect.Effect<ServerSelfUpdateResult, ServerSelfUpdateError>;
   }
->()("t3/cloud/selfUpdate/ServerSelfUpdate") {}
+>()("@kata-sh/code-cli/cloud/selfUpdate/ServerSelfUpdate") {}
 
 export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -71,7 +71,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
     }
     if (capability === null) {
       return yield* failWith(
-        "Remote updates require the Kata Code background service. Run `t3 service install` on the server machine.",
+        "Remote updates require the Kata Code background service. Run `katacode service install` on the server machine.",
       );
     }
 

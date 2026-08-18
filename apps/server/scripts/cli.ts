@@ -190,7 +190,7 @@ const createVpPmPublishArgs = (config: PublishCommandConfig): ReadonlyArray<stri
   const args = [
     "publish",
     "--filter",
-    "t3",
+    "@kata-sh/code-cli",
     "--access",
     config.access,
     "--tag",

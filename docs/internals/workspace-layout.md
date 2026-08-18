@@ -7,12 +7,12 @@ the task commands.
 
 ## apps
 
-- `apps/server` (`t3`): the execution runtime and the published CLI. Owns orchestration, provider
+- `apps/server` (`katacode`): the execution runtime and the published CLI. Owns orchestration, provider
   drivers, checkpointing, VCS, terminals, filesystem access, auth, and the HTTP + WebSocket surface.
   Also serves the built web app.
 - `apps/web` (`@kata-sh/code-web`): React + Vite UI. Consumes the shared client runtime and adds routing,
   components, and web-specific platform layers.
-- `apps/desktop` (`@kata-sh/code-desktop`): Electron shell. Supervises a desktop-scoped `t3` backend,
+- `apps/desktop` (`@kata-sh/code-desktop`): Electron shell. Supervises a desktop-scoped `katacode` backend,
   loads the web bundle over the `katacode://` protocol, and owns SSH-managed remote environments.
 - `apps/mobile` (`@kata-sh/code-mobile`): Expo/React Native client. Same client runtime composition as
   web, different platform layer and UI.

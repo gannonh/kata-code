@@ -90,4 +90,6 @@ export interface ProjectionPendingApprovalRepositoryShape {
 export class ProjectionPendingApprovalRepository extends Context.Service<
   ProjectionPendingApprovalRepository,
   ProjectionPendingApprovalRepositoryShape
->()("t3/persistence/Services/ProjectionPendingApprovals/ProjectionPendingApprovalRepository") {}
+>()(
+  "@kata-sh/code-cli/persistence/Services/ProjectionPendingApprovals/ProjectionPendingApprovalRepository",
+) {}

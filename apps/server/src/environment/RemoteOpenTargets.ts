@@ -24,7 +24,7 @@ export class RemoteOpenTargets extends Context.Service<
   {
     readonly resolveTargets: () => Effect.Effect<ReadonlyArray<RemoteOpenTarget>>;
   }
->()("t3/environment/RemoteOpenTargets") {}
+>()("@kata-sh/code-cli/environment/RemoteOpenTargets") {}
 
 export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

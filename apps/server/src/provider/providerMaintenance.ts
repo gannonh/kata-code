@@ -81,7 +81,7 @@ export interface ProviderVersionCacheEntry {
 }
 
 export const ProviderVersionCache = Context.Reference<Map<string, ProviderVersionCacheEntry>>(
-  "@kata-sh/code-server/providerMaintenance/ProviderVersionCache",
+  "@kata-sh/code-cli/provider/providerMaintenance/ProviderVersionCache",
   {
     defaultValue: () => new Map(),
   },

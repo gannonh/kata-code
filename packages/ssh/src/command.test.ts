@@ -121,7 +121,7 @@ describe("ssh command", () => {
           updateChannel: "nightly",
           isDevelopment: true,
         }),
-        "t3@nightly",
+        "@kata-sh/code-cli@nightly",
       );
       assert.equal(
         resolveRemoteT3CliPackageSpec({
@@ -129,7 +129,7 @@ describe("ssh command", () => {
           updateChannel: "latest",
           isDevelopment: true,
         }),
-        "t3@nightly",
+        "@kata-sh/code-cli@nightly",
       );
     }),
   );

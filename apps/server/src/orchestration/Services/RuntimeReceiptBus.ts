@@ -68,5 +68,5 @@ export interface RuntimeReceiptBusShape {
 }
 
 export class RuntimeReceiptBus extends Context.Service<RuntimeReceiptBus, RuntimeReceiptBusShape>()(
-  "t3/orchestration/Services/RuntimeReceiptBus",
+  "@kata-sh/code-cli/orchestration/Services/RuntimeReceiptBus",
 ) {}

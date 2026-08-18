@@ -79,4 +79,4 @@ export interface OrchestrationEngineShape {
 export class OrchestrationEngineService extends Context.Service<
   OrchestrationEngineService,
   OrchestrationEngineShape
->()("t3/orchestration/Services/OrchestrationEngine/OrchestrationEngineService") {}
+>()("@kata-sh/code-cli/orchestration/Services/OrchestrationEngine/OrchestrationEngineService") {}

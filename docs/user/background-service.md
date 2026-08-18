@@ -43,7 +43,7 @@ available.
 Kata Code Connect may offer to install the service during setup so the host stays reachable after you log
 out. This is only an onboarding shortcut: the service and Kata Code Connect are managed separately.
 
-Signing out of Kata Code Connect does not remove the service. Use `t3 service uninstall` when you no longer
+Signing out of Kata Code Connect does not remove the service. Use `katacode service uninstall` when you no longer
 want Kata Code to start in the background.
 
 The background service currently requires Linux with systemd.

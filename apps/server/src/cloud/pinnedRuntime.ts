@@ -36,7 +36,7 @@ export function pinnedRuntimePaths(
   const versionDir = path.join(baseDir, PINNED_RUNTIME_DIR, "versions", version);
   return {
     versionDir,
-    entryPath: path.join(versionDir, "node_modules", "t3", "dist", "bin.mjs"),
+    entryPath: path.join(versionDir, "node_modules", "@kata-sh", "code-cli", "dist", "bin.mjs"),
     sentinelPath: path.join(versionDir, ".install-complete"),
   };
 }
@@ -146,7 +146,14 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     );
   const stagingPaths: PinnedRuntimePaths = {
     versionDir: stagingDir,
-    entryPath: input.path.join(stagingDir, "node_modules", "t3", "dist", "bin.mjs"),
+    entryPath: input.path.join(
+      stagingDir,
+      "node_modules",
+      "@kata-sh",
+      "code-cli",
+      "dist",
+      "bin.mjs",
+    ),
     sentinelPath: input.path.join(stagingDir, ".install-complete"),
   };
 

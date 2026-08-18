@@ -25,10 +25,13 @@ it("detects package runners from their cache entry paths", () => {
     "pnpm dlx",
   );
   assert.equal(detectCliRunner("/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs"), "bunx");
-  assert.equal(detectCliRunner("/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs"), "bunx");
+  assert.equal(
+    detectCliRunner("/tmp/bunx-1000-@kata-sh/code-cli@latest/node_modules/t3/dist/bin.mjs"),
+    "bunx",
+  );
   assert.equal(
     detectCliRunner(
-      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-t3@latest\\node_modules\\t3\\dist\\bin.mjs",
+      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-@kata-sh/code-cli@latest\\node_modules\\t3\\dist\\bin.mjs",
     ),
     "bunx",
   );
@@ -42,7 +45,7 @@ it("treats stable installs as direct invocations", () => {
 });
 
 it("re-suggests the nightly channel only for nightly builds", () => {
-  assert.equal(suggestedPackageSpec("0.0.31-nightly.20260729"), "t3@nightly");
+  assert.equal(suggestedPackageSpec("0.0.31-nightly.20260729"), "@kata-sh/code-cli@nightly");
   assert.equal(suggestedPackageSpec("0.0.31"), "t3");
 });
 
@@ -53,15 +56,15 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "npx t3@nightly serve",
+    "npx @kata-sh/code-cli@nightly serve",
   );
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs",
+      entryPath: "/tmp/bunx-1000-@kata-sh/code-cli@latest/node_modules/t3/dist/bin.mjs",
       version: "0.0.31",
     }),
-    "bunx t3 serve",
+    "bunx @kata-sh/code-cli serve",
   );
   assert.equal(
     formatCliCommand({
@@ -69,6 +72,6 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/usr/local/lib/node_modules/t3/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "t3 serve",
+    "katacode serve",
   );
 });
