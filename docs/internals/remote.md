@@ -1,6 +1,6 @@
 # Remote Architecture
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using Kata Code? See [docs/user](../user/).
 
 Remote environments are shipped, not planned. Direct, bearer-paired, relay-tunneled, Tailscale, and
 desktop-managed SSH access all exist today. This document describes the model they share and where
@@ -9,7 +9,7 @@ each piece lives. For the user-facing setup guide see
 
 ## The model
 
-T3 has one runtime boundary: a client talks to a T3 server over HTTP and WebSocket, and the server
+T3 has one runtime boundary: a client talks to a Kata server over HTTP and WebSocket, and the server
 owns orchestration, providers, terminals, git, and filesystem operations. Remoteness is expressed at
 the connection layer, never by splitting the runtime.
 
@@ -24,9 +24,9 @@ the connection layer, never by splitting the runtime.
 │  direct ws/wss, relay tunnel,                │
 │  Tailscale serve, desktop-managed ssh        │
 └───────────────┬──────────────────────────────┘
-                │ connects to one T3 server
+                │ connects to one Kata server
 ┌───────────────▼──────────────────────────────┐
-│ Execution environment = one T3 server        │
+│ Execution environment = one Kata server        │
 │  identity, providers, projects/threads,      │
 │  terminals, git, filesystem                  │
 └──────────────────────────────────────────────┘
@@ -34,7 +34,7 @@ the connection layer, never by splitting the runtime.
 
 ### ExecutionEnvironment
 
-One running T3 server instance. It owns provider availability and auth, model availability, projects
+One running Kata server instance. It owns provider availability and auth, model availability, projects
 and threads, terminal processes, filesystem access, git operations, and server settings.
 
 It is identified by a stable `environmentId`, persisted by the server at `<stateDir>/environment-id`
@@ -54,7 +54,7 @@ control plane or a copy of session state.
 | ------------------------- | ------------------------------------------------------------------------ |
 | `PrimaryConnectionTarget` | The platform-managed local server (desktop backend, CLI-served web app). |
 | `BearerConnectionTarget`  | Any manually paired endpoint reached over direct HTTP/WebSocket.         |
-| `RelayConnectionTarget`   | Managed T3 Connect relay tunnels.                                        |
+| `RelayConnectionTarget`   | Managed Kata Code Connect relay tunnels.                                        |
 | `SshConnectionTarget`     | Desktop-managed SSH environments.                                        |
 
 Bearer, relay, and SSH are persisted; primary is platform-managed. Note that Tailscale is not a
@@ -97,7 +97,7 @@ model: core owns environments, pairing, and connection lifecycle, and providers 
 Tailscale is the first provider, and T3 manages more than discovery. When `tailscaleServeEnabled` is
 set, the server acquires a Tailscale serve mapping for its actual listening port at startup with
 `ensureTailscaleServe` and releases it with `disableTailscaleServe` on scope close
-(`apps/server/src/server.ts`, using [`@t3tools/tailscale`](../../packages/tailscale/src/tailscale.ts)).
+(`apps/server/src/server.ts`, using [`@kata-sh/code-tailscale`](../../packages/tailscale/src/tailscale.ts)).
 Endpoint identifiers are synthesized in `apps/desktop/src/backend/tailscaleEndpointProvider.ts` with
 `private-network` reachability.
 
@@ -106,7 +106,7 @@ Endpoint identifiers are synthesized in `apps/desktop/src/backend/tailscaleEndpo
 A hosted pairing request is a bootstrap URL for the static web app, not a transport:
 
 ```text
-https://app.t3.codes/pair?host=https://backend.example.com:3773#token=PAIRCODE
+https://app.kata.sh/pair?host=https://backend.example.com:3773#token=PAIRCODE
 ```
 
 The hosted app reads `host`, takes the token from the URL hash, exchanges it directly with that
@@ -131,7 +131,7 @@ project in one environment.
 
 ## Access methods
 
-Access answers one question: how does the client speak WebSocket to a T3 server? It does not answer
+Access answers one question: how does the client speak WebSocket to a Kata server? It does not answer
 how the server got started or who manages the process.
 
 ### Direct WebSocket access
@@ -142,7 +142,7 @@ are part of it: a hosted HTTPS client cannot connect to plain `ws://` or `http:/
 
 ### Relay-tunneled access
 
-Managed T3 Connect relay tunnels use `RelayConnectionTarget` and are the answer when the host is
+Managed Kata Code Connect relay tunnels use `RelayConnectionTarget` and are the answer when the host is
 behind NAT, inbound ports are unavailable, or mobile must reach a desktop-hosted environment. From
 the client's perspective this is still an ordinary WebSocket connection; the route is mediated. The
 relay Worker only brokers credentials and a managed endpoint; application traffic then flows over
@@ -177,7 +177,7 @@ before reconnecting the WebSocket client.
 
 ## Launch methods
 
-Launch answers a different question: how does a T3 server come to exist on the target machine? Keep
+Launch answers a different question: how does a Kata server come to exist on the target machine? Keep
 it separate from access.
 
 - **Pre-existing server.** The operator already runs T3 and the client connects directly or through a
