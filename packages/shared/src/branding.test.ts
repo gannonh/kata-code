@@ -6,14 +6,21 @@ import {
   DEFAULT_HOSTED_APP_ORIGIN,
   DESKTOP_BUNDLE_ID,
   DESKTOP_BUNDLE_ID_DEV_PREFIX,
+  DESKTOP_LINUX_EXECUTABLE_NAME,
+  DESKTOP_PACKAGED_PROTOCOL_SCHEMES,
+  DESKTOP_URL_HANDLER_ENTRY_NAME,
   ENV_PREFIX,
   HOSTED_WEB_CHANNEL_PATH,
   HOSTED_WEB_LATEST_ORIGIN,
   HOSTED_WEB_NIGHTLY_ORIGIN,
   PROTOCOL_SCHEME,
   PROTOCOL_SCHEME_DEV,
+  PROTOCOL_SCHEME_LEGACY,
   PROTOCOL_SCHEME_PREVIEW,
   WORKTREE_BRANCH_PREFIX,
+  desktopLinuxDesktopEntryName,
+  desktopProtocolScheme,
+  desktopUrlHandlerSchemes,
   envKey,
   formatAppDisplayName,
   resolveAppBranding,
@@ -30,7 +37,17 @@ describe("branding", () => {
     assert.equal(WORKTREE_BRANCH_PREFIX, "katacode");
     assert.equal(PROTOCOL_SCHEME, "katacode");
     assert.equal(PROTOCOL_SCHEME_DEV, "katacode-dev");
+    assert.equal(PROTOCOL_SCHEME_LEGACY, "t3code");
     assert.equal(PROTOCOL_SCHEME_PREVIEW, "katacode-preview");
+    assert.equal(DESKTOP_LINUX_EXECUTABLE_NAME, "t3code");
+    assert.deepEqual(DESKTOP_PACKAGED_PROTOCOL_SCHEMES, ["katacode", "t3code", "katacode-dev"]);
+    assert.equal(DESKTOP_URL_HANDLER_ENTRY_NAME, "katacode-url-handler.desktop");
+    assert.equal(desktopProtocolScheme(false), "katacode");
+    assert.equal(desktopProtocolScheme(true), "katacode-dev");
+    assert.equal(desktopLinuxDesktopEntryName(false), "t3code.desktop");
+    assert.equal(desktopLinuxDesktopEntryName(true), "katacode-dev.desktop");
+    assert.deepEqual(desktopUrlHandlerSchemes(false), ["katacode", "t3code"]);
+    assert.deepEqual(desktopUrlHandlerSchemes(true), ["katacode-dev"]);
     assert.equal(DESKTOP_BUNDLE_ID, "com.katacode.app");
     assert.equal(DESKTOP_BUNDLE_ID_DEV_PREFIX, "com.katacode.dev");
     assert.equal(DEFAULT_HOSTED_APP_ORIGIN, "https://app.kata.sh");

@@ -34,7 +34,7 @@ const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
     stateDir: "/tmp/t3-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
-    userDataDirName: isDevelopment ? "katacode-dev" : "t3code",
+    userDataDirName: isDevelopment ? "katacode-dev" : "katacode",
     legacyUserDataDirName: isDevelopment ? "Kata Code (Dev)" : "Kata Code (Alpha)",
     path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);

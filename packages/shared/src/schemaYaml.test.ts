@@ -14,7 +14,7 @@ describe("schemaYaml helpers", () => {
     const decodeConfig = Schema.decodeUnknownSync(fromYaml(ProjectConfig));
 
     expect(
-      decodeConfig(`name: t3code
+      decodeConfig(`name: kata-code
 enabled: true
 tags:
   - codex
@@ -36,7 +36,7 @@ tags:
         enabled: true,
         tags: ["codex"],
       }),
-    ).toBe(`name: t3code
+    ).toBe(`name: kata-code
 enabled: true
 tags:
   - codex

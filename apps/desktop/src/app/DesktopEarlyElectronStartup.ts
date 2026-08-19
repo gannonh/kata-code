@@ -1,3 +1,4 @@
+import { desktopProtocolScheme } from "@kata-sh/code-shared/branding";
 import { fromLenientJson } from "@kata-sh/code-shared/schemaJson";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -81,7 +82,7 @@ export function resolveEarlyLinuxElectronOptions(
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
   return {
-    linuxWmClass: isDevelopmentEnvironment(input.env) ? "katacode-dev" : "t3code",
+    linuxWmClass: desktopProtocolScheme(isDevelopmentEnvironment(input.env)),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

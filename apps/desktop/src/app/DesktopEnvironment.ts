@@ -4,6 +4,13 @@ import type {
   DesktopRuntimeArch,
   DesktopRuntimeInfo,
 } from "@kata-sh/code-contracts";
+import {
+  APP_BASE_NAME,
+  DESKTOP_BUNDLE_ID,
+  DESKTOP_BUNDLE_ID_DEV_PREFIX,
+  desktopLinuxDesktopEntryName,
+  desktopProtocolScheme,
+} from "@kata-sh/code-shared/branding";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -84,8 +91,6 @@ export class DesktopEnvironment extends Context.Service<
     readonly resolveResourcePathCandidates: (fileName: string) => readonly string[];
   }
 >()("@kata-sh/code-desktop/app/DesktopEnvironment") {}
-
-const APP_BASE_NAME = "Kata Code";
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
@@ -178,7 +183,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isDevelopment ? "katacode-dev" : "t3code";
+  const userDataDirName = desktopProtocolScheme(isDevelopment);
   const legacyUserDataDirName = isDevelopment ? "Kata Code (Dev)" : "Kata Code (Alpha)";
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
@@ -224,10 +229,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
     branding,
     displayName,
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
-      isDevelopment ? "com.katacode.dev" : "com.katacode.app",
+      isDevelopment ? DESKTOP_BUNDLE_ID_DEV_PREFIX : DESKTOP_BUNDLE_ID,
     ),
-    linuxDesktopEntryName: isDevelopment ? "katacode-dev.desktop" : "t3code.desktop",
-    linuxWmClass: isDevelopment ? "katacode-dev" : "t3code",
+    linuxDesktopEntryName: desktopLinuxDesktopEntryName(isDevelopment),
+    linuxWmClass: desktopProtocolScheme(isDevelopment),
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
     userDataDirName,
