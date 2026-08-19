@@ -977,7 +977,7 @@ export function TerminalViewport({
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full overflow-hidden rounded-[4px] bg-background"
+      className="relative h-full w-full overflow-hidden bg-[var(--terminal-background)]"
     />
   );
 }
@@ -1473,7 +1473,12 @@ export default function ThreadTerminalDrawer({
       )}
 
       <div className="min-h-0 w-full flex-1">
-        <div className={`flex h-full min-h-0 ${hasTerminalSidebar ? "gap-1.5" : ""}`}>
+        <div
+          className={cn(
+            "flex h-full min-h-0 bg-[var(--terminal-background)]",
+            hasTerminalSidebar && "gap-1.5",
+          )}
+        >
           <div className="min-w-0 flex-1">
             {isSplitView ? (
               <div
@@ -1508,7 +1513,7 @@ export default function ThreadTerminalDrawer({
                         }
                       }}
                     >
-                      <div className="h-full p-1">
+                      <div className="h-full">
                         <TerminalViewport
                           advancedTypography={advancedTypography}
                           threadRef={threadRef}
@@ -1536,7 +1541,7 @@ export default function ThreadTerminalDrawer({
                 })}
               </div>
             ) : (
-              <div className="h-full p-1">
+              <div className="h-full">
                 <TerminalViewport
                   advancedTypography={advancedTypography}
                   key={resolvedActiveTerminalId}
