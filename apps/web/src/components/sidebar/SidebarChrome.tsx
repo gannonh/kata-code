@@ -5,17 +5,13 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import { memo, useCallback } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 
-import { APP_BASE_NAME } from "../../branding";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import {
   resolveEnvironmentIdentificationPillLabel,
-  resolveSidebarStageBackdropVariant,
-  resolveSidebarStageFocusRingOffsetClass,
-  SidebarStageBackdrop,
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { Badge } from "../ui/badge";
@@ -39,10 +35,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }) {
   const stageLabel = useEnvironmentStageLabel();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
-  const backdropVariant = resolveSidebarStageBackdropVariant(
-    stageLabel,
-    environmentIdentificationMode === "artwork",
-  );
   const pillLabel =
     environmentIdentificationMode === "pill"
       ? resolveEnvironmentIdentificationPillLabel(stageLabel)
@@ -55,16 +47,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
         isElectron && "drag-region",
       )}
     >
-      {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
-      <SidebarTrigger
-        className={cn(
-          "relative z-10 md:hidden",
-          backdropVariant &&
-            "focus-visible:ring-white/90 [&_svg]:stroke-white/90! [&_svg]:opacity-100! [&_svg]:hover:stroke-white! [:hover,[data-pressed]]:bg-white/15",
-          backdropVariant && resolveSidebarStageFocusRingOffsetClass(backdropVariant),
-        )}
-      />
-      <SidebarBrand onBackdrop={backdropVariant !== null} />
+      <SidebarTrigger className="relative z-10 md:hidden" />
       {pillLabel ? (
         <Badge
           className="relative z-10 ml-1 rounded-full px-1.5 text-muted-foreground"
@@ -78,29 +61,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     </SidebarHeader>
   );
 });
-
-function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
-  return (
-    <Link
-      aria-label="Go to threads"
-      className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
-        onBackdrop ? "text-white" : "text-foreground",
-      )}
-      to="/"
-    >
-      <img alt="" className="size-5 shrink-0 object-contain" src="/logo-mark.svg" />
-      <span
-        className={cn(
-          "-translate-y-px truncate text-sm font-medium tracking-tight",
-          onBackdrop ? "text-white/70" : "text-muted-foreground",
-        )}
-      >
-        {APP_BASE_NAME}
-      </span>
-    </Link>
-  );
-}
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
