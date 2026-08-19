@@ -109,6 +109,7 @@ const withIdentity = <A, E, R>(
     readonly calls?: ElectronAppCalls;
     readonly environment?: TestEnvironmentInput;
     readonly legacyPathExists?: boolean;
+    readonly previousProductionUserDataExists?: boolean;
     readonly legacyPathProbeError?: PlatformError.PlatformError;
     readonly packageJson?: string;
     readonly pngIconPath?: Option.Option<string>;
@@ -129,7 +130,8 @@ const withIdentity = <A, E, R>(
               input.legacyPathProbeError
                 ? Effect.fail(input.legacyPathProbeError)
                 : Effect.succeed(
-                    input.legacyPathExists === true && path.includes("Kata Code (Alpha)"),
+                    (input.legacyPathExists === true && path.includes("Kata Code (Alpha)")) ||
+                      (input.previousProductionUserDataExists === true && path.endsWith("/t3code")),
                   ),
             readFileString: () =>
               Effect.succeed(input.packageJson ?? '{"t3codeCommitHash":"abcdef1234567890"}'),
@@ -153,6 +155,41 @@ describe("DesktopAppIdentity", () => {
         assert.equal(userDataPath, "/Users/alice/Library/Application Support/Kata Code (Alpha)");
       }),
       { legacyPathExists: true },
+    ),
+  );
+
+  it.effect("keeps using the previous production userData directory when it exists", () =>
+    withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        const userDataPath = yield* identity.resolveUserDataPath;
+
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/t3code");
+      }),
+      { previousProductionUserDataExists: true },
+    ),
+  );
+
+  it.effect("prefers the display-name legacy userData path over the previous slug", () =>
+    withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        const userDataPath = yield* identity.resolveUserDataPath;
+
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/Kata Code (Alpha)");
+      }),
+      { legacyPathExists: true, previousProductionUserDataExists: true },
+    ),
+  );
+
+  it.effect("uses the canonical production userData directory for new installs", () =>
+    withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        const userDataPath = yield* identity.resolveUserDataPath;
+
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/katacode");
+      }),
     ),
   );
 

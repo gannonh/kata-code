@@ -14,6 +14,7 @@ import * as DesktopLinuxUrlHandler from "./DesktopLinuxUrlHandler.ts";
 interface RecordedRegistration {
   readonly directories: string[];
   readonly files: Array<{ readonly path: string; readonly content: string }>;
+  readonly removed: string[];
   readonly commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>;
 }
 
@@ -68,6 +69,10 @@ const makeHandlerLayer = (
               : Effect.sync(() => {
                   recorded.files.push({ path, content });
                 }),
+          remove: (path) =>
+            Effect.sync(() => {
+              recorded.removed.push(path);
+            }),
         }),
         Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
@@ -99,6 +104,7 @@ const runRegister = (
 const emptyRecording = (): RecordedRegistration => ({
   directories: [],
   files: [],
+  removed: [],
   commands: [],
 });
 
@@ -107,7 +113,7 @@ describe("DesktopLinuxUrlHandler", () => {
     const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
       displayName: "Kata Code (Nightly)",
       execTarget: '/home/al ice/Apps/T3 "100%" $HOME\\x.AppImage',
-      scheme: "katacode",
+      schemes: ["katacode", "t3code"],
     });
 
     assert.include(entry, "[Desktop Entry]");
@@ -121,7 +127,7 @@ describe("DesktopLinuxUrlHandler", () => {
     );
     assert.include(entry, "NoDisplay=true");
     assert.notInclude(entry, "StartupWMClass=");
-    assert.include(entry, "MimeType=x-scheme-handler/katacode;");
+    assert.include(entry, "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;");
   });
 
   it("carries structured context on registration errors", () => {
@@ -167,11 +173,21 @@ describe("DesktopLinuxUrlHandler", () => {
         recorded.files[0]?.content,
         'Exec="/home/alice/Applications/T3-Code.AppImage" %U',
       );
-      assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/katacode;");
+      assert.include(
+        recorded.files[0]?.content,
+        "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;",
+      );
+      assert.deepEqual(recorded.removed, [
+        "/home/alice/.local/share/applications/t3code-url-handler.desktop",
+      ]);
       assert.deepEqual(recorded.commands, [
         {
           command: "xdg-mime",
           args: ["default", "katacode-url-handler.desktop", "x-scheme-handler/katacode"],
+        },
+        {
+          command: "xdg-mime",
+          args: ["default", "katacode-url-handler.desktop", "x-scheme-handler/t3code"],
         },
       ]);
     });
@@ -201,6 +217,7 @@ describe("DesktopLinuxUrlHandler", () => {
       for (const recorded of [nonLinux, unpackaged]) {
         assert.deepEqual(recorded.directories, []);
         assert.deepEqual(recorded.files, []);
+        assert.deepEqual(recorded.removed, []);
         assert.deepEqual(recorded.commands, []);
       }
     });

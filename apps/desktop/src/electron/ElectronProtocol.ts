@@ -6,14 +6,20 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
+import {
+  desktopProtocolScheme,
+  PROTOCOL_SCHEME,
+  PROTOCOL_SCHEME_DEV,
+  PROTOCOL_SCHEME_LEGACY,
+} from "@kata-sh/code-shared/branding";
 import * as Electron from "electron";
 
 export const DESKTOP_HOST = "app";
-export const DESKTOP_PRODUCTION_SCHEME = "katacode";
-export const DESKTOP_DEVELOPMENT_SCHEME = "katacode-dev";
+export const DESKTOP_PRODUCTION_SCHEME = PROTOCOL_SCHEME;
+export const DESKTOP_DEVELOPMENT_SCHEME = PROTOCOL_SCHEME_DEV;
 
 export function getDesktopScheme(isDevelopment: boolean): string {
-  return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;
+  return desktopProtocolScheme(isDevelopment);
 }
 
 export function getDesktopOrigin(isDevelopment: boolean): string {
@@ -105,30 +111,23 @@ function withContentSecurityPolicy(response: Response, policy: string): Response
   });
 }
 
+const DESKTOP_SCHEME_PRIVILEGES = {
+  standard: true,
+  secure: true,
+  supportFetchAPI: true,
+  corsEnabled: true,
+} as const;
+
 /**
  * Must run synchronously during process bootstrap, before Electron emits `ready`.
  */
 export function registerDesktopSchemePrivilegesSync(): void {
-  Electron.protocol.registerSchemesAsPrivileged([
-    {
-      scheme: DESKTOP_PRODUCTION_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
-      },
-    },
-    {
-      scheme: DESKTOP_DEVELOPMENT_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
-      },
-    },
-  ]);
+  Electron.protocol.registerSchemesAsPrivileged(
+    [PROTOCOL_SCHEME, PROTOCOL_SCHEME_LEGACY, PROTOCOL_SCHEME_DEV].map((scheme) => ({
+      scheme,
+      privileges: DESKTOP_SCHEME_PRIVILEGES,
+    })),
+  );
 }
 
 const registerDesktopSchemePrivileges = Effect.sync(registerDesktopSchemePrivilegesSync).pipe(

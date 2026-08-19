@@ -23,7 +23,7 @@ const environmentLayer = DesktopEnvironment.layer({
 }).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))));
 
 describe("DesktopAssets", () => {
-  it.effect("uses canonical source-tree icons for unpackaged development", () =>
+  it.effect("uses resource icons for unpackaged development", () =>
     Effect.gen(function* () {
       const developmentEnvironmentLayer = DesktopEnvironment.layer({
         dirname: "/repo/apps/desktop/dist-electron",

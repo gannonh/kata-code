@@ -16,6 +16,13 @@ import { fromYaml } from "@kata-sh/code-shared/schemaYaml";
 import { HostProcessArchitecture, HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@kata-sh/code-shared/relayAuth";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
+import {
+  APP_BASE_NAME,
+  DESKTOP_BUNDLE_ID,
+  DESKTOP_LINUX_EXECUTABLE_NAME,
+  DESKTOP_PACKAGED_PROTOCOL_SCHEMES,
+  PROTOCOL_SCHEME,
+} from "@kata-sh/code-shared/branding";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
@@ -51,7 +58,12 @@ import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.katacode.app";
+const desktopElectronProtocolHandlers = () => [
+  {
+    name: APP_BASE_NAME,
+    schemes: [...DESKTOP_PACKAGED_PROTOCOL_SCHEMES],
+  },
+];
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -1010,7 +1022,7 @@ export function resolveMacPasskeySigningConfiguration(
   }
 
   return {
-    appId: DESKTOP_APP_ID,
+    appId: DESKTOP_BUNDLE_ID,
     teamId,
     rpDomains: uniqueRpDomains,
     provisioningProfilePath,
@@ -2036,7 +2048,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     | undefined,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: DESKTOP_APP_ID,
+    appId: DESKTOP_BUNDLE_ID,
     productName: resolveDesktopProductName(version),
     artifactName: "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
@@ -2071,12 +2083,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
-      protocols: [
-        {
-          name: "Kata Code",
-          schemes: ["t3code", "katacode-dev"],
-        },
-      ],
+      protocols: desktopElectronProtocolHandlers(),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,
@@ -2112,21 +2119,17 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     buildConfig.linux = {
       target: [target],
-      executableName: "t3code",
+      executableName: DESKTOP_LINUX_EXECUTABLE_NAME,
       icon: "icons",
       category: "Development",
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
-      // in the .desktop entry (Exec already gets %U), so browsers can hand
-      // katacode:// OAuth callbacks to the app.
-      protocols: [
-        {
-          name: "Kata Code",
-          schemes: ["t3code", "katacode-dev"],
-        },
-      ],
+      // in the .desktop entry (Exec already gets %U). Register the canonical
+      // katacode scheme first and keep t3code so existing OS associations still
+      // launch the app during the cut.
+      protocols: desktopElectronProtocolHandlers(),
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          StartupWMClass: PROTOCOL_SCHEME,
         },
       },
     };
@@ -2141,6 +2144,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     const winConfig: Record<string, unknown> = {
       target: [target],
       icon: "icon.ico",
+      protocols: desktopElectronProtocolHandlers(),
       // Resource editing applies the product metadata and icon independently
       // of code signing. Disabling it for local unsigned builds leaves the
       // packaged executable with Electron's stock icon.

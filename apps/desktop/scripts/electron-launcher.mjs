@@ -19,7 +19,7 @@ export const APP_DISPLAY_NAME = isDevelopment ? "Kata Code (Dev)" : "Kata Code (
 export const APP_BUNDLE_ID = isDevelopment
   ? `com.katacode.dev.${devBundleIdSuffix || "local"}`
   : "com.katacode.app";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["katacode-dev"] : ["katacode"];
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["katacode-dev"] : ["katacode", "t3code"];
 const LAUNCHER_VERSION = 15;
 const developmentMacIconPngPath = NodePath.join(desktopDir, "resources", "source.png");
 const productionMacIconPngPath = NodePath.join(desktopDir, "resources", "source.png");

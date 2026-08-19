@@ -6,6 +6,8 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
+import { PROTOCOL_SCHEME_LEGACY } from "@kata-sh/code-shared/branding";
+
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
@@ -48,22 +50,27 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
 export const resolveUserDataPath = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
-  const legacyPath = environment.path.join(
-    environment.appDataDirectory,
-    environment.legacyUserDataDirName,
-  );
-  const legacyPathExists = yield* fileSystem.exists(legacyPath).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DesktopUserDataPathResolutionError({
-          legacyPath,
-          cause,
-        }),
-    ),
-  );
-  return legacyPathExists
-    ? legacyPath
-    : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
+  const candidateDirNames = environment.isDevelopment
+    ? [environment.legacyUserDataDirName]
+    : [environment.legacyUserDataDirName, PROTOCOL_SCHEME_LEGACY];
+
+  for (const dirName of candidateDirNames) {
+    const candidatePath = environment.path.join(environment.appDataDirectory, dirName);
+    const exists = yield* fileSystem.exists(candidatePath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new DesktopUserDataPathResolutionError({
+            legacyPath: candidatePath,
+            cause,
+          }),
+      ),
+    );
+    if (exists) {
+      return candidatePath;
+    }
+  }
+
+  return environment.path.join(environment.appDataDirectory, environment.userDataDirName);
 }).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
 
 export const make = Effect.gen(function* () {

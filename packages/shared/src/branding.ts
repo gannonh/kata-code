@@ -18,9 +18,43 @@ export const WORKTREE_BRANCH_PREFIX = "katacode" as const;
 export const PROTOCOL_SCHEME = "katacode" as const;
 export const PROTOCOL_SCHEME_DEV = "katacode-dev" as const;
 export const PROTOCOL_SCHEME_PREVIEW = "katacode-preview" as const;
+/** Previous production scheme, userData directory, and Linux executable name. */
+export const PROTOCOL_SCHEME_LEGACY = "t3code" as const;
 
 /** Production desktop / mobile bundle id. */
 export const DESKTOP_BUNDLE_ID = "com.katacode.app" as const;
+
+/**
+ * Packaged Linux binary and `.desktop` filename. Window class and URL schemes
+ * use `PROTOCOL_SCHEME`; this name stays on the previous slug until a later
+ * installer migration.
+ */
+export const DESKTOP_LINUX_EXECUTABLE_NAME = PROTOCOL_SCHEME_LEGACY;
+
+/** OS-registered schemes for packaged desktop builds. Canonical first. */
+export const DESKTOP_PACKAGED_PROTOCOL_SCHEMES = [
+  PROTOCOL_SCHEME,
+  PROTOCOL_SCHEME_LEGACY,
+  PROTOCOL_SCHEME_DEV,
+] as const;
+
+export const DESKTOP_URL_HANDLER_ENTRY_NAME = `${PROTOCOL_SCHEME}-url-handler.desktop` as const;
+export const DESKTOP_LEGACY_URL_HANDLER_ENTRY_NAME =
+  `${PROTOCOL_SCHEME_LEGACY}-url-handler.desktop` as const;
+
+export function desktopProtocolScheme(
+  isDevelopment: boolean,
+): typeof PROTOCOL_SCHEME | typeof PROTOCOL_SCHEME_DEV {
+  return isDevelopment ? PROTOCOL_SCHEME_DEV : PROTOCOL_SCHEME;
+}
+
+export function desktopLinuxDesktopEntryName(isDevelopment: boolean): string {
+  return `${isDevelopment ? PROTOCOL_SCHEME_DEV : DESKTOP_LINUX_EXECUTABLE_NAME}.desktop`;
+}
+
+export function desktopUrlHandlerSchemes(isDevelopment: boolean): readonly string[] {
+  return isDevelopment ? [PROTOCOL_SCHEME_DEV] : [PROTOCOL_SCHEME, PROTOCOL_SCHEME_LEGACY];
+}
 
 /** Dev desktop bundle id prefix; suffix is the repo folder name. */
 export const DESKTOP_BUNDLE_ID_DEV_PREFIX = "com.katacode.dev" as const;

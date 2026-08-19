@@ -173,9 +173,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
   });
 
-  it("switches the bundled splash and favicon branding for nightly versions", () => {
+  it("keeps production splash and favicon branding for nightly versions", () => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17"), "production");
-    assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "nightly");
+    assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "production");
   });
 
   it.effect("resolves GitHub desktop publish config from Effect config", () =>
@@ -477,9 +477,20 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         iconTextSize: 12,
       });
       // Linux must register the renderer schemes so the generated .desktop
-      // entry advertises MimeType=x-scheme-handler/t3code; for OAuth deep links.
+      // entry advertises MimeType=x-scheme-handler/katacode; for OAuth deep
+      // links, and keeps t3code so existing associations still launch the app.
+      assert.equal((linux.linux as Record<string, unknown>).executableName, "t3code");
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "Kata Code", schemes: ["t3code", "katacode-dev"] },
+        { name: "Kata Code", schemes: ["katacode", "t3code", "katacode-dev"] },
+      ]);
+      assert.deepStrictEqual((linux.linux as Record<string, unknown>).desktop, {
+        entry: { StartupWMClass: "katacode" },
+      });
+      assert.deepStrictEqual((mac.mac as Record<string, unknown>).protocols, [
+        { name: "Kata Code", schemes: ["katacode", "t3code", "katacode-dev"] },
+      ]);
+      assert.deepStrictEqual((win.win as Record<string, unknown>).protocols, [
+        { name: "Kata Code", schemes: ["katacode", "t3code", "katacode-dev"] },
       ]);
       for (const config of [mac, linux, win]) {
         assert.deepStrictEqual(config.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
@@ -995,7 +1006,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.deepStrictEqual(mac.protocols, [
-        { name: "Kata Code", schemes: ["t3code", "katacode-dev"] },
+        { name: "Kata Code", schemes: ["katacode", "t3code", "katacode-dev"] },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );

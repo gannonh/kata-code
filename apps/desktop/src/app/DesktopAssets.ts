@@ -61,22 +61,16 @@ const resolveResourcePath = Effect.fn("desktop.assets.resolveResourcePath")(func
   return Option.none<string>();
 });
 
-const resolveIconPath = Effect.fn("desktop.assets.resolveIconPath")(function* (
-  ext: keyof DesktopIconPaths,
-): Effect.fn.Return<
-  Option.Option<string>,
-  DesktopAssetProbeError,
-  FileSystem.FileSystem | DesktopEnvironment.DesktopEnvironment
-> {
-  return yield* resolveResourcePath(`icon.${ext}`);
-});
-
 export const make = Effect.gen(function* () {
   const context = yield* Effect.context<
     FileSystem.FileSystem | DesktopEnvironment.DesktopEnvironment
   >();
   const [ico, icns, png] = yield* Effect.all(
-    [resolveIconPath("ico"), resolveIconPath("icns"), resolveIconPath("png")] as const,
+    [
+      resolveResourcePath("icon.ico"),
+      resolveResourcePath("icon.icns"),
+      resolveResourcePath("icon.png"),
+    ] as const,
     { concurrency: "unbounded" },
   );
   const iconPaths = { ico, icns, png } satisfies DesktopIconPaths;

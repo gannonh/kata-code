@@ -70,6 +70,8 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.backendCwd, "/repo");
       assert.equal(environment.appUserModelId, "com.katacode.dev");
       assert.equal(environment.linuxWmClass, "katacode-dev");
+      assert.equal(environment.linuxDesktopEntryName, "katacode-dev.desktop");
+      assert.equal(environment.userDataDirName, "katacode-dev");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -125,8 +127,11 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.katacode/dev");
+      assert.equal(production.stateDir, "/Users/alice/.katacode/userdata");
+      assert.equal(production.linuxWmClass, "katacode");
+      assert.equal(production.linuxDesktopEntryName, "t3code.desktop");
+      assert.equal(production.userDataDirName, "katacode");
     }),
   );
 

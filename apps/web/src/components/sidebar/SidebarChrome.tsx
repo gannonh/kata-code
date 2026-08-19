@@ -43,14 +43,14 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   return (
     <SidebarHeader
       className={cn(
-        "@container/sidebar-header relative h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0",
+        "@container/sidebar-header h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0",
         isElectron && "drag-region",
       )}
     >
-      <SidebarTrigger className="relative z-10 md:hidden" />
+      <SidebarTrigger className="md:hidden" />
       {pillLabel ? (
         <Badge
-          className="relative z-10 ml-1 rounded-full px-1.5 text-muted-foreground"
+          className="ml-1 rounded-full px-1.5 text-muted-foreground"
           data-environment-identification="pill"
           size="sm"
           variant="secondary"
