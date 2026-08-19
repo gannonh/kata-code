@@ -178,7 +178,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isDevelopment ? "katacode-dev" : "t3code";
+  const userDataDirName = isDevelopment ? "katacode-dev" : "katacode";
   const legacyUserDataDirName = isDevelopment ? "Kata Code (Dev)" : "Kata Code (Alpha)";
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
@@ -226,8 +226,8 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
       isDevelopment ? "com.katacode.dev" : "com.katacode.app",
     ),
-    linuxDesktopEntryName: isDevelopment ? "katacode-dev.desktop" : "t3code.desktop",
-    linuxWmClass: isDevelopment ? "katacode-dev" : "t3code",
+    linuxDesktopEntryName: isDevelopment ? "katacode-dev.desktop" : "katacode.desktop",
+    linuxWmClass: isDevelopment ? "katacode-dev" : "katacode",
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
     userDataDirName,

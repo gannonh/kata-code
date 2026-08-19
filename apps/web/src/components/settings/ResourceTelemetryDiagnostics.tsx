@@ -136,7 +136,7 @@ function categoryLabel(category: ResourceTelemetryProcessCategory): string {
     case "resource-monitor":
       return "Monitor";
     case "unknown-t3":
-      return "T3 process";
+      return "Kata process";
   }
 }
 
@@ -1279,8 +1279,8 @@ export function ResourceTelemetryDiagnostics() {
         <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_1px_rgb(0_0_0/0.03)]">
           <div className="bg-muted/15 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground sm:px-5">
             Native counters identify which process is reading or writing. These application-level
-            counters identify known T3 operations so process spikes can be correlated with specific
-            persistence and logging paths.
+            counters identify known Kata operations so process spikes can be correlated with
+            specific persistence and logging paths.
           </div>
           <AttributionTable entries={snapshot?.attribution.entries ?? []} />
         </div>

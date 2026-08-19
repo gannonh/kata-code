@@ -81,7 +81,7 @@ export function resolveEarlyLinuxElectronOptions(
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
   return {
-    linuxWmClass: isDevelopmentEnvironment(input.env) ? "katacode-dev" : "t3code",
+    linuxWmClass: isDevelopmentEnvironment(input.env) ? "katacode-dev" : "katacode",
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

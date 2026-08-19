@@ -9,7 +9,7 @@ import * as Scope from "effect/Scope";
 import * as Electron from "electron";
 
 export const DESKTOP_HOST = "app";
-export const DESKTOP_PRODUCTION_SCHEME = "t3code";
+export const DESKTOP_PRODUCTION_SCHEME = "katacode";
 export const DESKTOP_DEVELOPMENT_SCHEME = "katacode-dev";
 
 export function getDesktopScheme(isDevelopment: boolean): string {
