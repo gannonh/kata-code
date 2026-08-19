@@ -13,11 +13,9 @@ set -euo pipefail
 # Resolve the worktree root from the script location so it works regardless of
 # the caller's CWD within the worktree.
 worktree_root="$(cd "$(dirname "$0")/.." && pwd)"
-env_source="$HOME/dotfiles/repos/kata-agents/.env"
+env_source="$HOME/dotfiles/repos/kata-code/.env"
 
-bun install
-bun run ensure:electron
-bun run electron:build
+pnpm install
 
 if [[ -f "$env_source" ]]; then
   ln -sfn "$env_source" "$worktree_root/.env"
