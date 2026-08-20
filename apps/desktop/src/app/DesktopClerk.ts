@@ -13,6 +13,7 @@ import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
 
 declare const __KATACODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
@@ -84,6 +85,10 @@ export function createDesktopClerkBridge(stateDir: string, isDevelopment: boolea
 }
 
 export const make = Effect.gen(function* () {
+  // Clerk registers the renderer scheme during bridge creation, which must
+  // happen before Electron emits `ready`. Keeping this service dependency
+  // explicit makes the pre-ready layer a real acquisition prerequisite.
+  yield* DesktopPreReadyPlatform.DesktopPreReadyElectronOptions;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const electronApp = yield* ElectronApp.ElectronApp;
 

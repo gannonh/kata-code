@@ -198,6 +198,7 @@ const desktopClerkLayer = DesktopClerk.layer.pipe(
   Layer.provideMerge(desktopEnvironmentLayer),
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(ElectronApp.layer),
+  Layer.provideMerge(DesktopPreReadyPlatform.layer),
 );
 
 const desktopApplicationRuntimeLayer = desktopApplicationLayer.pipe(
@@ -213,7 +214,6 @@ const desktopRuntimeLayer = desktopClerkLayer.pipe(
   Layer.flatMap((clerkContext) =>
     desktopApplicationRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),
   ),
-  Layer.provideMerge(DesktopPreReadyPlatform.layer),
 );
 
 DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);
