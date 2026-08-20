@@ -45,21 +45,11 @@ sandboxes with **named, persistent** sandboxes. Key differences from v1:
 
 ```typescript
 // Core SDK
-import {
-  Sandbox,
-  Session,
-  Snapshot,
-  Command,
-  CommandFinished,
-} from "@vercel/sandbox";
+import { Sandbox, Session, Snapshot, Command, CommandFinished } from "@vercel/sandbox";
 import { APIError, StreamError } from "@vercel/sandbox";
 
 // For advanced network policy with credential brokering and L7 matchers
-import type {
-  NetworkPolicy,
-  NetworkPolicyRule,
-  NetworkTransformer,
-} from "@vercel/sandbox";
+import type { NetworkPolicy, NetworkPolicyRule, NetworkTransformer } from "@vercel/sandbox";
 
 // For implementing a request-forwarding proxy (forwardURL)
 import { defineSandboxProxy } from "@vercel/sandbox/proxy";
@@ -87,7 +77,7 @@ const sandbox = await Sandbox.create({
   env: { NODE_ENV: "production" }, // Env vars inherited by all commands
   tags: { env: "staging", team: "infra" }, // Up to 5 key:value tags
   persistent: true, // Default: true. Auto-snapshots on stop, restores on resume.
-  snapshotExpiration: ms("7d"), // Default TTL for snapshots (7 days). Use 0 for no expiration.
+  snapshotExpiration: ms("7d"), // Default TTL for snapshots. Use 0 for no expiration.
 });
 
 console.log(sandbox.name);
@@ -110,9 +100,7 @@ const sandbox = await Sandbox.getOrCreate({
   name: "my-workspace",
   // Runs only the first time the sandbox is created.
   onCreate: async (sbx) => {
-    await sbx.writeFiles([
-      { path: "README.md", content: Buffer.from("# Hello") },
-    ]);
+    await sbx.writeFiles([{ path: "README.md", content: Buffer.from("# Hello") }]);
     await sbx.runCommand("npm", ["install"]);
   },
   // Runs every time the sandbox session is resumed (including after auto-resume).
@@ -544,9 +532,7 @@ const sandbox = await Sandbox.create({
           match: {
             method: ["POST"],
             path: { startsWith: "/v1/" },
-            headers: [
-              { key: { exact: "x-api-key" }, value: { exact: "placeholder" } },
-            ],
+            headers: [{ key: { exact: "x-api-key" }, value: { exact: "placeholder" } }],
           },
           transform: [{ headers: { authorization: "Bearer ..." } }],
         },
@@ -594,13 +580,7 @@ const handler = defineSandboxProxy(async (request, meta) => {
 
 // Sandboxes forward requests using their original method, so the handler
 // must be exposed under every verb the network policy can route.
-export {
-  handler as GET,
-  handler as POST,
-  handler as PUT,
-  handler as PATCH,
-  handler as DELETE,
-};
+export { handler as GET, handler as POST, handler as PUT, handler as PATCH, handler as DELETE };
 ```
 
 ### Updating Network Policy at Runtime
@@ -752,7 +732,7 @@ await sandbox.runCommand("npm", ["install"]);
 
 // Create snapshot (stops the sandbox)
 const snapshot = await sandbox.snapshot({
-  expiration: ms("14d"), // Defaults to the sandbox's snapshotExpiration, or 7 days. Use 0 for no expiration.
+  expiration: ms("14d"), // Default: 30 days, use 0 for no expiration
 });
 console.log("Snapshot ID:", snapshot.snapshotId);
 ```
@@ -764,7 +744,7 @@ Configure default expiration and retention policy per sandbox:
 ```typescript
 await Sandbox.create({
   name: "my-app",
-  snapshotExpiration: ms("7d"), // Default TTL for any snapshot of this sandbox (7 days)
+  snapshotExpiration: ms("7d"), // Default TTL for any snapshot of this sandbox
   keepLastSnapshots: {
     count: 1, // Keep only the most recent snapshot (1-10)
     expiration: ms("30d"), // Override expiration for kept snapshots
@@ -773,10 +753,8 @@ await Sandbox.create({
 });
 ```
 
-Persistent sandboxes already default to `{ count: 1, deleteEvicted: true }`, so
-snapshot storage stays flat without configuring anything. Raise `count` to keep
-more history, or pass `keepLastSnapshots: null` (CLI: `--keep-last-snapshots 0`)
-to disable the limit and keep every snapshot until it expires.
+`keepLastSnapshots: { count: 1 }` is the recommended setting when you only
+care about the latest snapshot — it lets the SDK keep snapshot storage costs flat.
 
 ### List, Get, and Delete
 
@@ -965,9 +943,8 @@ sandbox create --connect
 sandbox create --name my-app
 sandbox create --image my-repo:v1            # Boot from a VCR image
 sandbox create --non-persistent              # Disable filesystem persistence
-sandbox create --snapshot-expiration 30d      # Default snapshot TTL (7d when omitted)
-sandbox create --keep-last-snapshots 3       # Retention policy (persistent default: 1)
-sandbox create --keep-last-snapshots 0       # Keep every snapshot until it expires
+sandbox create --snapshot-expiration 7d      # Default snapshot TTL
+sandbox create --keep-last-snapshots 1       # Retention policy
 sandbox create --tag env=staging             # Repeatable
 
 # Fork an existing sandbox (inherits config, incl. env; --env replaces it)
@@ -1109,9 +1086,7 @@ async function runFromBase(code: string) {
     sourceSandbox: "my-base",
     persistent: false,
   });
-  await sandbox.writeFiles([
-    { path: "/vercel/sandbox/index.ts", content: Buffer.from(code) },
-  ]);
+  await sandbox.writeFiles([{ path: "/vercel/sandbox/index.ts", content: Buffer.from(code) }]);
   return sandbox.runCommand("tsx", ["index.ts"]);
 }
 ```
