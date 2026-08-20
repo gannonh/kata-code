@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - reads tracked packaging assets for a regression assertion.
+import * as NodeFS from "node:fs";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -1040,6 +1043,17 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       );
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
+
+  it("keeps DMG backgrounds Kata-branded", () => {
+    for (const channel of ["latest", "nightly"] as const) {
+      const source = NodeFS.readFileSync(
+        new URL(`../apps/desktop/resources/dmg/dmg-background-${channel}.svg`, import.meta.url),
+        "utf8",
+      );
+      assert.include(source, "KATA CODE");
+      assert.equal(source.includes("T3 CODE"), false);
+    }
+  });
 
   it.effect("keeps executable resource editing enabled for unsigned Windows builds", () =>
     Effect.gen(function* () {
