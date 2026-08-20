@@ -546,7 +546,7 @@ describe("OrchestrationEngine", () => {
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        branch: "kata-code/generated-branch-name",
+        branch: "katacode/generated-branch-name",
         worktreePath: "/tmp/project-branch-race-worktree",
         createdAt,
       }),
@@ -557,13 +557,13 @@ describe("OrchestrationEngine", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-stale-temporary-branch-sync"),
         threadId: ThreadId.make("thread-branch-race"),
-        branch: "kata-code/1234abcd",
-        expectedBranch: "kata-code/1234abcd",
+        branch: "katacode/1234abcd",
+        expectedBranch: "katacode/1234abcd",
       }),
     );
 
     const snapshot = await system.readModel();
-    expect(snapshot.threads[0]?.branch).toBe("kata-code/generated-branch-name");
+    expect(snapshot.threads[0]?.branch).toBe("katacode/generated-branch-name");
     await system.dispose();
   });
 
@@ -609,13 +609,13 @@ describe("OrchestrationEngine", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-authoritative-worktree-bootstrap"),
         threadId: ThreadId.make("thread-worktree-bootstrap"),
-        branch: "kata-code/1234abcd",
+        branch: "katacode/1234abcd",
         worktreePath: "/tmp/project-worktree-bootstrap-worktree",
       }),
     );
 
     const snapshot = await system.readModel();
-    expect(snapshot.threads[0]?.branch).toBe("kata-code/1234abcd");
+    expect(snapshot.threads[0]?.branch).toBe("katacode/1234abcd");
     expect(snapshot.threads[0]?.worktreePath).toBe("/tmp/project-worktree-bootstrap-worktree");
     await system.dispose();
   });

@@ -1,3 +1,4 @@
+import { PROTOCOL_SCHEME } from "@kata-sh/code-shared/branding";
 import { readHostedPairingRequest } from "@kata-sh/code-shared/remote";
 import * as Schema from "effect/Schema";
 
@@ -78,7 +79,7 @@ export function extractPairingUrlFromQrPayload(payload: string): string {
 
   try {
     const url = new URL(trimmed);
-    if (url.protocol === "t3code:") {
+    if (url.protocol === `${PROTOCOL_SCHEME}:`) {
       const pairingUrl = url.searchParams.get(MOBILE_PAIRING_URL_PARAM)?.trim() ?? "";
       if (pairingUrl.length > 0) {
         return pairingUrl;

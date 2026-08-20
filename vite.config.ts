@@ -29,6 +29,8 @@ export default defineConfig({
       ".reference",
       ".repos/**",
       ".plans",
+      ".agents/**",
+      ".claude/**",
       ".alchemy",
       "dist",
       "dist-electron",
@@ -57,6 +59,8 @@ export default defineConfig({
     ignorePatterns: [
       ".repos",
       ".repos/**",
+      ".agents/**",
+      ".claude/**",
       "dist",
       "dist-electron",
       "node_modules",

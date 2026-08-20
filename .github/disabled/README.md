@@ -2,6 +2,6 @@
 
 GitHub only runs YAML under [`.github/workflows/`](../workflows/). Nothing here runs.
 
-Parked in Phase 1 ([#109](https://github.com/gannonh/kata-code/issues/109)). Move a file back to `workflows/` when that pipeline is ready.
+Phase 2 release publishing is active at [`workflows/release.yml`](../workflows/release.yml).
 
-Active: `workflows/ci.yml` (`ubuntu-24.04`, `@kata-sh/code-*` filters).
+Active: `workflows/ci.yml` and `workflows/release.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`).

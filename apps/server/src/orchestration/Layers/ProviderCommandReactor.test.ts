@@ -1465,7 +1465,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-thread-branch"),
         threadId: ThreadId.make("thread-1"),
-        branch: "kata-code/1234abcd",
+        branch: "katacode/1234abcd",
         worktreePath: "/tmp/provider-project-worktree",
       }),
     );

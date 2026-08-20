@@ -7307,7 +7307,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             isRepo: true,
             hasPrimaryRemote: true,
             isDefaultRef: false,
-            refName: "kata-code/bootstrap-refName",
+            refName: "katacode/bootstrap-refName",
             hasWorkingTreeChanges: false,
             workingTree: {
               files: [],
@@ -7350,7 +7350,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               bootstrapGitOperations.push("create-worktree");
               return {
                 worktree: {
-                  refName: "kata-code/bootstrap-refName",
+                  refName: "katacode/bootstrap-refName",
                   path: "/tmp/bootstrap-worktree",
                 },
               };
@@ -7427,7 +7427,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
-                  branch: "kata-code/bootstrap-refName",
+                  branch: "katacode/bootstrap-refName",
                   startFromOrigin: true,
                 },
                 runSetupScript: true,
@@ -7451,7 +7451,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           refName: fetchedOriginCommit,
-          newRefName: "kata-code/bootstrap-refName",
+          newRefName: "katacode/bootstrap-refName",
           baseRefName: "main",
           path: null,
         });
@@ -7517,7 +7517,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
             Effect.succeed({
               worktree: {
-                refName: "kata-code/bootstrap-refName",
+                refName: "katacode/bootstrap-refName",
                 path: "/tmp/bootstrap-worktree",
               },
             }),
@@ -7573,7 +7573,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
-                  branch: "kata-code/bootstrap-refName",
+                  branch: "katacode/bootstrap-refName",
                   startFromOrigin: true,
                 },
               },
@@ -7591,7 +7591,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           refName: "main",
-          newRefName: "kata-code/bootstrap-refName",
+          newRefName: "katacode/bootstrap-refName",
           baseRefName: "main",
           path: null,
         });
@@ -7605,7 +7605,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "kata-code/bootstrap-refName",
+              refName: "katacode/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -7676,7 +7676,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "kata-code/bootstrap-refName",
+                branch: "katacode/bootstrap-refName",
               },
               runSetupScript: true,
             },
@@ -7710,7 +7710,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "kata-code/bootstrap-refName",
+              refName: "katacode/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -7797,7 +7797,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "kata-code/bootstrap-refName",
+                branch: "katacode/bootstrap-refName",
               },
               runSetupScript: true,
             },
@@ -7881,7 +7881,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "kata-code/bootstrap-refName",
+                branch: "katacode/bootstrap-refName",
               },
               runSetupScript: false,
             },

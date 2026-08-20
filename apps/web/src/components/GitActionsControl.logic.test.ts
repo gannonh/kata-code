@@ -1095,8 +1095,8 @@ describe("resolveLiveThreadBranchUpdate", () => {
 
   it("does not regress a semantic thread ref back to a temporary worktree ref", () => {
     const update = resolveLiveThreadBranchUpdate({
-      threadBranch: "kata-code/github-query-rate-limit",
-      gitStatus: status({ refName: "kata-code/bda76797" }),
+      threadBranch: "katacode/github-query-rate-limit",
+      gitStatus: status({ refName: "katacode/bda76797" }),
     });
 
     assert.equal(update, null);
@@ -1104,7 +1104,7 @@ describe("resolveLiveThreadBranchUpdate", () => {
 
   it("allows a temporary worktree ref to reconcile to a semantic branch", () => {
     const update = resolveLiveThreadBranchUpdate({
-      threadBranch: "kata-code/a9628676",
+      threadBranch: "katacode/a9628676",
       gitStatus: status({ refName: "feature/diff-panel-toggle" }),
     });
 

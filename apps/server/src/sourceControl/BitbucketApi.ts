@@ -14,7 +14,7 @@ import {
   type SourceControlRepositoryVisibility,
 } from "@kata-sh/code-contracts";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import { sanitizeBranchFragment } from "@kata-sh/code-shared/git";
+import { sanitizeBranchFragment, WORKTREE_BRANCH_PREFIX } from "@kata-sh/code-shared/git";
 import {
   detectSourceControlProviderFromRemoteUrl,
   isSshRemoteUrl,
@@ -522,7 +522,7 @@ function checkoutBranchName(input: {
     return input.headBranch;
   }
 
-  return `t3code/pr-${input.pullRequestId}/${sanitizeBranchFragment(input.headBranch)}`;
+  return `${WORKTREE_BRANCH_PREFIX}/pr-${input.pullRequestId}/${sanitizeBranchFragment(input.headBranch)}`;
 }
 
 function repositoryNameWithOwner(

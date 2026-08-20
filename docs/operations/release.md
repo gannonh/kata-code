@@ -24,7 +24,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - Nightly runs are always GitHub prereleases and never marked latest.
   - Automatically generated release notes are pinned to the previous tag in the same channel, so stable compares to the previous stable tag and nightly compares to the previous nightly tag.
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
-- Publishes the CLI package (`apps/server`, npm package `katacode`) with OIDC trusted publishing from the same workflow file:
+- Publishes the CLI package (`apps/server`, npm package `@kata-sh/code-cli`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
 - Deploys the hosted web app to Vercel only after a release is published:
@@ -168,7 +168,7 @@ One-time Vercel dashboard setup:
   - `make_latest` is always `false`
 - Uses the next stable patch version as the nightly base. For example, `0.0.17` produces nightlies on `0.0.18-nightly.*`.
 - Publishes Electron auto-update metadata to the dedicated `nightly` updater channel, so desktop users can opt into that track independently from stable.
-- Publishes the CLI package (`apps/server`, npm package `katacode`) to the `nightly` npm dist-tag using the same nightly version.
+- Publishes the CLI package (`apps/server`, npm package `@kata-sh/code-cli`) to the `nightly` npm dist-tag using the same nightly version.
 - Does not commit version bumps back to `main`.
 
 ## Server self-update release invariant
@@ -186,11 +186,11 @@ The workflow enforces this ordering:
 Preserve these dependencies when changing the release graph. Publishing a client first would leave
 the **Update server** action targeting a package version that does not exist yet.
 
-For a release smoke test, confirm `npm view t3@<version> version` returns the expected version, then
+For a release smoke test, confirm `npm view @kata-sh/code-cli@<version> version` returns the expected version, then
 connect the new client to a server on the previous version and verify that the update action
 reconnects to the matching server. Use releases with identical migration manifests for the
 automatic path. When the manifest changed, verify that the remote action stops before restart and
-shows the exact local `npx t3@<version> service update` command. Also test the manual or
+shows the exact local `npx @kata-sh/code-cli@<version> service update` command. Also test the manual or
 desktop-managed guidance when those environments are available.
 
 ## Desktop auto-update notes
@@ -248,12 +248,12 @@ blockmaps, with a 60 MB maximum for a representative sidecar-to-sidecar update.
 ## 0) npm OIDC trusted publishing setup (CLI)
 
 The workflow invokes `node apps/server/scripts/cli.ts publish` after aligning package versions. That
-script temporarily prepares the `katacode` package, then runs `vp pm publish --filter @kata-sh/code-cli ...` from the
+script temporarily prepares the `@kata-sh/code-cli` package, then runs `vp pm publish --filter @kata-sh/code-cli ...` from the
 repository root so workspace publish configuration is applied correctly.
 
 Checklist:
 
-1. Confirm npm org/user owns package `katacode` (or rename package first if needed).
+1. Confirm the npm org/user owns package `@kata-sh/code-cli`.
 2. In npm package settings, configure Trusted Publisher:
    - Provider: GitHub Actions
    - Repository: this repo
@@ -268,20 +268,14 @@ Checklist:
 
 ## 1) Release validation and unsigned builds
 
-There is no dry-run tag path. Pushing any accepted non-nightly tag, including
-`v0.0.0-test.1`, classifies the run as the stable channel. It publishes `katacode` with npm dist-tag
-`latest`, creates a real GitHub Release, aliases the hosted app to `latest.app.kata.sh` and
-`app.kata.sh`, and can commit a version bump to `main` in the finalize job. Do not push a test tag
-to validate the workflow.
+Use `workflow_dispatch` with `dry_run=true` to run the quality gates and full desktop build matrix
+without publishing npm packages, GitHub Releases, or hosted web aliases. For a dry run without a
+version input, the workflow derives a disposable `0.0.0-dryrun.<run>` version.
 
-The workflow has no non-publishing `workflow_dispatch` mode. Use normal CI or local quality gates to
-validate checks and builds without shipping. To exercise the complete release graph at lower stable
-risk, manually dispatch `channel=nightly`; this still publishes a real nightly npm package, GitHub
-prerelease, desktop updater release, and hosted nightly alias, but it does not update stable aliases or
-commit a version bump to `main`. Only run it when a real nightly release is acceptable.
-
-Manual `channel=stable` with a version input is also a real stable-channel release. Omitting signing
-secrets only makes platform artifacts unsigned; it does not prevent publication.
+A normal nightly dispatch (`channel=nightly`, `dry_run=false`) publishes a real nightly npm package,
+GitHub prerelease, desktop updater release, and hosted nightly alias. A stable dispatch requires a
+version and publishes to the stable channels. Omitting signing secrets only makes platform artifacts
+unsigned; it does not prevent publication.
 
 ## 2) Apple signing + notarization setup (macOS)
 
@@ -294,7 +288,7 @@ Required secrets used by the workflow:
 - `APPLE_API_ISSUER`
 - `MACOS_PROVISIONING_PROFILE` (base64-encoded provisioning profile with Associated Domains)
 
-Required repository variables:
+Required GitHub Actions secrets:
 
 - `APPLE_TEAM_ID`
 
