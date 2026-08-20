@@ -12,6 +12,7 @@ allowBuilds:
   browser-tabs-lock: false
   bufferutil: false
   core-js: false
+  "@clerk/shared": false
   electron: true
   electron-winstaller: false
   esbuild: true
