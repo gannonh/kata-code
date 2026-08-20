@@ -266,16 +266,17 @@ Checklist:
    - invoke the CLI publish script with npm dist-tag `latest`
 5. Nightly runs invoke the same publish script with npm dist-tag `nightly`.
 
-## 1) Release validation and unsigned builds
+## 1) Release validation and signed builds
 
 Use `workflow_dispatch` with `dry_run=true` to run the quality gates and full desktop build matrix
 without publishing npm packages, GitHub Releases, or hosted web aliases. For a dry run without a
-version input, the workflow derives a disposable `0.0.0-dryrun.<run>` version.
+version input, the workflow derives a disposable `0.0.0-dryrun.<run>` version. Dry runs may omit
+platform signing secrets; publishing jobs remain disabled.
 
 A normal nightly dispatch (`channel=nightly`, `dry_run=false`) publishes a real nightly npm package,
 GitHub prerelease, desktop updater release, and hosted nightly alias. A stable dispatch requires a
-version and publishes to the stable channels. Omitting signing secrets only makes platform artifacts
-unsigned; it does not prevent publication.
+version and publishes to the stable channels. macOS release builds fail before publication when the
+Developer ID signing certificate is unavailable.
 
 ## 2) Apple signing + notarization setup (macOS)
 
@@ -283,14 +284,19 @@ Required secrets used by the workflow:
 
 - `CSC_LINK`
 - `CSC_KEY_PASSWORD`
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `APPLE_TEAM_ID`
+
+Optional API-key notarization credentials (use these instead of Apple ID credentials when available):
+
 - `APPLE_API_KEY`
 - `APPLE_API_KEY_ID`
 - `APPLE_API_ISSUER`
+
+Optional passkey entitlement secret:
+
 - `MACOS_PROVISIONING_PROFILE` (base64-encoded provisioning profile with Associated Domains)
-
-Required GitHub Actions secrets:
-
-- `APPLE_TEAM_ID`
 
 Optional repository variables:
 
@@ -302,28 +308,27 @@ Checklist:
 1. Apple Developer account access:
    - Team has rights to create Developer ID certificates.
 2. Create an explicit App ID for `com.katacode.app` and enable Associated Domains.
-3. Create a `Developer ID Application` certificate and a compatible provisioning profile for that
-   App ID with Associated Domains enabled.
+3. Create a `Developer ID Application` certificate. Create a compatible provisioning profile for
+   that App ID with Associated Domains enabled only if desktop passkeys are enabled.
 4. Export the certificate + private key as `.p12` from Keychain.
 5. Base64-encode the `.p12` and store as `CSC_LINK`.
-6. Base64-encode the provisioning profile and store it as `MACOS_PROVISIONING_PROFILE`.
+6. If using desktop passkeys, base64-encode the provisioning profile and store it as
+   `MACOS_PROVISIONING_PROFILE`.
 7. Store the `.p12` export password as `CSC_KEY_PASSWORD`, and set `APPLE_TEAM_ID` to the
-   10-character Apple Developer Team ID.
-8. In App Store Connect, create an API key (Team key).
-9. Add API key values:
-   - `APPLE_API_KEY`: contents of the downloaded `.p8`
-   - `APPLE_API_KEY_ID`: Key ID
-   - `APPLE_API_ISSUER`: Issuer ID
-10. Complete the Clerk Native API and AASA setup in [Kata Code Connect Clerk Setup](../internals/t3-connect.md#desktop-passkeys).
-11. Re-run a tag release and confirm macOS artifacts are signed/notarized and contain the expected
-    `com.apple.developer.associated-domains` entitlement.
+   10-character Apple Developer Team ID. Set `APPLE_ID` and an app-specific password for
+   notarization.
+8. Optionally create an App Store Connect API key (Team key) and set `APPLE_API_KEY`,
+   `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` instead of the Apple ID credentials.
+9. Complete the Clerk Native API and AASA setup in [Kata Code Connect Clerk Setup](../internals/t3-connect.md#desktop-passkeys).
+10. Re-run a tag release and confirm macOS artifacts are signed/notarized. If a provisioning profile
+    is configured, confirm the expected `com.apple.developer.associated-domains` entitlement.
 
 Notes:
 
 - `APPLE_API_KEY` is stored as raw key text in secrets.
 - The workflow writes it to a temporary `AuthKey_<id>.p8` file at runtime.
 - The workflow decodes `MACOS_PROVISIONING_PROFILE`, validates it with `security cms`, and passes it
-  to the desktop packager.
+  to the desktop packager when configured.
 
 ## 3) Azure Trusted Signing setup (Windows)
 

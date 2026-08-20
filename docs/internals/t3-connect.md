@@ -213,9 +213,11 @@ KATACODE_CLERK_PASSKEY_RP_DOMAINS=example.clerk.accounts.dev,clerk.example.com
 ```
 
 When `KATACODE_CLERK_PASSKEY_RP_DOMAINS` is absent, the build derives the RP domain from
-`KATACODE_CLERK_PUBLISHABLE_KEY`. Signed macOS builds fail early if the Team ID, provisioning profile,
-or RP-domain configuration is missing. The generated main-app entitlements include every configured
-`webcredentials:<domain>` entry; helper apps keep Electron's minimal default entitlements.
+`KATACODE_CLERK_PUBLISHABLE_KEY`. Signed macOS builds include passkey entitlements when a provisioning
+profile is configured and fail early if that profile's Team ID or RP-domain configuration is invalid.
+Without a provisioning profile, the app is still signed but does not advertise Associated Domains. The
+generated main-app entitlements include every configured `webcredentials:<domain>` entry; helper apps
+keep Electron's minimal default entitlements.
 
 The normal `dev:desktop` launcher is unsigned and cannot complete macOS passkey ceremonies. For
 renderer HMR, build and install a signed app first, run the renderer dev server, then launch the

@@ -29,6 +29,7 @@ interface UpdatesHarnessOptions {
   >;
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
+  readonly startBackend?: Effect.Effect<void>;
   readonly stopBackend?: Effect.Effect<void>;
   readonly env?: Record<string, string | undefined>;
 }
@@ -37,6 +38,7 @@ const flushCallbacks = Effect.yieldNow;
 
 function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
+  let startBackendCount = 0;
   let allowDowngrade = false;
   let fullChangelog = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
@@ -115,7 +117,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   const stubBackendInstance: DesktopBackendPool.DesktopBackendInstance = {
     id: DesktopBackendPool.PRIMARY_INSTANCE_ID,
     label: Effect.succeed("Windows"),
-    start: Effect.void,
+    start: Effect.sync(() => {
+      startBackendCount += 1;
+    }).pipe(Effect.andThen(options.startBackend ?? Effect.void)),
     stop: () => options.stopBackend ?? Effect.void,
     currentConfig: Effect.succeed(Option.none()),
     snapshot: Effect.succeed({
@@ -191,6 +195,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   return {
     layer,
     checkCount: () => checkCount,
+    startBackendCount: () => startBackendCount,
     feedUrls: () => feedUrls,
     fullChangelog: () => fullChangelog,
     listenerCount: () =>
@@ -508,6 +513,39 @@ describe("DesktopUpdates", () => {
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
+
+  it.effect("restarts the backend after an updater install failure", () =>
+    Effect.gen(function* () {
+      const restarted = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        startBackend: Deferred.succeed(restarted, undefined),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const desktopState = yield* DesktopState.DesktopState;
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-downloaded", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const result = yield* updates.install;
+          assert.isTrue(result.accepted);
+          assert.isFalse(result.completed);
+          assert.isTrue(yield* Ref.get(desktopState.quitting));
+
+          harness.emit("error", new Error("code signature validation failed"));
+          yield* Deferred.await(restarted);
+
+          assert.equal(harness.startBackendCount(), 1);
+          assert.isFalse(yield* Ref.get(desktopState.quitting));
+          const state = yield* updates.getState;
+          assert.equal(state.status, "downloaded");
+          assert.equal(state.errorContext, "install");
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
 
   it.effect("persists channel changes through the settings service", () => {
     const harness = makeHarness();

@@ -451,6 +451,26 @@ export const make = Effect.gen(function* () {
     { discard: true },
   );
 
+  const restartBackendsAfterInstallFailure = Effect.gen(function* () {
+    const instances = yield* pool.list;
+    for (const instance of instances) {
+      yield* instance.start.pipe(
+        Effect.catchCause(() =>
+          logUpdaterError("failed to restart a desktop backend after update install failure", {
+            errorTag: "DesktopUpdateBackendRestartError",
+            instanceId: instance.id,
+          }).pipe(Effect.asVoid),
+        ),
+      );
+    }
+  }).pipe(
+    Effect.catchCause(() =>
+      logUpdaterError("failed to list desktop backends after update install failure", {
+        errorTag: "DesktopUpdateBackendListError",
+      }).pipe(Effect.asVoid),
+    ),
+  );
+
   const installDownloadedUpdate = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     if (
@@ -624,6 +644,7 @@ export const make = Effect.gen(function* () {
         errorTag: error._tag,
         operation: error.operation,
       });
+      yield* restartBackendsAfterInstallFailure;
       return;
     }
 
