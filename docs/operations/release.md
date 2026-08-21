@@ -286,10 +286,7 @@ Required secrets used by the workflow:
 - `CSC_KEY_PASSWORD`
 - `APPLE_ID`
 - `APPLE_APP_SPECIFIC_PASSWORD`
-
-Required repository variables:
-
-- `APPLE_TEAM_ID` (10-character Apple Developer Team ID; not a secret)
+- `APPLE_TEAM_ID` (10-character Apple Developer Team ID)
 
 Optional API-key notarization credentials (use these instead of Apple ID credentials when available):
 
@@ -318,7 +315,7 @@ Checklist:
 6. If using desktop passkeys, base64-encode the provisioning profile and store it as
    `MACOS_PROVISIONING_PROFILE`.
 7. Store the `.p12` export password as `CSC_KEY_PASSWORD`, and set the `APPLE_TEAM_ID`
-   repository variable to the 10-character Apple Developer Team ID. Set `APPLE_ID` and an
+   secret to the 10-character Apple Developer Team ID. Set `APPLE_ID` and an
    app-specific password for notarization.
 8. Optionally create an App Store Connect API key (Team key) and set `APPLE_API_KEY`,
    `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` instead of the Apple ID credentials.
@@ -375,7 +372,7 @@ Checklist:
 ## 5) Troubleshooting
 
 - macOS build unsigned when expected signed:
-  - Check all Apple secrets plus the `APPLE_TEAM_ID` repository variable are populated and non-empty.
+  - Check all Apple secrets plus the `APPLE_TEAM_ID` secret are populated and non-empty.
   - Confirm the provisioning profile belongs to `APPLE_TEAM_ID.com.katacode.app` and includes
     Associated Domains.
 - Windows build unsigned when expected signed:
