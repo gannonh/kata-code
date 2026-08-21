@@ -4,12 +4,6 @@ Kata Code is an "agent harness control surface". It enables control of the agent
 
 Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, and OpenCode. If they're set up on your computer, Kata Code can control them.
 
-## "Wait, what are you selling me?"
-
-Nothing. We built Kata Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
-
-We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
-
 ## Installation
 
 > [!WARNING]
@@ -37,16 +31,6 @@ Tip: Use `npx @kata-sh/code-cli@latest --help` for the full CLI reference.
 
 Build the desktop app from this repository (`pnpm run dev:desktop`). Packaged releases are not part of Phase 1.
 
-## Attribution
-
-Kata Code is an independent fork of [T3 Code](https://github.com/pingdotgg/t3code). Portions of this repository derive from T3 Code, Copyright (c) 2026 T3 Tools Inc., under the MIT License.
-
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
-
 ## Documentation
 
 Full docs live in [docs/](./docs). There's no docs site yet.
@@ -63,7 +47,7 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 
 Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
 
-## If you REALLY want to contribute still.... read this first
+## Development
 
 ### Install `vp`
 
@@ -88,9 +72,5 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 ```bash
 vp i
 ```
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
-
 Have a feature request? Open a GitHub issue on [gannonh/kata-code](https://github.com/gannonh/kata-code).
 
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
