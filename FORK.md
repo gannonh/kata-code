@@ -47,13 +47,12 @@ No compatibility shims for the previous upstream env prefix, home directory, or 
 ## Intentionally T3-shaped (later phases)
 
 - User project format `t3.json`
-- Connect wire IDs (`t3_relay`, `/api/t3-connect`, `t3-mobile` / `t3-web`)
 - `apps/marketing/**` copy
 - `packaging/aur/**`
 - `.repos/**`
 
 ## Workflows
 
-Active: `.github/workflows/ci.yml` and `.github/workflows/release.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`; `@kata-sh/code-*` filters).
+Active: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and `.github/workflows/deploy-relay.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`; `@kata-sh/code-*` filters).
 
-Parked under `.github/disabled/` until a later phase: relay deploy, mobile EAS, AUR, PR automation, web preview.
+Parked under `.github/disabled/` until a later phase: mobile EAS, AUR, PR automation, web preview.

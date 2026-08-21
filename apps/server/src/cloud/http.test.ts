@@ -15,6 +15,7 @@ import {
 } from "effect/unstable/http";
 
 import { EnvironmentId } from "@kata-sh/code-contracts";
+import { WIRE_RELAY_PROVIDER_KIND } from "@kata-sh/code-contracts/wireIdentity";
 import { RelayClientTracer } from "@kata-sh/code-shared/relayTracing";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -595,10 +596,10 @@ describe("link proof provider kinds", () => {
     origin: { localHttpHost: "127.0.0.1", localHttpPort: 7331 },
   });
 
-  it("accepts managed and manual endpoints but not t3_relay", () => {
+  it("accepts managed and manual endpoints but not the relay provider", () => {
     expect(isSupportedLinkProviderKind(proofRequest("cloudflare_tunnel"))).toBe(true);
     expect(isSupportedLinkProviderKind(proofRequest("manual"))).toBe(true);
-    expect(isSupportedLinkProviderKind(proofRequest("t3_relay"))).toBe(false);
+    expect(isSupportedLinkProviderKind(proofRequest(WIRE_RELAY_PROVIDER_KIND))).toBe(false);
   });
 
   it("only claims the managed-tunnel scope for tunnel links", () => {

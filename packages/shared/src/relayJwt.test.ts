@@ -3,9 +3,37 @@ import * as NodeCrypto from "node:crypto";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
-import { RelayJwtError, signRelayJwt, verifyRelayJwt } from "./relayJwt.ts";
+import {
+  RELAY_ACTIVITY_PUBLISH_TYP,
+  RELAY_HEALTH_REQUEST_TYP,
+  RELAY_HEALTH_RESPONSE_TYP,
+  RELAY_LINK_PROOF_TYP,
+  RELAY_MINT_REQUEST_TYP,
+  RELAY_MINT_RESPONSE_TYP,
+  RelayJwtError,
+  signRelayJwt,
+  verifyRelayJwt,
+} from "./relayJwt.ts";
 
 describe("relayJwt", () => {
+  it("uses the Kata Connect JWT type registry", () => {
+    expect([
+      RELAY_LINK_PROOF_TYP,
+      RELAY_MINT_REQUEST_TYP,
+      RELAY_HEALTH_REQUEST_TYP,
+      RELAY_MINT_RESPONSE_TYP,
+      RELAY_HEALTH_RESPONSE_TYP,
+      RELAY_ACTIVITY_PUBLISH_TYP,
+    ]).toEqual([
+      "kata-env-link+jwt",
+      "kata-cloud-mint+jwt",
+      "kata-cloud-health+jwt",
+      "kata-env-mint+jwt",
+      "kata-env-health+jwt",
+      "kata-env-activity+jwt",
+    ]);
+  });
+
   it.effect("preserves signing context and the JOSE cause", () =>
     Effect.gen(function* () {
       const error = yield* signRelayJwt({

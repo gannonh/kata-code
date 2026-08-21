@@ -10,6 +10,7 @@ import {
   type RelayAgentActivityPublishProofPayload,
   type RelayAgentActivityState,
 } from "@kata-sh/code-contracts/relay";
+import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
 import { projectThreadAwareness } from "@kata-sh/code-shared/agentAwareness";
 import { makeDrainableWorker } from "@kata-sh/code-shared/DrainableWorker";
 import { withRelayClientTracing } from "@kata-sh/code-shared/relayTracing";
@@ -198,7 +199,7 @@ const makePublishProof = Effect.fn("makePublishProof")(function* (input: {
   const now = yield* DateTime.now;
   const expiresAt = DateTime.add(now, { minutes: 5 });
   const payload = {
-    iss: `t3-env:${input.environmentId}`,
+    iss: wireEnvironmentIssuer(input.environmentId),
     aud: normalizeRelayIssuer(input.relayIssuer),
     sub: input.environmentId,
     jti: input.jti,

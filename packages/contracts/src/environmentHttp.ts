@@ -48,6 +48,7 @@ import {
   RelayEnvironmentMintResponse,
   RelayLinkProofRequest,
 } from "./relay.ts";
+import { WIRE_CONNECT_API_PREFIX, WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "./wireIdentity.ts";
 
 const OptionalBearerHeaders = Schema.Struct({
   authorization: Schema.optionalKey(Schema.String),
@@ -402,7 +403,7 @@ export const AuthOtherClientSessionsRevokeResult = Schema.Struct({
 export type AuthOtherClientSessionsRevokeResult = typeof AuthOtherClientSessionsRevokeResult.Type;
 
 export class EnvironmentMetadataHttpApi extends HttpApiGroup.make("metadata").add(
-  HttpApiEndpoint.get("descriptor", "/.well-known/t3/environment", {
+  HttpApiEndpoint.get("descriptor", WIRE_ENVIRONMENT_WELL_KNOWN_PATH, {
     success: ExecutionEnvironmentDescriptor,
   }),
 ) {}
@@ -586,7 +587,7 @@ export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.post("health", "/api/t3-connect/health", {
+    HttpApiEndpoint.post("health", `${WIRE_CONNECT_API_PREFIX}/health`, {
       payload: RelayCloudEnvironmentHealthRequest,
       success: RelayEnvironmentHealthResponse,
       error: EnvironmentHttpCloudErrors,
@@ -600,11 +601,15 @@ export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }),
   )
   .add(
-    HttpApiEndpoint.post("t3MintCredential", "/api/t3-connect/mint-credential", {
-      payload: RelayCloudMintCredentialRequest,
-      success: RelayEnvironmentMintResponse,
-      error: EnvironmentHttpCloudErrors,
-    }),
+    HttpApiEndpoint.post(
+      "kataConnectMintCredential",
+      `${WIRE_CONNECT_API_PREFIX}/mint-credential`,
+      {
+        payload: RelayCloudMintCredentialRequest,
+        success: RelayEnvironmentMintResponse,
+        error: EnvironmentHttpCloudErrors,
+      },
+    ),
   ) {}
 
 export class EnvironmentHttpApi extends HttpApi.make("environment")
