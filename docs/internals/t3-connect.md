@@ -214,7 +214,8 @@ KATACODE_CLERK_PASSKEY_RP_DOMAINS=example.clerk.accounts.dev,clerk.example.com
 
 When `KATACODE_CLERK_PASSKEY_RP_DOMAINS` is absent, the build derives the RP domain from
 `KATACODE_CLERK_PUBLISHABLE_KEY`. Signed macOS builds include passkey entitlements when a provisioning
-profile is configured and fail early if that profile's Team ID or RP-domain configuration is invalid.
+profile is configured and fail early if the KATACODE_APPLE_TEAM_ID value or RP-domain
+configuration is invalid.
 Without a provisioning profile, the app is still signed but does not advertise Associated Domains. The
 generated main-app entitlements include every configured `webcredentials:<domain>` entry; helper apps
 keep Electron's minimal default entitlements.

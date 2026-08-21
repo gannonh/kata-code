@@ -35,7 +35,7 @@ describe("thread sidebar width", () => {
     expect(resolveInitialThreadSidebarWidth(900, 700)).toBe(THREAD_SIDEBAR_MIN_WIDTH);
   });
 
-  it("keeps the desktop sidebar header compact across the legal width range", () => {
+  it("pins the compact header height and trigger in the sidebar chrome source", () => {
     const sidebarSource = NodeFS.readFileSync(
       new URL("./sidebar/SidebarChrome.tsx", import.meta.url),
       "utf8",

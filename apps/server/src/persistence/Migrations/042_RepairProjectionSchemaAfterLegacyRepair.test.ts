@@ -38,8 +38,20 @@ layer("042_RepairProjectionSchemaAfterLegacyRepair", (it) => {
       `;
       const threadNames = new Set(threadColumns.map((column) => column.name));
       assert.ok(threadNames.has("settled_override"));
+      assert.ok(threadNames.has("settled_at"));
       assert.ok(threadNames.has("snoozed_until"));
+      assert.ok(threadNames.has("snoozed_at"));
+      assert.ok(threadNames.has("title_regeneration_request_id"));
+      assert.ok(threadNames.has("title_regeneration_started_at"));
+      assert.ok(threadNames.has("pinned_at"));
       assert.ok(threadNames.has("pin_order_key"));
+
+      const projectColumns = yield* sql<{ readonly name: string }>`
+        PRAGMA table_info(projection_projects)
+      `;
+      const projectNames = new Set(projectColumns.map((column) => column.name));
+      assert.ok(projectNames.has("default_thread_env_mode"));
+      assert.ok(projectNames.has("favicon_path"));
 
       const indexes = yield* sql<{ readonly name: string }>`
         SELECT name FROM sqlite_master
