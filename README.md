@@ -72,5 +72,5 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 ```bash
 vp i
 ```
-Have a feature request? Open a GitHub issue on [gannonh/kata-code](https://github.com/gannonh/kata-code).
 
+Have a feature request? Open a GitHub issue on [gannonh/kata-code](https://github.com/gannonh/kata-code).
