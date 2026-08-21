@@ -29,7 +29,8 @@ describe("exchangeClerkDpopToken", () => {
     });
     expect(capturedUrl).toBe("https://relay.example.test/v1/client/dpop-token");
     expect(capturedInit?.method).toBe("POST");
-    expect(String((capturedInit?.headers as Record<string, string>).dpop)).toMatch(/^eyJ/u);
+    const requestHeaders = (capturedInit?.headers ?? {}) as Record<string, string>;
+    expect(String(requestHeaders.dpop)).toMatch(/^eyJ/u);
     expect(new URLSearchParams(String(capturedInit?.body)).get("client_id")).toBe("kata-web");
   });
 

@@ -1,14 +1,10 @@
-// @effect-diagnostics nodeBuiltinImport:off - The test reads the checked-in migration text.
-import { readFileSync } from "node:fs";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
 import { describe, expect, it } from "@effect/vitest";
 
-import {
-  relayManagedEndpointAllocations,
-  relayManagedTunnelLimits,
-  relayMobileDevices,
-} from "./schema.ts";
+import { relayManagedTunnelLimits, relayMobileDevices } from "./schema.ts";
 
-const reconciliationMigration = readFileSync(
+const reconciliationMigration = NodeFS.readFileSync(
   new URL(
     "../../migrations/postgres/20260821120000_kata_connect_state_reconciliation/migration.sql",
     import.meta.url,

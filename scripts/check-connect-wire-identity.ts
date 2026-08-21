@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodeURL from "node:url";
+import * as NodePath from "node:path";
 
 export const CONNECT_WIRE_SCAN_FILES = [
   ".env.example",
@@ -74,11 +74,11 @@ export function findConnectWireViolations(
 }
 
 export function scanConnectWireFiles(
-  repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url))),
+  repoRoot = NodePath.resolve(NodeURL.fileURLToPath(new URL("..", import.meta.url))),
 ) {
   return findConnectWireViolations(
     CONNECT_WIRE_SCAN_FILES.map(
-      (path) => [path, readFileSync(resolve(repoRoot, path), "utf8")] as const,
+      (path) => [path, NodeFS.readFileSync(NodePath.resolve(repoRoot, path), "utf8")] as const,
     ),
   );
 }

@@ -26,13 +26,16 @@ import {
 } from "./wireIdentity.ts";
 
 describe("Kata Connect wire identity", () => {
+  const isRelayProviderKind = Schema.is(RelayManagedEndpointProviderKind);
+  const isRelayPublicClientId = Schema.is(RelayPublicClientId);
+
   it("owns the target provider, client, issuer, Clerk, and JWT values", () => {
     expect(WIRE_RELAY_PROVIDER_KIND).toBe("kata_relay");
     expect(WIRE_RELAY_PUBLIC_CLIENT_IDS).toEqual(["kata-mobile", "kata-web"]);
-    expect(Schema.is(RelayManagedEndpointProviderKind)("kata_relay")).toBe(true);
-    expect(Schema.is(RelayPublicClientId)("kata-mobile")).toBe(true);
-    expect(Schema.is(RelayPublicClientId)("kata-web")).toBe(true);
-    expect(Schema.is(RelayPublicClientId)("t3-mobile")).toBe(false);
+    expect(isRelayProviderKind("kata_relay")).toBe(true);
+    expect(isRelayPublicClientId("kata-mobile")).toBe(true);
+    expect(isRelayPublicClientId("kata-web")).toBe(true);
+    expect(isRelayPublicClientId("t3-mobile")).toBe(false);
     expect(WIRE_MOBILE_CLIENT_ID).toBe("kata-mobile");
     expect(WIRE_WEB_CLIENT_ID).toBe("kata-web");
     expect(WIRE_ENVIRONMENT_WELL_KNOWN_PATH).toBe("/.well-known/kata/environment");
