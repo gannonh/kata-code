@@ -3,8 +3,8 @@
 > For maintainers. Using Kata Code? See [docs/user](../user/).
 
 Kata Code Connect uses one Clerk application for web, desktop, and mobile authentication. The relay verifies
-two kinds of bearer credential: template JWTs generated from the `t3-relay` template with the shared
-`t3-code-relay` audience, and Clerk OAuth tokens issued to the CLI. `verifyRelayClientBearerToken` in
+two kinds of bearer credential: template JWTs generated from the `kata-relay` template with the shared
+`kata-code-relay` audience, and Clerk OAuth tokens issued to the CLI. `verifyRelayClientBearerToken` in
 `infra/relay/src/http/Api.ts` tries the template/session path first and falls back to OAuth
 verification (`acceptsToken: "oauth_token"`), so the CLI's OAuth credential works without a JWT
 template.
@@ -78,7 +78,7 @@ This uses an OAuth public client with PKCE, so the CLI stores no client secret.
 
 In **Clerk Dashboard > OAuth applications**:
 
-1. Create an OAuth application for the T3 CLI.
+1. Create an OAuth application for the Kata Code CLI.
 2. Enable the **Public** option so authorization-code exchange uses PKCE.
 3. Add **both** allowed redirect URIs:
    - `http://127.0.0.1:34338/callback` for the loopback listener;
@@ -105,13 +105,13 @@ environment link.
 The connect command group is:
 
 ```sh
-t3 connect            # default: onboarding
-t3 connect login
-t3 connect link       # --publish-only
-t3 connect status     # --json
-t3 connect publish    # --disable
-t3 connect unlink
-t3 connect logout
+katacode connect            # default: onboarding
+katacode connect login
+katacode connect link        # --publish-only
+katacode connect status      # --json
+katacode connect publish     # --disable
+katacode connect unlink
+katacode connect logout
 ```
 
 `katacode serve` is a separate top-level command, not a connect subcommand.
@@ -147,13 +147,13 @@ ssh -L 34338:127.0.0.1:34338 <host>
 
 In **Clerk Dashboard > JWT templates**, create a template with:
 
-| Setting | Value                        |
-| ------- | ---------------------------- |
-| Name    | `t3-relay`                   |
-| Claims  | `{ "aud": "t3-code-relay" }` |
+| Setting | Value                          |
+| ------- | ------------------------------ |
+| Name    | `kata-relay`                   |
+| Claims  | `{ "aud": "kata-code-relay" }` |
 
-Set `KATACODE_CLERK_JWT_TEMPLATE=t3-relay` in the repository-root `.env`, and set
-`CLERK_JWT_AUDIENCE=t3-code-relay` in `infra/relay/.env`. Define `CLERK_JWT_TEMPLATE` and
+Set `KATACODE_CLERK_JWT_TEMPLATE=kata-relay` in the repository-root `.env`, and set
+`CLERK_JWT_AUDIENCE=kata-code-relay` in `infra/relay/.env`. Define `CLERK_JWT_TEMPLATE` and
 `CLERK_JWT_AUDIENCE` in the production relay deployment environment as well. The stable `aud` value
 is shared by production and non-production relay stages. The client-facing `KATACODE_RELAY_URL` still
 selects the concrete relay deployment, but changing that URL does not require a JWT template change.

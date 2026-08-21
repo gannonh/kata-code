@@ -1,4 +1,5 @@
 import { EnvironmentId } from "@kata-sh/code-contracts";
+import { WIRE_RELAY_PROVIDER_KIND } from "@kata-sh/code-contracts/wireIdentity";
 
 import type { RelayEnvironmentView } from "../connection/useConnectionController";
 import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
@@ -34,7 +35,7 @@ const pocketPiId = EnvironmentId.make("showcase-pocket-pi");
 const pocketPiEndpoint = {
   httpBaseUrl: "https://pocket-pi.t3.sh",
   wsBaseUrl: "wss://pocket-pi.t3.sh",
-  providerKind: "t3_relay" as const,
+  providerKind: WIRE_RELAY_PROVIDER_KIND,
 };
 
 export const SHOWCASE_CONNECTED_CLOUD_ENVIRONMENTS: ReadonlyArray<ConnectedEnvironmentSummary> = [

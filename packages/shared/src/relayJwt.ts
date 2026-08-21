@@ -1,15 +1,23 @@
 import { decodeJwt, importPKCS8, importSPKI, jwtVerify, SignJWT, type JWTPayload } from "jose";
+import {
+  WIRE_RELAY_CLOUD_HEALTH_REQUEST_JWT_TYP,
+  WIRE_RELAY_CLOUD_MINT_REQUEST_JWT_TYP,
+  WIRE_RELAY_ENV_ACTIVITY_JWT_TYP,
+  WIRE_RELAY_ENV_HEALTH_RESPONSE_JWT_TYP,
+  WIRE_RELAY_ENV_LINK_JWT_TYP,
+  WIRE_RELAY_ENV_MINT_RESPONSE_JWT_TYP,
+} from "@kata-sh/code-contracts/wireIdentity";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
-export const RELAY_LINK_PROOF_TYP = "t3-env-link+jwt";
-export const RELAY_MINT_REQUEST_TYP = "t3-cloud-mint+jwt";
-export const RELAY_HEALTH_REQUEST_TYP = "t3-cloud-health+jwt";
-export const RELAY_MINT_RESPONSE_TYP = "t3-env-mint+jwt";
-export const RELAY_HEALTH_RESPONSE_TYP = "t3-env-health+jwt";
-export const RELAY_ACTIVITY_PUBLISH_TYP = "t3-env-activity+jwt";
+export const RELAY_LINK_PROOF_TYP = WIRE_RELAY_ENV_LINK_JWT_TYP;
+export const RELAY_MINT_REQUEST_TYP = WIRE_RELAY_CLOUD_MINT_REQUEST_JWT_TYP;
+export const RELAY_HEALTH_REQUEST_TYP = WIRE_RELAY_CLOUD_HEALTH_REQUEST_JWT_TYP;
+export const RELAY_MINT_RESPONSE_TYP = WIRE_RELAY_ENV_MINT_RESPONSE_JWT_TYP;
+export const RELAY_HEALTH_RESPONSE_TYP = WIRE_RELAY_ENV_HEALTH_RESPONSE_JWT_TYP;
+export const RELAY_ACTIVITY_PUBLISH_TYP = WIRE_RELAY_ENV_ACTIVITY_JWT_TYP;
 
 export class RelayJwtError extends Schema.TaggedErrorClass<RelayJwtError>()("RelayJwtError", {
   operation: Schema.Literals(["sign", "verify"]),

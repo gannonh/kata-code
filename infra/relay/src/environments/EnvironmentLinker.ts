@@ -3,6 +3,7 @@ import {
   RelayEnvironmentLinkProofInvalidReason,
   type RelayEnvironmentLinkRequest,
 } from "@kata-sh/code-contracts/relay";
+import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
 import {
   decodeRelayJwt,
   normalizeRelayIssuer,
@@ -183,7 +184,7 @@ const make = Effect.gen(function* () {
           expiresAt: DateTime.formatIso(DateTime.makeUnsafe(candidate.exp * 1_000)),
         });
       }
-      const issuer = `t3-env:${candidate.environmentId}`;
+      const issuer = wireEnvironmentIssuer(candidate.environmentId);
       const relayIssuer = normalizeRelayIssuer(config.relayIssuer);
       const verified = yield* verifyRelayJwt({
         publicKey: candidate.environmentPublicKey,

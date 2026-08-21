@@ -14,6 +14,7 @@ import {
   ExecutionEnvironmentDescriptor,
   PortSchema,
 } from "@kata-sh/code-contracts";
+import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
 import { resolveWorktreeKatacodeHome } from "@kata-sh/code-shared/devHome";
 import {
   buildTailscaleHttpsBaseUrl,
@@ -55,7 +56,7 @@ import {
 } from "../startupAccess.ts";
 import { baseDirFlag, DurationFromString } from "./config.ts";
 
-const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
+const WELL_KNOWN_ENVIRONMENT_PATH = WIRE_ENVIRONMENT_WELL_KNOWN_PATH;
 const PAIR_PROBE_TIMEOUT = Duration.millis(2_500);
 // Tailscale provisions an HTTPS certificate on the first request to a fresh
 // serve mapping, which can take a few seconds.

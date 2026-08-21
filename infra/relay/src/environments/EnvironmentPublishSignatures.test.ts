@@ -35,7 +35,7 @@ const config = RelayConfiguration.RelayConfiguration.of({
   apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
   clerkSecretKey: Redacted.make("clerk-secret"),
   clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
+  clerkJwtAudience: "kata-code-relay",
   cloudMintPrivateKey: Redacted.make(keyPair.privateKey),
   cloudMintPublicKey: keyPair.publicKey,
   managedEndpointBaseDomain: undefined,
@@ -68,7 +68,7 @@ function signTestJwt(payload: object, privateKey: string): string {
 const freshRequest = Effect.gen(function* () {
   const now = yield* DateTime.now;
   const payload = {
-    iss: "t3-env:env",
+    iss: "kata-env:env",
     aud: "https://relay.example.test",
     sub: "env",
     jti: "publish-jti",
