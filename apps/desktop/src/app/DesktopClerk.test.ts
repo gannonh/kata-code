@@ -66,6 +66,7 @@ describe("DesktopClerk", () => {
   beforeEach(() => {
     createClerkBridgeMock.mockReset();
     storageMock.mockReset();
+    DesktopClerk.resetDesktopClerkBeforeReadyForTests();
   });
 
   it("derives the Clerk Frontend API hostname used by the desktop CSP", () => {

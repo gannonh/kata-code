@@ -27,6 +27,7 @@ interface UpdatesHarnessOptions {
     void,
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
   >;
+  readonly quitAndInstall?: ElectronUpdater.ElectronUpdater["Service"]["quitAndInstall"];
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
   readonly startBackend?: Effect.Effect<void>;
@@ -85,7 +86,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       checkCount += 1;
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
     downloadUpdate: Effect.void,
-    quitAndInstall: () => Effect.void,
+    quitAndInstall: options.quitAndInstall ?? (() => Effect.void),
     on: (eventName, listener) =>
       Effect.acquireRelease(
         Effect.sync(() => {
@@ -537,6 +538,76 @@ describe("DesktopUpdates", () => {
           harness.emit("error", new Error("code signature validation failed"));
           yield* Deferred.await(restarted);
 
+          assert.equal(harness.startBackendCount(), 1);
+          assert.isFalse(yield* Ref.get(desktopState.quitting));
+          const state = yield* updates.getState;
+          assert.equal(state.status, "downloaded");
+          assert.equal(state.errorContext, "install");
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
+  it.effect("restarts the backend after quitAndInstall throws", () =>
+    Effect.gen(function* () {
+      const restarted = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        quitAndInstall: () =>
+          Effect.fail(
+            new ElectronUpdater.ElectronUpdaterQuitAndInstallError({
+              channel: "latest",
+              isSilent: true,
+              isForceRunAfter: true,
+              cause: new Error("quitAndInstall failed"),
+            }),
+          ),
+        startBackend: Deferred.succeed(restarted, undefined),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const desktopState = yield* DesktopState.DesktopState;
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-downloaded", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const result = yield* updates.install;
+          assert.isTrue(result.accepted);
+          assert.isFalse(result.completed);
+
+          yield* Deferred.await(restarted);
+          assert.equal(harness.startBackendCount(), 1);
+          assert.isFalse(yield* Ref.get(desktopState.quitting));
+          const state = yield* updates.getState;
+          assert.equal(state.status, "downloaded");
+          assert.equal(state.errorContext, "install");
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
+  it.effect("restarts the backend after an unexpected install failure", () =>
+    Effect.gen(function* () {
+      const restarted = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        stopBackend: Effect.die(new Error("backend stop failed")),
+        startBackend: Deferred.succeed(restarted, undefined),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const desktopState = yield* DesktopState.DesktopState;
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-downloaded", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const result = yield* updates.install;
+          assert.isTrue(result.accepted);
+          assert.isFalse(result.completed);
+
+          yield* Deferred.await(restarted);
           assert.equal(harness.startBackendCount(), 1);
           assert.isFalse(yield* Ref.get(desktopState.quitting));
           const state = yield* updates.getState;

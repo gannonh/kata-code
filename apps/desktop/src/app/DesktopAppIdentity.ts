@@ -11,6 +11,7 @@ import { PROTOCOL_SCHEME_LEGACY } from "@kata-sh/code-shared/branding";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import { resolveDesktopUserDataPath } from "./DesktopStatePaths.ts";
 
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
@@ -53,6 +54,7 @@ export const resolveUserDataPath = Effect.gen(function* () {
   const candidateDirNames = environment.isDevelopment
     ? [environment.legacyUserDataDirName]
     : [environment.legacyUserDataDirName, PROTOCOL_SCHEME_LEGACY];
+  const existenceByPath = new Map<string, boolean>();
 
   for (const dirName of candidateDirNames) {
     const candidatePath = environment.path.join(environment.appDataDirectory, dirName);
@@ -65,12 +67,17 @@ export const resolveUserDataPath = Effect.gen(function* () {
           }),
       ),
     );
-    if (exists) {
-      return candidatePath;
-    }
+    existenceByPath.set(candidatePath, exists);
   }
 
-  return environment.path.join(environment.appDataDirectory, environment.userDataDirName);
+  return resolveDesktopUserDataPath({
+    appDataDirectory: environment.appDataDirectory,
+    exists: (path) => existenceByPath.get(path) === true,
+    isDevelopment: environment.isDevelopment,
+    joinPath: environment.path.join,
+    legacyUserDataDirName: environment.legacyUserDataDirName,
+    userDataDirName: environment.userDataDirName,
+  });
 }).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
 
 export const make = Effect.gen(function* () {

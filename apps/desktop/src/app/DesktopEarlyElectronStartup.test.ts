@@ -3,12 +3,25 @@ import * as NodePath from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 
 import {
+  isDevelopmentEnvironment,
   resolveEarlyLinuxElectronOptions,
   resolveEarlyLinuxPasswordStorePreference,
 } from "./DesktopEarlyElectronStartup.ts";
 
 describe("DesktopEarlyElectronStartup", () => {
   const joinPath = NodePath.posix.join;
+
+  it.each([
+    { env: { VITE_DEV_SERVER_URL: "http://127.0.0.1:5173" }, expected: true },
+    { env: { VITE_DEV_SERVER_URL: "" }, expected: false },
+    { env: { VITE_DEV_SERVER_URL: "   " }, expected: false },
+    { env: {}, expected: false },
+  ])(
+    "detects development from VITE_DEV_SERVER_URL ($env.VITE_DEV_SERVER_URL)",
+    ({ env, expected }) => {
+      assert.equal(isDevelopmentEnvironment(env), expected);
+    },
+  );
 
   it("reads the persisted linux password-store preference before Electron is ready", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
@@ -90,6 +103,20 @@ describe("DesktopEarlyElectronStartup", () => {
     const options = resolveEarlyLinuxElectronOptions({
       env: {
         KATACODE_HOME: "/home/user/.t3-test",
+      },
+      homeDirectory: "/home/user",
+      joinPath,
+      readFileString: () => JSON.stringify({ linuxPasswordStore: "auto" }),
+    });
+
+    assert.equal(options.linuxWmClass, "katacode");
+  });
+
+  it("uses the production window class when VITE_DEV_SERVER_URL is empty", () => {
+    const options = resolveEarlyLinuxElectronOptions({
+      env: {
+        KATACODE_HOME: "/home/user/.t3-test",
+        VITE_DEV_SERVER_URL: "",
       },
       homeDirectory: "/home/user",
       joinPath,
