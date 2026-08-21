@@ -1029,6 +1029,14 @@ export function resolveMacPasskeySigningConfiguration(
   };
 }
 
+export function resolveOptionalMacPasskeySigningConfiguration(
+  env: Readonly<Record<string, string | undefined>>,
+): MacPasskeySigningConfiguration | undefined {
+  return env.KATACODE_MACOS_PROVISIONING_PROFILE?.trim()
+    ? resolveMacPasskeySigningConfiguration(env)
+    : undefined;
+}
+
 function escapeXml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -2050,7 +2058,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_BUNDLE_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "Kata-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [...DESKTOP_FILE_EXCLUSIONS],
     directories: {
@@ -2079,6 +2087,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "mac") {
+    if (signed) {
+      buildConfig.forceCodeSigning = true;
+    }
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
@@ -2850,7 +2861,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const configuredMacPasskeySigning =
     options.platform === "mac" && options.signed
       ? yield* Effect.try({
-          try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
+          try: () => resolveOptionalMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
         })
       : undefined;
@@ -2997,6 +3008,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = "false";
     delete buildEnv.CSC_LINK;
     delete buildEnv.CSC_KEY_PASSWORD;
+    delete buildEnv.APPLE_ID;
+    delete buildEnv.APPLE_APP_SPECIFIC_PASSWORD;
+    delete buildEnv.APPLE_TEAM_ID;
     delete buildEnv.APPLE_API_KEY;
     delete buildEnv.APPLE_API_KEY_ID;
     delete buildEnv.APPLE_API_ISSUER;

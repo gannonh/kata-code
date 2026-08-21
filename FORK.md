@@ -54,6 +54,6 @@ No compatibility shims for the previous upstream env prefix, home directory, or 
 
 ## Workflows
 
-Active: `.github/workflows/ci.yml` (`ubuntu-24.04`, `@kata-sh/code-*` filters).
+Active: `.github/workflows/ci.yml` and `.github/workflows/release.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`; `@kata-sh/code-*` filters).
 
-Parked under `.github/disabled/` until a later phase: release, relay deploy, mobile EAS, AUR, PR automation, web preview.
+Parked under `.github/disabled/` until a later phase: relay deploy, mobile EAS, AUR, PR automation, web preview.

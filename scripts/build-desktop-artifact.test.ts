@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - reads tracked packaging assets for a regression assertion.
+import * as NodeFS from "node:fs";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -32,6 +35,7 @@ import {
   renderMacPasskeyEntitlements,
   resolveClerkPasskeyNativeArtifacts,
   resolveMacPasskeySigningConfiguration,
+  resolveOptionalMacPasskeySigningConfiguration,
   resolveDesktopRuntimeDependencies,
   resolveFffNativeDependencies,
   resolveBuildOptions,
@@ -894,6 +898,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
   });
 
+  it("allows signed macOS builds without optional passkey entitlements", () => {
+    assert.isUndefined(
+      resolveOptionalMacPasskeySigningConfiguration({
+        KATACODE_APPLE_TEAM_ID: "ABC1234567",
+        KATACODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev",
+      }),
+    );
+  });
+
   it("normalizes explicit macOS passkey RP domains and renders required entitlements", () => {
     const configuration = resolveMacPasskeySigningConfiguration({
       KATACODE_APPLE_TEAM_ID: "ABC1234567",
@@ -1002,6 +1015,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       });
 
       const mac = config.mac as Record<string, unknown>;
+      assert.isTrue(config.forceCodeSigning);
       assert.equal(config.appId, "com.katacode.app");
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
@@ -1029,6 +1043,17 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       );
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
+
+  it("keeps DMG backgrounds Kata-branded", () => {
+    for (const channel of ["latest", "nightly"] as const) {
+      const source = NodeFS.readFileSync(
+        new URL(`../apps/desktop/resources/dmg/dmg-background-${channel}.svg`, import.meta.url),
+        "utf8",
+      );
+      assert.include(source, "KATA CODE");
+      assert.equal(source.includes("T3 CODE"), false);
+    }
+  });
 
   it.effect("keeps executable resource editing enabled for unsigned Windows builds", () =>
     Effect.gen(function* () {

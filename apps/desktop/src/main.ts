@@ -64,6 +64,10 @@ import * as DesktopWslBackend from "./wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "./wsl/DesktopWslEnvironment.ts";
 import * as DesktopWslServerTree from "./wsl/DesktopWslServerTree.ts";
 
+// Clerk registers its renderer scheme during bridge creation, so initialize it
+// before the Effect runtime can yield to Electron's ready event.
+DesktopClerk.initializeDesktopClerkBeforeReady();
+
 const desktopEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
     const metadata = yield* Effect.service(ElectronApp.ElectronApp).pipe(
@@ -198,6 +202,7 @@ const desktopClerkLayer = DesktopClerk.layer.pipe(
   Layer.provideMerge(desktopEnvironmentLayer),
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(ElectronApp.layer),
+  Layer.provideMerge(DesktopPreReadyPlatform.layer),
 );
 
 const desktopApplicationRuntimeLayer = desktopApplicationLayer.pipe(
@@ -213,7 +218,6 @@ const desktopRuntimeLayer = desktopClerkLayer.pipe(
   Layer.flatMap((clerkContext) =>
     desktopApplicationRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),
   ),
-  Layer.provideMerge(DesktopPreReadyPlatform.layer),
 );
 
 DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);

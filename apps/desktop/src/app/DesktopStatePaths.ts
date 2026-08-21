@@ -1,3 +1,4 @@
+import { PROTOCOL_SCHEME_LEGACY } from "@kata-sh/code-shared/branding";
 import * as Option from "effect/Option";
 
 export type JoinPath = (first: string, ...segments: string[]) => string;
@@ -29,4 +30,30 @@ export function resolveDesktopStateDir(input: {
   const useDevSubdir =
     input.isDevelopment && Option.isNone(normalizeConfiguredBaseDir(input.t3Home));
   return input.joinPath(input.baseDir, useDevSubdir ? "dev" : "userdata");
+}
+
+export function desktopLegacyUserDataDirName(isDevelopment: boolean): string {
+  return isDevelopment ? "Kata Code (Dev)" : "Kata Code (Alpha)";
+}
+
+export function resolveDesktopUserDataPath(input: {
+  readonly appDataDirectory: string;
+  readonly exists: (path: string) => boolean;
+  readonly isDevelopment: boolean;
+  readonly joinPath: JoinPath;
+  readonly legacyUserDataDirName: string;
+  readonly userDataDirName: string;
+}): string {
+  const candidateDirNames = input.isDevelopment
+    ? [input.legacyUserDataDirName]
+    : [input.legacyUserDataDirName, PROTOCOL_SCHEME_LEGACY];
+
+  for (const dirName of candidateDirNames) {
+    const candidatePath = input.joinPath(input.appDataDirectory, dirName);
+    if (input.exists(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
+  return input.joinPath(input.appDataDirectory, input.userDataDirName);
 }

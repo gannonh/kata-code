@@ -20,7 +20,11 @@ import * as Path from "effect/Path";
 
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
-import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
+import {
+  desktopLegacyUserDataDirName,
+  resolveDesktopBaseDir,
+  resolveDesktopStateDir,
+} from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 
 export interface MakeDesktopEnvironmentInput {
@@ -184,7 +188,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     t3Home: config.t3Home,
   });
   const userDataDirName = desktopProtocolScheme(isDevelopment);
-  const legacyUserDataDirName = isDevelopment ? "Kata Code (Dev)" : "Kata Code (Alpha)";
+  const legacyUserDataDirName = desktopLegacyUserDataDirName(isDevelopment);
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
     "applications",

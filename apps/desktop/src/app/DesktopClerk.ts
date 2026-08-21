@@ -1,5 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off - Clerk's renderer bridge must be created synchronously before Electron's ready event.
 import { createClerkBridge } from "@clerk/electron";
 import { storage } from "@clerk/electron/storage";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -8,11 +12,22 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import { clerkFrontendApiHostnameFromPublishableKey } from "@kata-sh/code-shared/relayAuth";
+import * as Electron from "electron";
+
+import { desktopProtocolScheme } from "@kata-sh/code-shared/branding";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import { isDevelopmentEnvironment } from "./DesktopEarlyElectronStartup.ts";
+import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
+import {
+  desktopLegacyUserDataDirName,
+  resolveDesktopBaseDir,
+  resolveDesktopStateDir,
+  resolveDesktopUserDataPath,
+} from "./DesktopStatePaths.ts";
 
 declare const __KATACODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
@@ -83,7 +98,57 @@ export function createDesktopClerkBridge(stateDir: string, isDevelopment: boolea
   });
 }
 
+type DesktopClerkBridge = ReturnType<typeof createDesktopClerkBridge>;
+
+let preReadyBridge: DesktopClerkBridge | undefined;
+let preReadyBridgeError: unknown;
+
+export function initializeDesktopClerkBeforeReady(env: NodeJS.ProcessEnv = process.env): void {
+  if (preReadyBridge !== undefined || preReadyBridgeError !== undefined) return;
+
+  const configuredHome = env.KATACODE_HOME?.trim() || undefined;
+  const isDevelopment = isDevelopmentEnvironment(env);
+  const homeDirectory = NodeOS.homedir();
+  const t3Home = Option.fromNullishOr(configuredHome);
+  const baseDir = resolveDesktopBaseDir({
+    homeDirectory,
+    joinPath: NodePath.join,
+    t3Home,
+  });
+  const stateDir = resolveDesktopStateDir({
+    baseDir,
+    isDevelopment,
+    joinPath: NodePath.join,
+    t3Home,
+  });
+  const userDataPath = resolveDesktopUserDataPath({
+    appDataDirectory: Electron.app.getPath("appData"),
+    exists: NodeFS.existsSync,
+    isDevelopment,
+    joinPath: NodePath.join,
+    legacyUserDataDirName: desktopLegacyUserDataDirName(isDevelopment),
+    userDataDirName: desktopProtocolScheme(isDevelopment),
+  });
+
+  try {
+    Electron.app.setPath("userData", userDataPath);
+    preReadyBridge = createDesktopClerkBridge(stateDir, isDevelopment);
+  } catch (error) {
+    preReadyBridgeError = error;
+  }
+}
+
+/** Test-only: clear the pre-ready bridge so unit tests can re-run bootstrap. */
+export function resetDesktopClerkBeforeReadyForTests(): void {
+  preReadyBridge = undefined;
+  preReadyBridgeError = undefined;
+}
+
 export const make = Effect.gen(function* () {
+  // Clerk registers the renderer scheme during bridge creation, which must
+  // happen before Electron emits `ready`. Keeping this service dependency
+  // explicit makes the pre-ready layer a real acquisition prerequisite.
+  yield* DesktopPreReadyPlatform.DesktopPreReadyElectronOptions;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const electronApp = yield* ElectronApp.ElectronApp;
 
@@ -98,7 +163,14 @@ export const make = Effect.gen(function* () {
 
   const bridge = yield* Effect.acquireRelease(
     Effect.try({
-      try: () => createDesktopClerkBridge(environment.stateDir, environment.isDevelopment),
+      try: () => {
+        if (preReadyBridgeError !== undefined) throw preReadyBridgeError;
+        const bridge =
+          preReadyBridge ??
+          createDesktopClerkBridge(environment.stateDir, environment.isDevelopment);
+        preReadyBridge = undefined;
+        return bridge;
+      },
       catch: (cause) =>
         new DesktopClerkBridgeInitializationError({
           stateDir: environment.stateDir,

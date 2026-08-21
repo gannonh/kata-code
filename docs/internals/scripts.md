@@ -91,9 +91,11 @@ authenticated.
   launch.
 - To keep staging files for debugging package contents, run: `vp run dist:desktop:dmg --keep-stage`
 - To allow code-signing/notarization when configured in CI/secrets, add: `--signed`.
-- Signed macOS builds also require `KATACODE_APPLE_TEAM_ID` and
-  `KATACODE_MACOS_PROVISIONING_PROFILE`. The passkey RP domain is derived from
-  `KATACODE_CLERK_PUBLISHABLE_KEY` unless `KATACODE_CLERK_PASSKEY_RP_DOMAINS` overrides it.
+- Signed macOS builds can include passkey entitlements when
+  `KATACODE_APPLE_TEAM_ID` and `KATACODE_MACOS_PROVISIONING_PROFILE` are configured. The passkey RP
+  domain is derived from `KATACODE_CLERK_PUBLISHABLE_KEY` unless
+  `KATACODE_CLERK_PASSKEY_RP_DOMAINS` overrides it; without a provisioning profile, the app remains
+  signed but has no Associated Domains entitlement.
 - Windows `--signed` uses Azure Trusted Signing and expects:
   `AZURE_TRUSTED_SIGNING_ENDPOINT`, `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`,
   `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`, and `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`.

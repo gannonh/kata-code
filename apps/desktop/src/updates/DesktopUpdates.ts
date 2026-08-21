@@ -451,6 +451,34 @@ export const make = Effect.gen(function* () {
     { discard: true },
   );
 
+  const restartBackendsAfterInstallFailure = Effect.gen(function* () {
+    const instances = yield* pool.list;
+    yield* Effect.forEach(
+      instances,
+      (instance) =>
+        instance.start.pipe(
+          Effect.catchCause(() =>
+            logUpdaterError("failed to restart a desktop backend after update install failure", {
+              errorTag: "DesktopUpdateBackendRestartError",
+              instanceId: instance.id,
+            }).pipe(Effect.asVoid),
+          ),
+        ),
+      { concurrency: "unbounded" },
+    );
+  }).pipe(
+    Effect.catchCause(() =>
+      logUpdaterError("failed to list desktop backends after update install failure", {
+        errorTag: "DesktopUpdateBackendListError",
+      }).pipe(Effect.asVoid),
+    ),
+  );
+
+  const recoverFromFailedInstall = Effect.gen(function* () {
+    yield* resetInstallAction;
+    yield* restartBackendsAfterInstallFailure;
+  });
+
   const installDownloadedUpdate = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     if (
@@ -488,7 +516,7 @@ export const make = Effect.gen(function* () {
       Effect.catchTags({
         ElectronUpdaterQuitAndInstallError: Effect.fn("desktop.updates.handleInstallFailure")(
           function* (error) {
-            yield* resetInstallAction;
+            yield* recoverFromFailedInstall;
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnInstallFailure(current, error.message),
             );
@@ -508,7 +536,7 @@ export const make = Effect.gen(function* () {
           if (Cause.hasInterruptsOnly(cause)) {
             return yield* Effect.failCause(cause);
           }
-          yield* resetInstallAction;
+          yield* recoverFromFailedInstall;
           const error = new DesktopUpdateUnexpectedActionError({ action: "install", cause });
           yield* updateState((current) =>
             reduceDesktopUpdateStateOnInstallFailure(current, error.message),
@@ -615,8 +643,7 @@ export const make = Effect.gen(function* () {
       cause,
     });
     if (yield* Ref.get(updateInstallInFlightRef)) {
-      yield* Ref.set(updateInstallInFlightRef, false);
-      yield* Ref.set(desktopState.quitting, false);
+      yield* recoverFromFailedInstall;
       yield* updateState((current) =>
         reduceDesktopUpdateStateOnInstallFailure(current, error.message),
       );

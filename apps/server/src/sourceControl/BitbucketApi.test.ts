@@ -761,17 +761,17 @@ it.effect("checks out fork pull requests through an ensured fork remote", () => 
       cwd: "/repo",
       remoteName: "octocat",
       remoteBranch: "main",
-      localBranch: "kata-code/pr-42/main",
+      localBranch: "katacode/pr-42/main",
     });
     assert.deepStrictEqual(git.setBranchUpstream.mock.calls[0]?.[0], {
       cwd: "/repo",
-      branch: "kata-code/pr-42/main",
+      branch: "katacode/pr-42/main",
       remoteName: "octocat",
       remoteBranch: "main",
     });
     assert.deepStrictEqual(git.switchRef.mock.calls[0]?.[0], {
       cwd: "/repo",
-      refName: "kata-code/pr-42/main",
+      refName: "katacode/pr-42/main",
     });
   }).pipe(Effect.provide(layer));
 });

@@ -6,8 +6,8 @@ describe("formatWorkspaceRelativePath", () => {
   it("formats absolute workspace paths from the workspace root", () => {
     expect(
       formatWorkspaceRelativePath(
-        "C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts:501",
-        "C:/Users/mike/dev-stuff/t3code",
+        "C:/Users/mike/dev-stuff/kata-code/apps/web/src/session-logic.ts:501",
+        "C:/Users/mike/dev-stuff/kata-code",
       ),
     ).toBe("kata-code/apps/web/src/session-logic.ts:501");
   });
@@ -16,7 +16,7 @@ describe("formatWorkspaceRelativePath", () => {
     expect(
       formatWorkspaceRelativePath(
         "apps/web/src/session-logic.ts:501",
-        "C:/Users/mike/dev-stuff/t3code",
+        "C:/Users/mike/dev-stuff/kata-code",
       ),
     ).toBe("kata-code/apps/web/src/session-logic.ts:501");
   });
@@ -25,7 +25,7 @@ describe("formatWorkspaceRelativePath", () => {
     expect(
       formatWorkspaceRelativePath(
         "kata-code/apps/web/src/session-logic.ts:501",
-        "C:/Users/mike/dev-stuff/t3code",
+        "C:/Users/mike/dev-stuff/kata-code",
       ),
     ).toBe("kata-code/apps/web/src/session-logic.ts:501");
   });
@@ -33,8 +33,8 @@ describe("formatWorkspaceRelativePath", () => {
   it("preserves columns when present", () => {
     expect(
       formatWorkspaceRelativePath(
-        "/C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts:501:9",
-        "C:/Users/mike/dev-stuff/t3code",
+        "/C:/Users/mike/dev-stuff/kata-code/apps/web/src/session-logic.ts:501:9",
+        "C:/Users/mike/dev-stuff/kata-code",
       ),
     ).toBe("kata-code/apps/web/src/session-logic.ts:501:9");
   });

@@ -85,15 +85,15 @@ jobs:
 
       - name: Test
         env:
-          KATACODE_TRANSFER_BUDGET_REPORT_PATH: ${{ runner.temp }}/t3code-transfer-budget.md
+          KATACODE_TRANSFER_BUDGET_REPORT_PATH: ${{ runner.temp }}/katacode-transfer-budget.md
           KATACODE_TRANSFER_BUDGET_RESULT_PATH: ${{ runner.temp }}/thread-transfer-result.json
         run: vp run test
 
       - name: Publish transfer budget report
         if: always()
         run: |
-          if test -f "${{ runner.temp }}/t3code-transfer-budget.md"; then
-            tee -a "$GITHUB_STEP_SUMMARY" < "${{ runner.temp }}/t3code-transfer-budget.md"
+          if test -f "${{ runner.temp }}/katacode-transfer-budget.md"; then
+            tee -a "$GITHUB_STEP_SUMMARY" < "${{ runner.temp }}/katacode-transfer-budget.md"
           else
             echo "Transfer budget report was not produced." >> "$GITHUB_STEP_SUMMARY"
           fi

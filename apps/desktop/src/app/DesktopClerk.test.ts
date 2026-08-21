@@ -28,6 +28,7 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
 
 const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
@@ -50,6 +51,10 @@ const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
+        Layer.succeed(DesktopPreReadyPlatform.DesktopPreReadyElectronOptions, {
+          linux: null,
+          linuxPasswordStoreCommandLine: null,
+        }),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
         FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
       ),
@@ -61,6 +66,7 @@ describe("DesktopClerk", () => {
   beforeEach(() => {
     createClerkBridgeMock.mockReset();
     storageMock.mockReset();
+    DesktopClerk.resetDesktopClerkBeforeReadyForTests();
   });
 
   it("derives the Clerk Frontend API hostname used by the desktop CSP", () => {

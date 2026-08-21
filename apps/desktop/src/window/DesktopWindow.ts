@@ -721,10 +721,10 @@ export const make = Effect.gen(function* () {
       );
     });
 
+    // ready-to-show is preferred, but a loaded hidden window must still reveal if
+    // Electron never emits it (which can happen for packaged macOS windows).
     const revealSubscribers: RevealSubscription[] = [(fire) => window.once("ready-to-show", fire)];
-    if (environment.platform === "linux") {
-      revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
-    }
+    revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
     bindFirstRevealTrigger(revealSubscribers, () => {
       // Reveal the real window, then close the connecting splash (if any) so the
       // two don't overlap and there's no blank gap between them.

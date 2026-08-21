@@ -179,7 +179,7 @@ export const make = Effect.gen(function* () {
     }
     yield* writeDesktopEntry;
     // Best-effort: the previous slug's hidden entry must not keep claiming
-    // t3code:// after this process has claimed both schemes.
+    // the legacy URL scheme after this process has claimed both schemes.
     yield* fileSystem.remove(legacyDesktopEntryPath, { force: true }).pipe(Effect.ignore);
     yield* setDefaultHandler;
     yield* logInfo("registered URL scheme handler", { schemes });
