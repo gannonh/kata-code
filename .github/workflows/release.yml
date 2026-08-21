@@ -173,6 +173,20 @@ jobs:
             echo "dry_run=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Post release parameters to the run page
+        run: |
+          {
+            echo "## Release parameters"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **channel** | \`${{ steps.release_meta.outputs.release_channel }}\` |"
+            echo "| **version** | \`${{ steps.release_meta.outputs.version }}\` |"
+            echo "| **tag** | \`${{ steps.release_meta.outputs.tag }}\` |"
+            echo "| **prerelease** | \`${{ steps.release_meta.outputs.is_prerelease }}\` |"
+            echo "| **make_latest** | \`${{ steps.release_meta.outputs.make_latest }}\` |"
+            echo "| **dry_run** | \`${{ steps.release_meta.outputs.dry_run }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Check
         run: vp check
 
@@ -868,6 +882,14 @@ jobs:
       #       exit 1
       #     fi
 
+      - name: Prepare release assets
+        run: |
+          node scripts/prepare-github-release.ts \
+            --dist release-assets \
+            --repository "${{ github.repository }}" \
+            --tag "${{ needs.preflight.outputs.tag }}" \
+            --version "${{ needs.preflight.outputs.version }}"
+
       - name: Publish release
         if: needs.preflight.outputs.previous_tag != ''
         uses: softprops/action-gh-release@v3
@@ -875,6 +897,7 @@ jobs:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: ${{ needs.preflight.outputs.release_name }}
+          body_path: release-assets/release-body.md
           generate_release_notes: true
           previous_tag: ${{ needs.preflight.outputs.previous_tag }}
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
@@ -896,6 +919,7 @@ jobs:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: ${{ needs.preflight.outputs.release_name }}
+          body_path: release-assets/release-body.md
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
