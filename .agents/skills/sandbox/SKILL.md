@@ -45,11 +45,21 @@ sandboxes with **named, persistent** sandboxes. Key differences from v1:
 
 ```typescript
 // Core SDK
-import { Sandbox, Session, Snapshot, Command, CommandFinished } from "@vercel/sandbox";
+import {
+  Sandbox,
+  Session,
+  Snapshot,
+  Command,
+  CommandFinished,
+} from "@vercel/sandbox";
 import { APIError, StreamError } from "@vercel/sandbox";
 
 // For advanced network policy with credential brokering and L7 matchers
-import type { NetworkPolicy, NetworkPolicyRule, NetworkTransformer } from "@vercel/sandbox";
+import type {
+  NetworkPolicy,
+  NetworkPolicyRule,
+  NetworkTransformer,
+} from "@vercel/sandbox";
 
 // For implementing a request-forwarding proxy (forwardURL)
 import { defineSandboxProxy } from "@vercel/sandbox/proxy";
@@ -100,7 +110,9 @@ const sandbox = await Sandbox.getOrCreate({
   name: "my-workspace",
   // Runs only the first time the sandbox is created.
   onCreate: async (sbx) => {
-    await sbx.writeFiles([{ path: "README.md", content: Buffer.from("# Hello") }]);
+    await sbx.writeFiles([
+      { path: "README.md", content: Buffer.from("# Hello") },
+    ]);
     await sbx.runCommand("npm", ["install"]);
   },
   // Runs every time the sandbox session is resumed (including after auto-resume).
@@ -532,7 +544,9 @@ const sandbox = await Sandbox.create({
           match: {
             method: ["POST"],
             path: { startsWith: "/v1/" },
-            headers: [{ key: { exact: "x-api-key" }, value: { exact: "placeholder" } }],
+            headers: [
+              { key: { exact: "x-api-key" }, value: { exact: "placeholder" } },
+            ],
           },
           transform: [{ headers: { authorization: "Bearer ..." } }],
         },
@@ -580,7 +594,13 @@ const handler = defineSandboxProxy(async (request, meta) => {
 
 // Sandboxes forward requests using their original method, so the handler
 // must be exposed under every verb the network policy can route.
-export { handler as GET, handler as POST, handler as PUT, handler as PATCH, handler as DELETE };
+export {
+  handler as GET,
+  handler as POST,
+  handler as PUT,
+  handler as PATCH,
+  handler as DELETE,
+};
 ```
 
 ### Updating Network Policy at Runtime
@@ -1086,7 +1106,9 @@ async function runFromBase(code: string) {
     sourceSandbox: "my-base",
     persistent: false,
   });
-  await sandbox.writeFiles([{ path: "/vercel/sandbox/index.ts", content: Buffer.from(code) }]);
+  await sandbox.writeFiles([
+    { path: "/vercel/sandbox/index.ts", content: Buffer.from(code) },
+  ]);
   return sandbox.runCommand("tsx", ["index.ts"]);
 }
 ```
