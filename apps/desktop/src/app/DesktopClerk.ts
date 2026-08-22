@@ -89,7 +89,7 @@ export const desktopClerkFrontendApiHostname = resolveDesktopClerkFrontendApiHos
 
 export function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   return createClerkBridge({
-    storage: storage({ path: stateDir }),
+    storage: storage({ name: "kata-clerk-tokens", path: stateDir }),
     passkeys: true,
     renderer: {
       scheme: ElectronProtocol.getDesktopScheme(isDevelopment),

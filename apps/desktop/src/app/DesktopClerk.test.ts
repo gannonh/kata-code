@@ -227,7 +227,9 @@ describe("DesktopClerk", () => {
     createClerkBridgeMock.mockReturnValue(bridge);
 
     assert.equal(DesktopClerk.createDesktopClerkBridge("/tmp/t3-state", isDevelopment), bridge);
-    assert.deepEqual(storageMock.mock.calls, [[{ path: "/tmp/t3-state" }]]);
+    assert.deepEqual(storageMock.mock.calls, [
+      [{ name: "kata-clerk-tokens", path: "/tmp/t3-state" }],
+    ]);
     assert.deepEqual(createClerkBridgeMock.mock.calls, [
       [
         {

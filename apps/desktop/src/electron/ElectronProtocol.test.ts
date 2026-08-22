@@ -3,15 +3,26 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { handleMock, netFetchMock, unhandleMock } = vi.hoisted(() => ({
-  handleMock: vi.fn(),
-  netFetchMock: vi.fn(),
-  unhandleMock: vi.fn(),
-}));
+const { handleMock, netFetchMock, onBeforeSendHeadersMock, onHeadersReceivedMock, unhandleMock } =
+  vi.hoisted(() => ({
+    handleMock: vi.fn(),
+    netFetchMock: vi.fn(),
+    onBeforeSendHeadersMock: vi.fn(),
+    onHeadersReceivedMock: vi.fn(),
+    unhandleMock: vi.fn(),
+  }));
 
 vi.mock("electron", () => ({
   net: { fetch: netFetchMock },
   protocol: { handle: handleMock, unhandle: unhandleMock },
+  session: {
+    defaultSession: {
+      webRequest: {
+        onBeforeSendHeaders: onBeforeSendHeadersMock,
+        onHeadersReceived: onHeadersReceivedMock,
+      },
+    },
+  },
 }));
 
 import * as ElectronProtocol from "./ElectronProtocol.ts";
@@ -20,6 +31,8 @@ describe("ElectronProtocol", () => {
   beforeEach(() => {
     handleMock.mockReset();
     netFetchMock.mockReset();
+    onBeforeSendHeadersMock.mockReset();
+    onHeadersReceivedMock.mockReset();
     unhandleMock.mockReset();
   });
 
@@ -85,6 +98,123 @@ describe("ElectronProtocol", () => {
       assert.isNull(forwardedHeaders.get("referer"));
       assert.isNull(forwardedHeaders.get("sec-fetch-site"));
       assert.deepEqual(unhandleMock.mock.calls, [["katacode-dev"]]);
+    }).pipe(Effect.provide(ElectronProtocol.layer)),
+  );
+
+  it("removes the renderer origin only from authenticated Clerk requests", () => {
+    assert.deepEqual(
+      ElectronProtocol.normalizeClerkRequestHeaders({
+        Authorization: "Bearer client-token",
+        Origin: "katacode-dev://app",
+        Accept: "application/json",
+      }),
+      {
+        Authorization: "Bearer client-token",
+        Accept: "application/json",
+      },
+    );
+    assert.deepEqual(
+      ElectronProtocol.normalizeClerkRequestHeaders({
+        Origin: "katacode-dev://app",
+        Accept: "application/json",
+      }),
+      {
+        Origin: "katacode-dev://app",
+        Accept: "application/json",
+      },
+    );
+  });
+
+  it("adds the renderer origin to native Clerk responses", () => {
+    assert.deepEqual(
+      ElectronProtocol.withClerkCorsResponseHeaders(
+        {
+          "Access-Control-Allow-Origin": ["https://old.example"],
+          "Content-Type": ["application/json"],
+        },
+        "katacode-dev://app",
+      ),
+      {
+        "Access-Control-Allow-Origin": ["katacode-dev://app"],
+        "Content-Type": ["application/json"],
+      },
+    );
+  });
+
+  it.effect("registers the Clerk header hooks for the configured frontend host", () =>
+    Effect.gen(function* () {
+      let requestListener:
+        | ((
+            details: { requestHeaders: Record<string, string> },
+            callback: (response: { requestHeaders: Record<string, string> }) => void,
+          ) => void)
+        | undefined;
+      let responseListener:
+        | ((
+            details: { responseHeaders?: Record<string, string[]> },
+            callback: (response: { responseHeaders: Record<string, string[]> }) => void,
+          ) => void)
+        | undefined;
+      onBeforeSendHeadersMock.mockImplementation((filter, nextListener) => {
+        if (nextListener) requestListener = nextListener;
+      });
+      onHeadersReceivedMock.mockImplementation((filter, nextListener) => {
+        if (nextListener) responseListener = nextListener;
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "katacode-dev",
+            targetOrigin: new URL("http://127.0.0.1:3773/"),
+            backendOrigin: new URL("http://127.0.0.1:3774/"),
+            clerkFrontendApiHostname: "upward-terrier-81.clerk.accounts.dev",
+          });
+
+          assert.deepEqual(onBeforeSendHeadersMock.mock.calls[0]?.[0], {
+            urls: ["https://upward-terrier-81.clerk.accounts.dev/*"],
+          });
+          assert.deepEqual(onHeadersReceivedMock.mock.calls[0]?.[0], {
+            urls: ["https://upward-terrier-81.clerk.accounts.dev/*"],
+          });
+          assert.isDefined(requestListener);
+          assert.isDefined(responseListener);
+
+          let requestResponse: { requestHeaders: Record<string, string> } | undefined;
+          requestListener!(
+            {
+              requestHeaders: {
+                authorization: "Bearer client-token",
+                origin: "katacode-dev://app",
+              },
+            },
+            (nextResponse) => {
+              requestResponse = nextResponse;
+            },
+          );
+          assert.deepEqual(requestResponse, {
+            requestHeaders: { authorization: "Bearer client-token" },
+          });
+
+          let responseResponse: { responseHeaders: Record<string, string[]> } | undefined;
+          responseListener!(
+            { responseHeaders: { "Content-Type": ["application/json"] } },
+            (nextResponse) => {
+              responseResponse = nextResponse;
+            },
+          );
+          assert.deepEqual(responseResponse, {
+            responseHeaders: {
+              "Access-Control-Allow-Origin": ["katacode-dev://app"],
+              "Content-Type": ["application/json"],
+            },
+          });
+        }),
+      );
+
+      assert.deepEqual(onBeforeSendHeadersMock.mock.calls.at(-1), [null]);
+      assert.deepEqual(onHeadersReceivedMock.mock.calls.at(-1), [null]);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
