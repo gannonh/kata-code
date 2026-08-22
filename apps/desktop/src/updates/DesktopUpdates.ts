@@ -506,7 +506,12 @@ export const make = Effect.gen(function* () {
         (instance) => instance.stop({ timeout: Duration.seconds(5) }),
         { concurrency: "unbounded" },
       );
-      yield* electronWindow.destroyAll;
+      // Keep windows alive on macOS: Electron's quitAndInstall quits the app
+      // after the last window closes, so destroying them here starves that
+      // chain and Squirrel aborts the install with "App Still Running".
+      if (environment.platform !== "darwin") {
+        yield* electronWindow.destroyAll;
+      }
       yield* electronUpdater.quitAndInstall({
         isSilent: true,
         isForceRunAfter: true,
