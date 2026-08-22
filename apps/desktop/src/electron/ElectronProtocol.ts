@@ -102,10 +102,10 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
 }
 
 export function normalizeClerkRequestHeaders(
-  requestHeaders: Readonly<Record<string, string>>,
+  requestHeaders: Record<string, string>,
 ): Record<string, string> {
   const names = Object.keys(requestHeaders);
-  if (!names.some((name) => name.toLowerCase() === "authorization")) return { ...requestHeaders };
+  if (!names.some((name) => name.toLowerCase() === "authorization")) return requestHeaders;
 
   return Object.fromEntries(
     Object.entries(requestHeaders).filter(([name]) => name.toLowerCase() !== "origin"),
@@ -258,32 +258,33 @@ export const make = Effect.gen(function* () {
       if (input.clerkFrontendApiHostname) {
         const webRequest = Electron.session.defaultSession.webRequest;
         const filter = { urls: [`https://${input.clerkFrontendApiHostname}/*`] };
-        yield* Effect.acquireRelease(
-          Effect.try({
-            try: () =>
-              webRequest.onBeforeSendHeaders(filter, (details, callback) => {
-                callback({ requestHeaders: normalizeClerkRequestHeaders(details.requestHeaders) });
-              }),
-            catch: (cause) =>
-              new ElectronProtocolRegistrationError({ scheme: input.scheme, cause }),
-          }),
-          () => Effect.sync(() => webRequest.onBeforeSendHeaders(null)),
+        const hook = <A>(acquire: () => A, release: () => void) =>
+          Effect.acquireRelease(
+            Effect.try({
+              try: acquire,
+              catch: (cause) =>
+                new ElectronProtocolRegistrationError({ scheme: input.scheme, cause }),
+            }),
+            () => Effect.sync(release),
+          );
+        yield* hook(
+          () =>
+            webRequest.onBeforeSendHeaders(filter, (details, callback) => {
+              callback({ requestHeaders: normalizeClerkRequestHeaders(details.requestHeaders) });
+            }),
+          () => webRequest.onBeforeSendHeaders(null),
         );
-        yield* Effect.acquireRelease(
-          Effect.try({
-            try: () =>
-              webRequest.onHeadersReceived(filter, (details, callback) => {
-                callback({
-                  responseHeaders: withClerkCorsResponseHeaders(
-                    details.responseHeaders,
-                    `${input.scheme}://${DESKTOP_HOST}`,
-                  ),
-                });
-              }),
-            catch: (cause) =>
-              new ElectronProtocolRegistrationError({ scheme: input.scheme, cause }),
-          }),
-          () => Effect.sync(() => webRequest.onHeadersReceived(null)),
+        yield* hook(
+          () =>
+            webRequest.onHeadersReceived(filter, (details, callback) => {
+              callback({
+                responseHeaders: withClerkCorsResponseHeaders(
+                  details.responseHeaders,
+                  `${input.scheme}://${DESKTOP_HOST}`,
+                ),
+              });
+            }),
+          () => webRequest.onHeadersReceived(null),
         );
       }
     },

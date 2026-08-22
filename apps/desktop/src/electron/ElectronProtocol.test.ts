@@ -123,6 +123,13 @@ describe("ElectronProtocol", () => {
         Accept: "application/json",
       },
     );
+    assert.deepEqual(
+      ElectronProtocol.normalizeClerkRequestHeaders({
+        authorization: "Bearer client-token",
+        origin: "katacode-dev://app",
+      }),
+      { authorization: "Bearer client-token" },
+    );
   });
 
   it("adds the renderer origin to native Clerk responses", () => {
@@ -143,25 +150,6 @@ describe("ElectronProtocol", () => {
 
   it.effect("registers the Clerk header hooks for the configured frontend host", () =>
     Effect.gen(function* () {
-      let requestListener:
-        | ((
-            details: { requestHeaders: Record<string, string> },
-            callback: (response: { requestHeaders: Record<string, string> }) => void,
-          ) => void)
-        | undefined;
-      let responseListener:
-        | ((
-            details: { responseHeaders?: Record<string, string[]> },
-            callback: (response: { responseHeaders: Record<string, string[]> }) => void,
-          ) => void)
-        | undefined;
-      onBeforeSendHeadersMock.mockImplementation((filter, nextListener) => {
-        if (nextListener) requestListener = nextListener;
-      });
-      onHeadersReceivedMock.mockImplementation((filter, nextListener) => {
-        if (nextListener) responseListener = nextListener;
-      });
-
       yield* Effect.scoped(
         Effect.gen(function* () {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
@@ -177,38 +165,6 @@ describe("ElectronProtocol", () => {
           });
           assert.deepEqual(onHeadersReceivedMock.mock.calls[0]?.[0], {
             urls: ["https://upward-terrier-81.clerk.accounts.dev/*"],
-          });
-          assert.isDefined(requestListener);
-          assert.isDefined(responseListener);
-
-          let requestResponse: { requestHeaders: Record<string, string> } | undefined;
-          requestListener!(
-            {
-              requestHeaders: {
-                authorization: "Bearer client-token",
-                origin: "katacode-dev://app",
-              },
-            },
-            (nextResponse) => {
-              requestResponse = nextResponse;
-            },
-          );
-          assert.deepEqual(requestResponse, {
-            requestHeaders: { authorization: "Bearer client-token" },
-          });
-
-          let responseResponse: { responseHeaders: Record<string, string[]> } | undefined;
-          responseListener!(
-            { responseHeaders: { "Content-Type": ["application/json"] } },
-            (nextResponse) => {
-              responseResponse = nextResponse;
-            },
-          );
-          assert.deepEqual(responseResponse, {
-            responseHeaders: {
-              "Access-Control-Allow-Origin": ["katacode-dev://app"],
-              "Content-Type": ["application/json"],
-            },
           });
         }),
       );
