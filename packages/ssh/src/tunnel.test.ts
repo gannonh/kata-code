@@ -100,23 +100,20 @@ function commandArgs(command: ChildProcess.Command): ReadonlyArray<string> {
 }
 
 describe("ssh tunnel scripts", () => {
-  it("builds the remote t3 runner with npx and npm fallbacks", () => {
+  it("builds the remote runner with npx and npm fallbacks", () => {
     const script = buildRemoteT3RunnerScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE });
 
     assert.include(script, "T3_NODE_SCRIPT_PATH=''");
-    assert.include(script, 'exec t3 "$@"');
+    assert.include(script, 'exec katacode "$@"');
     assert.include(script, "exec npx --yes '@kata-sh/code-cli@latest' \"$@\"");
     assert.include(script, "exec npm exec --yes '@kata-sh/code-cli@latest' -- \"$@\"");
     assert.include(script, "could not install '@kata-sh/code-cli@latest'");
+    assert.include(script, "require_installed_cli npx --yes --package '@kata-sh/code-cli@latest'");
     assert.include(
       script,
-      "require_installed_t3_cli npx --yes --package '@kata-sh/code-cli@latest'",
+      "require_installed_cli npm exec --yes --package '@kata-sh/code-cli@latest'",
     );
-    assert.include(
-      script,
-      "require_installed_t3_cli npm exec --yes --package '@kata-sh/code-cli@latest'",
-    );
-    assert.include(script, "npm produced no t3 executable");
+    assert.include(script, "npm produced no katacode executable");
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/bin"');
     assert.include(script, `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`);
     assert.include(script, "remote_node_satisfies_engine()");
@@ -157,7 +154,7 @@ describe("ssh tunnel scripts", () => {
     );
     assert.include(
       script,
-      "require_installed_t3_cli npx --yes --package '@kata-sh/code-cli@nightly; touch /tmp/t3-owned'",
+      "require_installed_cli npx --yes --package '@kata-sh/code-cli@nightly; touch /tmp/t3-owned'",
     );
     assert.notInclude(script, "exec npx --yes @kata-sh/code-cli@nightly; touch /tmp/t3-owned");
   });
@@ -202,6 +199,14 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
     assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"');
     assert.notInclude(buildRemoteLaunchScript(), "server-home");
+    assert.include(buildRemoteLaunchScript(), 'STATE_DIR="$HOME/.katacode/ssh-launch/$STATE_KEY"');
+    assert.include(buildRemoteLaunchScript(), 'DEFAULT_SERVER_HOME="$HOME/.katacode"');
+    assert.include(buildRemoteLaunchScript(), 'RUNNER_FILE="$STATE_DIR/run-katacode.sh"');
+    assert.include(buildRemotePairingScript(target), 'STATE_DIR="$HOME/.katacode/ssh-launch/');
+    assert.include(buildRemoteStopScript(target), "$HOME/.katacode/ssh-launch/");
+    assert.notInclude(buildRemoteLaunchScript(), ".t3");
+    assert.notInclude(buildRemotePairingScript(target), ".t3");
+    assert.notInclude(buildRemoteStopScript(target), ".t3");
     assert.include(buildRemoteLaunchScript(), "Remote Kata server did not become ready");
     assert.include(buildRemoteLaunchScript(), 'wait_ready "60000"');
     assert.include(buildRemoteLaunchScript(), 'if [ -s "$LOG_FILE" ]; then');
