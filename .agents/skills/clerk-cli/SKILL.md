@@ -141,7 +141,7 @@ Use this before `clerk api <path>`. If you don't see the endpoint you expected, 
 # GET requests
 clerk api /users                                  # list users
 clerk api /users/user_abc123                      # fetch one
-clerk api /users?limit=5&order_by=-created_at     # query params work inline
+clerk api '/users?limit=5&order_by=-created_at'   # query params work inline
 
 # Mutating requests
 clerk api /users -d '{"email_address":["a@b.co"]}'          # POST (auto-detected from body)

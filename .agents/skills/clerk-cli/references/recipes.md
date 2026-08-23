@@ -39,9 +39,24 @@ clerk users create \
   --password 'SuperSecret123!' \
   --first-name Alice \
   --last-name Doe \
+  --dry-run
+
+# Create the user after reviewing the preview.
+clerk users create \
+  --email alice@example.com \
+  --password 'SuperSecret123!' \
+  --first-name Alice \
+  --last-name Doe \
   --yes
 
 # Equivalent raw BAPI call. Use only when curated flags don't cover a field.
+# Preview the request before creating the user.
+clerk api /users -d '{
+  "email_address": ["alice@example.com"],
+  "password": "SuperSecret123!",
+  "first_name": "Alice",
+  "last_name": "Doe"
+}' --dry-run
 clerk api /users -d '{
   "email_address": ["alice@example.com"],
   "password": "SuperSecret123!",
