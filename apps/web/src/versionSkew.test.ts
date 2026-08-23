@@ -7,6 +7,7 @@ import {
   buildVersionMismatchDismissalKey,
   dismissVersionMismatch,
   isVersionMismatchDismissed,
+  manualServerUpdateCommand,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
@@ -94,6 +95,13 @@ describe("versionSkew", () => {
       }),
     ).toBe("desktop-managed");
     expect(resolveServerSelfUpdateCapability(null)).toBeNull();
+  });
+
+  it("hands users a runnable package spec for manual server updates", () => {
+    expect(manualServerUpdateCommand("0.0.31")).toBe("npx @kata-sh/code-cli@0.0.31");
+    expect(manualServerUpdateCommand("0.0.40-nightly.20260823.581")).toBe(
+      "npx @kata-sh/code-cli@0.0.40-nightly.20260823.581",
+    );
   });
 
   it("matches version-drift guidance to the advertised update path", () => {
