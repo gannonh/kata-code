@@ -144,7 +144,7 @@ clerk enable orgs --app app_abc123 --instance ins_abc123 --dry-run
 # After user approval, rerun the same command without --dry-run.
 ```
 
-For org settings the toggle flags don't cover, preview `clerk config patch --json '{"organization_settings":{...}}' --dry-run`, then rerun it after approval. Deeper org workflows (roles, memberships, components) live in the `clerk-orgs` skill.
+For org settings the toggle flags don't cover, preview `clerk config patch --app app_abc123 --instance ins_abc123 --json '{"organization_settings":{...}}' --dry-run`, then rerun it after approval. Deeper org workflows (roles, memberships, components) live in the `clerk-orgs` skill.
 
 ## Sessions
 
