@@ -175,9 +175,9 @@ relevant command on the host.
 
 ```sh
 # Dry run first
-clerk api /users/user_abc123 -X DELETE --dry-run
+clerk api /users/user_abc123 --app app_abc123 --instance ins_abc123 -X DELETE --dry-run
 # After the user approves the preview, rerun without --dry-run.
-clerk api /users/user_abc123 -X DELETE
+clerk api /users/user_abc123 --app app_abc123 --instance ins_abc123 -X DELETE
 ```
 
 ### Target explicitly

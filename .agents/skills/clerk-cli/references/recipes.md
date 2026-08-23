@@ -4,6 +4,8 @@ Copy-pasteable patterns for common tasks. Treat these as starting points; confir
 
 Mutation snippets below are preview-only by default. Run the `--dry-run` command, inspect its target and payload, then stop for explicit user approval. After approval, rerun that same command without `--dry-run`. Agent mode skips interactive confirmation, so the preview is not approval.
 
+Replace `app_abc123` and `ins_abc123` with the intended app and instance. Raw API mutations below carry both targets explicitly. Clerk CLI 3.1.0 does not expose `--app` or `--instance` on `users create`; verify the linked or secret-key target before using that curated command, or use its explicitly targeted raw API equivalent.
+
 ## Discovery first
 
 ```sh
@@ -37,6 +39,7 @@ clerk users open user_abc123 --print     # print the URL instead of opening
 
 # Create a user (preferred; curated command)
 # Keep the password in a temporary file instead of shell history or process arguments.
+# This curated command uses the linked or secret-key target; use the raw command below for explicit targets.
 umask 077
 payload="$(mktemp)"
 trap 'rm -f "$payload"' EXIT
@@ -53,22 +56,22 @@ clerk users create --file "$payload" --dry-run
 # After user approval, rerun the same command without --dry-run.
 
 # Equivalent raw BAPI call. Use only when curated flags don't cover a field.
-clerk api /users --file "$payload" --dry-run
+clerk api /users --app app_abc123 --instance ins_abc123 --file "$payload" --dry-run
 # After user approval, rerun the same command without --dry-run.
 
 # Update (PATCH merges; preview first)
-clerk api /users/user_abc123 -X PATCH -d '{"first_name":"Alicia"}' --dry-run
+clerk api /users/user_abc123 --app app_abc123 --instance ins_abc123 -X PATCH -d '{"first_name":"Alicia"}' --dry-run
 
 # Ban / unban (preview each request before approval)
-clerk api /users/user_abc123/ban -X POST --dry-run
-clerk api /users/user_abc123/unban -X POST --dry-run
+clerk api /users/user_abc123/ban --app app_abc123 --instance ins_abc123 -X POST --dry-run
+clerk api /users/user_abc123/unban --app app_abc123 --instance ins_abc123 -X POST --dry-run
 
 # Lock / unlock (preview each request before approval)
-clerk api /users/user_abc123/lock -X POST --dry-run
-clerk api /users/user_abc123/unlock -X POST --dry-run
+clerk api /users/user_abc123/lock --app app_abc123 --instance ins_abc123 -X POST --dry-run
+clerk api /users/user_abc123/unlock --app app_abc123 --instance ins_abc123 -X POST --dry-run
 
 # Delete (PREVIEW FIRST; rerun without --dry-run after approval)
-clerk api /users/user_abc123 -X DELETE --dry-run
+clerk api /users/user_abc123 --app app_abc123 --instance ins_abc123 -X DELETE --dry-run
 ```
 
 ### Test users (development only)
@@ -80,7 +83,7 @@ For test accounts you need to sign into without real email or SMS delivery, Cler
 ```sh
 # Create a test user with a test email (dev instance)
 # `skip_password_checks` isn't a curated flag, so pass the body via `-d`.
-clerk users create -d '{
+clerk api /users --app app_abc123 --instance ins_abc123 -d '{
   "email_address": ["demo+clerk_test@example.com"],
   "password": "REPLACE_WITH_PASSWORD",
   "skip_password_checks": true
@@ -92,7 +95,7 @@ clerk users create -d '{
 
 ```sh
 # Create a test user with a test phone (dev instance)
-clerk users create -d '{
+clerk api /users --app app_abc123 --instance ins_abc123 -d '{
   "phone_number": ["+12015550100"],
   "password": "REPLACE_WITH_PASSWORD",
   "skip_password_checks": true
@@ -115,19 +118,19 @@ clerk api '/organizations?limit=20&query=acme'
 clerk api /organizations/org_abc123
 
 # Create (preview first)
-clerk api /organizations -d '{"name":"Acme","created_by":"user_abc123"}' --dry-run
+clerk api /organizations --app app_abc123 --instance ins_abc123 -d '{"name":"Acme","created_by":"user_abc123"}' --dry-run
 
 # Update (preview first)
-clerk api /organizations/org_abc123 -X PATCH -d '{"name":"Acme Inc."}' --dry-run
+clerk api /organizations/org_abc123 --app app_abc123 --instance ins_abc123 -X PATCH -d '{"name":"Acme Inc."}' --dry-run
 
 # Members
 clerk api /organizations/org_abc123/memberships
-clerk api /organizations/org_abc123/memberships -d '{"user_id":"user_xyz","role":"org:member"}' --dry-run
-clerk api /organizations/org_abc123/memberships/user_xyz -X PATCH -d '{"role":"org:admin"}' --dry-run
-clerk api /organizations/org_abc123/memberships/user_xyz -X DELETE --dry-run
+clerk api /organizations/org_abc123/memberships --app app_abc123 --instance ins_abc123 -d '{"user_id":"user_xyz","role":"org:member"}' --dry-run
+clerk api /organizations/org_abc123/memberships/user_xyz --app app_abc123 --instance ins_abc123 -X PATCH -d '{"role":"org:admin"}' --dry-run
+clerk api /organizations/org_abc123/memberships/user_xyz --app app_abc123 --instance ins_abc123 -X DELETE --dry-run
 
 # Invitations
-clerk api /organizations/org_abc123/invitations -d '{"email_address":"new@acme.com","role":"org:member"}' --dry-run
+clerk api /organizations/org_abc123/invitations --app app_abc123 --instance ins_abc123 -d '{"email_address":"new@acme.com","role":"org:member"}' --dry-run
 ```
 
 If organization endpoints return `organization_not_enabled_in_instance`, enable the feature first with the dedicated toggle:
@@ -137,7 +140,7 @@ If organization endpoints return `organization_not_enabled_in_instance`, enable 
 clerk api /instance/organization_settings
 
 # Preview, then enable organizations for this instance
-clerk enable orgs --dry-run
+clerk enable orgs --app app_abc123 --instance ins_abc123 --dry-run
 # After user approval, rerun the same command without --dry-run.
 ```
 
@@ -150,7 +153,7 @@ For org settings the toggle flags don't cover, preview `clerk config patch --jso
 clerk api '/sessions?user_id=user_abc123&status=active'
 
 # Revoke a session
-clerk api /sessions/sess_abc123/revoke -X POST --dry-run
+clerk api /sessions/sess_abc123/revoke --app app_abc123 --instance ins_abc123 -X POST --dry-run
 ```
 
 ## Impersonation (sign in as a user)
@@ -159,30 +162,30 @@ Impersonation goes through `clerk impersonate` (alias `imp`): it creates an acto
 
 ```sh
 # Print the sign-in URL for a user (agent-safe: no browser, no prompt)
-clerk imp user_abc123 --print
+clerk imp user_abc123 --app app_abc123 --instance ins_abc123 --print
 
 # Resolve by exact email instead of user ID
-clerk imp alice@example.com --print
+clerk imp alice@example.com --app app_abc123 --instance ins_abc123 --print
 
 # Short-lived token. This command has no dry-run; confirm with the user before minting it.
-clerk imp user_abc123 --expires-in 900
+clerk imp user_abc123 --app app_abc123 --instance ins_abc123 --expires-in 900
 
 # Revoke a pending actor token after user approval (the id is printed at creation - capture it then)
-clerk imp revoke act_abc123
+clerk imp revoke act_abc123 --app app_abc123 --instance ins_abc123
 ```
 
 To mint a one-time **sign-in token** instead - for building custom token sign-in flows, signing in *as* the user with no actor audit trail - use the raw API:
 
 ```sh
-clerk api /sign_in_tokens -d '{"user_id":"user_abc123"}' --dry-run
+clerk api /sign_in_tokens --app app_abc123 --instance ins_abc123 -d '{"user_id":"user_abc123"}' --dry-run
 ```
 
 ## Invitations (top-level, not org-scoped)
 
 ```sh
 clerk api /invitations
-clerk api /invitations -d '{"email_address":"new@example.com","redirect_url":"https://example.com/welcome"}' --dry-run
-clerk api /invitations/inv_abc123/revoke -X POST --dry-run
+clerk api /invitations --app app_abc123 --instance ins_abc123 -d '{"email_address":"new@example.com","redirect_url":"https://example.com/welcome"}' --dry-run
+clerk api /invitations/inv_abc123/revoke --app app_abc123 --instance ins_abc123 -X POST --dry-run
 ```
 
 ## JWT templates
@@ -190,7 +193,7 @@ clerk api /invitations/inv_abc123/revoke -X POST --dry-run
 ```sh
 clerk api /jwt_templates
 clerk api /jwt_templates/jtmp_abc123
-clerk api /jwt_templates -d '{
+clerk api /jwt_templates --app app_abc123 --instance ins_abc123 -d '{
   "name": "supabase",
   "claims": {"aud": "authenticated", "role": "authenticated"},
   "lifetime": 60
@@ -236,11 +239,11 @@ clerk config pull --instance prod --output config.prod.json
 clerk config schema --keys session sign_in social
 
 # PATCH: surgical updates
-clerk config patch --json '{"session":{"lifetime":3600}}' --dry-run
+clerk config patch --app app_abc123 --instance ins_abc123 --json '{"session":{"lifetime":3600}}' --dry-run
 # After user approval, rerun the same command without --dry-run.
 
 # PUT: replace everything (destructive - always --dry-run first)
-clerk config put --instance prod --file config.prod.json --dry-run
+clerk config put --app app_abc123 --instance prod --file config.prod.json --dry-run
 # After user approval, rerun the same command without --dry-run and keep --instance prod.
 ```
 
@@ -329,8 +332,8 @@ done
 ### Read body from stdin
 
 ```sh
-echo '{"first_name":"Bob"}' | clerk api /users/user_abc123 -X PATCH --dry-run
-jq -n '{email_address:["c@d.co"]}' | clerk api /users --dry-run
+echo '{"first_name":"Bob"}' | clerk api /users/user_abc123 --app app_abc123 --instance ins_abc123 -X PATCH --dry-run
+jq -n '{email_address:["c@d.co"]}' | clerk api /users --app app_abc123 --instance ins_abc123 --dry-run
 ```
 
 ### Loop safely
@@ -340,35 +343,43 @@ set -euo pipefail
 umask 077
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/clerk-update.XXXXXX")"
 trap 'rm -rf "$workdir"' EXIT
+ids_file="$workdir/reviewed-user-ids.txt"
 
 update_users() {
   dry_run="$1"
-  offset=0
-  while :; do
-    page="$workdir/users-${offset}.json"
-    clerk users list --json --limit 250 --offset "$offset" > "$page"
-    ids="$(jq -r '.data[] | .id' "$page")"
-    while IFS= read -r id; do
-      [ -n "$id" ] || continue
-      if [ "$dry_run" = true ]; then
-        clerk api "/users/$id" -X PATCH -d '{"public_metadata":{"migrated":true}}' --dry-run
-      else
-        clerk api "/users/$id" -X PATCH -d '{"public_metadata":{"migrated":true}}'
-      fi
-    done <<EOF
+  if [ "$dry_run" = true ]; then
+    : > "$ids_file"
+    offset=0
+    while :; do
+      page="$workdir/users-${offset}.json"
+      clerk users list --app app_abc123 --instance ins_abc123 --json --limit 250 --offset "$offset" > "$page"
+      ids="$(jq -r '.data[] | .id' "$page")"
+      printf '%s\n' "$ids" >> "$ids_file"
+      while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        clerk api "/users/$id" --app app_abc123 --instance ins_abc123 -X PATCH -d '{"public_metadata":{"migrated":true}}' --dry-run
+      done <<EOF
 $ids
 EOF
-    has_more="$(jq -r '.hasMore' "$page")"
-    [ "$has_more" = true ] || break
-    offset=$((offset + 250))
-  done
+      has_more="$(jq -r '.hasMore' "$page")"
+      [ "$has_more" = true ] || break
+      offset=$((offset + 250))
+    done
+    return
+  fi
+
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    clerk api "/users/$id" --app app_abc123 --instance ins_abc123 -X PATCH -d '{"public_metadata":{"migrated":true}}'
+  done < "$ids_file"
 }
 
 update_users true
-# Stop here. Review every preview and get user approval before applying changes.
+# Stop here. Keep this shell open, review every preview, and get user approval before applying changes.
+# The private reviewed-user-ids.txt file is the approved set; the apply pass never re-lists users.
 ```
 
-After approval, run the apply phase separately:
+After approval, run the apply phase separately in the same shell so it uses the private reviewed ID snapshot:
 
 ```bash
 update_users false
@@ -381,8 +392,8 @@ update_users false
 umask 077
 config_dir="$(mktemp -d "${TMPDIR:-/tmp}/clerk-config.XXXXXX")"
 trap 'rm -rf "$config_dir"' EXIT
-clerk config pull --instance dev --output "$config_dir/dev-config.json"
-clerk config put --instance ins_staging --file "$config_dir/dev-config.json" --dry-run
+clerk config pull --app app_abc123 --instance dev --output "$config_dir/dev-config.json"
+clerk config put --app app_abc123 --instance ins_staging --file "$config_dir/dev-config.json" --dry-run
 ```
 
 ## When in doubt
