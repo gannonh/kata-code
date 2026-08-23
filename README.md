@@ -27,6 +27,32 @@ This will launch Kata Code's backend on your machine as well as the local web ap
 
 Tip: Use `npx @kata-sh/code-cli@latest --help` for the full CLI reference.
 
+### Test a headless remote environment
+
+Run a second, isolated server on your machine:
+
+```bash
+npx @kata-sh/code-cli@latest serve \
+  --port 53210 \
+  --base-dir ~/.katacode-headless-test
+```
+
+In the desktop app, open **Settings** → **Connections** → **Add environment** → **Remote link**,
+paste the printed pairing URL into **Host**, then click **Add environment**. Use `@nightly` instead
+of `@latest` when testing with the Nightly app.
+
+To expose a headless Linux server through Kata Code Connect:
+
+```bash
+npx @kata-sh/code-cli@latest connect link --headless
+npx @kata-sh/code-cli@latest serve
+```
+
+Approve the managed relay-client installation when prompted. Then open the authorization URL on a
+machine with a browser, paste the resulting code into the headless terminal, and sign in to the same
+account in the desktop app. See
+[Remote access](./docs/user/remote-access.md) for the complete flow and background-service options.
+
 ### Desktop app
 
 Build the desktop app from this repository (`pnpm run dev:desktop`). Packaged releases are not part of Phase 1.

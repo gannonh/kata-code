@@ -27,6 +27,7 @@ import { Command } from "effect/unstable/cli";
 
 import { cli, makeCli } from "./bin.ts";
 import * as ServerConfig from "./config.ts";
+import * as CliState from "./cloud/CliState.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
@@ -233,6 +234,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         readonly linked: boolean;
         readonly cloudUserId: string | null;
         readonly relayUrl: string | null;
+        readonly desiredLinkMode: CliState.CliDesiredLinkMode | null;
       };
 
       assert.equal(status.desired, false);
@@ -240,6 +242,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       assert.equal(status.linked, false);
       assert.equal(status.cloudUserId, null);
       assert.equal(status.relayUrl, null);
+      assert.equal(status.desiredLinkMode, null);
     }),
   );
 
@@ -259,6 +262,50 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         output,
         "Next: Run `katacode connect link` to authorize and enable Kata Code Connect.",
       );
+    }),
+  );
+
+  it.effect("reports publish-only pending links without promising a managed tunnel", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-cloud-publish-only-status-test-"),
+      );
+      const { secretsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
+      NodeFS.mkdirSync(secretsDir, { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(secretsDir, "cloud-cli-oauth-token.bin"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off - Test fixture matches the persisted CLI token representation.
+        JSON.stringify({
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+        }),
+      );
+      NodeFS.writeFileSync(
+        NodePath.join(secretsDir, `${CliState.CLOUD_CLI_DESIRED_LINK_SECRET}.bin`),
+        "publish_only",
+      );
+
+      const human = yield* captureStdout(
+        runConnectCli(["connect", "status", "--base-dir", baseDir]),
+      );
+      const json = yield* captureStdout(
+        runConnectCli(["connect", "status", "--base-dir", baseDir, "--json"]),
+      );
+
+      assert.include(
+        human.output,
+        "Start Kata Code to provision the environment link and publish agent activity.",
+      );
+      assert.include(human.output, "No managed tunnel will be created.");
+      assert.notInclude(human.output, "launch its managed tunnel");
+      // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is decoded as a presentation DTO.
+      const decoded = JSON.parse(json.output) as {
+        readonly desired: boolean;
+        readonly desiredLinkMode: CliState.CliDesiredLinkMode | null;
+      };
+      assert.isTrue(decoded.desired);
+      assert.equal(decoded.desiredLinkMode, "publish_only");
     }),
   );
 

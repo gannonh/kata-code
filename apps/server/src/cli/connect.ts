@@ -146,15 +146,24 @@ export function isPublishAgentActivityEnabledValue(value: string | null): boolea
   return isAgentActivityPublishingEnabledValue(value);
 }
 
-interface CloudCliStatus {
-  readonly desired: boolean;
+type CloudCliStatusFields = {
   readonly authenticated: boolean;
   readonly linked: boolean;
   readonly cloudUserId: string | null;
   readonly relayUrl: string | null;
   readonly publishAgentActivity: boolean;
   readonly relayClient: RelayClient.RelayClientStatus;
-}
+};
+
+type CloudCliStatus =
+  | (CloudCliStatusFields & {
+      readonly desired: false;
+      readonly desiredLinkMode: null;
+    })
+  | (CloudCliStatusFields & {
+      readonly desired: true;
+      readonly desiredLinkMode: CliState.CliDesiredLinkMode;
+    });
 
 function formatRelayClientStatus(executable: RelayClient.RelayClientStatus): ReadonlyArray<string> {
   switch (executable.status) {
@@ -196,7 +205,9 @@ function formatCloudStatus(status: CloudCliStatus, options?: { readonly json?: b
     : !status.desired
       ? "Run `katacode connect link` to enable Kata Code Connect."
       : !status.linked
-        ? "Start T3 to provision the environment link and launch its managed tunnel."
+        ? status.desiredLinkMode === "publish_only"
+          ? "Start Kata Code to provision the environment link and publish agent activity. No managed tunnel will be created."
+          : "Start Kata Code to provision the environment link and launch its managed tunnel."
         : undefined;
 
   return [
@@ -216,7 +227,7 @@ const CLOUD_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(5);
 const confirmRelayClientInstall = (version: string) =>
   Prompt.run(
     Prompt.confirm({
-      message: `The T3 relay client is required for Kata Code Connect. Download and install version ${version}?`,
+      message: `The Kata Code relay client is required for Kata Code Connect. Download and install version ${version}?`,
       initial: false,
     }),
   );
@@ -531,7 +542,7 @@ const connectLinkCommand = Command.make("link", {
           const serveCommand = yield* resolveCliCommand("serve");
           yield* Console.log(
             flags.publishOnly
-              ? `✓ Authorized${connectedAs(linked.identity)}\n\nNext\n  Start T3 to publish agent activity (no managed tunnel).`
+              ? `✓ Authorized${connectedAs(linked.identity)}\n\nNext\n  Start Kata Code to publish agent activity (no managed tunnel).`
               : `✓ Authorized${connectedAs(linked.identity)}\n\nNext\n  Start the server with \`${serveCommand}\` to make this machine reachable.`,
           );
         }
@@ -552,20 +563,31 @@ const connectStatusCommand = Command.make("status", {
         const secrets = yield* ServerSecretStore.ServerSecretStore;
         const relayClient = yield* RelayClient.RelayClient;
         const tokens = yield* CliTokenManager.CloudCliTokenManager;
-        const [desired, authenticated, cloudUserId, relayUrl, publishAgentActivity, executable] =
-          yield* Effect.all(
-            [
-              CliState.readCliDesiredCloudLink,
-              tokens.hasCredential,
-              secrets.get(CLOUD_LINKED_USER_ID),
-              secrets.get(RELAY_URL_SECRET),
-              secrets.get(PUBLISH_AGENT_ACTIVITY_SECRET),
-              relayClient.resolve,
-            ],
-            { concurrency: "unbounded" },
-          );
-        const status: CloudCliStatus = {
+        const [
           desired,
+          desiredLinkMode,
+          authenticated,
+          cloudUserId,
+          relayUrl,
+          publishAgentActivity,
+          executable,
+        ] = yield* Effect.all(
+          [
+            CliState.readCliDesiredCloudLink,
+            CliState.readCliDesiredLinkMode,
+            tokens.hasCredential,
+            secrets.get(CLOUD_LINKED_USER_ID),
+            secrets.get(RELAY_URL_SECRET),
+            secrets.get(PUBLISH_AGENT_ACTIVITY_SECRET),
+            relayClient.resolve,
+          ],
+          { concurrency: "unbounded" },
+        );
+        const desiredStatus = desired
+          ? { desired: true as const, desiredLinkMode }
+          : { desired: false as const, desiredLinkMode: null };
+        const status = {
+          ...desiredStatus,
           authenticated,
           linked: Option.isSome(cloudUserId),
           cloudUserId: Option.isSome(cloudUserId) ? bytesToString(cloudUserId.value) : null,
@@ -574,7 +596,7 @@ const connectStatusCommand = Command.make("status", {
             Option.isSome(publishAgentActivity) ? bytesToString(publishAgentActivity.value) : null,
           ),
           relayClient: executable,
-        };
+        } satisfies CloudCliStatus;
         yield* Console.log(formatCloudStatus(status, { json: flags.json }));
       }),
       {
@@ -641,13 +663,13 @@ const connectPublishCommand = Command.make("publish", {
         // link is pending at all.
         if (yield* CliState.readCliDesiredCloudLink) {
           yield* Console.log(
-            "A Kata Code Connect link is already pending. Start T3 to finish provisioning it; publishing starts once it links.",
+            "A Kata Code Connect link is already pending. Start Kata Code to finish provisioning it; publishing starts once it links.",
           );
           return;
         }
         yield* CliState.setCliDesiredCloudLink(true, "publish_only");
         yield* Console.log(
-          "Restart T3 to finish authorizing this environment to publish (no managed tunnel is created).",
+          "Restart Kata Code to finish authorizing this environment to publish (no managed tunnel is created).",
         );
       }),
     ),

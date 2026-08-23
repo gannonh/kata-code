@@ -7,7 +7,7 @@ Use this when you want to connect to a Kata Code server from another device such
 If a server is already running on this machine, mint a fresh pairing token and QR code without restarting anything:
 
 ```bash
-npx katacode pair
+npx @kata-sh/code-cli@latest pair
 ```
 
 `katacode pair` finds the running server (the shared `~/.katacode` install, or the current worktree's dev server when run inside one), issues a one-time pairing token, and prints the pairing URL as a QR code you can scan from your phone.
@@ -15,12 +15,12 @@ npx katacode pair
 If the server is only bound to loopback, the printed URL is not reachable from another device. Pair over your tailnet instead:
 
 ```bash
-npx katacode pair --tailscale
+npx @kata-sh/code-cli@latest pair --tailscale
 ```
 
 This publishes the server over Tailscale Serve HTTPS (configuring the mapping if needed — it persists until you run `tailscale serve --https=443 off`) and pairs through the `https://machine.tailnet.ts.net/` URL. Use `--tailscale-serve-port` for a different HTTPS port, `--ttl` to change the token lifetime, and `--base-dir` to target a specific data directory.
 
-If no server is running, `katacode pair` says so and points you at `npx katacode serve` or `npx katacode connect`.
+If no server is running, `katacode pair` says so and points you at the `serve` or `connect` command.
 
 ## Recommended Setup
 
@@ -87,7 +87,7 @@ Use this when you want to run the server without a GUI, for example on a remote 
 Run the server with `katacode serve`.
 
 ```bash
-npx katacode serve --host "$(tailscale ip -4)"
+npx @kata-sh/code-cli@latest serve --host "$(tailscale ip -4)"
 ```
 
 `katacode serve` starts the server without opening a browser and prints:
@@ -100,23 +100,62 @@ npx katacode serve --host "$(tailscale ip -4)"
 From there, connect from another device in either of these ways:
 
 - scan the QR code on your phone
-- in the desktop app, enter the full pairing URL
+- in the desktop app, open **Settings** → **Connections** → **Add environment** → **Remote link**, paste the full pairing URL into **Host**, then click **Add environment**
 - in the desktop app, enter the host and token separately
 - in the hosted web app, open a hosted pairing URL when the backend is reachable over HTTPS
 
 Use `katacode serve --help` for the full flag reference. It supports the same general startup options as the normal server command, including an optional `cwd` argument.
 
+#### Test a second server on the same machine
+
+Give a local test server its own data directory. Without `--base-dir`, the desktop app and CLI can
+share an environment ID, causing the app to treat the test server as its primary environment and
+hide it from **Remote environments**.
+
+```bash
+npx @kata-sh/code-cli@latest serve \
+  --port 53210 \
+  --base-dir ~/.katacode-headless-test
+```
+
+Paste the printed pairing URL into **Settings** → **Connections** → **Add environment** →
+**Remote link**. Use `@nightly` instead of `@latest` when testing against the Nightly desktop app.
+
+#### Connect a headless server through Kata Code Connect
+
+On the headless machine, register the environment:
+
+```bash
+npx @kata-sh/code-cli@latest connect link --headless
+```
+
+Approve the managed relay-client installation when prompted. Then open the printed URL on a device
+with a browser, sign in, and paste the authorization code back into the terminal. Start the server
+with the same package channel and data directory:
+
+```bash
+npx @kata-sh/code-cli@latest serve
+```
+
+Kata Code Connect supplies the tunnel, so this flow does not require `--host 0.0.0.0` or an open
+inbound firewall port. In the desktop app, sign in with the same Kata Code Connect account, open
+**Settings** → **Connections**, find the environment under **Remote environments**, and click
+**Connect**.
+
+If you pass `--base-dir` to `connect link`, pass the same value to `serve`. Use `@nightly` for both
+commands when the desktop app runs Nightly.
+
 For hosted web pairing over Tailscale HTTPS, opt in to Tailscale Serve:
 
 ```bash
-npx katacode serve --tailscale-serve
+npx @kata-sh/code-cli@latest serve --tailscale-serve
 ```
 
 By default this configures Tailscale Serve on HTTPS port 443 and advertises
 `https://machine.tailnet.ts.net/`. Advanced users can choose a different HTTPS port:
 
 ```bash
-npx katacode serve --tailscale-serve --tailscale-serve-port 8443
+npx @kata-sh/code-cli@latest serve --tailscale-serve --tailscale-serve-port 8443
 ```
 
 Once paired, add projects normally: open the Command Palette and choose **Add Project**, then pick
