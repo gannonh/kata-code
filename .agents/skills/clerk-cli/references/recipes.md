@@ -2,6 +2,8 @@
 
 Copy-pasteable patterns for common tasks. Treat these as starting points; confirm exact paths and parameters with `clerk api ls <keyword>` and `clerk <command> --help`, since the Clerk API evolves.
 
+Mutation snippets below are preview-only by default. Run the `--dry-run` command, inspect its target and payload, then stop for explicit user approval. After approval, rerun that same command without `--dry-run`. Agent mode skips interactive confirmation, so the preview is not approval.
+
 ## Discovery first
 
 ```sh
@@ -48,26 +50,25 @@ cat > "$payload" <<'JSON'
 JSON
 # Replace the password placeholder before running the commands.
 clerk users create --file "$payload" --dry-run
-clerk users create --file "$payload"
+# After user approval, rerun the same command without --dry-run.
 
 # Equivalent raw BAPI call. Use only when curated flags don't cover a field.
 clerk api /users --file "$payload" --dry-run
-clerk api /users --file "$payload"
+# After user approval, rerun the same command without --dry-run.
 
-# Update (PATCH merges)
-clerk api /users/user_abc123 -X PATCH -d '{"first_name":"Alicia"}'
+# Update (PATCH merges; preview first)
+clerk api /users/user_abc123 -X PATCH -d '{"first_name":"Alicia"}' --dry-run
 
-# Ban / unban
-clerk api /users/user_abc123/ban -X POST
-clerk api /users/user_abc123/unban -X POST
+# Ban / unban (preview each request before approval)
+clerk api /users/user_abc123/ban -X POST --dry-run
+clerk api /users/user_abc123/unban -X POST --dry-run
 
-# Lock / unlock
-clerk api /users/user_abc123/lock -X POST
-clerk api /users/user_abc123/unlock -X POST
+# Lock / unlock (preview each request before approval)
+clerk api /users/user_abc123/lock -X POST --dry-run
+clerk api /users/user_abc123/unlock -X POST --dry-run
 
-# Delete (PREVIEW FIRST)
+# Delete (PREVIEW FIRST; rerun without --dry-run after approval)
 clerk api /users/user_abc123 -X DELETE --dry-run
-clerk api /users/user_abc123 -X DELETE
 ```
 
 ### Test users (development only)
@@ -84,11 +85,7 @@ clerk users create -d '{
   "password": "REPLACE_WITH_PASSWORD",
   "skip_password_checks": true
 }' --dry-run
-clerk users create -d '{
-  "email_address": ["demo+clerk_test@example.com"],
-  "password": "REPLACE_WITH_PASSWORD",
-  "skip_password_checks": true
-}'
+# After user approval, rerun the same command without --dry-run.
 ```
 
 **By phone.** Any US fictional phone number in the `+1 (XXX) 555-0100` through `+1 (XXX) 555-0199` range is recognized as a test phone. Pass the E.164 form.
@@ -100,11 +97,7 @@ clerk users create -d '{
   "password": "REPLACE_WITH_PASSWORD",
   "skip_password_checks": true
 }' --dry-run
-clerk users create -d '{
-  "phone_number": ["+12015550100"],
-  "password": "REPLACE_WITH_PASSWORD",
-  "skip_password_checks": true
-}'
+# After user approval, rerun the same command without --dry-run.
 ```
 
 When signing in with an email or phone verification code, enter `424242`. Email verification-link flows send a link that is valid for 10 minutes.
@@ -121,20 +114,20 @@ clerk api '/organizations?limit=20&query=acme'
 # Fetch
 clerk api /organizations/org_abc123
 
-# Create
-clerk api /organizations -d '{"name":"Acme","created_by":"user_abc123"}'
+# Create (preview first)
+clerk api /organizations -d '{"name":"Acme","created_by":"user_abc123"}' --dry-run
 
-# Update
-clerk api /organizations/org_abc123 -X PATCH -d '{"name":"Acme Inc."}'
+# Update (preview first)
+clerk api /organizations/org_abc123 -X PATCH -d '{"name":"Acme Inc."}' --dry-run
 
 # Members
 clerk api /organizations/org_abc123/memberships
-clerk api /organizations/org_abc123/memberships -d '{"user_id":"user_xyz","role":"org:member"}'
-clerk api /organizations/org_abc123/memberships/user_xyz -X PATCH -d '{"role":"org:admin"}'
+clerk api /organizations/org_abc123/memberships -d '{"user_id":"user_xyz","role":"org:member"}' --dry-run
+clerk api /organizations/org_abc123/memberships/user_xyz -X PATCH -d '{"role":"org:admin"}' --dry-run
 clerk api /organizations/org_abc123/memberships/user_xyz -X DELETE --dry-run
 
 # Invitations
-clerk api /organizations/org_abc123/invitations -d '{"email_address":"new@acme.com","role":"org:member"}'
+clerk api /organizations/org_abc123/invitations -d '{"email_address":"new@acme.com","role":"org:member"}' --dry-run
 ```
 
 If organization endpoints return `organization_not_enabled_in_instance`, enable the feature first with the dedicated toggle:
@@ -145,10 +138,10 @@ clerk api /instance/organization_settings
 
 # Preview, then enable organizations for this instance
 clerk enable orgs --dry-run
-clerk enable orgs
+# After user approval, rerun the same command without --dry-run.
 ```
 
-For org settings the toggle flags don't cover, fall back to `clerk config patch --json '{"organization_settings":{...}}'`. Deeper org workflows (roles, memberships, components) live in the `clerk-orgs` skill.
+For org settings the toggle flags don't cover, preview `clerk config patch --json '{"organization_settings":{...}}' --dry-run`, then rerun it after approval. Deeper org workflows (roles, memberships, components) live in the `clerk-orgs` skill.
 
 ## Sessions
 
@@ -157,7 +150,7 @@ For org settings the toggle flags don't cover, fall back to `clerk config patch 
 clerk api '/sessions?user_id=user_abc123&status=active'
 
 # Revoke a session
-clerk api /sessions/sess_abc123/revoke -X POST
+clerk api /sessions/sess_abc123/revoke -X POST --dry-run
 ```
 
 ## Impersonation (sign in as a user)
@@ -171,25 +164,25 @@ clerk imp user_abc123 --print
 # Resolve by exact email instead of user ID
 clerk imp alice@example.com --print
 
-# Short-lived token. Confirm with the user before minting it.
+# Short-lived token. This command has no dry-run; confirm with the user before minting it.
 clerk imp user_abc123 --expires-in 900
 
-# Revoke a pending actor token (the id is printed at creation - capture it then)
+# Revoke a pending actor token after user approval (the id is printed at creation - capture it then)
 clerk imp revoke act_abc123
 ```
 
 To mint a one-time **sign-in token** instead - for building custom token sign-in flows, signing in *as* the user with no actor audit trail - use the raw API:
 
 ```sh
-clerk api /sign_in_tokens -d '{"user_id":"user_abc123"}'
+clerk api /sign_in_tokens -d '{"user_id":"user_abc123"}' --dry-run
 ```
 
 ## Invitations (top-level, not org-scoped)
 
 ```sh
 clerk api /invitations
-clerk api /invitations -d '{"email_address":"new@example.com","redirect_url":"https://example.com/welcome"}'
-clerk api /invitations/inv_abc123/revoke -X POST
+clerk api /invitations -d '{"email_address":"new@example.com","redirect_url":"https://example.com/welcome"}' --dry-run
+clerk api /invitations/inv_abc123/revoke -X POST --dry-run
 ```
 
 ## JWT templates
@@ -201,7 +194,7 @@ clerk api /jwt_templates -d '{
   "name": "supabase",
   "claims": {"aud": "authenticated", "role": "authenticated"},
   "lifetime": 60
-}'
+}' --dry-run
 ```
 
 ## Webhooks (local testing)
@@ -244,11 +237,11 @@ clerk config schema --keys session sign_in social
 
 # PATCH: surgical updates
 clerk config patch --json '{"session":{"lifetime":3600}}' --dry-run
-clerk config patch --json '{"session":{"lifetime":3600}}'
+# After user approval, rerun the same command without --dry-run.
 
 # PUT: replace everything (destructive - always --dry-run first)
-clerk config put --file config.prod.json --dry-run
-clerk config put --file config.prod.json --instance prod
+clerk config put --instance prod --file config.prod.json --dry-run
+# After user approval, rerun the same command without --dry-run and keep --instance prod.
 ```
 
 ## Environment variables
@@ -336,8 +329,8 @@ done
 ### Read body from stdin
 
 ```sh
-echo '{"first_name":"Bob"}' | clerk api /users/user_abc123 -X PATCH
-jq -n '{email_address:["c@d.co"]}' | clerk api /users
+echo '{"first_name":"Bob"}' | clerk api /users/user_abc123 -X PATCH --dry-run
+jq -n '{email_address:["c@d.co"]}' | clerk api /users --dry-run
 ```
 
 ### Loop safely

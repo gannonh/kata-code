@@ -143,18 +143,18 @@ clerk api /users                                  # list users
 clerk api /users/user_abc123                      # fetch one
 clerk api '/users?limit=5&order_by=-created_at'   # query params work inline
 
-# Mutating requests
-clerk api /users -d '{"email_address":["a@b.co"]}'          # POST (auto-detected from body)
-clerk api /users/user_abc123 -X PATCH -d '{"first_name":"A"}'
-clerk api /users/user_abc123 -X DELETE
+# Mutating requests (preview first)
+clerk api /users -d '{"email_address":["a@b.co"]}' --dry-run          # POST (auto-detected from body)
+clerk api /users/user_abc123 -X PATCH -d '{"first_name":"A"}' --dry-run
+clerk api /users/user_abc123 -X DELETE --dry-run
 
-# Body from file or stdin
-clerk api /users --file payload.json
-cat payload.json | clerk api /users
+# Body from file or stdin (preview first)
+clerk api /users --file payload.json --dry-run
+cat payload.json | clerk api /users --dry-run
 
 # Always preview mutations first
 clerk api /users/user_abc123 -X DELETE --dry-run
-clerk api /users/user_abc123 -X DELETE           # run after user approval
+# After user approval, rerun the same command without --dry-run.
 
 # Target a specific app/instance
 clerk api /users --app app_abc123 --instance prod
