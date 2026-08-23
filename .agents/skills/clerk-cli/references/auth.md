@@ -11,7 +11,7 @@ Clerk exposes two HTTP APIs. The CLI speaks both.
 | **Backend API (BAPI)**   | `https://api.clerk.dev/v1/` | Instance **secret key** (`sk_...`)                                     | Tenant data: users, orgs, sessions, invitations, JWT templates, webhooks.                          | (default)    |
 | **Platform API (PLAPI)** | `https://api.clerk.com/v1/` | **Platform API key** (`ak_...`) or OAuth token from `clerk auth login` | Account-level: listing your applications, fetching app/instance metadata, pulling config, billing. | `--platform` |
 
-You override the base URLs via `CLERK_BACKEND_API_URL` and `CLERK_PLATFORM_API_URL` when testing against non-production Clerk environments.
+You override the base URLs via `CLERK_BACKEND_API_URL` and `CLERK_PLATFORM_API_URL` when testing against non-production Clerk environments. `CLERK_OAUTH_BASE_URL` overrides the OAuth system instance for login flows. These variables control destinations for requests that carry API credentials or OAuth material. Use only trusted Clerk-compatible HTTPS endpoints, and never point them at arbitrary or untrusted hosts.
 
 ### Backend API secret key resolution order
 

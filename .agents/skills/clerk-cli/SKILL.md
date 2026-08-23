@@ -17,7 +17,7 @@ license: MIT
 
 The `clerk` binary is a pre-authenticated gateway to Clerk's Backend API and Platform API, plus project-level tooling (auth, linking, env pulls, instance config). When the user asks anything that touches a Clerk resource, reach for `clerk` first instead of hand-rolling `curl`.
 
-> This skill targets clerk `latest`. If `clerk --version` disagrees with the latest available CLI, refresh it with `clerk update`, or invoke the latest through a package runner such as `bunx clerk@latest`. The binary is always the source of truth, so run `clerk <command> --help` to verify anything this skill claims.
+> This skill targets Clerk CLI `3.1.0`. If `clerk --version` reports a different version, verify the current CLI docs before using it. Update the pinned version in this skill as a deliberate maintenance change, or run `clerk update` for a deliberate interactive upgrade. The binary is always the source of truth, so run `clerk <command> --help` to verify anything this skill claims.
 
 ## Execution environment (prefer the host, understand the sandbox warning)
 
@@ -77,14 +77,14 @@ Otherwise fall back to a package runner, in this order (matches the CLI's own `p
 
 | Project package manager   | Invocation                       |
 | ------------------------- | -------------------------------- |
-| bun (`bun.lock*`)         | `bunx clerk@latest`     |
-| npm (`package-lock.json`) | `npx -y clerk@latest`   |
-| pnpm (`pnpm-lock.yaml`)   | `pnpm dlx clerk@latest` |
-| yarn >= 2 (`yarn.lock`)   | `yarn dlx clerk@latest` |
+| bun (`bun.lock*`)         | `bunx clerk@3.1.0`     |
+| npm (`package-lock.json`) | `npx -y clerk@3.1.0`   |
+| pnpm (`pnpm-lock.yaml`)   | `pnpm dlx clerk@3.1.0` |
+| yarn >= 2 (`yarn.lock`)   | `yarn dlx clerk@3.1.0` |
 
-Yarn Classic (v1) has no `dlx`; treat those projects as "no preferred runner" and fall back to the first runner from the list above that's on PATH.
+Check `yarn --version` before selecting Yarn. Use `yarn dlx` only when the major version is 2 or higher. If it reports 1.x, skip Yarn and continue with the next runner.
 
-The published npm package is **`clerk`**, not `@clerk/cli`. Never teach `npm install -g clerk` as the primary path. If the global CLI is stale or behaves differently from this skill, either upgrade the global install or fall back to the `latest` runner form above.
+The published npm package is **`clerk`**, not `@clerk/cli`. Never teach `npm install -g clerk` as the primary path. If the global CLI is stale or behaves differently from this skill, either upgrade the global install or fall back to the pinned runner form above.
 
 ## Prerequisites (run at session start)
 
@@ -154,7 +154,7 @@ cat payload.json | clerk api /users
 
 # Always preview mutations first
 clerk api /users/user_abc123 -X DELETE --dry-run
-clerk api /users/user_abc123 -X DELETE --yes      # skip confirmation once you've verified
+clerk api /users/user_abc123 -X DELETE           # run after user approval
 
 # Target a specific app/instance
 clerk api /users --app app_abc123 --instance prod
@@ -174,7 +174,7 @@ In human mode, `clerk api` with no arguments opens an interactive request builde
 
 For instance config, prefer the dedicated `clerk config ...` commands over raw Platform API `/config` paths. They handle dry-run, diffing, and confirmation more cleanly than the raw endpoint form.
 
-**Always `--dry-run` a mutation before running it for real.** Then re-run without `--dry-run` (add `--yes` if you're sure). In agent mode, interactive confirmation is bypassed, so `--dry-run` is the only safety net for destructive calls.
+**Always `--dry-run` a mutation before running it for real.** Then get user approval and re-run without `--dry-run`. In agent mode, interactive confirmation is bypassed, so `--dry-run` is the only safety check before a high-impact call.
 
 **JSON bodies must be valid JSON.** The CLI validates and rejects malformed payloads.
 
@@ -187,24 +187,26 @@ See [references/recipes.md](references/recipes.md) for concrete patterns: listin
 `users list`, `apps list`, `config pull`, and most `clerk api` GETs return payloads that can be many kilobytes or megabytes. Production tenants commonly have thousands of users; an instance config can be hundreds of fields deep. Reading those responses into the conversation costs context window for no benefit. Save the response to a file first, then query just what you need with `jq`:
 
 ```sh
-# 1. Persist the response. Use --limit 250 to maximize page size for users list.
-clerk users list --json --limit 250 > /tmp/users.json
-clerk apps list --json                > /tmp/apps.json
-clerk api /users/user_abc123          > /tmp/user.json
+# 1. Save selected fields in a private temporary directory.
+umask 077
+response_dir="$(mktemp -d "${TMPDIR:-/tmp}/clerk-cli.XXXXXX")"
+response_file="$response_dir/users.json"
+trap 'rm -rf "$response_dir"' EXIT
+clerk users list --json --limit 250 |
+  jq '{data: [.data[] | {id, email_addresses}], hasMore}' > "$response_file"
 
 # 2. Inspect only what you need.
-jq '.data | length'                       /tmp/users.json   # current page size
-jq '.hasMore'                             /tmp/users.json   # are more pages available?
-jq '.data[0] | keys'                      /tmp/users.json   # discover the user shape once
-jq '.data[] | {id, email_addresses}'      /tmp/users.json   # project to a few fields
-jq '[.data[] | select(.banned)] | length' /tmp/users.json   # aggregate without reading rows
+jq '.data | length'  "$response_file"   # current page size
+jq '.hasMore'        "$response_file"   # are more pages available?
+jq '.data[0] | keys' "$response_file"   # inspect the saved shape
+jq '.data[]'         "$response_file"   # inspect the selected fields
 ```
 
 **If `jq` is not available**, fall back to Python or Node - both can stream the file without printing it whole:
 
 ```sh
-python3 -c 'import json; d=json.load(open("/tmp/users.json")); print(len(d["data"]), d["hasMore"])'
-node -e 'const d=require("/tmp/users.json"); console.log(d.data.length, d.hasMore)'
+RESPONSE_FILE="$response_file" python3 -c 'import json, os; d=json.load(open(os.environ["RESPONSE_FILE"])); print(len(d["data"]), d["hasMore"])'
+RESPONSE_FILE="$response_file" node -e 'const d=require(process.env.RESPONSE_FILE); console.log(d.data.length, d.hasMore)'
 ```
 
 `cat` / `head` the file only when you genuinely need to see the raw structure for one-off debugging. When walking pages, write each page to its own file (e.g. `page-${offset}.json`) so individual pages stay independently inspectable.
@@ -249,14 +251,14 @@ node -e 'const d=require("/tmp/users.json"); console.log(d.data.length, d.hasMor
 
 The CLI auto-detects agent mode when stdout is not a TTY, or when `--mode agent` / `CLERK_MODE=agent` is set. In agent mode:
 
-- **Interactive prompts are disabled.** Commands that would normally show pickers (`link` without `--app`, `unlink` without `--yes`, `users` without a subcommand) either auto-resolve or exit with a usage error. `clerk api` with no args prints usage guidance and exits 0; pass an endpoint (or `ls`) explicitly. Always pass explicit flags (`--app`, `--yes`) in scripted calls.
+- **Interactive prompts are disabled.** Commands that would normally show pickers (`link` without `--app`, `unlink` without `--yes`, `users` without a subcommand) either auto-resolve or exit with a usage error. `clerk api` with no args prints usage guidance and exits 0; pass an endpoint (or `ls`) explicitly. Always pass explicit targeting flags and any command-specific required flags in scripted calls.
 - **Host-sensitive operations emit a sandbox warning once per invocation.** Home-directory Clerk state, keychain access, networked Clerk calls, browser launch, and localhost OAuth callback setup can trigger the warning shown above. If it appears, rerun the same command on the host before trusting the result.
 - **If your harness does not clearly present as agent mode, force it.** Use `--mode agent` or `CLERK_MODE=agent` when you want the CLI's non-interactive behavior and sandbox warning path to apply deterministically.
 - **`link` supports deterministic agent flows.** In agent mode, `clerk link --app <id>` links directly. Without `--app`, the CLI will try silent key-based autolink first; if it cannot determine the app unambiguously, it exits and tells you to pass `--app`.
 - **`init` needs no login — do not log in first.** An unauthenticated agent run mints an unclaimed app with temporary dev keys: no flag, no account, no browser. `--app <id>` or a pre-link targets a real app instead; `--keyless` forces the temporary-keys path over both a session and an existing link. A framework without temporary-key support and no app target prints manual guidance and exits cleanly. Flag exclusivity is in the command table above.
 - **`--fresh` is destructive.** It replaces the temporary app and overwrites the env keys and `.clerk/keyless.json` with no prompt, orphaning the previous app and its users. Never pass it just to re-run `init`.
 - **`unlink` requires `--yes` in agent mode.** It gates on `isAgent() && !options.yes` and exits with a usage error without it. This is the exception, not the pattern - see the next bullet.
-- **Only `unlink` actually requires `--yes`.** Every other confirmation gate is written as `isHuman() && !options.yes`, so agent mode skips it outright: the mutation executes with no prompt and no error. Passing `--yes` is harmless but changes nothing. Do not treat it as a safety gate - `--dry-run` is the real one.
+- **Only `unlink` actually requires `--yes`.** Every other confirmation gate is written as `isHuman() && !options.yes`, so agent mode skips it outright: the mutation executes with no prompt and no error. Passing `--yes` is harmless but changes nothing. Do not treat `--yes` or a dry-run result as user approval. After previewing, get explicit user approval before executing destructive, irreversible, billing, impersonation, or production changes.
 - **`impersonate` requires the `[user]` positional in agent mode.** If a search term matches multiple users, it exits `2` listing candidate user IDs — retry with a specific `user_...` ID. Output is a JSON object (`{url, id, userId, actor, ...}`); surface `url` to the user and capture `id` — it is the only chance to record the revoke handle.
 - **`webhooks listen` is long-running.** Run it in the background. In agent mode (or with `--json`) it emits NDJSON: one `ready` line (`{type:"ready", relay_url, forward_to}`), then one `event` line per delivery — each event line can be fed back to `clerk webhooks verify --delivery`.
 - **`doctor --fix` is ignored.** Parse `doctor --json` output's `remedy` field and act on it yourself.

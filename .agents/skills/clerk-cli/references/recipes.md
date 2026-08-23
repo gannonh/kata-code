@@ -33,36 +33,26 @@ clerk users list --email-address alice@example.com
 clerk users open user_abc123
 clerk users open user_abc123 --print     # print the URL instead of opening
 
-# Create a user (preferred; curated flags)
-clerk users create \
-  --email alice@example.com \
-  --password 'SuperSecret123!' \
-  --first-name Alice \
-  --last-name Doe \
-  --dry-run
-
-# Create the user after reviewing the preview.
-clerk users create \
-  --email alice@example.com \
-  --password 'SuperSecret123!' \
-  --first-name Alice \
-  --last-name Doe \
-  --yes
+# Create a user (preferred; curated command)
+# Keep the password in a temporary file instead of shell history or process arguments.
+umask 077
+payload="$(mktemp)"
+trap 'rm -f "$payload"' EXIT
+cat > "$payload" <<'JSON'
+{
+  "email_address": ["alice@example.com"],
+  "password": "REPLACE_WITH_PASSWORD",
+  "first_name": "Alice",
+  "last_name": "Doe"
+}
+JSON
+# Replace the password placeholder before running the commands.
+clerk users create --file "$payload" --dry-run
+clerk users create --file "$payload"
 
 # Equivalent raw BAPI call. Use only when curated flags don't cover a field.
-# Preview the request before creating the user.
-clerk api /users -d '{
-  "email_address": ["alice@example.com"],
-  "password": "SuperSecret123!",
-  "first_name": "Alice",
-  "last_name": "Doe"
-}' --dry-run
-clerk api /users -d '{
-  "email_address": ["alice@example.com"],
-  "password": "SuperSecret123!",
-  "first_name": "Alice",
-  "last_name": "Doe"
-}'
+clerk api /users --file "$payload" --dry-run
+clerk api /users --file "$payload"
 
 # Update (PATCH merges)
 clerk api /users/user_abc123 -X PATCH -d '{"first_name":"Alicia"}'
@@ -77,12 +67,12 @@ clerk api /users/user_abc123/unlock -X POST
 
 # Delete (PREVIEW FIRST)
 clerk api /users/user_abc123 -X DELETE --dry-run
-clerk api /users/user_abc123 -X DELETE --yes
+clerk api /users/user_abc123 -X DELETE
 ```
 
 ### Test users (development only)
 
-For test accounts you need to sign into without real email or SMS delivery, Clerk provides two magic patterns that both verify with the fixed OTP `424242`. Use them on development instances; production rejects them.
+For test accounts you need to sign into without real email or SMS delivery, Clerk provides two magic patterns. Test mode is required. It is enabled by default on development instances and can also be enabled on production instances, although Clerk discourages it.
 
 **By email.** Any address with the `+clerk_test` subaddress is recognized as a test email. The domain portion is arbitrary.
 
@@ -91,9 +81,14 @@ For test accounts you need to sign into without real email or SMS delivery, Cler
 # `skip_password_checks` isn't a curated flag, so pass the body via `-d`.
 clerk users create -d '{
   "email_address": ["demo+clerk_test@example.com"],
-  "password": "TestPass123!",
+  "password": "REPLACE_WITH_PASSWORD",
   "skip_password_checks": true
-}' --yes
+}' --dry-run
+clerk users create -d '{
+  "email_address": ["demo+clerk_test@example.com"],
+  "password": "REPLACE_WITH_PASSWORD",
+  "skip_password_checks": true
+}'
 ```
 
 **By phone.** Any US fictional phone number in the `+1 (XXX) 555-0100` through `+1 (XXX) 555-0199` range is recognized as a test phone. Pass the E.164 form.
@@ -102,14 +97,19 @@ clerk users create -d '{
 # Create a test user with a test phone (dev instance)
 clerk users create -d '{
   "phone_number": ["+12015550100"],
-  "password": "TestPass123!",
+  "password": "REPLACE_WITH_PASSWORD",
   "skip_password_checks": true
-}' --yes
+}' --dry-run
+clerk users create -d '{
+  "phone_number": ["+12015550100"],
+  "password": "REPLACE_WITH_PASSWORD",
+  "skip_password_checks": true
+}'
 ```
 
-When signing in as either user in a browser or Playwright, enter `424242` at the OTP prompt.
+When signing in with an email or phone verification code, enter `424242`. Email verification-link flows send a link that is valid for 10 minutes.
 
-These patterns only apply to development instances. In production, Device Trust blocks sign-in regardless of suffix or number, and using real-looking test addresses is highly discouraged. Test addresses and numbers do not count against the dev-instance monthly caps (20 SMS, 100 emails). See [Clerk's test emails and phones reference](https://clerk.com/docs/guides/development/testing/test-emails-and-phones) for the full contract.
+These patterns only apply when test mode is enabled. Using real-looking test addresses is highly discouraged. Test addresses and numbers do not count against the dev-instance monthly caps (20 SMS, 100 emails). See [Clerk's test emails and phones reference](https://clerk.com/docs/guides/development/testing/test-emails-and-phones) for the full contract.
 
 ## Organizations
 
@@ -145,7 +145,7 @@ clerk api /instance/organization_settings
 
 # Preview, then enable organizations for this instance
 clerk enable orgs --dry-run
-clerk enable orgs --yes
+clerk enable orgs
 ```
 
 For org settings the toggle flags don't cover, fall back to `clerk config patch --json '{"organization_settings":{...}}'`. Deeper org workflows (roles, memberships, components) live in the `clerk-orgs` skill.
@@ -171,8 +171,8 @@ clerk imp user_abc123 --print
 # Resolve by exact email instead of user ID
 clerk imp alice@example.com --print
 
-# Short-lived token, no confirmation prompt
-clerk imp user_abc123 --yes --expires-in 900
+# Short-lived token. Confirm with the user before minting it.
+clerk imp user_abc123 --expires-in 900
 
 # Revoke a pending actor token (the id is printed at creation - capture it then)
 clerk imp revoke act_abc123
@@ -244,11 +244,11 @@ clerk config schema --keys session sign_in social
 
 # PATCH: surgical updates
 clerk config patch --json '{"session":{"lifetime":3600}}' --dry-run
-clerk config patch --json '{"session":{"lifetime":3600}}' --yes
+clerk config patch --json '{"session":{"lifetime":3600}}'
 
 # PUT: replace everything (destructive - always --dry-run first)
 clerk config put --file config.prod.json --dry-run
-clerk config put --file config.prod.json --instance prod --yes
+clerk config put --file config.prod.json --instance prod
 ```
 
 ## Environment variables
@@ -284,20 +284,25 @@ clerk api /v1/platform/applications/app_abc123 --platform
 `users list`, `apps list`, `config pull`, and most `clerk api` GETs can return responses ranging from kilobytes to megabytes. Reading the full payload into an LLM-driven session burns context for no benefit. Persist the response, then query just the slice you need:
 
 ```sh
-# Persist once, query as many times as you need.
-clerk users list --json --limit 250 > /tmp/users.json
+# Persist only the fields needed below in a private temporary directory.
+umask 077
+response_dir="$(mktemp -d "${TMPDIR:-/tmp}/clerk-cli.XXXXXX")"
+response_file="$response_dir/users.json"
+trap 'rm -rf "$response_dir"' EXIT
+clerk users list --json --limit 250 |
+  jq '{data: [.data[] | {id, email_addresses}], hasMore}' > "$response_file"
 
-jq '.data | length'                   /tmp/users.json   # count rows on the page
-jq '.hasMore'                         /tmp/users.json   # any more pages?
-jq '.data[0] | keys'                  /tmp/users.json   # learn the shape of one record
-jq '.data[] | {id, email_addresses}'  /tmp/users.json   # project to relevant fields only
+jq '.data | length'  "$response_file"   # count rows on the page
+jq '.hasMore'        "$response_file"   # any more pages?
+jq '.data[0] | keys' "$response_file"   # learn the saved shape
+jq '.data[]'         "$response_file"   # inspect the selected fields
 ```
 
 If `jq` is not on `PATH`, fall back to Python or Node, which most environments have:
 
 ```sh
-python3 -c 'import json; d=json.load(open("/tmp/users.json")); print(len(d["data"]), d["hasMore"])'
-node    -e 'const d=require("/tmp/users.json"); console.log(d.data.length, d.hasMore)'
+RESPONSE_FILE="$response_file" python3 -c 'import json, os; d=json.load(open(os.environ["RESPONSE_FILE"])); print(len(d["data"]), d["hasMore"])'
+RESPONSE_FILE="$response_file" node -e 'const d=require(process.env.RESPONSE_FILE); console.log(d.data.length, d.hasMore)'
 ```
 
 Only `cat`/`head` the file when you genuinely need the raw structure for one-off debugging.
@@ -315,9 +320,12 @@ clerk users list --json | jq '[.data[] | select(.banned)] | length'
 
 # Walk every page until hasMore is false. Save each page to its own file so you
 # can inspect them independently without re-fetching.
+umask 077
+response_dir="$(mktemp -d "${TMPDIR:-/tmp}/clerk-pages.XXXXXX")"
+trap 'rm -rf "$response_dir"' EXIT
 offset=0
 while :; do
-  page="/tmp/users-${offset}.json"
+  page="$response_dir/users-${offset}.json"
   clerk users list --json --limit 250 --offset "$offset" > "$page"
   jq -r '.data[] | .id' "$page"
   [ "$(jq -r '.hasMore' "$page")" = "true" ] || break
@@ -334,21 +342,54 @@ jq -n '{email_address:["c@d.co"]}' | clerk api /users
 
 ### Loop safely
 
-```sh
-# Always --dry-run first across the whole set. `users list` paginates;
-# bump --limit (max 250) and walk pages with --offset until .hasMore is false.
-for id in $(clerk users list --json --limit 250 | jq -r '.data[] | .id'); do
-  clerk api /users/$id -X PATCH -d '{"public_metadata":{"migrated":true}}' --dry-run
-done
-# Re-run without --dry-run once the previews look right
+```bash
+set -euo pipefail
+umask 077
+workdir="$(mktemp -d "${TMPDIR:-/tmp}/clerk-update.XXXXXX")"
+trap 'rm -rf "$workdir"' EXIT
+
+update_users() {
+  dry_run="$1"
+  offset=0
+  while :; do
+    page="$workdir/users-${offset}.json"
+    clerk users list --json --limit 250 --offset "$offset" > "$page"
+    ids="$(jq -r '.data[] | .id' "$page")"
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      if [ "$dry_run" = true ]; then
+        clerk api "/users/$id" -X PATCH -d '{"public_metadata":{"migrated":true}}' --dry-run
+      else
+        clerk api "/users/$id" -X PATCH -d '{"public_metadata":{"migrated":true}}'
+      fi
+    done <<EOF
+$ids
+EOF
+    has_more="$(jq -r '.hasMore' "$page")"
+    [ "$has_more" = true ] || break
+    offset=$((offset + 250))
+  done
+}
+
+update_users true
+# Stop here. Review every preview and get user approval before applying changes.
+```
+
+After approval, run the apply phase separately:
+
+```bash
+update_users false
 ```
 
 ### Target multiple instances
 
 ```sh
 # Copy config from dev to staging for review
-clerk config pull --instance dev --output /tmp/dev-config.json
-clerk config patch --instance ins_staging --file /tmp/dev-config.json --dry-run
+umask 077
+config_dir="$(mktemp -d "${TMPDIR:-/tmp}/clerk-config.XXXXXX")"
+trap 'rm -rf "$config_dir"' EXIT
+clerk config pull --instance dev --output "$config_dir/dev-config.json"
+clerk config put --instance ins_staging --file "$config_dir/dev-config.json" --dry-run
 ```
 
 ## When in doubt

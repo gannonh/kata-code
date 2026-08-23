@@ -129,9 +129,9 @@ On the headless machine, register the environment:
 npx @kata-sh/code-cli@latest connect link --headless
 ```
 
-Open the printed URL on a device with a browser, sign in, then paste the authorization code back into
-the terminal. Approve the managed relay-client installation when prompted. Start the server with the
-same package channel and data directory:
+Approve the managed relay-client installation when prompted. Then open the printed URL on a device
+with a browser, sign in, and paste the authorization code back into the terminal. Start the server
+with the same package channel and data directory:
 
 ```bash
 npx @kata-sh/code-cli@latest serve

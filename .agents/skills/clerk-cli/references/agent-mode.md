@@ -74,7 +74,7 @@ Force human mode with `--mode human` or `CLERK_MODE=human`. Typical AI-agent inv
 In addition, sandboxed agent-mode invocations may emit the warning above once
 per CLI invocation when a host-sensitive operation is blocked.
 
-**Rule of thumb:** always pass `--yes` for mutations and `--json` for structured output where available. Pass `--app` / `--instance` when you intentionally target a real app. Bootstrapping without authentication needs no flag at all — temporary development keys are the default; `--keyless` forces that path over both a signed-in session and an existing linked profile.
+**Rule of thumb:** preview every mutation with `--dry-run` when the command supports it, and use `--json` for structured output where available. Treat `--yes` as CLI syntax, not user consent. Get explicit user approval before executing destructive, irreversible, billing, impersonation, or production changes. Pass `--app` / `--instance` when you intentionally target a real app. Bootstrapping without authentication needs no flag at all — temporary development keys are the default; `--keyless` forces that path over both a signed-in session and an existing linked profile.
 
 ## Passing options as JSON: `--input-json`
 
@@ -176,8 +176,8 @@ relevant command on the host.
 ```sh
 # Dry run first
 clerk api /users/user_abc123 -X DELETE --dry-run
-# If the preview is what you expected, run it with --yes
-clerk api /users/user_abc123 -X DELETE --yes
+# After the user approves the preview, rerun without --dry-run.
+clerk api /users/user_abc123 -X DELETE
 ```
 
 ### Target explicitly
@@ -289,5 +289,5 @@ All three remediation commands are themselves interactive by default: `auth logi
 - **Don't call `clerk link` without `--app` and assume the agent can pick for you** - it only succeeds when silent autolink can determine the app from detected keys.
 - **Don't run `clerk unlink` in agent mode without `--yes`** - it exits with a usage error instead of prompting.
 - **Don't run `clerk config put` without `--dry-run` first** - it's a full replacement and is destructive.
-- **Don't skip `--yes` on mutations and expect them to work** - agent mode disables prompts, so commands that require confirmation will error.
+- **Don't treat `--yes` as an approval gate in agent mode** - only `unlink` requires it. Preview supported mutations with `--dry-run`, then get user approval before executing high-impact changes.
 - **Don't leak secret keys into logs** - the CLI never prints the raw secret key, and you shouldn't either.

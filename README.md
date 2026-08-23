@@ -48,8 +48,9 @@ npx @kata-sh/code-cli@latest connect link --headless
 npx @kata-sh/code-cli@latest serve
 ```
 
-Open the authorization URL on a machine with a browser, paste the resulting code into the headless
-terminal, then sign in to the same account in the desktop app. See
+Approve the managed relay-client installation when prompted. Then open the authorization URL on a
+machine with a browser, paste the resulting code into the headless terminal, and sign in to the same
+account in the desktop app. See
 [Remote access](./docs/user/remote-access.md) for the complete flow and background-service options.
 
 ### Desktop app
