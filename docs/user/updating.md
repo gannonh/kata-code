@@ -32,7 +32,7 @@ The available action depends on how that server was started. Kata Code does not 
 servers silently in the background.
 
 An older background-service launcher may ask you to run the exact
-`npx t3@<version> service update` command on the server machine. That one local update installs the
+`npx @kata-sh/code-cli@<version> service update` command on the server machine. That one local update installs the
 rollback support needed for later remote updates, including versions that change the database.
 
 After selecting **Update**, the notice becomes a live status line: **Downloading…** while the new
@@ -40,14 +40,14 @@ version is fetched and verified, then **Restarting…** while the server restart
 status appears in the conversation and in Connections, so navigating between them does not lose the
 update. A failure remains visible with its error and an option to retry.
 
-**Copy update command** gives you `npx t3@<client-version>`, which relaunches the server directly
+**Copy update command** gives you `npx @kata-sh/code-cli@<client-version>`, which relaunches the server directly
 at the matching version. Add whatever startup options you normally use.
 
 If the server instead runs as the Kata Code background service, update the service on the host and
 pin the same version:
 
 ```sh
-npx t3@<client-version> service update
+npx @kata-sh/code-cli@<client-version> service update
 ```
 
 `service update` installs the version of the CLI that invoked it, so `npx @kata-sh/code-cli@latest service update`
@@ -67,7 +67,7 @@ If a step fails:
 
 1. Retry the offered action once.
 2. Make sure you updated the machine named in the warning, not only the device you are using.
-3. For a command-line server, relaunch it with `npx t3@<client-version>`, replacing
+3. For a command-line server, relaunch it with `npx @kata-sh/code-cli@<client-version>`, replacing
    `<client-version>` with the client version shown in the warning.
 
 ## The Mobile App
