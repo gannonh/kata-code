@@ -9,7 +9,32 @@ Hard fork of [T3 Code](https://github.com/pingdotgg/t3code). Identity, remotes, 
 - **Repo:** `gannonh/kata-code` · **npm scope:** `@kata-sh/code-*` · **CLI:** `katacode` (`@kata-sh/code-cli`)
 - **Env prefix:** `KATACODE_*` · **State dir:** `~/.katacode` (override with `KATACODE_HOME`)
 - **Protocols:** `katacode://` / `katacode-dev://` · **Desktop bundle:** `com.katacode.app`
-- Specs live as GitHub Issues (`gh issue list --label kind:spec --state open`).
+
+## Specs live in GitHub Issues
+
+Specs for this repository are GitHub Issues, not files.
+
+- Read the roadmap with `gh issue list --label kind:spec --state open`.
+- Read a spec with `gh issue view <N>`; read an epic's slices with `gh sub-issue list <N>`.
+- Do not create local spec files. Use the `plan-build-verify` skill, which publishes specs as issues.
+- Never build an issue that is not labeled `status:approved` without explicit maintainer approval.
+- Post build reports and acceptance evidence as comments on the spec issue.
+
+## Skills
+
+Product OS is plan-build-verify. Install the per-project skills (no `-g`) so cloud VMs get them:
+
+```bash
+./scripts/install-skills.sh
+```
+
+Or the equivalent:
+
+```bash
+npx skills add gannonh/skills --skill plan-build-verify --skill address-pr-comments -y
+```
+
+Do not install the whole `gannonh/skills` pack. Cursor deep mode uses the pstack plugin; do not npx-install `ps` (already under `.agents/skills/ps`). Leave existing vendor skills (clerk, cloudflare, vercel, ios/maestro, test-t3-*, sandbox, ps) alone.
 
 ## What makes Kata Code special?
 
