@@ -1,11 +1,16 @@
 import { DEFAULT_HOSTED_APP_ORIGIN } from "./branding.ts";
 import { readHashParams } from "./remote.ts";
 
-const CONNECT_AUTH_STATE_PARAM = "state";
-const CONNECT_AUTH_CHALLENGE_PARAM = "challenge";
-const CONNECT_AUTH_PORT_PARAM = "port";
+const CONNECT_AUTH_STATE_PARAM = "s";
+const CONNECT_AUTH_CHALLENGE_PARAM = "c";
+const CONNECT_AUTH_PORT_PARAM = "p";
+const LEGACY_CONNECT_AUTH_STATE_PARAM = "state";
+const LEGACY_CONNECT_AUTH_CHALLENGE_PARAM = "challenge";
+const LEGACY_CONNECT_AUTH_PORT_PARAM = "port";
 const CONNECT_AUTH_CODE_SEPARATOR = ".";
 const CONNECT_LOOPBACK_CALLBACK_PATH = "/callback";
+const CONNECT_AUTH_STATE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+const CONNECT_AUTH_CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 const CONNECT_AUTHORIZE_PATH = "/connect";
 const CONNECT_CALLBACK_PATH = "/connect/callback";
@@ -65,12 +70,19 @@ export function buildConnectAuthorizeRequestUrl(input: {
 
 export function readConnectAuthorizeRequest(url: URL): ConnectAuthorizeRequest | null {
   const params = readHashParams(url);
-  const state = params.get(CONNECT_AUTH_STATE_PARAM)?.trim() ?? "";
-  const challenge = params.get(CONNECT_AUTH_CHALLENGE_PARAM)?.trim() ?? "";
-  if (!state || !challenge) {
+  // The hosted app must continue reading links from installed CLIs while the
+  // shorter fragment format rolls out.
+  const state =
+    (params.get(CONNECT_AUTH_STATE_PARAM) ?? params.get(LEGACY_CONNECT_AUTH_STATE_PARAM))?.trim() ??
+    "";
+  const challenge =
+    (
+      params.get(CONNECT_AUTH_CHALLENGE_PARAM) ?? params.get(LEGACY_CONNECT_AUTH_CHALLENGE_PARAM)
+    )?.trim() ?? "";
+  if (!CONNECT_AUTH_STATE_PATTERN.test(state) || !CONNECT_AUTH_CHALLENGE_PATTERN.test(challenge)) {
     return null;
   }
-  const port = params.get(CONNECT_AUTH_PORT_PARAM);
+  const port = params.get(CONNECT_AUTH_PORT_PARAM) ?? params.get(LEGACY_CONNECT_AUTH_PORT_PARAM);
   if (port === null) {
     return { state, challenge };
   }
