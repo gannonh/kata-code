@@ -11,20 +11,25 @@ import {
 } from "./connectAuth.ts";
 
 describe("connectAuth", () => {
+  const state = "q7mK9xV2pL4nR8sT6wYzAQ";
+  const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
   it("round-trips state and challenge through the authorize URL fragment", () => {
     const url = buildConnectAuthorizeRequestUrl({
       hostedAppUrl: "https://app.kata.sh",
-      state: "q7mK9xV2pL4nR8sT6wYzAQ",
-      challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      state,
+      challenge,
     });
     const parsed = new URL(url);
 
     expect(parsed.origin).toBe("https://app.kata.sh");
     expect(parsed.pathname).toBe("/connect");
     expect(parsed.search).toBe("");
+    expect(parsed.hash).toBe(`#s=${state}&c=${challenge}`);
+    expect(url.length).toBeLessThanOrEqual(100);
     expect(readConnectAuthorizeRequest(parsed)).toEqual({
-      state: "q7mK9xV2pL4nR8sT6wYzAQ",
-      challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      state,
+      challenge,
     });
   });
 
@@ -38,17 +43,38 @@ describe("connectAuth", () => {
     ).toBeNull();
   });
 
+  it("rejects truncated or malformed authorization parameters", () => {
+    for (const hash of [
+      `state=${state.slice(0, -1)}&challenge=${challenge}`,
+      `state=${state}&challenge=${challenge.slice(0, -1)}`,
+      `state=${state}!&challenge=${challenge}`,
+      `state=${state}&challenge=${challenge.slice(0, -1)}!`,
+    ]) {
+      expect(
+        readConnectAuthorizeRequest(new URL(`https://app.kata.sh/connect#${hash}`)),
+      ).toBeNull();
+    }
+  });
+
+  it("reads verbose authorization parameters from installed CLIs", () => {
+    const url = new URL(`https://app.kata.sh/connect#state=${state}&challenge=${challenge}`);
+    expect(readConnectAuthorizeRequest(url)).toEqual({ state, challenge });
+
+    url.hash += "&port=34338";
+    expect(readConnectAuthorizeRequest(url)).toEqual({ state, challenge, loopbackPort: 34338 });
+  });
+
   it("round-trips the loopback port through the authorize URL fragment", () => {
     const url = buildConnectAuthorizeRequestUrl({
       hostedAppUrl: "https://app.kata.sh",
-      state: "state-1",
-      challenge: "challenge-1",
+      state,
+      challenge,
       loopbackPort: 34338,
     });
 
     expect(readConnectAuthorizeRequest(new URL(url))).toEqual({
-      state: "state-1",
-      challenge: "challenge-1",
+      state,
+      challenge,
       loopbackPort: 34338,
     });
     expect(connectLoopbackRedirectUri(34338)).toBe("http://127.0.0.1:34338/callback");
@@ -57,7 +83,7 @@ describe("connectAuth", () => {
   it("rejects authorize requests whose loopback port is corrupted", () => {
     for (const port of ["", "abc", "-1", "0", "65536", "34338x", "34 38"]) {
       const url = new URL(
-        `https://app.kata.sh/connect#state=state-1&challenge=challenge-1&port=${encodeURIComponent(port)}`,
+        `https://app.kata.sh/connect#state=${state}&challenge=${challenge}&port=${encodeURIComponent(port)}`,
       );
       expect(readConnectAuthorizeRequest(url), port).toBeNull();
     }
