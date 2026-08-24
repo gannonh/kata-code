@@ -12,14 +12,11 @@ set -euo pipefail
 
 # Resolve the worktree root from the script location so it works regardless of
 # the caller's CWD within the worktree.
-worktree_root="$(cd "$(dirname "$0")/.." && pwd)"
-env_source="$HOME/dotfiles/repos/kata-code/.env"
+WORKTREE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_ROOT="/Volumes/EVO/dev/kata-code"
 
-pnpm install
-
-if [[ -f "$env_source" ]]; then
-  ln -sfn "$env_source" "$worktree_root/.env"
-  echo "linked .env ← $env_source"
-else
-  echo "warn: central env not found at $env_source — .env not linked" >&2
-fi
+vp i 
+ln -sf $PROJECT_ROOT/.env $WORKTREE_ROOT/.env 
+ln -sf $PROJECT_ROOT/infra/relay/.env $WORKTREE_ROOT/infra/relay/.env 
+node $WORKTREE_ROOT/apps/web/scripts/warm-dep-cache.ts
+$WORKTREE_ROOT/scripts/install-skills.sh
