@@ -18,14 +18,18 @@ const successfulRunner = (fs: FileSystem.FileSystem, path: Path.Path) =>
   ProcessRunner.ProcessRunner.of({
     run: (input) =>
       Effect.gen(function* () {
+        assert.equal(input.command, "npm");
         const prefixIndex = input.args.indexOf("--prefix");
         const stagingDir = input.args[prefixIndex + 1];
         if (stagingDir === undefined) return yield* Effect.die("missing npm --prefix");
+        const spec = input.args[input.args.length - 1] ?? "";
+        const atIndex = spec.lastIndexOf("@");
+        if (atIndex <= 0) return yield* Effect.die(`malformed npm spec: ${spec}`);
+        const packageName = spec.slice(0, atIndex);
         const entry = path.join(
           stagingDir,
           "node_modules",
-          "@kata-sh",
-          "code-cli",
+          ...packageName.split("/"),
           "dist",
           "bin.mjs",
         );
