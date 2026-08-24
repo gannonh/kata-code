@@ -15,7 +15,7 @@ Hard fork of [T3 Code](https://github.com/pingdotgg/t3code). Identity, remotes, 
 Specs for this repository are GitHub Issues, not files.
 
 - Read the roadmap with `gh issue list --label kind:spec --state open`.
-- Read a spec with `gh issue view <N>`; read an epic's slices with `gh sub-issue list <N>`.
+- Read a spec with `gh issue view <N>`; read an epic's slices with `gh api repos/{owner}/{repo}/issues/<N>/sub_issues --jq '.[] | {number, title, state}'`.
 - Do not create local spec files. Use the `plan-build-verify` skill, which publishes specs as issues.
 - Never build an issue that is not labeled `status:approved` without explicit maintainer approval.
 - Post build reports and acceptance evidence as comments on the spec issue.
