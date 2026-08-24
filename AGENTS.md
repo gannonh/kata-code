@@ -34,7 +34,7 @@ Or the equivalent:
 npx skills add gannonh/skills --skill plan-build-verify --skill address-pr-comments -y
 ```
 
-Do not install the whole `gannonh/skills` pack. Cursor deep mode uses the pstack plugin; do not npx-install `ps` (already under `.agents/skills/ps`). Leave existing vendor skills (clerk, cloudflare, vercel, ios/maestro, test-t3-*, sandbox, ps) alone.
+Do not install the whole `gannonh/skills` pack. Cursor deep mode uses the pstack plugin; do not npx-install `ps` (already under `.agents/skills/ps`). Leave existing vendor skills (clerk, cloudflare, vercel, ios/maestro, test-t3-\*, sandbox, ps) alone.
 
 ## What makes Kata Code special?
 
