@@ -4,7 +4,7 @@
   "scripts": [
     {
       "name": "Setup Worktree",
-      "command": "vp i && ln -sf $KATACODE_PROJECT_ROOT/.env .env && ln -sf $KATACODE_PROJECT_ROOT/infra/relay/.env infra/relay/.env && node apps/web/scripts/warm-dep-cache.ts",
+      "command": "vp i && ln -sf $KATACODE_PROJECT_ROOT/.env .env && ln -sf $KATACODE_PROJECT_ROOT/infra/relay/.env infra/relay/.env && node apps/web/scripts/warm-dep-cache.ts && ./scripts/install-skills.sh",
       "icon": "configure",
       "runOnWorktreeCreate": true
     }
