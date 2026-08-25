@@ -37,6 +37,11 @@ Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
 Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refresh`, and
 `chat.new`. Project scripts are addressable as `script.{id}.run`, for example `script.test.run`.
 
+`terminal.close` defaults to `mod+w` while the terminal is focused. Closing one terminal from that
+shortcut, from the pane close control, or from its tab asks you to confirm. The prompt names the
+terminal and warns that the process stops and its history is cleared. Closing every terminal in a
+panel at once, or a terminal that exits on its own, does not prompt.
+
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
 `projectSearch.toggle` searches inside the active project's files and defaults to `mod+shift+f`.
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.
