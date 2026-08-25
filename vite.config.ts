@@ -31,6 +31,7 @@ export default defineConfig({
       ".plans",
       ".agents/**",
       ".claude/**",
+      ".cursor/**",
       ".alchemy",
       "dist",
       "dist-electron",
