@@ -2,7 +2,6 @@ import { readLocalApi } from "~/localApi";
 
 let pendingConfirmations = 0;
 
-/** Whether a terminal-close confirmation is currently waiting on the user. */
 export function isTerminalCloseConfirmPending(): boolean {
   return pendingConfirmations > 0;
 }
