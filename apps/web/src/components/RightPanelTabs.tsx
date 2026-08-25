@@ -4,15 +4,7 @@ import type {
   PullRequestState,
 } from "@kata-sh/code-contracts";
 import { getTerminalLabel } from "@kata-sh/code-shared/terminalLabels";
-import {
-  Bot,
-  FileDiff,
-  Files,
-  GitPullRequest,
-  Globe2,
-  Plus,
-  TerminalSquare,
-} from "lucide-react";
+import { Bot, FileDiff, Files, GitPullRequest, Globe2, Plus, TerminalSquare } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
