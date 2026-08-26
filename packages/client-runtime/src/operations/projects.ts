@@ -106,6 +106,23 @@ export function addProjectRemoteSourceProvider(
   return source === "url" ? null : source;
 }
 
+const GITHUB_REPOSITORY_SHORTHAND =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]+(?:\.git)?$/;
+
+export function normalizePastedCloneUrl(input: string): string {
+  const trimmed = input.trim();
+  if (!GITHUB_REPOSITORY_SHORTHAND.test(trimmed)) return trimmed;
+  const repository = trimmed.endsWith(".git") ? trimmed : `${trimmed}.git`;
+  return `https://github.com/${repository}`;
+}
+
+/** GitHub defaults to HTTPS; other providers keep their SSH default. */
+export function getDefaultCloneUrl(
+  repository: Pick<SourceControlRepositoryInfo, "provider" | "url" | "sshUrl">,
+): string {
+  return repository.provider === "github" ? repository.url : repository.sshUrl;
+}
+
 export function sortAddProjectProviderSources(
   readinessBySource: AddProjectRemoteSourceReadiness,
 ): ReadonlyArray<AddProjectRemoteProviderKind> {

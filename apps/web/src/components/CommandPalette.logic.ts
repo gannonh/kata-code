@@ -1,8 +1,13 @@
 import {
   type FilesystemBrowseEntry,
   type KeybindingCommand,
+  type SourceControlRepositoryInfo,
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@kata-sh/code-contracts";
+import {
+  getDefaultCloneUrl,
+  normalizePastedCloneUrl,
+} from "@kata-sh/code-client-runtime/operations/projects";
 import { filterFilesystemBrowseEntries } from "@kata-sh/code-client-runtime/state/filesystem";
 import type { SidebarThreadSortOrder } from "@kata-sh/code-contracts/settings";
 import * as Arr from "effect/Array";
@@ -457,4 +462,13 @@ export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): str
     case "submenu-browse":
       return "Enter path (e.g. ~/projects/my-app)";
   }
+}
+
+export function getAddProjectCloneConfirmRemoteUrl(input: {
+  readonly repository: Pick<SourceControlRepositoryInfo, "provider" | "url" | "sshUrl"> | null;
+  readonly pastedInput: string;
+}): string {
+  return input.repository === null
+    ? normalizePastedCloneUrl(input.pastedInput)
+    : getDefaultCloneUrl(input.repository);
 }

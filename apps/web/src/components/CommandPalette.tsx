@@ -116,6 +116,7 @@ import {
   type CommandPaletteView,
   filterCommandPaletteGroups,
   filterPinnedBrowseEntries,
+  getAddProjectCloneConfirmRemoteUrl,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
@@ -1880,7 +1881,10 @@ function OpenCommandPaletteDialog(props: {
           source: addProjectCloneFlow.source,
           repositoryInput: rawRepository,
           repository: null,
-          remoteUrl: rawRepository,
+          remoteUrl: getAddProjectCloneConfirmRemoteUrl({
+            repository: null,
+            pastedInput: rawRepository,
+          }),
         });
         setHighlightedItemValue(null);
         setQuery(destinationPath);
@@ -1920,7 +1924,10 @@ function OpenCommandPaletteDialog(props: {
         source: addProjectCloneFlow.source,
         repositoryInput: rawRepository,
         repository,
-        remoteUrl: repository.sshUrl,
+        remoteUrl: getAddProjectCloneConfirmRemoteUrl({
+          repository,
+          pastedInput: rawRepository,
+        }),
       });
       setHighlightedItemValue(null);
       setQuery(destinationPath);

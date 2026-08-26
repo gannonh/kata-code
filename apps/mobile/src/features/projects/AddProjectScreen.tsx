@@ -58,7 +58,10 @@ import {
   useRemoteEnvironmentRuntime,
   useSavedRemoteConnections,
 } from "../../state/use-remote-environment-registry";
-import { resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
+import {
+  getAddProjectCloneConfirmRemoteUrl,
+  resolveAddProjectEnvironment,
+} from "./AddProjectScreen.logic";
 
 interface EnvironmentOption {
   readonly environmentId: EnvironmentId;
@@ -662,7 +665,10 @@ export function AddProjectRepositoryScreen(props: {
     setIsSubmitting(true);
     const provider = addProjectRemoteSourceProvider(source);
     if (!provider) {
-      const remoteUrl = repositoryInput.trim();
+      const remoteUrl = getAddProjectCloneConfirmRemoteUrl({
+        repository: null,
+        pastedInput: repositoryInput,
+      });
       navigation.dispatch(
         StackActions.push("AddProjectDestination", {
           environmentId: environment.environmentId,
@@ -691,7 +697,10 @@ export function AddProjectRepositoryScreen(props: {
         StackActions.push("AddProjectDestination", {
           environmentId: environment.environmentId,
           source,
-          remoteUrl: repository.sshUrl,
+          remoteUrl: getAddProjectCloneConfirmRemoteUrl({
+            repository,
+            pastedInput: repositoryInput,
+          }),
           repositoryTitle: repository.nameWithOwner,
           repositoryName: getCloneDirectoryName(repository.nameWithOwner),
         }),
