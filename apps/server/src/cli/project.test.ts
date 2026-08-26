@@ -3,10 +3,15 @@ import { assert, it } from "@effect/vitest";
 import { EnvironmentInternalError } from "@kata-sh/code-contracts";
 
 import {
+  PROJECT_CLI_SESSION_LABEL,
   ProjectLiveServerDeclaredResponseError,
   ProjectLiveServerRequestError,
   projectCommandErrorFromLiveServerRequest,
 } from "./project.ts";
+
+it("uses the project CLI session label", () => {
+  assert.strictEqual(PROJECT_CLI_SESSION_LABEL, "katacode project cli");
+});
 
 it("maps declared server failures into structural project command errors", () => {
   const cause = new EnvironmentInternalError({

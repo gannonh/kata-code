@@ -38,8 +38,11 @@ import {
   projectServerWelcome,
   resolveServerConfigValue,
   resolveServerUpdateProgressResult,
+  ServerUpdateProgressIncompleteError,
+  ServerUpdateResumeTimeoutError,
   serverUpdateStateForProgressEvent,
   serverUpdateStateForServerVersion,
+  ServerUpdateTerminalError,
   validateServerUpdateReadyEvent,
 } from "./server.ts";
 
@@ -124,6 +127,26 @@ describe("update restart reconnect nudges", () => {
       yield* Fiber.join(fiber);
     }).pipe(Effect.provide(TestClock.layer())),
   );
+});
+
+describe("server update errors", () => {
+  it("names the exact CLI package version in update failures", () => {
+    expect(
+      new ServerUpdateResumeTimeoutError({
+        environmentId: EnvironmentId.make("environment-1"),
+        targetVersion: "0.0.31",
+      }).message,
+    ).toBe("The server did not resume on @kata-sh/code-cli@0.0.31.");
+    expect(new ServerUpdateProgressIncompleteError({ targetVersion: "0.0.31" }).message).toBe(
+      "The @kata-sh/code-cli@0.0.31 update ended before the server accepted the restart.",
+    );
+    expect(
+      new ServerUpdateTerminalError({
+        targetVersion: "0.0.31",
+        status: "rolled-back",
+      }).message,
+    ).toBe("The @kata-sh/code-cli@0.0.31 update rolled-back.");
+  });
 });
 
 describe("server state projection", () => {

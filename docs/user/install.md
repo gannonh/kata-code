@@ -19,35 +19,7 @@ This starts the Kata Code server on your machine and opens the local web app. Us
 
 ## Desktop App
 
-Download the latest release from
-[GitHub Releases](https://github.com/pingdotgg/t3code/releases), or install from a package
-registry.
-
-Windows:
-
-```bash
-winget install T3Tools.T3Code
-```
-
-macOS:
-
-```bash
-brew install --cask t3-code
-```
-
-Arch Linux:
-
-Stable:
-
-```bash
-yay -S t3code-bin
-```
-
-Nightly:
-
-```bash
-yay -S t3code-nightly-bin
-```
+Native Windows, macOS, and Arch Linux packages are not published yet, so use [GitHub Releases](https://github.com/gannonh/kata-code/releases) or `npx @kata-sh/code-cli@latest`.
 
 ## Providers
 

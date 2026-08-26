@@ -13,6 +13,7 @@ import * as Terminal from "effect/Terminal";
 import * as BootService from "../cloud/bootService.ts";
 import {
   acquireRelayClientForLink,
+  CONNECT_CLI_SESSION_LABEL,
   formatHeadlessAuthorizationPrompt,
   formatRelayClientReady,
   headlessSessionConfig,
@@ -20,6 +21,10 @@ import {
   reportCloudDisconnectResults,
 } from "./connect.ts";
 import { recoverServiceOnboardingOffer } from "./service.ts";
+
+it("uses the Kata Code Connect CLI session label", () => {
+  assert.equal(CONNECT_CLI_SESSION_LABEL, "katacode connect cli");
+});
 
 it("explains how to complete headless authorization", () => {
   assert.equal(

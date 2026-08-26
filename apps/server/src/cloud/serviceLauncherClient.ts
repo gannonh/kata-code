@@ -19,7 +19,6 @@ export class ServiceLauncherClientError extends Schema.TaggedErrorClass<ServiceL
   {
     operation: Schema.Literals([
       "decode-context",
-      "version-mismatch",
       "ipc-unavailable",
       "unmanaged",
       "send",
@@ -33,8 +32,6 @@ export class ServiceLauncherClientError extends Schema.TaggedErrorClass<ServiceL
     switch (this.operation) {
       case "decode-context":
         return "The service launcher supplied invalid startup context.";
-      case "version-mismatch":
-        return "The service launcher started a different t3 version.";
       case "ipc-unavailable":
         return "The service launcher IPC channel is unavailable.";
       case "unmanaged":
@@ -46,6 +43,18 @@ export class ServiceLauncherClientError extends Schema.TaggedErrorClass<ServiceL
       case "timeout":
         return "The service launcher did not respond within 30 seconds.";
     }
+  }
+}
+
+export class ServiceLauncherVersionMismatchError extends Schema.TaggedErrorClass<ServiceLauncherVersionMismatchError>()(
+  "ServiceLauncherVersionMismatchError",
+  {
+    launcherVersion: Schema.String,
+    serverVersion: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `The service launcher expected @kata-sh/code-cli@${this.launcherVersion}, but this server is @kata-sh/code-cli@${this.serverVersion}.`;
   }
 }
 
@@ -123,7 +132,10 @@ const resolveStartup = Effect.fn("cloud.service_launcher_client.resolve_startup"
       return yield* new ServiceLauncherClientError({ operation: "decode-context" });
     }
     if (context !== undefined && context.childVersion !== currentVersion) {
-      return yield* new ServiceLauncherClientError({ operation: "version-mismatch" });
+      return yield* new ServiceLauncherVersionMismatchError({
+        launcherVersion: context.childVersion,
+        serverVersion: currentVersion,
+      });
     }
 
     const managed = context !== undefined && host.connected;

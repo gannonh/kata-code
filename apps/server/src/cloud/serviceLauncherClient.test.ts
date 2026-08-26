@@ -136,3 +136,23 @@ it.effect("rejects contradictory trial context instead of leaving activation clo
     expect(error.message).toBe("The service launcher supplied invalid startup context.");
   }),
 );
+
+it.effect("reports both package versions when launcher startup versions differ", () =>
+  Effect.gen(function* () {
+    const host = new FakeLauncherProcess({
+      protocol: SERVICE_LAUNCHER_PROTOCOL,
+      childVersion: "1.0.0",
+    });
+    const error = yield* makeClient(host, "1.1.0").pipe(Effect.flip);
+
+    expect(error).toBeInstanceOf(ServiceLauncherClient.ServiceLauncherVersionMismatchError);
+    expect(error).toMatchObject({
+      _tag: "ServiceLauncherVersionMismatchError",
+      launcherVersion: "1.0.0",
+      serverVersion: "1.1.0",
+    });
+    expect(error.message).toBe(
+      "The service launcher expected @kata-sh/code-cli@1.0.0, but this server is @kata-sh/code-cli@1.1.0.",
+    );
+  }),
+);
