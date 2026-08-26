@@ -289,7 +289,9 @@ describe("update restart reconnect nudges", () => {
           updateResult,
         );
         expect(yield* Ref.get(consumedReady)).toBe(true);
-        expect(registry.get(atoms.updateStateAtom(TARGET.environmentId))).toEqual({ status: "idle" });
+        expect(registry.get(atoms.updateStateAtom(TARGET.environmentId))).toEqual({
+          status: "idle",
+        });
       }),
     ).pipe(Effect.provide(TestClock.layer())),
   );
