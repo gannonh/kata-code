@@ -4,10 +4,7 @@
   "slug": "kata-code",
   "defaults": {
     "permissionMode": "safe",
-    "cyclablePermissionModes": [
-      "safe",
-      "allow-all"
-    ],
+    "cyclablePermissionModes": ["safe", "allow-all"],
     "enabledSourceSlugs": []
   },
   "localMcpServers": {
