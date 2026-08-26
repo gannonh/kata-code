@@ -2,15 +2,19 @@ import {
   EnvironmentId,
   type ServerConfig,
   type ServerConfigStreamEvent,
+  type ServerLifecycleStreamReadyEvent,
   type ServerLifecycleWelcomePayload,
   WS_METHODS,
 } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -18,19 +22,24 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as TestClock from "effect/testing/TestClock";
 import { RpcClientError } from "effect/unstable/rpc";
+import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import * as Socket from "effect/unstable/socket/Socket";
 
 import {
   AVAILABLE_CONNECTION_STATE,
+  ConnectionBlockedError,
   PrimaryConnectionTarget,
   type PreparedConnection,
+  type SupervisorConnectionState,
 } from "../connection/model.ts";
+import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as Persistence from "../platform/persistence.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import {
   applyServerConfigProjection,
+  createServerEnvironmentAtoms,
   makeEnvironmentServerConfigState,
   isLegacyUpdateHandoffLoss,
   matchesServerUpdateReadyEvent,
@@ -126,6 +135,163 @@ describe("update restart reconnect nudges", () => {
 
       yield* Fiber.join(fiber);
     }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("retries rejected credentials only while the update restart is in progress", () =>
+    Effect.gen(function* () {
+      const retries = yield* Ref.make(0);
+
+      yield* nudgeReconnectDuringUpdateRestart({
+        stateChanges: Stream.fromIterable([
+          { phase: "blocked", lastFailure: { reason: "permission" } },
+          {
+            phase: "blocked",
+            lastFailure: {
+              reason: "authentication",
+              detail: "The environment credential is invalid.",
+            },
+          },
+          { phase: "blocked", lastFailure: { reason: "configuration" } },
+        ]),
+        retryNow: Ref.update(retries, (count) => count + 1),
+        interval: Duration.zero,
+      });
+
+      expect(yield* Ref.get(retries)).toBe(1);
+    }),
+  );
+
+  it.effect("recovers the update command after a transient credential rejection", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const updateResult = {
+          targetVersion: "0.0.31",
+          method: "boot-service" as const,
+        };
+        const initialConfig = {
+          ...CONFIG,
+          environment: {
+            environmentId: TARGET.environmentId,
+            label: "Test environment",
+            platform: { os: "linux", arch: "x64" },
+            serverVersion: "0.0.30",
+            capabilities: { repositoryIdentity: false },
+          },
+        } as unknown as ServerConfig;
+        const authBlocked: SupervisorConnectionState = {
+          ...AVAILABLE_CONNECTION_STATE,
+          phase: "blocked",
+          lastFailure: new ConnectionBlockedError({
+            reason: "authentication",
+            detail: "The environment credential is invalid.",
+          }),
+        };
+        const readyEvent: ServerLifecycleStreamReadyEvent = {
+          version: 1,
+          sequence: 1,
+          type: "ready",
+          payload: {
+            at: "2026-08-01T00:00:00.000Z",
+            environment: {
+              environmentId: TARGET.environmentId,
+              label: "Test environment",
+              platform: { os: "linux", arch: "x64" },
+              serverVersion: "0.0.31",
+              capabilities: { repositoryIdentity: false },
+            },
+          },
+        };
+        const retries = yield* Ref.make(0);
+        const consumedReady = yield* Ref.make(false);
+        const stateSubscribed = yield* Deferred.make<void>();
+        const lifecycleSubscribed = yield* Deferred.make<void>();
+        const connectionStates = yield* Queue.unbounded<SupervisorConnectionState>();
+        const lifecycle = yield* SubscriptionRef.make<ServerLifecycleStreamReadyEvent | null>(null);
+        const environmentRegistry = EnvironmentRegistry.EnvironmentRegistry.of({
+          run: () => Effect.succeed(updateResult),
+          stateChanges: () =>
+            Stream.unwrap(
+              Deferred.succeed(stateSubscribed, undefined).pipe(
+                Effect.as(Stream.fromQueue(connectionStates)),
+              ),
+            ),
+          retryNow: () => Ref.update(retries, (count) => count + 1),
+          followStream: () =>
+            Stream.unwrap(
+              Deferred.succeed(lifecycleSubscribed, undefined).pipe(
+                Effect.as(
+                  Stream.filter(
+                    SubscriptionRef.changes(lifecycle),
+                    (event): event is ServerLifecycleStreamReadyEvent => event !== null,
+                  ).pipe(Stream.tap(() => Ref.set(consumedReady, true))),
+                ),
+              ),
+            ),
+        } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]);
+        const cache = Persistence.EnvironmentCacheStore.of({
+          loadShell: () => Effect.succeed(Option.none()),
+          saveShell: () => Effect.void,
+          loadThread: () => Effect.succeed(Option.none()),
+          saveThread: () => Effect.void,
+          removeThread: () => Effect.void,
+          loadServerConfig: () => Effect.succeed(Option.none()),
+          saveServerConfig: () => Effect.void,
+          loadVcsRefs: () => Effect.succeed(Option.none()),
+          saveVcsRefs: () => Effect.void,
+          removeVcsRefs: () => Effect.void,
+          clearVcsRefs: () => Effect.void,
+          clear: () => Effect.void,
+        });
+        const clock = yield* Clock.Clock;
+        const runtime = Atom.runtime(
+          Layer.mergeAll(
+            Layer.succeed(Clock.Clock, clock),
+            Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+            Layer.succeed(Persistence.EnvironmentCacheStore, cache),
+          ),
+        );
+        const atoms = createServerEnvironmentAtoms(runtime, {
+          initialConfigValueAtom: () => Atom.make(initialConfig),
+        });
+        const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+          Effect.sync(() => registry.dispose()),
+        );
+        const fiber = yield* Effect.forkChild(
+          Effect.promise(() =>
+            atoms.updateServer.run(registry, {
+              environmentId: TARGET.environmentId,
+              input: { targetVersion: updateResult.targetVersion },
+            }),
+          ),
+          { startImmediately: true },
+        );
+
+        yield* Deferred.await(stateSubscribed);
+        yield* Deferred.await(lifecycleSubscribed);
+        expect(registry.get(atoms.updateStateAtom(TARGET.environmentId))).toMatchObject({
+          status: "running",
+          stage: "resuming",
+        });
+        expect(yield* Ref.get(retries)).toBe(0);
+
+        yield* Queue.offer(connectionStates, authBlocked);
+        yield* Effect.yieldNow;
+        expect(yield* Ref.get(retries)).toBe(0);
+
+        yield* TestClock.adjust(Duration.seconds(1));
+        expect(yield* Ref.get(retries)).toBe(1);
+
+        yield* SubscriptionRef.set(lifecycle, readyEvent);
+        const commandResult = yield* Fiber.join(fiber);
+
+        expect(AsyncResult.isSuccess(commandResult)).toBe(true);
+        expect(AsyncResult.isSuccess(commandResult) ? commandResult.value : undefined).toEqual(
+          updateResult,
+        );
+        expect(yield* Ref.get(consumedReady)).toBe(true);
+        expect(registry.get(atoms.updateStateAtom(TARGET.environmentId))).toEqual({ status: "idle" });
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
   );
 });
 
