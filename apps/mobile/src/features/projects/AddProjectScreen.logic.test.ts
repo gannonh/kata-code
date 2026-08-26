@@ -2,7 +2,10 @@ import type { EnvironmentConnectionPhase } from "@kata-sh/code-client-runtime/co
 import { EnvironmentId } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
+import {
+  getAddProjectCloneConfirmRemoteUrl,
+  resolveAddProjectEnvironment,
+} from "./AddProjectScreen.logic";
 
 const ENVIRONMENT_A = EnvironmentId.make("environment-a");
 const ENVIRONMENT_B = EnvironmentId.make("environment-b");
@@ -37,5 +40,62 @@ describe("resolveAddProjectEnvironment", () => {
         null,
       )?.environmentId,
     ).toBe(ENVIRONMENT_B);
+  });
+});
+
+describe("getAddProjectCloneConfirmRemoteUrl", () => {
+  it("passes a provider-selected GitHub repository HTTPS url as the confirm remoteUrl", () => {
+    expect(
+      getAddProjectCloneConfirmRemoteUrl({
+        repository: {
+          provider: "github",
+          url: "https://github.com/gannonh/kata-code",
+          sshUrl: "git@github.com:gannonh/kata-code.git",
+        },
+        pastedInput: "gannonh/kata-code",
+      }),
+    ).toBe("https://github.com/gannonh/kata-code");
+  });
+
+  it("passes GitLab, Bitbucket, and Azure DevOps SSH urls as the confirm remoteUrl", () => {
+    expect(
+      getAddProjectCloneConfirmRemoteUrl({
+        repository: {
+          provider: "gitlab",
+          url: "https://gitlab.com/group/project.git",
+          sshUrl: "git@gitlab.com:group/project.git",
+        },
+        pastedInput: "group/project",
+      }),
+    ).toBe("git@gitlab.com:group/project.git");
+    expect(
+      getAddProjectCloneConfirmRemoteUrl({
+        repository: {
+          provider: "bitbucket",
+          url: "https://bitbucket.org/workspace/repository.git",
+          sshUrl: "git@bitbucket.org:workspace/repository.git",
+        },
+        pastedInput: "workspace/repository",
+      }),
+    ).toBe("git@bitbucket.org:workspace/repository.git");
+    expect(
+      getAddProjectCloneConfirmRemoteUrl({
+        repository: {
+          provider: "azure-devops",
+          url: "https://dev.azure.com/org/project/_git/repo",
+          sshUrl: "git@ssh.dev.azure.com:v3/org/project/repo",
+        },
+        pastedInput: "project/repo",
+      }),
+    ).toBe("git@ssh.dev.azure.com:v3/org/project/repo");
+  });
+
+  it("normalizes pasted GitHub shorthand when no repository is selected", () => {
+    expect(
+      getAddProjectCloneConfirmRemoteUrl({
+        repository: null,
+        pastedInput: "imputnet/helium",
+      }),
+    ).toBe("https://github.com/imputnet/helium.git");
   });
 });
