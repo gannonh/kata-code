@@ -60,21 +60,64 @@ evidence_dir_for() {
   printf '%s/%s\n' "$EVIDENCE_ROOT" "$1"
 }
 
+env_file_for() {
+  printf '%s/run.env\n' "$(verify_root_for "$1")"
+}
+
+# Filename-safe run ids only. No path separators, no traversal, no leading dash.
+is_safe_run_id() {
+  local run_id="$1"
+  [[ "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]
+}
+
+assert_safe_run_id() {
+  local run_id="$1"
+  if [[ "$run_id" == "" ]]; then
+    echo "verify-katacode: run id is empty" >&2
+    return 1
+  fi
+  if ! is_safe_run_id "$run_id"; then
+    echo "verify-katacode: refusing unsafe run id (must be a single filename-safe token): $run_id" >&2
+    return 1
+  fi
+}
+
 resolve_run_id() {
+  local run_id=""
   if [[ "${1:-}" != "" ]]; then
-    printf '%s\n' "$1"
-    return 0
+    run_id="$1"
+  elif [[ "${VERIFY_RUN_ID:-}" != "" ]]; then
+    run_id="$VERIFY_RUN_ID"
+  elif [[ -f "$LAST_RUN_FILE" ]]; then
+    run_id="$(tr -d '[:space:]' <"$LAST_RUN_FILE")"
+  else
+    echo "verify-katacode: pass a run id, set VERIFY_RUN_ID, or run bin/launch first" >&2
+    return 1
   fi
-  if [[ "${VERIFY_RUN_ID:-}" != "" ]]; then
-    printf '%s\n' "$VERIFY_RUN_ID"
-    return 0
+  assert_safe_run_id "$run_id" || return 1
+  printf '%s\n' "$run_id"
+}
+
+# Stable identity for a pid so cleanup can refuse a reused PID.
+# Linux: /proc/<pid>/stat starttime. Elsewhere: ps lstart.
+pid_identity() {
+  local pid="$1"
+  local started
+  if [[ ! "$pid" =~ ^[0-9]+$ ]]; then
+    return 1
   fi
-  if [[ -f "$LAST_RUN_FILE" ]]; then
-    tr -d '[:space:]' <"$LAST_RUN_FILE"
-    return 0
+  if [[ -r "/proc/$pid/stat" ]]; then
+    started="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
+    if [[ "$started" =~ ^[0-9]+$ ]]; then
+      printf 'procstat:%s\n' "$started"
+      return 0
+    fi
   fi
-  echo "verify-katacode: pass a run id, set VERIFY_RUN_ID, or run bin/launch first" >&2
-  return 1
+  started="$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)"
+  if [[ "$started" == "" ]]; then
+    return 1
+  fi
+  printf 'lstart:%s\n' "$started"
 }
 
 is_forbidden_home() {

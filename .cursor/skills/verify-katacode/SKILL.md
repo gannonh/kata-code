@@ -13,17 +13,19 @@ Iterative human testing against a kept-alive worktree stack is the sibling `test
 
 ## Launch
 
-From the repository root:
+From the repository root, load the printed values into the current shell:
 
 ```bash
-.cursor/skills/verify-katacode/bin/launch
+eval "$(.cursor/skills/verify-katacode/bin/launch)"
 ```
+
+`launch` writes progress on stderr and only `KEY=value` lines on stdout, so `eval` exports `RUN_ID`, `RUNNER_PID`, `HOME_DIR`, `VERIFY_ROOT`, `WEB_ORIGIN`, `SERVER_PORT`, `WEB_PORT`, `EVIDENCE_DIR`, `ENV_FILE`, and `PAIRING_URL`. The same exports are also written to `$ENV_FILE` (`${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/run.env`) for a later `source "$ENV_FILE"`.
 
 That starts `node scripts/dev-runner.ts dev --home-dir <disposable>` with no `--browser`, no `--share`, and with `VITE_HTTP_URL` / `VITE_WS_URL` unset. Dev is single-origin. Vite proxies `/api`, `/oauth`, `/.well-known`, and `/ws`. Baking a localhost origin into the bundle breaks every remote browser.
 
 Ready means all of these are true:
 
-- stdout printed `RUN_ID`, `WEB_ORIGIN`, `HOME_DIR`, and `PAIRING_URL`
+- the shell has `RUN_ID`, `WEB_ORIGIN`, `HOME_DIR`, and `PAIRING_URL` set (from `eval` or `source "$ENV_FILE"`)
 - the log contains a `[dev-runner] ... serverPort=... webPort=... baseDir=...` line whose `baseDir` is the disposable home
 - the server log contains a `/pair#token=...` URL (Effect logs it as `pairingUrl:`; `katacode pair` prints `Pairing URL:`)
 - `GET http://127.0.0.1:<webPort>/.well-known/kata/environment` returns JSON with `environmentId`, `label`, and `serverVersion`
@@ -48,11 +50,11 @@ Run this first whenever anything looks off, and before you drive:
 .cursor/skills/verify-katacode/bin/doctor
 ```
 
-Pass the run id if `.last-run` is stale: `bin/doctor web-20260826-163000`.
+Pass the run id if `.last-run` is stale: `bin/doctor web-20260826-163000-a1b2c3d4`.
 
 Doctor is read-only. It answers "is this instance worth driving?" by checking:
 
-- the runner pid from `run.json` is alive
+- the runner pid from `run.json` is alive and its start identity matches `runnerStart`
 - `server-runtime.json` pid is alive and in that runner's process tree
 - the recorded web and server ports are listened to by processes under that runner
 - the home dir is the disposable one, not `~/.katacode` or the worktree `.katacode`
@@ -80,7 +82,7 @@ agent-browser --session katacode-verify wait --text "What should we work on?"
 agent-browser --session katacode-verify snapshot -i
 ```
 
-`$PAIRING_URL` is the value launch printed. It ends in `/pair#token=...`. Open it exactly once as the first navigation. Preserve the fragment. Opening it twice, or opening it in a second browser, burns the token.
+`$PAIRING_URL` is the value from `eval "$(bin/launch)"` or `source "$ENV_FILE"`. It ends in `/pair#token=...`. Open it exactly once as the first navigation that consumes the token (after any token-free `$WEB_ORIGIN/` before-shot in the pairing recipe). Preserve the fragment. Opening it twice, or opening it in a second browser, burns the token.
 
 After pairing, the app strips the token from the URL and redirects to `/`. Wait until you see either:
 
@@ -134,9 +136,9 @@ When the proof is captured, or as soon as a launch/drive attempt fails:
 .cursor/skills/verify-katacode/bin/cleanup
 ```
 
-That kills the runner pid recorded in `run.json` and its descendants, then deletes `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/`. It does not delete `uat-evidence/<RUN_ID>/`.
+That verifies the runner pid in `run.json` still has the recorded `runnerStart` identity, then kills that pid and its descendants, then deletes `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/`. If the pid is gone or the identity no longer matches, cleanup skips signals and only removes this run's state. It does not delete `uat-evidence/<RUN_ID>/`.
 
-Never `pkill -f`, never `pgrep | kill`, never kill a pid you found by matching `katacode` or the worktree path. This machine runs other Kata Code servers. The worktree you are in may already have a `vp run dev` on different ports. Kill only the pid launch printed.
+Never `pkill -f`, never `pgrep | kill`, never kill a pid you found by matching `katacode` or the worktree path. This machine runs other Kata Code servers. The worktree you are in may already have a `vp run dev` on different ports. Kill only the pid launch printed, and only after the start identity matches.
 
 Do not remove `~/.katacode` or the worktree `.katacode`.
 
@@ -147,12 +149,13 @@ Close the `katacode-verify` agent-browser session after cleanup so the next run 
 All three are executable. Run them from the repository root.
 
 ```bash
-.cursor/skills/verify-katacode/bin/launch
+eval "$(.cursor/skills/verify-katacode/bin/launch)"
 .cursor/skills/verify-katacode/bin/doctor
-.cursor/skills/verify-katacode/bin/doctor web-20260826-163000
+.cursor/skills/verify-katacode/bin/doctor web-20260826-163000-a1b2c3d4
 .cursor/skills/verify-katacode/bin/cleanup
+# later shell: source "$ENV_FILE"
 ```
 
-`launch` writes `uat-evidence/<RUN_ID>/` and `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/run.json`. `doctor` and `cleanup` read `.cursor/skills/verify-katacode/.last-run` when you omit the id.
+`launch` writes `uat-evidence/<RUN_ID>/`, `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/run.json`, and `run.env`. `doctor` and `cleanup` read `.cursor/skills/verify-katacode/.last-run` when you omit the id. Run ids are `web-<UTC>-<8 hex>` and must stay filename-safe (no `/` or `..`).
 
 Feature recipes live in [features/](features/README.md). Drive from that map. A proof that uses one convenient entry point is incomplete when the map lists others; report the ones you did not reach rather than silently skipping them.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Start an isolated Kata Code web stack for verification. Prints run metadata
-# and the one-time pairing URL on stdout. Does not open a browser.
+# and the one-time pairing URL on stdout (eval-friendly KEY=value lines).
+# Progress goes to stderr. Does not open a browser.
 
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -16,12 +17,33 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-RUN_ID="web-$(date -u +%Y%m%d-%H%M%S)"
-VERIFY_ROOT="$(verify_root_for "$RUN_ID")"
+WAIT_SECS="${VERIFY_LAUNCH_TIMEOUT:-180}"
+RUN_ID=""
+VERIFY_ROOT=""
+attempt=0
+while ((attempt < 8)); do
+  attempt=$((attempt + 1))
+  suffix="$(openssl rand -hex 4 2>/dev/null || od -An -N4 -tx4 /dev/urandom | tr -d ' \n')"
+  candidate="web-$(date -u +%Y%m%d-%H%M%S)-${suffix}"
+  assert_safe_run_id "$candidate"
+  root="$(verify_root_for "$candidate")"
+  # Exclusive create: an existing id must fail instead of sharing state.
+  if mkdir "$root" 2>/dev/null; then
+    RUN_ID="$candidate"
+    VERIFY_ROOT="$root"
+    break
+  fi
+done
+
+if [[ "$RUN_ID" == "" || "$VERIFY_ROOT" == "" ]]; then
+  echo "verify-katacode: could not atomically create a unique verify root under $TMP_ROOT" >&2
+  exit 1
+fi
+
 HOME_DIR="$(home_dir_for "$RUN_ID")"
 DEV_LOG="$(dev_log_for "$RUN_ID")"
 EVIDENCE_DIR="$(evidence_dir_for "$RUN_ID")"
-WAIT_SECS="${VERIFY_LAUNCH_TIMEOUT:-180}"
+ENV_FILE="$(env_file_for "$RUN_ID")"
 
 if is_forbidden_home "$HOME_DIR"; then
   echo "verify-katacode: refusing to launch against $HOME_DIR" >&2
@@ -61,13 +83,21 @@ print(proc.pid)
 PY
 )"
 
+if ! RUNNER_START="$(pid_identity "$RUNNER_PID")"; then
+  echo "verify-katacode: could not read identity for runner pid $RUNNER_PID" >&2
+  kill_tree "$RUNNER_PID"
+  rm -rf "$VERIFY_ROOT"
+  exit 1
+fi
+
 cleanup_failed_launch() {
   echo "verify-katacode: launch failed, stopping pid $RUNNER_PID" >&2
   kill_tree "$RUNNER_PID"
+  rm -rf "$VERIFY_ROOT"
 }
 trap cleanup_failed_launch EXIT
 
-echo "verify-katacode: started runner pid=$RUNNER_PID run=$RUN_ID home=$HOME_DIR"
+echo "verify-katacode: started runner pid=$RUNNER_PID run=$RUN_ID home=$HOME_DIR" >&2
 
 deadline=$((SECONDS + WAIT_SECS))
 SERVER_PORT=""
@@ -134,15 +164,16 @@ fi
 printf '%s\n' "$PAIRING_URL" >"$(pairing_url_file_for "$RUN_ID")"
 chmod 600 "$(pairing_url_file_for "$RUN_ID")"
 
-python3 - "$RUN_ID" "$HOME_DIR" "$RUNNER_PID" "$SERVER_PORT" "$WEB_PORT" "$WEB_ORIGIN" "$(run_json_for "$RUN_ID")" <<'PY'
+python3 - "$RUN_ID" "$HOME_DIR" "$RUNNER_PID" "$RUNNER_START" "$SERVER_PORT" "$WEB_PORT" "$WEB_ORIGIN" "$(run_json_for "$RUN_ID")" <<'PY'
 import json, sys
-run_id, home, pid, server_port, web_port, origin, path = sys.argv[1:]
+run_id, home, pid, start, server_port, web_port, origin, path = sys.argv[1:]
 with open(path, "w", encoding="utf-8") as fh:
     json.dump(
         {
             "runId": run_id,
             "homeDir": home,
             "runnerPid": int(pid),
+            "runnerStart": start,
             "serverPort": int(server_port),
             "webPort": int(web_port),
             "webOrigin": origin,
@@ -153,12 +184,35 @@ with open(path, "w", encoding="utf-8") as fh:
     fh.write("\n")
 PY
 
+python3 - "$ENV_FILE" "$RUN_ID" "$HOME_DIR" "$RUNNER_PID" "$WEB_ORIGIN" "$SERVER_PORT" "$WEB_PORT" "$EVIDENCE_DIR" "$PAIRING_URL" "$VERIFY_ROOT" <<'PY'
+import shlex, sys
+path, run_id, home, pid, origin, server_port, web_port, evidence, pairing, verify_root = sys.argv[1:]
+keys = (
+    ("RUN_ID", run_id),
+    ("RUNNER_PID", pid),
+    ("HOME_DIR", home),
+    ("VERIFY_ROOT", verify_root),
+    ("WEB_ORIGIN", origin),
+    ("SERVER_PORT", server_port),
+    ("WEB_PORT", web_port),
+    ("EVIDENCE_DIR", evidence),
+    ("PAIRING_URL", pairing),
+    ("ENV_FILE", path),
+)
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write("# Source this file after bin/launch, or use: eval \"$(bin/launch)\"\n")
+    for key, value in keys:
+        fh.write(f"export {key}={shlex.quote(value)}\n")
+PY
+chmod 600 "$ENV_FILE"
+
 printf '%s\n' "$RUN_ID" >"$LAST_RUN_FILE"
 
 # Redacted launch excerpt for the evidence dir. Pairing tokens stay out.
 {
   echo "runId=$RUN_ID"
   echo "runnerPid=$RUNNER_PID"
+  echo "runnerStart=$RUNNER_START"
   echo "homeDir=$HOME_DIR"
   echo "webOrigin=$WEB_ORIGIN"
   echo "serverPort=$SERVER_PORT"
@@ -168,13 +222,16 @@ printf '%s\n' "$RUN_ID" >"$LAST_RUN_FILE"
 
 trap - EXIT
 
+# Stdout is KEY=value only so callers can eval "$(bin/launch)".
 cat <<EOF
 RUN_ID=$RUN_ID
 RUNNER_PID=$RUNNER_PID
 HOME_DIR=$HOME_DIR
+VERIFY_ROOT=$VERIFY_ROOT
 WEB_ORIGIN=$WEB_ORIGIN
 SERVER_PORT=$SERVER_PORT
 WEB_PORT=$WEB_PORT
 EVIDENCE_DIR=$EVIDENCE_DIR
+ENV_FILE=$ENV_FILE
 PAIRING_URL=$PAIRING_URL
 EOF
