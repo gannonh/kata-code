@@ -1,0 +1,18 @@
+{
+  "id": "ws_ba51073c",
+  "name": "kata-code",
+  "slug": "kata-code",
+  "defaults": {
+    "permissionMode": "safe",
+    "cyclablePermissionModes": [
+      "safe",
+      "allow-all"
+    ],
+    "enabledSourceSlugs": []
+  },
+  "localMcpServers": {
+    "enabled": true
+  },
+  "createdAt": 1787705521777,
+  "updatedAt": 1787705521778
+}
