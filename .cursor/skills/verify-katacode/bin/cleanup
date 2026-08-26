@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Stop the stack this run started. Removes the disposable home. Leaves uat-evidence.
+
+set -euo pipefail
+# shellcheck source=lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+RUN_ID="$(resolve_run_id "${1:-}")"
+RUN_JSON="$(run_json_for "$RUN_ID")"
+VERIFY_ROOT="$(verify_root_for "$RUN_ID")"
+HOME_DIR="$(home_dir_for "$RUN_ID")"
+EVIDENCE_DIR="$(evidence_dir_for "$RUN_ID")"
+
+if [[ ! -f "$RUN_JSON" ]]; then
+  echo "verify-katacode: no run.json at $RUN_JSON; nothing to stop" >&2
+  exit 1
+fi
+
+eval "$(python3 - "$RUN_JSON" <<'PY'
+import json, shlex, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+print(f"RUNNER_PID={shlex.quote(str(data['runnerPid']))}")
+print(f"RECORDED_HOME={shlex.quote(str(data['homeDir']))}")
+print(f"RUNNER_START={shlex.quote(str(data.get('runnerStart') or ''))}")
+PY
+)"
+
+if is_forbidden_home "$HOME_DIR" || is_forbidden_home "$RECORDED_HOME"; then
+  echo "verify-katacode: refusing to delete $RECORDED_HOME" >&2
+  exit 1
+fi
+
+case "$VERIFY_ROOT" in
+  */katacode-verify-"$RUN_ID") ;;
+  *)
+    echo "verify-katacode: unexpected verify root $VERIFY_ROOT" >&2
+    exit 1
+    ;;
+esac
+
+should_signal=0
+if [[ "$RUNNER_START" == "" ]]; then
+  echo "verify-katacode: run.json has no runnerStart; skipping signals for pid $RUNNER_PID" >&2
+elif ! pid_alive "$RUNNER_PID"; then
+  echo "verify-katacode: runner pid $RUNNER_PID is not alive; skipping signals" >&2
+else
+  current_start="$(pid_identity "$RUNNER_PID" || true)"
+  if [[ "$current_start" == "$RUNNER_START" ]]; then
+    should_signal=1
+  else
+    echo "verify-katacode: pid $RUNNER_PID identity mismatch (recorded=$RUNNER_START current=${current_start:-missing}); skipping signals" >&2
+  fi
+fi
+
+if ((should_signal)); then
+  echo "verify-katacode: stopping runner pid $RUNNER_PID"
+  kill_tree "$RUNNER_PID"
+  # Give children a moment, then force the leftovers of this tree only.
+  sleep 1
+  if pid_alive "$RUNNER_PID"; then
+    current_start="$(pid_identity "$RUNNER_PID" || true)"
+    if [[ "$current_start" == "$RUNNER_START" ]]; then
+      kill -9 "$RUNNER_PID" 2>/dev/null || true
+    fi
+  fi
+else
+  echo "verify-katacode: removing run state only at $VERIFY_ROOT"
+fi
+
+rm -rf "$VERIFY_ROOT"
+
+if [[ -f "$LAST_RUN_FILE" ]] && [[ "$(tr -d '[:space:]' <"$LAST_RUN_FILE")" == "$RUN_ID" ]]; then
+  rm -f "$LAST_RUN_FILE"
+fi
+
+if [[ -d "$EVIDENCE_DIR" ]]; then
+  echo "verify-katacode: evidence kept at $EVIDENCE_DIR"
+else
+  echo "verify-katacode: warning: expected evidence dir $EVIDENCE_DIR is missing" >&2
+fi
