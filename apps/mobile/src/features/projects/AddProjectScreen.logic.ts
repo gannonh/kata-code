@@ -1,6 +1,10 @@
-import { canCreateProjectInEnvironment } from "@kata-sh/code-client-runtime/operations/projects";
+import {
+  canCreateProjectInEnvironment,
+  getDefaultCloneUrl,
+  normalizePastedCloneUrl,
+} from "@kata-sh/code-client-runtime/operations/projects";
 import type { EnvironmentConnectionPhase } from "@kata-sh/code-client-runtime/connection";
-import type { EnvironmentId } from "@kata-sh/code-contracts";
+import type { EnvironmentId, SourceControlRepositoryInfo } from "@kata-sh/code-contracts";
 
 export function resolveAddProjectEnvironment<
   T extends {
@@ -23,4 +27,13 @@ export function resolveAddProjectEnvironment<
       canCreateProjectInEnvironment(environment.connectionState),
     ) ?? null
   );
+}
+
+export function getAddProjectCloneConfirmRemoteUrl(input: {
+  readonly repository: Pick<SourceControlRepositoryInfo, "provider" | "url" | "sshUrl"> | null;
+  readonly pastedInput: string;
+}): string {
+  return input.repository === null
+    ? normalizePastedCloneUrl(input.pastedInput)
+    : getDefaultCloneUrl(input.repository);
 }

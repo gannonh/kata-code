@@ -16,6 +16,8 @@ import {
   getCloneDestinationBrowsePath,
   getCloneDestinationPath,
   getCloneDirectoryName,
+  getDefaultCloneUrl,
+  normalizePastedCloneUrl,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
 } from "./projects.ts";
@@ -44,6 +46,72 @@ describe("add project shared logic", () => {
     expect(getCloneDirectoryName("owner/repo/")).toBe("repo");
     expect(getCloneDirectoryName("")).toBe("");
     expect(getCloneDirectoryName(null)).toBe("");
+  });
+
+  it("routes owner/repository shorthand to GitHub over HTTPS", () => {
+    expect(normalizePastedCloneUrl("gannonh/kata-code")).toBe(
+      "https://github.com/gannonh/kata-code.git",
+    );
+    expect(normalizePastedCloneUrl("imputnet/helium.git")).toBe(
+      "https://github.com/imputnet/helium.git",
+    );
+    expect(normalizePastedCloneUrl("  gannonh/kata-code  ")).toBe(
+      "https://github.com/gannonh/kata-code.git",
+    );
+    expect(normalizePastedCloneUrl("foo/bar")).toBe("https://github.com/foo/bar.git");
+  });
+
+  it("keeps explicit clone URLs and local paths unchanged", () => {
+    expect(normalizePastedCloneUrl("https://github.com/gannonh/kata-code.git")).toBe(
+      "https://github.com/gannonh/kata-code.git",
+    );
+    expect(normalizePastedCloneUrl("git@github.com:gannonh/kata-code.git")).toBe(
+      "git@github.com:gannonh/kata-code.git",
+    );
+    expect(normalizePastedCloneUrl("/repo")).toBe("/repo");
+    expect(normalizePastedCloneUrl("  /repo  ")).toBe("/repo");
+    expect(normalizePastedCloneUrl("./repo")).toBe("./repo");
+    expect(normalizePastedCloneUrl("../repo")).toBe("../repo");
+    expect(normalizePastedCloneUrl("C:\\Users\\me\\repo")).toBe("C:\\Users\\me\\repo");
+    expect(normalizePastedCloneUrl("group/subgroup/project")).toBe("group/subgroup/project");
+    expect(normalizePastedCloneUrl("gannonh/kata-code?ref=main")).toBe(
+      "gannonh/kata-code?ref=main",
+    );
+    expect(normalizePastedCloneUrl("gannonh/kata-code#readme")).toBe("gannonh/kata-code#readme");
+  });
+
+  it("uses HTTPS for GitHub repositories selected through a provider", () => {
+    expect(
+      getDefaultCloneUrl({
+        provider: "github",
+        url: "https://github.com/imputnet/helium",
+        sshUrl: "git@github.com:imputnet/helium.git",
+      }),
+    ).toBe("https://github.com/imputnet/helium");
+  });
+
+  it("preserves SSH for GitLab, Bitbucket, and Azure DevOps provider selections", () => {
+    expect(
+      getDefaultCloneUrl({
+        provider: "gitlab",
+        url: "https://gitlab.com/group/project.git",
+        sshUrl: "git@gitlab.com:group/project.git",
+      }),
+    ).toBe("git@gitlab.com:group/project.git");
+    expect(
+      getDefaultCloneUrl({
+        provider: "bitbucket",
+        url: "https://bitbucket.org/workspace/repository.git",
+        sshUrl: "git@bitbucket.org:workspace/repository.git",
+      }),
+    ).toBe("git@bitbucket.org:workspace/repository.git");
+    expect(
+      getDefaultCloneUrl({
+        provider: "azure-devops",
+        url: "https://dev.azure.com/org/project/_git/repo",
+        sshUrl: "git@ssh.dev.azure.com:v3/org/project/repo",
+      }),
+    ).toBe("git@ssh.dev.azure.com:v3/org/project/repo");
   });
 
   it("derives the clone folder name from any pasted clone URL", () => {
