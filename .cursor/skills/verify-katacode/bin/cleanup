@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Stop the stack this run started. Removes the disposable home. Leaves uat-evidence.
+
+set -euo pipefail
+# shellcheck source=lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+RUN_ID="$(resolve_run_id "${1:-}")"
+RUN_JSON="$(run_json_for "$RUN_ID")"
+VERIFY_ROOT="$(verify_root_for "$RUN_ID")"
+HOME_DIR="$(home_dir_for "$RUN_ID")"
+EVIDENCE_DIR="$(evidence_dir_for "$RUN_ID")"
+
+if [[ ! -f "$RUN_JSON" ]]; then
+  echo "verify-katacode: no run.json at $RUN_JSON; nothing to stop" >&2
+  exit 1
+fi
+
+eval "$(python3 - "$RUN_JSON" <<'PY'
+import json, shlex, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+print(f"RUNNER_PID={shlex.quote(str(data['runnerPid']))}")
+print(f"RECORDED_HOME={shlex.quote(str(data['homeDir']))}")
+PY
+)"
+
+if is_forbidden_home "$HOME_DIR" || is_forbidden_home "$RECORDED_HOME"; then
+  echo "verify-katacode: refusing to delete $RECORDED_HOME" >&2
+  exit 1
+fi
+
+case "$VERIFY_ROOT" in
+  */katacode-verify-"$RUN_ID") ;;
+  *)
+    echo "verify-katacode: unexpected verify root $VERIFY_ROOT" >&2
+    exit 1
+    ;;
+esac
+
+echo "verify-katacode: stopping runner pid $RUNNER_PID"
+kill_tree "$RUNNER_PID"
+# Give children a moment, then force the leftovers of this tree only.
+sleep 1
+if pid_alive "$RUNNER_PID"; then
+  kill -9 "$RUNNER_PID" 2>/dev/null || true
+fi
+
+rm -rf "$VERIFY_ROOT"
+
+if [[ -f "$LAST_RUN_FILE" ]] && [[ "$(tr -d '[:space:]' <"$LAST_RUN_FILE")" == "$RUN_ID" ]]; then
+  rm -f "$LAST_RUN_FILE"
+fi
+
+if [[ -d "$EVIDENCE_DIR" ]]; then
+  echo "verify-katacode: evidence kept at $EVIDENCE_DIR"
+else
+  echo "verify-katacode: warning: expected evidence dir $EVIDENCE_DIR is missing" >&2
+fi

@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# Start an isolated Kata Code web stack for verification. Prints run metadata
+# and the one-time pairing URL on stdout. Does not open a browser.
+
+set -euo pipefail
+# shellcheck source=lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+if [[ ! -d "$REPO_ROOT/node_modules" ]]; then
+  echo "verify-katacode: node_modules is missing. From the repo root run: vp i" >&2
+  exit 1
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "verify-katacode: node is not on PATH" >&2
+  exit 1
+fi
+
+RUN_ID="web-$(date -u +%Y%m%d-%H%M%S)"
+VERIFY_ROOT="$(verify_root_for "$RUN_ID")"
+HOME_DIR="$(home_dir_for "$RUN_ID")"
+DEV_LOG="$(dev_log_for "$RUN_ID")"
+EVIDENCE_DIR="$(evidence_dir_for "$RUN_ID")"
+WAIT_SECS="${VERIFY_LAUNCH_TIMEOUT:-180}"
+
+if is_forbidden_home "$HOME_DIR"; then
+  echo "verify-katacode: refusing to launch against $HOME_DIR" >&2
+  exit 1
+fi
+
+mkdir -p "$HOME_DIR" "$EVIDENCE_DIR/screenshots" "$EVIDENCE_DIR/snapshots" "$EVIDENCE_DIR/logs"
+: >"$DEV_LOG"
+
+# Never bake origins into the web bundle. Never auto-open a browser: that
+# consumes the one-time pairing token before the controlled session uses it.
+unset VITE_HTTP_URL VITE_WS_URL || true
+
+cd "$REPO_ROOT"
+# New session so the runner survives this helper exiting. Cursor's shell
+# tool kills the helper's process group when the command finishes.
+RUNNER_PID="$(
+  python3 - "$REPO_ROOT" "$HOME_DIR" "$DEV_LOG" <<'PY'
+import os
+import subprocess
+import sys
+
+repo, home, log_path = sys.argv[1], sys.argv[2], sys.argv[3]
+env = os.environ.copy()
+env.pop("VITE_HTTP_URL", None)
+env.pop("VITE_WS_URL", None)
+with open(log_path, "ab") as logf:
+    proc = subprocess.Popen(
+        ["node", "scripts/dev-runner.ts", "dev", "--home-dir", home],
+        cwd=repo,
+        stdout=logf,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        env=env,
+    )
+print(proc.pid)
+PY
+)"
+
+cleanup_failed_launch() {
+  echo "verify-katacode: launch failed, stopping pid $RUNNER_PID" >&2
+  kill_tree "$RUNNER_PID"
+}
+trap cleanup_failed_launch EXIT
+
+echo "verify-katacode: started runner pid=$RUNNER_PID run=$RUN_ID home=$HOME_DIR"
+
+deadline=$((SECONDS + WAIT_SECS))
+SERVER_PORT=""
+WEB_PORT=""
+LOGGED_HOME=""
+PAIRING_URL=""
+WEB_ORIGIN=""
+
+while ((SECONDS < deadline)); do
+  if ! pid_alive "$RUNNER_PID"; then
+    echo "verify-katacode: runner exited before it became ready. Last log lines:" >&2
+    tail -n 40 "$DEV_LOG" | redact_secrets >&2
+    exit 1
+  fi
+
+  if [[ "$WEB_PORT" == "" ]]; then
+    line="$(grep -E '\[dev-runner\].*serverPort=' "$DEV_LOG" | tail -n 1 || true)"
+    if [[ "$line" != "" ]]; then
+      SERVER_PORT="$(sed -nE 's/.*serverPort=([0-9]+).*/\1/p' <<<"$line")"
+      WEB_PORT="$(sed -nE 's/.*webPort=([0-9]+).*/\1/p' <<<"$line")"
+      LOGGED_HOME="$(sed -nE 's/.*baseDir=(.*)$/\1/p' <<<"$line")"
+      if [[ "$(normpath "$LOGGED_HOME")" != "$(normpath "$HOME_DIR")" ]]; then
+        echo "verify-katacode: runner baseDir $LOGGED_HOME does not match $HOME_DIR" >&2
+        exit 1
+      fi
+    fi
+  fi
+
+  if [[ "$PAIRING_URL" == "" ]]; then
+    PAIRING_URL="$(grep -Eo 'https?://[^[:space:]\"'\'']+/pair#token=[^[:space:]\"'\'']+' "$DEV_LOG" | tail -n 1 || true)"
+  fi
+
+  if [[ "$WEB_PORT" != "" && "$PAIRING_URL" != "" ]]; then
+    if descriptor_from "http://127.0.0.1:${SERVER_PORT}/.well-known/kata/environment" \
+      || descriptor_from "http://localhost:${SERVER_PORT}/.well-known/kata/environment"; then
+      WEB_ORIGIN="$(web_origin_for_port "$WEB_PORT" || true)"
+      if [[ "$WEB_ORIGIN" != "" ]]; then
+        break
+      fi
+    fi
+  fi
+  sleep 1
+done
+
+if [[ "$WEB_PORT" == "" || "$SERVER_PORT" == "" ]]; then
+  echo "verify-katacode: timed out waiting for the [dev-runner] port line" >&2
+  tail -n 40 "$DEV_LOG" | redact_secrets >&2
+  exit 1
+fi
+
+if [[ "$PAIRING_URL" == "" ]]; then
+  echo "verify-katacode: timed out waiting for a /pair#token= URL in the server log" >&2
+  tail -n 40 "$DEV_LOG" | redact_secrets >&2
+  exit 1
+fi
+
+if [[ "$WEB_ORIGIN" == "" ]]; then
+  if ! WEB_ORIGIN="$(web_origin_for_port "$WEB_PORT")"; then
+    echo "verify-katacode: web origin is not serving /.well-known/kata/environment JSON on localhost or 127.0.0.1 port $WEB_PORT" >&2
+    tail -n 40 "$DEV_LOG" | redact_secrets >&2
+    exit 1
+  fi
+fi
+printf '%s\n' "$PAIRING_URL" >"$(pairing_url_file_for "$RUN_ID")"
+chmod 600 "$(pairing_url_file_for "$RUN_ID")"
+
+python3 - "$RUN_ID" "$HOME_DIR" "$RUNNER_PID" "$SERVER_PORT" "$WEB_PORT" "$WEB_ORIGIN" "$(run_json_for "$RUN_ID")" <<'PY'
+import json, sys
+run_id, home, pid, server_port, web_port, origin, path = sys.argv[1:]
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(
+        {
+            "runId": run_id,
+            "homeDir": home,
+            "runnerPid": int(pid),
+            "serverPort": int(server_port),
+            "webPort": int(web_port),
+            "webOrigin": origin,
+        },
+        fh,
+        indent=2,
+    )
+    fh.write("\n")
+PY
+
+printf '%s\n' "$RUN_ID" >"$LAST_RUN_FILE"
+
+# Redacted launch excerpt for the evidence dir. Pairing tokens stay out.
+{
+  echo "runId=$RUN_ID"
+  echo "runnerPid=$RUNNER_PID"
+  echo "homeDir=$HOME_DIR"
+  echo "webOrigin=$WEB_ORIGIN"
+  echo "serverPort=$SERVER_PORT"
+  echo "webPort=$WEB_PORT"
+  grep -E '\[dev-runner\]' "$DEV_LOG" | redact_secrets || true
+} >"$EVIDENCE_DIR/logs/launch.txt"
+
+trap - EXIT
+
+cat <<EOF
+RUN_ID=$RUN_ID
+RUNNER_PID=$RUNNER_PID
+HOME_DIR=$HOME_DIR
+WEB_ORIGIN=$WEB_ORIGIN
+SERVER_PORT=$SERVER_PORT
+WEB_PORT=$WEB_PORT
+EVIDENCE_DIR=$EVIDENCE_DIR
+PAIRING_URL=$PAIRING_URL
+EOF

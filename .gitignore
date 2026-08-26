@@ -41,3 +41,6 @@ node_modules/
 .agents/skills/plan-build-verify/
 .agents/skills/address-pr-comments/
 skills-lock.json
+
+# Local verification-run screenshots and logs. Pairing tokens must never land here.
+uat-evidence/
