@@ -407,8 +407,16 @@ describe("environment query lifecycle", () => {
         const result = registry.get(harness.atom);
         expect(AsyncResult.isFailure(result)).toBe(true);
         expect(result.waiting).toBe(false);
-        if (AsyncResult.isFailure(result) && expectedFailure !== null) {
-          expect(Cause.squash(result.cause)).toBe(expectedFailure);
+        if (AsyncResult.isFailure(result)) {
+          const failure = Cause.squash(result.cause);
+          if (expectedFailure !== null) {
+            expect(failure).toBe(expectedFailure);
+          } else {
+            expect(failure).toMatchObject({
+              _tag: "EnvironmentRpcUnavailableError",
+              environmentId: QUERY_ENVIRONMENT.environmentId,
+            });
+          }
         }
       }),
     ),
