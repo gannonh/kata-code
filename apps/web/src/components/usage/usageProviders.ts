@@ -26,5 +26,21 @@ export const PROVIDER_PRESENTATION = {
   },
 } satisfies Record<UsageProviderKind, UsageProviderPresentation>;
 
-/** The chart layers every series from zero, so order only controls how it is read. */
+/** Stable provider reading order across charts, summaries, tables, and hover rows. */
 export const PROVIDER_ORDER = Object.keys(PROVIDER_PRESENTATION) as UsageProviderKind[];
+
+/** Providers with real activity, independent of the metric currently displayed. */
+export function providersWithUsage(
+  totals: readonly {
+    readonly provider: UsageProviderKind;
+    readonly costUsd: number;
+    readonly totalTokens: number;
+  }[],
+): readonly UsageProviderKind[] {
+  const active = new Set(
+    totals
+      .filter((entry) => entry.totalTokens > 0 || entry.costUsd > 0)
+      .map((entry) => entry.provider),
+  );
+  return PROVIDER_ORDER.filter((provider) => active.has(provider));
+}
