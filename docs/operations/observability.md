@@ -79,7 +79,7 @@ You do not need any extra env vars. Just run the app normally and inspect `serve
 Examples:
 
 ```bash
-npx t3
+npx @kata-sh/code-cli
 ```
 
 ```bash
@@ -130,7 +130,7 @@ export KATACODE_TRACE_TIMING_ENABLED=true
 CLI:
 
 ```bash
-npx t3
+npx @kata-sh/code-cli
 ```
 
 Monorepo web/server dev:
@@ -183,19 +183,19 @@ Resolve the path for the launch mode once. Production and explicitly configured 
 state under the base directory's `userdata` folder:
 
 ```bash
-TRACE_FILE="${KATACODE_HOME:-$HOME/.t3}/userdata/logs/server.trace.ndjson"
+TRACE_FILE="${KATACODE_HOME:-$HOME/.katacode}/userdata/logs/server.trace.ndjson"
 ```
 
 A dev server started from a linked worktree defaults to that worktree's local home:
 
 ```bash
-TRACE_FILE="$WORKTREE/.t3/userdata/logs/server.trace.ndjson"
+TRACE_FILE="$WORKTREE/.katacode/userdata/logs/server.trace.ndjson"
 ```
 
 Only an implicit dev run outside a linked worktree uses the shared dev directory:
 
 ```bash
-TRACE_FILE="$HOME/.t3/dev/logs/server.trace.ndjson"
+TRACE_FILE="$HOME/.katacode/dev/logs/server.trace.ndjson"
 ```
 
 Tail the selected file:
