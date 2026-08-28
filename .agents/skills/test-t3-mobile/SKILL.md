@@ -93,8 +93,8 @@ Run Metro from `apps/mobile`.
 
 Use `ios-debugger-agent` to select one UDID and set these XcodeBuildMCP session defaults:
 
-- Workspace: `<repo>/apps/mobile/ios/T3CodeDev.xcworkspace`
-- Scheme: `T3CodeDev`
+- Workspace: `<repo>/apps/mobile/ios/KataCodeDev.xcworkspace`
+- Scheme: `KataCodeDev`
 - Configuration: `Debug`
 - Simulator ID: the selected UDID
 - Bundle ID: `com.katacode.dev`
