@@ -70,7 +70,7 @@
     "plan-build-verify": {
       "source": "gannonh/skills",
       "sourceType": "github",
-      "skillPath": "plan-build-verify/SKILL.md",
+      "skillPath": "skills/plan-build-verify/SKILL.md",
       "computedHash": "8bbb2c0ace87821b0811740f9fb95e4f4a5600a12eb27532e351b1adfcaa5c90"
     },
     "pr-walkthrough": {
@@ -346,7 +346,7 @@
     "readme": {
       "source": "gannonh/skills",
       "sourceType": "github",
-      "skillPath": "readme/SKILL.md",
+      "skillPath": "skills/readme/SKILL.md",
       "computedHash": "d8f24451fb0481a457cffe63b174d1c29179bdec5da5ad816c678a19beda401f"
     },
     "readout": {
@@ -436,7 +436,7 @@
     "thermo-run": {
       "source": "gannonh/skills",
       "sourceType": "github",
-      "skillPath": "thermo-run/SKILL.md",
+      "skillPath": "skills/thermo-run/SKILL.md",
       "computedHash": "16eabcd03c60038d5d283bbc7312517eefb6527e981c9e12a83403f9967dfa45"
     },
     "unslop": {
