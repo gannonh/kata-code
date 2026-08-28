@@ -79,6 +79,270 @@
       "skillPath": ".agents/skills/pr-walkthrough/SKILL.md",
       "computedHash": "fd5ff2a22f4cc80ef8d0ab3a7bdef427d6463719f9e5fdf47f6fa1371fc4d3f9"
     },
+    "ps-architect": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-architect/SKILL.md",
+      "computedHash": "b165f2e61f352776bf8772844371927ad3b441ef70d042c0a5901ff9098c4b63"
+    },
+    "ps-arena": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-arena/SKILL.md",
+      "computedHash": "6418d899fb5f299b48cb9190be1261ce21e67501f19fab030aa56492469996c6"
+    },
+    "ps-automate-me": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-automate-me/SKILL.md",
+      "computedHash": "ea5296692a486cbadb9a83a03ded2ca71013111c1b6d97460ab69145e2886c14"
+    },
+    "ps-blast-radius": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-blast-radius/SKILL.md",
+      "computedHash": "8c82b267ba4467922eed96693be519694a86a7c85554d8a4532ffc49df390639"
+    },
+    "ps-bro": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-bro/SKILL.md",
+      "computedHash": "855cd6eb91300f212dc6c5f2d2a06a799603995723c37a4e8d1e657fce317707"
+    },
+    "ps-create-verification-skill": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-create-verification-skill/SKILL.md",
+      "computedHash": "e37dacfdc2e0dce3bd1c25191008904eb5c1f19668721b81a0a33703aedfeb6f"
+    },
+    "ps-figure-it-out": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-figure-it-out/SKILL.md",
+      "computedHash": "e27381423387ed6aa064a32183aaffbf55c907d0676fe0eca58628f75ef79988"
+    },
+    "ps-how": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-how/SKILL.md",
+      "computedHash": "afa3a010c341f427f2e25cab1fefb6293c4313342918474655c980ccff794c72"
+    },
+    "ps-interrogate": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-interrogate/SKILL.md",
+      "computedHash": "7697078dceb3b35db2764126229eb7e10f641ad7d252dbf57ff20c9373bd529c"
+    },
+    "ps-maintain-verification-skill": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-maintain-verification-skill/SKILL.md",
+      "computedHash": "f28766310d42795ea380540a9a94d4e00007c527127c7a4e933c84d561b22840"
+    },
+    "ps-no-comments": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-no-comments/SKILL.md",
+      "computedHash": "e4638185f6b02240587e96f0e6bff4664e3875f8b7876e92c1c14440aded7ae8"
+    },
+    "ps-poteto-mode": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-poteto-mode/SKILL.md",
+      "computedHash": "c05060f01f677b736bfa26e61d0bda88d8cc5eb294f1ea57fe25e2d5ca2195b8"
+    },
+    "ps-principle-boundary-discipline": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-boundary-discipline/SKILL.md",
+      "computedHash": "ab1d270c45b6727f6323180a3cae5c7b4c105b1b42d91cc13cfa3c573e3f34f1"
+    },
+    "ps-principle-build-the-lever": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-build-the-lever/SKILL.md",
+      "computedHash": "7f6d1f39b772b60e34431e1a4ae63bb0be34be2be373394518c84adcb00b2e8f"
+    },
+    "ps-principle-encode-lessons-in-structure": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-encode-lessons-in-structure/SKILL.md",
+      "computedHash": "ade5f56e6d9970a049498d43d859d0c88b2c7e2f85b6bb68d35168c078694287"
+    },
+    "ps-principle-exhaust-the-design-space": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-exhaust-the-design-space/SKILL.md",
+      "computedHash": "d25311921db930203cacfba5255b8389cccc8550fa114af6d0c489e1dbf14e19"
+    },
+    "ps-principle-experience-first": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-experience-first/SKILL.md",
+      "computedHash": "a844b8e2ae9b6d3da8a629facc2cb4f4974826d335ed11416ca37ae6526e822b"
+    },
+    "ps-principle-fix-root-causes": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-fix-root-causes/SKILL.md",
+      "computedHash": "0f868ca36628f05aea152a294c090f7920e2aee7860532945f6ec3100332ba4f"
+    },
+    "ps-principle-foundational-thinking": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-foundational-thinking/SKILL.md",
+      "computedHash": "68e3257c73ddd83af7b37fd53ac35df69d38bbf496f4449e0fa242cbfcbe4204"
+    },
+    "ps-principle-guard-the-context-window": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-guard-the-context-window/SKILL.md",
+      "computedHash": "9d29096e94d7f052261571a6c07c407d204e885c4342e946b5328a2064c4491c"
+    },
+    "ps-principle-laziness-protocol": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-laziness-protocol/SKILL.md",
+      "computedHash": "c3c666255f9a044fda0351155318d0e519a950a83687fa7cc4bdd335633edd86"
+    },
+    "ps-principle-make-operations-idempotent": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-make-operations-idempotent/SKILL.md",
+      "computedHash": "ceca27bd20b31af6fe13e11be3fce08a2fe6f155f1a42b22e49686074a93bcff"
+    },
+    "ps-principle-migrate-callers-then-delete-legacy-apis": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-migrate-callers-then-delete-legacy-apis/SKILL.md",
+      "computedHash": "b8eec0369c15743864ec8480a2ca8d7c26c3df841e5731102ceaa48e532405f3"
+    },
+    "ps-principle-minimize-reader-load": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-minimize-reader-load/SKILL.md",
+      "computedHash": "cd4833a481aaf1c6e12848ac81f857c2a5db5daaeca6186f5a8f4988cf4cfd56"
+    },
+    "ps-principle-model-the-domain": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-model-the-domain/SKILL.md",
+      "computedHash": "d7f1e6f7622b2356e1fb0bceca355bb1ef57d00ffa683750ea2d83a02eac07e4"
+    },
+    "ps-principle-never-block-on-the-human": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-never-block-on-the-human/SKILL.md",
+      "computedHash": "615dc19f2d32645a4600328f055642c212e6a50731eff29abaf063660248092f"
+    },
+    "ps-principle-outcome-oriented-execution": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-outcome-oriented-execution/SKILL.md",
+      "computedHash": "07a3d0f7d6f21d5b5939b2c38fb79e01c4c32b302d1459521e280667be9501f4"
+    },
+    "ps-principle-prove-it-works": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-prove-it-works/SKILL.md",
+      "computedHash": "7dfb0a4276483774772a5f29d75dfe25d3fbdff5bd14a61febe120526c35e8c5"
+    },
+    "ps-principle-redesign-from-first-principles": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-redesign-from-first-principles/SKILL.md",
+      "computedHash": "f49c82c710429565df6a7eaa87f1ab89d8ed32f665a052c23983ffb0985c1add"
+    },
+    "ps-principle-separate-before-serializing-shared-state": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-separate-before-serializing-shared-state/SKILL.md",
+      "computedHash": "af61061992ac7d3fa9b6f6a1339565ec676474e2e45e06915a4035d1ecb8986f"
+    },
+    "ps-principle-sequence-verifiable-units": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-sequence-verifiable-units/SKILL.md",
+      "computedHash": "26677d1d4b292612c776637856a9c3978c9b37f7aef80b25182f1eb5d0fca012"
+    },
+    "ps-principle-subtract-before-you-add": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-subtract-before-you-add/SKILL.md",
+      "computedHash": "d06dc7dd1728cc0469480979336d0a4e4bfe5404c4ee768810d84e9ce2d79330"
+    },
+    "ps-principle-type-system-discipline": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-principle-type-system-discipline/SKILL.md",
+      "computedHash": "51fbff61d5c44f712d2e7615c86a0d27bced69e0710cac83ef6783a9239b824a"
+    },
+    "ps-recall": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-recall/SKILL.md",
+      "computedHash": "5ffe99b1b12be4c8e99b6dc3100582a5124e9f646ff619682387d1d02e0d408f"
+    },
+    "ps-reflect": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-reflect/SKILL.md",
+      "computedHash": "aba4450b10b8072f8eb0bddfa75d108843eebea367c6aeb59ccc2180ea0cbdec"
+    },
+    "ps-setup-pstack": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-setup-pstack/SKILL.md",
+      "computedHash": "138b754b492926642ca79e3e9807f8cc9233bde5abfa68d2149640f0e19a8030"
+    },
+    "ps-show-me-your-work": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-show-me-your-work/SKILL.md",
+      "computedHash": "37e2b30c58bc1aafa2ac75a1dcdeb5a0c539cdb8cdfb6443e0473cbfc82117a6"
+    },
+    "ps-swarm": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-swarm/SKILL.md",
+      "computedHash": "17fb8c97851e33caebe8c11cc9b05832621b8b8ec44246aee0dcd223e8dcaef8"
+    },
+    "ps-tdd": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-tdd/SKILL.md",
+      "computedHash": "4e6fdd4ad35c09cd0db6993f3b0ee180ba51769ceb69d557d312d3e80c64e2e9"
+    },
+    "ps-teach": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-teach/SKILL.md",
+      "computedHash": "9022f62e52e74dde81f12958dddb35a86bcadebf498bcf1b0ed4702b80fb248c"
+    },
+    "ps-technical-writing": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-technical-writing/SKILL.md",
+      "computedHash": "a0aab1a3b3beac43fecad18d13e272a4f80852446bfe5e96dbab6f2d7e1ef936"
+    },
+    "ps-typescript-best-practices": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-typescript-best-practices/SKILL.md",
+      "computedHash": "77e541c3a7f96310e6b4ec9a716ab28ea9a03eeb0856f09c2ba0cac0294e98dc"
+    },
+    "ps-unslop": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-unslop/SKILL.md",
+      "computedHash": "f982a496c69e4533e383acc880245c769ff11bdee48864237a1bcca385bd94d3"
+    },
+    "ps-why": {
+      "source": "gannonh/skills",
+      "sourceType": "github",
+      "skillPath": "pstack-skills/skills/ps-why/SKILL.md",
+      "computedHash": "5dfcb6f49bfb4086ffa1475815e17239e44f02721c7eaa719c05d9679565310d"
+    },
     "readme": {
       "source": "gannonh/skills",
       "sourceType": "github",
