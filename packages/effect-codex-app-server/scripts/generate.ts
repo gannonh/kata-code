@@ -146,7 +146,7 @@ const ManualSchemas: Record<string, Schema.Json> = {
 };
 
 // Codex 0.150 added these multi-agent values before the next full protocol refresh.
-const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
+const Codex0150DefinitionSchemas = {
   CollabAgentTool: {
     type: "string",
     enum: [
@@ -169,7 +169,7 @@ const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
     type: "string",
     enum: ["started", "interacted", "interrupted", "completed"],
   },
-};
+} satisfies Record<string, Schema.Json>;
 
 const getGeneratedPaths = Effect.fn("getGeneratedPaths")(function* () {
   const path = yield* Path.Path;
@@ -583,7 +583,9 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
 
     for (const [definitionName, definitionSchema] of Object.entries(parsed.definitions ?? {})) {
       const compatibleDefinitionSchema =
-        Codex0150DefinitionSchemas[definitionName] ?? definitionSchema;
+        definitionName in Codex0150DefinitionSchemas
+          ? Codex0150DefinitionSchemas[definitionName as keyof typeof Codex0150DefinitionSchemas]
+          : definitionSchema;
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
