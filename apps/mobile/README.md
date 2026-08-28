@@ -1,8 +1,5 @@
 # Kata Code Mobile
 
-> [!WARNING]
-> Kata Code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
-
 ## Quickstart
 
 > [!NOTE]
@@ -31,7 +28,7 @@ vp run dev:client
 Build and run the local iOS dev client:
 
 ```bash
-vp run ios:dev
+vp run ios:dev --device <udid>
 ```
 
 If your Xcode account only has a Personal Team, use a bundle identifier you control and opt into the
@@ -40,7 +37,7 @@ entitlement, and native Sign in with Apple entitlement; builds without this opt-
 
 ```bash
 KATACODE_IOS_PERSONAL_TEAM=1 \
-KATACODE_IOS_PERSONAL_TEAM_BUNDLE_ID=com.example.t3code.dev \
+KATACODE_IOS_PERSONAL_TEAM_BUNDLE_ID=com.example.katacode.dev \
 vp run ios:dev
 ```
 
@@ -54,7 +51,7 @@ The Personal Team equivalent also needs a unique bundle identifier:
 
 ```bash
 KATACODE_IOS_PERSONAL_TEAM=1 \
-KATACODE_IOS_PERSONAL_TEAM_BUNDLE_ID=com.example.t3code \
+KATACODE_IOS_PERSONAL_TEAM_BUNDLE_ID=com.example.katacode \
 vp run ios:release
 ```
 
