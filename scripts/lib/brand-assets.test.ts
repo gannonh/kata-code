@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { readFileSync } from "node:fs";
+import * as NodeFS from "node:fs";
 
 import {
   BRAND_ASSET_PATHS,
@@ -11,7 +11,7 @@ import {
 } from "./brand-assets.ts";
 
 const readIconComposerMark = (projectPath: string) =>
-  readFileSync(new URL(`../../${projectPath}/Assets/text.svg`, import.meta.url), "utf8");
+  NodeFS.readFileSync(new URL(`../../${projectPath}/Assets/text.svg`, import.meta.url), "utf8");
 
 const normalizeMarkFill = (svg: string) =>
   svg.replace(/fill="(?:white|#FFD60A)"/g, 'fill="channel-color"');
