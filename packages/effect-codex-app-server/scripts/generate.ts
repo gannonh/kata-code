@@ -145,6 +145,32 @@ const ManualSchemas: Record<string, Schema.Json> = {
   },
 };
 
+// Codex 0.150 added these multi-agent values before the next full protocol refresh.
+const Codex0150DefinitionSchemas = {
+  CollabAgentTool: {
+    type: "string",
+    enum: [
+      "spawnAgent",
+      "sendInput",
+      "resumeAgent",
+      "wait",
+      "closeAgent",
+      "sendMessage",
+      "followupTask",
+      "interruptAgent",
+      "listAgents",
+    ],
+  },
+  CollabAgentToolCallStatus: {
+    type: "string",
+    enum: ["inProgress", "completed", "failed", "interrupted"],
+  },
+  SubAgentActivityKind: {
+    type: "string",
+    enum: ["started", "interacted", "interrupted", "completed"],
+  },
+} satisfies Record<string, Schema.Json>;
+
 const getGeneratedPaths = Effect.fn("getGeneratedPaths")(function* () {
   const path = yield* Path.Path;
   const generatedDir = path.join(import.meta.dirname, "..", "src", "_generated");
@@ -556,10 +582,14 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     );
 
     for (const [definitionName, definitionSchema] of Object.entries(parsed.definitions ?? {})) {
+      const compatibleDefinitionSchema =
+        definitionName in Codex0150DefinitionSchemas
+          ? Codex0150DefinitionSchemas[definitionName as keyof typeof Codex0150DefinitionSchemas]
+          : definitionSchema;
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
-            definitionSchema,
+            compatibleDefinitionSchema,
             localDefinitionNames,
             file.namespace,
             exportNameByQualifiedName,
