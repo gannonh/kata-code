@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Tests read icon SVG fixtures from disk.
 import { describe, expect, it } from "vite-plus/test";
 import * as NodeFS from "node:fs";
 

@@ -50,17 +50,23 @@ export function CompactBrandTitle(
       style={{
         alignItems: "center",
         flexDirection: "row",
+        flexShrink: 1,
         gap: 6,
         marginLeft: titleOffset,
+        minWidth: 0,
       }}
     >
       <KataMark borderRadius={6} size={20} />
       <Text
+        ellipsizeMode="tail"
+        numberOfLines={1}
         style={{
           color: mutedColor,
+          flexShrink: 1,
           fontFamily: "DMSans-Medium",
           fontSize: 21,
           letterSpacing: -0.5,
+          minWidth: 0,
         }}
       >
         Kata Code
@@ -69,6 +75,7 @@ export function CompactBrandTitle(
         style={{
           backgroundColor: subtleColor,
           borderRadius: 999,
+          flexShrink: 0,
           paddingHorizontal: 6,
           paddingVertical: 2,
         }}
