@@ -10,11 +10,14 @@ Python 3.9+, stdlib only. Uses system fonts so the page and the exported PNG
 render the same everywhere.
 """
 
+import argparse
 import base64
 import html
 import json
 import re
 import sys
+import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
 
 GRADES = [
@@ -41,6 +44,35 @@ def grade_for(score: float) -> str:
 
 def pct(score) -> int:
     return round(float(score) * 100)
+
+
+def format_generated_at(value) -> str:
+    if not value:
+        return ""
+    raw = str(value)
+    normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    if re.search(r"[+-]\d{2}$", normalized):
+        normalized += ":00"
+    try:
+        generated_at = datetime.fromisoformat(normalized)
+    except ValueError:
+        return raw
+    suffix = ""
+    if generated_at.tzinfo is not None:
+        generated_at = generated_at.astimezone(timezone.utc)
+        suffix = " UTC"
+    time = generated_at.strftime("%I:%M %p").lstrip("0")
+    return (
+        f"{generated_at.strftime('%B')} {generated_at.day}, "
+        f"{generated_at.year} at {time}{suffix}"
+    )
+
+
+def open_report(report_path: Path) -> bool:
+    try:
+        return bool(webbrowser.open(report_path.absolute().as_uri(), new=2))
+    except (OSError, webbrowser.Error):
+        return False
 
 
 def esc(v) -> str:
@@ -90,12 +122,12 @@ WARP_MARK = (
 )
 
 # Sticky report footer.
-STAMP_NAME = "Self improve your workflows with Warp Factories"
+STAMP_NAME = "Automatically improve your skills with Warp Factories"
 STAMP_SUB = "continuous scoring \u00b7 continuous skill tuning"
 
 # Attribution shown only in the exported share image.
 SHARE_STAMP_NAME = "Get your report with /skill-doctor"
-SHARE_STAMP_SUB = "npx skills add warpdotdev/common-skills --skill skill-doctor"
+SHARE_STAMP_SUB = "warp.dev/skill-doctor"
 
 # Design tokens lifted from warp.dev/factories (factories-landing.css):
 # white ground with a dot grid, Matter-Mono-ish monospace, #2a1eff accent,
@@ -159,7 +191,9 @@ li { margin-bottom: 10px; }
 .bar-name { text-transform: lowercase; }
 .bar-val { font-weight: 600; font-variant-numeric: tabular-nums; }
 .bar-track { height: 8px; background: var(--line-soft); box-shadow: inset 0 0 0 1px var(--line); }
-.bar-fill { height: 100%; background: var(--accent); }
+.bar-fill { height: 100%; background: var(--accent);
+  animation: skill-doctor-fill 700ms cubic-bezier(0.22, 1, 0.36, 1) var(--metric-delay) both;
+  transform-origin: left; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line);
   border-top: none; background: var(--bg-panel); }
 .stat { padding: 16px 24px 14px; border-left: 1px solid var(--line); }
@@ -181,6 +215,13 @@ li { margin-bottom: 10px; }
   text-transform: uppercase; color: var(--accent); background: var(--surface);
   border: 1px solid var(--line); padding: 5px 10px; margin-top: 6px; cursor: pointer; }
 .diff-toggle:hover { border-color: var(--accent); }
+@keyframes skill-doctor-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar-fill { animation: none; }
+}
 """
 
 
@@ -188,16 +229,18 @@ def render_page(r) -> str:
     scores = r["scores"]
     stats = r.get("stats", {})
     grade = r.get("grade") or grade_for(scores["overall"])
+    generated_at = format_generated_at(r.get("generated_at"))
 
     bars = "".join(
         f'<div class="bar-row"><div class="bar-head"><span class="bar-name">{esc(name)}</span>'
         f'<span class="bar-val">{pct(val)}</span></div>'
-        f'<div class="bar-track"><div class="bar-fill" style="width:{pct(val)}%"></div></div></div>'
-        for name, val in [
+        f'<div class="bar-track"><div class="bar-fill" '
+        f'style="width:{pct(val)}%;--metric-delay:{180 + index * 110}ms"></div></div></div>'
+        for index, (name, val) in enumerate([
             ("Efficiency", scores.get("efficiency", 0)),
             ("Code Quality", scores.get("code_quality", 0)),
             ("Skill Coverage", scores.get("skill_coverage", 0)),
-        ]
+        ])
     )
     stat_cells = "".join(
         f'<div class="stat"><div class="num">{esc(value)}</div><div class="lbl">{esc(label)}</div></div>'
@@ -248,7 +291,7 @@ def render_page(r) -> str:
   <h1>{esc(r.get('title', 'Agent Skill Report'))}</h1>
   <button class="cta-button" id="share-png" type="button">Share</button>
 </div>
-<p class="muted">Generated {esc(r.get('generated_at', ''))} &middot; harness: {esc(r.get('harness', 'codex'))} &middot; all analysis ran locally</p>
+<p class="muted">Generated {esc(generated_at)} &middot; harness: {esc(r.get('harness', 'codex'))}</p>
 <div class="scorecard">
   <div class="grade-col"><div class="grade">{esc(grade)}</div>
     <div class="grade-label">overall {pct(scores['overall'])}</div></div>
@@ -262,7 +305,7 @@ def render_page(r) -> str:
     <div class="stamp-name">{esc(STAMP_NAME)}</div>
     <div class="stamp-sub">{esc(STAMP_SUB)}</div>
   </div></div>
-  <a class="cta-button" href="{esc(r.get('cta_url', 'https://warp.dev/factories/request-access'))}">Request access to Warp Factories</a>
+  <a class="cta-button" href="{esc(r.get('cta_url', 'https://warp.dev/factories/request-access'))}">Request access</a>
 </div>
 <script>{embedded_diffs_script()}</script>
 <script>{page_script(card_data)}</script>
@@ -497,10 +540,26 @@ def page_script(card_data: str) -> str:
     return script.replace("__CARD__", card_data.replace("</", "<\\/")).replace("__CLAMP__", str(DIFF_CLAMP_PX))
 
 
-def main():
-    report_path = Path(
-        sys.argv[1] if len(sys.argv) > 1 else "./skill-doctor-report/report.json"
-    ).expanduser()
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "report_path",
+        nargs="?",
+        default="./skill-doctor-report/report.json",
+        help="Path to the report.json file",
+    )
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        dest="open_browser",
+        help="Open the generated report in the default browser",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    report_path = Path(args.report_path).expanduser()
     if not report_path.exists():
         print(f"error: {report_path} not found", file=sys.stderr)
         sys.exit(1)
@@ -509,8 +568,16 @@ def main():
 
     out_path = report_path.parent / "report.html"
     out_path.write_text(render_page(r))
-    print(f"report: {out_path}")
-    print('        open it and hit "share as png" for a 1200x675 share image')
+    print(f"report: {out_path.absolute().as_uri()}")
+    if args.open_browser:
+        if open_report(out_path):
+            print("        opened in the default browser")
+        else:
+            print(
+                "warning: could not open the report in the default browser",
+                file=sys.stderr,
+            )
+    print('        use "share as png" for a 1200x675 share image')
 
 
 if __name__ == "__main__":

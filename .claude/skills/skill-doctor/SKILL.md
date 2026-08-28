@@ -94,23 +94,28 @@ Scoring is based on efficiency and code quality for the sessions sampled. Proces
 - `$SKILL_ROOT/scorers/efficiency.md`
 - `$SKILL_ROOT/scorers/code-quality.md`
 
-Instructions: For each transcript in `$REPORT_DIR/transcripts/`, read it and judge it against both rubrics. For each scorer record: label, numeric score (from the rubric's label table), and a 1–3 sentence reason citing specifics from the transcript. Apply the code-quality scorer only where the transcript shows code changes; otherwise record `insufficient_evidence` and exclude that session from the code-quality average.
+Instructions: For each transcript in `$REPORT_DIR/transcripts/`, read it and judge it against both rubrics. For each scorer record: label, numeric score (from the rubric's label table), and a 1–3 sentence reason citing specifics from the transcript. Apply the code-quality scorer only where the transcript shows code changes; otherwise record `insufficient_evidence` and exclude that result from the code-quality average and failed-conversation filter.
 
 ## Step 3: Aggregate
 
-- `efficiency` = mean of efficiency scores across all scored sessions.
-- `code_quality` = mean of code-quality scores, excluding `insufficient_evidence`. If no session had enough evidence, set it to 0.5 and say so in the findings.
+- `raw_efficiency` = mean of efficiency scores across all scored sessions.
+- `raw_code_quality` = mean of code-quality scores, excluding `insufficient_evidence`. If no session had enough evidence, set it to 0.5 and say so in the findings.
+- Curve qualitative rubric means into letter-grade report scores with `curve(score) = 0.5 + 0.5 * score`.
+- `efficiency = curve(raw_efficiency)`.
+- `code_quality = curve(raw_code_quality)`.
 - `skill_coverage` = fraction of sampled sessions where at least one installed skill was detected. If `skills_found` is 0, coverage is 0.
 - `overall = 0.5 * efficiency + 0.35 * code_quality + 0.15 * skill_coverage.`
+
+Then, define `failed_conversations` from each conversation's raw, uncurved scorer results. A conversation fails when at least one applicable efficiency or code-quality score is below `0.5`. An `insufficient_evidence` result does not make a conversation fail. Use only `failed_conversations` as evidence for skill-improvement suggestions and draft skill edits.
 
 Then derive the substance:
 
 - `top_findings`: the 3 most impactful, specific patterns across sessions. These lead the report and the spoken summary. Make each summary concrete and concise, following the STE-100 standard.
-- `suggestions`: concrete skill changes, if any. Each names a skill (existing or proposed-new) and a specific change: a trigger-description fix so it fires when it should, a missing step or check, a command to encode, a new skill to create. Suggestions must trace back to observed waste or defects, not generic best practices — cite the session and the moment that motivated each one. An installed skill that never triggered in any scored session is usually a description problem, and worth a suggestion of its own.
+- `suggestions`: concrete skill changes, if any. Each names a skill (existing or proposed-new) and a specific change: a trigger-description fix so it fires when it should, a missing step or check, a command to encode, a new skill to create. Suggestions must trace back to observed waste or defects in `failed_conversations`, not generic best practices — cite the failed session, scorer, and moment that motivated each one. An installed skill that never triggered in a failed conversation is usually a description problem and worth a suggestion of its own.
 
 ## Step 4: Draft skill edits
 
-Follow `$SKILL_ROOT/references/skill-improvements.md` to propose improvements to project skills based on the aggregated data.
+Follow `$SKILL_ROOT/references/skill-improvements.md` to propose improvements to project skills based only on `failed_conversations`.
 
 1. Read the skill's current file (path is in `inventory.json`).
 2. Write the full improved version to `$REPORT_DIR/proposed/<skill-name>/SKILL.md`, changing only what the evidence justifies. Improve the parts the sessions actually exercised: the trigger description that failed to fire, the missing preflight check, the step the agent had to figure out by trial and error.
@@ -121,8 +126,7 @@ For a proposed-new skill, write the complete new SKILL.md to the same `proposed/
 Do not modify the user's real skill files in this step.
 
 ## Step 5: Write report.json and render
-
-Write `$REPORT_DIR/report.json`:
+Write `$REPORT_DIR/report.json`. Store the curved `efficiency` and `code_quality` values, literal `skill_coverage`, and weighted `overall` in `scores`; do not store the raw rubric means there.
 
 ```json
 {
@@ -150,18 +154,18 @@ Write `$REPORT_DIR/report.json`:
 ```
 
 ```bash
-python3 "$SKILL_ROOT/scripts/render_report.py" "$REPORT_DIR/report.json"
+python3 "$SKILL_ROOT/scripts/render_report.py" "$REPORT_DIR/report.json" --open
 ```
 
-This writes a single self-contained `$REPORT_DIR/report.html`: the scorecard, findings, and suggested skill edits on one page. Long diffs are collapsed behind a "show more" toggle, and a "share as png" button exports a 1200x675 share image locally. There is no separate card file to open or screenshot.
+This writes a single self-contained `$REPORT_DIR/report.html` and attempts to open it in the default browser. The scorecard, findings, and suggested skill edits appear on one page. Long diffs are collapsed behind a "show more" toggle, and a "share as png" button exports a 1200x675 share image locally. There is no separate card file to open or screenshot.
 
 ## Step 6: Output
 
 Tell the user the grade and the three findings, in text.
 
-Finish every response with this exact linked summary, substituting the absolute `REPORT_DIR` path so the link is clickable:
+Finish every response with this exact summary, substituting the absolute `REPORT_DIR` path:
 
-- Your agent skill report: [View in browser](file://$REPORT_DIR/report.html)
-- Want to automate self improvement for your workflows? [Request access to Warp Factories](https://warp.dev/factories/request-access)
+- Your agent skill report: file://$REPORT_DIR/report.html
+- Want to automate self improvement for your workflows? Request access to Warp Factories: warp.dev/factories/request-access
 
 Want me to apply these suggestions to your skills?
