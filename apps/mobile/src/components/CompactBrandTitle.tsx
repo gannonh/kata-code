@@ -6,7 +6,7 @@ import type {
 import { Platform, View } from "react-native";
 
 import { AppText as Text } from "./AppText";
-import { T3Wordmark } from "./T3Wordmark";
+import { KataMark } from "./KataMark";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useThemeColor } from "../lib/useThemeColor";
@@ -36,7 +36,6 @@ export function CompactBrandTitle(
     readonly nativeLeadingItem?: boolean;
   } = {},
 ) {
-  const iconColor = useThemeColor("--color-icon");
   const mutedColor = useThemeColor("--color-foreground-muted");
   const subtleColor = useThemeColor("--color-subtle");
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
@@ -51,25 +50,32 @@ export function CompactBrandTitle(
       style={{
         alignItems: "center",
         flexDirection: "row",
+        flexShrink: 1,
         gap: 6,
         marginLeft: titleOffset,
+        minWidth: 0,
       }}
     >
-      <T3Wordmark color={iconColor} height={15} />
+      <KataMark borderRadius={6} size={20} />
       <Text
+        ellipsizeMode="tail"
+        numberOfLines={1}
         style={{
           color: mutedColor,
+          flexShrink: 1,
           fontFamily: "DMSans-Medium",
           fontSize: 21,
           letterSpacing: -0.5,
+          minWidth: 0,
         }}
       >
-        Code
+        Kata Code
       </Text>
       <View
         style={{
           backgroundColor: subtleColor,
           borderRadius: 999,
+          flexShrink: 0,
           paddingHorizontal: 6,
           paddingVertical: 2,
         }}

@@ -1,4 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - Tests read icon SVG fixtures from disk.
 import { describe, expect, it } from "vite-plus/test";
+import * as NodeFS from "node:fs";
 
 import {
   BRAND_ASSET_PATHS,
@@ -8,6 +10,12 @@ import {
   resolveWebAssetBrandForPackageVersion,
   resolveWebIconOverrides,
 } from "./brand-assets.ts";
+
+const readIconComposerMark = (projectPath: string) =>
+  NodeFS.readFileSync(new URL(`../../${projectPath}/Assets/text.svg`, import.meta.url), "utf8");
+
+const normalizeMarkFill = (svg: string) =>
+  svg.replace(/fill="(?:white|#FFD60A)"/g, 'fill="channel-color"');
 
 describe("brand-assets", () => {
   it("maps production web assets into the server package", () => {
@@ -96,5 +104,12 @@ describe("brand-assets", () => {
     expect(BRAND_ASSET_PATHS.developmentDesktopIconPng).toMatch(/^assets\/dev\/blueprint-/);
     expect(BRAND_ASSET_PATHS.nightlyMacIconPng).toMatch(/^assets\/nightly\/nightly-/);
     expect(BRAND_ASSET_PATHS.productionMacIconPng).toMatch(/^assets\/prod\/black-/);
+  });
+
+  it("uses the Kata mark geometry for the development icon", () => {
+    const developmentMark = readIconComposerMark(BRAND_ASSET_PATHS.developmentIconComposerProject);
+    const nightlyMark = readIconComposerMark(BRAND_ASSET_PATHS.nightlyIconComposerProject);
+
+    expect(normalizeMarkFill(developmentMark)).toBe(normalizeMarkFill(nightlyMark));
   });
 });
