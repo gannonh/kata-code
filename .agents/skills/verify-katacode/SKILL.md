@@ -30,7 +30,7 @@ Ready means all of these are true:
 - the server log contains a `/pair#token=...` URL (Effect logs it as `pairingUrl:`; `katacode pair` prints `Pairing URL:`)
 - `GET $WEB_ORIGIN/.well-known/kata/environment` returns JSON with `environmentId`, `label`, and `serverVersion`
 
-Ports hash from the worktree path and move when occupied. A developer `vp run dev` may already be sitting on this worktree's default ports. Read the values launch printed. Do not assume 5733 / 13773. Vite often binds IPv6-only (`[::1]`). `bin/launch` and `bin/doctor` probe `::1`, then `127.0.0.1`, then `localhost`, and print the host that actually returned descriptor JSON as `WEB_ORIGIN`. Pairing URLs still print `localhost`. On IPv4-only `localhost` that hangs; rewrite the pairing URL host to match `WEB_ORIGIN` before opening it in the browser. Do not assume 5733 / 13773.
+Ports hash from the worktree path and move when occupied. A developer `vp run dev` may already be sitting on this worktree's default ports. Read the values launch printed. Do not assume 5733 / 13773. Vite often binds IPv6-only (`[::1]`). `bin/launch` and `bin/doctor` probe `::1`, then `127.0.0.1`, then `localhost`, and print the host that actually returned descriptor JSON as `WEB_ORIGIN`. Pairing URLs still print `localhost`. On IPv4-only `localhost` that hangs; open `PAIRING_OPEN_URL="${WEB_ORIGIN}/pair#${PAIRING_URL#*#}"`, not `$PAIRING_URL`. Do not assume 5733 / 13773.
 
 The disposable home is `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/home`. Runtime state is `<home>/userdata`. Never launch against `~/.katacode` or the worktree `.katacode`. Those are the user's live (or worktree) databases.
 
@@ -79,13 +79,14 @@ Install the browser CLI if needed (`npm i -g agent-browser && agent-browser inst
 Use one named session for the run. Do not pass `--session-name` (that persists cookies under `~/.agent-browser`).
 
 ```bash
-agent-browser --session katacode-verify open "$PAIRING_URL"
+PAIRING_OPEN_URL="${WEB_ORIGIN}/pair#${PAIRING_URL#*#}"
+agent-browser --session katacode-verify open "$PAIRING_OPEN_URL"
 agent-browser --session katacode-verify wait --text "What should we work on?"
 agent-browser --session katacode-verify snapshot -i
 # If `/pair` was already mounted (token-free before-shot), fill Pairing token and Continue instead.
 ```
 
-`$PAIRING_URL` is the value from `eval "$(bin/launch)"` or `source "$ENV_FILE"`. It ends in `/pair#token=...`. Rewrite its host to match `$WEB_ORIGIN` when they differ. Open it exactly once as the first navigation that consumes the token (after any token-free `$WEB_ORIGIN/` before-shot in the pairing recipe). Preserve the fragment. Opening it twice, or opening it in a second browser, burns the token. If the before-shot already mounted `/pair`, hash auto-submit will not run; use the form or reload.
+`$PAIRING_URL` is the value from `eval "$(bin/launch)"` or `source "$ENV_FILE"`. It ends in `/pair#token=...` and still uses `localhost`. `$PAIRING_OPEN_URL` keeps that fragment on `$WEB_ORIGIN` (so `[::1]` when Vite is IPv6-only). Open `$PAIRING_OPEN_URL` exactly once as the first navigation that consumes the token (after any token-free `$WEB_ORIGIN/` before-shot in the pairing recipe). Opening it twice, or opening it in a second browser, burns the token. If the before-shot already mounted `/pair`, hash auto-submit will not run; use the form or reload.
 
 After pairing, the app strips the token from the URL and redirects to `/`. Wait until you see either:
 

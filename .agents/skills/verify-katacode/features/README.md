@@ -6,7 +6,7 @@ This directory is the maintained source for verifying user-facing behavior of th
 
 - Launch with `eval "$(.agents/skills/verify-katacode/bin/launch)"` so the stack has a disposable `--home-dir` and `RUN_ID` / `WEB_ORIGIN` / `HOME_DIR` / `PAIRING_URL` are set in the shell (or `source` the printed `ENV_FILE`).
 - Run `.agents/skills/verify-katacode/bin/doctor` and require the printed `WEB_ORIGIN` and home dir to match that run.
-- Pair the `katacode-verify` agent-browser session by opening the launch `PAIRING_URL` exactly once as the first navigation.
+- Pair the `katacode-verify` agent-browser session by opening `PAIRING_OPEN_URL="${WEB_ORIGIN}/pair#${PAIRING_URL#*#}"` exactly once as the first navigation.
 - Never drive an instance doctor did not accept. A `vp run dev` already running in this worktree is someone else's session.
 
 ## Driving conventions
