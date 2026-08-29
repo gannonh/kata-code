@@ -76,7 +76,9 @@ export function classifyMarkdownImageSource(
     return { _tag: "Blocked" };
   }
   if (DIRECT_IMAGE_SOURCE_PATTERN.test(source)) {
-    return { _tag: "Direct", uri: source };
+    // Protocol-relative URLs need an explicit scheme on React Native (no document origin).
+    const uri = source.startsWith("//") ? `https:${source}` : source;
+    return { _tag: "Direct", uri };
   }
 
   if (/^file:/i.test(source)) {

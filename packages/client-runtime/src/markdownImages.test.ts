@@ -4,13 +4,13 @@ import { classifyMarkdownImageSource } from "./markdownImages.ts";
 
 describe("classifyMarkdownImageSource", () => {
   it.each([
-    "https://example.com/image.png",
-    "HTTP://example.com/image.png",
-    "data:image/png;base64,AAAA",
-    "blob:https://app.t3.codes/image-id",
-    "//cdn.example.com/image.png",
-  ])("keeps %s directly loadable", (uri) => {
-    expect(classifyMarkdownImageSource(uri, "/workspace/project")).toEqual({
+    ["https://example.com/image.png", "https://example.com/image.png"],
+    ["HTTP://example.com/image.png", "HTTP://example.com/image.png"],
+    ["data:image/png;base64,AAAA", "data:image/png;base64,AAAA"],
+    ["blob:https://app.t3.codes/image-id", "blob:https://app.t3.codes/image-id"],
+    ["//cdn.example.com/image.png", "https://cdn.example.com/image.png"],
+  ])("keeps %s directly loadable as %s", (source, uri) => {
+    expect(classifyMarkdownImageSource(source, "/workspace/project")).toEqual({
       _tag: "Direct",
       uri,
     });

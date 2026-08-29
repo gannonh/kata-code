@@ -209,8 +209,10 @@ function ThreadMarkdownImageView(props: {
   readonly sourceKey: string;
   readonly unavailable: boolean;
   readonly alt: string | null;
+  readonly title: string | null;
   readonly onPressImage: (uri: string) => void;
 }) {
+  const caption = props.title ?? props.alt;
   const codeBackground = useThemeColor("--color-md-code-bg");
   const [availableWidth, setAvailableWidth] = useState(0);
   const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null);
@@ -266,7 +268,7 @@ function ThreadMarkdownImageView(props: {
       ) : (
         <TouchableOpacity
           accessibilityRole="imagebutton"
-          accessibilityLabel={props.alt ?? "Markdown image"}
+          accessibilityLabel={props.alt ?? props.title ?? "Markdown image"}
           activeOpacity={0.7}
           disabled={displaySize === null}
           onPress={() => {
@@ -304,9 +306,9 @@ function ThreadMarkdownImageView(props: {
           </View>
         </TouchableOpacity>
       )}
-      {props.alt ? (
+      {caption ? (
         <Text selectable className="text-xs text-foreground-muted">
-          {props.alt}
+          {caption}
         </Text>
       ) : null}
     </View>
@@ -319,6 +321,7 @@ function ThreadMarkdownImage(props: {
   readonly threadId: ThreadId;
   readonly path: string;
   readonly alt: string | null;
+  readonly title: string | null;
   readonly onPressImage: (uri: string) => void;
 }) {
   const assetUrl = useAssetUrlState(props.environmentId, {
@@ -333,18 +336,23 @@ function ThreadMarkdownImage(props: {
       sourceKey={props.path}
       unavailable={assetUrl._tag === "Failure"}
       alt={props.alt}
+      title={props.title}
       onPressImage={props.onPressImage}
     />
   );
 }
 
-function ThreadMarkdownImageUnavailable(props: { readonly alt: string | null }) {
+function ThreadMarkdownImageUnavailable(props: {
+  readonly alt: string | null;
+  readonly title: string | null;
+}) {
   return (
     <ThreadMarkdownImageView
       uri={null}
       sourceKey="unavailable"
       unavailable
       alt={props.alt}
+      title={props.title}
       onPressImage={() => undefined}
     />
   );
@@ -1598,12 +1606,13 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             sourceKey={imageSource.uri}
             unavailable={false}
             alt={image.alt}
+            title={image.title}
             onPressImage={(uri) => setExpandedImage({ uri })}
           />
         );
       }
       if (imageSource._tag === "Blocked") {
-        return <ThreadMarkdownImageUnavailable alt={image.alt} />;
+        return <ThreadMarkdownImageUnavailable alt={image.alt} title={image.title} />;
       }
       return (
         <ThreadMarkdownImage
@@ -1611,6 +1620,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           threadId={props.threadId}
           path={imageSource.path}
           alt={image.alt}
+          title={image.title}
           onPressImage={(uri) => setExpandedImage({ uri })}
         />
       );

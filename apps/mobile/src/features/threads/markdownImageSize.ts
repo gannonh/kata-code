@@ -47,10 +47,7 @@ export function markdownImageLoadIsUnusable(
   availableWidth: number,
 ): boolean {
   if (loadedSize === null) return false;
-  if (
-    !isUsablePositiveFinite(loadedSize.width) ||
-    !isUsablePositiveFinite(loadedSize.height)
-  ) {
+  if (!isUsablePositiveFinite(loadedSize.width) || !isUsablePositiveFinite(loadedSize.height)) {
     return true;
   }
   if (availableWidth === 0) return false;
