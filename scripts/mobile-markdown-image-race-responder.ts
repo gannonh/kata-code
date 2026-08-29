@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
+import * as NodeURL from "node:url";
 
 import { PNG } from "pngjs";
 
@@ -37,39 +38,40 @@ function requiredOutcome(raceCase: RaceCase, source: RaceSource): RaceOutcome {
 }
 
 export function parseFixturePath(pathname: string): ParsedFixturePath | null {
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts[0] !== "runs" || !parts[1]) return null;
-  const raceCase = parts[2];
+  const parts = pathname.split("/");
+  if (parts[0] !== "" || parts[1] !== "runs" || !parts[2]) return null;
+  const runId = parts[2];
+  const raceCase = parts[3];
   if (!raceCases.has(raceCase as RaceCase)) return null;
 
-  if (parts[3] === "wait" && raceSources.has(parts[4] as RaceSource) && parts.length === 5) {
+  if (parts[4] === "wait" && raceSources.has(parts[5] as RaceSource) && parts.length === 6) {
     return {
       kind: "wait",
-      runId: parts[1],
+      runId,
       raceCase: raceCase as RaceCase,
-      source: parts[4] as RaceSource,
+      source: parts[5] as RaceSource,
     };
   }
   if (
-    parts[3] === "release" &&
-    raceSources.has(parts[4] as RaceSource) &&
-    raceOutcomes.has(parts[5] as RaceOutcome) &&
-    parts[5] === requiredOutcome(raceCase as RaceCase, parts[4] as RaceSource) &&
-    parts.length === 6
+    parts[4] === "release" &&
+    raceSources.has(parts[5] as RaceSource) &&
+    raceOutcomes.has(parts[6] as RaceOutcome) &&
+    parts[6] === requiredOutcome(raceCase as RaceCase, parts[5] as RaceSource) &&
+    parts.length === 7
   ) {
     return {
       kind: "release",
-      runId: parts[1],
+      runId,
       raceCase: raceCase as RaceCase,
-      source: parts[4] as RaceSource,
-      outcome: parts[5] as RaceOutcome,
+      source: parts[5] as RaceSource,
+      outcome: parts[6] as RaceOutcome,
     };
   }
-  const imageMatch = /^([ab])\.png$/u.exec(parts[3] ?? "");
-  if (imageMatch && parts.length === 4) {
+  const imageMatch = /^([ab])\.png$/u.exec(parts[4] ?? "");
+  if (imageMatch && parts.length === 5) {
     return {
       kind: "image",
-      runId: parts[1],
+      runId,
       raceCase: raceCase as RaceCase,
       source: imageMatch[1] as RaceSource,
     };
@@ -232,4 +234,5 @@ function main(): void {
   });
 }
 
-if (import.meta.url === `file://${NodeProcess.argv[1]}`) main();
+if (NodeProcess.argv[1] && import.meta.url === NodeURL.pathToFileURL(NodeProcess.argv[1]).href)
+  main();

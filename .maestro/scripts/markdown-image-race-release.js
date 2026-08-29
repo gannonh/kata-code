@@ -1,7 +1,7 @@
 var response = http.post(
   FIXTURE_ORIGIN +
     "/runs/" +
-    FIXTURE_RUN_ID +
+    encodeURIComponent(FIXTURE_RUN_ID) +
     "/" +
     RACE_CASE +
     "/release/" +

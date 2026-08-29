@@ -346,7 +346,7 @@ function ThreadMarkdownImageRequest(props: {
     props.onRequestCallbacks?.(props.uri, { load, error });
   }, [error, load, props.onRequestCallbacks, props.uri]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     return () => {
       activeRef.current = false;
     };
