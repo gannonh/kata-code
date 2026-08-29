@@ -8,10 +8,7 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/
 export const THREAD_LIST_V2_SHELF_DEFAULTS = { settled: true, snoozed: false } as const;
 
 export function resolveThreadListV2ShelfExpansion(
-  prefs: Pick<
-    Preferences,
-    "threadListV2SettledShelfExpanded" | "threadListV2SnoozedShelfExpanded"
-  >,
+  prefs: Pick<Preferences, "threadListV2SettledShelfExpanded" | "threadListV2SnoozedShelfExpanded">,
 ): { settled: boolean; snoozed: boolean } {
   return {
     settled: prefs.threadListV2SettledShelfExpanded !== false,
@@ -21,10 +18,7 @@ export function resolveThreadListV2ShelfExpansion(
 
 export function flipThreadListV2ShelfPatch(
   shelf: "settled" | "snoozed",
-  prefs: Pick<
-    Preferences,
-    "threadListV2SettledShelfExpanded" | "threadListV2SnoozedShelfExpanded"
-  >,
+  prefs: Pick<Preferences, "threadListV2SettledShelfExpanded" | "threadListV2SnoozedShelfExpanded">,
 ): Partial<Preferences> {
   const expansion = resolveThreadListV2ShelfExpansion(prefs);
   if (shelf === "settled") {
