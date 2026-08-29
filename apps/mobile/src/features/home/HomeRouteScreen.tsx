@@ -2,6 +2,7 @@ import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 import { useNavigation } from "@react-navigation/native";
 import { useEffect, useMemo, useState } from "react";
+import { Platform } from "react-native";
 
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProjects, useThreadShells } from "../../state/entities";
@@ -16,6 +17,7 @@ import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
+import { getHomeRouteHeaderOptions } from "./home-route-options";
 import { buildHomeProjectScopes } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
@@ -100,13 +102,25 @@ export function HomeRouteScreen() {
     }
   }, [projectFilterOptions, selectedProjectKey]);
 
+  const primaryHeaderOptions = getConnectionAwareBrandHeaderOptions({
+    onOpenEnvironments: () =>
+      navigation.navigate("SettingsSheet", {
+        screen: "SettingsContent",
+        params: { screen: "SettingsEnvironments" },
+      }),
+  });
+
   // In split layouts the persistent sidebar IS the thread list — Home becomes
   // an empty detail pane so selecting a thread never transitions layouts.
   if (layout.usesSplitView) {
     return (
       <>
         <NativeStackScreenOptions
-          options={{ title: "", headerTitle: "", unstable_headerLeftItems: () => [] }}
+          options={getHomeRouteHeaderOptions({
+            isAndroid: Platform.OS === "android",
+            usesSplitView: layout.usesSplitView,
+            primaryHeaderOptions,
+          })}
         />
         <WorkspaceSidebarToolbar
           afterSidebarButton={
@@ -129,17 +143,11 @@ export function HomeRouteScreen() {
       onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
     >
       <>
-        {/* Restore the compact title after the split branch blanks the detail
-            header. The brand slot doubles as the connection status surface:
-            while an environment reconnects, the lockup fades to a status label
-            in place (no layout shift in the list below). */}
         <NativeStackScreenOptions
-          options={getConnectionAwareBrandHeaderOptions({
-            onOpenEnvironments: () =>
-              navigation.navigate("SettingsSheet", {
-                screen: "SettingsContent",
-                params: { screen: "SettingsEnvironments" },
-              }),
+          options={getHomeRouteHeaderOptions({
+            isAndroid: Platform.OS === "android",
+            usesSplitView: layout.usesSplitView,
+            primaryHeaderOptions,
           })}
         />
         <HomeHeader

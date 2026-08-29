@@ -4,10 +4,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
+import { deriveAndroidHomeFabLayout } from "./android-home-fab-layout";
 
 /**
- * Android-only wrapper that overlays a bottom-right new-task FAB on the home
- * screen. Other platforms render children unchanged.
+ * Android-only wrapper that overlays a bottom-right new-task FAB on a thread
+ * list. Other platforms render children unchanged.
  */
 export function AndroidHomeFabLayout(props: {
   readonly onStartNewTask: () => void;
@@ -26,6 +27,7 @@ function AndroidHomeFab(props: {
 }) {
   const insets = useSafeAreaInsets();
   const primaryForegroundColor = useThemeColor("--color-primary-foreground");
+  const { fabBottom } = deriveAndroidHomeFabLayout({ bottomInset: insets.bottom });
 
   return (
     <View className="flex-1">
@@ -36,7 +38,7 @@ function AndroidHomeFab(props: {
         onPress={props.onStartNewTask}
         className="absolute right-5 size-14 items-center justify-center rounded-full bg-primary shadow-lg"
         style={{
-          bottom: Math.max(insets.bottom, 16) + 16,
+          bottom: fabBottom,
         }}
       >
         <SymbolView
