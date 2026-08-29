@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseFixturePath } from "./mobile-markdown-image-race-responder";
+import { parseFixturePath } from "./mobile-markdown-image-race-responder.js";
 
 describe("mobile Markdown image race responder paths", () => {
   it("parses image, wait, and release paths", () => {

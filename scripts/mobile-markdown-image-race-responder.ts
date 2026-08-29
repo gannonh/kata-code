@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off globalProcess:off - This local UAT responder owns HTTP sockets and process signals.
+// @effect-diagnostics nodeBuiltinImport:off globalProcess:off globalDate:off - This local UAT responder owns HTTP sockets, process signals, and timestamped evidence.
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
@@ -81,7 +81,7 @@ function imageBytes(source: RaceSource): Buffer {
   const width = source === "a" ? 80 : 320;
   const height = source === "a" ? 320 : 80;
   const png = new PNG({ width, height });
-  const color = source === "a" ? [220, 70, 70] : [45, 125, 235];
+  const color = source === "a" ? ([220, 70, 70] as const) : ([45, 125, 235] as const);
   for (let index = 0; index < png.data.length; index += 4) {
     png.data[index] = color[0];
     png.data[index + 1] = color[1];
@@ -97,9 +97,10 @@ function keyOf(input: Pick<ParsedFixturePath, "runId" | "raceCase" | "source">):
 
 function main(): void {
   const logArgument = NodeProcess.argv.indexOf("--log");
+  const logPathArgument = NodeProcess.argv[logArgument + 1];
   const logPath =
-    logArgument >= 0 && NodeProcess.argv[logArgument + 1]
-      ? NodePath.resolve(NodeProcess.argv[logArgument + 1])
+    logArgument >= 0 && logPathArgument
+      ? NodePath.resolve(logPathArgument)
       : NodePath.resolve("uat-evidence/mobile-markdown-image-race.jsonl");
   NodeFS.mkdirSync(NodePath.dirname(logPath), { recursive: true });
 
