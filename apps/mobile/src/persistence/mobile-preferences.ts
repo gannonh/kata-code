@@ -42,9 +42,7 @@ export interface Preferences {
   readonly legacyThreadListEnabled?: boolean;
   /** Device-local counterpart of desktop's `planModeEnabled` legacy flag. */
   readonly planModeEnabled?: boolean;
-  /** Undefined preserves Settled expanded. */
   readonly threadListV2SettledShelfExpanded?: boolean;
-  /** Undefined preserves Snoozed collapsed. */
   readonly threadListV2SnoozedShelfExpanded?: boolean;
 }
 

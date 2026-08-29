@@ -51,8 +51,6 @@ export function useThreadListV2ShelfPreferences() {
   const toggleSettledShelf = useCallback(() => {
     if (!loaded) return;
     const expanded = !settledRef.current;
-    // Refs advance before persistence so consecutive presses toggle the latest
-    // value even if React has not rendered the optimistic patch yet.
     settledRef.current = expanded;
     savePreferences({ threadListV2SettledShelfExpanded: expanded });
   }, [loaded, savePreferences]);
