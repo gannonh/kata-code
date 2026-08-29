@@ -34,7 +34,9 @@ Or the equivalent:
 npx skills add gannonh/skills --skill plan-build-verify --skill address-pr-comments -y
 ```
 
-Do not install the whole `gannonh/skills` pack. Cursor deep mode uses the pstack plugin; do not npx-install `ps` (already under `.agents/skills/ps`). Leave existing vendor skills (clerk, cloudflare, vercel, ios/maestro, test-t3-\*, sandbox, ps) alone.
+First-party skills in git: `ios-debugger-agent`, `ios-simulator-browser`, `test-t3-app`, `test-t3-mobile`, `verify-katacode`. Everything else under `.agents/skills` is installed locally and is not tracked.
+
+Do not install the whole `gannonh/skills` pack. Cursor deep mode uses the pstack plugin; do not npx-install `ps`. Leave first-party skills alone.
 
 ## What makes Kata Code special?
 

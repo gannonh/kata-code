@@ -39,3 +39,11 @@ node_modules/
 
 # Local verification-run screenshots and logs. Pairing tokens must never land here.
 uat-evidence/
+
+# Installed / third-party skills. First-party Kata skills stay tracked.
+.agents/skills/*
+!.agents/skills/ios-debugger-agent/
+!.agents/skills/ios-simulator-browser/
+!.agents/skills/test-t3-app/
+!.agents/skills/test-t3-mobile/
+!.agents/skills/verify-katacode/
