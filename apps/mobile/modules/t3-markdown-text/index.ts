@@ -21,6 +21,8 @@ export {
   type MarkdownHighlightedToken,
 } from "./src/SelectableMarkdownText";
 export type {
+  MarkdownImageRenderer,
+  MarkdownImageRequest,
   NativeMarkdownTextStyle,
   SelectableMarkdownSkill,
   SelectableMarkdownTextProps,

@@ -3,6 +3,8 @@ import type { SelectableMarkdownTextProps } from "@kata-sh/code-mobile-markdown-
 type MobileSelectableMarkdownTextProps = Omit<SelectableMarkdownTextProps, "highlightCode">;
 
 export type {
+  MarkdownImageRenderer,
+  MarkdownImageRequest,
   NativeMarkdownTextStyle,
   SelectableMarkdownSkill,
 } from "@kata-sh/code-mobile-markdown-text/types";
