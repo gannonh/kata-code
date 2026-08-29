@@ -139,7 +139,9 @@ function main(): void {
       const pending = waiters.get(key) ?? new Set<NodeHttp.ServerResponse>();
       pending.add(response);
       waiters.set(key, pending);
-      request.on("close", () => pending.delete(response));
+      const removeWaiter = () => pending.delete(response);
+      request.once("aborted", removeWaiter);
+      response.once("close", removeWaiter);
       return;
     }
 
