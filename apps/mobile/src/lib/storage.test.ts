@@ -196,6 +196,39 @@ describe("mobile connection storage", () => {
     });
   });
 
+  it("persists thread list v2 shelf expansion preferences", async () => {
+    await expect(
+      savePreferencesPatch({
+        threadListV2SettledShelfExpanded: false,
+        threadListV2SnoozedShelfExpanded: true,
+      }),
+    ).resolves.toEqual({
+      threadListV2SettledShelfExpanded: false,
+      threadListV2SnoozedShelfExpanded: true,
+    });
+    expect(JSON.parse(mocks.getPreferencesJson() ?? "")).toEqual({
+      threadListV2SettledShelfExpanded: false,
+      threadListV2SnoozedShelfExpanded: true,
+    });
+    await expect(loadPreferences()).resolves.toEqual({
+      threadListV2SettledShelfExpanded: false,
+      threadListV2SnoozedShelfExpanded: true,
+    });
+  });
+
+  it("ignores invalid thread list v2 shelf expansion types", async () => {
+    mocks.setPreferencesJson(
+      JSON.stringify({
+        baseFontSize: 17,
+        threadListV2SettledShelfExpanded: "false",
+        threadListV2SnoozedShelfExpanded: 1,
+      }),
+      10,
+    );
+
+    await expect(loadPreferences()).resolves.toEqual({ baseFontSize: 17 });
+  });
+
   it("falls back to secure storage when SQLite cannot save preferences", async () => {
     mocks.setDatabaseFailures(true, true);
     await expect(savePreferencesPatch({ baseFontSize: 19 })).resolves.toEqual({ baseFontSize: 19 });
