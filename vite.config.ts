@@ -21,8 +21,10 @@ export default defineConfig({
     testTimeout: 60_000,
   },
   staged: {
-    // Formatter only for now — no lint or typecheck on commit.
-    "*": "vp fmt",
+    // Formatter only. Oxfmt has no shell parser, so "*" is unsafe: a bash-only
+    // commit forwards .sh paths and oxfmt exits when it has no target files.
+    "*.{js,jsx,cjs,mjs,ts,tsx,cts,mts,json,jsonc,json5,yml,yaml,toml,html,css,scss,less,md,mdx}":
+      "vp fmt",
   },
   fmt: {
     ignorePatterns: [
