@@ -8,7 +8,7 @@ npx skills add gannonh/skills --skill thermo-run -y --copy --agent claude-code c
 npx skills add gannonh/skills --skill readme -y --copy --agent claude-code cursor
 
 # gannonh/skills/pstack-skills
-npx skills add gannonh/skills/pstack-skills -y --agent codex
+# npx skills add gannonh/skills/pstack-skills -y --agent codex
 
 # cursor/plugins
 npx skills add cursor/plugins --skill thermo-nuclear-code-quality-review -y --copy --agent claude-code cursor
