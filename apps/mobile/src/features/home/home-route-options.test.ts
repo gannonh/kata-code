@@ -6,18 +6,16 @@ describe("getHomeRouteHeaderOptions", () => {
   it("hides the Android native header in split detail", () => {
     expect(
       getHomeRouteHeaderOptions({
+        kind: "split",
         isAndroid: true,
-        usesSplitView: true,
-        primaryHeaderOptions: { title: "Threads" },
       }),
     ).toEqual({ headerShown: false });
   });
 
   it("keeps the blank detail options for iOS split navigation", () => {
     const options = getHomeRouteHeaderOptions({
+      kind: "split",
       isAndroid: false,
-      usesSplitView: true,
-      primaryHeaderOptions: { title: "Threads" },
     });
 
     expect(options).toMatchObject({ title: "", headerTitle: "" });
@@ -33,8 +31,7 @@ describe("getHomeRouteHeaderOptions", () => {
 
     expect(
       getHomeRouteHeaderOptions({
-        isAndroid: true,
-        usesSplitView: false,
+        kind: "compact",
         primaryHeaderOptions,
       }),
     ).toEqual({ ...primaryHeaderOptions, headerShown: true });

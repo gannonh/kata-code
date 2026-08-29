@@ -533,22 +533,23 @@ function AdaptiveWorkspaceLayoutContent(
               pointerEvents={panes.primarySidebarVisible ? "auto" : "none"}
               style={sidebarAnimatedStyle}
             >
-              <View className="flex-1" style={{ width: layout.listPaneWidth }}>
-                <AndroidHomeFabLayout onStartNewTask={handleStartNewTask}>
-                  <ThreadNavigationSidebar
-                    width={layout.listPaneWidth}
-                    visible={panes.primarySidebarVisible}
-                    onRequestVisibility={revealPrimarySidebar}
-                    selectedThreadKey={selectedThreadKey}
-                    onOpenSettings={handleOpenSettings}
-                    onOpenEnvironmentSettings={handleOpenEnvironmentSettings}
-                    onNewThreadInProject={handleNewThreadInProject}
-                    onSelectThread={handleSelectThread}
-                    onSearchQueryChange={setPrimarySidebarSearchQuery}
-                    searchQuery={primarySidebarSearchQuery}
-                  />
-                </AndroidHomeFabLayout>
-              </View>
+              <AndroidHomeFabLayout
+                onStartNewTask={handleStartNewTask}
+                width={layout.listPaneWidth}
+              >
+                <ThreadNavigationSidebar
+                  width={layout.listPaneWidth}
+                  visible={panes.primarySidebarVisible}
+                  onRequestVisibility={revealPrimarySidebar}
+                  selectedThreadKey={selectedThreadKey}
+                  onOpenSettings={handleOpenSettings}
+                  onOpenEnvironmentSettings={handleOpenEnvironmentSettings}
+                  onNewThreadInProject={handleNewThreadInProject}
+                  onSelectThread={handleSelectThread}
+                  onSearchQueryChange={setPrimarySidebarSearchQuery}
+                  searchQuery={primarySidebarSearchQuery}
+                />
+              </AndroidHomeFabLayout>
             </Animated.View>
           ) : null}
           <View className="flex-1 overflow-hidden bg-screen" collapsable={false}>

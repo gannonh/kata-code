@@ -13,6 +13,7 @@ import { deriveAndroidHomeFabLayout } from "./android-home-fab-layout";
 export function AndroidHomeFabLayout(props: {
   readonly onStartNewTask: () => void;
   readonly children: ReactNode;
+  readonly width?: number;
 }) {
   if (Platform.OS !== "android") {
     return <>{props.children}</>;
@@ -24,13 +25,14 @@ export function AndroidHomeFabLayout(props: {
 function AndroidHomeFab(props: {
   readonly onStartNewTask: () => void;
   readonly children: ReactNode;
+  readonly width?: number;
 }) {
   const insets = useSafeAreaInsets();
   const primaryForegroundColor = useThemeColor("--color-primary-foreground");
   const { fabBottom } = deriveAndroidHomeFabLayout({ bottomInset: insets.bottom });
 
   return (
-    <View className="flex-1">
+    <View className="flex-1" style={{ width: props.width }}>
       {props.children}
       <Pressable
         accessibilityLabel="New task"

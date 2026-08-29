@@ -117,9 +117,8 @@ export function HomeRouteScreen() {
       <>
         <NativeStackScreenOptions
           options={getHomeRouteHeaderOptions({
+            kind: "split",
             isAndroid: Platform.OS === "android",
-            usesSplitView: layout.usesSplitView,
-            primaryHeaderOptions,
           })}
         />
         <WorkspaceSidebarToolbar
@@ -145,8 +144,7 @@ export function HomeRouteScreen() {
       <>
         <NativeStackScreenOptions
           options={getHomeRouteHeaderOptions({
-            isAndroid: Platform.OS === "android",
-            usesSplitView: layout.usesSplitView,
+            kind: "compact",
             primaryHeaderOptions,
           })}
         />

@@ -57,6 +57,7 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
+import { deriveAndroidHomeFabLayout } from "./android-home-fab-layout";
 import {
   buildHomeListLayout,
   DEFAULT_GROUP_DISPLAY_STATE,
@@ -215,6 +216,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
   const insets = useSafeAreaInsets();
+  const androidHomeFabLayout = deriveAndroidHomeFabLayout({ bottomInset: insets.bottom });
   const accentColor = useThemeColor("--color-icon-muted");
   const iosBottomToolbarClearance =
     Platform.OS === "ios" && !NATIVE_LIQUID_GLASS_SUPPORTED
@@ -1167,7 +1169,7 @@ export function HomeScreen(props: HomeScreenProps) {
               paddingBottom:
                 Platform.OS === "ios"
                   ? Math.max(insets.bottom, 24) + 96 + iosBottomToolbarClearance
-                  : Math.max(insets.bottom, 16) + 88,
+                  : androidHomeFabLayout.compactListBottomPadding,
             }}
           />
         </SwipeableScrollGateProvider>
@@ -1213,7 +1215,7 @@ export function HomeScreen(props: HomeScreenProps) {
             paddingBottom:
               Platform.OS === "ios"
                 ? Math.max(insets.bottom, 24) + 24 + iosBottomToolbarClearance
-                : Math.max(insets.bottom, 16) + 88,
+                : androidHomeFabLayout.compactListBottomPadding,
           }}
           scrollIndicatorInsets={
             Platform.OS === "ios"

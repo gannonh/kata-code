@@ -1,11 +1,19 @@
 import type { AppNativeStackNavigationOptions } from "../../native/StackHeader";
 
-export function getHomeRouteHeaderOptions(input: {
-  readonly isAndroid: boolean;
-  readonly usesSplitView: boolean;
-  readonly primaryHeaderOptions: AppNativeStackNavigationOptions;
-}): AppNativeStackNavigationOptions {
-  if (input.usesSplitView) {
+type HomeRouteHeaderOptionsInput =
+  | {
+      readonly kind: "split";
+      readonly isAndroid: boolean;
+    }
+  | {
+      readonly kind: "compact";
+      readonly primaryHeaderOptions: AppNativeStackNavigationOptions;
+    };
+
+export function getHomeRouteHeaderOptions(
+  input: HomeRouteHeaderOptionsInput,
+): AppNativeStackNavigationOptions {
+  if (input.kind === "split") {
     return input.isAndroid
       ? { headerShown: false }
       : { title: "", headerTitle: "", unstable_headerLeftItems: () => [] };
