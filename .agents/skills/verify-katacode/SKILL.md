@@ -16,7 +16,7 @@ Iterative human testing against a kept-alive worktree stack is the sibling `test
 From the repository root, load the printed values into the current shell:
 
 ```bash
-eval "$(.cursor/skills/verify-katacode/bin/launch)"
+eval "$(.agents/skills/verify-katacode/bin/launch)"
 ```
 
 `launch` writes progress on stderr and only `KEY=value` lines on stdout, so `eval` exports `RUN_ID`, `RUNNER_PID`, `HOME_DIR`, `VERIFY_ROOT`, `WEB_ORIGIN`, `SERVER_PORT`, `WEB_PORT`, `EVIDENCE_DIR`, `ENV_FILE`, and `PAIRING_URL`. The same exports are also written to `$ENV_FILE` (`${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/run.env`) for a later `source "$ENV_FILE"`.
@@ -28,9 +28,9 @@ Ready means all of these are true:
 - the shell has `RUN_ID`, `WEB_ORIGIN`, `HOME_DIR`, and `PAIRING_URL` set (from `eval` or `source "$ENV_FILE"`)
 - the log contains a `[dev-runner] ... serverPort=... webPort=... baseDir=...` line whose `baseDir` is the disposable home
 - the server log contains a `/pair#token=...` URL (Effect logs it as `pairingUrl:`; `katacode pair` prints `Pairing URL:`)
-- `GET http://127.0.0.1:<webPort>/.well-known/kata/environment` returns JSON with `environmentId`, `label`, and `serverVersion`
+- `GET $WEB_ORIGIN/.well-known/kata/environment` returns JSON with `environmentId`, `label`, and `serverVersion`
 
-Ports hash from the worktree path and move when occupied. A developer `vp run dev` may already be sitting on this worktree's default ports. Read the values launch printed. Do not assume 5733 / 13773. The web origin is `http://localhost:<webPort>` in pairing URLs. Vite often binds IPv6-only (`[::1]`). `bin/launch` and `bin/doctor` probe `::1`, then `127.0.0.1`, then `localhost`, and print the host that actually returned descriptor JSON. Drive the browser with the pairing URL as printed (`localhost` is what Chrome wants). Do not assume 5733 / 13773.
+Ports hash from the worktree path and move when occupied. A developer `vp run dev` may already be sitting on this worktree's default ports. Read the values launch printed. Do not assume 5733 / 13773. Vite often binds IPv6-only (`[::1]`). `bin/launch` and `bin/doctor` probe `::1`, then `127.0.0.1`, then `localhost`, and print the host that actually returned descriptor JSON as `WEB_ORIGIN`. Pairing URLs still print `localhost`. On IPv4-only `localhost` that hangs; rewrite the pairing URL host to match `WEB_ORIGIN` before opening it in the browser. Do not assume 5733 / 13773.
 
 The disposable home is `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/home`. Runtime state is `<home>/userdata`. Never launch against `~/.katacode` or the worktree `.katacode`. Those are the user's live (or worktree) databases.
 
@@ -47,7 +47,7 @@ If `node_modules` is missing, run `vp i` and launch again. Do not invent a diffe
 Run this first whenever anything looks off, and before you drive:
 
 ```bash
-.cursor/skills/verify-katacode/bin/doctor
+.agents/skills/verify-katacode/bin/doctor
 ```
 
 Pass the run id if `.last-run` is stale: `bin/doctor web-20260826-163000-a1b2c3d4`.
@@ -61,6 +61,8 @@ Doctor is read-only. It answers "is this instance worth driving?" by checking:
 - the web origin serves the environment descriptor and the app shell
 
 If doctor fails, stop. Do not click around in some other Kata Code tab "to save time." Attaching to the user's session is how you consume their pairing token, write into their database, or kill the wrong pid.
+
+On Linux, Vite often binds IPv6-only (`[::1]`). `localhost` then times out on IPv4. `bin/doctor` probes `::1` first. If the descriptor probe fails in the first second after launch, run doctor once more against the same run id before treating the instance as dead.
 
 A consumed pairing token is not a doctor failure. Mint a replacement against the same home:
 
@@ -80,9 +82,10 @@ Use one named session for the run. Do not pass `--session-name` (that persists c
 agent-browser --session katacode-verify open "$PAIRING_URL"
 agent-browser --session katacode-verify wait --text "What should we work on?"
 agent-browser --session katacode-verify snapshot -i
+# If `/pair` was already mounted (token-free before-shot), fill Pairing token and Continue instead.
 ```
 
-`$PAIRING_URL` is the value from `eval "$(bin/launch)"` or `source "$ENV_FILE"`. It ends in `/pair#token=...`. Open it exactly once as the first navigation that consumes the token (after any token-free `$WEB_ORIGIN/` before-shot in the pairing recipe). Preserve the fragment. Opening it twice, or opening it in a second browser, burns the token.
+`$PAIRING_URL` is the value from `eval "$(bin/launch)"` or `source "$ENV_FILE"`. It ends in `/pair#token=...`. Rewrite its host to match `$WEB_ORIGIN` when they differ. Open it exactly once as the first navigation that consumes the token (after any token-free `$WEB_ORIGIN/` before-shot in the pairing recipe). Preserve the fragment. Opening it twice, or opening it in a second browser, burns the token. If the before-shot already mounted `/pair`, hash auto-submit will not run; use the form or reload.
 
 After pairing, the app strips the token from the URL and redirects to `/`. Wait until you see either:
 
@@ -133,7 +136,7 @@ Proof standards:
 When the proof is captured, or as soon as a launch/drive attempt fails:
 
 ```bash
-.cursor/skills/verify-katacode/bin/cleanup
+.agents/skills/verify-katacode/bin/cleanup
 ```
 
 That verifies the runner pid in `run.json` still has the recorded `runnerStart` identity, then kills that pid and its descendants, then deletes `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/`. If the pid is gone or the identity no longer matches, cleanup skips signals and only removes this run's state. It does not delete `uat-evidence/<RUN_ID>/`.
@@ -149,13 +152,13 @@ Close the `katacode-verify` agent-browser session after cleanup so the next run 
 All three are executable. Run them from the repository root.
 
 ```bash
-eval "$(.cursor/skills/verify-katacode/bin/launch)"
-.cursor/skills/verify-katacode/bin/doctor
-.cursor/skills/verify-katacode/bin/doctor web-20260826-163000-a1b2c3d4
-.cursor/skills/verify-katacode/bin/cleanup
+eval "$(.agents/skills/verify-katacode/bin/launch)"
+.agents/skills/verify-katacode/bin/doctor
+.agents/skills/verify-katacode/bin/doctor web-20260826-163000-a1b2c3d4
+.agents/skills/verify-katacode/bin/cleanup
 # later shell: source "$ENV_FILE"
 ```
 
-`launch` writes `uat-evidence/<RUN_ID>/`, `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/run.json`, and `run.env`. `doctor` and `cleanup` read `.cursor/skills/verify-katacode/.last-run` when you omit the id. Run ids are `web-<UTC>-<8 hex>` and must stay filename-safe (no `/` or `..`).
+`launch` writes `uat-evidence/<RUN_ID>/`, `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/run.json`, and `run.env`. `doctor` and `cleanup` read `.agents/skills/verify-katacode/.last-run` when you omit the id. Run ids are `web-<UTC>-<8 hex>` and must stay filename-safe (no `/` or `..`).
 
 Feature recipes live in [features/](features/README.md). Drive from that map. A proof that uses one convenient entry point is incomplete when the map lists others; report the ones you did not reach rather than silently skipping them.
