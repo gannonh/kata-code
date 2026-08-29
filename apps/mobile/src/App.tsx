@@ -12,6 +12,7 @@ import { RegistryContext } from "@effect/atom-react";
 import { ConfirmDialogHost } from "./components/ConfirmDialogHost";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
 import { prepareNativeShowcaseCapture } from "./features/showcase/nativeShowcaseScene";
+import { MarkdownImageRaceFixture } from "./features/showcase/MarkdownImageRaceFixture";
 import { IncomingShareProvider } from "./features/sharing/IncomingShareProvider";
 import {
   AppearancePreferencesProvider,
@@ -74,6 +75,7 @@ function AppContent() {
   const { themeAppearance } = useAppearancePreferences();
   const statusBarBg = useThemeColor("--color-status-bar");
   const navigationTheme = useMobileNavigationTheme(themeAppearance);
+  const markdownImageRaceFixture = process.env.EXPO_PUBLIC_MARKDOWN_IMAGE_RACE_FIXTURE === "1";
 
   return (
     <>
@@ -93,10 +95,16 @@ function AppContent() {
                 the system is in dark mode. */}
             {/* Blur target for Android dropdown backdrops — see appBlurTarget.ts. */}
             <BlurTargetView ref={appBlurTargetRef} style={{ flex: 1 }}>
-              <IncomingShareProvider>
-                <Navigation linking={appLinking} theme={navigationTheme} />
-              </IncomingShareProvider>
-              <ConfirmDialogHost />
+              {markdownImageRaceFixture ? (
+                <MarkdownImageRaceFixture />
+              ) : (
+                <>
+                  <IncomingShareProvider>
+                    <Navigation linking={appLinking} theme={navigationTheme} />
+                  </IncomingShareProvider>
+                  <ConfirmDialogHost />
+                </>
+              )}
             </BlurTargetView>
             {/* Anchored-menu overlays render here — in-window, so the
                 keyboard stays up while a dropdown is open. */}

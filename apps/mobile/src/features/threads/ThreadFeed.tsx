@@ -204,21 +204,29 @@ function MessageAttachmentImage(props: {
   );
 }
 
-function ThreadMarkdownImageView(props: {
+export interface ThreadMarkdownImageRequestCallbacks {
+  readonly load: (sourceSize: { width: number; height: number }) => void;
+  readonly error: () => void;
+}
+
+export function ThreadMarkdownImageView(props: {
   readonly uri: string | null;
   readonly sourceKey: string;
   readonly unavailable: boolean;
   readonly alt: string | null;
   readonly title: string | null;
   readonly onPressImage: (uri: string) => void;
+  readonly testID?: string;
+  readonly onRequestCallbacks?: (
+    uri: string,
+    callbacks: ThreadMarkdownImageRequestCallbacks,
+  ) => void;
 }) {
   const caption = props.title ?? props.alt;
   const codeBackground = useThemeColor("--color-md-code-bg");
   const [availableWidth, setAvailableWidth] = useState(0);
   const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null);
   const [failedUri, setFailedUri] = useState<string | null>(null);
-  const activeUriRef = useRef(props.uri);
-  activeUriRef.current = props.uri;
 
   useEffect(() => {
     setSourceSize(null);
@@ -251,6 +259,7 @@ function ThreadMarkdownImageView(props: {
     >
       {props.uri === null || failed ? (
         <View
+          testID={props.testID ? `${props.testID}-unavailable` : undefined}
           style={{
             ...frameStyle,
             borderRadius: 10,
@@ -277,6 +286,7 @@ function ThreadMarkdownImageView(props: {
           style={{ alignSelf: "flex-start" }}
         >
           <View
+            testID={props.testID ? `${props.testID}-frame` : undefined}
             style={{
               ...frameStyle,
               borderRadius: 10,
@@ -286,23 +296,14 @@ function ThreadMarkdownImageView(props: {
               overflow: "hidden",
             }}
           >
-            <Image
-              source={{ uri: props.uri }}
-              resizeMode="contain"
-              accessible={false}
-              onLoad={(event) => {
-                if (activeUriRef.current !== props.uri) return;
-                const { width, height } = event.nativeEvent.source;
-                setSourceSize({ width, height });
-              }}
+            <ThreadMarkdownImageRequest
+              key={props.uri}
+              uri={props.uri}
+              onLoad={setSourceSize}
               onError={() => setFailedUri(props.uri)}
-              style={{
-                width: "100%",
-                height: "100%",
-                opacity: displaySize === null ? 0 : 1,
-              }}
+              testID={props.testID}
+              onRequestCallbacks={props.onRequestCallbacks}
             />
-            {displaySize === null ? <ActivityIndicator style={StyleSheet.absoluteFill} /> : null}
           </View>
         </TouchableOpacity>
       )}
@@ -312,6 +313,66 @@ function ThreadMarkdownImageView(props: {
         </Text>
       ) : null}
     </View>
+  );
+}
+
+function ThreadMarkdownImageRequest(props: {
+  readonly uri: string;
+  readonly onLoad: (sourceSize: { width: number; height: number }) => void;
+  readonly onError: () => void;
+  readonly testID?: string;
+  readonly onRequestCallbacks?: (
+    uri: string,
+    callbacks: ThreadMarkdownImageRequestCallbacks,
+  ) => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const activeRef = useRef(true);
+  const onLoadRef = useRef(props.onLoad);
+  const onErrorRef = useRef(props.onError);
+  onLoadRef.current = props.onLoad;
+  onErrorRef.current = props.onError;
+  const load = useCallback((sourceSize: { width: number; height: number }) => {
+    if (!activeRef.current) return;
+    setLoaded(true);
+    onLoadRef.current(sourceSize);
+  }, []);
+  const error = useCallback(() => {
+    if (!activeRef.current) return;
+    onErrorRef.current();
+  }, []);
+
+  useEffect(() => {
+    props.onRequestCallbacks?.(props.uri, { load, error });
+  }, [error, load, props.onRequestCallbacks, props.uri]);
+
+  useEffect(() => {
+    return () => {
+      activeRef.current = false;
+    };
+  }, []);
+
+  return (
+    <>
+      <Image
+        source={{ uri: props.uri }}
+        resizeMode="contain"
+        accessible={false}
+        onLoad={(event) => load(event.nativeEvent.source)}
+        onError={error}
+        testID={loaded && props.testID ? `${props.testID}-image` : undefined}
+        style={{ width: "100%", height: "100%", opacity: loaded ? 1 : 0 }}
+      />
+      {loaded ? null : (
+        <View
+          pointerEvents="none"
+          testID={props.testID ? `${props.testID}-loading` : undefined}
+          style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]}
+        >
+          <Text className="text-xs text-foreground-muted">Loading image…</Text>
+        </View>
+      )}
+    </>
   );
 }
 
