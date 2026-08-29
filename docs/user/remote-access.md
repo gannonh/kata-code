@@ -145,6 +145,24 @@ inbound firewall port. In the desktop app, sign in with the same Kata Code Conne
 If you pass `--base-dir` to `connect link`, pass the same value to `serve`. Use `@nightly` for both
 commands when the desktop app runs Nightly.
 
+#### Fix a Connect account mismatch
+
+Clerk stores the desktop app session and the Connect CLI authorization separately. The environment
+belongs to the account that authorized `connect link`. Signing in to another account in the desktop
+app does not change the CLI authorization.
+
+`connect link --headless` reuses a valid stored CLI credential. To move a Nightly environment to the
+same account as the mobile app, clear that credential and authorize the link again:
+
+```bash
+npx @kata-sh/code-cli@nightly connect logout --base-dir ~/.katacode
+npx @kata-sh/code-cli@nightly connect link --headless --base-dir ~/.katacode
+```
+
+Open the authorization URL and sign in with the account used on mobile. Confirm that the command
+reports the expected account, then restart the Nightly desktop app. The explicit `--base-dir` keeps
+the commands on the installed app's data when you run them from a linked worktree.
+
 For hosted web pairing over Tailscale HTTPS, opt in to Tailscale Serve:
 
 ```bash
