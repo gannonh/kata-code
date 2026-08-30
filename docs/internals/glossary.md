@@ -10,6 +10,7 @@ This is a living glossary for Kata Code. It explains what common terms mean in t
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
+- [Kata Sandbox](#kata-sandbox)
 - [Checkpointing](#checkpointing)
 
 ## Concepts
@@ -115,6 +116,24 @@ Controls how assistant text reaches the thread timeline. In [the contracts][1], 
 #### Snapshot
 
 A point-in-time view of state. The word is used in multiple layers, including orchestration, provider, and checkpointing. See [ProjectionSnapshotQuery.ts][10], [ProviderAdapter.ts][15], and [CheckpointStore.ts][19].
+
+### Kata Sandbox
+
+#### Deployment
+
+A durable record for a Docker-hosted Kata environment. A deployment records the requested intent,
+the owned provider resource, the identified target environment, or a deletion tombstone. See
+[`kata-sandbox.md`](./kata-sandbox.md).
+
+#### Provider observation
+
+The latest state the control server can prove about a provider resource. Sandbox observations are
+`Running`, `Unknown`, or `Gone`.
+
+#### Operation receipt
+
+The durable result of an authenticated Sandbox command. It tracks request identity and command
+status so retries can return the original operation.
 
 ### Checkpointing
 

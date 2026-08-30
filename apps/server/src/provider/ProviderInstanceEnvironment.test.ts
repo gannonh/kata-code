@@ -18,4 +18,16 @@ describe("mergeProviderInstanceEnvironment", () => {
       PATH: "/bin",
     });
   });
+
+  it("removes the sandbox bootstrap credential before launching a provider", () => {
+    expect(
+      mergeProviderInstanceEnvironment(
+        [{ name: "KATACODE_SANDBOX_BOOTSTRAP_TOKEN", value: "provider-injected", sensitive: true }],
+        {
+          KATACODE_SANDBOX_BOOTSTRAP_TOKEN: "target-only",
+          PATH: "/bin",
+        },
+      ),
+    ).toEqual({ PATH: "/bin" });
+  });
 });

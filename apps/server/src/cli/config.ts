@@ -127,6 +127,10 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  sandboxBootstrapToken: Config.string("KATACODE_SANDBOX_BOOTSTRAP_TOKEN").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   autoBootstrapProjectFromCwd: Config.boolean("KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -307,6 +311,7 @@ export const resolveServerConfig = (
       () => mode === "desktop",
     );
     const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
+    const sandboxBootstrapToken = env.sandboxBootstrapToken;
     const desktopTelemetryFd = bootstrap?.desktopTelemetryFd;
     const desktopTelemetryControlFd = bootstrap?.desktopTelemetryControlFd;
     const resourceMonitorPath = bootstrap?.resourceMonitorPath;
@@ -383,6 +388,7 @@ export const resolveServerConfig = (
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,
+      ...(sandboxBootstrapToken === undefined ? {} : { sandboxBootstrapToken }),
       desktopTelemetryFd,
       desktopTelemetryControlFd,
       resourceMonitorPath,

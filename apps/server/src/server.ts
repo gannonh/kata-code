@@ -1,4 +1,5 @@
 import { EnvironmentHttpApi } from "@kata-sh/code-contracts";
+import { SandboxHttpApi } from "@kata-sh/code-kata-sandbox-contracts/http";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -115,6 +116,8 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
+import { sandboxBootstrapPairingRouteLayer, sandboxHttpApiLayer } from "./kataSandbox/http.ts";
+import * as SandboxDeploymentService from "./kataSandbox/SandboxDeploymentService.ts";
 import * as NetService from "@kata-sh/code-shared/Net";
 import * as RelayClient from "@kata-sh/code-shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@kata-sh/code-tailscale";
@@ -415,7 +418,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   ),
 );
 
-const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
+const RuntimeDependenciesLive = SandboxDeploymentService.layer.pipe(
+  Layer.provideMerge(RuntimeCoreDependenciesLive),
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
@@ -454,6 +458,11 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
+    HttpApiBuilder.layer(SandboxHttpApi).pipe(
+      Layer.provide(sandboxHttpApiLayer),
+      Layer.provide(environmentAuthenticatedAuthLayer),
+    ),
+    sandboxBootstrapPairingRouteLayer,
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
     staticAndDevRouteLayer,
