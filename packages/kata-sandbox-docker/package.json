@@ -1,0 +1,42 @@
+{
+  "name": "@kata-sh/code-kata-sandbox-docker",
+  "version": "0.0.1",
+  "private": true,
+  "files": [
+    "dist",
+    "Dockerfile",
+    "bootstrap",
+    "scripts"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./driver": {
+      "types": "./src/driver.ts",
+      "import": "./src/driver.ts"
+    },
+    "./engine": {
+      "types": "./src/engine.ts",
+      "import": "./src/engine.ts"
+    }
+  },
+  "scripts": {
+    "build:image": "node scripts/build-image.mjs",
+    "typecheck": "tsgo --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@kata-sh/code-contracts": "workspace:*",
+    "@kata-sh/code-kata-sandbox": "workspace:*",
+    "@kata-sh/code-kata-sandbox-contracts": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}
