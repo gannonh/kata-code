@@ -95,12 +95,20 @@ try {
     ],
     { cwd: repositoryRoot, stdio: "inherit" },
   );
-  const image = (
-    await exec("docker", ["image", "inspect", "--format", "{{.Id}}", imageTag])
-  ).stdout.trim();
+  const repoDigests = JSON.parse(
+    (await exec("docker", ["image", "inspect", "--format", "{{json .RepoDigests}}", imageTag]))
+      .stdout,
+  );
+  const imageReference =
+    Array.isArray(repoDigests) && typeof repoDigests[0] === "string"
+      ? repoDigests[0]
+      : (await exec("docker", ["image", "inspect", "--format", "{{.Id}}", imageTag])).stdout.trim();
+  if (!/^(?:[^\s@]+@)?sha256:[0-9a-f]{64}$/i.test(imageReference)) {
+    throw new Error("Docker image inspect did not return an immutable image reference.");
+  }
   process.stdout.write(
     [
-      `image=${imageTag}@${image}`,
+      `image=${imageReference}`,
       `KATACODE_SANDBOX_SERVER_ARTIFACT_SHA256=${kataDigest}`,
       `KATACODE_SANDBOX_CODEX_VERSION=${codexPackage.version}`,
       `KATACODE_SANDBOX_CODEX_ARTIFACT_SHA256=${codexDigest}`,

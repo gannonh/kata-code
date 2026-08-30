@@ -48,7 +48,7 @@ export const UnixSocketPath = TrimmedNonEmptyString.check(Schema.isPattern(/^\/.
 export type UnixSocketPath = typeof UnixSocketPath.Type;
 
 export const OciImageDigest = TrimmedNonEmptyString.check(
-  Schema.isPattern(/^[^\s@]+@sha256:[0-9a-f]{64}$/),
+  Schema.isPattern(/^(?:[^\s@]+@)?sha256:[0-9a-f]{64}$/),
 );
 export type OciImageDigest = typeof OciImageDigest.Type;
 

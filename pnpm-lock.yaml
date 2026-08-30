@@ -558,6 +558,9 @@ importers:
       '@kata-sh/code-contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@kata-sh/code-kata-sandbox-contracts':
+        specifier: workspace:*
+        version: link:../../packages/kata-sandbox-contracts
       '@kata-sh/code-shared':
         specifier: workspace:*
         version: link:../../packages/shared

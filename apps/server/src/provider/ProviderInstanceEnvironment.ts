@@ -6,7 +6,7 @@ export function mergeProviderInstanceEnvironment(
   environment: ProviderInstanceEnvironment | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const next: NodeJS.ProcessEnv = { ...baseEnv };
+  const next = { ...baseEnv };
   delete next[SANDBOX_BOOTSTRAP_TOKEN];
   for (const variable of environment ?? []) {
     if (variable.name === SANDBOX_BOOTSTRAP_TOKEN) continue;

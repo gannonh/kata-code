@@ -23,6 +23,7 @@
     "@formkit/auto-animate": "^0.9.0",
     "@kata-sh/code-client-runtime": "workspace:*",
     "@kata-sh/code-contracts": "workspace:*",
+    "@kata-sh/code-kata-sandbox-contracts": "workspace:*",
     "@kata-sh/code-shared": "workspace:*",
     "@legendapp/list": "catalog:",
     "@lexical/react": "^0.41.0",

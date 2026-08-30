@@ -1,58 +1,14 @@
+import * as Schema from "effect/Schema";
+
+import {
+  SandboxListResponse as SandboxListResponseSchema,
+  type SandboxListResponse as SandboxListResponseContract,
+} from "@kata-sh/code-kata-sandbox-contracts/http";
 import { readDesktopPrimaryBearerToken } from "~/environments/primary/desktopAuth";
 import { resolvePrimaryEnvironmentHttpUrl } from "~/environments/primary/target";
 import { randomUUID } from "~/lib/utils";
 
-export type SandboxProfile = {
-  readonly profileId: string;
-  readonly name: string;
-  readonly driverKind: "docker";
-  readonly socketPath: string;
-  readonly imageDigest: string;
-  readonly enabled: boolean;
-  readonly revision: number;
-};
-
-export type SandboxProfileSummary =
-  | {
-      readonly kind: "available";
-      readonly profile: SandboxProfile;
-      readonly daemonVersion?: string;
-    }
-  | {
-      readonly kind: "unavailable";
-      readonly profile: SandboxProfile;
-      readonly reason: string;
-      readonly diagnostic: string;
-    };
-
-export type SandboxDeploymentState = "Requested" | "Allocated" | "Identified" | "Deleted";
-
-export type SandboxDeployment = {
-  readonly state: SandboxDeploymentState;
-  readonly revision: number;
-  readonly deploymentId: string;
-  readonly label?: string;
-  readonly repository?: string;
-  readonly ref?: string;
-  readonly providerInstanceId?: string;
-  readonly environmentId?: string;
-  readonly endpoint?: string;
-};
-
-export type SandboxObservation = {
-  readonly state: "Running" | "Unknown" | "Gone";
-  readonly diagnostic?: string;
-};
-
-export type SandboxDeploymentSummary = {
-  readonly deployment: SandboxDeployment;
-  readonly observation?: SandboxObservation;
-};
-
-export type SandboxListResponse = {
-  readonly profiles: ReadonlyArray<SandboxProfileSummary>;
-  readonly deployments: ReadonlyArray<SandboxDeploymentSummary>;
-};
+export type SandboxListResponse = SandboxListResponseContract;
 
 export type SandboxOperationReceipt = {
   readonly operationId: string;
@@ -101,134 +57,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isString = (value: unknown): value is string => typeof value === "string";
 
-const isNumber = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value);
-
-function decodeProfile(value: unknown): SandboxProfile {
-  if (
-    !isRecord(value) ||
-    !isString(value.profileId) ||
-    !isString(value.name) ||
-    value.driverKind !== "docker" ||
-    !isString(value.socketPath) ||
-    !isString(value.imageDigest) ||
-    typeof value.enabled !== "boolean" ||
-    !isNumber(value.revision)
-  ) {
-    throw new Error("The sandbox profile response is invalid.");
-  }
-
-  return {
-    profileId: value.profileId,
-    name: value.name,
-    driverKind: value.driverKind,
-    socketPath: value.socketPath,
-    imageDigest: value.imageDigest,
-    enabled: value.enabled,
-    revision: value.revision,
-  };
-}
-
-function decodeProfileSummary(value: unknown): SandboxProfileSummary {
-  if (!isRecord(value) || (value.kind !== "available" && value.kind !== "unavailable")) {
-    throw new Error("The sandbox profile summary response is invalid.");
-  }
-
-  const profile = decodeProfile(value.profile);
-  if (value.kind === "available") {
-    return {
-      kind: value.kind,
-      profile,
-      ...(isString(value.daemonVersion) ? { daemonVersion: value.daemonVersion } : {}),
-    };
-  }
-
-  if (!isString(value.reason) || !isString(value.diagnostic)) {
-    throw new Error("The unavailable sandbox profile response is invalid.");
-  }
-
-  return {
-    kind: value.kind,
-    profile,
-    reason: value.reason,
-    diagnostic: value.diagnostic,
-  };
-}
-
-function decodeDeployment(value: unknown): SandboxDeployment {
-  if (!isRecord(value) || !isString(value.state) || !isNumber(value.revision)) {
-    throw new Error("The sandbox deployment response is invalid.");
-  }
-
-  if (
-    value.state !== "Requested" &&
-    value.state !== "Allocated" &&
-    value.state !== "Identified" &&
-    value.state !== "Deleted"
-  ) {
-    throw new Error("The sandbox deployment state is invalid.");
-  }
-
-  const intent = isRecord(value.intent) ? value.intent : null;
-  const deploymentId = isString(value.deploymentId)
-    ? value.deploymentId
-    : intent && isString(intent.deploymentId)
-      ? intent.deploymentId
-      : null;
-  if (deploymentId === null) {
-    throw new Error("The sandbox deployment id is missing.");
-  }
-
-  const source = intent && isRecord(intent.source) ? intent.source : null;
-  return {
-    state: value.state,
-    revision: value.revision,
-    deploymentId,
-    ...(intent && isString(intent.label) ? { label: intent.label } : {}),
-    ...(source && isString(source.repository) ? { repository: source.repository } : {}),
-    ...(source && isString(source.ref) ? { ref: source.ref } : {}),
-    ...(intent && isString(intent.providerInstanceId)
-      ? { providerInstanceId: intent.providerInstanceId }
-      : {}),
-    ...(isString(value.environmentId) ? { environmentId: value.environmentId } : {}),
-    ...(isString(value.endpoint) ? { endpoint: value.endpoint } : {}),
-  };
-}
-
-function decodeObservation(value: unknown): SandboxObservation {
-  if (
-    !isRecord(value) ||
-    (value.state !== "Running" && value.state !== "Unknown" && value.state !== "Gone")
-  ) {
-    throw new Error("The sandbox observation response is invalid.");
-  }
-
-  return {
-    state: value.state,
-    ...(isString(value.diagnostic) ? { diagnostic: value.diagnostic } : {}),
-  };
-}
+const decodeSandboxListResponse = Schema.decodeUnknownSync(SandboxListResponseSchema);
 
 function decodeListResponse(value: unknown): SandboxListResponse {
-  if (!isRecord(value) || !Array.isArray(value.profiles) || !Array.isArray(value.deployments)) {
+  try {
+    return decodeSandboxListResponse(value);
+  } catch {
     throw new Error("The sandbox list response is invalid.");
   }
-
-  return {
-    profiles: value.profiles.map(decodeProfileSummary),
-    deployments: value.deployments.map((entry) => {
-      if (!isRecord(entry) || !("deployment" in entry)) {
-        throw new Error("The sandbox deployment summary response is invalid.");
-      }
-
-      return {
-        deployment: decodeDeployment(entry.deployment),
-        ...(entry.observation === undefined
-          ? {}
-          : { observation: decodeObservation(entry.observation) }),
-      };
-    }),
-  };
 }
 
 function decodeOperationReceipt(value: unknown): SandboxOperationReceipt {
@@ -353,12 +189,7 @@ export function createSandboxDeployment(
       },
       providerInstanceId: input.providerInstanceId.trim(),
     }),
-    (value) => {
-      if (!isRecord(value) || !isString(value.operationId)) {
-        throw new Error("The sandbox create response is invalid.");
-      }
-      return { operationId: value.operationId };
-    },
+    decodeAccepted,
   );
 }
 

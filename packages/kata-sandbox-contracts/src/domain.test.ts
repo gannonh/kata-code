@@ -21,6 +21,21 @@ describe("sandbox contracts", () => {
     expect(manifest.imageDigest).toContain("@sha256:");
   });
 
+  it("accepts a local content-addressed image id", () => {
+    const imageDigest = `sha256:${"a".repeat(64)}`;
+    const manifest = decodeSandboxBootstrapManifest({
+      version: 1,
+      imageDigest,
+      kataVersion: "0.0.42",
+      serverVersion: "0.0.42",
+      serverArtifactSha256: "b".repeat(64),
+      codexVersion: "0.1.0",
+      codexArtifactSha256: "c".repeat(64),
+    });
+
+    expect(manifest.imageDigest).toBe(imageDigest);
+  });
+
   it("rejects mutable image references", () => {
     expect(() =>
       decodeSandboxBootstrapManifest({

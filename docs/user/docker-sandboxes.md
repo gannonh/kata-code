@@ -21,9 +21,10 @@ KATACODE_SANDBOX_CODEX_TARBALL=/path/to/codex.tgz \
 vp run --filter @kata-sh/code-kata-sandbox-docker build:image
 ```
 
-The command prints the image digest and the three `KATACODE_SANDBOX_*` values required by the
-control server. The base image must provide Node 24, Git, GitHub CLI, and the native build tools
-used by current Kata dependencies.
+The command prints an immutable registry digest when Docker provides one. A local build without a
+registry association prints its bare `sha256:<config digest>` image ID. It also prints the three
+`KATACODE_SANDBOX_*` values required by the control server. The base image must provide Node 24,
+Git, GitHub CLI, and the native build tools used by current Kata dependencies.
 
 Create a deployment by selecting an available profile, entering a GitHub repository and ref, and
 selecting a Codex provider instance. Kata Code resolves the ref to a commit before creating the

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   createSandboxDeployment,
@@ -12,6 +12,10 @@ import {
 describe("Docker sandbox Settings API", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("loads profiles and deployments from the primary sandbox endpoint", async () => {
@@ -28,24 +32,20 @@ describe("Docker sandbox Settings API", () => {
               imageDigest: "ghcr.io/kata-sh/sandbox@sha256:" + "a".repeat(64),
               enabled: true,
               revision: 1,
+              createdAt: "2026-08-30T00:00:00.000Z",
+              updatedAt: "2026-08-30T00:00:00.000Z",
             },
           },
         ],
         deployments: [
           {
             deployment: {
-              state: "Identified",
+              state: "Deleted",
               revision: 3,
-              intent: {
-                deploymentId: "deployment-1",
-                label: "Issue 159",
-                providerInstanceId: "codex",
-                source: { repository: "gannonh/kata-code", ref: "main" },
-              },
-              environmentId: "sandbox-env",
-              endpoint: "http://127.0.0.1:3773",
+              deploymentId: "deployment-1",
+              profileId: "local",
+              deletedAt: "2026-08-30T00:00:00.000Z",
             },
-            observation: { state: "Running" },
           },
         ],
       }),
@@ -55,7 +55,10 @@ describe("Docker sandbox Settings API", () => {
     const result = await fetchSandboxList();
 
     expect(result.profiles[0]?.profile.name).toBe("Local Docker");
-    expect(result.deployments[0]?.deployment.deploymentId).toBe("deployment-1");
+    expect(result.deployments[0]?.deployment).toMatchObject({
+      state: "Deleted",
+      deploymentId: "deployment-1",
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/kata-sandbox"),
       expect.objectContaining({ credentials: "include" }),

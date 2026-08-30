@@ -19,6 +19,7 @@ import {
   type DockerResourceHandle,
   type ProviderObservation,
   type SandboxDeploymentIntent,
+  type SandboxOwnership,
   type SandboxProfile,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
 import {
@@ -183,19 +184,26 @@ function inspectByName(
   );
 }
 
-function labelsMatch(inspect: DockerInspect, intent: SandboxDeploymentIntent): boolean {
+function ownershipMatches(inspect: DockerInspect, ownership: SandboxOwnership): boolean {
   const labels = inspect.Config.Labels;
-  const expected = dockerOwnershipLabels(intent);
   return (
     labels !== null &&
-    labels[SandboxProviderLabels.controlEnvironmentId] ===
-      expected[SandboxProviderLabels.controlEnvironmentId] &&
-    labels[SandboxProviderLabels.deploymentId] === expected[SandboxProviderLabels.deploymentId] &&
-    labels[SandboxProviderLabels.profileId] === expected[SandboxProviderLabels.profileId] &&
-    labels[SandboxProviderLabels.profileRevision] ===
-      expected[SandboxProviderLabels.profileRevision] &&
-    labels[SandboxProviderLabels.schemaVersion] === expected[SandboxProviderLabels.schemaVersion]
+    labels[SandboxProviderLabels.controlEnvironmentId] === ownership.controlEnvironmentId &&
+    labels[SandboxProviderLabels.deploymentId] === ownership.deploymentId &&
+    labels[SandboxProviderLabels.profileId] === ownership.profileId &&
+    labels[SandboxProviderLabels.profileRevision] === String(ownership.profileRevision) &&
+    labels[SandboxProviderLabels.schemaVersion] === ownership.schemaVersion
   );
+}
+
+function labelsMatch(inspect: DockerInspect, intent: SandboxDeploymentIntent): boolean {
+  return ownershipMatches(inspect, {
+    controlEnvironmentId: intent.controlEnvironmentId,
+    deploymentId: intent.deploymentId,
+    profileId: intent.profileId,
+    profileRevision: intent.profileRevision,
+    schemaVersion: "v1",
+  });
 }
 
 function hostPort(inspect: DockerInspect): number | undefined {
@@ -432,7 +440,13 @@ function defaultReadinessProbe(
   return Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
     return yield* Effect.gen(function* () {
-      const response = yield* client.execute(HttpClientRequest.get(endpoint + READY_PATH));
+      const response = yield* client
+        .execute(HttpClientRequest.get(endpoint + READY_PATH))
+        .pipe(
+          Effect.retry(
+            Schedule.spaced("250 millis").pipe(Schedule.upTo({ duration: "30 seconds" })),
+          ),
+        );
       if (!isSuccess(response.status)) {
         return yield* new SandboxDriverError({
           reason: "setup-failed",
@@ -455,10 +469,7 @@ function defaultReadinessProbe(
         });
       }
       return readiness;
-    }).pipe(
-      Effect.retry(Schedule.spaced("250 millis").pipe(Schedule.upTo({ duration: "30 seconds" }))),
-      Effect.timeout("30 seconds"),
-    );
+    }).pipe(Effect.timeout("30 seconds"));
   }).pipe(
     Effect.mapError((cause) =>
       cause instanceof SandboxDriverError ? cause : asDriverError(cause, "setup-failed"),
@@ -788,16 +799,7 @@ export function makeDockerSandboxDriver(
       return inspectByName(engine, resource.containerId, "observation-failed").pipe(
         Effect.map((inspect): ProviderObservation => {
           if (inspect === undefined) return goneObservation(now());
-          const labels = inspect.Config.Labels;
-          const owned =
-            labels !== null &&
-            labels[SandboxProviderLabels.controlEnvironmentId] ===
-              resource.ownership.controlEnvironmentId &&
-            labels[SandboxProviderLabels.deploymentId] === resource.ownership.deploymentId &&
-            labels[SandboxProviderLabels.profileId] === resource.ownership.profileId &&
-            labels[SandboxProviderLabels.profileRevision] ===
-              String(resource.ownership.profileRevision) &&
-            labels[SandboxProviderLabels.schemaVersion] === resource.ownership.schemaVersion;
+          const owned = ownershipMatches(inspect, resource.ownership);
           if (!owned) {
             return unknownObservation(now(), "Docker resource ownership could not be verified.");
           }
@@ -815,16 +817,7 @@ export function makeDockerSandboxDriver(
       return inspectByName(engine, resource.containerId, "deletion-failed").pipe(
         Effect.flatMap((inspect) => {
           if (inspect === undefined) return Effect.succeed(goneObservation(now()));
-          const labels = inspect.Config.Labels;
-          const owned =
-            labels !== null &&
-            labels[SandboxProviderLabels.controlEnvironmentId] ===
-              resource.ownership.controlEnvironmentId &&
-            labels[SandboxProviderLabels.deploymentId] === resource.ownership.deploymentId &&
-            labels[SandboxProviderLabels.profileId] === resource.ownership.profileId &&
-            labels[SandboxProviderLabels.profileRevision] ===
-              String(resource.ownership.profileRevision) &&
-            labels[SandboxProviderLabels.schemaVersion] === resource.ownership.schemaVersion;
+          const owned = ownershipMatches(inspect, resource.ownership);
           if (!owned) {
             return Effect.succeed(
               unknownObservation(

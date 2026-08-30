@@ -32,13 +32,13 @@ COPY artifacts/codex.tgz /usr/local/share/kata-sandbox-artifacts/codex.tgz
 RUN printf '%s  %s\n' "${KATACODE_CLI_SHA256}" /usr/local/share/kata-sandbox-artifacts/kata-code-cli.tgz | sha256sum -c - \
   && printf '%s  %s\n' "${CODEX_SHA256}" /usr/local/share/kata-sandbox-artifacts/codex.tgz | sha256sum -c -
 
-RUN node --input-type=module -e '
-  import { execFileSync } from "node:child_process";
-  const readPackage = (archive) => JSON.parse(execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }));
-  const kata = readPackage("/usr/local/share/kata-sandbox-artifacts/kata-code-cli.tgz");
-  const codex = readPackage("/usr/local/share/kata-sandbox-artifacts/codex.tgz");
-  if (kata.name !== process.env.KATACODE_CLI_PACKAGE || kata.version !== process.env.KATACODE_CLI_VERSION) process.exit(64);
-  if (codex.name !== process.env.CODEX_PACKAGE || codex.version !== process.env.CODEX_VERSION) process.exit(64);
+RUN node --input-type=module -e ' \
+  import { execFileSync } from "node:child_process"; \
+  const readPackage = (archive) => JSON.parse(execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" })); \
+  const kata = readPackage("/usr/local/share/kata-sandbox-artifacts/kata-code-cli.tgz"); \
+  const codex = readPackage("/usr/local/share/kata-sandbox-artifacts/codex.tgz"); \
+  if (kata.name !== process.env.KATACODE_CLI_PACKAGE || kata.version !== process.env.KATACODE_CLI_VERSION) process.exit(64); \
+  if (codex.name !== process.env.CODEX_PACKAGE || codex.version !== process.env.CODEX_VERSION) process.exit(64); \
   ' \
   && npm install --global --omit=dev \
     /usr/local/share/kata-sandbox-artifacts/kata-code-cli.tgz \

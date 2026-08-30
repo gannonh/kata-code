@@ -64,7 +64,15 @@ function initialDeploymentForm(): DeploymentFormState {
 function deploymentLabel(
   deployment: SandboxListResponse["deployments"][number]["deployment"],
 ): string {
-  return deployment.label || deployment.deploymentId;
+  return deployment.state === "Deleted"
+    ? deployment.deploymentId
+    : deployment.intent.label || deployment.intent.deploymentId;
+}
+
+function deploymentId(
+  deployment: SandboxListResponse["deployments"][number]["deployment"],
+): string {
+  return deployment.state === "Deleted" ? deployment.deploymentId : deployment.intent.deploymentId;
 }
 
 export function DeploymentSettings() {
@@ -517,69 +525,56 @@ export function DeploymentSettings() {
         description="Attach an identified deployment through the ordinary onboarding flow."
       >
         <div className="mt-3 space-y-2" data-testid="kata-sandbox-deployments">
-          {data?.deployments.map(({ deployment, observation }) => (
-            <div
-              className="rounded-lg border border-border/70 px-3 py-2"
-              key={deployment.deploymentId}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-medium">{deploymentLabel(deployment)}</span>
-                <span className="text-xs text-muted-foreground">
-                  {deployment.state} · {observation?.state ?? "Not observed"}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {deployment.repository && deployment.ref
-                  ? `${deployment.repository} @ ${deployment.ref}`
-                  : deployment.deploymentId}
-              </p>
-              {observation?.state === "Unknown" && observation.diagnostic ? (
-                <p className="mt-1 text-xs text-destructive">{observation.diagnostic}</p>
-              ) : null}
-              {deployment.state === "Identified" ? (
-                <div className="mt-2 flex flex-wrap gap-2">
+          {data?.deployments.map(({ deployment, observation }) => {
+            const id = deploymentId(deployment);
+            const source = deployment.state === "Deleted" ? undefined : deployment.intent.source;
+            return (
+              <div className="rounded-lg border border-border/70 px-3 py-2" key={id}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{deploymentLabel(deployment)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {deployment.state} · {observation?.state ?? "Not observed"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {source ? `${source.repository} @ ${source.ref}` : id}
+                </p>
+                {observation?.state === "Unknown" && observation.diagnostic ? (
+                  <p className="mt-1 text-xs text-destructive">{observation.diagnostic}</p>
+                ) : null}
+                {deployment.state === "Identified" ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button
+                      disabled={activeHandoffId === id || activeDeleteId !== null}
+                      onClick={() => void attachDeployment(id)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {activeHandoffId === id ? "Attaching..." : "Attach environment"}
+                    </Button>
+                    <Button
+                      disabled={activeDeleteId !== null}
+                      onClick={() => void removeDeployment(id, deployment.revision)}
+                      size="sm"
+                      variant="ghost-muted"
+                    >
+                      {activeDeleteId === `deployment:${id}` ? "Deleting..." : "Delete"}
+                    </Button>
+                  </div>
+                ) : deployment.state === "Allocated" || deployment.state === "Requested" ? (
                   <Button
-                    disabled={
-                      activeHandoffId === deployment.deploymentId || activeDeleteId !== null
-                    }
-                    onClick={() => void attachDeployment(deployment.deploymentId)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {activeHandoffId === deployment.deploymentId
-                      ? "Attaching..."
-                      : "Attach environment"}
-                  </Button>
-                  <Button
+                    className="mt-2"
                     disabled={activeDeleteId !== null}
-                    onClick={() =>
-                      void removeDeployment(deployment.deploymentId, deployment.revision)
-                    }
+                    onClick={() => void removeDeployment(id, deployment.revision)}
                     size="sm"
                     variant="ghost-muted"
                   >
-                    {activeDeleteId === `deployment:${deployment.deploymentId}`
-                      ? "Deleting..."
-                      : "Delete"}
+                    {activeDeleteId === `deployment:${id}` ? "Deleting..." : "Delete"}
                   </Button>
-                </div>
-              ) : deployment.state === "Allocated" || deployment.state === "Requested" ? (
-                <Button
-                  className="mt-2"
-                  disabled={activeDeleteId !== null}
-                  onClick={() =>
-                    void removeDeployment(deployment.deploymentId, deployment.revision)
-                  }
-                  size="sm"
-                  variant="ghost-muted"
-                >
-                  {activeDeleteId === `deployment:${deployment.deploymentId}`
-                    ? "Deleting..."
-                    : "Delete"}
-                </Button>
-              ) : null}
-            </div>
-          ))}
+                ) : null}
+              </div>
+            );
+          })}
           {data?.deployments.length === 0 ? (
             <p className="text-sm text-muted-foreground">No sandbox deployments yet.</p>
           ) : null}
