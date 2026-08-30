@@ -97,7 +97,10 @@ export const sandboxBootstrapPairingRouteLayer = HttpRouter.add(
           const pairingGrants = yield* PairingGrantStore.PairingGrantStore;
           const active = yield* pairingGrants.listActive();
           yield* Effect.forEach(
-            active.filter((link) => link.label === decoded.success.label),
+            active.filter(
+              (link) =>
+                link.subject === "sandbox-bootstrap" && link.label === decoded.success.label,
+            ),
             (link) => pairingGrants.revoke(link.id),
             { discard: true },
           );

@@ -65,11 +65,22 @@ function makeRequest(
   request: DockerRequest,
   binary: boolean,
 ): Effect.Effect<DockerResponse | DockerBufferResponse, DockerEngineError> {
-  const timeoutMs = request.hijacked === true ? 0 : (request.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return Effect.tryPromise({
-    try: () =>
+    try: (signal) =>
       new Promise<DockerResponse | DockerBufferResponse>((resolve, reject) => {
-        const nodeRequest = NodeHttp.request(
+        let settled = false;
+        let nodeRequest: NodeHttp.ClientRequest;
+        const onAbort = () =>
+          nodeRequest.destroy(new Error(`Docker request ${request.path} was interrupted`));
+        const settle = (complete: () => void) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener("abort", onAbort);
+          complete();
+        };
+
+        nodeRequest = NodeHttp.request(
           {
             socketPath,
             path: request.path,
@@ -79,15 +90,18 @@ function makeRequest(
           },
           (response) => {
             const chunks: Buffer[] = [];
+            response.on("error", (cause) => settle(() => reject(cause)));
             response.on("data", (chunk: Buffer | string) =>
               chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
             );
             response.on("end", () => {
               const body = Buffer.concat(chunks);
-              resolve(
-                binary
-                  ? { status: response.statusCode ?? 0, body }
-                  : { status: response.statusCode ?? 0, body: body.toString("utf8") },
+              settle(() =>
+                resolve(
+                  binary
+                    ? { status: response.statusCode ?? 0, body }
+                    : { status: response.statusCode ?? 0, body: body.toString("utf8") },
+                ),
               );
             });
           },
@@ -101,7 +115,9 @@ function makeRequest(
             ),
           );
         }
-        nodeRequest.on("error", (cause) => reject(cause));
+        nodeRequest.on("error", (cause) => settle(() => reject(cause)));
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
         if (request.body !== undefined) nodeRequest.write(request.body);
         if (request.bodyBytes !== undefined) nodeRequest.write(Buffer.from(request.bodyBytes));
         nodeRequest.end();

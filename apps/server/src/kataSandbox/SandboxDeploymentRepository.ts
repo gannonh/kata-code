@@ -657,7 +657,8 @@ const makeRepository = Effect.gen(function* () {
     const kataHome = "kataHome" in deployment ? deployment.kataHome : undefined;
     const identifiedAt = "identifiedAt" in deployment ? deployment.identifiedAt : undefined;
     const deletedAt = "deletedAt" in deployment ? deployment.deletedAt : undefined;
-    const profileId = deployment.state === "Deleted" ? deployment.profileId : undefined;
+    const profileId =
+      deployment.state === "Deleted" ? deployment.profileId : deployment.intent.profileId;
 
     return sql
       .withTransaction(

@@ -76,6 +76,12 @@ const makeSeed = Effect.gen(function* () {
         ),
       );
       const rawConfig = yield* configForInstance(settings, providerInstanceId);
+      if ("driver" in rawConfig && rawConfig.driver !== "codex") {
+        return yield* new SandboxCredentialUnavailableError({
+          providerInstanceId,
+          message: "The selected provider instance is not a Codex instance.",
+        });
+      }
       const codexConfig = yield* decodeCodexSettings(
         "driver" in rawConfig ? (rawConfig.config ?? {}) : rawConfig,
       ).pipe(
@@ -88,12 +94,6 @@ const makeSeed = Effect.gen(function* () {
             }),
         ),
       );
-      if ("driver" in rawConfig && rawConfig.driver !== "codex") {
-        return yield* new SandboxCredentialUnavailableError({
-          providerInstanceId,
-          message: "The selected provider instance is not a Codex instance.",
-        });
-      }
       if ("enabled" in rawConfig && rawConfig.enabled === false) {
         return yield* new SandboxCredentialUnavailableError({
           providerInstanceId,

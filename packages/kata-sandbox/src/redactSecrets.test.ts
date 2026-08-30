@@ -22,4 +22,8 @@ describe("redactSecrets", () => {
       '{"credential":"[redacted]","detail":"unavailable"}',
     );
   });
+
+  it("returns a fallback for undefined diagnostics", () => {
+    expect(redactDiagnostic(undefined)).toBe("Unknown diagnostic");
+  });
 });

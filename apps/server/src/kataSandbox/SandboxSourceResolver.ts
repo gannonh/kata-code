@@ -76,7 +76,7 @@ const makeResolver = Effect.gen(function* () {
         .run({
           operation: "kata-sandbox.resolve-source",
           command: "git",
-          args: ["ls-remote", remote, "--", ...exactRemoteRefs(input.ref)],
+          args: ["ls-remote", remote, ...exactRemoteRefs(input.ref)],
           cwd: config.cwd,
           env: {
             ...sourceEnv,

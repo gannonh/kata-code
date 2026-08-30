@@ -201,7 +201,7 @@ export function project(
         kataHome: state.intent.kataHome,
         identifiedAt: event.identifiedAt,
       };
-    case "Deleted":
+    case "Deleted": {
       if (state === undefined) {
         throw fail("missing-deployment", "The deployment does not exist.");
       }
@@ -216,6 +216,7 @@ export function project(
         ...(state.state === "Identified" ? { environmentId: state.environmentId } : {}),
         deletedAt: event.deletedAt,
       };
+    }
   }
 }
 

@@ -149,7 +149,7 @@ export interface SandboxDeploymentServiceShape {
 }
 
 const BOOTSTRAP_SECRET_PREFIX = "kata-sandbox-bootstrap-";
-const decodeAuthPairingCredentialResult = Schema.decodeUnknownSync(AuthPairingCredentialResult);
+const decodeAuthPairingCredentialResult = Schema.decodeUnknownEffect(AuthPairingCredentialResult);
 
 const asServiceError = (cause: unknown): SandboxDeploymentServiceError => {
   if (cause instanceof SandboxDeploymentServiceError) return cause;
@@ -246,10 +246,13 @@ function targetPairingLabel(deploymentId: SandboxDeploymentId): string {
   return `Kata Code sandbox ${deploymentId}`;
 }
 
-function decodeTargetPairing(value: unknown): SandboxPairingCredential {
-  const decoded = decodeAuthPairingCredentialResult(value);
-  return { credential: decoded.credential, expiresAt: DateTime.formatIso(decoded.expiresAt) };
-}
+const decodeTargetPairing = (value: unknown) =>
+  decodeAuthPairingCredentialResult(value).pipe(
+    Effect.map((decoded) => ({
+      credential: decoded.credential,
+      expiresAt: DateTime.formatIso(decoded.expiresAt),
+    })),
+  );
 
 function issueTargetPairingCredential(
   input: SandboxPairingCredentialInput,
@@ -272,7 +275,7 @@ function issueTargetPairingCredential(
           message: `Sandbox pairing credential request returned HTTP ${response.status}.`,
         });
       }
-      return decodeTargetPairing(yield* response.json);
+      return yield* decodeTargetPairing(yield* response.json);
     }).pipe(Effect.timeout("30 seconds"));
   }).pipe(
     Effect.mapError((cause) =>

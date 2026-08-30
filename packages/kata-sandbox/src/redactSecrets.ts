@@ -15,5 +15,7 @@ export function redactSecrets(value: unknown): unknown {
 
 export function redactDiagnostic(value: unknown): string {
   const redacted = redactSecrets(value);
-  return typeof redacted === "string" ? redacted : JSON.stringify(redacted);
+  return typeof redacted === "string"
+    ? redacted
+    : (JSON.stringify(redacted) ?? "Unknown diagnostic");
 }

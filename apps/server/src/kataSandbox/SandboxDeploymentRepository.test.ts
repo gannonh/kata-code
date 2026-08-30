@@ -178,4 +178,26 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
       Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
     ),
   );
+
+  it.effect("retains the profile reference for active deployment states", () =>
+    Effect.gen(function* () {
+      const repository = yield* SandboxDeploymentRepository;
+      yield* repository.saveProfile({ ...profile, enabled: false });
+      yield* repository.saveDeployment(requestDeployment(intent));
+      yield* repository.saveDeployment(
+        {
+          state: "Allocated",
+          revision: 2,
+          intent,
+          resource,
+        },
+        1,
+      );
+
+      const deleted = yield* Effect.flip(repository.deleteProfile(profileId));
+      expect(deleted).toBeInstanceOf(SandboxRepositoryConflictError);
+    }).pipe(
+      Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
+    ),
+  );
 });
