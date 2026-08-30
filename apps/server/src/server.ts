@@ -414,12 +414,12 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
         Layer.provide(ExternalLauncher.layer),
       ),
       CloudManagedEndpointRuntimeLive,
-      SandboxDeploymentService.layer,
     ),
   ),
 );
 
-const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
+const RuntimeDependenciesLive = SandboxDeploymentService.layer.pipe(
+  Layer.provideMerge(RuntimeCoreDependenciesLive),
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
