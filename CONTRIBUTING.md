@@ -4,9 +4,9 @@
 
 We are not actively accepting contributions right now.
 
-You can still report a bug or open a PR, but please do so knowing there is a high chance we close it, defer it forever, or never look at it.
+You can still report a bug, file a feature request, or open a PR, but please do so knowing there is a high chance we close it, defer it forever, or never look at it.
 
-Feature requests and proposals belong in [Ideas discussions](https://github.com/pingdotgg/t3code/discussions/categories/ideas), not issues.
+Feature requests and proposals belong in the [feature request form](https://github.com/gannonh/kata-code/issues/new?template=feature_request.yml).
 
 If that sounds annoying, that is because it is. This project is still early and we are trying to keep scope, quality, and direction under control.
 
@@ -52,9 +52,9 @@ If the change depends on motion, timing, transitions, or interaction details, in
 
 If we have to guess what changed, we are much less likely to review it.
 
-## Discuss Changes First
+## Propose Changes First
 
-If you are thinking about a non-trivial change, start a discussion first. Issues are reserved for bug reports.
+If you are thinking about a non-trivial change, open a [feature request](https://github.com/gannonh/kata-code/issues/new?template=feature_request.yml) first. Use the [bug report form](https://github.com/gannonh/kata-code/issues/new?template=bug_report.yml) for broken behavior.
 
 That still does not mean we will want the PR, but it gives you a chance to avoid wasting your time.
 
