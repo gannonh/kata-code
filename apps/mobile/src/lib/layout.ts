@@ -85,8 +85,7 @@ export function resolveThreadFeedMeasuredContentInset(input: {
 
   if (measuredBottom > 0) {
     return {
-      contentInset:
-        input.initialContentInset.bottom > 0 ? input.initialContentInset : undefined,
+      contentInset: input.initialContentInset.bottom > 0 ? input.initialContentInset : undefined,
       report: { bottom: measuredBottom },
     };
   }
