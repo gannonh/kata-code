@@ -1,0 +1,90 @@
+appId: com.katacode.dev
+---
+- extendedWaitUntil:
+    visible:
+      id: markdown-image-race-replace
+    timeout: 60000
+- runScript:
+    file: scripts/markdown-image-race-wait.js
+    env:
+      RACE_CASE: late-success
+      RACE_SOURCE: a
+- extendedWaitUntil:
+    visible:
+      id: markdown-image-race-late-success-a-loading
+    timeout: 15000
+- takeScreenshot: markdown-image-race-01-a-loading
+- tapOn:
+    id: markdown-image-race-replace
+- runScript:
+    file: scripts/markdown-image-race-wait.js
+    env:
+      RACE_CASE: late-success
+      RACE_SOURCE: b
+- assertVisible:
+    id: markdown-image-race-late-success-b-loading
+- runScript:
+    file: scripts/markdown-image-race-release.js
+    env:
+      RACE_CASE: late-success
+      RACE_SOURCE: b
+      RACE_OUTCOME: success
+- extendedWaitUntil:
+    visible:
+      id: markdown-image-race-late-success-b-image
+    timeout: 15000
+- takeScreenshot: markdown-image-race-02-b-loaded
+- runScript:
+    file: scripts/markdown-image-race-release.js
+    env:
+      RACE_CASE: late-success
+      RACE_SOURCE: a
+      RACE_OUTCOME: success
+- tapOn:
+    id: markdown-image-race-dispatch-late-success
+- assertVisible:
+    id: markdown-image-race-late-success-b-image
+- assertNotVisible:
+    id: markdown-image-race-late-success-b-unavailable
+- takeScreenshot: markdown-image-race-03-after-late-a-success
+- tapOn:
+    id: markdown-image-race-start-late-error
+- runScript:
+    file: scripts/markdown-image-race-wait.js
+    env:
+      RACE_CASE: late-error
+      RACE_SOURCE: a
+- assertVisible:
+    id: markdown-image-race-late-error-a-loading
+- tapOn:
+    id: markdown-image-race-replace
+- runScript:
+    file: scripts/markdown-image-race-wait.js
+    env:
+      RACE_CASE: late-error
+      RACE_SOURCE: b
+- assertVisible:
+    id: markdown-image-race-late-error-b-loading
+- runScript:
+    file: scripts/markdown-image-race-release.js
+    env:
+      RACE_CASE: late-error
+      RACE_SOURCE: b
+      RACE_OUTCOME: success
+- extendedWaitUntil:
+    visible:
+      id: markdown-image-race-late-error-b-image
+    timeout: 15000
+- runScript:
+    file: scripts/markdown-image-race-release.js
+    env:
+      RACE_CASE: late-error
+      RACE_SOURCE: a
+      RACE_OUTCOME: error
+- tapOn:
+    id: markdown-image-race-dispatch-late-error
+- assertVisible:
+    id: markdown-image-race-late-error-b-image
+- assertNotVisible:
+    id: markdown-image-race-late-error-b-unavailable
+- takeScreenshot: markdown-image-race-04-after-late-a-error
