@@ -36,18 +36,26 @@ export class SandboxSourceResolver extends Context.Service<
 const remoteLine = /^([0-9a-f]{40})\s+(\S+)$/i;
 const SANDBOX_BOOTSTRAP_TOKEN = "KATACODE_SANDBOX_BOOTSTRAP_TOKEN";
 
-function exactRemoteRefs(ref: string): ReadonlyArray<string> {
+function remoteRefCandidates(ref: string): ReadonlyArray<string> {
   if (ref.startsWith("refs/")) return [ref];
   return [`refs/heads/${ref}`, `refs/tags/${ref}`];
 }
 
-function resolveRemoteSha(stdout: string, ref: string): string | undefined {
+function exactRemoteRefs(ref: string): ReadonlyArray<string> {
+  return remoteRefCandidates(ref).flatMap((exactRef) =>
+    exactRef.startsWith("refs/tags/") ? [exactRef, exactRef + "^{}"] : [exactRef],
+  );
+}
+
+export function resolveRemoteSha(stdout: string, ref: string): string | undefined {
   const entries = stdout
     .split("\n")
     .map((line) => remoteLine.exec(line.trim()))
     .filter((entry): entry is RegExpExecArray => entry !== null);
-  for (const exactRef of exactRemoteRefs(ref)) {
-    const peeled = entries.find((entry) => entry[2] === exactRef + "^{}");
+  for (const exactRef of remoteRefCandidates(ref)) {
+    const peeled = exactRef.startsWith("refs/tags/")
+      ? entries.find((entry) => entry[2] === exactRef + "^{}")
+      : undefined;
     if (peeled?.[1] !== undefined) return peeled[1];
     const direct = entries.find((entry) => entry[2] === exactRef);
     if (direct?.[1] !== undefined) return direct[1];

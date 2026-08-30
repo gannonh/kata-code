@@ -2,6 +2,7 @@
 // @effect-diagnostics preferSchemaOverJson:off - Docker Engine request and response bodies are private wire data.
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as Schedule from "effect/Schedule";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -31,6 +32,8 @@ import { type DockerEngine, DockerEngineError, makeDockerEngine } from "./engine
 
 const DOCKER_KIND = "docker" as const;
 const READY_PATH = "/.well-known/kata/environment";
+const DEFAULT_ENDPOINT_HOST = "127.0.0.1";
+const CHECKOUT_READY_PATH = "/tmp/kata-sandbox-checkout-ready";
 
 interface DockerInspect {
   readonly Id: string;
@@ -51,6 +54,7 @@ export interface DockerSandboxDriverOptions {
   readonly engine?: DockerEngine;
   readonly socketPath?: string;
   readonly engineForSocketPath?: (socketPath: string) => DockerEngine;
+  readonly endpointHost?: string;
   readonly now?: () => string;
   readonly readinessProbe?: (
     endpoint: string,
@@ -132,6 +136,25 @@ function engineFailure(
 
 function isSuccess(status: number): boolean {
   return status >= 200 && status < 300;
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, "$1");
+  return normalized === "localhost" || normalized === "::1" || normalized.startsWith("127.");
+}
+
+function hostIpForEndpoint(host: string): string {
+  if (isLoopbackHost(host)) return "127.0.0.1";
+  return host.includes(":") ? "::" : "0.0.0.0";
+}
+
+function endpointUrl(host: string, port: number): string {
+  const normalized = host.trim().replace(/^\[(.*)\]$/, "$1");
+  const formatted = normalized.includes(":") ? `[${normalized}]` : normalized;
+  return `http://${formatted}:${port}`;
 }
 
 function inspectByName(
@@ -229,6 +252,7 @@ function createBody(input: {
   readonly profile: SandboxProfile;
   readonly intent: SandboxDeploymentIntent;
   readonly bootstrapToken?: string;
+  readonly endpointHost: string;
 }): string {
   const env = [
     "HOME=/home/katacode",
@@ -243,12 +267,12 @@ function createBody(input: {
   return JSON.stringify({
     Image: input.profile.imageDigest,
     Cmd: [
-      "katacode",
-      "serve",
-      "--host",
-      "0.0.0.0",
-      "--port",
-      String(DEFAULT_SANDBOX_CONTAINER_PORT),
+      "sh",
+      "-lc",
+      "while [ ! -f " +
+        shellQuote(CHECKOUT_READY_PATH) +
+        " ]; do sleep 0.1; done\nexec katacode serve --host 0.0.0.0 --port " +
+        String(DEFAULT_SANDBOX_CONTAINER_PORT),
     ],
     Env: env,
     WorkingDir: DEFAULT_SANDBOX_WORKSPACE_ROOT,
@@ -256,7 +280,9 @@ function createBody(input: {
     Labels: dockerOwnershipLabels(input.intent),
     HostConfig: {
       PortBindings: {
-        [DEFAULT_SANDBOX_CONTAINER_PORT + "/tcp"]: [{ HostIp: "127.0.0.1", HostPort: "" }],
+        [DEFAULT_SANDBOX_CONTAINER_PORT + "/tcp"]: [
+          { HostIp: hostIpForEndpoint(input.endpointHost), HostPort: "" },
+        ],
       },
       AutoRemove: false,
     },
@@ -429,7 +455,10 @@ function defaultReadinessProbe(
         });
       }
       return readiness;
-    }).pipe(Effect.timeout("30 seconds"));
+    }).pipe(
+      Effect.retry(Schedule.spaced("250 millis").pipe(Schedule.upTo({ duration: "30 seconds" }))),
+      Effect.timeout("30 seconds"),
+    );
   }).pipe(
     Effect.mapError((cause) =>
       cause instanceof SandboxDriverError ? cause : asDriverError(cause, "setup-failed"),
@@ -527,6 +556,7 @@ export function makeDockerSandboxDriver(
     makeDockerEngine(options.socketPath ?? socketPath);
   const now = options.now ?? (() => new Date().toISOString());
   const readinessProbe = options.readinessProbe ?? defaultReadinessProbe;
+  const endpointHost = options.endpointHost ?? DEFAULT_ENDPOINT_HOST;
 
   return {
     kind: DOCKER_KIND,
@@ -550,7 +580,7 @@ export function makeDockerSandboxDriver(
           .request({
             path: "/containers/create?name=" + encodeURIComponent(name),
             method: "POST",
-            body: createBody(input),
+            body: createBody({ ...input, endpointHost }),
           })
           .pipe(Effect.mapError((error) => engineFailure(error, "allocation-failed")));
         if (created.status === 409) {
@@ -727,7 +757,10 @@ export function makeDockerSandboxDriver(
             'test "$(git -C ' +
             shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
             ' rev-parse HEAD)" = ' +
-            shellQuote(input.intent.source.resolvedCommitSha),
+            shellQuote(input.intent.source.resolvedCommitSha) +
+            "\n" +
+            "touch " +
+            shellQuote(CHECKOUT_READY_PATH),
           "/",
           "setup-failed",
         );
@@ -737,7 +770,7 @@ export function makeDockerSandboxDriver(
             message: "Git checkout failed: " + clone.stderr.slice(0, 200),
           });
         }
-        const endpoint = "http://127.0.0.1:" + port;
+        const endpoint = endpointUrl(endpointHost, port);
         const readiness = yield* readinessProbe(endpoint, input.manifest);
         return {
           environmentId: readiness.environmentId,

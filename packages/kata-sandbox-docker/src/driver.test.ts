@@ -1,3 +1,5 @@
+// @effect-diagnostics preferSchemaOverJson:off - these tests inspect private Docker request JSON.
+
 import { ProviderInstanceId, type ModelSelection } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -173,6 +175,106 @@ describe("Docker sandbox driver", () => {
       });
       expect(resource.hostPort).toBeUndefined();
       expect(requests.some((request) => request.path.endsWith("/start"))).toBe(false);
+    });
+  });
+
+  it.effect("publishes remote sandboxes and gates server startup on checkout", () => {
+    const labels = dockerOwnershipLabels(intent);
+    let createRequest: DockerRequest | undefined;
+    const driver = makeDockerSandboxDriver({
+      endpointHost: "192.168.1.42",
+      engine: fakeEngine((request) => {
+        if (request.path.startsWith("/containers/create?")) {
+          createRequest = request;
+          return response(201, '{"Id":"container-1"}');
+        }
+        if (request.path === "/containers/container-1/json") {
+          return response(200, JSON.stringify(inspect(labels)));
+        }
+        return response(404);
+      }),
+    });
+
+    return Effect.gen(function* () {
+      yield* driver.allocate({
+        profile,
+        intent,
+        manifest,
+        codexAuthJson: new Uint8Array([123]),
+      });
+
+      const body = JSON.parse(createRequest?.body ?? "{}") as {
+        readonly Cmd?: ReadonlyArray<string>;
+        readonly HostConfig?: {
+          readonly PortBindings?: Record<
+            string,
+            ReadonlyArray<{ readonly HostIp?: string; readonly HostPort?: string }>
+          >;
+        };
+      };
+      expect(body.Cmd?.[0]).toBe("sh");
+      expect(body.Cmd?.[2]).toContain("while [ ! -f '/tmp/kata-sandbox-checkout-ready'");
+      expect(body.Cmd?.[2]).toContain("exec katacode serve --host 0.0.0.0 --port 3773");
+      expect(body.HostConfig?.PortBindings?.["3773/tcp"]?.[0]?.HostIp).toBe("0.0.0.0");
+    });
+  });
+
+  it.effect("returns the configured reachable host in identified endpoint facts", () => {
+    const labels = dockerOwnershipLabels(intent);
+    const resource = decodeResource({
+      containerId: "container-1",
+      containerName: dockerContainerName(intent.deploymentId),
+      containerPort: 3773,
+      ownership: {
+        controlEnvironmentId: intent.controlEnvironmentId,
+        deploymentId: intent.deploymentId,
+        profileId: intent.profileId,
+        profileRevision: intent.profileRevision,
+        schemaVersion: "v1",
+      },
+    });
+    let inspectCalls = 0;
+    let execRequest: DockerRequest | undefined;
+    const driver = makeDockerSandboxDriver({
+      endpointHost: "192.168.1.42",
+      readinessProbe: (endpoint, readinessManifest) => {
+        expect(endpoint).toBe("http://192.168.1.42:41001");
+        return Effect.succeed({
+          environmentId: "sandbox-env",
+          serverVersion: readinessManifest.serverVersion,
+        });
+      },
+      engine: {
+        request: (request) =>
+          Effect.sync(() => {
+            if (request.path.includes("/archive?path=")) return response(200);
+            if (request.path === "/containers/container-1/json") {
+              inspectCalls += 1;
+              return response(200, JSON.stringify(inspect(labels, inspectCalls > 1)));
+            }
+            if (request.path === "/containers/container-1/start") return response(204);
+            if (request.path === "/containers/container-1/exec") {
+              execRequest = request;
+              return response(201, '{"Id":"exec-1"}');
+            }
+            if (request.path === "/exec/exec-1/json") return response(200, '{"ExitCode":0}');
+            return response(404);
+          }),
+        requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
+      },
+    });
+
+    return Effect.gen(function* () {
+      const identified = yield* driver.identify({
+        profile,
+        intent,
+        manifest,
+        codexAuthJson: new Uint8Array([123]),
+        resource,
+      });
+
+      expect(identified.endpoint).toBe("http://192.168.1.42:41001");
+      expect(execRequest?.body).toContain("touch '/tmp/kata-sandbox-checkout-ready'");
     });
   });
 

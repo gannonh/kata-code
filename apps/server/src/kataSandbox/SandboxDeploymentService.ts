@@ -55,6 +55,8 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerConfig from "../config.ts";
+import { resolveHeadlessConnectionHost } from "../startupAccess.ts";
 import { makeDockerSandboxDriver } from "@kata-sh/code-kata-sandbox-docker";
 import {
   SandboxDeploymentRepository,
@@ -105,6 +107,7 @@ export interface SandboxDeploymentServiceDependencies {
 
 export interface SandboxDeploymentServiceOptions {
   readonly driverFor?: (profile: SandboxProfile) => SandboxProviderDriver;
+  readonly endpointHost?: string;
   readonly bootstrapManifestFor?: (
     profile: SandboxProfile,
   ) => SandboxDeploymentIntent["bootstrapManifest"];
@@ -145,7 +148,6 @@ export interface SandboxDeploymentServiceShape {
   readonly recover: () => Effect.Effect<void, SandboxDeploymentServiceError>;
 }
 
-const DEFAULT_DRIVER_FOR = () => makeDockerSandboxDriver();
 const BOOTSTRAP_SECRET_PREFIX = "kata-sandbox-bootstrap-";
 const decodeAuthPairingCredentialResult = Schema.decodeUnknownSync(AuthPairingCredentialResult);
 
@@ -291,7 +293,8 @@ export function makeSandboxDeploymentService(
   options: SandboxDeploymentServiceOptions = {},
 ): SandboxDeploymentServiceShape {
   const repository = dependencies.repository;
-  const driverFor = options.driverFor ?? DEFAULT_DRIVER_FOR;
+  const endpointHost = options.endpointHost ?? "127.0.0.1";
+  const driverFor = options.driverFor ?? (() => makeDockerSandboxDriver({ endpointHost }));
   const bootstrapManifestFor = options.bootstrapManifestFor ?? buildSandboxBootstrapManifest;
   const now = options.now ?? (() => new Date().toISOString());
   const schedule =
@@ -1018,14 +1021,20 @@ export function makeSandboxDeploymentService(
 }
 
 const makeService = Effect.gen(function* () {
-  const service = makeSandboxDeploymentService({
-    repository: yield* SandboxDeploymentRepository,
-    environment: yield* ServerEnvironment.ServerEnvironment,
-    sourceResolver: yield* SandboxSourceResolver,
-    credentialSeed: yield* SandboxCredentialSeed,
-    secretStore: yield* ServerSecretStore.ServerSecretStore,
-    crypto: yield* Crypto.Crypto,
-  });
+  const serverConfig = yield* ServerConfig.ServerConfig;
+  const service = makeSandboxDeploymentService(
+    {
+      repository: yield* SandboxDeploymentRepository,
+      environment: yield* ServerEnvironment.ServerEnvironment,
+      sourceResolver: yield* SandboxSourceResolver,
+      credentialSeed: yield* SandboxCredentialSeed,
+      secretStore: yield* ServerSecretStore.ServerSecretStore,
+      crypto: yield* Crypto.Crypto,
+    },
+    {
+      endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
+    },
+  );
   yield* Effect.forkDetach(service.recover());
   return service;
 });
