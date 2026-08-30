@@ -82,6 +82,7 @@ import { cn } from "../../lib/cn";
 import {
   deriveCenteredContentHorizontalPadding,
   deriveThreadFeedInitialContentInset,
+  resolveThreadFeedMeasuredContentInset,
   type LayoutVariant,
 } from "../../lib/layout";
 import {
@@ -1621,10 +1622,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const bottomContentInset = props.contentBottomInset ?? 18;
   const usesNativeAutomaticInsets =
     props.usesAutomaticContentInsets === true && Platform.OS === "ios";
-  const initialContentInset = deriveThreadFeedInitialContentInset({
-    platform: Platform.OS,
-    usesNativeAutomaticInsets,
-    bottomContentInset,
+  const initialContentInset = useMemo(
+    () =>
+      deriveThreadFeedInitialContentInset({
+        platform: Platform.OS,
+        usesNativeAutomaticInsets,
+        bottomContentInset,
+      }),
+    [bottomContentInset, usesNativeAutomaticInsets],
+  );
+  const measuredContentInset = resolveThreadFeedMeasuredContentInset({
+    initialContentInset,
+    measuredBottom: props.contentInsetEndAdjustment.value,
   });
   // With automatic insets the header inset lives in UIKit's adjustedContentInset,
   // which LegendList's JS anchoring math cannot see — it measures the anchored
@@ -1868,14 +1877,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // content-inset override — and useKeyboardChatComposerInset (mounted above
   // the remount boundary) deduplicates by height, so it never re-reports the
   // composer inset to the fresh instance. On Android the declarative
-  // contentInset floor below covers the window before this effect lands.
+  // contentInset floor below covers the window before this effect lands; a
+  // zero measurement drops that floor so it cannot outlive the overlay.
   const listMountKey = `${feedThreadKey}:${props.feed.length === 0 ? "empty" : "filled"}`;
   useLayoutEffect(() => {
-    const bottom = props.contentInsetEndAdjustment.value;
-    if (bottom > 0) {
-      props.listRef.current?.reportContentInset({ bottom });
+    const report = resolveThreadFeedMeasuredContentInset({
+      initialContentInset,
+      measuredBottom: props.contentInsetEndAdjustment.value,
+    }).report;
+    if (report !== undefined) {
+      props.listRef.current?.reportContentInset(report);
     }
-  }, [listMountKey, props.contentInsetEndAdjustment, props.listRef]);
+  }, [initialContentInset, listMountKey, props.contentInsetEndAdjustment, props.listRef]);
 
   const anchoredEndSpace = useMemo(
     () =>
@@ -2178,10 +2191,13 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             // Inset reports arrive via runOnJS, racing the remounted list's
             // one-shot initial scroll-at-end. LegendList consumes contentInset
             // in JS math only (Android's ScrollView has no native contentInset
-            // prop) and the first reported override REPLACES it instead of
-            // adding to it. Not on iOS: there the prop would reach UIKit and
-            // inset natively on top of the animated padding.
-            {...(initialContentInset ? { contentInset: initialContentInset } : {})}
+            // prop) and merges a reported override onto it. A zero
+            // measurement omits this prop so the estimate cannot remain as a
+            // floor. Not on iOS: there the prop would reach UIKit and inset
+            // natively on top of the animated padding.
+            {...(measuredContentInset.contentInset
+              ? { contentInset: measuredContentInset.contentInset }
+              : {})}
             // The keyboard integration's offset math (end pinning, max scroll)
             // must add the same UIKit-added extra, or its keyboard-open end
             // targets land one safe-area short of the true resting offset.

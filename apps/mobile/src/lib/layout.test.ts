@@ -9,6 +9,7 @@ import {
   deriveStableFormSheetDetent,
   deriveThreadFeedInitialContentInset,
   deriveWorkspacePaneLayout,
+  resolveThreadFeedMeasuredContentInset,
   SPLIT_LAYOUT_MIN_HEIGHT,
   SPLIT_LAYOUT_MIN_WIDTH,
 } from "./layout";
@@ -72,6 +73,74 @@ describe("deriveThreadFeedInitialContentInset", () => {
         bottomContentInset: -12,
       }),
     ).toEqual({ bottom: 0 });
+  });
+});
+
+describe("resolveThreadFeedMeasuredContentInset", () => {
+  const androidFloor = deriveThreadFeedInitialContentInset({
+    platform: "android",
+    usesNativeAutomaticInsets: false,
+    bottomContentInset: 174,
+  });
+
+  it("clears a nonzero Android floor after a zero measurement", () => {
+    expect(
+      resolveThreadFeedMeasuredContentInset({
+        initialContentInset: androidFloor,
+        measuredBottom: 0,
+      }),
+    ).toEqual({
+      contentInset: undefined,
+      report: { bottom: 0 },
+    });
+  });
+
+  it("keeps the Android floor and reports a later positive measurement", () => {
+    expect(
+      resolveThreadFeedMeasuredContentInset({
+        initialContentInset: androidFloor,
+        measuredBottom: 200,
+      }),
+    ).toEqual({
+      contentInset: { bottom: 174 },
+      report: { bottom: 200 },
+    });
+  });
+
+  it("does not report a zero iOS measurement", () => {
+    expect(
+      resolveThreadFeedMeasuredContentInset({
+        initialContentInset: undefined,
+        measuredBottom: 0,
+      }),
+    ).toEqual({
+      contentInset: undefined,
+      report: undefined,
+    });
+  });
+
+  it("re-reports a positive iOS measurement without a declarative floor", () => {
+    expect(
+      resolveThreadFeedMeasuredContentInset({
+        initialContentInset: undefined,
+        measuredBottom: 174,
+      }),
+    ).toEqual({
+      contentInset: undefined,
+      report: { bottom: 174 },
+    });
+  });
+
+  it("treats a negative Android measurement as a zero that clears the floor", () => {
+    expect(
+      resolveThreadFeedMeasuredContentInset({
+        initialContentInset: androidFloor,
+        measuredBottom: -8,
+      }),
+    ).toEqual({
+      contentInset: undefined,
+      report: { bottom: 0 },
+    });
   });
 });
 
