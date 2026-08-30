@@ -42,6 +42,16 @@ git fetch upstream --tags
 
 Single table: `packages/shared/src/branding.ts`. `apps/web/vercel.ts` inlines the same hosts (Vercel compiles it before the monorepo build).
 
+## Identifier policy
+
+Kata Code retains upstream T3 identifiers when they are neither user-visible nor part of a supported operator interface. Explicit compatibility boundaries listed below remain retained even when users or supported operators encounter them. This limits vendor-pull conflicts and preserves durable and wire compatibility.
+
+User-visible means text, labels, routes, examples, or identifiers shown in shipped web, desktop, mobile, CLI, or current user documentation. A supported operator interface is a documented file, environment variable, CLI option, URL scheme, or network contract that operators or external clients are expected to set or send.
+
+Retain private or internal source symbols, private logs, comments, generated script locals, disabled workflows, internal binary paths, storage keys, and test fixtures. Explicit retained compatibility boundaries include `t3.json`, its schema URL, the OAuth token-type URN, checkpoint refs, browser storage keys, internal `T3_*` variables, binary names, CSS identifiers, and temporary names. These values remain retained even when they appear in a supported operator interface.
+
+Rename a T3 identifier only when it appears in user-facing identity, forms a supported operator interface, or blocks a Kata-owned capability. A capability blocker is an identifier that prevents an approved Kata feature from working because that feature requires a Kata-owned route, option, protocol name, or external resource name. A naming preference alone is not a capability blocker. Route any user-visible rename to [#118](https://github.com/gannonh/kata-code/issues/118) and route other operator-interface or capability changes to a dedicated approved spec. Do not add compatibility aliases, dual reads, migrations, or fallback paths for this policy.
+
 No compatibility shims for the previous upstream env prefix, home directory, or URL schemes on product surfaces.
 
 ## Intentionally T3-shaped (later phases)

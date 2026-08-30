@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest an improvement or new capability.
+labels:
+  - enhancement
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for one problem, limitation, or desired outcome.
+        Bug reports belong in the [Bug report](https://github.com/gannonh/kata-code/issues/new?template=bug_report.yml) form.
+        Search existing issues first. Filing this does not mean we will build it.
+
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or limitation
+      description: What is painful, missing, or limited today? One problem.
+      placeholder: Remote clients cannot pair after the host sleeps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should become possible or true if this were done well?
+      placeholder: A remote client reconnects with the existing pairing token after the host wakes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: What did you try, or what would you accept instead?
+      placeholder: A new pairing URL each time works, but it breaks saved environments.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Supporting context
+      description: Links, notes, or files that help. You can drag files into this field.
+      placeholder: Related issues, screenshots, or a short recording.
