@@ -67,11 +67,17 @@
       "skillPath": ".agents/skills/implement-specs/SKILL.md",
       "computedHash": "bd2787a63cfdc917275769ef2d9c7adc701cfaf1a74344b3a6248d4116a8923e"
     },
+    "maestro-mobile-testing": {
+      "source": "tovimx/maestro-mobile-testing-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "bdbd865389287a513591c184ca7958256b42d694216ae55c8e94372843eda46b"
+    },
     "plan-build-verify": {
       "source": "gannonh/skills",
       "sourceType": "github",
       "skillPath": "skills/plan-build-verify/SKILL.md",
-      "computedHash": "8bbb2c0ace87821b0811740f9fb95e4f4a5600a12eb27532e351b1adfcaa5c90"
+      "computedHash": "b6112b7f735b1a75e5e118f3e4163898756f35aef00937194c3974b24edd1c21"
     },
     "pr-walkthrough": {
       "source": "warpdotdev/common-skills",

@@ -47,4 +47,13 @@ uat-evidence/
 !.agents/skills/test-t3-app/
 !.agents/skills/test-t3-mobile/
 !.agents/skills/verify-katacode/
+.claude/skills/*
+!.claude/skills/ios-debugger-agent/
+!.claude/skills/ios-simulator-browser/
+!.claude/skills/test-t3-app/
+!.claude/skills/test-t3-mobile/
+!.claude/skills/verify-katacode/
+
+
+# Kata Code workspace file.
 kata-code.code-workspace
