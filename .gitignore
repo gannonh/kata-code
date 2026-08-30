@@ -47,3 +47,4 @@ uat-evidence/
 !.agents/skills/test-t3-app/
 !.agents/skills/test-t3-mobile/
 !.agents/skills/verify-katacode/
+kata-code.code-workspace
