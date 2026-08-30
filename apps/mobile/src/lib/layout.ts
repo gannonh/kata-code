@@ -52,6 +52,50 @@ export interface FileInspectorPaneLayout {
   readonly width: number | null;
 }
 
+export function deriveThreadFeedInitialContentInset(input: {
+  readonly platform: string;
+  readonly usesNativeAutomaticInsets: boolean;
+  readonly bottomContentInset: number;
+}): { readonly bottom: number } | undefined {
+  if (input.platform !== "android" || input.usesNativeAutomaticInsets) {
+    return undefined;
+  }
+
+  return { bottom: Math.max(0, input.bottomContentInset) };
+}
+
+/** Drop the Android estimate when the remount measurement is 0. iOS only reports a positive inset. */
+export function resolveThreadFeedMeasuredContentInset(input: {
+  readonly initialContentInset: { readonly bottom: number } | undefined;
+  readonly measuredBottom: number;
+}): {
+  readonly contentInset: { readonly bottom: number } | undefined;
+  readonly report: { readonly bottom: number } | undefined;
+} {
+  const measuredBottom = Number.isFinite(input.measuredBottom)
+    ? Math.max(0, input.measuredBottom)
+    : 0;
+
+  if (input.initialContentInset === undefined) {
+    return {
+      contentInset: undefined,
+      report: measuredBottom > 0 ? { bottom: measuredBottom } : undefined,
+    };
+  }
+
+  if (measuredBottom > 0) {
+    return {
+      contentInset: input.initialContentInset.bottom > 0 ? input.initialContentInset : undefined,
+      report: { bottom: measuredBottom },
+    };
+  }
+
+  return {
+    contentInset: undefined,
+    report: { bottom: 0 },
+  };
+}
+
 export type WorkspaceAuxiliaryPaneRole = "supplementary" | "inspector";
 
 export function deriveLayout(input: { readonly width: number; readonly height: number }): Layout {
