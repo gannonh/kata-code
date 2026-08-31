@@ -27,7 +27,7 @@ describe("hosted web Vercel output", () => {
   });
 
   it("pins deploy_web to the hosted project id and refuses kata-code", () => {
-    expect(releaseWorkflow).toContain('.vercel/project.json');
+    expect(releaseWorkflow).toContain(".vercel/project.json");
     expect(releaseWorkflow).toContain("katacode-web");
     expect(releaseWorkflow).toContain("/kata-code");
   });
