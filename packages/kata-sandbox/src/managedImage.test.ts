@@ -31,7 +31,7 @@ function failed<A, E>(effect: Effect.Effect<A, E>) {
 
 describe("managed image resolution", () => {
   it("uses the public repository owned by the deployed Vercel project", () => {
-    expect(DEFAULT_VCR_IMAGE_REPOSITORY).toBe("vcr.vercel.com/astro-labs/kata-code/kata-sandbox");
+    expect(DEFAULT_VCR_IMAGE_REPOSITORY).toBe("ghcr.io/gannonh/kata-sandbox");
   });
 
   it("uses the channel in the nightly release tag", () => {
@@ -110,6 +110,65 @@ describe("managed image resolution", () => {
       expect(requests[0]).toBe(
         "https://vcr.vercel.com/v2/team/project/kata-sandbox/manifests/0.0.43",
       );
+      expect(resolution.indexDigest).toBe(digest);
+    }),
+  );
+
+  it.effect("completes an anonymous OCI bearer challenge before reading a manifest", () =>
+    Effect.gen(function* () {
+      const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
+      const manifestUrl = "https://ghcr.io/v2/gannonh/kata-sandbox/manifests/0.0.43";
+      const client = HttpClient.make((request) => {
+        requests.push({
+          url: request.url,
+          authorization: request.headers.authorization,
+        });
+        if (request.url.startsWith("https://ghcr.io/token?")) {
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ token: "anonymous-token" }), { status: 200 }),
+            ),
+          );
+        }
+        if (request.headers.authorization === "Bearer anonymous-token") {
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ manifests: manifest.manifests }), {
+                status: 200,
+                headers: { "docker-content-digest": digest },
+              }),
+            ),
+          );
+        }
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(null, {
+              status: 401,
+              headers: {
+                "www-authenticate":
+                  'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:gannonh/kata-sandbox:pull"',
+              },
+            }),
+          ),
+        );
+      });
+
+      const resolution = yield* resolveManagedImage(
+        { serverVersion: "0.0.43", channel: "stable" },
+        makeVcrOciRegistry({ repository: "ghcr.io/gannonh/kata-sandbox", httpClient: client }),
+      );
+
+      expect(requests).toEqual([
+        { url: manifestUrl, authorization: undefined },
+        {
+          url: "https://ghcr.io/token?service=ghcr.io&scope=repository%3Agannonh%2Fkata-sandbox%3Apull",
+          authorization: undefined,
+        },
+        { url: manifestUrl, authorization: "Bearer anonymous-token" },
+      ]);
       expect(resolution.indexDigest).toBe(digest);
     }),
   );
