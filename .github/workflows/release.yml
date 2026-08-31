@@ -836,9 +836,6 @@ jobs:
           index_digest="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).indexDigest)' "$build_output")"
           anonymous_config="$RUNNER_TEMP/docker-anonymous"
           mkdir -p "$anonymous_config"
-          for platform in linux/amd64 linux/arm64; do
-            docker pull --platform "$platform" "$repository@$index_digest"
-          done
           docker --config "$anonymous_config" buildx imagetools inspect \
             "$public_repository@$index_digest"
 
