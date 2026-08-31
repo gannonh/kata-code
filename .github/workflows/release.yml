@@ -1163,8 +1163,15 @@ jobs:
 
           vercel_scope="${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
           vercel_scope_args=(--scope "$vercel_scope")
+          hosted_project_slug="katacode-web"
+
+          # Pin the linked project. Without .vercel/project.json, vercel@53 can
+          # retrieve the git-connected kata-code project and look for public.
+          mkdir -p .vercel
+          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
 
           echo "Deploying hosted web app for $channel_name channel."
+          deploy_log="$RUNNER_TEMP/vercel-hosted-deploy.log"
           deployment_url="$(
             vp dlx vercel@53.1.1 deploy \
               --archive=tgz \
@@ -1182,8 +1189,21 @@ jobs:
               --build-env "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET=${KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET:-}" \
               --build-env "KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=${KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN:-}" \
               --build-env "VITE_HOSTED_APP_URL=$router_url" \
-              --build-env "VITE_HOSTED_APP_CHANNEL=$channel_name"
+              --build-env "VITE_HOSTED_APP_CHANNEL=$channel_name" \
+              2> >(tee "$deploy_log" >&2)
           )"
+          printf '%s\n' "$deployment_url" >> "$deploy_log"
+
+          if grep -Eq '/kata-code([[:space:]]|$)' "$deploy_log" || [[ "$deployment_url" == *://kata-code-* ]]; then
+            echo "Hosted web deploy targeted Vercel project kata-code instead of ${hosted_project_slug}." >&2
+            echo "Set VERCEL_PROJECT_ID to the hosted web project, not the repo-named VCR project." >&2
+            exit 1
+          fi
+          if ! grep -Fq "/${hosted_project_slug}" "$deploy_log" && [[ "$deployment_url" != *://${hosted_project_slug}-* ]]; then
+            echo "Hosted web deploy did not report Vercel project ${hosted_project_slug}." >&2
+            echo "Confirm VERCEL_PROJECT_ID is the hosted web project." >&2
+            exit 1
+          fi
 
           echo "Aliasing $deployment_url to $channel_domain."
           vp dlx vercel@53.1.1 alias set "$deployment_url" "$channel_domain" \

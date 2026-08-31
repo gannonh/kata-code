@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - Reads repo-root Vercel config and Vite outDir.
+// @effect-diagnostics nodeBuiltinImport:off - Reads Vite outDir, vercel.ts, and release.yml.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
@@ -11,6 +11,10 @@ const repoRoot = NodePath.resolve(webRoot, "../..");
 
 const viteConfigSource = NodeFS.readFileSync(NodePath.join(webRoot, "vite.config.ts"), "utf8");
 const viteOutDirMatch = viteConfigSource.match(/outDir:\s*"([^"]+)"/);
+const releaseWorkflow = NodeFS.readFileSync(
+  NodePath.join(repoRoot, ".github/workflows/release.yml"),
+  "utf8",
+);
 
 describe("hosted web Vercel output", () => {
   it("matches the Vite emit directory, not Vercel's default public folder", () => {
@@ -18,16 +22,13 @@ describe("hosted web Vercel output", () => {
     expect(webVercelConfig.outputDirectory).toBe("dist");
   });
 
-  it("names apps/web/dist from the repo-root config that Release deploy_web uploads", () => {
-    const rootConfigPath = NodePath.join(repoRoot, "vercel.ts");
-    expect(
-      NodeFS.existsSync(rootConfigPath),
-      "Release deploy_web runs `vercel deploy` from the monorepo root, so Vercel reads a root vercel.ts",
-    ).toBe(true);
+  it("does not add a repo-root vercel.ts that would host the SPA on kata-code", () => {
+    expect(NodeFS.existsSync(NodePath.join(repoRoot, "vercel.ts"))).toBe(false);
+  });
 
-    const rootConfigSource = NodeFS.readFileSync(rootConfigPath, "utf8");
-    expect(rootConfigSource).toMatch(/outputDirectory:\s*"apps\/web\/dist"/);
-    expect(rootConfigSource).toContain("vp run --filter @kata-sh/code-web build");
-    expect(rootConfigSource).not.toContain("filter './apps/*'");
+  it("pins deploy_web to the hosted project id and refuses kata-code", () => {
+    expect(releaseWorkflow).toContain('.vercel/project.json');
+    expect(releaseWorkflow).toContain("katacode-web");
+    expect(releaseWorkflow).toContain("/kata-code");
   });
 });
