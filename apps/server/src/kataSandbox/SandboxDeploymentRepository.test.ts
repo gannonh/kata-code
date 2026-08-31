@@ -170,7 +170,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
           expectedRevision: 2,
         },
         deployment: requestDeployment({
-          ...intent,
+          ...currentIntent,
           deploymentId: SandboxDeploymentId.make("deployment-expected"),
         }),
       });

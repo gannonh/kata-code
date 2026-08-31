@@ -509,7 +509,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: true,
             profileId,
           });
@@ -645,7 +645,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: true,
             profileId,
           });
@@ -733,7 +733,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: true,
             profileId,
           });
@@ -841,7 +841,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: true,
             profileId,
           });
@@ -934,7 +934,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
               name: profile.name,
               driverKind: "docker",
               socketPath: profile.socketPath,
-              imageDigest: profile.imageDigest,
+              image: { kind: "custom", digest: profile.imageDigest },
               enabled: true,
               profileId,
             });

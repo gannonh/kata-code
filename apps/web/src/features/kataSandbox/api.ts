@@ -88,7 +88,7 @@ function decodeOperationReceipt(value: unknown): SandboxOperationReceipt {
   try {
     return decodeSandboxOperationResponse(value).receipt;
   } catch {
-    throw new Error("The sandbox operation receipt is invalid.");
+    throw new Error("The sandbox operation response is invalid.");
   }
 }
 
