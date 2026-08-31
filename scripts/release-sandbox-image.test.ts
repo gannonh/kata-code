@@ -7,6 +7,7 @@ import * as NodeURL from "node:url";
 
 import {
   assertPublishedImageVerifyCommands,
+  isDockerPullOfDigest,
   makeSandboxImageArtifact,
   parsePlatformDigests,
   parseReleaseImageArgs,
@@ -14,6 +15,71 @@ import {
   vcrReadinessUrl,
   waitForVcrAmd64Ready,
 } from "./release-sandbox-image.ts";
+
+const workflowIndexDigestRef = /\$\{?(?:public_)?repository\}?@\$\{?index_digest\}?/g;
+
+function tokenizeShell(line: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  for (const ch of line) {
+    if (quote === null) {
+      if (ch === "#" && current.length === 0) break;
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (/\s/.test(ch) || ch === ";") {
+        if (current.length > 0) {
+          args.push(current);
+          current = "";
+        }
+        if (ch === ";") args.push(";");
+        continue;
+      }
+      current += ch;
+      continue;
+    }
+    if (ch === quote) {
+      quote = null;
+      continue;
+    }
+    current += ch;
+  }
+  if (current.length > 0) args.push(current);
+  return args;
+}
+
+function dockerCommandsFromWorkflowScript(
+  script: string,
+  digest: string,
+): ReadonlyArray<ReadonlyArray<string>> {
+  const commands: string[][] = [];
+  let pending: string[] = [];
+  const flush = () => {
+    if (pending.length === 0) return;
+    const dockerAt = pending.findIndex((arg) => arg === "docker");
+    if (dockerAt !== -1) {
+      commands.push(
+        pending
+          .slice(dockerAt)
+          .map((arg) => arg.replace(workflowIndexDigestRef, `image@${digest}`)),
+      );
+    }
+    pending = [];
+  };
+  for (const line of script.replace(/\\\r?\n/g, " ").split("\n")) {
+    for (const token of tokenizeShell(line)) {
+      if (token === ";") {
+        flush();
+        continue;
+      }
+      pending.push(token);
+    }
+    flush();
+  }
+  return commands;
+}
 
 const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 
@@ -123,29 +189,31 @@ describe("release sandbox image boundaries", () => {
     );
   });
 
+  it("rejects a workflow that pulls one index digest twice", () => {
+    const script = `
+docker  --config /tmp/docker-anonymous  pull --platform linux/amd64 \\
+  $repository@$index_digest
+docker pull --platform linux/arm64 "$public_repository@$index_digest"
+`;
+    assert.throws(
+      () =>
+        assertPublishedImageVerifyCommands(
+          dockerCommandsFromWorkflowScript(script, indexDigest),
+          indexDigest,
+        ),
+      /cannot overwrite digest/,
+    );
+  });
+
   it("inspects the mirrored public index once", () => {
     const workflow = NodeFS.readFileSync(
       NodePath.join(repoRoot, ".github/workflows/release.yml"),
       "utf8",
     );
-    assert.include(workflow, "buildx imagetools inspect");
-    assert.notInclude(workflow, 'docker pull --platform');
-    assert.doesNotThrow(() =>
-      assertPublishedImageVerifyCommands(
-        [
-          [
-            "docker",
-            "--config",
-            "/tmp/docker-anonymous",
-            "buildx",
-            "imagetools",
-            "inspect",
-            `ghcr.io/gannonh/kata-sandbox@${indexDigest}`,
-          ],
-        ],
-        indexDigest,
-      ),
-    );
+    const commands = dockerCommandsFromWorkflowScript(workflow, indexDigest);
+    assert.isTrue(commands.some((args) => args.includes("imagetools") && args.includes("inspect")));
+    assert.equal(commands.filter((args) => isDockerPullOfDigest(args, indexDigest)).length, 0);
+    assert.doesNotThrow(() => assertPublishedImageVerifyCommands(commands, indexDigest));
   });
 
   it("requires both supported platform manifests", () => {
@@ -251,7 +319,11 @@ describe("release sandbox image boundaries", () => {
       assert.isTrue(
         commands
           .filter((args) => args[0] === "docker" && args[1] === "run")
-          .every((args) => args.includes(`${repository}@${amd64Digest}`) || args.includes(`${repository}@${arm64Digest}`)),
+          .every(
+            (args) =>
+              args.includes(`${repository}@${amd64Digest}`) ||
+              args.includes(`${repository}@${arm64Digest}`),
+          ),
       );
       assert.doesNotThrow(() => assertPublishedImageVerifyCommands(commands, indexDigest));
       assert.isTrue(commands.some((args) => args.includes(`${repository}:latest`)));

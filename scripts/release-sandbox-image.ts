@@ -374,7 +374,7 @@ export function buildBootstrapManifest(input: {
   };
 }
 
-function isDockerPullOfDigest(args: ReadonlyArray<string>, indexDigest: string): boolean {
+export function isDockerPullOfDigest(args: ReadonlyArray<string>, indexDigest: string): boolean {
   if (args[0] !== "docker") return false;
   if (args.includes("run") || args.includes("imagetools")) return false;
   if (!args.includes("pull")) return false;
