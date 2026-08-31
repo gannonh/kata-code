@@ -45,6 +45,23 @@ const index = {
 };
 
 describe("release sandbox image boundaries", () => {
+  it("passes the VCR project to the Vercel Sandbox smoke test", () => {
+    const workflow = NodeFS.readFileSync(
+      NodePath.join(import.meta.dirname, "../.github/workflows/release.yml"),
+      "utf8",
+    );
+    const smokeStart = workflow.indexOf("KATACODE_VERCEL_IMAGE_E2E=1");
+    const smokeEnd = workflow.indexOf(
+      "vp test run scripts/verify-kata-sandbox-image-vercel.test.ts",
+    );
+    assert.isAtLeast(smokeStart, 0);
+    assert.isAbove(smokeEnd, smokeStart);
+
+    const smokeCommand = workflow.slice(smokeStart, smokeEnd);
+    assert.include(smokeCommand, 'VERCEL_ORG_ID="$VCR_ORG_ID"');
+    assert.include(smokeCommand, 'VERCEL_PROJECT_ID="$VCR_PROJECT_ID"');
+  });
+
   it("derives exact and discovery tags without parsing release logs", () => {
     assert.deepEqual(
       parseReleaseImageArgs(
