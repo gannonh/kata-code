@@ -26,6 +26,11 @@ both platforms. Docker selects the host platform. Vercel Sandbox uses the same i
 VCR. The default repository is `ghcr.io/gannonh/kata-sandbox`; deployments using another registry
 set `KATACODE_SANDBOX_IMAGE_REPOSITORY` to that full repository name.
 
+If a managed profile reports an OCI `401`, check the server version and image repository. Current
+releases pull anonymously from GHCR. An older server or a
+`KATACODE_SANDBOX_IMAGE_REPOSITORY` override can still point at a registry that requires
+credentials.
+
 ## Advanced image override
 
 Leave the managed image selected for normal use. Development profiles can provide an immutable

@@ -102,6 +102,21 @@ Developers deploy personal stages locally rather than through pull-request autom
 vp run --filter kata-code-relay deploy -- --stage "$USER" --env-file .env.local
 ```
 
+## Vercel release projects
+
+The release workflow uses two Vercel projects in the same team:
+
+- The hosted web project, currently `katacode-web`, builds and deploys `apps/web`. `VERCEL_ORG_ID` and
+  `VERCEL_PROJECT_ID` identify this project.
+- The Sandbox registry project, currently `kata-code`, owns the VCR repository and runs the Vercel
+  Sandbox image smoke test. `VCR_ORG_ID` and `VCR_PROJECT_ID` identify this project.
+
+GitHub Actions secrets are the release source of truth. A local `.vercel/project.json` link does not
+configure either release job. Local `E2E_VERCEL_*` variables are also outside the release workflow.
+The release smoke test uses the Sandbox registry project instead of a separate E2E project.
+
+Both jobs use `VERCEL_TOKEN`. The token must have access to both projects in the configured team.
+
 ## Hosted web app release deployment
 
 The hosted app is intentionally not deployed by Vercel's Git integration. The
@@ -114,21 +129,13 @@ Required GitHub Actions secrets:
 - `VERCEL_TOKEN`
 - `VERCEL_ORG_ID`: hosted web app team ID.
 - `VERCEL_PROJECT_ID`: hosted web app project ID.
-- `VCR_ORG_ID`: Sandbox image VCR team ID.
-- `VCR_PROJECT_ID`: Sandbox image VCR project ID.
 
 Optional GitHub Actions variables:
 
 - `VERCEL_TEAM_SLUG`: overrides the Vercel CLI scope when the team slug is preferred over the `VERCEL_ORG_ID` secret.
-- `VERCEL_PROJECT_SLUG`: VCR project slug when it differs from `kata-code`.
-- `KATACODE_SANDBOX_IMAGE_REPOSITORY`: VCR repository used by Vercel workloads; defaults to `vcr.vercel.com/astro-labs/kata-code/kata-sandbox`.
 - `KATACODE_WEB_ROUTER_URL`: defaults to `https://app.kata.sh`.
 - `KATACODE_WEB_LATEST_DOMAIN`: defaults to `latest.app.kata.sh`.
 - `KATACODE_WEB_NIGHTLY_DOMAIN`: defaults to `nightly.app.kata.sh`.
-
-The Sandbox image job publishes each exact release tag to VCR and
-`ghcr.io/gannonh/kata-sandbox`. VCR serves authenticated Vercel workloads. GHCR serves anonymous
-Docker pulls. The release verifies anonymous GHCR access before publishing Sandbox metadata.
 
 Required Vercel domains:
 
@@ -161,6 +168,48 @@ One-time Vercel dashboard setup:
 4. Run one stable release deployment, or manually alias the current stable
    deployment, so `app.kata.sh` points at a deployment containing the router
    rules in `apps/web/vercel.ts`. Future stable releases keep this alias current.
+
+## Sandbox image release
+
+Required GitHub Actions secrets:
+
+- `VERCEL_TOKEN`
+- `VCR_ORG_ID`: Sandbox registry team ID.
+- `VCR_PROJECT_ID`: Sandbox registry project ID.
+
+Optional GitHub Actions variables:
+
+- `VERCEL_TEAM_SLUG`: overrides the Vercel CLI scope when the team slug is preferred over the
+  `VCR_ORG_ID` secret.
+- `VERCEL_PROJECT_SLUG`: VCR project slug when it differs from `kata-code`.
+- `KATACODE_SANDBOX_IMAGE_REPOSITORY`: VCR repository used by Vercel workloads. The default is
+  `vcr.vercel.com/astro-labs/kata-code/kata-sandbox`.
+
+The Sandbox image job publishes each exact release tag to VCR and
+`ghcr.io/gannonh/kata-sandbox`. VCR serves authenticated Vercel workloads. GHCR serves anonymous
+Docker pulls. The job passes the VCR project credentials to the Vercel Sandbox smoke test.
+
+The first GHCR publish creates a private package. Open the package settings, change its visibility
+to public, and rerun the failed release. The anonymous manifest check must pass before the workflow
+publishes `sandbox-image.json`.
+
+To inspect the release configuration without printing secret values, run:
+
+```sh
+gh secret list -R gannonh/kata-code | rg '^(VERCEL|VCR)_'
+```
+
+To verify a published tag without Docker credentials, run:
+
+```sh
+anonymous_config="$(mktemp -d)"
+docker --config "$anonymous_config" manifest inspect \
+  "ghcr.io/gannonh/kata-sandbox:<version>"
+```
+
+The inspection must return one OCI index containing `linux/amd64` and `linux/arm64`. A `401`
+response means the GHCR package is not anonymously readable. `manifest unknown` means the requested
+tag does not exist. Check the Sandbox image job before changing `VERCEL_TOKEN`.
 
 ## Nightly builds
 
