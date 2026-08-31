@@ -19,6 +19,15 @@ const manifest = {
   ],
 };
 
+function failed<A, E>(effect: Effect.Effect<A, E>) {
+  return Effect.gen(function* () {
+    const result = yield* Effect.result(effect);
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") return undefined as never;
+    return result.failure;
+  });
+}
+
 describe("managed image resolution", () => {
   it("uses the channel in the nightly release tag", () => {
     expect(managedImageTag({ serverVersion: "v0.0.43", channel: "stable" })).toBe("0.0.43");
@@ -46,7 +55,7 @@ describe("managed image resolution", () => {
         kind: "registry-failure",
         message: "registry unavailable",
       });
-      const failed = yield* Effect.flip(
+      const failed = yield* Effect.result(
         resolveManagedImage(
           { serverVersion: "0.0.43", channel: "stable" },
           {
@@ -55,7 +64,10 @@ describe("managed image resolution", () => {
           },
         ),
       );
-      expect(failed).toMatchObject({ kind: "registry-failure" });
+      expect(failed._tag).toBe("Failure");
+      if (failed._tag === "Failure") {
+        expect(failed.failure).toMatchObject({ kind: "registry-failure" });
+      }
       expect(() => parseManagedImageManifest("registry/image", "0.0.43", {})).toThrow(
         "has no index digest",
       );
@@ -100,8 +112,9 @@ describe("managed image resolution", () => {
   it.effect("reports malformed repository and digest responses as typed diagnostics", () =>
     Effect.gen(function* () {
       const invalidRepository = makeVcrOciRegistry({ repository: "https://registry/image" });
-      const invalidRepo = yield* Effect.flip(invalidRepository.readManifest("0.0.43"));
-      expect(invalidRepo).toMatchObject({ kind: "invalid-repository" });
+      expect(yield* failed(invalidRepository.readManifest("0.0.43"))).toMatchObject({
+        kind: "invalid-repository",
+      });
       const invalidDigestClient = HttpClient.make((request) =>
         Effect.succeed(
           HttpClientResponse.fromWeb(
@@ -113,13 +126,14 @@ describe("managed image resolution", () => {
           ),
         ),
       );
-      const invalidDigest = yield* Effect.flip(
-        makeVcrOciRegistry({
-          repository: "vcr.vercel.com/team/image",
-          httpClient: invalidDigestClient,
-        }).readManifest("0.0.43"),
-      );
-      expect(invalidDigest).toMatchObject({ kind: "invalid-digest" });
+      expect(
+        yield* failed(
+          makeVcrOciRegistry({
+            repository: "vcr.vercel.com/team/image",
+            httpClient: invalidDigestClient,
+          }).readManifest("0.0.43"),
+        ),
+      ).toMatchObject({ kind: "invalid-digest" });
     }),
   );
 
@@ -136,13 +150,14 @@ describe("managed image resolution", () => {
           ),
         ),
       );
-      const conflict = yield* Effect.flip(
-        makeVcrOciRegistry({
-          repository: "vcr.vercel.com/team/image",
-          httpClient: client,
-        }).readManifest("0.0.43"),
-      );
-      expect(conflict).toMatchObject({ kind: "invalid-digest" });
+      expect(
+        yield* failed(
+          makeVcrOciRegistry({
+            repository: "vcr.vercel.com/team/image",
+            httpClient: client,
+          }).readManifest("0.0.43"),
+        ),
+      ).toMatchObject({ kind: "invalid-digest" });
     }),
   );
 
@@ -151,13 +166,14 @@ describe("managed image resolution", () => {
       const client = HttpClient.make((request) =>
         Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 404 }))),
       );
-      const missing = yield* Effect.flip(
-        makeVcrOciRegistry({
-          repository: "vcr.vercel.com/team/image",
-          httpClient: client,
-        }).readManifest("0.0.43"),
-      );
-      expect(missing).toMatchObject({ kind: "missing-tag", status: 404 });
+      expect(
+        yield* failed(
+          makeVcrOciRegistry({
+            repository: "vcr.vercel.com/team/image",
+            httpClient: client,
+          }).readManifest("0.0.43"),
+        ),
+      ).toMatchObject({ kind: "missing-tag", status: 404 });
     }),
   );
 });
