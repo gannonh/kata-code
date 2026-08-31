@@ -6,8 +6,14 @@ import * as NodePath from "node:path";
 
 import {
   makeSandboxImageArtifact,
+  managedSandboxImageRepository,
   parsePlatformDigests,
+  parsePrintRepositoryArgs,
   parseReleaseImageArgs,
+  projectSlugFromVercelProject,
+  resolveReleaseSandboxImageRepository,
+  resolveSandboxImageRepository,
+  vercelProjectInspectUrl,
   verifyAndWriteSandboxImage,
   vcrReadinessUrl,
   waitForVcrAmd64Ready,
@@ -45,6 +51,96 @@ const index = {
 };
 
 describe("release sandbox image boundaries", () => {
+  it("builds the VCR path from the authenticated team and project", () => {
+    assert.equal(
+      managedSandboxImageRepository({ teamSlug: "acme", projectSlug: "katacode-web" }),
+      "vcr.vercel.com/acme/katacode-web/kata-sandbox",
+    );
+    assert.equal(
+      vercelProjectInspectUrl({
+        projectId: "prj_123",
+        teamId: "team_123",
+        teamSlug: "acme",
+      }),
+      "https://api.vercel.com/v9/projects/prj_123?teamId=team_123&slug=acme",
+    );
+    assert.equal(projectSlugFromVercelProject({ name: "katacode-web" }), "katacode-web");
+  });
+
+  it("does not push to a VCR project that the docker OIDC token cannot read", () => {
+    assert.deepEqual(
+      resolveSandboxImageRepository({
+        teamSlug: "acme",
+        projectSlug: "katacode-web",
+        override: "vcr.vercel.com/acme/kata-code/kata-sandbox",
+      }),
+      {
+        repository: "vcr.vercel.com/acme/katacode-web/kata-sandbox",
+        ignoredOverride: "vcr.vercel.com/acme/kata-code/kata-sandbox",
+      },
+    );
+    assert.deepEqual(
+      resolveSandboxImageRepository({
+        teamSlug: "acme",
+        projectSlug: "katacode-web",
+        override: "vcr.vercel.com/acme/katacode-web/kata-sandbox",
+      }),
+      { repository: "vcr.vercel.com/acme/katacode-web/kata-sandbox" },
+    );
+  });
+
+  it("reads the project name from the Vercel project used for vcr login", async () => {
+    const requested: string[] = [];
+    const result = await resolveReleaseSandboxImageRepository({
+      projectId: "prj_123",
+      teamId: "team_123",
+      teamSlug: "acme",
+      token: "secret-token",
+      override: "vcr.vercel.com/acme/kata-code/kata-sandbox",
+      fetch: async (url) => {
+        requested.push(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ name: "katacode-web" }),
+        };
+      },
+    });
+    assert.deepEqual(requested, [
+      "https://api.vercel.com/v9/projects/prj_123?teamId=team_123&slug=acme",
+    ]);
+    assert.deepEqual(result, {
+      repository: "vcr.vercel.com/acme/katacode-web/kata-sandbox",
+      projectSlug: "katacode-web",
+      ignoredOverride: "vcr.vercel.com/acme/kata-code/kata-sandbox",
+    });
+    assert.deepEqual(
+      parsePrintRepositoryArgs(
+        [
+          "--print-repository",
+          "--project-id",
+          "prj_123",
+          "--team-id",
+          "team_123",
+          "--team-slug",
+          "acme",
+          "--token",
+          "secret-token",
+          "--override",
+          "vcr.vercel.com/acme/kata-code/kata-sandbox",
+        ],
+        {},
+      ),
+      {
+        projectId: "prj_123",
+        teamId: "team_123",
+        teamSlug: "acme",
+        token: "secret-token",
+        override: "vcr.vercel.com/acme/kata-code/kata-sandbox",
+      },
+    );
+  });
+
   it("derives exact and discovery tags without parsing release logs", () => {
     assert.deepEqual(
       parseReleaseImageArgs(

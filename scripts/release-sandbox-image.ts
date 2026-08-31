@@ -270,6 +270,166 @@ export function assertPlatformManifest(value: unknown, platform: string): void {
   }
 }
 
+export const MANAGED_SANDBOX_REPOSITORY_NAME = "kata-sandbox";
+
+export interface SandboxImageRepository {
+  readonly host: string;
+  readonly teamSlug: string;
+  readonly projectSlug: string;
+  readonly repositoryName: string;
+}
+
+export interface PrintRepositoryCliOptions {
+  readonly projectId: string;
+  readonly teamId?: string | undefined;
+  readonly teamSlug: string;
+  readonly token: string;
+  readonly override?: string | undefined;
+}
+
+export interface ResolvedSandboxImageRepository {
+  readonly repository: string;
+  readonly projectSlug: string;
+  readonly ignoredOverride?: string | undefined;
+}
+
+export function parseSandboxImageRepository(reference: string): SandboxImageRepository {
+  const parts = reference.trim().split("/");
+  if (parts.length !== 4 || parts[0] !== "vcr.vercel.com" || parts.some((part) => part.length === 0)) {
+    throw new Error("--repository must be vcr.vercel.com/<team>/<project>/kata-sandbox.");
+  }
+  const [, teamSlug, projectSlug, repositoryName] = parts;
+  if (teamSlug === undefined || projectSlug === undefined || repositoryName === undefined) {
+    throw new Error("--repository must be vcr.vercel.com/<team>/<project>/kata-sandbox.");
+  }
+  return { host: "vcr.vercel.com", teamSlug, projectSlug, repositoryName };
+}
+
+export function managedSandboxImageRepository(input: {
+  readonly teamSlug: string;
+  readonly projectSlug: string;
+}): string {
+  const teamSlug = input.teamSlug.trim();
+  const projectSlug = input.projectSlug.trim();
+  if (teamSlug.length === 0 || projectSlug.length === 0) {
+    throw new Error("VCR repository requires team and project slugs.");
+  }
+  return `vcr.vercel.com/${teamSlug}/${projectSlug}/${MANAGED_SANDBOX_REPOSITORY_NAME}`;
+}
+
+export function resolveSandboxImageRepository(input: {
+  readonly teamSlug: string;
+  readonly projectSlug: string;
+  readonly override?: string | undefined;
+}): { readonly repository: string; readonly ignoredOverride?: string } {
+  const derived = managedSandboxImageRepository(input);
+  const override = input.override?.trim();
+  if (override === undefined || override.length === 0) return { repository: derived };
+  return { repository: override };
+}
+
+export function vercelProjectInspectUrl(input: {
+  readonly projectId: string;
+  readonly teamId?: string | undefined;
+  readonly teamSlug?: string | undefined;
+}): string {
+  const params = new URLSearchParams();
+  if (input.teamId) params.set("teamId", input.teamId);
+  if (input.teamSlug) params.set("slug", input.teamSlug);
+  const query = params.toString();
+  return `https://api.vercel.com/v9/projects/${encodeURIComponent(input.projectId)}${query ? `?${query}` : ""}`;
+}
+
+export function projectSlugFromVercelProject(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    throw new Error("Vercel project response is not an object.");
+  }
+  const name = (value as { readonly name?: unknown }).name;
+  if (typeof name !== "string" || name.trim().length === 0) {
+    throw new Error("Vercel project response is missing name.");
+  }
+  return name.trim();
+}
+
+export function parsePrintRepositoryArgs(
+  args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): PrintRepositoryCliOptions {
+  let projectId = environment.VERCEL_PROJECT_ID?.trim();
+  let teamId = environment.VERCEL_ORG_ID?.trim() || undefined;
+  let teamSlug = environment.VERCEL_TEAM_SLUG?.trim() || undefined;
+  let token = environment.VERCEL_TOKEN?.trim();
+  let override = environment.KATACODE_SANDBOX_IMAGE_REPOSITORY?.trim() || undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    switch (flag) {
+      case "--print-repository":
+        break;
+      case "--project-id":
+        projectId = requiredValue(args, index, flag);
+        index += 1;
+        break;
+      case "--team-id":
+        teamId = requiredValue(args, index, flag);
+        index += 1;
+        break;
+      case "--team-slug":
+        teamSlug = requiredValue(args, index, flag);
+        index += 1;
+        break;
+      case "--token":
+        token = requiredValue(args, index, flag);
+        index += 1;
+        break;
+      case "--override":
+        override = requiredValue(args, index, flag);
+        index += 1;
+        break;
+      case undefined:
+        break;
+      default:
+        throw new Error(`Unknown release image argument '${flag}'.`);
+    }
+  }
+
+  if (!projectId) throw new Error("VERCEL_PROJECT_ID or --project-id is required.");
+  if (!teamSlug) throw new Error("VERCEL_TEAM_SLUG or --team-slug is required.");
+  if (!token) throw new Error("VERCEL_TOKEN or --token is required.");
+  return { projectId, teamId, teamSlug, token, override };
+}
+
+export async function resolveReleaseSandboxImageRepository(input: {
+  readonly projectId: string;
+  readonly teamId?: string | undefined;
+  readonly teamSlug: string;
+  readonly token: string;
+  readonly override?: string | undefined;
+  readonly fetch?: ReleaseImageFetch | undefined;
+}): Promise<ResolvedSandboxImageRepository> {
+  const fetchImage: ReleaseImageFetch =
+    input.fetch ??
+    ((url, init) => fetch(url, init as RequestInit) as Promise<ReleaseImageFetchResponse>);
+  const response = await fetchImage(
+    vercelProjectInspectUrl({
+      projectId: input.projectId,
+      teamId: input.teamId,
+      teamSlug: input.teamSlug,
+    }),
+    { headers: { accept: "application/json", authorization: `Bearer ${input.token}` } },
+  );
+  if (!response.ok) {
+    throw new Error(`Vercel project inspect returned HTTP ${response.status}.`);
+  }
+  const projectSlug = projectSlugFromVercelProject(await response.json());
+  const resolved = resolveSandboxImageRepository({
+    teamSlug: input.teamSlug,
+    projectSlug,
+    override: input.override,
+  });
+  return { projectSlug, ...resolved };
+}
+
 export function vcrReadinessUrl(input: {
   readonly repository: string;
   readonly projectId: string;

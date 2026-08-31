@@ -31,7 +31,10 @@ function failed<A, E>(effect: Effect.Effect<A, E>) {
 
 describe("managed image resolution", () => {
   it("uses the public repository owned by the deployed Vercel project", () => {
-    expect(DEFAULT_VCR_IMAGE_REPOSITORY).toBe("vcr.vercel.com/astro-labs/kata-code/kata-sandbox");
+    const parts = DEFAULT_VCR_IMAGE_REPOSITORY.split("/");
+    expect(parts[0]).toBe("vcr.vercel.com");
+    expect(parts[2]).toBe("katacode-web");
+    expect(parts[3]).toBe("kata-sandbox");
   });
 
   it("uses the channel in the nightly release tag", () => {
