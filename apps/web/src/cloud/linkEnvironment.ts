@@ -26,6 +26,7 @@ import { EnvironmentRegistry } from "@kata-sh/code-client-runtime/connection";
 import { request, runStream } from "@kata-sh/code-client-runtime/rpc";
 import { makeEnvironmentHttpApiClient } from "@kata-sh/code-client-runtime/rpc";
 import { ManagedRelay } from "@kata-sh/code-client-runtime/relay";
+import { isLoopbackHost } from "@kata-sh/code-shared/preview";
 
 import {
   readPrimaryEnvironmentDescriptor,
@@ -382,10 +383,10 @@ export function unlinkPrimaryEnvironmentFromCloud(input: {
           environmentId: EnvironmentId.make(input.target.environmentId),
         })
         .pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("Could not revoke cloud environment link after local unlink.", {
-              cause,
-            }),
+          Effect.mapError(
+            decodedRelayClientError(
+              `${configuredRelayUrl}/v1/client/environment-links/${encodeURIComponent(input.target.environmentId)} failed`,
+            ),
           ),
         );
     }
@@ -419,6 +420,18 @@ export function linkPrimaryEnvironmentToCloud(input: {
     const providerKind = managedTunnelsEnabled
       ? MANAGED_ENDPOINT_PROVIDER_KIND
       : PUBLISH_ONLY_PROVIDER_KIND;
+    const isLocalConnection = yield* Effect.sync(() => {
+      try {
+        return isLoopbackHost(new URL(input.target.httpBaseUrl).hostname);
+      } catch {
+        return false;
+      }
+    });
+    if (!isLocalConnection) {
+      return yield* new CloudEnvironmentLinkError({
+        message: "Cloud linking requires a local environment connection.",
+      });
+    }
     const relayClient = yield* ManagedRelay.ManagedRelayClient;
     const environmentClient = yield* makeEnvironmentHttpApiClient(input.target.httpBaseUrl);
     if (managedTunnelsEnabled) {
@@ -471,24 +484,61 @@ export function linkPrimaryEnvironmentToCloud(input: {
           decodedRelayClientError(`${configuredRelayUrl}/v1/client/environment-links failed`),
         ),
       );
-    yield* ensureLinkedEnvironmentMatches({
-      expectedEnvironmentId: input.target.environmentId,
-      expectedProviderKind: providerKind,
-      link,
-    });
+    const compensateLink = (cause: CloudEnvironmentLinkError) =>
+      Effect.gen(function* () {
+        const localUnlink = yield* environmentClient.connect
+          .unlink({ headers: {} })
+          .pipe(
+            Effect.mapError(environmentApiError("Could not clean up the local environment link.")),
+            Effect.result,
+          );
+        const relayUnlink = yield* relayClient
+          .unlinkEnvironment({
+            clerkToken: input.clerkToken,
+            environmentId: EnvironmentId.make(input.target.environmentId),
+          })
+          .pipe(
+            Effect.mapError(
+              decodedRelayClientError(
+                `${configuredRelayUrl}/v1/client/environment-links/${encodeURIComponent(input.target.environmentId)} failed`,
+              ),
+            ),
+            Effect.result,
+          );
+        if (localUnlink._tag === "Failure" || relayUnlink._tag === "Failure") {
+          return yield* new CloudEnvironmentLinkError({
+            message: "Could not clean up the environment cloud link after linking failed.",
+            cause: {
+              original: cause,
+              local: localUnlink._tag === "Failure" ? localUnlink.failure : undefined,
+              relay: relayUnlink._tag === "Failure" ? relayUnlink.failure : undefined,
+            },
+          });
+        }
+        return yield* cause;
+      });
 
-    yield* environmentClient.connect
-      .relayConfig({
-        headers: {},
-        payload: {
-          relayUrl: configuredRelayUrl,
-          relayIssuer: link.relayIssuer,
-          cloudUserId: link.cloudUserId,
-          environmentCredential: link.environmentCredential,
-          cloudMintPublicKey: link.cloudMintPublicKey,
-          endpointRuntime: link.endpointRuntime,
-        },
-      })
-      .pipe(Effect.mapError(environmentApiError("Could not configure environment relay access.")));
+    yield* Effect.gen(function* () {
+      yield* ensureLinkedEnvironmentMatches({
+        expectedEnvironmentId: input.target.environmentId,
+        expectedProviderKind: providerKind,
+        link,
+      });
+      yield* environmentClient.connect
+        .relayConfig({
+          headers: {},
+          payload: {
+            relayUrl: configuredRelayUrl,
+            relayIssuer: link.relayIssuer,
+            cloudUserId: link.cloudUserId,
+            environmentCredential: link.environmentCredential,
+            cloudMintPublicKey: link.cloudMintPublicKey,
+            endpointRuntime: link.endpointRuntime,
+          },
+        })
+        .pipe(
+          Effect.mapError(environmentApiError("Could not configure environment relay access.")),
+        );
+    }).pipe(Effect.catch(compensateLink));
   }).pipe(Effect.provide(primaryEnvironmentHttpLayer));
 }

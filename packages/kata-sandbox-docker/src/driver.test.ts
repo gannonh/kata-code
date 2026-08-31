@@ -351,7 +351,8 @@ describe("Docker sandbox driver", () => {
     });
   });
 
-  it.effect("checks ownership before copying credentials into a container", () => {
+  it.effect("rejects a stored container identity mismatch before seeding credentials", () => {
+    const labels = dockerOwnershipLabels(intent);
     const resource = decodeResource({
       containerId: "container-1",
       containerName: dockerContainerName(intent.deploymentId),
@@ -364,22 +365,14 @@ describe("Docker sandbox driver", () => {
         schemaVersion: "v1",
       },
     });
-    let archiveRequests = 0;
-    const foreignLabels = {
-      ...dockerOwnershipLabels(intent),
-      [SandboxProviderLabels.deploymentId]: "foreign-deployment",
-    };
+    const requests: DockerRequest[] = [];
     const driver = makeDockerSandboxDriver({
-      engine: {
-        request: (request) => {
-          if (request.path.includes("/archive?path=")) archiveRequests += 1;
-          if (request.path === "/containers/container-1/json") {
-            return Effect.succeed(response(200, JSON.stringify(inspect(foreignLabels))));
-          }
-          return Effect.succeed(response(404));
-        },
-        requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
-      },
+      engine: fakeEngine((request) => {
+        requests.push(request);
+        return request.path.endsWith("/json")
+          ? response(200, JSON.stringify({ ...inspect(labels), Name: "/a-different-container" }))
+          : response(404);
+      }),
     });
 
     return Effect.gen(function* () {
@@ -393,7 +386,7 @@ describe("Docker sandbox driver", () => {
         }),
       );
       expect(result._tag).toBe("Failure");
-      expect(archiveRequests).toBe(0);
+      expect(requests.some((request) => request.path.includes("/archive?path="))).toBe(false);
     });
   });
 
@@ -501,6 +494,120 @@ describe("Docker sandbox driver", () => {
     expect(archive.toString("utf8")).toContain('"codex-selected"');
     expect(archive.toString("utf8")).toContain('"gpt-5.6-luna"');
     expect(archive.toString("utf8")).not.toContain("auth.json");
+  });
+
+  it.effect("returns Stopped and resumes the exact owned container", () => {
+    const labels = dockerOwnershipLabels(intent);
+    const resource = decodeResource({
+      containerId: "container-1",
+      containerName: dockerContainerName(intent.deploymentId),
+      hostPort: 41001,
+      containerPort: 3773,
+      ownership: {
+        controlEnvironmentId: intent.controlEnvironmentId,
+        deploymentId: intent.deploymentId,
+        profileId: intent.profileId,
+        profileRevision: intent.profileRevision,
+        schemaVersion: "v1",
+      },
+    });
+    let running = false;
+    let probeCalls = 0;
+    const paths: string[] = [];
+    const driver = makeDockerSandboxDriver({
+      readinessProbe: () => {
+        probeCalls++;
+        return Effect.succeed({
+          environmentId: "sandbox-env",
+          serverVersion: intent.bootstrapManifest.serverVersion,
+        });
+      },
+      engine: fakeEngine((request) => {
+        paths.push(request.path);
+        if (request.path.endsWith("/json")) {
+          return response(200, JSON.stringify(inspect(labels, running)));
+        }
+        if (request.path.endsWith("/stop")) {
+          running = false;
+          return response(204);
+        }
+        if (request.path.endsWith("/start")) {
+          running = true;
+          return response(204);
+        }
+        return response(404);
+      }),
+    });
+
+    return Effect.gen(function* () {
+      const power = driver.power;
+      if (power === undefined) throw new Error("Expected Docker power capability.");
+      expect(yield* power.inspect({ profile, resource, intent })).toEqual({
+        state: "Stopped",
+        observedAt: expect.any(String),
+      });
+      const started = yield* power.start({
+        profile,
+        resource,
+        intent,
+        expectedEnvironmentId: "sandbox-env",
+      });
+      expect(started).toMatchObject({
+        environmentId: "sandbox-env",
+        endpoint: "http://127.0.0.1:41001",
+        resource: { containerId: "container-1", hostPort: 41001 },
+        connectorOrigin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+      });
+      expect(probeCalls).toBe(1);
+      expect(
+        yield* power.inspect({
+          profile,
+          resource,
+          intent,
+          expectedEnvironmentId: "sandbox-env",
+        }),
+      ).toMatchObject({ state: "Running" });
+      expect(probeCalls).toBe(1);
+      expect(paths).toEqual([
+        "/containers/container-1/json",
+        "/containers/container-1/json",
+        "/containers/container-1/start",
+        "/containers/container-1/json",
+        "/containers/container-1/json",
+      ]);
+      expect(yield* power.stop({ profile, resource, intent })).toMatchObject({
+        state: "Stopped",
+      });
+    });
+  });
+
+  it.effect("reports Unknown for an identity collision", () => {
+    const labels = dockerOwnershipLabels(intent);
+    const resource = decodeResource({
+      containerId: "container-1",
+      containerName: dockerContainerName(intent.deploymentId),
+      hostPort: 41001,
+      containerPort: 3773,
+      ownership: {
+        controlEnvironmentId: intent.controlEnvironmentId,
+        deploymentId: intent.deploymentId,
+        profileId: intent.profileId,
+        profileRevision: intent.profileRevision,
+        schemaVersion: "v1",
+      },
+    });
+    const driver = makeDockerSandboxDriver({
+      engine: fakeEngine((request) =>
+        request.path.endsWith("/json")
+          ? response(200, JSON.stringify({ ...inspect(labels), Id: "a-different-container" }))
+          : response(404),
+      ),
+    });
+
+    return Effect.gen(function* () {
+      const observation = yield* driver.observe({ profile, resource });
+      expect(observation.state).toBe("Unknown");
+    });
   });
 
   it.effect("records Gone for an authoritative missing container", () => {

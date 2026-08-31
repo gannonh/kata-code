@@ -50,10 +50,10 @@ const loadPreferences = vi.fn(() => Effect.succeed({}));
 const savedConnection = {
   environmentId: EnvironmentId.make("env-1"),
   environmentLabel: "Desktop",
-  pairingUrl: "https://desktop.example.test/",
-  displayUrl: "https://desktop.example.test/",
-  httpBaseUrl: "https://desktop.example.test/",
-  wsBaseUrl: "wss://desktop.example.test/ws",
+  pairingUrl: "http://127.0.0.1:3773/",
+  displayUrl: "http://127.0.0.1:3773/",
+  httpBaseUrl: "http://127.0.0.1:3773/",
+  wsBaseUrl: "ws://127.0.0.1:3773/ws",
   bearerToken: "local-bearer",
 };
 
@@ -613,6 +613,14 @@ describe("mobile cloud link environment client", () => {
           if (String(url).endsWith("/api/connect/link-proof")) {
             return Promise.resolve(Response.json(validLinkProof()));
           }
+          if (String(url).endsWith("/api/connect/unlink")) {
+            return Promise.resolve(
+              Response.json({ ok: true, endpointRuntimeStatus: { status: "disabled" } }),
+            );
+          }
+          if (String(url).endsWith("/v1/client/environment-links/env-1")) {
+            return Promise.resolve(Response.json({ ok: true }));
+          }
           return Promise.resolve(Response.json(validLinkResponse("env-other")));
         });
         vi.stubGlobal("fetch", fetchMock);
@@ -627,7 +635,11 @@ describe("mobile cloud link environment client", () => {
           _tag: "CloudEnvironmentLinkError",
           message: "Relay returned credentials for a different environment.",
         });
-        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(fetchMock).toHaveBeenCalledTimes(5);
+        expect(String(fetchMock.mock.calls[3]?.[0])).toContain("/api/connect/unlink");
+        expect(String(fetchMock.mock.calls[4]?.[0])).toContain(
+          "/v1/client/environment-links/env-1",
+        );
       }),
   );
 
@@ -711,6 +723,14 @@ describe("mobile cloud link environment client", () => {
         if (String(url).endsWith("/api/connect/link-proof")) {
           return Promise.resolve(Response.json(validLinkProof()));
         }
+        if (String(url).endsWith("/api/connect/unlink")) {
+          return Promise.resolve(
+            Response.json({ ok: true, endpointRuntimeStatus: { status: "disabled" } }),
+          );
+        }
+        if (String(url).endsWith("/v1/client/environment-links/env-1")) {
+          return Promise.resolve(Response.json({ ok: true }));
+        }
         return Promise.resolve(
           Response.json({
             ...validLinkResponse(),
@@ -733,7 +753,57 @@ describe("mobile cloud link environment client", () => {
         _tag: "CloudEnvironmentLinkError",
         message: "Relay returned credentials for a different endpoint provider.",
       });
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+      expect(String(fetchMock.mock.calls[3]?.[0])).toContain("/api/connect/unlink");
+      expect(String(fetchMock.mock.calls[4]?.[0])).toContain("/v1/client/environment-links/env-1");
+    }),
+  );
+
+  it.effect("compensates a relay link when local relay configuration fails", () =>
+    Effect.gen(function* () {
+      const fetchMock = vi.fn((url: string | URL) => {
+        if (String(url).endsWith("/v1/client/environment-link-challenges")) {
+          return Promise.resolve(Response.json(validLinkChallengeResponse()));
+        }
+        if (String(url).endsWith("/api/connect/link-proof")) {
+          return Promise.resolve(Response.json(validLinkProof()));
+        }
+        if (String(url).endsWith("/v1/client/environment-links")) {
+          return Promise.resolve(Response.json(validLinkResponse()));
+        }
+        if (String(url).endsWith("/api/connect/relay-config")) {
+          return Promise.resolve(Response.json({ malformed: true }, { status: 500 }));
+        }
+        if (String(url).endsWith("/api/connect/unlink")) {
+          return Promise.resolve(
+            Response.json({ ok: true, endpointRuntimeStatus: { status: "disabled" } }),
+          );
+        }
+        if (String(url).endsWith("/v1/client/environment-links/env-1")) {
+          return Promise.resolve(Response.json({ ok: true }));
+        }
+        return Promise.resolve(Response.json({ malformed: true }, { status: 500 }));
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = yield* Effect.result(
+        withCloudServices(
+          linkEnvironmentToCloud({
+            clerkToken: "clerk-token",
+            connection: savedConnection,
+          }),
+        ),
+      );
+
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("Could not configure environment relay access");
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      expect(String(fetchMock.mock.calls.at(-2)?.[0])).toContain("/api/connect/unlink");
+      expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain(
+        "/v1/client/environment-links/env-1",
+      );
     }),
   );
 
@@ -770,13 +840,13 @@ describe("mobile cloud link environment client", () => {
 
       expect(bodies[1]).toMatchObject({
         endpoint: {
-          httpBaseUrl: "https://desktop.example.test/",
-          wsBaseUrl: "wss://desktop.example.test/ws",
+          httpBaseUrl: "http://127.0.0.1:3773/",
+          wsBaseUrl: "ws://127.0.0.1:3773/ws",
           providerKind: "cloudflare_tunnel",
         },
         origin: {
           localHttpHost: "127.0.0.1",
-          localHttpPort: 443,
+          localHttpPort: 3773,
         },
       });
       expect(bodies[2]).toMatchObject({

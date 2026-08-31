@@ -300,6 +300,7 @@ function endpointRequestPort(url: URL): number {
 function isAllowedEndpointOrigin(input: {
   readonly origin: RelayManagedEndpointOrigin;
   readonly requestUrl: string;
+  readonly connectorPort?: number;
 }): boolean {
   if (!isLoopbackHostname(input.origin.localHttpHost)) {
     return false;
@@ -310,7 +311,10 @@ function isAllowedEndpointOrigin(input: {
     return false;
   }
 
-  return input.origin.localHttpPort === endpointRequestPort(url);
+  return (
+    input.origin.localHttpPort === endpointRequestPort(url) ||
+    input.origin.localHttpPort === input.connectorPort
+  );
 }
 
 // A managed (Cloudflare tunnel) endpoint is provisioned by the relay and must
@@ -380,11 +384,13 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
   requestUrl: string,
 ) {
   const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
+  const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
   if (
     !isSupportedLinkProviderKind(request) ||
     !isAllowedEndpointOrigin({
       origin: request.origin,
       requestUrl,
+      ...(Option.isSome(config) ? { connectorPort: config.value.port } : {}),
     })
   ) {
     return yield* new EnvironmentHttpBadRequestError({

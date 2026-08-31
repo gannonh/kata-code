@@ -11,9 +11,12 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import {
   DockerResourceHandle,
   ProviderObservation,
+  SandboxAttachment,
+  SandboxConnectorOrigin,
   SandboxDeployment,
   SandboxDeploymentIntent,
   SandboxDeploymentId,
+  SandboxOperationId,
   SandboxOperationReceipt,
   SandboxOperationProgress,
   SandboxOperationResult,
@@ -79,6 +82,7 @@ export interface SandboxDeploymentRepositoryShape {
   readonly saveObservation: (
     deploymentId: SandboxDeploymentId,
     observation: ProviderObservation,
+    expectedRevision?: number,
   ) => Effect.Effect<void, SandboxRepositoryError>;
   readonly accept: (
     input: SandboxAcceptedOperation,
@@ -90,9 +94,20 @@ export interface SandboxDeploymentRepositoryShape {
     actor: string,
     requestId: SandboxRequestId,
   ) => Effect.Effect<Option.Option<SandboxOperationReceipt>, SandboxRepositoryError>;
-  readonly saveOperation: (
+  readonly claimOperation: (
+    operationId: SandboxOperationId,
+    claimId: string,
+    claimedAt: string,
+  ) => Effect.Effect<Option.Option<SandboxOperationReceipt>, SandboxRepositoryError>;
+  readonly saveClaimedOperation: (
     receipt: SandboxOperationReceipt,
+    claimId: string,
   ) => Effect.Effect<void, SandboxRepositoryError>;
+  readonly ownsOperation: (
+    operationId: SandboxOperationId,
+    claimId: string,
+  ) => Effect.Effect<boolean, SandboxRepositoryError>;
+  readonly releaseInFlightClaims: () => Effect.Effect<void, SandboxRepositoryError>;
   readonly listInFlightOperations: () => Effect.Effect<
     ReadonlyArray<SandboxOperationReceipt>,
     SandboxRepositoryError
@@ -125,6 +140,8 @@ const DeploymentRow = Schema.Struct({
   profileId: Schema.NullOr(Schema.String),
   environmentId: Schema.NullOr(Schema.String),
   endpoint: Schema.NullOr(Schema.String),
+  connectorOriginJson: Schema.NullOr(Schema.String),
+  attachment: Schema.NullOr(Schema.String),
   workspaceRoot: Schema.NullOr(Schema.String),
   kataHome: Schema.NullOr(Schema.String),
   identifiedAt: Schema.NullOr(Schema.String),
@@ -133,6 +150,7 @@ const DeploymentRow = Schema.Struct({
 
 const ObservationRow = Schema.Struct({
   observationJson: Schema.String,
+  deploymentRevision: Schema.Int,
 });
 
 const OperationRow = Schema.Struct({
@@ -145,6 +163,7 @@ const OperationRow = Schema.Struct({
   deploymentId: Schema.NullOr(Schema.String),
   profileId: Schema.NullOr(Schema.String),
   profileInputJson: Schema.NullOr(Schema.String),
+  attachment: Schema.NullOr(Schema.String),
   expectedRevision: Schema.NullOr(Schema.Int),
   resolvedImageDigest: Schema.NullOr(Schema.String),
   resultJson: Schema.NullOr(Schema.String),
@@ -161,6 +180,8 @@ const decodeSandboxProfile = Schema.decodeUnknownEffect(SandboxProfile);
 const decodeSandboxDeployment = Schema.decodeUnknownEffect(SandboxDeployment);
 const decodeSandboxDeploymentIntent = Schema.decodeUnknownEffect(SandboxDeploymentIntent);
 const decodeDockerResourceHandle = Schema.decodeUnknownEffect(DockerResourceHandle);
+const decodeSandboxConnectorOrigin = Schema.decodeUnknownEffect(SandboxConnectorOrigin);
+const decodeSandboxAttachment = Schema.decodeUnknownEffect(SandboxAttachment);
 const decodeProviderObservation = Schema.decodeUnknownEffect(ProviderObservation);
 const decodeSandboxOperationResult = Schema.decodeUnknownEffect(SandboxOperationResult);
 const decodeSandboxOperationProgress = Schema.decodeUnknownEffect(SandboxOperationProgress);
@@ -237,6 +258,22 @@ function fromDeploymentRow(raw: unknown): Effect.Effect<SandboxDeployment, Persi
                 row.resourceJson,
                 "deployment.resource.decode",
               );
+        const connectorOrigin =
+          row.connectorOriginJson === null
+            ? undefined
+            : yield* decodeJson(
+                decodeSandboxConnectorOrigin,
+                row.connectorOriginJson,
+                "deployment.connector-origin.decode",
+              );
+        const attachment =
+          row.attachment === null
+            ? undefined
+            : yield* decodeSandboxAttachment(row.attachment).pipe(
+                Effect.mapError((cause) =>
+                  PersistenceDecodeError.fromSchemaError("deployment.attachment.decode", cause),
+                ),
+              );
 
         switch (row.state) {
           case "Requested":
@@ -293,6 +330,8 @@ function fromDeploymentRow(raw: unknown): Effect.Effect<SandboxDeployment, Persi
               resource,
               environmentId: row.environmentId,
               endpoint: row.endpoint,
+              ...(connectorOrigin === undefined ? {} : { connectorOrigin }),
+              ...(attachment === undefined ? {} : { attachment }),
               workspaceRoot: row.workspaceRoot,
               kataHome: row.kataHome,
               identifiedAt: row.identifiedAt,
@@ -383,6 +422,15 @@ function fromOperationRow(
                   "operation.profile-input.decode",
                 ),
               }),
+          ...(row.attachment === null
+            ? {}
+            : {
+                attachment: yield* decodeSandboxAttachment(row.attachment).pipe(
+                  Effect.mapError((cause) =>
+                    PersistenceDecodeError.fromSchemaError("operation.attachment.decode", cause),
+                  ),
+                ),
+              }),
           ...(row.expectedRevision === null ? {} : { expectedRevision: row.expectedRevision }),
           ...(row.resolvedImageDigest === null
             ? {}
@@ -459,6 +507,8 @@ const makeRepository = Effect.gen(function* () {
         profile_id AS "profileId",
         environment_id AS "environmentId",
         endpoint,
+        connector_origin_json AS "connectorOriginJson",
+        attachment,
         workspace_root AS "workspaceRoot",
         kata_home AS "kataHome",
         identified_at AS "identifiedAt",
@@ -481,6 +531,8 @@ const makeRepository = Effect.gen(function* () {
         profile_id AS "profileId",
         environment_id AS "environmentId",
         endpoint,
+        connector_origin_json AS "connectorOriginJson",
+        attachment,
         workspace_root AS "workspaceRoot",
         kata_home AS "kataHome",
         identified_at AS "identifiedAt",
@@ -504,6 +556,7 @@ const makeRepository = Effect.gen(function* () {
         deployment_id AS "deploymentId",
         profile_id AS "profileId",
         profile_input_json AS "profileInputJson",
+        attachment,
         expected_revision AS "expectedRevision",
         resolved_image_digest AS "resolvedImageDigest",
         result_json AS "resultJson",
@@ -530,6 +583,7 @@ const makeRepository = Effect.gen(function* () {
         deployment_id AS "deploymentId",
         profile_id AS "profileId",
         profile_input_json AS "profileInputJson",
+        attachment,
         expected_revision AS "expectedRevision",
         resolved_image_digest AS "resolvedImageDigest",
         result_json AS "resultJson",
@@ -556,6 +610,7 @@ const makeRepository = Effect.gen(function* () {
         deployment_id AS "deploymentId",
         profile_id AS "profileId",
         profile_input_json AS "profileInputJson",
+        attachment,
         expected_revision AS "expectedRevision",
         resolved_image_digest AS "resolvedImageDigest",
         result_json AS "resultJson",
@@ -620,7 +675,9 @@ const makeRepository = Effect.gen(function* () {
     Request: deploymentInput,
     Result: ObservationRow,
     execute: ({ deploymentId }) => sql`
-      SELECT observation_json AS "observationJson"
+      SELECT
+        observation_json AS "observationJson",
+        deployment_revision AS "deploymentRevision"
       FROM kata_sandbox_observations
       WHERE deployment_id = ${deploymentId}
     `,
@@ -681,6 +738,9 @@ const makeRepository = Effect.gen(function* () {
     const resource = "resource" in deployment ? deployment.resource : undefined;
     const environmentId = "environmentId" in deployment ? deployment.environmentId : undefined;
     const endpoint = "endpoint" in deployment ? deployment.endpoint : undefined;
+    const connectorOrigin =
+      "connectorOrigin" in deployment ? deployment.connectorOrigin : undefined;
+    const attachment = "attachment" in deployment ? deployment.attachment : undefined;
     const workspaceRoot = "workspaceRoot" in deployment ? deployment.workspaceRoot : undefined;
     const kataHome = "kataHome" in deployment ? deployment.kataHome : undefined;
     const identifiedAt = "identifiedAt" in deployment ? deployment.identifiedAt : undefined;
@@ -695,7 +755,8 @@ const makeRepository = Effect.gen(function* () {
             yield* sql`
             INSERT INTO kata_sandbox_deployments (
               deployment_id, state, revision, intent_json, resource_json,
-              profile_id, environment_id, endpoint, workspace_root, kata_home, identified_at, deleted_at
+              profile_id, environment_id, endpoint, connector_origin_json, attachment,
+              workspace_root, kata_home, identified_at, deleted_at
             ) VALUES (
               ${deployment.state === "Deleted" ? deployment.deploymentId : deployment.intent.deploymentId},
               ${deployment.state},
@@ -703,7 +764,9 @@ const makeRepository = Effect.gen(function* () {
               ${intent === undefined ? null : encodeJson(intent)},
               ${resource === undefined ? null : encodeJson(resource)},
               ${profileId ?? null},
-              ${environmentId ?? null}, ${endpoint ?? null}, ${workspaceRoot ?? null},
+              ${environmentId ?? null}, ${endpoint ?? null},
+              ${connectorOrigin === undefined ? null : encodeJson(connectorOrigin)},
+              ${attachment ?? null}, ${workspaceRoot ?? null},
               ${kataHome ?? null}, ${identifiedAt ?? null}, ${deletedAt ?? null}
             )
           `;
@@ -718,6 +781,8 @@ const makeRepository = Effect.gen(function* () {
               profile_id = ${profileId ?? null},
               environment_id = ${environmentId ?? null},
               endpoint = ${endpoint ?? null},
+              connector_origin_json = ${connectorOrigin === undefined ? null : encodeJson(connectorOrigin)},
+              attachment = ${attachment ?? null},
               workspace_root = ${workspaceRoot ?? null},
               kata_home = ${kataHome ?? null},
               identified_at = ${identifiedAt ?? null},
@@ -775,30 +840,80 @@ const makeRepository = Effect.gen(function* () {
               message: "Profile is still referenced by an active deployment.",
             });
           }
-          yield* sql`DELETE FROM kata_sandbox_profiles WHERE profile_id = ${profileId}`;
+          const deleted = yield* sql`
+            DELETE FROM kata_sandbox_profiles
+            WHERE profile_id = ${profileId}
+              AND enabled = 0
+              AND (${expectedRevision ?? null} IS NULL OR revision = ${expectedRevision ?? null})
+            RETURNING profile_id
+          `;
+          if (deleted.length === 0) {
+            return yield* new SandboxRepositoryConflictError({
+              resource: profileId,
+              message: "Profile changed before it could be deleted.",
+            });
+          }
         }),
       )
       .pipe(mapSql("SandboxDeploymentRepository.deleteProfile"));
 
-  const saveObservation = (deploymentId: SandboxDeploymentId, observation: ProviderObservation) =>
-    sql`
-      INSERT INTO kata_sandbox_observations (deployment_id, observation_json)
-      VALUES (${deploymentId}, ${encodeJson(observation)})
-      ON CONFLICT (deployment_id)
-      DO UPDATE SET observation_json = excluded.observation_json
-    `.pipe(Effect.asVoid, mapSql("SandboxDeploymentRepository.saveObservation"));
+  const saveObservation = (
+    deploymentId: SandboxDeploymentId,
+    observation: ProviderObservation,
+    expectedRevision?: number,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const deployments = yield* sql`
+            SELECT revision
+            FROM kata_sandbox_deployments
+            WHERE deployment_id = ${deploymentId}
+          `;
+          const currentRevision = deployments[0]?.revision;
+          if (currentRevision === undefined) {
+            return yield* new SandboxRepositoryConflictError({
+              resource: deploymentId,
+              message: "Sandbox deployment disappeared while saving its observation.",
+            });
+          }
+          if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
+            return yield* new SandboxRepositoryConflictError({
+              resource: deploymentId,
+              message: `Deployment revision ${expectedRevision} is stale.`,
+            });
+          }
+          yield* sql`
+            INSERT INTO kata_sandbox_observations (
+              deployment_id, observation_json, deployment_revision
+            ) VALUES (${deploymentId}, ${encodeJson(observation)}, ${currentRevision})
+            ON CONFLICT (deployment_id)
+            DO UPDATE SET
+              observation_json = excluded.observation_json,
+              deployment_revision = excluded.deployment_revision
+            WHERE excluded.deployment_revision > kata_sandbox_observations.deployment_revision
+               OR (
+                 excluded.deployment_revision = kata_sandbox_observations.deployment_revision
+                 AND json_extract(excluded.observation_json, '$.observedAt') >
+                   json_extract(kata_sandbox_observations.observation_json, '$.observedAt')
+               )
+          `;
+        }),
+      )
+      .pipe(Effect.asVoid, mapSql("SandboxDeploymentRepository.saveObservation"));
 
   const insertReceipt = (input: SandboxAcceptedOperation) =>
     sql`
       INSERT INTO kata_sandbox_operation_receipts (
         operation_id, actor, request_id, command, payload_hash, status,
-        deployment_id, profile_id, profile_input_json, expected_revision, resolved_image_digest, result_json, error, progress_json, accepted_at, updated_at
+        deployment_id, profile_id, profile_input_json, attachment, expected_revision, resolved_image_digest, result_json, error, progress_json, accepted_at, updated_at
       ) VALUES (
         ${input.receipt.operationId}, ${input.actor}, ${input.receipt.requestId},
         ${input.receipt.command}, ${input.receipt.payloadHash}, ${input.receipt.status},
         ${input.receipt.deploymentId ?? null},
         ${input.receipt.profileId ?? null},
         ${input.receipt.profileInput === undefined ? null : encodeJson(input.receipt.profileInput)},
+        ${input.receipt.attachment ?? null},
         ${input.receipt.expectedRevision ?? null},
         ${input.receipt.resolvedImageDigest ?? null},
         ${input.receipt.result === undefined ? null : encodeJson(input.receipt.result)},
@@ -835,23 +950,21 @@ const makeRepository = Effect.gen(function* () {
           FROM kata_sandbox_operation_receipts
           WHERE actor = ${input.actor} AND request_id = ${input.receipt.requestId}
         `;
-          if (
-            before.length === 0 &&
-            input.receipt.command === "delete" &&
-            input.receipt.deploymentId
-          ) {
-            const creates = yield* sql`
-            SELECT operation_id
+          if (before.length === 0 && input.receipt.deploymentId !== undefined) {
+            const active = yield* sql`
+            SELECT command
             FROM kata_sandbox_operation_receipts
-            WHERE command = 'create'
-              AND deployment_id = ${input.receipt.deploymentId}
+            WHERE deployment_id = ${input.receipt.deploymentId}
               AND status IN ('Accepted', 'Running')
             LIMIT 1
           `;
-            if (creates.length > 0) {
+            if (active.length > 0) {
               return yield* new SandboxRepositoryConflictError({
                 resource: input.receipt.deploymentId,
-                message: "The sandbox deployment is still being created.",
+                message:
+                  input.receipt.command === "delete" && active[0]?.command === "create"
+                    ? "The sandbox deployment is still being created."
+                    : "Another sandbox operation is already in progress.",
               });
             }
           }
@@ -899,7 +1012,7 @@ const makeRepository = Effect.gen(function* () {
             if (profiles[0]?.enabled !== 0) {
               return yield* new SandboxRepositoryConflictError({
                 resource: input.receipt.profileId,
-                message: "Disable the sandbox profile before deleting it.",
+                message: "The sandbox profile changed before deletion was accepted.",
               });
             }
             if (
@@ -931,10 +1044,16 @@ const makeRepository = Effect.gen(function* () {
             FROM kata_sandbox_profiles
             WHERE profile_id = ${input.deployment.intent.profileId}
           `;
-            if (profiles[0]?.enabled !== 1) {
+            const current = profiles[0];
+            if (
+              current?.enabled !== 1 ||
+              current.revision !== input.deployment.intent.profileRevision ||
+              (input.receipt.expectedRevision !== undefined &&
+                current.revision !== input.receipt.expectedRevision)
+            ) {
               return yield* new SandboxRepositoryConflictError({
                 resource: input.deployment.intent.profileId,
-                message: "Sandbox profile is unavailable.",
+                message: "Sandbox profile changed before creation was accepted.",
               });
             }
             if (
@@ -979,10 +1098,12 @@ const makeRepository = Effect.gen(function* () {
             yield* sql`
             INSERT INTO kata_sandbox_deployments (
               deployment_id, state, revision, intent_json, resource_json,
-              profile_id, environment_id, endpoint, workspace_root, kata_home, identified_at, deleted_at
+              profile_id, environment_id, endpoint, connector_origin_json, attachment,
+              workspace_root, kata_home, identified_at, deleted_at
             ) VALUES (
               ${deployment.intent.deploymentId}, 'Requested', ${deployment.revision},
-              ${encodeJson(deployment.intent)}, NULL, ${deployment.intent.profileId}, NULL, NULL, NULL, NULL, NULL, NULL
+              ${encodeJson(deployment.intent)}, NULL, ${deployment.intent.profileId},
+              NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
             )
           `;
           }
@@ -1018,21 +1139,75 @@ const makeRepository = Effect.gen(function* () {
       mapSql("SandboxDeploymentRepository.getOperationByRequest"),
     );
 
-  const saveOperation = (receipt: SandboxOperationReceipt) =>
+  const claimOperation = (operationId: SandboxOperationId, claimId: string, claimedAt: string) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const claimed = yield* sql`
+            UPDATE kata_sandbox_operation_receipts
+            SET status = 'Running',
+                execution_token = ${claimId},
+                claimed_at = ${claimedAt},
+                updated_at = ${claimedAt}
+            WHERE operation_id = ${operationId}
+              AND (
+                status = 'Accepted'
+                OR (status = 'Running' AND execution_token IS NULL)
+              )
+            RETURNING operation_id
+          `;
+          if (claimed.length === 0) return Option.none<typeof OperationRow.Type>();
+          return yield* getOperationRow({ operationId });
+        }),
+      )
+      .pipe(
+        Effect.flatMap((value) =>
+          Option.isNone(value)
+            ? Effect.succeed(Option.none<SandboxOperationReceipt>())
+            : fromOperationRow(value.value).pipe(Effect.map(Option.some)),
+        ),
+        mapSql("SandboxDeploymentRepository.claimOperation"),
+      );
+
+  const saveClaimedOperation = (receipt: SandboxOperationReceipt, claimId: string) =>
     sql`
       UPDATE kata_sandbox_operation_receipts
       SET status = ${receipt.status},
           deployment_id = ${receipt.deploymentId ?? null},
           profile_id = ${receipt.profileId ?? null},
           profile_input_json = ${receipt.profileInput === undefined ? null : encodeJson(receipt.profileInput)},
+          attachment = ${receipt.attachment ?? null},
           expected_revision = ${receipt.expectedRevision ?? null},
           resolved_image_digest = ${receipt.resolvedImageDigest ?? null},
           result_json = ${receipt.result === undefined ? null : encodeJson(receipt.result)},
           error = ${receipt.error ?? null},
           progress_json = ${receipt.progress === undefined ? null : encodeJson(receipt.progress)},
+          execution_token = ${receipt.status === "Running" ? claimId : null},
+          claimed_at = ${receipt.status === "Running" ? receipt.updatedAt : null},
           updated_at = ${receipt.updatedAt}
       WHERE operation_id = ${receipt.operationId}
-    `.pipe(Effect.asVoid, mapSql("SandboxDeploymentRepository.saveOperation"));
+        AND execution_token = ${claimId}
+    `.pipe(Effect.asVoid, mapSql("SandboxDeploymentRepository.saveClaimedOperation"));
+
+  const ownsOperation = (operationId: SandboxOperationId, claimId: string) =>
+    sql`
+      SELECT operation_id
+      FROM kata_sandbox_operation_receipts
+      WHERE operation_id = ${operationId}
+        AND status = 'Running'
+        AND execution_token = ${claimId}
+    `.pipe(
+      Effect.map((rows) => rows.length > 0),
+      mapSql("SandboxDeploymentRepository.ownsOperation"),
+    );
+
+  const releaseInFlightClaims = () =>
+    sql`
+      UPDATE kata_sandbox_operation_receipts
+      SET execution_token = NULL,
+          claimed_at = NULL
+      WHERE status IN ('Accepted', 'Running')
+    `.pipe(Effect.asVoid, mapSql("SandboxDeploymentRepository.releaseInFlightClaims"));
 
   const listInFlightOperations = () =>
     listInFlightRows(undefined).pipe(
@@ -1053,7 +1228,10 @@ const makeRepository = Effect.gen(function* () {
     accept,
     getOperation,
     getOperationByRequest,
-    saveOperation,
+    claimOperation,
+    saveClaimedOperation,
+    ownsOperation,
+    releaseInFlightClaims,
     listInFlightOperations,
   } satisfies SandboxDeploymentRepositoryShape;
 });

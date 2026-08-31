@@ -2,10 +2,12 @@ import * as Schema from "effect/Schema";
 
 import {
   SandboxListResponse as SandboxListResponseSchema,
+  SandboxOperationResponse as SandboxOperationResponseSchema,
   type SandboxListResponse as SandboxListResponseContract,
 } from "@kata-sh/code-kata-sandbox-contracts/http";
 import {
-  SandboxOperationReceipt as SandboxOperationReceiptSchema,
+  SandboxHandoff as SandboxHandoffSchema,
+  type SandboxHandoff as SandboxHandoffContract,
   type SandboxImageInput,
   type SandboxOperationReceipt as SandboxOperationReceiptContract,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
@@ -17,11 +19,7 @@ export type SandboxListResponse = SandboxListResponseContract;
 
 export type SandboxOperationReceipt = SandboxOperationReceiptContract;
 
-export type SandboxHandoff = {
-  readonly pairingUrl: string;
-  readonly environmentId?: string;
-  readonly endpoint?: string;
-};
+export type SandboxHandoff = SandboxHandoffContract;
 
 export type SandboxProfileForm = {
   readonly profileId?: string;
@@ -76,9 +74,7 @@ function shouldIncludePrimaryCookies(requestUrl: string): boolean {
 }
 
 const decodeSandboxListResponse = Schema.decodeUnknownSync(SandboxListResponseSchema);
-const decodeSandboxOperationResponse = Schema.decodeUnknownSync(
-  Schema.Struct({ receipt: SandboxOperationReceiptSchema }),
-);
+const decodeSandboxOperationResponse = Schema.decodeUnknownSync(SandboxOperationResponseSchema);
 
 function decodeListResponse(value: unknown): SandboxListResponse {
   try {
@@ -96,16 +92,14 @@ function decodeOperationReceipt(value: unknown): SandboxOperationReceipt {
   }
 }
 
+const decodeSandboxHandoff = Schema.decodeUnknownSync(SandboxHandoffSchema);
+
 function decodeHandoff(value: unknown): SandboxHandoff {
-  if (!isRecord(value) || !isString(value.pairingUrl)) {
+  try {
+    return decodeSandboxHandoff(value);
+  } catch {
     throw new Error("The sandbox handoff response is invalid.");
   }
-
-  return {
-    pairingUrl: value.pairingUrl,
-    ...(isString(value.environmentId) ? { environmentId: value.environmentId } : {}),
-    ...(isString(value.endpoint) ? { endpoint: value.endpoint } : {}),
-  };
 }
 
 async function request<T>(
@@ -216,6 +210,38 @@ export function deleteSandboxProfile(
   );
 }
 
+export function startSandboxDeployment(
+  deploymentId: string,
+  expectedRevision: number,
+  attachment: "direct" | "relay",
+): Promise<{ readonly operationId: string }> {
+  return request(
+    "/api/kata-sandbox/deployments/start",
+    jsonRequest({
+      requestId: createSandboxRequestId(),
+      deploymentId,
+      expectedRevision,
+      attachment,
+    }),
+    decodeAccepted,
+  );
+}
+
+export function stopSandboxDeployment(
+  deploymentId: string,
+  expectedRevision: number,
+): Promise<{ readonly operationId: string }> {
+  return request(
+    "/api/kata-sandbox/deployments/stop",
+    jsonRequest({
+      requestId: createSandboxRequestId(),
+      deploymentId,
+      expectedRevision,
+    }),
+    decodeAccepted,
+  );
+}
+
 export function deleteSandboxDeployment(
   deploymentId: string,
   expectedRevision?: number,
@@ -268,10 +294,32 @@ export async function pollSandboxOperation(
   throw new Error("The sandbox operation did not finish in time.");
 }
 
-export function mintSandboxHandoff(deploymentId: string): Promise<SandboxHandoff> {
+export function mintSandboxHandoff(
+  deploymentId: string,
+): Promise<Extract<SandboxHandoff, { attachment: "direct" }>> {
   return request(
     `/api/kata-sandbox/deployments/${encodeURIComponent(deploymentId)}/handoff`,
     { method: "POST" },
     decodeHandoff,
-  );
+  ).then((handoff) => {
+    if (handoff.attachment !== "direct") {
+      throw new Error("The sandbox returned a relay handoff for a direct request.");
+    }
+    return handoff;
+  });
+}
+
+export function mintSandboxRelayHandoff(
+  deploymentId: string,
+): Promise<Extract<SandboxHandoff, { attachment: "relay" }>> {
+  return request(
+    `/api/kata-sandbox/deployments/${encodeURIComponent(deploymentId)}/handoff/relay`,
+    { method: "POST" },
+    decodeHandoff,
+  ).then((handoff) => {
+    if (handoff.attachment !== "relay") {
+      throw new Error("The sandbox returned a direct handoff for a relay request.");
+    }
+    return handoff;
+  });
 }

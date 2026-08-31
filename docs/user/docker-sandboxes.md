@@ -51,10 +51,31 @@ Connections lists saved profiles and deployments separately from saved client en
 Unavailable profiles remain visible with a daemon, image, or configuration diagnostic. Retry
 validation after fixing Docker or the image.
 
-- Provider Delete removes the owned Docker container and records the deployment deletion.
-- Client Remove removes only the environment registration from the current client.
-- Attach environment mints a one-use credential that expires after five minutes. Retry Attach when
-  the handoff expires or the client loses the response.
+The deployment list shows the durable lifecycle state and the latest provider observation. Use Stop
+and Start to control the same container. Start uses the stored workspace, source locator, resolved
+commit, bootstrap manifest, and Kata home. It does not resolve the Git ref again. A stopped deployment
+keeps its environment ID and client registrations; connection supervisors show it as disconnected
+until the container starts.
 
-Kata copies only the selected Codex `auth.json` into the sandbox. Other provider credentials,
-host credentials, repository data, and mutable package installs are excluded from the image.
+Choose Direct or Relay for every attachment. Direct creates a one-use bearer pairing URL for the
+container endpoint. Relay links the sandbox through the configured Kata Code Connect account and
+returns an ordinary relay registration. The handoff expires after five minutes. Use Attach direct or
+Attach relay again when a handoff expires or a client loses the response. Web and mobile clients can
+then discover the environment, add a project, and use it through their normal connection flows.
+
+Delete a deployment from the same list when its work is complete. Provider Delete unlinks the
+sandbox's Connect record, removes the owned Docker container, confirms `Gone`, and writes a durable
+deleted record. Client Remove only clears an environment from the current client and leaves the
+Docker deployment in place. A second administrative client can perform Stop, Start, attachment
+retry, and Delete. Standard or read-only clients cannot perform those operations.
+
+A `Stopped` observation means Docker confirmed the owned container is not running. `Unknown` means
+Kata Code could not prove the Docker state, so the deployment, environment ID, registrations, last
+observation, and exact resource handle remain stored. A successful absence observation or confirmed
+Delete produces `Gone`; an outage never does. Allocated deployments can be deleted after Docker
+returns. Disabled profiles retain their deployments and can be re-enabled after the daemon or image
+is fixed.
+
+Kata Code copies only the selected Codex `auth.json` into the sandbox. The sandbox receives no
+provider credentials for other providers. Other provider credentials, host credentials, repository
+data, and mutable package installs are excluded from the image.

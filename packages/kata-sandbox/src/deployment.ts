@@ -7,6 +7,7 @@ import type {
   DeletedDeployment,
   IdentifiedDeployment,
   RequestedDeployment,
+  SandboxConnectorOrigin,
   SandboxDeployment,
   SandboxDeploymentIntent,
   SandboxEndpoint,
@@ -28,6 +29,7 @@ export type SandboxDeploymentCommand =
       readonly kind: "identify";
       readonly environmentId: EnvironmentId;
       readonly endpoint: SandboxEndpoint;
+      readonly connectorOrigin?: SandboxConnectorOrigin;
       readonly resource: DockerResourceHandle;
       readonly expectedRevision: number;
       readonly at: string;
@@ -51,6 +53,7 @@ export type SandboxDeploymentEvent =
       readonly kind: "Identified";
       readonly environmentId: EnvironmentId;
       readonly endpoint: SandboxEndpoint;
+      readonly connectorOrigin?: SandboxConnectorOrigin;
       readonly resource: DockerResourceHandle;
       readonly identifiedAt: string;
     }
@@ -110,12 +113,14 @@ function sameIdentifiedFacts(
   state: IdentifiedDeployment,
   event: Pick<
     Extract<SandboxDeploymentCommand, { readonly kind: "identify" }>,
-    "environmentId" | "endpoint" | "resource"
+    "environmentId" | "endpoint" | "connectorOrigin" | "resource"
   >,
 ): boolean {
   return (
     state.environmentId === event.environmentId &&
     state.endpoint === event.endpoint &&
+    state.connectorOrigin?.localHttpHost === event.connectorOrigin?.localHttpHost &&
+    state.connectorOrigin?.localHttpPort === event.connectorOrigin?.localHttpPort &&
     sameResource(state.resource, event.resource)
   );
 }
@@ -147,6 +152,9 @@ export function decide(
             kind: "Identified",
             environmentId: command.environmentId,
             endpoint: command.endpoint,
+            ...(command.connectorOrigin === undefined
+              ? {}
+              : { connectorOrigin: command.connectorOrigin }),
             resource: command.resource,
             identifiedAt: command.at,
           },
@@ -197,6 +205,7 @@ export function project(
         resource: event.resource,
         environmentId: event.environmentId,
         endpoint: event.endpoint,
+        ...(event.connectorOrigin === undefined ? {} : { connectorOrigin: event.connectorOrigin }),
         workspaceRoot: state.intent.workspaceRoot,
         kataHome: state.intent.kataHome,
         identifiedAt: event.identifiedAt,
@@ -247,11 +256,13 @@ export function identifyDeployment(
   endpoint: SandboxEndpoint,
   resource: DockerResourceHandle,
   identifiedAt: string,
+  connectorOrigin?: SandboxConnectorOrigin,
 ): IdentifiedDeployment {
   const events = decide(state, {
     kind: "identify",
     environmentId,
     endpoint,
+    ...(connectorOrigin === undefined ? {} : { connectorOrigin }),
     resource,
     expectedRevision: state.revision,
     at: identifiedAt,

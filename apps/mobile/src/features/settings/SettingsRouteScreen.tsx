@@ -143,7 +143,24 @@ function LocalSettingsRouteScreen() {
 
 function ConfiguredSettingsRouteScreen() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom, { mode: "promiseExit" });
+  const persistLiveActivityPreference = useCallback(
+    async (enabled: boolean): Promise<boolean> => {
+      const result = await settleAsyncResult(() =>
+        savePreferences({ liveActivitiesEnabled: enabled }),
+      );
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          reportAtomCommandResult(result, {
+            label: "live activity preference save",
+          });
+        }
+        return false;
+      }
+      return true;
+    },
+    [savePreferences],
+  );
   const agentAwarenessPushAvailable = supportsAgentAwarenessPush();
   const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
   const insets = useSafeAreaInsets();
@@ -326,7 +343,10 @@ function ConfiguredSettingsRouteScreen() {
       return;
     }
 
-    savePreferences({ liveActivitiesEnabled: true });
+    if (!(await persistLiveActivityPreference(true))) {
+      setLiveActivityStatus("disabled");
+      return;
+    }
     refreshManagedRelayEnvironments();
     setLiveActivityStatus("enabled");
     // The environment link can succeed while this device's own registration
@@ -351,8 +371,8 @@ function ConfiguredSettingsRouteScreen() {
     getToken,
     isSignedIn,
     liveActivitiesPreferenceEnabled,
+    persistLiveActivityPreference,
     promptSignIn,
-    savePreferences,
   ]);
 
   const handleDeviceNotificationsChange = useCallback(
@@ -410,7 +430,10 @@ function ConfiguredSettingsRouteScreen() {
             });
             return;
           }
-          savePreferences({ liveActivitiesEnabled: false });
+          if (!(await persistLiveActivityPreference(false))) {
+            setLiveActivityStatus("enabled");
+            return;
+          }
           refreshManagedRelayEnvironments();
         })();
         return;
@@ -429,8 +452,8 @@ function ConfiguredSettingsRouteScreen() {
       isSignedIn,
       linkEnvironments,
       liveActivitiesPreferenceEnabled,
+      persistLiveActivityPreference,
       promptSignIn,
-      savePreferences,
     ],
   );
 

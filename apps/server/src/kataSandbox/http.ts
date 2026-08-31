@@ -11,6 +11,8 @@ import {
   AuthAccessReadScope,
   AuthAccessWriteScope,
   AuthPairingCredentialResult,
+  AuthRelayReadScope,
+  AuthRelayWriteScope,
   AuthOrchestrationReadScope,
   AuthStandardClientScopes,
   EnvironmentAuthenticatedPrincipal,
@@ -30,6 +32,7 @@ import * as SandboxDeploymentService from "./SandboxDeploymentService.ts";
 
 const SandboxBootstrapPairingRequest = Schema.Struct({
   label: TrimmedNonEmptyString,
+  scopes: Schema.optional(Schema.Array(Schema.Literals([AuthRelayReadScope, AuthRelayWriteScope]))),
 });
 const decodeSandboxBootstrapPairingRequest = Schema.decodeUnknownEffect(
   SandboxBootstrapPairingRequest,
@@ -105,7 +108,7 @@ export const sandboxBootstrapPairingRouteLayer = HttpRouter.add(
             { discard: true },
           );
           return yield* pairingGrants.issueOneTimeToken({
-            scopes: AuthStandardClientScopes,
+            scopes: decoded.success.scopes ?? AuthStandardClientScopes,
             subject: "sandbox-bootstrap",
             label: decoded.success.label,
           });
@@ -190,6 +193,26 @@ export const sandboxHttpApiLayer = HttpApiBuilder.group(
         }),
       )
       .handle(
+        "start",
+        Effect.fn("kataSandbox.http.start")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          const session = yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* service
+            .start(session.subject, args.payload)
+            .pipe(Effect.mapError(toHttpError));
+        }),
+      )
+      .handle(
+        "stop",
+        Effect.fn("kataSandbox.http.stop")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          const session = yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* service
+            .stop(session.subject, args.payload)
+            .pipe(Effect.mapError(toHttpError));
+        }),
+      )
+      .handle(
         "delete",
         Effect.fn("kataSandbox.http.delete")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
@@ -217,6 +240,20 @@ export const sandboxHttpApiLayer = HttpApiBuilder.group(
           yield* requireEnvironmentScope(AuthAccessWriteScope);
           const result = yield* sandboxHandoffMutex.withPermits(1)(
             service.mintHandoff(args.params.deploymentId).pipe(Effect.mapError(toHttpError)),
+          );
+          yield* noStoreResponseHeaders;
+          return result;
+        }),
+      )
+      .handle(
+        "mintRelayHandoff",
+        Effect.fn("kataSandbox.http.mintRelayHandoff")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          const result = yield* sandboxHandoffMutex.withPermits(1)(
+            service
+              .mintHandoff(args.params.deploymentId, "relay")
+              .pipe(Effect.mapError(toHttpError)),
           );
           yield* noStoreResponseHeaders;
           return result;

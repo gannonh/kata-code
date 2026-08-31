@@ -16,6 +16,7 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   BearerConnectionRegistration,
+  RelayConnectionRegistration,
   type ConnectionCatalogEntry,
   type ConnectionCredential,
   SshConnectionProfile,
@@ -26,6 +27,7 @@ import { mapRemoteEnvironmentError } from "./errors.ts";
 import {
   BearerConnectionTarget,
   ConnectionBlockedError,
+  RelayConnectionTarget,
   SshConnectionTarget,
   type ConnectionAttemptError,
 } from "./model.ts";
@@ -41,6 +43,11 @@ export interface PairingConnectionInput {
 export interface SshConnectionInput {
   readonly target: DesktopSshEnvironmentTarget;
   readonly label?: string;
+}
+
+export interface RelayConnectionInput {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
 }
 
 export interface BearerConnectionUpdateInput {
@@ -60,6 +67,12 @@ export class ConnectionOnboarding extends Context.Service<
     >;
     readonly registerSsh: (
       input: SshConnectionInput,
+    ) => Effect.Effect<
+      EnvironmentId,
+      ConnectionAttemptError | Persistence.ConnectionPersistenceError
+    >;
+    readonly registerRelay: (
+      input: RelayConnectionInput,
     ) => Effect.Effect<
       EnvironmentId,
       ConnectionAttemptError | Persistence.ConnectionPersistenceError
@@ -242,6 +255,27 @@ export const registerSshConnection = Effect.fn(
   return registration.target.environmentId;
 });
 
+export const registerRelayConnection = Effect.fn(
+  "clientRuntime.connection.onboarding.registerRelayConnection",
+)(function* (input: RelayConnectionInput) {
+  const label = input.label.trim();
+  if (label === "") {
+    return yield* new ConnectionBlockedError({
+      reason: "configuration",
+      detail: "Environment label cannot be empty.",
+    });
+  }
+  const registration = new RelayConnectionRegistration({
+    target: new RelayConnectionTarget({
+      environmentId: input.environmentId,
+      label,
+    }),
+  });
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+  yield* registry.register(registration);
+  return registration.target.environmentId;
+});
+
 export const make = Effect.gen(function* () {
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
   const presentation = yield* ClientCapabilities.ClientPresentation;
@@ -260,6 +294,10 @@ export const make = Effect.gen(function* () {
       registerSshConnection(input).pipe(
         Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
         Effect.provideService(ClientCapabilities.SshEnvironmentGateway, ssh),
+      ),
+    registerRelay: (input) =>
+      registerRelayConnection(input).pipe(
+        Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
       ),
     updateBearer: (input) =>
       updateBearerConnection(input).pipe(

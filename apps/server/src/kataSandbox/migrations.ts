@@ -49,6 +49,8 @@ export const runKataSandboxMigrations = Effect.fn("kataSandbox.runMigrations")(f
             endpoint TEXT,
             workspace_root TEXT,
             kata_home TEXT,
+            connector_origin_json TEXT,
+            attachment TEXT,
             identified_at TEXT,
             deleted_at TEXT
           )
@@ -57,7 +59,8 @@ export const runKataSandboxMigrations = Effect.fn("kataSandbox.runMigrations")(f
         yield* sql`
           CREATE TABLE IF NOT EXISTS kata_sandbox_observations (
             deployment_id TEXT PRIMARY KEY REFERENCES kata_sandbox_deployments(deployment_id),
-            observation_json TEXT NOT NULL
+            observation_json TEXT NOT NULL,
+            deployment_revision INTEGER NOT NULL DEFAULT 0
           )
         `;
 
@@ -72,8 +75,11 @@ export const runKataSandboxMigrations = Effect.fn("kataSandbox.runMigrations")(f
             deployment_id TEXT,
             profile_id TEXT,
             profile_input_json TEXT,
+            attachment TEXT,
             expected_revision INTEGER,
             resolved_image_digest TEXT,
+            execution_token TEXT,
+            claimed_at TEXT,
             result_json TEXT,
             error TEXT,
             progress_json TEXT,
@@ -92,13 +98,38 @@ export const runKataSandboxMigrations = Effect.fn("kataSandbox.runMigrations")(f
           ON kata_sandbox_operation_receipts (status)
         `;
       } else {
-        // Existing installations predate durable progress and retain their profile rows unchanged.
+        const deploymentColumns = yield* sql<{ readonly name: string }>`
+          PRAGMA table_info(kata_sandbox_deployments)
+        `;
+        if (!deploymentColumns.some((column) => column.name === "connector_origin_json")) {
+          yield* sql.unsafe(
+            "ALTER TABLE kata_sandbox_deployments ADD COLUMN connector_origin_json TEXT",
+          );
+        }
+        if (!deploymentColumns.some((column) => column.name === "attachment")) {
+          yield* sql.unsafe("ALTER TABLE kata_sandbox_deployments ADD COLUMN attachment TEXT");
+        }
+
+        const observationColumns = yield* sql<{ readonly name: string }>`
+          PRAGMA table_info(kata_sandbox_observations)
+        `;
+        if (!observationColumns.some((column) => column.name === "deployment_revision")) {
+          yield* sql.unsafe(
+            "ALTER TABLE kata_sandbox_observations ADD COLUMN deployment_revision INTEGER NOT NULL DEFAULT 0",
+          );
+        }
+
         const operationColumns = yield* sql<{ readonly name: string }>`
           PRAGMA table_info(kata_sandbox_operation_receipts)
         `;
-        if (!operationColumns.some((column) => column.name === "progress_json")) {
+        if (!operationColumns.some((column) => column.name === "attachment")) {
           yield* sql.unsafe(
-            "ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN progress_json TEXT",
+            "ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN attachment TEXT",
+          );
+        }
+        if (!operationColumns.some((column) => column.name === "expected_revision")) {
+          yield* sql.unsafe(
+            "ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN expected_revision INTEGER",
           );
         }
         if (!operationColumns.some((column) => column.name === "resolved_image_digest")) {
@@ -106,9 +137,19 @@ export const runKataSandboxMigrations = Effect.fn("kataSandbox.runMigrations")(f
             "ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN resolved_image_digest TEXT",
           );
         }
-        if (!operationColumns.some((column) => column.name === "expected_revision")) {
+        if (!operationColumns.some((column) => column.name === "execution_token")) {
           yield* sql.unsafe(
-            "ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN expected_revision INTEGER",
+            "ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN execution_token TEXT",
+          );
+        }
+        if (!operationColumns.some((column) => column.name === "claimed_at")) {
+          yield* sql.unsafe(
+            "ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN claimed_at TEXT",
+          );
+        }
+        if (!operationColumns.some((column) => column.name === "progress_json")) {
+          yield* sql.unsafe(
+            "ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN progress_json TEXT",
           );
         }
         // Profile operations from the original Docker contract stored imageDigest directly.

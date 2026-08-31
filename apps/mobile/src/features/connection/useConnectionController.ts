@@ -1,8 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  RelayConnectionRegistration,
-  RelayConnectionTarget,
-} from "@kata-sh/code-client-runtime/connection";
 import type { EnvironmentId } from "@kata-sh/code-contracts";
 import type {
   RelayClientEnvironmentRecord,
@@ -14,6 +10,7 @@ import { useCallback, useMemo } from "react";
 import { environmentCatalog } from "../../connection/catalog";
 import {
   connectPairingUrl as connectPairingUrlAtom,
+  connectRelayEnvironment as connectRelayEnvironmentAtom,
   updateBearerConnection,
 } from "../../connection/onboarding";
 import { useEnvironments } from "../../state/environments";
@@ -36,7 +33,9 @@ export function useConnectionController() {
     reportFailure: false,
   });
   const updateBearer = useAtomCommand(updateBearerConnection, { reportFailure: false });
-  const registerEnvironment = useAtomCommand(environmentCatalog.register, "environment register");
+  const connectRelayEnvironmentMutation = useAtomCommand(connectRelayEnvironmentAtom, {
+    reportFailure: false,
+  });
   const removeEnvironmentMutation = useAtomCommand(environmentCatalog.remove, "environment remove");
   const retryEnvironmentMutation = useAtomCommand(environmentCatalog.retryNow, "environment retry");
   const refreshRelayEnvironments = useAtomCommand(
@@ -74,15 +73,11 @@ export function useConnectionController() {
   );
   const connectRelayEnvironment = useCallback(
     (environment: RelayClientEnvironmentRecord) =>
-      registerEnvironment(
-        new RelayConnectionRegistration({
-          target: new RelayConnectionTarget({
-            environmentId: environment.environmentId,
-            label: environment.label,
-          }),
-        }),
-      ),
-    [registerEnvironment],
+      connectRelayEnvironmentMutation({
+        environmentId: environment.environmentId,
+        label: environment.label,
+      }),
+    [connectRelayEnvironmentMutation],
   );
   const removeEnvironment = useCallback(
     (environmentId: EnvironmentId) => removeEnvironmentMutation(environmentId),

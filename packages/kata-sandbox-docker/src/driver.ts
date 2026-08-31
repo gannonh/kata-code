@@ -7,7 +7,7 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
-import { PositiveInt, type ModelSelection } from "@kata-sh/code-contracts";
+import { EnvironmentId, PositiveInt, type ModelSelection } from "@kata-sh/code-contracts";
 import {
   DEFAULT_SANDBOX_CONTAINER_PORT,
   DEFAULT_SANDBOX_KATA_HOME,
@@ -27,6 +27,8 @@ import {
   SandboxDriverError,
   type SandboxIdentifiedFacts,
   type SandboxProviderDriver,
+  type SandboxProviderResourceInput,
+  type SandboxStartedFacts,
   type SandboxValidatedProfile,
   type SandboxValidationProgressReporter,
 } from "@kata-sh/code-kata-sandbox/driver";
@@ -116,6 +118,7 @@ const decodeExecInspect = Schema.decodeUnknownSync(
 const decodeDockerVersion = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ ApiVersion: Schema.String })),
 );
+const decodeEnvironmentId = Schema.decodeUnknownSync(EnvironmentId);
 
 function decodeReadiness(value: unknown): ReadinessResponse {
   if (value === null || typeof value !== "object") {
@@ -126,7 +129,10 @@ function decodeReadiness(value: unknown): ReadinessResponse {
   if (typeof environmentId !== "string" || typeof serverVersion !== "string") {
     throw new Error("Kata readiness response did not contain environmentId and serverVersion.");
   }
-  return { environmentId, serverVersion };
+  return {
+    environmentId: decodeEnvironmentId(environmentId),
+    serverVersion,
+  };
 }
 
 function asDriverError(cause: unknown, reason: SandboxDriverError["reason"]): SandboxDriverError {
@@ -213,6 +219,21 @@ function labelsMatch(inspect: DockerInspect, intent: SandboxDeploymentIntent): b
     profileRevision: intent.profileRevision,
     schemaVersion: "v1",
   });
+}
+
+function containerNameMatches(inspect: DockerInspect, expectedName: string): boolean {
+  const name = inspect.Name.startsWith("/") ? inspect.Name.slice(1) : inspect.Name;
+  return name === expectedName;
+}
+
+function allocatedIdentityMatches(
+  inspect: DockerInspect,
+  intent: SandboxDeploymentIntent,
+): boolean {
+  return (
+    containerNameMatches(inspect, dockerContainerName(intent.deploymentId)) &&
+    labelsMatch(inspect, intent)
+  );
 }
 
 function hostPort(inspect: DockerInspect): number | undefined {
@@ -634,6 +655,10 @@ function runningObservation(at: string): ProviderObservation {
   return { state: "Running", observedAt: at };
 }
 
+function stoppedObservation(at: string): ProviderObservation {
+  return { state: "Stopped", observedAt: at };
+}
+
 function goneObservation(at: string): ProviderObservation {
   return { state: "Gone", observedAt: at };
 }
@@ -646,6 +671,28 @@ function unknownObservation(at: string, cause: unknown): ProviderObservation {
   };
 }
 
+function resourceIdentityMatches(inspect: DockerInspect, resource: DockerResourceHandle): boolean {
+  return (
+    inspect.Id === resource.containerId &&
+    containerNameMatches(inspect, resource.containerName) &&
+    ownershipMatches(inspect, resource.ownership)
+  );
+}
+
+function inspectStoredResource(
+  engine: DockerEngine,
+  resource: DockerResourceHandle,
+  reason: SandboxDriverError["reason"],
+): Effect.Effect<DockerInspect | undefined, SandboxDriverError> {
+  return inspectByName(engine, resource.containerId, reason).pipe(
+    Effect.flatMap((inspect) =>
+      inspect !== undefined
+        ? Effect.succeed(inspect)
+        : inspectByName(engine, resource.containerName, reason),
+    ),
+  );
+}
+
 function removeOwnedContainer(
   engine: DockerEngine,
   containerId: string,
@@ -653,7 +700,12 @@ function removeOwnedContainer(
 ): Effect.Effect<void, never> {
   return inspectByName(engine, containerId, "allocation-failed").pipe(
     Effect.flatMap((inspect) => {
-      if (inspect === undefined || !labelsMatch(inspect, intent)) return Effect.void;
+      if (
+        inspect === undefined ||
+        inspect.Id !== containerId ||
+        !allocatedIdentityMatches(inspect, intent)
+      )
+        return Effect.void;
       return engine
         .request({
           path: "/containers/" + encodeURIComponent(containerId) + "?force=true",
@@ -676,6 +728,161 @@ export function makeDockerSandboxDriver(
   const readinessProbe = options.readinessProbe ?? defaultReadinessProbe;
   const endpointHost = options.endpointHost ?? DEFAULT_ENDPOINT_HOST;
 
+  const inspectPowerResource = (
+    input: SandboxProviderResourceInput,
+  ): Effect.Effect<DockerInspect | undefined, SandboxDriverError> =>
+    inspectStoredResource(engineFor(input.profile.socketPath), input.resource, "lifecycle-failed");
+
+  const powerObservation = (input: SandboxProviderResourceInput) =>
+    inspectPowerResource(input).pipe(
+      Effect.flatMap((inspect): Effect.Effect<ProviderObservation, SandboxDriverError> => {
+        if (inspect === undefined) return Effect.succeed(goneObservation(now()));
+        if (!resourceIdentityMatches(inspect, input.resource)) {
+          return Effect.succeed(
+            unknownObservation(now(), "Docker resource ownership could not be verified."),
+          );
+        }
+        if (!inspect.State.Running) return Effect.succeed(stoppedObservation(now()));
+        return Effect.succeed(runningObservation(now()));
+      }),
+      Effect.catch((cause) => Effect.succeed(unknownObservation(now(), cause))),
+    );
+
+  const startedFacts = (
+    input: SandboxProviderResourceInput,
+    inspect: DockerInspect,
+  ): Effect.Effect<SandboxStartedFacts | ProviderObservation, SandboxDriverError> =>
+    Effect.gen(function* () {
+      const port = hostPort(inspect);
+      if (port === undefined) {
+        return yield* new SandboxDriverError({
+          reason: "lifecycle-failed",
+          message: "Docker did not publish the sandbox port after start.",
+        });
+      }
+      const endpoint = endpointUrl(endpointHost, port);
+      if (input.intent === undefined) return runningObservation(now());
+      const readiness = yield* readinessProbe(endpoint, input.intent.bootstrapManifest).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SandboxDriverError({
+              reason: "lifecycle-failed",
+              message: cause.message,
+              cause,
+            }),
+        ),
+      );
+      if (
+        input.expectedEnvironmentId !== undefined &&
+        readiness.environmentId !== input.expectedEnvironmentId
+      ) {
+        return yield* new SandboxDriverError({
+          reason: "lifecycle-failed",
+          message: "Sandbox readiness returned a different environment id.",
+        });
+      }
+      return {
+        environmentId: readiness.environmentId,
+        endpoint,
+        connectorOrigin: {
+          localHttpHost: DEFAULT_ENDPOINT_HOST,
+          localHttpPort: PositiveInt.make(DEFAULT_SANDBOX_CONTAINER_PORT),
+        },
+        resource: {
+          ...input.resource,
+          hostPort: PositiveInt.make(port),
+        },
+      } satisfies SandboxStartedFacts;
+    });
+
+  const stopPower = (input: SandboxProviderResourceInput) =>
+    inspectPowerResource(input).pipe(
+      Effect.flatMap((inspect) => {
+        if (inspect === undefined) return Effect.succeed(goneObservation(now()));
+        if (!resourceIdentityMatches(inspect, input.resource)) {
+          return Effect.succeed(
+            unknownObservation(now(), "Docker resource ownership could not be verified."),
+          );
+        }
+        if (!inspect.State.Running) return Effect.succeed(stoppedObservation(now()));
+        return engineFor(input.profile.socketPath)
+          .request({
+            path: "/containers/" + encodeURIComponent(input.resource.containerId) + "/stop",
+            method: "POST",
+          })
+          .pipe(
+            Effect.mapError((error) => engineFailure(error, "lifecycle-failed")),
+            Effect.flatMap((response) => {
+              if (!isSuccess(response.status) && response.status !== 304) {
+                return Effect.fail(
+                  new SandboxDriverError({
+                    reason: "lifecycle-failed",
+                    message: "Docker stop returned " + response.status + ".",
+                  }),
+                );
+              }
+              return powerObservation(input);
+            }),
+          );
+      }),
+      Effect.catch((cause) => Effect.succeed(unknownObservation(now(), cause))),
+    );
+
+  const startPower = (input: SandboxProviderResourceInput) =>
+    inspectPowerResource(input).pipe(
+      Effect.flatMap((inspect) => {
+        if (inspect === undefined) return Effect.succeed(goneObservation(now()));
+        if (!resourceIdentityMatches(inspect, input.resource)) {
+          return Effect.succeed(
+            unknownObservation(now(), "Docker resource ownership could not be verified."),
+          );
+        }
+        const started = inspect.State.Running
+          ? Effect.succeed(inspect)
+          : engineFor(input.profile.socketPath)
+              .request({
+                path: "/containers/" + encodeURIComponent(input.resource.containerId) + "/start",
+                method: "POST",
+              })
+              .pipe(
+                Effect.mapError((error) => engineFailure(error, "lifecycle-failed")),
+                Effect.flatMap((response) =>
+                  !isSuccess(response.status) && response.status !== 304
+                    ? Effect.fail(
+                        new SandboxDriverError({
+                          reason: "lifecycle-failed",
+                          message: "Docker start returned " + response.status + ".",
+                        }),
+                      )
+                    : inspectPowerResource(input).pipe(
+                        Effect.flatMap((after) =>
+                          after === undefined
+                            ? Effect.fail(
+                                new SandboxDriverError({
+                                  reason: "lifecycle-failed",
+                                  message: "Sandbox container disappeared after start.",
+                                }),
+                              )
+                            : Effect.succeed(after),
+                        ),
+                      ),
+                ),
+              );
+        return started.pipe(
+          Effect.flatMap((after) => {
+            if (!resourceIdentityMatches(after, input.resource)) {
+              return Effect.succeed<ProviderObservation>(
+                unknownObservation(now(), "Docker resource ownership changed after start."),
+              );
+            }
+            if (!after.State.Running) return Effect.succeed(stoppedObservation(now()));
+            return startedFacts(input, after);
+          }),
+        );
+      }),
+      Effect.catch((cause) => Effect.succeed(unknownObservation(now(), cause))),
+    );
+
   return {
     kind: DOCKER_KIND,
     descriptor: DOCKER_DESCRIPTOR,
@@ -688,10 +895,10 @@ export function makeDockerSandboxDriver(
         const name = dockerContainerName(input.intent.deploymentId);
         const existing = yield* inspectByName(engine, name, "allocation-failed");
         if (existing !== undefined) {
-          if (!labelsMatch(existing, input.intent)) {
+          if (!allocatedIdentityMatches(existing, input.intent)) {
             return yield* new SandboxDriverError({
               reason: "allocation-failed",
-              message: "Docker container " + name + " exists with foreign ownership labels.",
+              message: "Docker container " + name + " exists with foreign ownership.",
             });
           }
           return yield* makeHandle(existing, input.intent);
@@ -705,7 +912,7 @@ export function makeDockerSandboxDriver(
           .pipe(Effect.mapError((error) => engineFailure(error, "allocation-failed")));
         if (created.status === 409) {
           const adopted = yield* inspectByName(engine, name, "allocation-failed");
-          if (adopted !== undefined && labelsMatch(adopted, input.intent)) {
+          if (adopted !== undefined && allocatedIdentityMatches(adopted, input.intent)) {
             return yield* makeHandle(adopted, input.intent);
           }
         }
@@ -743,6 +950,12 @@ export function makeDockerSandboxDriver(
               message: "Docker container disappeared immediately after creation.",
             });
           }
+          if (!allocatedIdentityMatches(inspected, input.intent)) {
+            return yield* new SandboxDriverError({
+              reason: "allocation-failed",
+              message: "Docker container ownership labels did not match after creation.",
+            });
+          }
           return yield* makeHandle(inspected, input.intent);
         });
         return yield* allocated.pipe(
@@ -764,21 +977,11 @@ export function makeDockerSandboxDriver(
       Effect.gen(function* () {
         yield* validateAllocationInput(input);
         const engine = engineFor(input.profile.socketPath);
-        const initialInspection = yield* inspectByName(
-          engine,
-          input.resource.containerId,
-          "setup-failed",
-        );
-        if (initialInspection === undefined) {
+        const existing = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
+        if (existing === undefined || !resourceIdentityMatches(existing, input.resource)) {
           return yield* new SandboxDriverError({
             reason: "setup-failed",
-            message: "Sandbox container disappeared before auth setup.",
-          });
-        }
-        if (!labelsMatch(initialInspection, input.intent)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox ownership labels could not be verified before auth setup.",
+            message: "Docker resource identity could not be verified before setup.",
           });
         }
         const archive = buildAuthArchive(input.codexAuthJson);
@@ -825,6 +1028,12 @@ export function makeDockerSandboxDriver(
             message: "Sandbox container disappeared before start.",
           });
         }
+        if (!resourceIdentityMatches(inspected, input.resource)) {
+          return yield* new SandboxDriverError({
+            reason: "setup-failed",
+            message: "Sandbox resource identity changed before start.",
+          });
+        }
         if (!labelsMatch(inspected, input.intent)) {
           return yield* new SandboxDriverError({
             reason: "setup-failed",
@@ -852,10 +1061,10 @@ export function makeDockerSandboxDriver(
             message: "Sandbox container disappeared after start.",
           });
         }
-        if (!labelsMatch(running, input.intent)) {
+        if (!resourceIdentityMatches(running, input.resource)) {
           return yield* new SandboxDriverError({
             reason: "setup-failed",
-            message: "Sandbox ownership labels changed after start.",
+            message: "Sandbox resource identity changed after start.",
           });
         }
         const port = hostPort(running);
@@ -912,6 +1121,10 @@ export function makeDockerSandboxDriver(
         return {
           environmentId: readiness.environmentId,
           endpoint,
+          connectorOrigin: {
+            localHttpHost: DEFAULT_ENDPOINT_HOST,
+            localHttpPort: PositiveInt.make(DEFAULT_SANDBOX_CONTAINER_PORT),
+          },
           workspaceRoot: DEFAULT_SANDBOX_WORKSPACE_ROOT,
           resource: {
             ...input.resource,
@@ -919,31 +1132,15 @@ export function makeDockerSandboxDriver(
           },
         } satisfies SandboxIdentifiedFacts;
       }),
-    observe: (input): Effect.Effect<ProviderObservation, SandboxDriverError> => {
-      const engine = engineFor(input.profile.socketPath);
-      const resource = input.resource;
-      return inspectByName(engine, resource.containerId, "observation-failed").pipe(
-        Effect.map((inspect): ProviderObservation => {
-          if (inspect === undefined) return goneObservation(now());
-          const owned = ownershipMatches(inspect, resource.ownership);
-          if (!owned) {
-            return unknownObservation(now(), "Docker resource ownership could not be verified.");
-          }
-          if (!inspect.State.Running) {
-            return unknownObservation(now(), "Docker sandbox container is stopped.");
-          }
-          return runningObservation(now());
-        }),
-        Effect.catch((cause) => Effect.succeed(unknownObservation(now(), cause))),
-      );
-    },
+    observe: (input): Effect.Effect<ProviderObservation, SandboxDriverError> =>
+      powerObservation({ profile: input.profile, resource: input.resource }),
     delete: (input): Effect.Effect<ProviderObservation, SandboxDriverError> => {
       const engine = engineFor(input.profile.socketPath);
       const resource = input.resource;
-      return inspectByName(engine, resource.containerId, "deletion-failed").pipe(
+      return inspectStoredResource(engine, resource, "deletion-failed").pipe(
         Effect.flatMap((inspect) => {
           if (inspect === undefined) return Effect.succeed(goneObservation(now()));
-          const owned = ownershipMatches(inspect, resource.ownership);
+          const owned = resourceIdentityMatches(inspect, resource);
           if (!owned) {
             return Effect.succeed(
               unknownObservation(
@@ -987,6 +1184,11 @@ export function makeDockerSandboxDriver(
         }),
         Effect.catch((cause) => Effect.succeed(unknownObservation(now(), cause))),
       );
+    },
+    power: {
+      inspect: (input) => powerObservation(input),
+      stop: (input) => stopPower(input),
+      start: (input) => startPower(input),
     },
   };
 }
