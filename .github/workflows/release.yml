@@ -740,8 +740,8 @@ jobs:
     timeout-minutes: 45
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VCR_ORG_ID: ${{ secrets.VCR_ORG_ID }}
+      VCR_PROJECT_ID: ${{ secrets.VCR_PROJECT_ID }}
       VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
       VERCEL_PROJECT_SLUG: ${{ vars.VERCEL_PROJECT_SLUG }}
       KATACODE_SANDBOX_IMAGE_REPOSITORY: ${{ vars.KATACODE_SANDBOX_IMAGE_REPOSITORY }}
@@ -800,7 +800,7 @@ jobs:
             exit 0
           fi
 
-          required=(VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID)
+          required=(VERCEL_TOKEN VCR_ORG_ID VCR_PROJECT_ID)
           for name in "${required[@]}"; do
             if [[ -z "${!name:-}" ]]; then
               echo "Missing required Vercel release configuration: $name" >&2
@@ -808,11 +808,11 @@ jobs:
             fi
           done
 
-          vcr_scope="${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
+          vcr_scope="${VERCEL_TEAM_SLUG:-$VCR_ORG_ID}"
           repository="${KATACODE_SANDBOX_IMAGE_REPOSITORY:-vcr.vercel.com/${VERCEL_TEAM_SLUG:-kata-sh}/${VERCEL_PROJECT_SLUG:-kata-code}/kata-sandbox}"
           public_repository="ghcr.io/gannonh/kata-sandbox"
           vp dlx vercel@59.10.0 vcr login docker \
-            --project "$VERCEL_PROJECT_ID" \
+            --project "$VCR_PROJECT_ID" \
             --scope "$vcr_scope" \
             --token "$VERCEL_TOKEN" \
             --non-interactive
@@ -827,7 +827,7 @@ jobs:
 
           # VCR public access permits other authenticated Vercel teams to pull.
           vp dlx vercel@59.10.0 vcr config kata-sandbox \
-            --project "$VERCEL_PROJECT_ID" \
+            --project "$VCR_PROJECT_ID" \
             --scope "$vcr_scope" \
             --public true \
             --token "$VERCEL_TOKEN" \
@@ -845,7 +845,7 @@ jobs:
             --repository "$repository"
             --build-output "$build_output"
             --output sandbox-image.json
-            --project-id "$VERCEL_PROJECT_ID"
+            --project-id "$VCR_PROJECT_ID"
             --team-slug "${VERCEL_TEAM_SLUG:-kata-sh}"
           )
           if [[ "${{ needs.preflight.outputs.make_latest }}" == "true" ]]; then

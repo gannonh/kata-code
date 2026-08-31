@@ -112,8 +112,10 @@ web app with Vercel CLI after the GitHub Release succeeds.
 Required GitHub Actions secrets:
 
 - `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
+- `VERCEL_ORG_ID`: hosted web app team ID.
+- `VERCEL_PROJECT_ID`: hosted web app project ID.
+- `VCR_ORG_ID`: Sandbox image VCR team ID.
+- `VCR_PROJECT_ID`: Sandbox image VCR project ID.
 
 Optional GitHub Actions variables:
 
@@ -126,8 +128,7 @@ Optional GitHub Actions variables:
 
 The Sandbox image job publishes each exact release tag to VCR and
 `ghcr.io/gannonh/kata-sandbox`. VCR serves authenticated Vercel workloads. GHCR serves anonymous
-Docker pulls. The first GHCR publish creates a private package; make it public in the package
-settings before rerunning the release so the anonymous manifest check can pass.
+Docker pulls. The release verifies anonymous GHCR access before publishing Sandbox metadata.
 
 Required Vercel domains:
 
