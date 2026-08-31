@@ -138,24 +138,207 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
       const stale = yield* Effect.flip(repository.saveProfile({ ...updated, revision: 3 }, 1));
       expect(stale).toBeInstanceOf(SandboxRepositoryConflictError);
 
+      const currentIntent = {
+        ...intent,
+        profileRevision: 2,
+        profileSnapshot: updated,
+      };
+      const currentReceipt = { ...receipt, expectedRevision: 2 };
       const accepted = yield* repository.accept({
         actor: "desktop-bootstrap",
-        receipt,
-        deployment: requestDeployment(intent),
+        receipt: currentReceipt,
+        deployment: requestDeployment(currentIntent),
       });
       const retried = yield* repository.accept({
         actor: "desktop-bootstrap",
-        receipt: { ...receipt, operationId: SandboxOperationId.make("operation-2") },
+        receipt: {
+          ...currentReceipt,
+          operationId: SandboxOperationId.make("operation-2"),
+        },
         deployment: requestDeployment({
-          ...intent,
+          ...currentIntent,
           deploymentId: SandboxDeploymentId.make("deployment-2"),
         }),
       });
 
       expect(retried).toEqual(accepted);
       expect((yield* repository.getDeployment(deploymentId)).pipe(Option.getOrUndefined)).toEqual(
-        requestDeployment(intent),
+        requestDeployment(currentIntent),
       );
+    }).pipe(
+      Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
+    ),
+  );
+
+  it.effect("claims each operation once and only allows stale takeover", () =>
+    Effect.gen(function* () {
+      const repository = yield* SandboxDeploymentRepository;
+      yield* repository.saveProfile(profile);
+      yield* repository.accept({
+        actor: "desktop-bootstrap",
+        receipt,
+        deployment: requestDeployment(intent),
+      });
+
+      const first = yield* repository.claimOperation(
+        receipt.operationId,
+        "worker-1",
+        "2026-08-30T00:00:00.000Z",
+        "2026-08-29T23:59:30.000Z",
+      );
+      expect(Option.isSome(first)).toBe(true);
+      expect(
+        yield* repository.renewOperation(
+          receipt.operationId,
+          "worker-1",
+          "2026-08-30T00:00:10.000Z",
+        ),
+      ).toBe(true);
+      expect(
+        yield* repository.renewOperation(
+          receipt.operationId,
+          "worker-2",
+          "2026-08-30T00:00:10.000Z",
+        ),
+      ).toBe(false);
+
+      const concurrent = yield* repository.claimOperation(
+        receipt.operationId,
+        "worker-2",
+        "2026-08-30T00:00:11.000Z",
+        "2026-08-30T00:00:10.000Z",
+      );
+      expect(Option.isNone(concurrent)).toBe(true);
+
+      const stale = yield* repository.claimOperation(
+        receipt.operationId,
+        "worker-2",
+        "2026-08-30T00:00:41.000Z",
+        "2026-08-30T00:00:11.000Z",
+      );
+      expect(Option.isSome(stale)).toBe(true);
+      if (Option.isSome(first)) {
+        yield* repository.saveClaimedOperation({ ...first.value, status: "Succeeded" }, "worker-1");
+      }
+      expect(
+        (yield* repository.getOperation(receipt.operationId)).pipe(Option.getOrUndefined)?.status,
+      ).toBe("Running");
+      if (Option.isSome(stale)) {
+        yield* repository.saveClaimedOperation({ ...stale.value, status: "Succeeded" }, "worker-2");
+      }
+      expect(
+        (yield* repository.getOperation(receipt.operationId)).pipe(Option.getOrUndefined)?.status,
+      ).toBe("Succeeded");
+    }).pipe(
+      Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
+    ),
+  );
+
+  it.effect("allows only one concurrent stale-operation takeover", () =>
+    Effect.gen(function* () {
+      const repository = yield* SandboxDeploymentRepository;
+      yield* repository.saveProfile(profile);
+      yield* repository.accept({
+        actor: "desktop-bootstrap",
+        receipt,
+        deployment: requestDeployment(intent),
+      });
+      yield* repository.claimOperation(
+        receipt.operationId,
+        "worker-1",
+        "2026-08-30T00:00:00.000Z",
+        "2026-08-29T23:59:30.000Z",
+      );
+
+      const claims = yield* Effect.all(
+        [
+          repository.claimOperation(
+            receipt.operationId,
+            "worker-2",
+            "2026-08-30T00:00:41.000Z",
+            "2026-08-30T00:00:11.000Z",
+          ),
+          repository.claimOperation(
+            receipt.operationId,
+            "worker-3",
+            "2026-08-30T00:00:41.000Z",
+            "2026-08-30T00:00:11.000Z",
+          ),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const winners = claims.filter(Option.isSome);
+      expect(winners).toHaveLength(1);
+      const winnerIndex = Option.isSome(claims[0]) ? 0 : 1;
+      const winner = claims[winnerIndex];
+      if (Option.isNone(winner)) throw new Error("Expected one stale-operation winner.");
+      const winnerId = winnerIndex === 0 ? "worker-2" : "worker-3";
+      yield* repository.saveClaimedOperation({ ...winner.value, status: "Succeeded" }, winnerId);
+      expect(
+        (yield* repository.getOperation(receipt.operationId)).pipe(Option.getOrUndefined)?.status,
+      ).toBe("Succeeded");
+    }).pipe(
+      Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
+    ),
+  );
+
+  it.effect("orders equal-revision observations and rejects stale revisions", () =>
+    Effect.gen(function* () {
+      const repository = yield* SandboxDeploymentRepository;
+      yield* repository.saveDeployment(requestDeployment(intent));
+      yield* repository.saveObservation(deploymentId, {
+        state: "Running",
+        observedAt: "2026-08-30T00:00:02.000Z",
+        environmentId: intent.controlEnvironmentId,
+      });
+      yield* repository.saveObservation(deploymentId, {
+        state: "Stopped",
+        observedAt: "2026-08-30T00:00:01.000Z",
+      });
+      expect(
+        (yield* repository.getObservation(deploymentId)).pipe(Option.getOrUndefined),
+      ).toMatchObject({ state: "Running", observedAt: "2026-08-30T00:00:02.000Z" });
+
+      const allocated = {
+        state: "Allocated" as const,
+        revision: 2,
+        intent,
+        resource,
+      };
+      yield* repository.saveDeployment(allocated, 1);
+      const stale = yield* Effect.flip(
+        repository.saveObservation(
+          deploymentId,
+          { state: "Stopped", observedAt: "2026-08-30T00:00:03.000Z" },
+          1,
+        ),
+      );
+      expect(stale).toBeInstanceOf(SandboxRepositoryConflictError);
+    }).pipe(
+      Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
+    ),
+  );
+
+  it.effect("rejects a second active operation for one deployment", () =>
+    Effect.gen(function* () {
+      const repository = yield* SandboxDeploymentRepository;
+      yield* repository.saveProfile(profile);
+      yield* repository.accept({
+        actor: "desktop-bootstrap",
+        receipt,
+        deployment: requestDeployment(intent),
+      });
+      const second = yield* Effect.flip(
+        repository.accept({
+          actor: "mobile-bootstrap",
+          receipt: {
+            ...receipt,
+            operationId: SandboxOperationId.make("operation-2"),
+            requestId: SandboxRequestId.make("request-2"),
+          },
+        }),
+      );
+      expect(second).toBeInstanceOf(SandboxRepositoryConflictError);
     }).pipe(
       Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
     ),
