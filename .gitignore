@@ -54,6 +54,8 @@ uat-evidence/
 !.claude/skills/test-t3-mobile/
 !.claude/skills/verify-katacode/
 
-
 # Kata Code workspace file.
 kata-code.code-workspace
+
+# Fly sprite credentials
+.sprite
