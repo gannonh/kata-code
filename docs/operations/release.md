@@ -118,8 +118,8 @@ Required GitHub Actions secrets:
 Optional GitHub Actions variables:
 
 - `VERCEL_TEAM_SLUG`: overrides the Vercel CLI scope when the team slug is preferred over the `VERCEL_ORG_ID` secret.
-- `VERCEL_PROJECT_SLUG`: VCR project slug when it differs from `kata-code`.
-- `KATACODE_SANDBOX_IMAGE_REPOSITORY`: full public VCR repository override; defaults to `vcr.vercel.com/astro-labs/kata-code/kata-sandbox`.
+- `VERCEL_PROJECT_SLUG`: unused by Release. The sandbox job reads the project name from `VERCEL_PROJECT_ID`.
+- `KATACODE_SANDBOX_IMAGE_REPOSITORY`: optional full VCR path. Release ignores it when the team or project does not match the project used for `vcr login`. The hosted default is `vcr.vercel.com/<team>/katacode-web/kata-sandbox`.
 - `KATACODE_WEB_ROUTER_URL`: defaults to `https://app.kata.sh`.
 - `KATACODE_WEB_LATEST_DOMAIN`: defaults to `latest.app.kata.sh`.
 - `KATACODE_WEB_NIGHTLY_DOMAIN`: defaults to `nightly.app.kata.sh`.

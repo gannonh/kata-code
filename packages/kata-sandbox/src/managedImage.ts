@@ -45,7 +45,7 @@ export interface VcrOciRegistryOptions {
   readonly baseUrl?: string;
 }
 
-export const DEFAULT_VCR_IMAGE_REPOSITORY = "vcr.vercel.com/astro-labs/kata-code/kata-sandbox";
+export const DEFAULT_VCR_IMAGE_REPOSITORY = "vcr.vercel.com/astro-labs/katacode-web/kata-sandbox"; // pragma: allowlist secret
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const repositorySegmentPattern = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;

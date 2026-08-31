@@ -295,7 +295,11 @@ export interface ResolvedSandboxImageRepository {
 
 export function parseSandboxImageRepository(reference: string): SandboxImageRepository {
   const parts = reference.trim().split("/");
-  if (parts.length !== 4 || parts[0] !== "vcr.vercel.com" || parts.some((part) => part.length === 0)) {
+  if (
+    parts.length !== 4 ||
+    parts[0] !== "vcr.vercel.com" ||
+    parts.some((part) => part.length === 0)
+  ) {
     throw new Error("--repository must be vcr.vercel.com/<team>/<project>/kata-sandbox.");
   }
   const [, teamSlug, projectSlug, repositoryName] = parts;
@@ -325,7 +329,15 @@ export function resolveSandboxImageRepository(input: {
   const derived = managedSandboxImageRepository(input);
   const override = input.override?.trim();
   if (override === undefined || override.length === 0) return { repository: derived };
-  return { repository: override };
+  try {
+    const parsed = parseSandboxImageRepository(override);
+    if (parsed.teamSlug === input.teamSlug && parsed.projectSlug === input.projectSlug) {
+      return { repository: override };
+    }
+  } catch {
+    return { repository: derived, ignoredOverride: override };
+  }
+  return { repository: derived, ignoredOverride: override };
 }
 
 export function vercelProjectInspectUrl(input: {
@@ -756,11 +768,23 @@ export async function verifyAndWriteSandboxImage(input: {
 
 if (import.meta.main) {
   try {
-    const options = parseReleaseImageArgs(process.argv.slice(2));
-    await verifyAndWriteSandboxImage({ options });
-    process.stdout.write(
-      `Wrote ${options.output} for ${options.repository}@${JSON.parse(NodeFS.readFileSync(options.output, "utf8")).indexDigest}.\n`,
-    );
+    const args = process.argv.slice(2);
+    if (args[0] === "--print-repository") {
+      const options = parsePrintRepositoryArgs(args);
+      const resolved = await resolveReleaseSandboxImageRepository(options);
+      if (resolved.ignoredOverride !== undefined) {
+        process.stderr.write(
+          `Ignoring KATACODE_SANDBOX_IMAGE_REPOSITORY=${resolved.ignoredOverride} because it does not match authenticated Vercel project ${resolved.projectSlug}.\n`,
+        );
+      }
+      process.stdout.write(`${resolved.repository}\n`);
+    } else {
+      const options = parseReleaseImageArgs(args);
+      await verifyAndWriteSandboxImage({ options });
+      process.stdout.write(
+        `Wrote ${options.output} for ${options.repository}@${JSON.parse(NodeFS.readFileSync(options.output, "utf8")).indexDigest}.\n`,
+      );
+    }
   } catch (cause) {
     process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`);
     process.exitCode = 1;

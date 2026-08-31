@@ -797,8 +797,25 @@ jobs:
             fi
           done
 
-          vcr_scope="${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
-          repository="${KATACODE_SANDBOX_IMAGE_REPOSITORY:-vcr.vercel.com/${VERCEL_TEAM_SLUG:-kata-sh}/${VERCEL_PROJECT_SLUG:-kata-code}/kata-sandbox}"
+          if [[ -z "${VERCEL_TEAM_SLUG:-}" ]]; then
+            echo "Missing required Vercel release configuration: VERCEL_TEAM_SLUG" >&2
+            exit 1
+          fi
+
+          vcr_scope="$VERCEL_TEAM_SLUG"
+          print_args=(
+            --print-repository
+            --project-id "$VERCEL_PROJECT_ID"
+            --team-id "$VERCEL_ORG_ID"
+            --team-slug "$VERCEL_TEAM_SLUG"
+            --token "$VERCEL_TOKEN"
+          )
+          if [[ -n "${KATACODE_SANDBOX_IMAGE_REPOSITORY:-}" ]]; then
+            print_args+=(--override "$KATACODE_SANDBOX_IMAGE_REPOSITORY")
+          fi
+          repository="$(node scripts/release-sandbox-image.ts "${print_args[@]}")"
+          echo "Publishing managed sandbox image to $repository"
+
           vp dlx vercel@59.10.0 vcr login docker \
             --project "$VERCEL_PROJECT_ID" \
             --scope "$vcr_scope" \
@@ -835,7 +852,7 @@ jobs:
             --build-output "$build_output"
             --output sandbox-image.json
             --project-id "$VERCEL_PROJECT_ID"
-            --team-slug "${VERCEL_TEAM_SLUG:-kata-sh}"
+            --team-slug "$VERCEL_TEAM_SLUG"
           )
           if [[ "${{ needs.preflight.outputs.make_latest }}" == "true" ]]; then
             release_args+=(--make-latest)
