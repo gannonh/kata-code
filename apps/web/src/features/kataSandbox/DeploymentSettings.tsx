@@ -268,7 +268,7 @@ export function DeploymentSettings() {
 
   const startDeployment = useCallback(
     async (deploymentId: string, revision: number, attachment: "direct" | "relay") => {
-      setActiveLifecycleId(`${deploymentId}:start`);
+      setActiveLifecycleId(`${deploymentId}:start:${attachment}`);
       setError(null);
       try {
         const accepted = await startSandboxDeployment(deploymentId, revision, attachment);
@@ -645,7 +645,9 @@ export function DeploymentSettings() {
                           size="sm"
                           variant="outline"
                         >
-                          {activeLifecycleId === `${id}:start` ? "Starting..." : "Start direct"}
+                          {activeLifecycleId === `${id}:start:direct`
+                            ? "Starting..."
+                            : "Start direct"}
                         </Button>
                         {relayAvailable ? (
                           <Button
@@ -654,7 +656,9 @@ export function DeploymentSettings() {
                             size="sm"
                             variant="outline"
                           >
-                            Start relay
+                            {activeLifecycleId === `${id}:start:relay`
+                              ? "Starting..."
+                              : "Start relay"}
                           </Button>
                         ) : null}
                       </>

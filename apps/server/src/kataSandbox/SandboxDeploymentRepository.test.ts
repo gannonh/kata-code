@@ -165,12 +165,15 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
       expect((yield* repository.getDeployment(deploymentId)).pipe(Option.getOrUndefined)).toEqual(
         requestDeployment(currentIntent),
       );
+      expect(
+        Option.isNone(yield* repository.getDeployment(SandboxDeploymentId.make("deployment-2"))),
+      ).toBe(true);
     }).pipe(
       Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
     ),
   );
 
-  it.effect("claims each operation once and only allows stale takeover", () =>
+  it.effect("claims each operation once until recover releases the claim", () =>
     Effect.gen(function* () {
       const repository = yield* SandboxDeploymentRepository;
       yield* repository.saveProfile(profile);
@@ -184,47 +187,38 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
         receipt.operationId,
         "worker-1",
         "2026-08-30T00:00:00.000Z",
-        "2026-08-29T23:59:30.000Z",
       );
       expect(Option.isSome(first)).toBe(true);
-      expect(
-        yield* repository.renewOperation(
-          receipt.operationId,
-          "worker-1",
-          "2026-08-30T00:00:10.000Z",
-        ),
-      ).toBe(true);
-      expect(
-        yield* repository.renewOperation(
-          receipt.operationId,
-          "worker-2",
-          "2026-08-30T00:00:10.000Z",
-        ),
-      ).toBe(false);
+      expect(yield* repository.ownsOperation(receipt.operationId, "worker-1")).toBe(true);
+      expect(yield* repository.ownsOperation(receipt.operationId, "worker-2")).toBe(false);
 
       const concurrent = yield* repository.claimOperation(
         receipt.operationId,
         "worker-2",
         "2026-08-30T00:00:11.000Z",
-        "2026-08-30T00:00:10.000Z",
       );
       expect(Option.isNone(concurrent)).toBe(true);
 
-      const stale = yield* repository.claimOperation(
+      yield* repository.releaseInFlightClaims();
+      expect(yield* repository.ownsOperation(receipt.operationId, "worker-1")).toBe(false);
+
+      const recovered = yield* repository.claimOperation(
         receipt.operationId,
         "worker-2",
-        "2026-08-30T00:00:41.000Z",
         "2026-08-30T00:00:11.000Z",
       );
-      expect(Option.isSome(stale)).toBe(true);
+      expect(Option.isSome(recovered)).toBe(true);
       if (Option.isSome(first)) {
         yield* repository.saveClaimedOperation({ ...first.value, status: "Succeeded" }, "worker-1");
       }
       expect(
         (yield* repository.getOperation(receipt.operationId)).pipe(Option.getOrUndefined)?.status,
       ).toBe("Running");
-      if (Option.isSome(stale)) {
-        yield* repository.saveClaimedOperation({ ...stale.value, status: "Succeeded" }, "worker-2");
+      if (Option.isSome(recovered)) {
+        yield* repository.saveClaimedOperation(
+          { ...recovered.value, status: "Succeeded" },
+          "worker-2",
+        );
       }
       expect(
         (yield* repository.getOperation(receipt.operationId)).pipe(Option.getOrUndefined)?.status,
@@ -234,7 +228,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
     ),
   );
 
-  it.effect("allows only one concurrent stale-operation takeover", () =>
+  it.effect("allows only one concurrent recover takeover", () =>
     Effect.gen(function* () {
       const repository = yield* SandboxDeploymentRepository;
       yield* repository.saveProfile(profile);
@@ -247,8 +241,8 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
         receipt.operationId,
         "worker-1",
         "2026-08-30T00:00:00.000Z",
-        "2026-08-29T23:59:30.000Z",
       );
+      yield* repository.releaseInFlightClaims();
 
       const claims = yield* Effect.all(
         [
@@ -256,13 +250,11 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
             receipt.operationId,
             "worker-2",
             "2026-08-30T00:00:41.000Z",
-            "2026-08-30T00:00:11.000Z",
           ),
           repository.claimOperation(
             receipt.operationId,
             "worker-3",
             "2026-08-30T00:00:41.000Z",
-            "2026-08-30T00:00:11.000Z",
           ),
         ],
         { concurrency: "unbounded" },
@@ -271,7 +263,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
       expect(winners).toHaveLength(1);
       const winnerIndex = Option.isSome(claims[0]) ? 0 : 1;
       const winner = claims[winnerIndex];
-      if (Option.isNone(winner)) throw new Error("Expected one stale-operation winner.");
+      if (Option.isNone(winner)) throw new Error("Expected one recover takeover winner.");
       const winnerId = winnerIndex === 0 ? "worker-2" : "worker-3";
       yield* repository.saveClaimedOperation({ ...winner.value, status: "Succeeded" }, winnerId);
       expect(

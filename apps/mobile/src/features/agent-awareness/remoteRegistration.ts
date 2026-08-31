@@ -1052,7 +1052,7 @@ export function registerLiveActivityPushToken(input: {
           runRegistrationInBackground(
             registerLiveActivityPushTokenValue({
               activityPushToken: event.pushToken,
-              expectedGeneration: deviceRegistrationGeneration,
+              expectedGeneration,
             }),
             "live activity token listener registration failed",
           );

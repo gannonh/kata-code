@@ -636,20 +636,7 @@ export function makeDockerSandboxDriver(
           );
         }
         if (!inspect.State.Running) return Effect.succeed(stoppedObservation(now()));
-        if (input.intent === undefined || input.expectedEnvironmentId === undefined) {
-          return Effect.succeed(runningObservation(now()));
-        }
-        const port = hostPort(inspect);
-        if (port === undefined) {
-          return Effect.succeed(unknownObservation(now(), "Docker sandbox port is not published."));
-        }
-        return readinessProbe(endpointUrl(endpointHost, port), input.intent.bootstrapManifest).pipe(
-          Effect.map((readiness) =>
-            readiness.environmentId === input.expectedEnvironmentId
-              ? runningObservation(now())
-              : unknownObservation(now(), "Sandbox readiness returned a different environment id."),
-          ),
-        );
+        return Effect.succeed(runningObservation(now()));
       }),
       Effect.catch((cause) => Effect.succeed(unknownObservation(now(), cause))),
     );

@@ -309,7 +309,7 @@ function endpointPairingUrl(endpoint: string, credential: string): string {
 
 function localDockerEndpoint(endpoint: string): string {
   const url = new URL(endpoint);
-  if (!url.hostname.includes(":")) url.hostname = "127.0.0.1";
+  url.hostname = url.hostname.includes(":") ? "[::1]" : "127.0.0.1";
   return url.origin;
 }
 
@@ -531,10 +531,10 @@ export function makeSandboxDeploymentService(
       .pipe(Effect.mapError(asServiceError));
 
   const assertOperationClaimed = (operationId: SandboxOperationId, claimId: string) =>
-    repository.renewOperation(operationId, claimId, now()).pipe(
+    repository.ownsOperation(operationId, claimId).pipe(
       Effect.mapError(asServiceError),
-      Effect.flatMap((claimed) =>
-        claimed ? Effect.void : failConflict("Sandbox operation lease was lost."),
+      Effect.flatMap((owned) =>
+        owned ? Effect.void : failConflict("Sandbox operation is no longer claimed."),
       ),
     );
 
@@ -619,10 +619,6 @@ export function makeSandboxDeploymentService(
           ? driver.power.inspect({
               profile: deployment.intent.profileSnapshot,
               resource: deployment.resource,
-              intent: deployment.intent,
-              ...(deployment.state === "Identified"
-                ? { expectedEnvironmentId: deployment.environmentId }
-                : {}),
             })
           : driver.observe({
               profile: deployment.intent.profileSnapshot,
@@ -1166,6 +1162,44 @@ export function makeSandboxDeploymentService(
         return;
       }
 
+      let relayUnlink:
+        | {
+            readonly client: HttpClient.HttpClient;
+            readonly relayUrl: string;
+            readonly accessToken: string;
+          }
+        | undefined;
+      if (deployment.state === "Identified") {
+        const requiresRelayCleanup = deployment.attachment === "relay";
+        const relayUrl = options.relayUrl;
+        const tokenManager = dependencies.cloudCliTokenManager;
+        const client = dependencies.httpClient;
+        const canAttemptRelayCleanup =
+          relayUrl !== undefined && tokenManager !== undefined && client !== undefined;
+        if (requiresRelayCleanup && !canAttemptRelayCleanup) {
+          return yield* failConflict("Relay attachment cleanup is not configured for this server.");
+        }
+        if (canAttemptRelayCleanup) {
+          const tokenResult = tokenManager.getExisting.pipe(Effect.mapError(asServiceError));
+          const tokenOption = requiresRelayCleanup
+            ? yield* tokenResult
+            : yield* tokenResult.pipe(Effect.catch(() => Effect.succeed(Option.none())));
+          if (Option.isNone(tokenOption)) {
+            if (requiresRelayCleanup) {
+              return yield* failConflict(
+                "Authorize Kata Code Connect before deleting this sandbox.",
+              );
+            }
+          } else {
+            relayUnlink = {
+              client,
+              relayUrl,
+              accessToken: tokenOption.value.accessToken,
+            };
+          }
+        }
+      }
+
       yield* assertOperationClaimed(receipt.operationId, claimId);
       const observation = yield* driverFor(deployment.intent.profileSnapshot)
         .delete({ profile: deployment.intent.profileSnapshot, resource: deployment.resource })
@@ -1188,37 +1222,14 @@ export function makeSandboxDeploymentService(
             : "Docker reported the sandbox is still running after deletion.",
         );
       }
-      if (deployment.state === "Identified") {
-        const relayUrl = options.relayUrl;
-        const tokenManager = dependencies.cloudCliTokenManager;
-        const client = dependencies.httpClient;
-        const requiresRelayCleanup = deployment.attachment === "relay";
-        const canAttemptRelayCleanup =
-          relayUrl !== undefined && tokenManager !== undefined && client !== undefined;
-        if (requiresRelayCleanup && !canAttemptRelayCleanup) {
-          return yield* failConflict("Relay attachment cleanup is not configured for this server.");
-        }
-        if (canAttemptRelayCleanup) {
-          const tokenResult = tokenManager.getExisting.pipe(Effect.mapError(asServiceError));
-          const tokenOption = requiresRelayCleanup
-            ? yield* tokenResult
-            : yield* tokenResult.pipe(Effect.catch(() => Effect.succeed(Option.none())));
-          if (Option.isNone(tokenOption)) {
-            if (requiresRelayCleanup) {
-              return yield* failConflict(
-                "Authorize Kata Code Connect before deleting this sandbox.",
-              );
-            }
-          } else {
-            yield* assertOperationClaimed(receipt.operationId, claimId);
-            yield* unlinkRelayEnvironment(
-              client,
-              relayUrl,
-              tokenOption.value.accessToken,
-              deployment.environmentId,
-            ).pipe(Effect.mapError(asServiceError));
-          }
-        }
+      if (deployment.state === "Identified" && relayUnlink !== undefined) {
+        yield* assertOperationClaimed(receipt.operationId, claimId);
+        yield* unlinkRelayEnvironment(
+          relayUnlink.client,
+          relayUnlink.relayUrl,
+          relayUnlink.accessToken,
+          deployment.environmentId,
+        ).pipe(Effect.mapError(asServiceError));
       }
 
       const deleted = deleteDeployment(deployment, now());
@@ -1513,29 +1524,11 @@ export function makeSandboxDeploymentService(
       ? operation
       : withDeploymentLock(SandboxDeploymentId.make(receipt.deploymentId), operation);
 
-  const renewOperationClaim = (
-    operationId: SandboxOperationId,
-    claimId: string,
-  ): Effect.Effect<never, SandboxDeploymentServiceError> =>
-    Effect.gen(function* () {
-      yield* Effect.sleep("10 seconds");
-      const claimed = yield* repository
-        .renewOperation(operationId, claimId, now())
-        .pipe(Effect.mapError(asServiceError));
-      if (!claimed) return yield* failConflict("Sandbox operation lease was lost.");
-      return yield* renewOperationClaim(operationId, claimId);
-    });
-
   const runOperation = (receipt: SandboxOperationReceipt) =>
     Effect.gen(function* () {
       const claimedAt = now();
       const claimed = yield* repository
-        .claimOperation(
-          SandboxOperationId.make(receipt.operationId),
-          workerId,
-          claimedAt,
-          DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(claimedAt), { seconds: -30 })),
-        )
+        .claimOperation(SandboxOperationId.make(receipt.operationId), workerId, claimedAt)
         .pipe(Effect.mapError(asServiceError));
       if (Option.isNone(claimed)) return;
       const claimedReceipt = claimed.value;
@@ -1565,10 +1558,7 @@ export function makeSandboxDeploymentService(
                   : claimedReceipt.command === "profile-delete"
                     ? processProfileDelete(claimedReceipt, workerId)
                     : failCommand(`Unsupported sandbox operation '${claimedReceipt.command}'.`);
-      yield* Effect.raceFirst(
-        operation,
-        renewOperationClaim(claimedReceipt.operationId, workerId),
-      ).pipe(Effect.catch((cause) => markFailed(claimedReceipt, workerId, cause)));
+      yield* operation.pipe(Effect.catch((cause) => markFailed(claimedReceipt, workerId, cause)));
     }).pipe(
       Effect.catch((cause) =>
         Effect.logError("Failed to claim sandbox operation", {
@@ -1972,16 +1962,16 @@ export function makeSandboxDeploymentService(
     });
 
   const recover: SandboxDeploymentServiceShape["recover"] = () =>
-    repository.listInFlightOperations().pipe(
-      Effect.mapError(asServiceError),
-      Effect.tap((operations) =>
-        Effect.forEach(operations, (operation) => scheduleOperation(operation), {
-          discard: true,
-        }),
-      ),
-      Effect.andThen(reconcile()),
-      Effect.asVoid,
-    );
+    Effect.gen(function* () {
+      yield* repository.releaseInFlightClaims().pipe(Effect.mapError(asServiceError));
+      const operations = yield* repository
+        .listInFlightOperations()
+        .pipe(Effect.mapError(asServiceError));
+      yield* Effect.forEach(operations, (operation) => scheduleOperation(operation), {
+        discard: true,
+      });
+      yield* reconcile();
+    });
 
   return {
     list,

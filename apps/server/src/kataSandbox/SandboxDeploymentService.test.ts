@@ -638,7 +638,6 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           });
 
           failNextObservationSave = false;
-          currentTime = "2026-08-30T00:01:00.000Z";
           yield* service.recover();
 
           const recovered = yield* service.getOperation(start.operationId);
@@ -809,10 +808,10 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           });
           expect(requests.map((request) => request.url)).toEqual([
             "https://relay.example.test/v1/client/environment-link-challenges",
-            "http://[2001:db8::10]:3774/oauth/token",
-            "http://[2001:db8::10]:3774/api/connect/link-proof",
+            "http://[::1]:3774/oauth/token",
+            "http://[::1]:3774/api/connect/link-proof",
             "https://relay.example.test/v1/client/environment-links",
-            "http://[2001:db8::10]:3774/api/connect/relay-config",
+            "http://[::1]:3774/api/connect/relay-config",
           ]);
           expect(requests[1]?.body).toContain("scope=relay%3Aread+relay%3Awrite");
           expect(requests[2]?.body).toContain('"httpBaseUrl":"http://[2001:db8::10]:3774"');
@@ -860,6 +859,80 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
       { cloudCliTokenManager, httpClient },
     );
   });
+
+  it.effect(
+    "refuses a relay delete before destroying the container when Connect is unauthorized",
+    () => {
+      const fixture = makeRelayFixture();
+      let token: Option.Option<CliTokenManager.PersistedToken> = Option.some({
+        accessToken: "control-access-token",
+        refreshToken: "control-refresh-token",
+        expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+      });
+      const cloudCliTokenManager: CliTokenManager.CloudCliTokenManager["Service"] = {
+        get: Effect.die("unused"),
+        getExisting: Effect.sync(() => token),
+        hasCredential: Effect.succeed(true),
+        store: () => Effect.die("unused"),
+        clear: Effect.die("unused"),
+      };
+      let deleteCalls = 0;
+      return runWithService(
+        (service) =>
+          Effect.gen(function* () {
+            yield* service.upsertProfile("desktop-bootstrap", {
+              requestId: SandboxRequestId.make("profile-relay-unauthorized-delete"),
+              name: profile.name,
+              driverKind: "docker",
+              socketPath: profile.socketPath,
+              imageDigest: profile.imageDigest,
+              enabled: true,
+              profileId,
+            });
+            const accepted = yield* service.create(
+              "desktop-bootstrap",
+              createInput("relay-unauthorized-delete-create"),
+            );
+            const created = yield* service.getOperation(accepted.operationId);
+            if (created.deploymentId === undefined) throw new Error("Expected a deployment id.");
+            yield* service.mintHandoff(created.deploymentId, "relay");
+            token = Option.none();
+            const deleted = yield* service.delete("desktop-bootstrap", {
+              requestId: SandboxRequestId.make("relay-unauthorized-delete"),
+              deploymentId: created.deploymentId,
+              expectedRevision: 4,
+            });
+            const receipt = yield* service.getOperation(deleted.operationId);
+            expect(receipt.status).toBe("Failed");
+            expect(receipt.error).toContain("Authorize Kata Code Connect");
+            expect(deleteCalls).toBe(0);
+            expect((yield* service.list()).deployments[0]?.deployment).toMatchObject({
+              state: "Identified",
+              attachment: "relay",
+            });
+          }),
+        {
+          relayUrl: "https://relay.example.test",
+          driverFor: () =>
+            makeDriver({
+              delete: () => {
+                deleteCalls += 1;
+                return Effect.succeed<ProviderObservation>({
+                  state: "Gone",
+                  observedAt: "2026-08-30T00:00:05.000Z",
+                });
+              },
+            }),
+          issuePairingCredential: () =>
+            Effect.succeed({
+              credential: "relay-bootstrap-credential",
+              expiresAt: "2026-08-30T00:05:00.000Z",
+            }),
+        },
+        { cloudCliTokenManager, httpClient: fixture.httpClient },
+      );
+    },
+  );
 
   it.effect("requires a profile to be disabled before deleting it", () =>
     runWithService(

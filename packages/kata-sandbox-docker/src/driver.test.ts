@@ -374,13 +374,16 @@ describe("Docker sandbox driver", () => {
       },
     });
     let running = false;
+    let probeCalls = 0;
     const paths: string[] = [];
     const driver = makeDockerSandboxDriver({
-      readinessProbe: () =>
-        Effect.succeed({
+      readinessProbe: () => {
+        probeCalls++;
+        return Effect.succeed({
           environmentId: "sandbox-env",
           serverVersion: intent.bootstrapManifest.serverVersion,
-        }),
+        });
+      },
       engine: fakeEngine((request) => {
         paths.push(request.path);
         if (request.path.endsWith("/json")) {
@@ -417,10 +420,21 @@ describe("Docker sandbox driver", () => {
         resource: { containerId: "container-1", hostPort: 41001 },
         connectorOrigin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
       });
+      expect(probeCalls).toBe(1);
+      expect(
+        yield* power.inspect({
+          profile,
+          resource,
+          intent,
+          expectedEnvironmentId: "sandbox-env",
+        }),
+      ).toMatchObject({ state: "Running" });
+      expect(probeCalls).toBe(1);
       expect(paths).toEqual([
         "/containers/container-1/json",
         "/containers/container-1/json",
         "/containers/container-1/start",
+        "/containers/container-1/json",
         "/containers/container-1/json",
       ]);
       expect(yield* power.stop({ profile, resource, intent })).toMatchObject({

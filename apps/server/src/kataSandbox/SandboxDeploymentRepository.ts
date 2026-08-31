@@ -97,17 +97,16 @@ export interface SandboxDeploymentRepositoryShape {
     operationId: SandboxOperationId,
     claimId: string,
     claimedAt: string,
-    staleBefore: string,
   ) => Effect.Effect<Option.Option<SandboxOperationReceipt>, SandboxRepositoryError>;
   readonly saveClaimedOperation: (
     receipt: SandboxOperationReceipt,
     claimId: string,
   ) => Effect.Effect<void, SandboxRepositoryError>;
-  readonly renewOperation: (
+  readonly ownsOperation: (
     operationId: SandboxOperationId,
     claimId: string,
-    claimedAt: string,
   ) => Effect.Effect<boolean, SandboxRepositoryError>;
+  readonly releaseInFlightClaims: () => Effect.Effect<void, SandboxRepositoryError>;
   readonly listInFlightOperations: () => Effect.Effect<
     ReadonlyArray<SandboxOperationReceipt>,
     SandboxRepositoryError
@@ -1077,7 +1076,6 @@ const makeRepository = Effect.gen(function* () {
     operationId: SandboxOperationId,
     claimId: string,
     claimedAt: string,
-    staleBefore: string,
   ) =>
     sql
       .withTransaction(
@@ -1091,10 +1089,7 @@ const makeRepository = Effect.gen(function* () {
             WHERE operation_id = ${operationId}
               AND (
                 status = 'Accepted'
-                OR (
-                  status = 'Running'
-                  AND (claimed_at IS NULL OR claimed_at < ${staleBefore})
-                )
+                OR (status = 'Running' AND execution_token IS NULL)
               )
             RETURNING operation_id
           `;
@@ -1129,19 +1124,25 @@ const makeRepository = Effect.gen(function* () {
         AND execution_token = ${claimId}
     `.pipe(Effect.asVoid, mapSql("SandboxDeploymentRepository.saveClaimedOperation"));
 
-  const renewOperation = (operationId: SandboxOperationId, claimId: string, claimedAt: string) =>
+  const ownsOperation = (operationId: SandboxOperationId, claimId: string) =>
     sql`
-      UPDATE kata_sandbox_operation_receipts
-      SET claimed_at = ${claimedAt},
-          updated_at = ${claimedAt}
+      SELECT operation_id
+      FROM kata_sandbox_operation_receipts
       WHERE operation_id = ${operationId}
         AND status = 'Running'
         AND execution_token = ${claimId}
-      RETURNING operation_id
     `.pipe(
       Effect.map((rows) => rows.length > 0),
-      mapSql("SandboxDeploymentRepository.renewOperation"),
+      mapSql("SandboxDeploymentRepository.ownsOperation"),
     );
+
+  const releaseInFlightClaims = () =>
+    sql`
+      UPDATE kata_sandbox_operation_receipts
+      SET execution_token = NULL,
+          claimed_at = NULL
+      WHERE status IN ('Accepted', 'Running')
+    `.pipe(Effect.asVoid, mapSql("SandboxDeploymentRepository.releaseInFlightClaims"));
 
   const listInFlightOperations = () =>
     listInFlightRows(undefined).pipe(
@@ -1164,7 +1165,8 @@ const makeRepository = Effect.gen(function* () {
     getOperationByRequest,
     claimOperation,
     saveClaimedOperation,
-    renewOperation,
+    ownsOperation,
+    releaseInFlightClaims,
     listInFlightOperations,
   } satisfies SandboxDeploymentRepositoryShape;
 });
