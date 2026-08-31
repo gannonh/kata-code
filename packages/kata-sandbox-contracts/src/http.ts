@@ -15,7 +15,9 @@ import {
 import {
   ProviderObservation,
   ResolvedGitHubSource,
+  SandboxAttachment,
   SandboxDeployment,
+  SandboxDeploymentAction,
   SandboxDeploymentId,
   SandboxDeploymentLabel,
   SandboxHandoff,
@@ -105,6 +107,21 @@ export const SandboxCreateRequest = Schema.Struct({
 });
 export type SandboxCreateRequest = typeof SandboxCreateRequest.Type;
 
+export const SandboxStartRequest = Schema.Struct({
+  requestId: SandboxRequestId,
+  deploymentId: SandboxDeploymentId,
+  expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  attachment: SandboxAttachment,
+});
+export type SandboxStartRequest = typeof SandboxStartRequest.Type;
+
+export const SandboxStopRequest = Schema.Struct({
+  requestId: SandboxRequestId,
+  deploymentId: SandboxDeploymentId,
+  expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type SandboxStopRequest = typeof SandboxStopRequest.Type;
+
 export const SandboxDeleteRequest = Schema.Struct({
   requestId: SandboxRequestId,
   deploymentId: SandboxDeploymentId,
@@ -127,12 +144,14 @@ export type SandboxAccepted = typeof SandboxAccepted.Type;
 export const SandboxDeploymentSummary = Schema.Struct({
   deployment: SandboxDeployment,
   observation: Schema.optional(ProviderObservation),
+  actions: Schema.optional(Schema.Array(SandboxDeploymentAction)),
 });
 export type SandboxDeploymentSummary = typeof SandboxDeploymentSummary.Type;
 
 export const SandboxListResponse = Schema.Struct({
   profiles: Schema.Array(SandboxProfileSummary),
   deployments: Schema.Array(SandboxDeploymentSummary),
+  relayAvailable: Schema.optional(Schema.Boolean),
 });
 export type SandboxListResponse = typeof SandboxListResponse.Type;
 
@@ -172,6 +191,20 @@ export const SandboxHttpApiGroup = HttpApiGroup.make("kataSandbox")
     }),
   )
   .add(
+    HttpApiEndpoint.post("start", "/api/kata-sandbox/deployments/start", {
+      payload: SandboxStartRequest,
+      success: SandboxAccepted.pipe(HttpApiSchema.status(202)),
+      error: SandboxHttpErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("stop", "/api/kata-sandbox/deployments/stop", {
+      payload: SandboxStopRequest,
+      success: SandboxAccepted.pipe(HttpApiSchema.status(202)),
+      error: SandboxHttpErrors,
+    }),
+  )
+  .add(
     HttpApiEndpoint.post("delete", "/api/kata-sandbox/deployments/delete", {
       payload: SandboxDeleteRequest,
       success: SandboxAccepted.pipe(HttpApiSchema.status(202)),
@@ -191,6 +224,17 @@ export const SandboxHttpApiGroup = HttpApiGroup.make("kataSandbox")
       success: SandboxHandoffResponse,
       error: SandboxHttpErrors,
     }),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      "mintRelayHandoff",
+      "/api/kata-sandbox/deployments/:deploymentId/handoff/relay",
+      {
+        params: Schema.Struct({ deploymentId: SandboxDeploymentId }),
+        success: SandboxHandoffResponse,
+        error: SandboxHttpErrors,
+      },
+    ),
   )
   .middleware(EnvironmentAuthenticatedAuth);
 

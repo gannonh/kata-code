@@ -6,7 +6,9 @@ import type {
   DockerResourceHandle,
   ProviderObservation,
   SandboxBootstrapManifest,
+  SandboxConnectorOrigin,
   SandboxDeploymentIntent,
+  SandboxEndpoint,
   SandboxProfile,
   SandboxProviderDriverKind,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
@@ -18,7 +20,8 @@ export type SandboxDriverErrorReason =
   | "allocation-failed"
   | "setup-failed"
   | "observation-failed"
-  | "deletion-failed";
+  | "deletion-failed"
+  | "lifecycle-failed";
 
 export class SandboxDriverError extends Data.TaggedError("SandboxDriverError")<{
   readonly reason: SandboxDriverErrorReason;
@@ -42,9 +45,39 @@ export interface SandboxAllocationInput {
 
 export interface SandboxIdentifiedFacts {
   readonly environmentId: string;
-  readonly endpoint: string;
+  readonly endpoint: SandboxEndpoint;
+  readonly connectorOrigin?: SandboxConnectorOrigin;
   readonly workspaceRoot: string;
   readonly resource: DockerResourceHandle;
+}
+
+export interface SandboxStartedFacts {
+  readonly environmentId: string;
+  readonly endpoint: SandboxEndpoint;
+  readonly connectorOrigin?: SandboxConnectorOrigin;
+  readonly resource: DockerResourceHandle;
+}
+
+export interface SandboxProviderResourceInput {
+  readonly profile: SandboxProfile;
+  readonly resource: DockerResourceHandle;
+  readonly intent?: SandboxDeploymentIntent;
+  readonly expectedEnvironmentId?: string;
+}
+
+export interface SandboxProviderPowerCapability {
+  readonly inspect: (
+    input: SandboxProviderResourceInput,
+  ) => Effect.Effect<ProviderObservation, SandboxDriverError>;
+  readonly stop: (
+    input: SandboxProviderResourceInput,
+  ) => Effect.Effect<ProviderObservation, SandboxDriverError>;
+  readonly start: (
+    input: SandboxProviderResourceInput,
+  ) => Effect.Effect<SandboxStartedFacts | ProviderObservation, SandboxDriverError>;
+  readonly adopt?: (
+    input: SandboxProviderResourceInput,
+  ) => Effect.Effect<DockerResourceHandle | ProviderObservation, SandboxDriverError>;
 }
 
 export interface SandboxProviderDriver {
@@ -66,4 +99,5 @@ export interface SandboxProviderDriver {
     readonly profile: SandboxProfile;
     readonly resource: DockerResourceHandle;
   }) => Effect.Effect<ProviderObservation, SandboxDriverError>;
+  readonly power?: SandboxProviderPowerCapability;
 }

@@ -67,6 +67,21 @@ export type SandboxWorkspaceRoot = typeof SandboxWorkspaceRoot.Type;
 export const SandboxEndpoint = Schema.String.check(Schema.isPattern(/^https?:\/\//));
 export type SandboxEndpoint = typeof SandboxEndpoint.Type;
 
+export const SandboxConnectorOrigin = Schema.Struct({
+  localHttpHost: TrimmedNonEmptyString,
+  localHttpPort: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(1),
+    Schema.isLessThanOrEqualTo(65_535),
+  ),
+});
+export type SandboxConnectorOrigin = typeof SandboxConnectorOrigin.Type;
+
+export const SandboxAttachment = Schema.Literals(["direct", "relay"]);
+export type SandboxAttachment = typeof SandboxAttachment.Type;
+
+export const SandboxDeploymentAction = Schema.Literals(["start", "stop", "attach", "delete"]);
+export type SandboxDeploymentAction = typeof SandboxDeploymentAction.Type;
+
 export const SandboxProviderDriverKind = Schema.Literals(["docker"]);
 export type SandboxProviderDriverKind = typeof SandboxProviderDriverKind.Type;
 
@@ -192,6 +207,8 @@ export const IdentifiedDeployment = Schema.Struct({
   resource: DockerResourceHandle,
   environmentId: EnvironmentId,
   endpoint: SandboxEndpoint,
+  connectorOrigin: Schema.optional(SandboxConnectorOrigin),
+  attachment: Schema.optional(SandboxAttachment),
   workspaceRoot: SandboxWorkspaceRoot,
   kataHome: SandboxWorkspaceRoot,
   identifiedAt: IsoDateTime,
@@ -224,6 +241,12 @@ export const ProviderObservation = Schema.Union([
     endpoint: Schema.optional(SandboxEndpoint),
   }),
   Schema.Struct({
+    state: Schema.Literal("Stopped"),
+    observedAt: IsoDateTime,
+    environmentId: Schema.optional(EnvironmentId),
+    endpoint: Schema.optional(SandboxEndpoint),
+  }),
+  Schema.Struct({
     state: Schema.Literal("Unknown"),
     observedAt: IsoDateTime,
     diagnostic: SandboxDiagnostic,
@@ -239,8 +262,9 @@ export const SandboxOperationKind = Schema.Literals([
   "profile-upsert",
   "profile-delete",
   "create",
+  "start",
+  "stop",
   "delete",
-  "mint-handoff",
 ]);
 export type SandboxOperationKind = typeof SandboxOperationKind.Type;
 
@@ -268,6 +292,18 @@ export const SandboxOperationResult = Schema.Union([
     deploymentId: SandboxDeploymentId,
     environmentId: Schema.optional(EnvironmentId),
   }),
+  Schema.Struct({
+    kind: Schema.Literal("started"),
+    deploymentId: SandboxDeploymentId,
+    environmentId: EnvironmentId,
+    endpoint: SandboxEndpoint,
+    resource: Schema.optional(DockerResourceHandle),
+    connectorOrigin: Schema.optional(SandboxConnectorOrigin),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("stopped"),
+    deploymentId: SandboxDeploymentId,
+  }),
 ]);
 export type SandboxOperationResult = typeof SandboxOperationResult.Type;
 
@@ -280,6 +316,8 @@ export const SandboxOperationReceipt = Schema.Struct({
   deploymentId: Schema.optional(SandboxDeploymentId),
   profileId: Schema.optional(SandboxProviderProfileId),
   profileInput: Schema.optional(SandboxProfileInput),
+  attachment: Schema.optional(SandboxAttachment),
+  expectedRevision: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   result: Schema.optional(SandboxOperationResult),
   error: Schema.optional(SandboxDiagnostic),
   acceptedAt: IsoDateTime,
@@ -287,14 +325,27 @@ export const SandboxOperationReceipt = Schema.Struct({
 });
 export type SandboxOperationReceipt = typeof SandboxOperationReceipt.Type;
 
-export const SandboxHandoff = Schema.Struct({
-  deploymentId: SandboxDeploymentId,
-  environmentId: EnvironmentId,
-  endpoint: SandboxEndpoint,
-  pairingUrl: Schema.String,
-  workspaceRoot: SandboxWorkspaceRoot,
-  expiresAt: IsoDateTime,
-});
+export const SandboxHandoff = Schema.Union([
+  Schema.Struct({
+    deploymentId: SandboxDeploymentId,
+    environmentId: EnvironmentId,
+    endpoint: SandboxEndpoint,
+    attachment: Schema.Literal("direct"),
+    pairingUrl: Schema.String,
+    workspaceRoot: SandboxWorkspaceRoot,
+    expiresAt: IsoDateTime,
+  }),
+  Schema.Struct({
+    deploymentId: SandboxDeploymentId,
+    environmentId: EnvironmentId,
+    endpoint: SandboxEndpoint,
+    attachment: Schema.Literal("relay"),
+    relayEnvironmentId: EnvironmentId,
+    label: SandboxDeploymentLabel,
+    workspaceRoot: SandboxWorkspaceRoot,
+    expiresAt: IsoDateTime,
+  }),
+]);
 export type SandboxHandoff = typeof SandboxHandoff.Type;
 
 export const SandboxProviderLabels = {
