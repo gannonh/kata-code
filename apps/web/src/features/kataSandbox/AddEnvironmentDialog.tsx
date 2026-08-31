@@ -80,7 +80,11 @@ export interface AddEnvironmentDialogProps {
   readonly onConnectSshTarget: (target: DesktopDiscoveredSshHost) => Promise<void>;
 }
 
+const isOciImageDigest = Schema.is(OciImageDigest);
+
 function operationView(phase: "profile" | "deployment", receipt: SandboxOperationReceipt) {
+  const profileId =
+    receipt.result?.kind === "profile" ? receipt.result.profileId : receipt.profileId;
   return {
     phase,
     operationId: receipt.operationId,
@@ -89,6 +93,7 @@ function operationView(phase: "profile" | "deployment", receipt: SandboxOperatio
       ? {}
       : { progress: receipt.progress, stage: receipt.progress.stage }),
     ...(receipt.error ? { error: receipt.error } : {}),
+    ...(profileId ? { profileId } : {}),
     ...(receipt.deploymentId ? { deploymentId: receipt.deploymentId } : {}),
   } as const;
 }
@@ -214,6 +219,7 @@ export function AddEnvironmentDialog({
 
   useEffect(() => {
     if (state.step !== "docker" || state.operation !== null) return;
+    if (state.draft.profileMode === "existing" && state.draft.profileId.length > 0) return;
     if (availableProfiles.length === 0 && state.draft.profileMode !== "new") {
       dispatch({ type: "new-profile" });
       return;
@@ -229,7 +235,8 @@ export function AddEnvironmentDialog({
 
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
-      if (!nextOpen && !sandboxOperationActive && !attachmentPending) {
+      if (!nextOpen && (sandboxOperationActive || attachmentPending)) return;
+      if (!nextOpen) {
         dispatch({
           type: "reset",
           docker: createInitialDockerDraft({ serverVersion, providerInstanceId: firstProviderId }),
@@ -350,7 +357,7 @@ export function AddEnvironmentDialog({
     if (
       draft.profileMode === "new" &&
       draft.imageOverride.trim().length > 0 &&
-      !Schema.is(OciImageDigest)(draft.imageOverride.trim())
+      !isOciImageDigest(draft.imageOverride.trim())
     ) {
       showError("The immutable image override must be a sha256 OCI digest.");
       return;
@@ -361,11 +368,22 @@ export function AddEnvironmentDialog({
     try {
       let selectedProfileId = profileId;
       let selectedProfileRevision = selectedProfile?.profile.revision;
-      if (draft.profileMode === "new") {
+      const listedProfile = sandboxList?.profiles.find(
+        (summary) => summary.profile.profileId === profileId,
+      )?.profile;
+      const retryUnavailableProfile =
+        draft.profileMode === "existing" && profileId.length > 0 && selectedProfile === undefined;
+      if (draft.profileMode === "new" || retryUnavailableProfile) {
         const profileInput: SandboxProfileForm = {
-          name: draft.profileName,
+          ...(retryUnavailableProfile
+            ? { profileId, expectedRevision: listedProfile?.revision ?? 1 }
+            : {}),
+          name: draft.profileName.trim() || listedProfile?.name || "Docker",
           socketPath: draft.socketPath,
-          image: profileImage(draft),
+          image:
+            retryUnavailableProfile && listedProfile
+              ? { kind: "custom", digest: listedProfile.imageDigest }
+              : profileImage(draft),
           enabled: true,
         };
         const accepted = await upsertSandboxProfile(profileInput);
@@ -375,22 +393,24 @@ export function AddEnvironmentDialog({
             phase: "profile",
             operationId: accepted.operationId,
             status: "Accepted",
+            ...(profileId ? { profileId } : {}),
           },
         });
         const receipt = await pollSandboxOperation(accepted.operationId, {
           onReceipt: (nextReceipt) =>
             dispatch({ type: "operation", operation: operationView("profile", nextReceipt) }),
         });
-        if (receipt.status === "Failed")
-          throw new Error(receipt.error ?? "The Docker profile could not be saved.");
-        selectedProfileId =
+        const receiptProfileId =
           receipt.result?.kind === "profile"
             ? (receipt.result.profileId ?? "")
             : (receipt.profileId ?? "");
-        if (!selectedProfileId) throw new Error("The Docker profile was saved without an id.");
-        selectedProfileRevision = 1;
-        dispatch({ type: "select-profile", profileId: selectedProfileId });
+        if (receiptProfileId) dispatch({ type: "select-profile", profileId: receiptProfileId });
         void refreshSandboxList();
+        if (receipt.status === "Failed")
+          throw new Error(receipt.error ?? "The Docker profile could not be saved.");
+        selectedProfileId = receiptProfileId;
+        if (!selectedProfileId) throw new Error("The Docker profile was saved without an id.");
+        selectedProfileRevision = listedProfile?.revision ?? 1;
       }
 
       const accepted = await createSandboxDeployment(
@@ -416,7 +436,7 @@ export function AddEnvironmentDialog({
       dispatch({ type: "operation", operation: operationView("deployment", receipt) });
       await attach(deploymentId);
     } catch (error) {
-      showError(error);
+      dispatch({ type: "fail-operation", error: errorMessage(error) });
     } finally {
       setIsSubmitting(false);
     }
@@ -788,7 +808,12 @@ export function AddEnvironmentDialog({
           ) : null}
           {operation === null ? (
             <Button
-              disabled={isSubmitting || (availableProfiles.length === 0 && !profileNeedsCreation)}
+              disabled={
+                isSubmitting ||
+                (availableProfiles.length === 0 &&
+                  !profileNeedsCreation &&
+                  state.draft.profileId.length === 0)
+              }
               type="submit"
             >
               {isSubmitting ? "Creating…" : "Create and attach environment"}

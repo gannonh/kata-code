@@ -486,7 +486,7 @@ async function defaultRun(
     return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") };
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
-    throw new Error(`Release image command '${command}' failed: ${message}`);
+    throw new Error(`Release image command '${command}' failed: ${message}`, { cause });
   }
 }
 

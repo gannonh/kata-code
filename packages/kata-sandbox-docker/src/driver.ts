@@ -306,6 +306,9 @@ function createBody(input: {
   });
 }
 
+export const SANDBOX_RUNTIME_UID = 1001;
+export const SANDBOX_RUNTIME_GID = 1001;
+
 function writeOctal(buffer: Buffer, offset: number, length: number, value: number): void {
   const encoded = value.toString(8).padStart(length - 1, "0");
   buffer.write(encoded + "\0", offset, length, "ascii");
@@ -320,8 +323,8 @@ function buildTarArchive(
     const header = Buffer.alloc(512);
     header.write(file.name, 0, "ascii");
     writeOctal(header, 100, 8, file.mode);
-    writeOctal(header, 108, 8, 0);
-    writeOctal(header, 116, 8, 0);
+    writeOctal(header, 108, 8, SANDBOX_RUNTIME_UID);
+    writeOctal(header, 116, 8, SANDBOX_RUNTIME_GID);
     writeOctal(header, 124, 12, data.length);
     writeOctal(header, 136, 12, 0);
     header.write("        ", 148, 8, "ascii");
@@ -490,8 +493,16 @@ function defaultReadinessProbe(
 type DockerPullMessage = {
   readonly id?: unknown;
   readonly status?: unknown;
+  readonly error?: unknown;
+  readonly errorDetail?: { readonly message?: unknown };
   readonly progressDetail?: { readonly current?: unknown; readonly total?: unknown };
 };
+
+function dockerPullError(message: DockerPullMessage): string | undefined {
+  if (typeof message.error === "string" && message.error.length > 0) return message.error;
+  const detail = message.errorDetail?.message;
+  return typeof detail === "string" && detail.length > 0 ? detail : undefined;
+}
 
 function parseDockerPullMessage(line: string): DockerPullMessage | undefined {
   try {
@@ -552,6 +563,13 @@ function validateProfile(
       for (const line of pulled.body.split("\n")) {
         const message = parseDockerPullMessage(line);
         if (message === undefined) continue;
+        const pullError = dockerPullError(message);
+        if (pullError !== undefined) {
+          return yield* new SandboxDriverError({
+            reason: "image-unavailable",
+            message: pullError,
+          });
+        }
         const layerId = typeof message.id === "string" ? message.id : undefined;
         if (layerId !== undefined) layerIds.add(layerId);
         if (

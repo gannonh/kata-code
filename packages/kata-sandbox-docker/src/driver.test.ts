@@ -14,6 +14,8 @@ import {
 import type { DockerEngine, DockerRequest, DockerResponse } from "./engine.ts";
 import {
   DOCKER_KIND,
+  SANDBOX_RUNTIME_GID,
+  SANDBOX_RUNTIME_UID,
   buildAuthArchive,
   buildProviderSettingsArchive,
   dockerContainerName,
@@ -214,6 +216,34 @@ describe("Docker sandbox driver", () => {
         "/images/" + encodeURIComponent(profile.imageDigest) + "/json",
         "/version",
       ]);
+    });
+  });
+
+  it.effect("fails a 200 Docker pull that reports an error line", () => {
+    const driver = makeDockerSandboxDriver({
+      engine: fakeEngine((request) => {
+        if (request.path === "/_ping") return response(200, "OK");
+        if (request.path.startsWith("/images/") && request.path.endsWith("/json")) {
+          return response(404);
+        }
+        if (request.path.startsWith("/images/create")) {
+          return response(
+            200,
+            '{"status":"Pulling from library/missing"}\n{"error":"pull access denied","errorDetail":{"message":"pull access denied"}}',
+          );
+        }
+        if (request.path === "/version") return response(200, '{"ApiVersion":"1.45"}');
+        return response(404);
+      }),
+    });
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.result(driver.validateProfile(profile));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure.reason).toBe("image-unavailable");
+        expect(result.failure.message).toBe("pull access denied");
+      }
     });
   });
 
@@ -448,10 +478,16 @@ describe("Docker sandbox driver", () => {
     });
   });
 
-  it("creates an archive containing only auth.json with mode 0600", () => {
+  it("creates an archive containing only auth.json with mode 0600 owned by the runtime user", () => {
     const archive = Buffer.from(buildAuthArchive(Buffer.from('{"token":"value"}')));
     expect(archive.subarray(0, 9).toString("utf8")).toBe("auth.json");
     expect(archive.subarray(100, 107).toString("ascii")).toBe("0000600");
+    expect(archive.subarray(108, 115).toString("ascii")).toBe(
+      SANDBOX_RUNTIME_UID.toString(8).padStart(7, "0"),
+    );
+    expect(archive.subarray(116, 123).toString("ascii")).toBe(
+      SANDBOX_RUNTIME_GID.toString(8).padStart(7, "0"),
+    );
     expect(archive.includes(Buffer.from("config.toml"))).toBe(false);
     expect(archive.includes(Buffer.from("sessions"))).toBe(false);
   });

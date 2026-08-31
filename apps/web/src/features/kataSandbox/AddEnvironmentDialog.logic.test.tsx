@@ -69,6 +69,46 @@ describe("Add Environment flow state", () => {
     });
   });
 
+  it("turns an in-flight Docker operation into a failed retryable state", () => {
+    const docker = addEnvironmentReducer(
+      { step: "sandbox-providers", error: null },
+      { type: "choose-docker", docker: createInitialDockerDraft({ serverVersion: "0.42.0" }) },
+    );
+    const selected = addEnvironmentReducer(docker, {
+      type: "select-profile",
+      profileId: "profile-failed",
+    });
+    const running = addEnvironmentReducer(selected, {
+      type: "operation",
+      operation: {
+        phase: "profile",
+        operationId: "op-profile",
+        status: "Running",
+        profileId: "profile-failed",
+      },
+    });
+    const failed = addEnvironmentReducer(running, {
+      type: "fail-operation",
+      error: "The sandbox operation did not finish in time.",
+    });
+    expect(failed).toMatchObject({
+      step: "docker",
+      error: "The sandbox operation did not finish in time.",
+      operation: {
+        phase: "profile",
+        status: "Failed",
+        profileId: "profile-failed",
+        error: "The sandbox operation did not finish in time.",
+      },
+      draft: { profileId: "profile-failed", profileMode: "existing" },
+    });
+    expect(addEnvironmentReducer(failed, { type: "retry" })).toMatchObject({
+      step: "docker",
+      operation: null,
+      draft: { profileId: "profile-failed", profileMode: "existing" },
+    });
+  });
+
   it("normalizes server versions for managed images", () => {
     expect(normalizeManagedImageVersion("v1.2.3")).toBe("1.2.3");
     expect(normalizeManagedImageVersion("not-a-version")).toBe("0.0.0");

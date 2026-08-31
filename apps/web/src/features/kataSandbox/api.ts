@@ -56,6 +56,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isString = (value: unknown): value is string => typeof value === "string";
 
+export function isHostSandboxClient(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.desktopBridge !== undefined) return true;
+  if (!window.location.origin.startsWith("http")) return false;
+  return new URL(resolvePrimaryEnvironmentHttpUrl("/")).origin === window.location.origin;
+}
+
 function shouldIncludePrimaryCookies(requestUrl: string): boolean {
   if (
     typeof window === "undefined" ||

@@ -125,6 +125,7 @@ import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectLis
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import { DeploymentSettings } from "../../features/kataSandbox/DeploymentSettings";
 import { AddEnvironmentDialog } from "../../features/kataSandbox/AddEnvironmentDialog";
+import { isHostSandboxClient } from "../../features/kataSandbox/api";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -1778,6 +1779,7 @@ export function ConnectionsSettings() {
     (state) => state.setDefaultAdvertisedEndpointKey,
   );
   const canManageLocalBackend = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
+  const canManageHostSandboxes = canManageLocalBackend && isHostSandboxClient();
   const canManageRelay = currentSessionScopes?.includes(AuthRelayWriteScope) ?? false;
   const authAccessChanges = useEnvironmentQuery(
     canManageLocalBackend && primaryEnvironmentId !== null
@@ -2665,7 +2667,7 @@ export function ConnectionsSettings() {
             )}
           </SettingsSection>
 
-          <DeploymentSettings />
+          {canManageHostSandboxes ? <DeploymentSettings /> : null}
 
           {isLocalBackendRemotelyReachable ? (
             <SettingsSection
@@ -2981,7 +2983,7 @@ export function ConnectionsSettings() {
             authenticated={
               Boolean(desktopBridge) || primarySessionState.data?.authenticated === true
             }
-            canManageSandboxes={canManageLocalBackend}
+            canManageSandboxes={canManageHostSandboxes}
             discoveredSshHosts={discoveredSshHosts}
             discoveredSshHostsError={desktopSshHosts.error}
             isLoadingDiscoveredSshHosts={desktopSshHosts.isPending}

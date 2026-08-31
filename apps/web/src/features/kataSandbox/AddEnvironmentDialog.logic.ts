@@ -43,6 +43,7 @@ export interface SandboxOperationView {
   readonly progress?: SandboxOperationProgress;
   readonly stage?: string;
   readonly error?: string;
+  readonly profileId?: string;
   readonly deploymentId?: string;
 }
 
@@ -94,6 +95,7 @@ export type AddEnvironmentAction =
   | { readonly type: "select-profile"; readonly profileId: string }
   | { readonly type: "new-profile" }
   | { readonly type: "operation"; readonly operation: SandboxOperationView }
+  | { readonly type: "fail-operation"; readonly error: string }
   | { readonly type: "retry" }
   | { readonly type: "attachment"; readonly attachment: AttachmentView }
   | { readonly type: "error"; readonly error: string | null };
@@ -221,6 +223,18 @@ export function addEnvironmentReducer(
       return state.step !== "docker"
         ? state
         : { ...state, operation: action.operation, error: null };
+    case "fail-operation":
+      if (state.step !== "docker") {
+        return state.step === "choice" ? state : { ...state, error: action.error };
+      }
+      return {
+        ...state,
+        error: action.error,
+        operation:
+          state.operation === null
+            ? state.operation
+            : { ...state.operation, status: "Failed", error: action.error },
+      };
     case "retry":
       return state.step !== "docker" || state.operation?.status !== "Failed"
         ? state

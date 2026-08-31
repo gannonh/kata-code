@@ -63,7 +63,8 @@ RUN node --input-type=module -e ' \
   && command -v katacode \
   && command -v codex
 
-RUN useradd --create-home --home-dir /home/katacode --shell /bin/sh katacode \
+RUN groupadd --gid 1001 katacode \
+  && useradd --uid 1001 --gid 1001 --create-home --home-dir /home/katacode --shell /bin/sh katacode \
   && mkdir -p /home/katacode/.codex /var/lib/katacode /workspace \
   && chown -R katacode:katacode /home/katacode /var/lib/katacode /workspace
 

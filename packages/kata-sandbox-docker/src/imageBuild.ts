@@ -225,6 +225,7 @@ function installedPackageVersion(name: string): string {
   } catch (cause) {
     throw new Error(
       `Cannot resolve installed dependency ${name} for the standalone Kata package: ${String(cause)}`,
+      { cause },
     );
   }
   let directory = NodePath.dirname(entry);

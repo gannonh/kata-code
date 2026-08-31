@@ -4,7 +4,9 @@ Docker sandboxes run a separate Kata Code environment for a GitHub repository an
 
 ## Create a sandbox
 
-1. Open Settings → Connections and select Add environment.
+1. Open Settings → Connections and select Add environment on the Kata host
+   (the desktop app or the locally hosted web app). Remote clients over Connect
+   or a tunnel cannot reach the sandbox pairing port.
 2. Select Sandboxes → Local Container → Docker.
 3. Reuse an available Docker profile or select Add Docker profile.
 4. Enter a deployment label, public GitHub repository and ref, and Codex provider.
