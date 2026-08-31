@@ -237,25 +237,13 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
         receipt,
         deployment: requestDeployment(intent),
       });
-      yield* repository.claimOperation(
-        receipt.operationId,
-        "worker-1",
-        "2026-08-30T00:00:00.000Z",
-      );
+      yield* repository.claimOperation(receipt.operationId, "worker-1", "2026-08-30T00:00:00.000Z");
       yield* repository.releaseInFlightClaims();
 
       const claims = yield* Effect.all(
         [
-          repository.claimOperation(
-            receipt.operationId,
-            "worker-2",
-            "2026-08-30T00:00:41.000Z",
-          ),
-          repository.claimOperation(
-            receipt.operationId,
-            "worker-3",
-            "2026-08-30T00:00:41.000Z",
-          ),
+          repository.claimOperation(receipt.operationId, "worker-2", "2026-08-30T00:00:41.000Z"),
+          repository.claimOperation(receipt.operationId, "worker-3", "2026-08-30T00:00:41.000Z"),
         ],
         { concurrency: "unbounded" },
       );

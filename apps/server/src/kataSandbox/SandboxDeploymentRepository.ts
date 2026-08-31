@@ -1072,11 +1072,7 @@ const makeRepository = Effect.gen(function* () {
       mapSql("SandboxDeploymentRepository.getOperationByRequest"),
     );
 
-  const claimOperation = (
-    operationId: SandboxOperationId,
-    claimId: string,
-    claimedAt: string,
-  ) =>
+  const claimOperation = (operationId: SandboxOperationId, claimId: string, claimedAt: string) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
