@@ -7,7 +7,9 @@ import type {
   ProviderObservation,
   SandboxBootstrapManifest,
   SandboxDeploymentIntent,
+  SandboxOperationProgress,
   SandboxProfile,
+  SandboxProviderDescriptor,
   SandboxProviderDriverKind,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
 
@@ -31,6 +33,17 @@ export interface SandboxValidatedProfile {
   readonly imageDigest: string;
 }
 
+export type SandboxValidationProgressReporter = (
+  progress: Extract<
+    SandboxOperationProgress,
+    { readonly stage: "pulling-image" | "validating-image" }
+  >,
+) => Effect.Effect<void>;
+
+export interface SandboxValidationOptions {
+  readonly pullIfMissing?: boolean;
+}
+
 export interface SandboxAllocationInput {
   readonly profile: SandboxProfile;
   readonly intent: SandboxDeploymentIntent;
@@ -49,8 +62,11 @@ export interface SandboxIdentifiedFacts {
 
 export interface SandboxProviderDriver {
   readonly kind: SandboxProviderDriverKind;
+  readonly descriptor: SandboxProviderDescriptor;
   readonly validateProfile: (
     profile: SandboxProfile,
+    reportProgress?: SandboxValidationProgressReporter,
+    options?: SandboxValidationOptions,
   ) => Effect.Effect<SandboxValidatedProfile, SandboxDriverError>;
   readonly allocate: (
     input: SandboxAllocationInput,

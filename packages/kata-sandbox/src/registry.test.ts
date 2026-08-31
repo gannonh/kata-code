@@ -7,6 +7,12 @@ import { SandboxProviderRegistry } from "./registry.ts";
 
 const driver = {
   kind: "docker" as const,
+  descriptor: {
+    driverKind: "docker" as const,
+    category: "local-container" as const,
+    displayName: "Docker",
+    profileForm: "docker" as const,
+  },
   validateProfile: () => Effect.never,
   allocate: () => Effect.never,
   identify: () => Effect.never,
@@ -36,6 +42,18 @@ describe("SandboxProviderRegistry", () => {
       profileId,
       reason: "unknown-driver",
     });
+  });
+
+  it("lists registered provider descriptors", () => {
+    const registry = new SandboxProviderRegistry([driver]);
+    expect(registry.listDescriptors()).toEqual([
+      {
+        driverKind: "docker",
+        category: "local-container",
+        displayName: "Docker",
+        profileForm: "docker",
+      },
+    ]);
   });
 
   it("returns the registered driver for an enabled profile", () => {

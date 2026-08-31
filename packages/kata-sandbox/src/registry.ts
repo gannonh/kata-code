@@ -1,4 +1,7 @@
-import type { SandboxProviderProfileId } from "@kata-sh/code-kata-sandbox-contracts/domain";
+import type {
+  SandboxProviderDescriptor,
+  SandboxProviderProfileId,
+} from "@kata-sh/code-kata-sandbox-contracts/domain";
 import type { SandboxProviderDriver } from "./driver.ts";
 
 export type SandboxDriverAvailabilityReason = "unknown-driver" | "disabled";
@@ -18,11 +21,19 @@ export type SandboxDriverRegistration =
 export class SandboxProviderRegistry {
   private readonly drivers = new Map<string, SandboxProviderDriver>();
 
+  constructor(drivers: ReadonlyArray<SandboxProviderDriver> = []) {
+    for (const driver of drivers) this.register(driver);
+  }
+
   register(driver: SandboxProviderDriver): void {
     if (this.drivers.has(driver.kind)) {
       throw new Error(`Sandbox driver ${driver.kind} is already registered.`);
     }
     this.drivers.set(driver.kind, driver);
+  }
+
+  listDescriptors(): ReadonlyArray<SandboxProviderDescriptor> {
+    return [...this.drivers.values()].map((driver) => driver.descriptor);
   }
 
   resolve(input: {

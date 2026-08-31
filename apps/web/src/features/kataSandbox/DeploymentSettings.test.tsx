@@ -37,6 +37,7 @@ describe("Docker sandbox Settings API", () => {
             },
           },
         ],
+        providers: [],
         deployments: [
           {
             deployment: {
@@ -61,7 +62,7 @@ describe("Docker sandbox Settings API", () => {
     });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/kata-sandbox"),
-      expect.objectContaining({ credentials: "include" }),
+      expect.objectContaining({ credentials: "omit" }),
     );
   });
 
@@ -79,7 +80,10 @@ describe("Docker sandbox Settings API", () => {
             operationId: "profile-operation",
             requestId: "request-1",
             command: "profile-upsert",
+            payloadHash: "hash-profile",
             status: "Succeeded",
+            acceptedAt: "2026-08-30T00:00:00.000Z",
+            updatedAt: "2026-08-30T00:00:01.000Z",
           },
         }),
       )
@@ -90,7 +94,10 @@ describe("Docker sandbox Settings API", () => {
             operationId: "operation-1",
             requestId: "request-1",
             command: "create",
+            payloadHash: "hash-create",
             status: "Running",
+            acceptedAt: "2026-08-30T00:00:00.000Z",
+            updatedAt: "2026-08-30T00:00:01.000Z",
           },
         }),
       )
@@ -100,8 +107,11 @@ describe("Docker sandbox Settings API", () => {
             operationId: "operation-1",
             requestId: "request-1",
             command: "create",
+            payloadHash: "hash-create",
             status: "Succeeded",
             deploymentId: "deployment-1",
+            acceptedAt: "2026-08-30T00:00:00.000Z",
+            updatedAt: "2026-08-30T00:00:02.000Z",
           },
         }),
       )
@@ -116,7 +126,7 @@ describe("Docker sandbox Settings API", () => {
     const profileAccepted = await upsertSandboxProfile({
       name: "Local Docker",
       socketPath: "/var/run/docker.sock",
-      imageDigest: "ghcr.io/kata-sh/sandbox@sha256:" + "b".repeat(64),
+      image: { kind: "custom", digest: "ghcr.io/kata-sh/sandbox@sha256:" + "b".repeat(64) },
       enabled: true,
     });
     const profileReceipt = await pollSandboxOperation(profileAccepted.operationId, {
@@ -171,7 +181,7 @@ describe("Docker sandbox Settings API", () => {
     );
 
     await expect(fetchSandboxOperation("operation-1")).rejects.toThrow(
-      "The sandbox operation receipt is invalid.",
+      "The sandbox operation response is invalid.",
     );
   });
 });

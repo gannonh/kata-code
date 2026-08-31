@@ -16,6 +16,8 @@ import {
   SandboxOperationId,
   type SandboxOperationReceipt,
   type SandboxProfile,
+  type SandboxImageInput,
+  type SandboxOperationProgress,
   type SandboxProfileInput,
   SandboxProviderProfileId,
   type AllocatedDeployment,
@@ -38,7 +40,11 @@ import {
   identifyDeployment,
   redactDiagnostic,
   requestDeployment,
+  resolveManagedImage,
+  makeVcrOciRegistry,
+  DEFAULT_VCR_IMAGE_REPOSITORY,
   SandboxDriverError,
+  type ManagedImageRegistry,
   type SandboxProviderDriver,
 } from "@kata-sh/code-kata-sandbox";
 import * as Context from "effect/Context";
@@ -49,6 +55,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import * as Exit from "effect/Exit";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -58,6 +66,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveHeadlessConnectionHost } from "../startupAccess.ts";
 import { makeDockerSandboxDriver } from "@kata-sh/code-kata-sandbox-docker";
+import { SandboxProviderRegistry } from "@kata-sh/code-kata-sandbox";
 import {
   SandboxDeploymentRepository,
   type SandboxAcceptedOperation,
@@ -103,6 +112,8 @@ export interface SandboxDeploymentServiceDependencies {
   readonly credentialSeed: SandboxCredentialSeedShape;
   readonly secretStore: ServerSecretStore.ServerSecretStore["Service"];
   readonly crypto: Crypto.Crypto;
+  readonly managedImageRegistry?: ManagedImageRegistry;
+  readonly providerRegistry?: SandboxProviderRegistry;
 }
 
 export interface SandboxDeploymentServiceOptions {
@@ -113,12 +124,15 @@ export interface SandboxDeploymentServiceOptions {
   ) => SandboxDeploymentIntent["bootstrapManifest"];
   readonly now?: () => string;
   readonly schedule?: (effect: Effect.Effect<void, never>) => Effect.Effect<void, never>;
+  readonly operationScope?: Scope.Scope;
   readonly bootstrapTokenFor?: (
     deploymentId: SandboxDeploymentId,
   ) => Effect.Effect<string, SandboxDeploymentServiceError>;
   readonly issuePairingCredential?: (
     input: SandboxPairingCredentialInput,
   ) => Effect.Effect<SandboxPairingCredential, SandboxDeploymentServiceError>;
+  readonly managedImageRegistry?: ManagedImageRegistry;
+  readonly providerRegistry?: SandboxProviderRegistry;
 }
 
 export interface SandboxDeploymentServiceShape {
@@ -246,6 +260,26 @@ function targetPairingLabel(deploymentId: SandboxDeploymentId): string {
   return `Kata Code sandbox ${deploymentId}`;
 }
 
+function imageSelection(input: SandboxProfileInput): SandboxImageInput {
+  return input.image;
+}
+
+function profileMatchesInput(
+  profile: SandboxProfile,
+  input: SandboxProfileInput,
+  resolvedImageDigest?: string,
+): boolean {
+  return (
+    profile.name === input.name &&
+    profile.driverKind === input.driverKind &&
+    profile.socketPath === (input.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH) &&
+    profile.enabled === input.enabled &&
+    (input.image.kind === "custom"
+      ? profile.imageDigest === input.image.digest
+      : resolvedImageDigest === undefined || profile.imageDigest === resolvedImageDigest)
+  );
+}
+
 const decodeTargetPairing = (value: unknown) =>
   decodeAuthPairingCredentialResult(value).pipe(
     Effect.map((decoded) => ({
@@ -297,12 +331,28 @@ export function makeSandboxDeploymentService(
 ): SandboxDeploymentServiceShape {
   const repository = dependencies.repository;
   const endpointHost = options.endpointHost ?? "127.0.0.1";
-  const driverFor = options.driverFor ?? (() => makeDockerSandboxDriver({ endpointHost }));
+  const defaultDriver = makeDockerSandboxDriver({ endpointHost });
+  const driverFor = options.driverFor ?? (() => defaultDriver);
+  const providerRegistry =
+    options.providerRegistry ??
+    dependencies.providerRegistry ??
+    new SandboxProviderRegistry([defaultDriver]);
+  const managedImageRegistry =
+    options.managedImageRegistry ??
+    dependencies.managedImageRegistry ??
+    makeVcrOciRegistry({
+      repository:
+        process.env.KATACODE_SANDBOX_IMAGE_REPOSITORY?.trim() || DEFAULT_VCR_IMAGE_REPOSITORY,
+    });
   const bootstrapManifestFor = options.bootstrapManifestFor ?? buildSandboxBootstrapManifest;
   const now = options.now ?? (() => new Date().toISOString());
-  const schedule =
+  const operationScope = options.operationScope;
+  const schedule: (effect: Effect.Effect<void, never>) => Effect.Effect<void, never> =
     options.schedule ??
-    ((effect: Effect.Effect<void, never>) => Effect.forkDetach(effect).pipe(Effect.asVoid));
+    ((effect) =>
+      operationScope === undefined
+        ? Effect.die("Sandbox deployment service requires an operation scope.")
+        : Effect.forkIn(effect, operationScope).pipe(Effect.asVoid));
 
   const bootstrapTokenFor =
     options.bootstrapTokenFor ??
@@ -350,6 +400,7 @@ export function makeSandboxDeploymentService(
     command: SandboxOperationReceipt["command"],
     hash: string,
     deploymentId?: SandboxDeploymentId,
+    expectedRevision?: number,
   ): SandboxOperationReceipt => ({
     operationId,
     requestId,
@@ -357,6 +408,7 @@ export function makeSandboxDeploymentService(
     payloadHash: hash,
     status: "Accepted",
     ...(deploymentId ? { deploymentId } : {}),
+    ...(expectedRevision === undefined ? {} : { expectedRevision }),
     acceptedAt: now(),
     updatedAt: now(),
   });
@@ -401,16 +453,41 @@ export function makeSandboxDeploymentService(
   const updateOperation = (
     receipt: SandboxOperationReceipt,
     update: Pick<SandboxOperationReceipt, "status"> &
-      Partial<Pick<SandboxOperationReceipt, "result" | "error" | "deploymentId">>,
+      Partial<
+        Pick<
+          SandboxOperationReceipt,
+          "result" | "error" | "deploymentId" | "progress" | "resolvedImageDigest"
+        >
+      >,
   ) =>
-    saveOperation({
-      ...receipt,
-      ...update,
-      updatedAt: now(),
-    });
+    repository.getOperation(receipt.operationId).pipe(
+      Effect.mapError(asServiceError),
+      Effect.flatMap((current) =>
+        saveOperation({
+          ...(Option.isSome(current) ? current.value : receipt),
+          ...update,
+          updatedAt: now(),
+        }),
+      ),
+    );
 
   const markFailed = (receipt: SandboxOperationReceipt, cause: unknown) =>
-    updateOperation(receipt, { status: "Failed", error: diagnostic(cause) }).pipe(
+    repository.getOperation(receipt.operationId).pipe(
+      Effect.mapError(asServiceError),
+      Effect.catch(() => Effect.succeed(Option.none<SandboxOperationReceipt>())),
+      Effect.flatMap((current) => {
+        const latest = Option.isSome(current) ? current.value : receipt;
+        const lastStage =
+          latest.progress?.stage === "failed"
+            ? latest.progress.lastStage
+            : (latest.progress?.stage ?? "resolving-image");
+        const message = diagnostic(cause);
+        return updateOperation(latest, {
+          status: "Failed",
+          progress: { stage: "failed", lastStage, diagnostic: message },
+          error: message,
+        });
+      }),
       Effect.catch((saveError) =>
         Effect.logError("Failed to persist sandbox operation failure", { cause: saveError }).pipe(
           Effect.asVoid,
@@ -424,14 +501,6 @@ export function makeSandboxDeploymentService(
   const saveObservation = (deploymentId: SandboxDeploymentId, observation: ProviderObservation) =>
     repository.saveObservation(deploymentId, observation).pipe(Effect.mapError(asServiceError));
 
-  const profileMatchesInput = (profile: SandboxProfile, input: SandboxProfileInput): boolean =>
-    profile.profileId === input.profileId &&
-    profile.name === input.name &&
-    profile.driverKind === input.driverKind &&
-    profile.socketPath === (input.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH) &&
-    profile.imageDigest === input.imageDigest &&
-    profile.enabled === input.enabled;
-
   const validateProfileUpsert = (input: SandboxProfileInput) =>
     Effect.gen(function* () {
       if (input.profileId === undefined) {
@@ -444,7 +513,11 @@ export function makeSandboxDeploymentService(
       if (existing !== undefined && input.expectedRevision === undefined) {
         return yield* failConflict("Replacing a sandbox profile requires its expected revision.");
       }
-      if (existing !== undefined && input.expectedRevision !== existing.revision) {
+      if (
+        existing !== undefined &&
+        input.expectedRevision !== undefined &&
+        input.expectedRevision !== existing.revision
+      ) {
         return yield* failConflict(`Profile revision ${input.expectedRevision} is stale.`);
       }
       if (
@@ -457,41 +530,77 @@ export function makeSandboxDeploymentService(
       return existing;
     });
 
-  const applyProfileUpsert = (input: SandboxProfileInput) =>
+  const applyProfileUpsert = (input: SandboxProfileInput, receipt?: SandboxOperationReceipt) =>
     Effect.gen(function* () {
       if (input.profileId === undefined) {
         return yield* failCommand("Profile upsert operation has no profile id.");
       }
+      const selected = imageSelection(input);
       const current = yield* repository
         .getProfile(input.profileId)
         .pipe(Effect.mapError(asServiceError));
-      if (
-        Option.isSome(current) &&
-        profileMatchesInput(current.value, input) &&
-        (input.expectedRevision === undefined ||
-          current.value.revision === input.expectedRevision + 1)
-      ) {
-        return current.value;
+      const currentProfile = Option.isSome(current) ? current.value : undefined;
+      const targetRevision = (input.expectedRevision ?? 0) + 1;
+      const recoveredProfile =
+        receipt !== undefined &&
+        currentProfile !== undefined &&
+        currentProfile.revision === targetRevision &&
+        profileMatchesInput(currentProfile, input, receipt.resolvedImageDigest)
+          ? currentProfile
+          : undefined;
+      const existing = recoveredProfile ?? (yield* validateProfileUpsert(input));
+      const report = (progress: SandboxOperationProgress) =>
+        receipt === undefined
+          ? Effect.void
+          : updateOperation(receipt, { status: "Running", progress }).pipe(
+              Effect.catch(() => Effect.void),
+            );
+      const imageDigest =
+        receipt?.resolvedImageDigest ??
+        recoveredProfile?.imageDigest ??
+        (selected.kind === "managed"
+          ? yield* report({ stage: "resolving-image" }).pipe(
+              Effect.andThen(
+                resolveManagedImage(
+                  { serverVersion: selected.version, channel: selected.channel },
+                  managedImageRegistry,
+                ).pipe(
+                  Effect.map((resolved) => resolved.immutableReference),
+                  Effect.mapError(asServiceError),
+                ),
+              ),
+            )
+          : selected.digest);
+      if (receipt !== undefined) {
+        yield* updateOperation(receipt, {
+          status: "Running",
+          resolvedImageDigest: imageDigest,
+        });
       }
-      const existing = yield* validateProfileUpsert(input);
       const timestamp = now();
-      const profile: SandboxProfile = {
+      const profile: SandboxProfile = recoveredProfile ?? {
         profileId: input.profileId,
         name: input.name,
         driverKind: input.driverKind,
         socketPath: input.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH,
-        imageDigest: input.imageDigest,
+        imageDigest,
         enabled: input.enabled,
         revision: existing === undefined ? 1 : existing.revision + 1,
         createdAt: existing?.createdAt ?? timestamp,
         updatedAt: timestamp,
       };
-      if (profile.enabled) {
-        yield* driverFor(profile).validateProfile(profile).pipe(Effect.mapError(asServiceError));
-      }
+      // Persist the resolved reference before any engine work so failures leave a visible profile.
       yield* repository
         .saveProfile(profile, existing?.revision)
         .pipe(Effect.mapError(asServiceError));
+      if (profile.enabled) {
+        if (selected.kind === "custom") {
+          yield* report({ stage: "validating-image" });
+        }
+        yield* driverFor(profile)
+          .validateProfile(profile, (progress) => report(progress))
+          .pipe(Effect.mapError(asServiceError));
+      }
       return profile;
     });
 
@@ -575,7 +684,16 @@ export function makeSandboxDeploymentService(
       }
 
       if (deployment.state === "Requested") {
-        yield* driver.validateProfile(profile).pipe(Effect.mapError(asServiceError));
+        yield* driver
+          .validateProfile(
+            profile,
+            (progress) =>
+              updateOperation(receipt, { status: "Running", progress }).pipe(
+                Effect.catch(() => Effect.void),
+              ),
+            { pullIfMissing: false },
+          )
+          .pipe(Effect.mapError(asServiceError));
         const resource = yield* driver
           .allocate({
             profile,
@@ -642,6 +760,7 @@ export function makeSandboxDeploymentService(
         deployment.state === "Identified" ? deployment : undefined;
       yield* updateOperation(receipt, {
         status: "Succeeded",
+        progress: { stage: "ready" },
         result: {
           kind: "deployment",
           deploymentId,
@@ -678,6 +797,12 @@ export function makeSandboxDeploymentService(
           result: operationResultForDeleted(deployment),
         });
         return;
+      }
+      if (
+        receipt.expectedRevision !== undefined &&
+        deployment.revision !== receipt.expectedRevision
+      ) {
+        return yield* failConflict(`Deployment revision ${receipt.expectedRevision} is stale.`);
       }
       if (deployment.state === "Requested") {
         const deleted = deleteDeployment(deployment, now());
@@ -726,9 +851,10 @@ export function makeSandboxDeploymentService(
       if (receipt.profileInput === undefined) {
         return yield* failCommand("Profile upsert operation has no profile input.");
       }
-      const profile = yield* applyProfileUpsert(receipt.profileInput);
+      const profile = yield* applyProfileUpsert(receipt.profileInput, receipt);
       yield* updateOperation(receipt, {
         status: "Succeeded",
+        progress: { stage: "ready" },
         result: { kind: "profile", profileId: profile.profileId },
       });
     });
@@ -738,7 +864,9 @@ export function makeSandboxDeploymentService(
       const profileId = receipt.profileId;
       if (profileId === undefined)
         return yield* failCommand("Profile delete operation has no profile id.");
-      yield* repository.deleteProfile(profileId).pipe(Effect.mapError(asServiceError));
+      yield* repository
+        .deleteProfile(profileId, receipt.expectedRevision)
+        .pipe(Effect.mapError(asServiceError));
       yield* updateOperation(receipt, {
         status: "Succeeded",
         result: { kind: "profile", profileId },
@@ -775,7 +903,7 @@ export function makeSandboxDeploymentService(
             });
           }
           return driverFor(profile)
-            .validateProfile(profile)
+            .validateProfile(profile, undefined, { pullIfMissing: false })
             .pipe(
               Effect.map((validated) => ({
                 kind: "available" as const,
@@ -816,7 +944,11 @@ export function makeSandboxDeploymentService(
         }),
         { concurrency: "unbounded" },
       );
-      return { profiles: profileSummaries, deployments: deploymentSummaries };
+      return {
+        profiles: profileSummaries,
+        deployments: deploymentSummaries,
+        providers: providerRegistry.listDescriptors(),
+      };
     });
 
   const upsertProfile: SandboxDeploymentServiceShape["upsertProfile"] = (actor, input) =>
@@ -834,7 +966,7 @@ export function makeSandboxDeploymentService(
         name: input.name,
         driverKind: input.driverKind,
         ...(input.socketPath === undefined ? {} : { socketPath: input.socketPath }),
-        imageDigest: input.imageDigest,
+        image: input.image,
         enabled: input.enabled,
         ...(input.expectedRevision === undefined
           ? {}
@@ -879,7 +1011,14 @@ export function makeSandboxDeploymentService(
         yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
       );
       const receipt = {
-        ...createReceipt(operationId, input.requestId, "profile-delete", hash),
+        ...createReceipt(
+          operationId,
+          input.requestId,
+          "profile-delete",
+          hash,
+          undefined,
+          input.expectedRevision,
+        ),
         profileId: profile.profileId,
       } satisfies SandboxOperationReceipt;
       const accepted = yield* acceptOperation({ actor, receipt });
@@ -926,7 +1065,14 @@ export function makeSandboxDeploymentService(
       const operationId = SandboxOperationId.make(
         yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
       );
-      const receipt = createReceipt(operationId, input.requestId, "create", hash, deploymentId);
+      const receipt = createReceipt(
+        operationId,
+        input.requestId,
+        "create",
+        hash,
+        deploymentId,
+        input.expectedRevision,
+      );
       const accepted = yield* acceptOperation({
         actor,
         receipt,
@@ -954,6 +1100,7 @@ export function makeSandboxDeploymentService(
         "delete",
         hash,
         input.deploymentId,
+        input.expectedRevision,
       );
       const accepted = yield* acceptOperation({ actor, receipt });
       if (accepted.created) yield* schedule(runOperation(accepted.receipt));
@@ -1025,6 +1172,8 @@ export function makeSandboxDeploymentService(
 
 const makeService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
+  const operationScope = yield* Scope.make("sequential");
+  yield* Effect.addFinalizer(() => Scope.close(operationScope, Exit.void));
   const service = makeSandboxDeploymentService(
     {
       repository: yield* SandboxDeploymentRepository,
@@ -1036,9 +1185,10 @@ const makeService = Effect.gen(function* () {
     },
     {
       endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
+      operationScope,
     },
   );
-  yield* Effect.forkDetach(service.recover());
+  yield* Effect.forkIn(service.recover(), operationScope);
   return service;
 });
 

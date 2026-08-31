@@ -16,6 +16,7 @@ import {
   SandboxContainerId,
   SandboxContainerName,
   SandboxProviderLabels,
+  type SandboxProviderDescriptor,
   type DockerResourceHandle,
   type ProviderObservation,
   type SandboxDeploymentIntent,
@@ -27,11 +28,19 @@ import {
   type SandboxIdentifiedFacts,
   type SandboxProviderDriver,
   type SandboxValidatedProfile,
+  type SandboxValidationProgressReporter,
 } from "@kata-sh/code-kata-sandbox/driver";
 
 import { type DockerEngine, DockerEngineError, makeDockerEngine } from "./engine.ts";
 
 const DOCKER_KIND = "docker" as const;
+const DOCKER_DESCRIPTOR = {
+  driverKind: DOCKER_KIND,
+  category: "local-container",
+  displayName: "Docker",
+  profileForm: "docker",
+} satisfies SandboxProviderDescriptor;
+const IMAGE_PULL_TIMEOUT_MS = 5 * 60_000;
 const READY_PATH = "/.well-known/kata/environment";
 const DEFAULT_ENDPOINT_HOST = "127.0.0.1";
 const CHECKOUT_READY_PATH = "/tmp/kata-sandbox-checkout-ready";
@@ -478,10 +487,32 @@ function defaultReadinessProbe(
   );
 }
 
+type DockerPullMessage = {
+  readonly id?: unknown;
+  readonly status?: unknown;
+  readonly progressDetail?: { readonly current?: unknown; readonly total?: unknown };
+};
+
+function parseDockerPullMessage(line: string): DockerPullMessage | undefined {
+  try {
+    const message = JSON.parse(line) as unknown;
+    return message !== null && typeof message === "object"
+      ? (message as DockerPullMessage)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function validateProfile(
   engine: DockerEngine,
   profile: SandboxProfile,
+  reportProgress?: SandboxValidationProgressReporter,
+  options: { readonly pullIfMissing?: boolean } = {},
 ): Effect.Effect<SandboxValidatedProfile, SandboxDriverError> {
+  const report = (progress: Parameters<SandboxValidationProgressReporter>[0]) =>
+    reportProgress === undefined ? Effect.void : reportProgress(progress);
+  const localImageId = /^sha256:[0-9a-f]{64}$/.test(profile.imageDigest);
   return Effect.gen(function* () {
     const ping = yield* engine
       .request({ path: "/_ping" })
@@ -492,13 +523,71 @@ function validateProfile(
         message: "Docker daemon returned " + ping.status + ".",
       });
     }
-    const image = yield* engine
+    let image = yield* engine
       .request({ path: "/images/" + encodeURIComponent(profile.imageDigest) + "/json" })
       .pipe(Effect.mapError((error) => engineFailure(error, "image-unavailable")));
+    if (image.status === 404 && options.pullIfMissing !== false && !localImageId) {
+      yield* report({
+        stage: "pulling-image",
+        downloadedBytes: 0,
+        totalBytes: null,
+        layersCompleted: 0,
+        layersTotal: null,
+      });
+      const pulled = yield* engine
+        .request({
+          path: "/images/create?fromImage=" + encodeURIComponent(profile.imageDigest),
+          method: "POST",
+          timeoutMs: IMAGE_PULL_TIMEOUT_MS,
+        })
+        .pipe(Effect.mapError((error) => engineFailure(error, "image-unavailable")));
+      if (!isSuccess(pulled.status)) {
+        return yield* new SandboxDriverError({
+          reason: "image-unavailable",
+          message: "Docker image pull returned " + pulled.status + ".",
+        });
+      }
+      const layerIds = new Set<string>();
+      const completedLayerIds = new Set<string>();
+      for (const line of pulled.body.split("\n")) {
+        const message = parseDockerPullMessage(line);
+        if (message === undefined) continue;
+        const layerId = typeof message.id === "string" ? message.id : undefined;
+        if (layerId !== undefined) layerIds.add(layerId);
+        if (
+          layerId !== undefined &&
+          typeof message.status === "string" &&
+          /(?:pull complete|already exists|download complete)/iu.test(message.status)
+        ) {
+          completedLayerIds.add(layerId);
+        }
+        const current = message.progressDetail?.current;
+        const total = message.progressDetail?.total;
+        if (
+          (current === undefined || (Number.isInteger(current) && (current as number) >= 0)) &&
+          (total === undefined || (Number.isInteger(total) && (total as number) >= 0))
+        ) {
+          yield* report({
+            stage: "pulling-image",
+            downloadedBytes: typeof current === "number" ? current : 0,
+            totalBytes: typeof total === "number" ? total : null,
+            layersCompleted: completedLayerIds.size,
+            layersTotal: layerIds.size || null,
+          });
+        }
+      }
+      image = yield* engine
+        .request({ path: "/images/" + encodeURIComponent(profile.imageDigest) + "/json" })
+        .pipe(Effect.mapError((error) => engineFailure(error, "image-unavailable")));
+    }
+    yield* report({ stage: "validating-image" });
     if (image.status === 404) {
       return yield* new SandboxDriverError({
         reason: "image-unavailable",
-        message: "Docker image " + profile.imageDigest + " is not present locally.",
+        message:
+          "Docker image " +
+          profile.imageDigest +
+          (localImageId ? " is not present locally." : " is not present after pulling."),
       });
     }
     if (!isSuccess(image.status)) {
@@ -571,7 +660,9 @@ export function makeDockerSandboxDriver(
 
   return {
     kind: DOCKER_KIND,
-    validateProfile: (profile) => validateProfile(engineFor(profile.socketPath), profile),
+    descriptor: DOCKER_DESCRIPTOR,
+    validateProfile: (profile, reportProgress, validationOptions) =>
+      validateProfile(engineFor(profile.socketPath), profile, reportProgress, validationOptions),
     allocate: (input) =>
       Effect.gen(function* () {
         yield* validateAllocationInput(input);
@@ -655,6 +746,23 @@ export function makeDockerSandboxDriver(
       Effect.gen(function* () {
         yield* validateAllocationInput(input);
         const engine = engineFor(input.profile.socketPath);
+        const initialInspection = yield* inspectByName(
+          engine,
+          input.resource.containerId,
+          "setup-failed",
+        );
+        if (initialInspection === undefined) {
+          return yield* new SandboxDriverError({
+            reason: "setup-failed",
+            message: "Sandbox container disappeared before auth setup.",
+          });
+        }
+        if (!labelsMatch(initialInspection, input.intent)) {
+          return yield* new SandboxDriverError({
+            reason: "setup-failed",
+            message: "Sandbox ownership labels could not be verified before auth setup.",
+          });
+        }
         const archive = buildAuthArchive(input.codexAuthJson);
         const copied = yield* engine
           .request({

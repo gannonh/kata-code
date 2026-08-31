@@ -8,7 +8,7 @@ export const SandboxSourceManifest = Schema.Struct({
   codex: Schema.Struct({
     package: Schema.Literal("@openai/codex"),
     version: Schema.String.check(Schema.isPattern(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/)),
-    integrity: Schema.String.check(Schema.isPattern(/^sha512-[A-Za-z0-9+/]+={0,2}$/)),
+    integrity: Schema.String.check(Schema.isPattern(/^sha512-[A-Za-z0-9+/]{86}==$/)),
   }),
 });
 export type SandboxSourceManifest = typeof SandboxSourceManifest.Type;

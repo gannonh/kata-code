@@ -154,7 +154,9 @@ export const sandboxHttpApiLayer = HttpApiBuilder.group(
             yield* requireEnvironmentScope(AuthAccessReadScope);
           }
           const result = yield* service.list().pipe(Effect.mapError(toHttpError));
-          return session.scopes.has(AuthAccessReadScope) ? result : { ...result, profiles: [] };
+          return session.scopes.has(AuthAccessReadScope)
+            ? result
+            : { profiles: [], deployments: [], providers: result.providers };
         }),
       )
       .handle(

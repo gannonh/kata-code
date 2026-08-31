@@ -148,7 +148,7 @@ jobs:
             fi
 
             version="${raw#v}"
-            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
               echo "Invalid release version: $raw" >&2
               exit 1
             fi
@@ -729,6 +729,132 @@ jobs:
           path: resource-monitor-publish/${{ matrix.resource_key }}/*
           if-no-files-found: error
 
+  build_sandbox_image:
+    name: Build and verify Sandbox image
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+      VERCEL_PROJECT_SLUG: ${{ vars.VERCEL_PROJECT_SLUG }}
+      KATACODE_SANDBOX_IMAGE_REPOSITORY: ${{ vars.KATACODE_SANDBOX_IMAGE_REPOSITORY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@kata-sh/code-cli...
+              - --filter=@kata-sh/code-kata-sandbox-docker...
+              - --filter=@kata-sh/code-scripts...
+
+      - name: Set up cross-platform Buildx
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
+
+      - name: Refresh release lockfile
+        run: vp install --lockfile-only --ignore-scripts
+
+      - name: Build Sandbox image
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_DRY_RUN: ${{ needs.preflight.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          build_output="$RUNNER_TEMP/sandbox-image-build.json"
+          if [[ "$RELEASE_DRY_RUN" == "true" ]]; then
+            node packages/kata-sandbox-docker/scripts/build-image.mjs \
+              --output-file "$build_output"
+            exit 0
+          fi
+
+          required=(VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID)
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required Vercel release configuration: $name" >&2
+              exit 1
+            fi
+          done
+
+          vcr_scope="${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
+          repository="${KATACODE_SANDBOX_IMAGE_REPOSITORY:-vcr.vercel.com/${VERCEL_TEAM_SLUG:-kata-sh}/${VERCEL_PROJECT_SLUG:-kata-code}/kata-sandbox}"
+          vp dlx vercel@59.10.0 vcr login docker \
+            --project "$VERCEL_PROJECT_ID" \
+            --scope "$vcr_scope" \
+            --token "$VERCEL_TOKEN" \
+            --non-interactive
+
+          node packages/kata-sandbox-docker/scripts/build-image.mjs \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --reference "$repository" \
+            --tag "$repository:$RELEASE_VERSION" \
+            --output-file "$build_output"
+
+          # VCR repositories are public so consumers can pull the managed image
+          # without credentials. The repository is created by the first push.
+          vp dlx vercel@59.10.0 vcr config kata-sandbox \
+            --project "$VERCEL_PROJECT_ID" \
+            --scope "$vcr_scope" \
+            --public true \
+            --token "$VERCEL_TOKEN" \
+            --non-interactive
+
+          index_digest="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).indexDigest)' "$build_output")"
+          anonymous_config="$RUNNER_TEMP/docker-anonymous"
+          mkdir -p "$anonymous_config"
+          for platform in linux/amd64 linux/arm64; do
+            docker --config "$anonymous_config" pull --platform "$platform" "$repository@$index_digest"
+          done
+
+          release_args=(
+            --version "$RELEASE_VERSION"
+            --channel "${{ needs.preflight.outputs.release_channel }}"
+            --repository "$repository"
+            --build-output "$build_output"
+            --output sandbox-image.json
+            --project-id "$VERCEL_PROJECT_ID"
+            --team-slug "${VERCEL_TEAM_SLUG:-kata-sh}"
+          )
+          if [[ "${{ needs.preflight.outputs.make_latest }}" == "true" ]]; then
+            release_args+=(--make-latest)
+          fi
+          node scripts/release-sandbox-image.ts "${release_args[@]}"
+
+          KATACODE_VERCEL_IMAGE_E2E=1 \
+          KATACODE_SANDBOX_IMAGE_ARTIFACT=sandbox-image.json \
+          vp test run scripts/verify-kata-sandbox-image-vercel.test.ts
+
+      - name: Upload Sandbox image metadata
+        if: ${{ needs.preflight.outputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: sandbox-image
+          path: sandbox-image.json
+          if-no-files-found: error
+          retention-days: 30
+
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, relay_public_config, build]
@@ -806,12 +932,12 @@ jobs:
           done
 
       - name: Publish CLI package
-        run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --verbose
+        run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --provenance --verbose
 
   release:
     name: Publish GitHub Release
-    needs: [preflight, build, publish_cli]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && needs.publish_cli.result == 'success' && needs.preflight.outputs.dry_run != 'true' }}
+    needs: [preflight, build, build_sandbox_image, publish_cli]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && needs.build_sandbox_image.result == 'success' && needs.publish_cli.result == 'success' && needs.preflight.outputs.dry_run != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -840,6 +966,12 @@ jobs:
         with:
           pattern: desktop-*
           merge-multiple: true
+          path: release-assets
+
+      - name: Download Sandbox image metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: sandbox-image
           path: release-assets
 
       - name: Merge macOS updater manifests
@@ -909,6 +1041,7 @@ jobs:
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
+            release-assets/sandbox-image.json
           fail_on_unmatched_files: true
           token: ${{ github.token }}
 
@@ -930,6 +1063,7 @@ jobs:
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
+            release-assets/sandbox-image.json
           fail_on_unmatched_files: true
           token: ${{ github.token }}
 
