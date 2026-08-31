@@ -3,8 +3,10 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 import {
+  assertPublishedImageVerifyCommands,
   makeSandboxImageArtifact,
   parsePlatformDigests,
   parseReleaseImageArgs,
@@ -12,6 +14,8 @@ import {
   vcrReadinessUrl,
   waitForVcrAmd64Ready,
 } from "./release-sandbox-image.ts";
+
+const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 
 const repository = "vcr.vercel.com/team/project/kata-sandbox";
 const indexDigest = `sha256:${"a".repeat(64)}`;
@@ -102,6 +106,45 @@ describe("release sandbox image boundaries", () => {
     assert.equal(
       vcrReadinessUrl({ repository, projectId: "project-id", teamSlug: "team" }),
       "https://api.vercel.com/v1/vcr/repository/kata-sandbox/images?projectId=project-id&slug=team",
+    );
+  });
+
+  it("rejects pulling one index digest for two platforms", () => {
+    assert.throws(
+      () =>
+        assertPublishedImageVerifyCommands(
+          [
+            ["docker", "pull", "--platform", "linux/amd64", `${repository}@${indexDigest}`],
+            ["docker", "pull", "--platform", "linux/arm64", `${repository}@${indexDigest}`],
+          ],
+          indexDigest,
+        ),
+      /cannot overwrite digest/,
+    );
+  });
+
+  it("inspects the mirrored public index once", () => {
+    const workflow = NodeFS.readFileSync(
+      NodePath.join(repoRoot, ".github/workflows/release.yml"),
+      "utf8",
+    );
+    assert.include(workflow, "buildx imagetools inspect");
+    assert.notInclude(workflow, 'docker pull --platform');
+    assert.doesNotThrow(() =>
+      assertPublishedImageVerifyCommands(
+        [
+          [
+            "docker",
+            "--config",
+            "/tmp/docker-anonymous",
+            "buildx",
+            "imagetools",
+            "inspect",
+            `ghcr.io/gannonh/kata-sandbox@${indexDigest}`,
+          ],
+        ],
+        indexDigest,
+      ),
     );
   });
 

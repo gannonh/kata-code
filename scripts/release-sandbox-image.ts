@@ -374,6 +374,11 @@ export function buildBootstrapManifest(input: {
   };
 }
 
+export function assertPublishedImageVerifyCommands(
+  _commands: ReadonlyArray<ReadonlyArray<string>>,
+  _indexDigest: string,
+): void {}
+
 export function makeSandboxImageArtifact(input: {
   readonly repository: string;
   readonly indexDigest: string;
