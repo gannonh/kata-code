@@ -130,8 +130,8 @@ function validateTag(value: string): string {
 }
 
 export function validatePushedImageTags(reference: string, tags: ReadonlyArray<string>): void {
-  if (tags.some((tag) => !tag.startsWith(`${reference}:`))) {
-    throw new Error("Pushed image tags must use the --reference repository.");
+  if (!tags[0]?.startsWith(`${reference}:`)) {
+    throw new Error("The first pushed image tag must use the --reference repository.");
   }
 }
 
@@ -477,8 +477,10 @@ export async function runImageBuild(args = process.argv.slice(2)): Promise<Image
   const firstTag = tags[0];
   if (firstTag === undefined) throw new Error("At least one Docker image tag is required.");
   const reference = options.reference?.trim();
-  if (options.push && !reference) throw new Error("--reference is required when pushing an image.");
-  if (options.push) validatePushedImageTags(reference, tags);
+  if (options.push) {
+    if (!reference) throw new Error("--reference is required when pushing an image.");
+    validatePushedImageTags(reference, tags);
+  }
 
   const context = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kata-sandbox-image-"));
   try {
