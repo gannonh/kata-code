@@ -160,6 +160,7 @@ export function DeploymentSettings() {
       setError(null);
       try {
         const accepted = await startSandboxDeployment(deploymentId, revision, attachment);
+        const receipt = await pollSandboxOperation(accepted.operationId);
         if (receipt.status === "Failed") {
           throw new Error(receipt.error ?? "The sandbox could not be started.");
         }
