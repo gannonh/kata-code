@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import {
+  DEFAULT_VCR_IMAGE_REPOSITORY,
   ManagedImageResolutionError,
   makeVcrOciRegistry,
   managedImageTag,
@@ -29,6 +30,10 @@ function failed<A, E>(effect: Effect.Effect<A, E>) {
 }
 
 describe("managed image resolution", () => {
+  it("uses the public repository owned by the deployed Vercel project", () => {
+    expect(DEFAULT_VCR_IMAGE_REPOSITORY).toBe("vcr.vercel.com/astro-labs/kata-code/kata-sandbox");
+  });
+
   it("uses the channel in the nightly release tag", () => {
     expect(managedImageTag({ serverVersion: "v0.0.43", channel: "stable" })).toBe("0.0.43");
     expect(managedImageTag({ serverVersion: "v0.0.43", channel: "nightly" })).toBe(

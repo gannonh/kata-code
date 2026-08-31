@@ -23,7 +23,7 @@ Profiles use the Docker Unix socket available to the Kata Code server. The defau
 The managed image uses the control-server version. Stable releases use the exact version tag.
 Nightly releases use the matching nightly tag. The public VCR repository contains one OCI index for
 both platforms. Docker selects the host platform. Vercel Sandbox uses the prepared `linux/amd64`
-manifest. The default repository is `vcr.vercel.com/kata-sh/kata-code/kata-sandbox`; deployments
+manifest. The default repository is `vcr.vercel.com/astro-labs/kata-code/kata-sandbox`; deployments
 using another VCR project set `KATACODE_SANDBOX_IMAGE_REPOSITORY` to that full repository name.
 
 ## Advanced image override

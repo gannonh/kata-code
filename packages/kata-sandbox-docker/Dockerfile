@@ -60,6 +60,7 @@ RUN node --input-type=module -e ' \
   # resolved by the image build. \
   && cd /usr/local/share/kata-sandbox-artifacts \
   && npm ci --omit=dev --no-audit --no-fund \
+  && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-* \
   && command -v katacode \
   && command -v codex
 

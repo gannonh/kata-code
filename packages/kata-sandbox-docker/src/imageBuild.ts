@@ -372,6 +372,31 @@ async function run(
   });
 }
 
+async function runStreaming(
+  command: string,
+  args: ReadonlyArray<string>,
+  options: NodeChildProcess.SpawnOptions = {},
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = NodeChildProcess.spawn(command, [...args], {
+      stdio: "inherit",
+      ...options,
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `${command} exited with ${signal === null ? `code ${String(code)}` : `signal ${signal}`}.`,
+        ),
+      );
+    });
+  });
+}
+
 export function createImageBuildFacts(input: {
   readonly mode: ImageBuildFacts["mode"];
   readonly imageId?: string | undefined;
@@ -550,7 +575,7 @@ export async function runImageBuild(args = process.argv.slice(2)): Promise<Image
         `CODEX_PACKAGE=${String(codexPackage.name ?? "")}`,
       ],
     });
-    await run("docker", dockerArgs, { cwd: repositoryRoot });
+    await runStreaming("docker", dockerArgs, { cwd: repositoryRoot });
 
     const buildxMetadata = NodeFS.existsSync(metadataPath) ? await readJson(metadataPath) : {};
     const indexDigest = extractBuildxIndexDigest(buildxMetadata);
