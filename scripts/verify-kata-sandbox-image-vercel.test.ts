@@ -3,6 +3,8 @@ import * as NodeFS from "node:fs";
 
 import { describe, expect, it } from "@effect/vitest";
 
+import { resolveVercelSandboxSmokeAuth } from "./vercel-sandbox-smoke-auth.ts";
+
 const enabled = process.env.KATACODE_VERCEL_IMAGE_E2E === "1";
 const artifactPath = process.env.KATACODE_SANDBOX_IMAGE_ARTIFACT ?? "sandbox-image.json";
 const digestPattern = /^sha256:[0-9a-f]{64}$/i;
@@ -104,14 +106,7 @@ describe.runIf(enabled)("Vercel Sandbox managed image", () => {
     async () => {
       const artifact = readArtifact();
       const { Sandbox } = await loadSandboxSdk();
-      const token = process.env.VERCEL_TOKEN;
-      const teamId = process.env.VERCEL_ORG_ID ?? process.env.VERCEL_TEAM_ID;
-      const projectId = process.env.VERCEL_PROJECT_ID;
-      if (!token || !teamId || !projectId) {
-        throw new Error(
-          "Vercel Sandbox smoke requires VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID.",
-        );
-      }
+      const { token, teamId, projectId } = resolveVercelSandboxSmokeAuth(process.env);
       const sandbox = await Sandbox.create({
         image: artifact.immutableReference,
         persistent: false,

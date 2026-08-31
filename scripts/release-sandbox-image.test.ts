@@ -115,7 +115,7 @@ const index = {
 };
 
 describe("release sandbox image boundaries", () => {
-  it("passes the VCR project to the Vercel Sandbox smoke test", () => {
+  it("does not remap VCR credentials onto the Vercel Sandbox smoke test", () => {
     const workflow = NodeFS.readFileSync(
       NodePath.join(import.meta.dirname, "../.github/workflows/release.yml"),
       "utf8",
@@ -128,8 +128,10 @@ describe("release sandbox image boundaries", () => {
     assert.isAbove(smokeEnd, smokeStart);
 
     const smokeCommand = workflow.slice(smokeStart, smokeEnd);
-    assert.include(smokeCommand, 'VERCEL_ORG_ID="$VCR_ORG_ID"');
-    assert.include(smokeCommand, 'VERCEL_PROJECT_ID="$VCR_PROJECT_ID"');
+    assert.notInclude(smokeCommand, 'VERCEL_ORG_ID="$VCR_ORG_ID"');
+    assert.notInclude(smokeCommand, 'VERCEL_PROJECT_ID="$VCR_PROJECT_ID"');
+    assert.include(workflow, "VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}");
+    assert.include(workflow, "VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}");
   });
 
   it("derives exact and discovery tags without parsing release logs", () => {
