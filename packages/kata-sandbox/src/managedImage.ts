@@ -39,13 +39,13 @@ export interface ManagedImageRegistry {
   readonly readManifest: (tag: string) => Effect.Effect<unknown, ManagedImageResolutionError>;
 }
 
-export interface VcrOciRegistryOptions {
+export interface OciRegistryOptions {
   readonly repository?: string;
   readonly httpClient?: HttpClient.HttpClient;
   readonly baseUrl?: string;
 }
 
-export const DEFAULT_VCR_IMAGE_REPOSITORY = "vcr.vercel.com/astro-labs/kata-code/kata-sandbox";
+export const DEFAULT_MANAGED_IMAGE_REPOSITORY = "ghcr.io/gannonh/kata-sandbox";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const repositorySegmentPattern = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
@@ -63,6 +63,11 @@ const manifestSchema = Schema.Struct({
   ),
 });
 const decodeManifest = Schema.decodeUnknownSync(manifestSchema);
+const tokenResponseSchema = Schema.Struct({
+  token: Schema.optional(Schema.String),
+  access_token: Schema.optional(Schema.String),
+});
+const decodeTokenResponse = Schema.decodeUnknownSync(tokenResponseSchema);
 const isImageVersion = Schema.is(SandboxImageVersion);
 type Manifest = typeof manifestSchema.Type;
 
@@ -207,11 +212,33 @@ function manifestUrl(repository: string, tag: string, baseUrl: string | undefine
   return `${base}/v2/${parsed.path}/manifests/${encodeURIComponent(tag)}`;
 }
 
-export function makeVcrOciRegistry(
-  options: VcrOciRegistryOptions | string = {},
-): ManagedImageRegistry {
+function bearerTokenUrl(header: string | undefined): string | undefined {
+  if (header === undefined || !header.startsWith("Bearer ")) return undefined;
+  const values = new Map<string, string>();
+  for (const match of header.slice("Bearer ".length).matchAll(/([a-z]+)="([^"]*)"/giu)) {
+    const name = match[1];
+    const value = match[2];
+    if (name !== undefined && value !== undefined) values.set(name.toLowerCase(), value);
+  }
+  const realm = values.get("realm");
+  if (realm === undefined) return undefined;
+  let url: URL;
+  try {
+    url = new URL(realm);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:") return undefined;
+  for (const name of ["service", "scope"]) {
+    const value = values.get(name);
+    if (value !== undefined) url.searchParams.set(name, value);
+  }
+  return url.toString();
+}
+
+export function makeOciRegistry(options: OciRegistryOptions | string = {}): ManagedImageRegistry {
   const normalized = typeof options === "string" ? { repository: options } : options;
-  const repository = normalized.repository ?? DEFAULT_VCR_IMAGE_REPOSITORY;
+  const repository = normalized.repository ?? DEFAULT_MANAGED_IMAGE_REPOSITORY;
   return {
     repository,
     readManifest: (tag) =>
@@ -224,26 +251,79 @@ export function makeVcrOciRegistry(
               : diagnostic("invalid-repository", String(cause), { repository }),
         });
         const client = normalized.httpClient ?? (yield* HttpClient.HttpClient);
-        const response = yield* client
-          .execute(
-            HttpClientRequest.get(url).pipe(
-              HttpClientRequest.setHeader(
-                "accept",
-                "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json",
+        const executeManifest = (authorization?: string) =>
+          client
+            .execute(
+              HttpClientRequest.get(url).pipe(
+                HttpClientRequest.setHeader(
+                  "accept",
+                  "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json",
+                ),
+                authorization === undefined
+                  ? (request) => request
+                  : HttpClientRequest.setHeader("authorization", authorization),
               ),
-            ),
-          )
-          .pipe(
-            Effect.mapError((cause) =>
-              diagnostic(
-                "registry-failure",
-                cause instanceof Error ? cause.message : String(cause),
-                {
+            )
+            .pipe(
+              Effect.mapError((cause) =>
+                diagnostic(
+                  "registry-failure",
+                  cause instanceof Error ? cause.message : String(cause),
+                  {
+                    repository,
+                  },
+                ),
+              ),
+            );
+        let response = yield* executeManifest();
+        if (response.status === 401) {
+          const tokenUrl = bearerTokenUrl(response.headers["www-authenticate"]);
+          if (tokenUrl !== undefined) {
+            const tokenResponse = yield* client
+              .execute(HttpClientRequest.get(tokenUrl))
+              .pipe(
+                Effect.mapError((cause) =>
+                  diagnostic(
+                    "registry-failure",
+                    cause instanceof Error ? cause.message : String(cause),
+                    { repository },
+                  ),
+                ),
+              );
+            if (tokenResponse.status < 200 || tokenResponse.status >= 300) {
+              return yield* diagnostic(
+                "http-status",
+                `OCI registry token service returned HTTP ${tokenResponse.status}.`,
+                { status: tokenResponse.status, repository },
+              );
+            }
+            const tokenBody = yield* tokenResponse.json.pipe(
+              Effect.flatMap((body) =>
+                Effect.try({
+                  try: () => decodeTokenResponse(body),
+                  catch: () =>
+                    diagnostic("registry-failure", "OCI registry returned an invalid token.", {
+                      repository,
+                    }),
+                }),
+              ),
+              Effect.mapError(() =>
+                diagnostic("registry-failure", "OCI registry returned an invalid token.", {
                   repository,
-                },
+                }),
               ),
-            ),
-          );
+            );
+            const token = (tokenBody.token ?? tokenBody.access_token)?.trim();
+            if (!token) {
+              return yield* diagnostic(
+                "registry-failure",
+                "OCI registry returned an invalid token.",
+                { repository },
+              );
+            }
+            response = yield* executeManifest(`Bearer ${token}`);
+          }
+        }
         if (response.status === 404) {
           return yield* diagnostic("missing-tag", `Managed image tag '${tag}' was not found.`, {
             status: response.status,
@@ -293,5 +373,3 @@ export function makeVcrOciRegistry(
       }).pipe(Effect.provide(FetchHttpClient.layer)),
   };
 }
-
-export const makeVcrManagedImageRegistry = makeVcrOciRegistry;

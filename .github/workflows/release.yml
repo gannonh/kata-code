@@ -733,6 +733,9 @@ jobs:
     name: Build and verify Sandbox image
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -769,6 +772,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Log in to GitHub Container Registry
+        if: ${{ needs.preflight.outputs.dry_run != 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
@@ -799,6 +810,7 @@ jobs:
 
           vcr_scope="${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
           repository="${KATACODE_SANDBOX_IMAGE_REPOSITORY:-vcr.vercel.com/${VERCEL_TEAM_SLUG:-kata-sh}/${VERCEL_PROJECT_SLUG:-kata-code}/kata-sandbox}"
+          public_repository="ghcr.io/gannonh/kata-sandbox"
           vp dlx vercel@59.10.0 vcr login docker \
             --project "$VERCEL_PROJECT_ID" \
             --scope "$vcr_scope" \
@@ -810,10 +822,10 @@ jobs:
             --push \
             --reference "$repository" \
             --tag "$repository:$RELEASE_VERSION" \
+            --tag "$public_repository:$RELEASE_VERSION" \
             --output-file "$build_output"
 
-          # VCR repositories are public so consumers can pull the managed image
-          # without credentials. The repository is created by the first push.
+          # VCR public access permits other authenticated Vercel teams to pull.
           vp dlx vercel@59.10.0 vcr config kata-sandbox \
             --project "$VERCEL_PROJECT_ID" \
             --scope "$vcr_scope" \
@@ -825,8 +837,10 @@ jobs:
           anonymous_config="$RUNNER_TEMP/docker-anonymous"
           mkdir -p "$anonymous_config"
           for platform in linux/amd64 linux/arm64; do
-            docker --config "$anonymous_config" pull --platform "$platform" "$repository@$index_digest"
+            docker pull --platform "$platform" "$repository@$index_digest"
           done
+          docker --config "$anonymous_config" buildx imagetools inspect \
+            "$public_repository@$index_digest"
 
           release_args=(
             --version "$RELEASE_VERSION"

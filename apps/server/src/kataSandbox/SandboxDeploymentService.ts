@@ -58,8 +58,8 @@ import {
   redactDiagnostic,
   requestDeployment,
   resolveManagedImage,
-  makeVcrOciRegistry,
-  DEFAULT_VCR_IMAGE_REPOSITORY,
+  makeOciRegistry,
+  DEFAULT_MANAGED_IMAGE_REPOSITORY,
   SandboxDriverError,
   type ManagedImageRegistry,
   type SandboxProviderDriver,
@@ -414,9 +414,9 @@ export function makeSandboxDeploymentService(
   const managedImageRegistry =
     options.managedImageRegistry ??
     dependencies.managedImageRegistry ??
-    makeVcrOciRegistry({
+    makeOciRegistry({
       repository:
-        process.env.KATACODE_SANDBOX_IMAGE_REPOSITORY?.trim() || DEFAULT_VCR_IMAGE_REPOSITORY,
+        process.env.KATACODE_SANDBOX_IMAGE_REPOSITORY?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
     });
   const bootstrapManifestFor = options.bootstrapManifestFor ?? buildSandboxBootstrapManifest;
   const now = options.now ?? (() => new Date().toISOString());

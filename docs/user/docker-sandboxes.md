@@ -12,7 +12,7 @@ Docker sandboxes run a separate Kata Code environment for a GitHub repository an
 4. Enter a deployment label, public GitHub repository and ref, and Codex provider.
 5. Select Create and attach environment.
 
-Kata resolves the matching managed image to an immutable VCR digest, pulls it when Docker does not
+Kata resolves the matching managed image to an immutable OCI digest, pulls it when Docker does not
 have it, validates the image, creates the container, and attaches it through ordinary environment
 onboarding. Profile progress shows image resolution, pull, validation, and bounded download and
 layer counts. A failed profile remains visible with its diagnostic and can be retried.
@@ -21,10 +21,10 @@ Profiles use the Docker Unix socket available to the Kata Code server. The defau
 `/var/run/docker.sock`. Docker must support `linux/amd64` or `linux/arm64`.
 
 The managed image uses the control-server version. Stable releases use the exact version tag.
-Nightly releases use the matching nightly tag. The public VCR repository contains one OCI index for
-both platforms. Docker selects the host platform. Vercel Sandbox uses the prepared `linux/amd64`
-manifest. The default repository is `vcr.vercel.com/astro-labs/kata-code/kata-sandbox`; deployments
-using another VCR project set `KATACODE_SANDBOX_IMAGE_REPOSITORY` to that full repository name.
+Nightly releases use the matching nightly tag. The public GHCR repository contains one OCI index for
+both platforms. Docker selects the host platform. Vercel Sandbox uses the same image published to
+VCR. The default repository is `ghcr.io/gannonh/kata-sandbox`; deployments using another registry
+set `KATACODE_SANDBOX_IMAGE_REPOSITORY` to that full repository name.
 
 ## Advanced image override
 

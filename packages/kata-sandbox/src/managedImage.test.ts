@@ -3,9 +3,9 @@ import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import {
-  DEFAULT_VCR_IMAGE_REPOSITORY,
+  DEFAULT_MANAGED_IMAGE_REPOSITORY,
   ManagedImageResolutionError,
-  makeVcrOciRegistry,
+  makeOciRegistry,
   managedImageTag,
   parseManagedImageManifest,
   resolveManagedImage,
@@ -30,8 +30,8 @@ function failed<A, E>(effect: Effect.Effect<A, E>) {
 }
 
 describe("managed image resolution", () => {
-  it("uses the public repository owned by the deployed Vercel project", () => {
-    expect(DEFAULT_VCR_IMAGE_REPOSITORY).toBe("ghcr.io/gannonh/kata-sandbox");
+  it("uses the public repository for anonymous Docker pulls", () => {
+    expect(DEFAULT_MANAGED_IMAGE_REPOSITORY).toBe("ghcr.io/gannonh/kata-sandbox");
   });
 
   it("uses the channel in the nightly release tag", () => {
@@ -102,7 +102,7 @@ describe("managed image resolution", () => {
       });
       const resolution = yield* resolveManagedImage(
         { serverVersion: "0.0.43", channel: "stable" },
-        makeVcrOciRegistry({
+        makeOciRegistry({
           repository: "vcr.vercel.com/team/project/kata-sandbox",
           httpClient: client,
         }),
@@ -119,10 +119,11 @@ describe("managed image resolution", () => {
       const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
       const manifestUrl = "https://ghcr.io/v2/gannonh/kata-sandbox/manifests/0.0.43";
       const client = HttpClient.make((request) => {
-        requests.push({
-          url: request.url,
-          authorization: request.headers.authorization,
-        });
+        requests.push(
+          request.headers.authorization === undefined
+            ? { url: request.url }
+            : { url: request.url, authorization: request.headers.authorization },
+        );
         if (request.url.startsWith("https://ghcr.io/token?")) {
           return Effect.succeed(
             HttpClientResponse.fromWeb(
@@ -158,14 +159,13 @@ describe("managed image resolution", () => {
 
       const resolution = yield* resolveManagedImage(
         { serverVersion: "0.0.43", channel: "stable" },
-        makeVcrOciRegistry({ repository: "ghcr.io/gannonh/kata-sandbox", httpClient: client }),
+        makeOciRegistry({ repository: "ghcr.io/gannonh/kata-sandbox", httpClient: client }),
       );
 
       expect(requests).toEqual([
-        { url: manifestUrl, authorization: undefined },
+        { url: manifestUrl },
         {
           url: "https://ghcr.io/token?service=ghcr.io&scope=repository%3Agannonh%2Fkata-sandbox%3Apull",
-          authorization: undefined,
         },
         { url: manifestUrl, authorization: "Bearer anonymous-token" },
       ]);
@@ -175,7 +175,7 @@ describe("managed image resolution", () => {
 
   it.effect("reports malformed repository and digest responses as typed diagnostics", () =>
     Effect.gen(function* () {
-      const invalidRepository = makeVcrOciRegistry({ repository: "https://registry/image" });
+      const invalidRepository = makeOciRegistry({ repository: "https://registry/image" });
       expect(yield* failed(invalidRepository.readManifest("0.0.43"))).toMatchObject({
         kind: "invalid-repository",
       });
@@ -192,7 +192,7 @@ describe("managed image resolution", () => {
       );
       expect(
         yield* failed(
-          makeVcrOciRegistry({
+          makeOciRegistry({
             repository: "vcr.vercel.com/team/image",
             httpClient: invalidDigestClient,
           }).readManifest("0.0.43"),
@@ -216,7 +216,7 @@ describe("managed image resolution", () => {
       );
       expect(
         yield* failed(
-          makeVcrOciRegistry({
+          makeOciRegistry({
             repository: "vcr.vercel.com/team/image",
             httpClient: client,
           }).readManifest("0.0.43"),
@@ -232,7 +232,7 @@ describe("managed image resolution", () => {
       );
       expect(
         yield* failed(
-          makeVcrOciRegistry({
+          makeOciRegistry({
             repository: "vcr.vercel.com/team/image",
             httpClient: client,
           }).readManifest("0.0.43"),
