@@ -9,7 +9,9 @@ import type {
   SandboxConnectorOrigin,
   SandboxDeploymentIntent,
   SandboxEndpoint,
+  SandboxOperationProgress,
   SandboxProfile,
+  SandboxProviderDescriptor,
   SandboxProviderDriverKind,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
 
@@ -32,6 +34,17 @@ export class SandboxDriverError extends Data.TaggedError("SandboxDriverError")<{
 export interface SandboxValidatedProfile {
   readonly daemonVersion: string;
   readonly imageDigest: string;
+}
+
+export type SandboxValidationProgressReporter = (
+  progress: Extract<
+    SandboxOperationProgress,
+    { readonly stage: "pulling-image" | "validating-image" }
+  >,
+) => Effect.Effect<void>;
+
+export interface SandboxValidationOptions {
+  readonly pullIfMissing?: boolean;
 }
 
 export interface SandboxAllocationInput {
@@ -82,8 +95,11 @@ export interface SandboxProviderPowerCapability {
 
 export interface SandboxProviderDriver {
   readonly kind: SandboxProviderDriverKind;
+  readonly descriptor: SandboxProviderDescriptor;
   readonly validateProfile: (
     profile: SandboxProfile,
+    reportProgress?: SandboxValidationProgressReporter,
+    options?: SandboxValidationOptions,
   ) => Effect.Effect<SandboxValidatedProfile, SandboxDriverError>;
   readonly allocate: (
     input: SandboxAllocationInput,

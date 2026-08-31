@@ -48,15 +48,23 @@ export const UnixSocketPath = TrimmedNonEmptyString.check(Schema.isPattern(/^\/.
 export type UnixSocketPath = typeof UnixSocketPath.Type;
 
 export const OciImageDigest = TrimmedNonEmptyString.check(
-  Schema.isPattern(/^(?:[^\s@]+@)?sha256:[0-9a-f]{64}$/),
+  Schema.isPattern(/^(?:[a-z0-9][a-z0-9._:/-]*@)?sha256:[0-9a-f]{64}$/),
 );
 export type OciImageDigest = typeof OciImageDigest.Type;
+
+export const SandboxImageChannel = Schema.Literals(["stable", "nightly"]);
+export type SandboxImageChannel = typeof SandboxImageChannel.Type;
 
 export const Sha256Digest = TrimmedNonEmptyString.check(Schema.isPattern(/^[0-9a-f]{64}$/i));
 export type Sha256Digest = typeof Sha256Digest.Type;
 
 export const SandboxProfileName = TrimmedNonEmptyString;
 export type SandboxProfileName = typeof SandboxProfileName.Type;
+
+export const SandboxImageVersion = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/),
+);
+export type SandboxImageVersion = typeof SandboxImageVersion.Type;
 
 export const SandboxDeploymentLabel = TrimmedNonEmptyString;
 export type SandboxDeploymentLabel = typeof SandboxDeploymentLabel.Type;
@@ -85,11 +93,43 @@ export type SandboxDeploymentAction = typeof SandboxDeploymentAction.Type;
 export const SandboxProviderDriverKind = Schema.Literals(["docker"]);
 export type SandboxProviderDriverKind = typeof SandboxProviderDriverKind.Type;
 
+export const SandboxProviderCategory = Schema.Literals(["local-container", "cloud-provider"]);
+export type SandboxProviderCategory = typeof SandboxProviderCategory.Type;
+
+export const SandboxProviderProfileForm = Schema.Literals(["docker", "none"]);
+export type SandboxProviderProfileForm = typeof SandboxProviderProfileForm.Type;
+
+export const SandboxProviderDescriptor = Schema.Struct({
+  driverKind: SandboxProviderDriverKind,
+  category: SandboxProviderCategory,
+  displayName: TrimmedNonEmptyString,
+  profileForm: SandboxProviderProfileForm,
+  availabilityDiagnostic: Schema.optional(SandboxDiagnostic),
+});
+export type SandboxProviderDescriptor = typeof SandboxProviderDescriptor.Type;
+
+export const SandboxManagedImageInput = Schema.Struct({
+  kind: Schema.Literal("managed"),
+  channel: SandboxImageChannel,
+  version: SandboxImageVersion,
+});
+export type SandboxManagedImageInput = typeof SandboxManagedImageInput.Type;
+
+export const SandboxCustomImageInput = Schema.Struct({
+  kind: Schema.Literal("custom"),
+  digest: OciImageDigest,
+});
+export type SandboxCustomImageInput = typeof SandboxCustomImageInput.Type;
+
+export const SandboxImageInput = Schema.Union([SandboxManagedImageInput, SandboxCustomImageInput]);
+export type SandboxImageInput = typeof SandboxImageInput.Type;
+
 export const SandboxProfile = Schema.Struct({
   profileId: SandboxProviderProfileId,
   name: SandboxProfileName,
   driverKind: SandboxProviderDriverKind,
   socketPath: UnixSocketPath,
+  /** The only image value persisted by a profile is this resolved immutable reference. */
   imageDigest: OciImageDigest,
   enabled: Schema.Boolean,
   revision: PositiveInt,
@@ -114,7 +154,8 @@ export const SandboxProfileInput = Schema.Struct({
   name: SandboxProfileName,
   driverKind: SandboxProviderDriverKind,
   socketPath: Schema.optional(UnixSocketPath),
-  imageDigest: OciImageDigest,
+  /** Requests select a managed channel/version or a custom immutable digest. */
+  image: SandboxImageInput,
   enabled: Schema.Boolean,
   expectedRevision: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 });
@@ -276,6 +317,42 @@ export const SandboxOperationStatus = Schema.Literals([
 ]);
 export type SandboxOperationStatus = typeof SandboxOperationStatus.Type;
 
+export const SandboxOperationProgressStage = Schema.Literals([
+  "resolving-image",
+  "pulling-image",
+  "validating-image",
+  "ready",
+  "failed",
+]);
+export type SandboxOperationProgressStage = typeof SandboxOperationProgressStage.Type;
+
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const SandboxProgressStageBeforeFailure = Schema.Literals([
+  "resolving-image",
+  "pulling-image",
+  "validating-image",
+  "ready",
+]);
+
+export const SandboxOperationProgress = Schema.Union([
+  Schema.Struct({ stage: Schema.Literal("resolving-image") }),
+  Schema.Struct({
+    stage: Schema.Literal("pulling-image"),
+    downloadedBytes: Schema.optional(NonNegativeInt),
+    totalBytes: Schema.optional(Schema.NullOr(NonNegativeInt)),
+    layersCompleted: Schema.optional(NonNegativeInt),
+    layersTotal: Schema.optional(Schema.NullOr(NonNegativeInt)),
+  }),
+  Schema.Struct({ stage: Schema.Literal("validating-image") }),
+  Schema.Struct({ stage: Schema.Literal("ready") }),
+  Schema.Struct({
+    stage: Schema.Literal("failed"),
+    lastStage: SandboxProgressStageBeforeFailure,
+    diagnostic: SandboxDiagnostic,
+  }),
+]);
+export type SandboxOperationProgress = typeof SandboxOperationProgress.Type;
+
 export const SandboxOperationResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("profile"),
@@ -318,6 +395,8 @@ export const SandboxOperationReceipt = Schema.Struct({
   profileInput: Schema.optional(SandboxProfileInput),
   attachment: Schema.optional(SandboxAttachment),
   expectedRevision: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  resolvedImageDigest: Schema.optional(OciImageDigest),
+  progress: Schema.optionalKey(SandboxOperationProgress),
   result: Schema.optional(SandboxOperationResult),
   error: Schema.optional(SandboxDiagnostic),
   acceptedAt: IsoDateTime,

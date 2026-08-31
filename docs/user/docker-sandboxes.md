@@ -1,35 +1,55 @@
 # Docker sandboxes
 
-Docker sandboxes let you run a separate Kata Code environment for a GitHub repository and ref.
-Configure them from Settings → Connections → Docker sandboxes.
+Docker sandboxes run a separate Kata Code environment for a GitHub repository and ref.
 
-Create a profile with:
+## Create a sandbox
 
-- a profile name;
-- the Docker Unix socket available to the Kata Code server; and
-- an immutable image reference with a `sha256` digest.
+1. Open Settings → Connections and select Add environment on the Kata host
+   (the desktop app or the locally hosted web app). Remote clients over Connect
+   or a tunnel cannot reach the sandbox pairing port.
+2. Select Sandboxes → Local Container → Docker.
+3. Reuse an available Docker profile or select Add Docker profile.
+4. Enter a deployment label, public GitHub repository and ref, and Codex provider.
+5. Select Create and attach environment.
 
-The profile stays visible when Docker or the image is unavailable. The diagnostic identifies whether
-the daemon, image, or profile configuration needs attention.
+Kata resolves the matching managed image to an immutable VCR digest, pulls it when Docker does not
+have it, validates the image, creates the container, and attaches it through ordinary environment
+onboarding. Profile progress shows image resolution, pull, validation, and bounded download and
+layer counts. A failed profile remains visible with its diagnostic and can be retried.
 
-The image must be built or published with an immutable digest. For local verification, build the
-repo-owned image with the Docker package:
+Profiles use the Docker Unix socket available to the Kata Code server. The default is
+`/var/run/docker.sock`. Docker must support `linux/amd64` or `linux/arm64`.
+
+The managed image uses the control-server version. Stable releases use the exact version tag.
+Nightly releases use the matching nightly tag. The public VCR repository contains one OCI index for
+both platforms. Docker selects the host platform. Vercel Sandbox uses the prepared `linux/amd64`
+manifest. The default repository is `vcr.vercel.com/kata-sh/kata-code/kata-sandbox`; deployments
+using another VCR project set `KATACODE_SANDBOX_IMAGE_REPOSITORY` to that full repository name.
+
+## Advanced image override
+
+Leave the managed image selected for normal use. Development profiles can provide an immutable
+custom image under Advanced. Use a repository digest such as
+`registry.example.com/team/image@sha256:<64 hex characters>` or a local Docker image ID in the form
+`sha256:<64 hex characters>`. Mutable tags are rejected and are never stored.
+
+The image builder reads the checked-in source manifest. Run it without image or Codex environment
+variables:
 
 ```bash
-KATACODE_SANDBOX_BASE_IMAGE=ghcr.io/example/base@sha256:<digest> \
-KATACODE_SANDBOX_CODEX_TARBALL=/path/to/codex.tgz \
 vp run --filter @kata-sh/code-kata-sandbox-docker build:image
 ```
 
-The command prints an immutable registry digest when Docker provides one. A local build without a
-registry association prints its bare `sha256:<config digest>` image ID. It also prints the three
-`KATACODE_SANDBOX_*` values required by the control server. The base image must provide Node 24,
-Git, GitHub CLI, and the native build tools used by current Kata dependencies.
+The source manifest pins the Node base image digest and the exact Codex package and npm integrity.
+The builder verifies both values before Docker work. The image contains Node 24, Git, GitHub CLI,
+native build tools, the Kata CLI, the Codex CLI, and the bootstrap verifier. It creates writable
+`HOME=/home/katacode` and `KATACODE_HOME=/var/lib/katacode` directories for the runtime user.
 
-Create a deployment by selecting an available profile, entering a GitHub repository and ref, and
-selecting a Codex provider instance. Kata Code resolves the ref to a commit before creating the
-container. The container checks its immutable bootstrap manifest, uses `/workspace` for the checked
-out repository, and stores its runtime state under `/var/lib/katacode`.
+## Manage sandboxes
+
+Connections lists saved profiles and deployments separately from saved client environments.
+Unavailable profiles remain visible with a daemon, image, or configuration diagnostic. Retry
+validation after fixing Docker or the image.
 
 The deployment list shows the durable lifecycle state and the latest provider observation. Use Stop
 and Start to control the same container. Start uses the stored workspace, source locator, resolved
@@ -57,4 +77,5 @@ returns. Disabled profiles retain their deployments and can be re-enabled after 
 is fixed.
 
 Kata Code copies only the selected Codex `auth.json` into the sandbox. The sandbox receives no
-provider credentials for other providers.
+provider credentials for other providers. Other provider credentials, host credentials, repository
+data, and mutable package installs are excluded from the image.

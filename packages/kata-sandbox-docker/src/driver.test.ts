@@ -14,6 +14,8 @@ import {
 import type { DockerEngine, DockerRequest, DockerResponse } from "./engine.ts";
 import {
   DOCKER_KIND,
+  SANDBOX_RUNTIME_GID,
+  SANDBOX_RUNTIME_UID,
   buildAuthArchive,
   buildProviderSettingsArchive,
   dockerContainerName,
@@ -91,7 +93,7 @@ function fakeEngine(request: (request: DockerRequest) => DockerResponse): Docker
 }
 
 describe("Docker sandbox driver", () => {
-  it.effect("validates the daemon and exact local image without pulling", () => {
+  it.effect("validates the daemon and exact local image", () => {
     const requests: DockerRequest[] = [];
     const driver = makeDockerSandboxDriver({
       engine: fakeEngine((request) => {
@@ -112,6 +114,136 @@ describe("Docker sandbox driver", () => {
         "/version",
       ]);
       expect(requests.some((request) => request.path.startsWith("/images/create"))).toBe(false);
+    });
+  });
+
+  it.effect("does not pull a missing local content-addressed image id", () => {
+    const requests: DockerRequest[] = [];
+    const localProfile = decodeProfile({
+      ...profile,
+      imageDigest: "sha256:" + "f".repeat(64),
+    });
+    const driver = makeDockerSandboxDriver({
+      engine: fakeEngine((request) => {
+        requests.push(request);
+        if (request.path === "/_ping") return response(200, "OK");
+        if (request.path.startsWith("/images/")) return response(404);
+        return response(404);
+      }),
+    });
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.exit(driver.validateProfile(localProfile));
+      expect(result._tag).toBe("Failure");
+      expect(requests.some((request) => request.path.startsWith("/images/create"))).toBe(false);
+    });
+  });
+
+  it.effect("pulls a missing image and reports bounded validation stages", () => {
+    const requests: DockerRequest[] = [];
+    const stages: string[] = [];
+    const counts: Array<{
+      readonly downloadedBytes?: number;
+      readonly totalBytes?: number | null;
+      readonly layersCompleted?: number;
+      readonly layersTotal?: number | null;
+    }> = [];
+    let inspectCount = 0;
+    const driver = makeDockerSandboxDriver({
+      engine: fakeEngine((request) => {
+        requests.push(request);
+        if (request.path === "/_ping") return response(200, "OK");
+        if (request.path.startsWith("/images/") && request.path.endsWith("/json")) {
+          inspectCount += 1;
+          return inspectCount === 1 ? response(404) : response(200, "{}");
+        }
+        if (request.path.startsWith("/images/create")) {
+          return response(
+            200,
+            '{"id":"layer-1","status":"Downloading","progressDetail":{"current":1,"total":2}}\n{"id":"layer-1","status":"Pull complete"}',
+          );
+        }
+        if (request.path === "/version") return response(200, '{"ApiVersion":"1.45"}');
+        return response(404);
+      }),
+    });
+
+    return Effect.gen(function* () {
+      yield* driver.validateProfile(profile, (progress) => {
+        stages.push(progress.stage);
+        if (progress.stage === "pulling-image" && progress.downloadedBytes !== undefined) {
+          counts.push({
+            downloadedBytes: progress.downloadedBytes,
+            ...(progress.totalBytes === undefined ? {} : { totalBytes: progress.totalBytes }),
+            ...(progress.layersCompleted === undefined
+              ? {}
+              : { layersCompleted: progress.layersCompleted }),
+            ...(progress.layersTotal === undefined ? {} : { layersTotal: progress.layersTotal }),
+          });
+        }
+        return Effect.void;
+      });
+      expect(stages).toEqual([
+        "pulling-image",
+        "pulling-image",
+        "pulling-image",
+        "validating-image",
+      ]);
+      expect(counts).toEqual([
+        {
+          downloadedBytes: 0,
+          totalBytes: null,
+          layersCompleted: 0,
+          layersTotal: null,
+        },
+        {
+          downloadedBytes: 1,
+          totalBytes: 2,
+          layersCompleted: 0,
+          layersTotal: 1,
+        },
+        {
+          downloadedBytes: 0,
+          totalBytes: null,
+          layersCompleted: 1,
+          layersTotal: 1,
+        },
+      ]);
+      expect(requests.map((request) => request.path)).toEqual([
+        "/_ping",
+        "/images/" + encodeURIComponent(profile.imageDigest) + "/json",
+        "/images/create?fromImage=" + encodeURIComponent(profile.imageDigest),
+        "/images/" + encodeURIComponent(profile.imageDigest) + "/json",
+        "/version",
+      ]);
+    });
+  });
+
+  it.effect("fails a 200 Docker pull that reports an error line", () => {
+    const driver = makeDockerSandboxDriver({
+      engine: fakeEngine((request) => {
+        if (request.path === "/_ping") return response(200, "OK");
+        if (request.path.startsWith("/images/") && request.path.endsWith("/json")) {
+          return response(404);
+        }
+        if (request.path.startsWith("/images/create")) {
+          return response(
+            200,
+            '{"status":"Pulling from library/missing"}\n{"error":"pull access denied","errorDetail":{"message":"pull access denied"}}',
+          );
+        }
+        if (request.path === "/version") return response(200, '{"ApiVersion":"1.45"}');
+        return response(404);
+      }),
+    });
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.result(driver.validateProfile(profile));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure.reason).toBe("image-unavailable");
+        expect(result.failure.message).toBe("pull access denied");
+      }
     });
   });
 
@@ -339,10 +471,16 @@ describe("Docker sandbox driver", () => {
     });
   });
 
-  it("creates an archive containing only auth.json with mode 0600", () => {
+  it("creates an archive containing only auth.json with mode 0600 owned by the runtime user", () => {
     const archive = Buffer.from(buildAuthArchive(Buffer.from('{"token":"value"}')));
     expect(archive.subarray(0, 9).toString("utf8")).toBe("auth.json");
     expect(archive.subarray(100, 107).toString("ascii")).toBe("0000600");
+    expect(archive.subarray(108, 115).toString("ascii")).toBe(
+      SANDBOX_RUNTIME_UID.toString(8).padStart(7, "0"),
+    );
+    expect(archive.subarray(116, 123).toString("ascii")).toBe(
+      SANDBOX_RUNTIME_GID.toString(8).padStart(7, "0"),
+    );
     expect(archive.includes(Buffer.from("config.toml"))).toBe(false);
     expect(archive.includes(Buffer.from("sessions"))).toBe(false);
   });

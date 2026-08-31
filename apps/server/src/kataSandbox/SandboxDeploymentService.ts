@@ -28,6 +28,8 @@ import {
   type SandboxConnectorOrigin,
   type SandboxOperationReceipt,
   type SandboxProfile,
+  type SandboxImageInput,
+  type SandboxOperationProgress,
   type SandboxProfileInput,
   SandboxProviderProfileId,
   type AllocatedDeployment,
@@ -55,7 +57,11 @@ import {
   identifyDeployment,
   redactDiagnostic,
   requestDeployment,
+  resolveManagedImage,
+  makeVcrOciRegistry,
+  DEFAULT_VCR_IMAGE_REPOSITORY,
   SandboxDriverError,
+  type ManagedImageRegistry,
   type SandboxProviderDriver,
 } from "@kata-sh/code-kata-sandbox";
 import * as Context from "effect/Context";
@@ -67,6 +73,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Scope from "effect/Scope";
+import * as Exit from "effect/Exit";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -83,6 +91,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveHeadlessConnectionHost } from "../startupAccess.ts";
 import { makeDockerSandboxDriver } from "@kata-sh/code-kata-sandbox-docker";
+import { SandboxProviderRegistry } from "@kata-sh/code-kata-sandbox";
 import {
   SandboxDeploymentRepository,
   type SandboxAcceptedOperation,
@@ -131,6 +140,8 @@ export interface SandboxDeploymentServiceDependencies {
   readonly secretStore: ServerSecretStore.ServerSecretStore["Service"];
   readonly crypto: Crypto.Crypto;
   readonly httpClient?: HttpClient.HttpClient;
+  readonly managedImageRegistry?: ManagedImageRegistry;
+  readonly providerRegistry?: SandboxProviderRegistry;
 }
 
 export interface SandboxDeploymentServiceOptions {
@@ -142,12 +153,15 @@ export interface SandboxDeploymentServiceOptions {
   ) => SandboxDeploymentIntent["bootstrapManifest"];
   readonly now?: () => string;
   readonly schedule?: (effect: Effect.Effect<void, never>) => Effect.Effect<void, never>;
+  readonly operationScope?: Scope.Scope;
   readonly bootstrapTokenFor?: (
     deploymentId: SandboxDeploymentId,
   ) => Effect.Effect<string, SandboxDeploymentServiceError>;
   readonly issuePairingCredential?: (
     input: SandboxPairingCredentialInput,
   ) => Effect.Effect<SandboxPairingCredential, SandboxDeploymentServiceError>;
+  readonly managedImageRegistry?: ManagedImageRegistry;
+  readonly providerRegistry?: SandboxProviderRegistry;
 }
 
 export interface SandboxDeploymentServiceShape {
@@ -317,6 +331,26 @@ function targetPairingLabel(deploymentId: SandboxDeploymentId): string {
   return `Kata Code sandbox ${deploymentId}`;
 }
 
+function imageSelection(input: SandboxProfileInput): SandboxImageInput {
+  return input.image;
+}
+
+function profileMatchesInput(
+  profile: SandboxProfile,
+  input: SandboxProfileInput,
+  resolvedImageDigest?: string,
+): boolean {
+  return (
+    profile.name === input.name &&
+    profile.driverKind === input.driverKind &&
+    profile.socketPath === (input.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH) &&
+    profile.enabled === input.enabled &&
+    (input.image.kind === "custom"
+      ? profile.imageDigest === input.image.digest
+      : resolvedImageDigest === undefined || profile.imageDigest === resolvedImageDigest)
+  );
+}
+
 const decodeTargetPairing = (value: unknown) =>
   decodeAuthPairingCredentialResult(value).pipe(
     Effect.map((decoded) => ({
@@ -371,12 +405,28 @@ export function makeSandboxDeploymentService(
 ): SandboxDeploymentServiceShape {
   const repository = dependencies.repository;
   const endpointHost = options.endpointHost ?? "127.0.0.1";
-  const driverFor = options.driverFor ?? (() => makeDockerSandboxDriver({ endpointHost }));
+  const defaultDriver = makeDockerSandboxDriver({ endpointHost });
+  const driverFor = options.driverFor ?? (() => defaultDriver);
+  const providerRegistry =
+    options.providerRegistry ??
+    dependencies.providerRegistry ??
+    new SandboxProviderRegistry([defaultDriver]);
+  const managedImageRegistry =
+    options.managedImageRegistry ??
+    dependencies.managedImageRegistry ??
+    makeVcrOciRegistry({
+      repository:
+        process.env.KATACODE_SANDBOX_IMAGE_REPOSITORY?.trim() || DEFAULT_VCR_IMAGE_REPOSITORY,
+    });
   const bootstrapManifestFor = options.bootstrapManifestFor ?? buildSandboxBootstrapManifest;
   const now = options.now ?? (() => new Date().toISOString());
-  const schedule =
+  const operationScope = options.operationScope;
+  const schedule: (effect: Effect.Effect<void, never>) => Effect.Effect<void, never> =
     options.schedule ??
-    ((effect: Effect.Effect<void, never>) => Effect.forkDetach(effect).pipe(Effect.asVoid));
+    ((effect) =>
+      operationScope === undefined
+        ? Effect.die("Sandbox deployment service requires an operation scope.")
+        : Effect.forkIn(effect, operationScope).pipe(Effect.asVoid));
 
   const bootstrapTokenFor =
     options.bootstrapTokenFor ??
@@ -498,7 +548,12 @@ export function makeSandboxDeploymentService(
     receipt: SandboxOperationReceipt,
     claimId: string,
     update: Pick<SandboxOperationReceipt, "status"> &
-      Partial<Pick<SandboxOperationReceipt, "result" | "error" | "deploymentId">>,
+      Partial<
+        Pick<
+          SandboxOperationReceipt,
+          "result" | "error" | "deploymentId" | "progress" | "resolvedImageDigest"
+        >
+      >,
   ) =>
     saveClaimedOperation(
       {
@@ -510,7 +565,22 @@ export function makeSandboxDeploymentService(
     );
 
   const markFailed = (receipt: SandboxOperationReceipt, claimId: string, cause: unknown) =>
-    updateOperation(receipt, claimId, { status: "Failed", error: diagnostic(cause) }).pipe(
+    repository.getOperation(receipt.operationId).pipe(
+      Effect.mapError(asServiceError),
+      Effect.catch(() => Effect.succeed(Option.none<SandboxOperationReceipt>())),
+      Effect.flatMap((current) => {
+        const latest = Option.isSome(current) ? current.value : receipt;
+        const lastStage =
+          latest.progress?.stage === "failed"
+            ? latest.progress.lastStage
+            : (latest.progress?.stage ?? "resolving-image");
+        const message = diagnostic(cause);
+        return updateOperation(latest, claimId, {
+          status: "Failed",
+          progress: { stage: "failed", lastStage, diagnostic: message },
+          error: message,
+        });
+      }),
       Effect.catch((saveError) =>
         Effect.logError("Failed to persist sandbox operation failure", { cause: saveError }).pipe(
           Effect.asVoid,
@@ -538,14 +608,6 @@ export function makeSandboxDeploymentService(
       ),
     );
 
-  const profileMatchesInput = (profile: SandboxProfile, input: SandboxProfileInput): boolean =>
-    profile.profileId === input.profileId &&
-    profile.name === input.name &&
-    profile.driverKind === input.driverKind &&
-    profile.socketPath === (input.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH) &&
-    profile.imageDigest === input.imageDigest &&
-    profile.enabled === input.enabled;
-
   const validateProfileUpsert = (input: SandboxProfileInput) =>
     Effect.gen(function* () {
       if (input.profileId === undefined) {
@@ -558,7 +620,11 @@ export function makeSandboxDeploymentService(
       if (existing !== undefined && input.expectedRevision === undefined) {
         return yield* failConflict("Replacing a sandbox profile requires its expected revision.");
       }
-      if (existing !== undefined && input.expectedRevision !== existing.revision) {
+      if (
+        existing !== undefined &&
+        input.expectedRevision !== undefined &&
+        input.expectedRevision !== existing.revision
+      ) {
         return yield* failConflict(`Profile revision ${input.expectedRevision} is stale.`);
       }
       if (
@@ -571,41 +637,81 @@ export function makeSandboxDeploymentService(
       return existing;
     });
 
-  const applyProfileUpsert = (input: SandboxProfileInput) =>
+  const applyProfileUpsert = (
+    input: SandboxProfileInput,
+    receipt?: SandboxOperationReceipt,
+    claimId?: string,
+  ) =>
     Effect.gen(function* () {
       if (input.profileId === undefined) {
         return yield* failCommand("Profile upsert operation has no profile id.");
       }
+      const selected = imageSelection(input);
       const current = yield* repository
         .getProfile(input.profileId)
         .pipe(Effect.mapError(asServiceError));
-      if (
-        Option.isSome(current) &&
-        profileMatchesInput(current.value, input) &&
-        (input.expectedRevision === undefined ||
-          current.value.revision === input.expectedRevision + 1)
-      ) {
-        return current.value;
+      const currentProfile = Option.isSome(current) ? current.value : undefined;
+      const targetRevision = (input.expectedRevision ?? 0) + 1;
+      const recoveredProfile =
+        receipt !== undefined &&
+        currentProfile !== undefined &&
+        currentProfile.revision === targetRevision &&
+        profileMatchesInput(currentProfile, input, receipt.resolvedImageDigest)
+          ? currentProfile
+          : undefined;
+      const existing = recoveredProfile ?? (yield* validateProfileUpsert(input));
+      const report = (progress: SandboxOperationProgress) =>
+        receipt === undefined || claimId === undefined
+          ? Effect.void
+          : updateOperation(receipt, claimId, { status: "Running", progress }).pipe(
+              Effect.catch(() => Effect.void),
+            );
+      const imageDigest =
+        receipt?.resolvedImageDigest ??
+        recoveredProfile?.imageDigest ??
+        (selected.kind === "managed"
+          ? yield* report({ stage: "resolving-image" }).pipe(
+              Effect.andThen(
+                resolveManagedImage(
+                  { serverVersion: selected.version, channel: selected.channel },
+                  managedImageRegistry,
+                ).pipe(
+                  Effect.map((resolved) => resolved.immutableReference),
+                  Effect.mapError(asServiceError),
+                ),
+              ),
+            )
+          : selected.digest);
+      if (receipt !== undefined && claimId !== undefined) {
+        yield* updateOperation(receipt, claimId, {
+          status: "Running",
+          resolvedImageDigest: imageDigest,
+        });
       }
-      const existing = yield* validateProfileUpsert(input);
       const timestamp = now();
-      const profile: SandboxProfile = {
+      const profile: SandboxProfile = recoveredProfile ?? {
         profileId: input.profileId,
         name: input.name,
         driverKind: input.driverKind,
         socketPath: input.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH,
-        imageDigest: input.imageDigest,
+        imageDigest,
         enabled: input.enabled,
         revision: existing === undefined ? 1 : existing.revision + 1,
         createdAt: existing?.createdAt ?? timestamp,
         updatedAt: timestamp,
       };
-      if (profile.enabled) {
-        yield* driverFor(profile).validateProfile(profile).pipe(Effect.mapError(asServiceError));
-      }
+      // Persist the resolved reference before any engine work so failures leave a visible profile.
       yield* repository
         .saveProfile(profile, existing?.revision)
         .pipe(Effect.mapError(asServiceError));
+      if (profile.enabled) {
+        if (selected.kind === "custom") {
+          yield* report({ stage: "validating-image" });
+        }
+        yield* driverFor(profile)
+          .validateProfile(profile, (progress) => report(progress))
+          .pipe(Effect.mapError(asServiceError));
+      }
       return profile;
     });
 
@@ -1010,7 +1116,16 @@ export function makeSandboxDeploymentService(
 
       if (deployment.state === "Requested") {
         yield* assertOperationClaimed(receipt.operationId, claimId);
-        yield* driver.validateProfile(profile).pipe(Effect.mapError(asServiceError));
+        yield* driver
+          .validateProfile(
+            profile,
+            (progress) =>
+              updateOperation(receipt, claimId, { status: "Running", progress }).pipe(
+                Effect.catch(() => Effect.void),
+              ),
+            { pullIfMissing: false },
+          )
+          .pipe(Effect.mapError(asServiceError));
         const resource = yield* driver
           .allocate({
             profile,
@@ -1107,6 +1222,7 @@ export function makeSandboxDeploymentService(
         deployment.state === "Identified" ? deployment : undefined;
       yield* updateOperation(receipt, claimId, {
         status: "Succeeded",
+        progress: { stage: "ready" },
         result: {
           kind: "deployment",
           deploymentId,
@@ -1150,6 +1266,12 @@ export function makeSandboxDeploymentService(
           result: operationResultForDeleted(deployment),
         });
         return;
+      }
+      if (
+        receipt.expectedRevision !== undefined &&
+        deployment.revision !== receipt.expectedRevision
+      ) {
+        return yield* failConflict(`Deployment revision ${receipt.expectedRevision} is stale.`);
       }
       if (deployment.state === "Requested") {
         yield* assertOperationClaimed(receipt.operationId, claimId);
@@ -1491,9 +1613,10 @@ export function makeSandboxDeploymentService(
         return yield* failCommand("Profile upsert operation has no profile input.");
       }
       yield* assertOperationClaimed(receipt.operationId, claimId);
-      const profile = yield* applyProfileUpsert(receipt.profileInput);
+      const profile = yield* applyProfileUpsert(receipt.profileInput, receipt, claimId);
       yield* updateOperation(receipt, claimId, {
         status: "Succeeded",
+        progress: { stage: "ready" },
         result: { kind: "profile", profileId: profile.profileId },
       });
     });
@@ -1594,7 +1717,7 @@ export function makeSandboxDeploymentService(
             });
           }
           return driverFor(profile)
-            .validateProfile(profile)
+            .validateProfile(profile, undefined, { pullIfMissing: false })
             .pipe(
               Effect.map((validated) => ({
                 kind: "available" as const,
@@ -1679,6 +1802,7 @@ export function makeSandboxDeploymentService(
         profiles: profileSummaries,
         deployments: deploymentSummaries,
         relayAvailable,
+        providers: providerRegistry.listDescriptors(),
       };
     });
 
@@ -1697,7 +1821,7 @@ export function makeSandboxDeploymentService(
         name: input.name,
         driverKind: input.driverKind,
         ...(input.socketPath === undefined ? {} : { socketPath: input.socketPath }),
-        imageDigest: input.imageDigest,
+        image: input.image,
         enabled: input.enabled,
         ...(input.expectedRevision === undefined
           ? {}
@@ -1991,6 +2115,8 @@ export function makeSandboxDeploymentService(
 const makeService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const relayUrl = yield* relayUrlConfig.pipe(Effect.option, Effect.map(Option.getOrUndefined));
+  const operationScope = yield* Scope.make("sequential");
+  yield* Effect.addFinalizer(() => Scope.close(operationScope, Exit.void));
   const service = makeSandboxDeploymentService(
     {
       repository: yield* SandboxDeploymentRepository,
@@ -2005,9 +2131,10 @@ const makeService = Effect.gen(function* () {
     {
       endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
       ...(relayUrl === undefined ? {} : { relayUrl }),
+      operationScope,
     },
   );
-  yield* Effect.forkDetach(service.recover());
+  yield* Effect.forkIn(service.recover(), operationScope);
   return service;
 });
 

@@ -23,6 +23,10 @@
       "types": "./src/registry.ts",
       "import": "./src/registry.ts"
     },
+    "./managedImage": {
+      "types": "./src/managedImage.ts",
+      "import": "./src/managedImage.ts"
+    },
     "./redactSecrets": {
       "types": "./src/redactSecrets.ts",
       "import": "./src/redactSecrets.ts"
