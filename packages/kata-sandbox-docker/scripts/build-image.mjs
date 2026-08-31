@@ -6,7 +6,6 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
-import { decodeSandboxSourceManifest } from "../src/imageManifest.ts";
 
 const exec = NodeUtil.promisify(NodeChildProcess.execFile);
 const packageDirectory = NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)));
@@ -14,7 +13,22 @@ const repositoryRoot = NodePath.resolve(packageDirectory, "../..");
 const sourceManifestPath = NodePath.join(packageDirectory, "source-manifest.json");
 
 function readSourceManifest() {
-  return decodeSandboxSourceManifest(JSON.parse(NodeFS.readFileSync(sourceManifestPath, "utf8")));
+  const value = JSON.parse(NodeFS.readFileSync(sourceManifestPath, "utf8"));
+  if (
+    value?.version !== 1 ||
+    typeof value.baseImage !== "string" ||
+    !/^\S+@sha256:[0-9a-f]{64}$/i.test(value.baseImage) ||
+    value.codex?.package !== "@openai/codex" ||
+    typeof value.codex.version !== "string" ||
+    !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value.codex.version) ||
+    typeof value.codex.integrity !== "string" ||
+    !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(value.codex.integrity)
+  ) {
+    throw new Error(
+      "source-manifest.json must pin a base image digest and @openai/codex integrity.",
+    );
+  }
+  return value;
 }
 
 function sha256(path) {

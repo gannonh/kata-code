@@ -52,6 +52,9 @@ export const OciImageDigest = TrimmedNonEmptyString.check(
 );
 export type OciImageDigest = typeof OciImageDigest.Type;
 
+export const SandboxImageChannel = Schema.Literals(["stable", "nightly"]);
+export type SandboxImageChannel = typeof SandboxImageChannel.Type;
+
 export const Sha256Digest = TrimmedNonEmptyString.check(Schema.isPattern(/^[0-9a-f]{64}$/i));
 export type Sha256Digest = typeof Sha256Digest.Type;
 
