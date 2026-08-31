@@ -6,6 +6,7 @@ import {
   extractBuildxIndexDigest,
   normalizeDockerPlatforms,
   parseImageBuildArgs,
+  validatePushedImageTags,
 } from "./imageBuild.ts";
 
 const sourceManifest = {
@@ -104,6 +105,15 @@ describe("image build boundaries", () => {
     assert.include(String(args[5]), "compression=zstd");
     assert.equal(args[2], "--platform");
     assert.equal(args[3], "linux/amd64,linux/arm64");
+  });
+
+  it("allows a pushed image to use an explicit mirror repository", () => {
+    assert.doesNotThrow(() =>
+      validatePushedImageTags("vcr.vercel.com/team/project/kata-sandbox", [
+        "vcr.vercel.com/team/project/kata-sandbox:0.0.43",
+        "ghcr.io/gannonh/kata-sandbox:0.0.43",
+      ]),
+    );
   });
 
   it("reads the immutable digest emitted by Buildx metadata", () => {
