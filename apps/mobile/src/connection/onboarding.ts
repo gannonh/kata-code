@@ -3,7 +3,7 @@ import {
   createAtomCommandScheduler,
   createRuntimeCommand,
 } from "@kata-sh/code-client-runtime/state/runtime";
-import type { EnvironmentId } from "@kata-sh/code-contracts";
+import { EnvironmentId } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 
 import { connectionAtomRuntime } from "./runtime";
@@ -17,6 +17,24 @@ export const connectPairingUrl = createRuntimeCommand(connectionAtomRuntime, {
   execute: (pairingUrl: string) =>
     ConnectionOnboarding.pipe(
       Effect.flatMap((onboarding) => onboarding.registerPairing({ pairingUrl })),
+    ),
+});
+
+export const connectRelayEnvironment = createRuntimeCommand(connectionAtomRuntime, {
+  label: "mobile:connection:connect-relay",
+  scheduler: onboardingScheduler,
+  concurrency: {
+    mode: "singleFlight",
+    key: (input: { readonly environmentId: string }) => input.environmentId,
+  },
+  execute: (input: { readonly environmentId: string; readonly label: string }) =>
+    ConnectionOnboarding.pipe(
+      Effect.flatMap((onboarding) =>
+        onboarding.registerRelay({
+          environmentId: EnvironmentId.make(input.environmentId),
+          label: input.label,
+        }),
+      ),
     ),
 });
 

@@ -79,7 +79,10 @@ describe("Docker sandbox Settings API", () => {
             operationId: "profile-operation",
             requestId: "request-1",
             command: "profile-upsert",
+            payloadHash: "a".repeat(64),
             status: "Succeeded",
+            acceptedAt: "2026-08-30T00:00:00.000Z",
+            updatedAt: "2026-08-30T00:00:01.000Z",
           },
         }),
       )
@@ -90,7 +93,10 @@ describe("Docker sandbox Settings API", () => {
             operationId: "operation-1",
             requestId: "request-1",
             command: "create",
+            payloadHash: "b".repeat(64),
             status: "Running",
+            acceptedAt: "2026-08-30T00:00:00.000Z",
+            updatedAt: "2026-08-30T00:00:01.000Z",
           },
         }),
       )
@@ -100,15 +106,23 @@ describe("Docker sandbox Settings API", () => {
             operationId: "operation-1",
             requestId: "request-1",
             command: "create",
+            payloadHash: "b".repeat(64),
             status: "Succeeded",
             deploymentId: "deployment-1",
+            acceptedAt: "2026-08-30T00:00:00.000Z",
+            updatedAt: "2026-08-30T00:00:02.000Z",
           },
         }),
       )
       .mockResolvedValueOnce(
         Response.json({
+          deploymentId: "deployment-1",
           pairingUrl: "http://127.0.0.1:3773/pair?token=one-use",
           environmentId: "sandbox-env",
+          endpoint: "http://127.0.0.1:3773",
+          attachment: "direct",
+          workspaceRoot: "/workspace",
+          expiresAt: "2026-08-30T00:05:00.000Z",
         }),
       );
     vi.stubGlobal("fetch", fetchMock);

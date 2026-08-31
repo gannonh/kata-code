@@ -1,9 +1,5 @@
 import { findErrorTraceId } from "@kata-sh/code-client-runtime/errors";
-import {
-  type EnvironmentConnectionPresentation,
-  RelayConnectionRegistration,
-  RelayConnectionTarget,
-} from "@kata-sh/code-client-runtime/connection";
+import { type EnvironmentConnectionPresentation } from "@kata-sh/code-client-runtime/connection";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -13,7 +9,7 @@ import type { RelayClientEnvironmentRecord } from "@kata-sh/code-contracts/relay
 import * as Option from "effect/Option";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
-import { environmentCatalog } from "~/connection/catalog";
+import { connectRelayEnvironment as connectRelayEnvironmentAtom } from "~/connection/onboarding";
 import { cn } from "~/lib/utils";
 import { relayEnvironmentDiscovery } from "~/state/relay";
 import { useRelayEnvironmentDiscovery } from "~/state/environments";
@@ -63,7 +59,7 @@ export function CloudEnvironmentConnectRows({
   readonly empty?: ReactNode;
 }) {
   const environmentsState = useRelayEnvironmentDiscovery();
-  const registerEnvironment = useAtomCommand(environmentCatalog.register, {
+  const registerEnvironment = useAtomCommand(connectRelayEnvironmentAtom, {
     reportFailure: false,
   });
   const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
@@ -71,14 +67,10 @@ export function CloudEnvironmentConnectRows({
   });
   const connectRelayEnvironment = useCallback(
     (environment: RelayClientEnvironmentRecord) =>
-      registerEnvironment(
-        new RelayConnectionRegistration({
-          target: new RelayConnectionTarget({
-            environmentId: environment.environmentId,
-            label: environment.label,
-          }),
-        }),
-      ),
+      registerEnvironment({
+        environmentId: environment.environmentId,
+        label: environment.label,
+      }),
     [registerEnvironment],
   );
   const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(

@@ -31,20 +31,30 @@ selecting a Codex provider instance. Kata Code resolves the ref to a commit befo
 container. The container checks its immutable bootstrap manifest, uses `/workspace` for the checked
 out repository, and stores its runtime state under `/var/lib/katacode`.
 
-The deployment list shows the durable lifecycle state and the latest provider observation. An
-identified deployment can be attached through the ordinary environment onboarding flow. Each attach
-request creates a new one-use credential that expires after five minutes. Use Attach environment
-again when the first handoff expires or the browser loses the response.
+The deployment list shows the durable lifecycle state and the latest provider observation. Use Stop
+and Start to control the same container. Start uses the stored workspace, source locator, resolved
+commit, bootstrap manifest, and Kata home. It does not resolve the Git ref again. A stopped deployment
+keeps its environment ID and client registrations; connection supervisors show it as disconnected
+until the container starts.
 
-Delete a deployment from the same list when its work is complete. Provider Delete removes the owned
-Docker container and writes a durable deletion record. Client Remove only clears an environment from
-the current client and leaves the Docker deployment in place.
+Choose Direct or Relay for every attachment. Direct creates a one-use bearer pairing URL for the
+container endpoint. Relay links the sandbox through the configured Kata Code Connect account and
+returns an ordinary relay registration. The handoff expires after five minutes. Use Attach direct or
+Attach relay again when a handoff expires or a client loses the response. Web and mobile clients can
+then discover the environment, add a project, and use it through their normal connection flows.
 
-An `Unknown` observation means Kata Code could not prove the Docker state. For an allocated
-deployment, Delete deployment retries cleanup after the daemon is available. For an identified
-deployment, Attach environment rechecks that the container is running. The deployment and its exact
-resource handle remain stored for recovery. Disabled profiles retain their deployments and can be
-re-enabled after the daemon or image is fixed.
+Delete a deployment from the same list when its work is complete. Provider Delete unlinks the
+sandbox's Connect record, removes the owned Docker container, confirms `Gone`, and writes a durable
+deleted record. Client Remove only clears an environment from the current client and leaves the
+Docker deployment in place. A second administrative client can perform Stop, Start, attachment
+retry, and Delete. Standard or read-only clients cannot perform those operations.
+
+A `Stopped` observation means Docker confirmed the owned container is not running. `Unknown` means
+Kata Code could not prove the Docker state, so the deployment, environment ID, registrations, last
+observation, and exact resource handle remain stored. A successful absence observation or confirmed
+Delete produces `Gone`; an outage never does. Allocated deployments can be deleted after Docker
+returns. Disabled profiles retain their deployments and can be re-enabled after the daemon or image
+is fixed.
 
 Kata Code copies only the selected Codex `auth.json` into the sandbox. The sandbox receives no
 provider credentials for other providers.

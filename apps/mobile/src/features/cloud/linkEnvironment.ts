@@ -10,6 +10,7 @@ import {
   EnvironmentHttpInternalServerError,
   EnvironmentHttpUnauthorizedError,
 } from "@kata-sh/code-contracts";
+import { isLoopbackHost } from "@kata-sh/code-shared/preview";
 import { stripPairingTokenFromUrl } from "@kata-sh/code-shared/remote";
 import {
   type RelayEnvironmentConnectResponse as RelayEnvironmentConnectResponseType,
@@ -285,6 +286,18 @@ export function linkEnvironmentToCloudWithPreference(
         message: "Only a locally paired bearer connection can be linked to the cloud.",
       });
     }
+    const isLocalConnection = yield* Effect.sync(() => {
+      try {
+        return isLoopbackHost(new URL(input.connection.httpBaseUrl).hostname);
+      } catch {
+        return false;
+      }
+    });
+    if (!isLocalConnection) {
+      return yield* new CloudEnvironmentLinkError({
+        message: "Cloud linking requires a local bearer connection.",
+      });
+    }
     const localBearerToken = input.connection.bearerToken;
     const relayUrl = yield* requireRelayUrl();
     const relayClient = yield* ManagedRelay.ManagedRelayClient;
@@ -337,27 +350,68 @@ export function linkEnvironmentToCloudWithPreference(
       .pipe(
         Effect.mapError(decodedRelayClientError(`${relayUrl}/v1/client/environment-links failed`)),
       );
-    yield* ensureLinkedEnvironmentMatches({
-      expectedEnvironmentId: input.connection.environmentId,
-      expectedProviderKind: MANAGED_ENDPOINT_PROVIDER_KIND,
-      link,
-    });
+    const compensateLink = (cause: CloudEnvironmentLinkError) =>
+      Effect.gen(function* () {
+        const localUnlink = yield* environmentClient.connect
+          .unlink({
+            headers: { authorization: `Bearer ${localBearerToken}` },
+          })
+          .pipe(
+            Effect.mapError(
+              cloudEnvironmentLinkError("Could not clean up the local environment link."),
+            ),
+            Effect.result,
+          );
+        const relayUnlink = yield* relayClient
+          .unlinkEnvironment({
+            clerkToken: input.clerkToken,
+            environmentId: input.connection.environmentId,
+          })
+          .pipe(
+            Effect.mapError(
+              decodedRelayClientError(
+                `${relayUrl}/v1/client/environment-links/${encodeURIComponent(input.connection.environmentId)} failed`,
+              ),
+            ),
+            Effect.result,
+          );
+        if (localUnlink._tag === "Failure" || relayUnlink._tag === "Failure") {
+          return yield* new CloudEnvironmentLinkError({
+            message: "Could not clean up the environment cloud link after linking failed.",
+            cause: {
+              original: cause,
+              local: localUnlink._tag === "Failure" ? localUnlink.failure : undefined,
+              relay: relayUnlink._tag === "Failure" ? relayUnlink.failure : undefined,
+            },
+          });
+        }
+        return yield* cause;
+      });
 
-    yield* environmentClient.connect
-      .relayConfig({
-        headers: { authorization: `Bearer ${localBearerToken}` },
-        payload: {
-          relayUrl,
-          relayIssuer: link.relayIssuer,
-          cloudUserId: link.cloudUserId,
-          environmentCredential: link.environmentCredential,
-          cloudMintPublicKey: link.cloudMintPublicKey,
-          endpointRuntime: link.endpointRuntime,
-        },
-      })
-      .pipe(
-        Effect.mapError(cloudEnvironmentLinkError("Could not configure environment relay access.")),
-      );
+    yield* Effect.gen(function* () {
+      yield* ensureLinkedEnvironmentMatches({
+        expectedEnvironmentId: input.connection.environmentId,
+        expectedProviderKind: MANAGED_ENDPOINT_PROVIDER_KIND,
+        link,
+      });
+      yield* environmentClient.connect
+        .relayConfig({
+          headers: { authorization: `Bearer ${localBearerToken}` },
+          payload: {
+            relayUrl,
+            relayIssuer: link.relayIssuer,
+            cloudUserId: link.cloudUserId,
+            environmentCredential: link.environmentCredential,
+            cloudMintPublicKey: link.cloudMintPublicKey,
+            endpointRuntime: link.endpointRuntime,
+          },
+        })
+        .pipe(
+          Effect.mapError(
+            cloudEnvironmentLinkError("Could not configure environment relay access."),
+          ),
+        );
+    }).pipe(Effect.catch(compensateLink));
   });
 }
 

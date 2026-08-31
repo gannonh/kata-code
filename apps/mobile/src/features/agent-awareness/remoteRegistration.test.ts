@@ -7,6 +7,7 @@ import { describe, expect, it } from "@effect/vitest";
 import Constants from "expo-constants";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
 import { ManagedRelay } from "@kata-sh/code-client-runtime/relay";
@@ -48,6 +49,11 @@ const widgetMocks = vi.hoisted(() => ({
   getInstances: vi.fn(() => []),
   start: vi.fn(() => ({})),
 }));
+const pushToStartTokenListenerMock = vi.hoisted(() =>
+  vi.fn((_listener: (event: { activityPushToStartToken: string }) => void) => ({
+    remove: vi.fn(),
+  })),
+);
 const environmentConfigsMock = vi.hoisted(() => ({
   configs: new Map<
     string,
@@ -81,7 +87,7 @@ vi.mock("expo-constants", () => ({
 }));
 
 vi.mock("expo-widgets", () => ({
-  addPushToStartTokenListener: vi.fn(() => ({ remove: vi.fn() })),
+  addPushToStartTokenListener: pushToStartTokenListenerMock,
 }));
 
 vi.mock("../../widgets/AgentActivity", () => ({
@@ -234,7 +240,7 @@ const runBackgroundOperations = Effect.fn("TestRemoteRegistration.runBackgroundO
   },
 );
 
-describe("makeRelayDeviceRegistrationRequest", () => {
+describe.sequential("makeRelayDeviceRegistrationRequest", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
     vi.stubGlobal("__DEV__", false);
@@ -251,6 +257,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     widgetMocks.getInstances.mockReset();
     widgetMocks.getInstances.mockReturnValue([]);
     widgetMocks.start.mockClear();
+    pushToStartTokenListenerMock.mockClear();
     environmentConfigsMock.configs.clear();
   });
 
@@ -541,11 +548,14 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     };
 
     setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    const pushToStartTokenListener = pushToStartTokenListenerMock.mock.calls.at(-1)?.[0];
+    pushToStartTokenListener?.({ activityPushToStartToken: "push-to-start-token" });
 
     return Effect.gen(function* () {
       yield* runBackgroundOperations();
 
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(registrationRecordStore.current?.pushToStartToken).toBe("push-to-start-token");
       const [request, init] = fetchMock.mock.calls[1] as unknown as [
         unknown,
         RequestInit | undefined,
@@ -571,6 +581,40 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         }),
       ).toMatchObject({ ok: true });
       expect(getAgentAwarenessRegistrationStatus()).toBe("registered");
+    }).pipe(Effect.provide(relayTestLayer));
+  });
+
+  it.effect("registers push-to-start tokens without notification permission", () => {
+    const fetchMock = vi.fn((request: RequestInfo | URL) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return Promise.resolve(
+        Response.json(
+          url.endsWith("/v1/client/dpop-token")
+            ? {
+                access_token: "relay-dpop-token",
+                issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+                token_type: "DPoP",
+                expires_in: 300,
+                scope: "mobile:registration",
+              }
+            : { ok: true },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    Constants.expoConfig!.extra = {
+      relay: {
+        url: "https://relay.example.test/",
+      },
+    };
+    vi.mocked(Notifications.getPermissionsAsync).mockResolvedValueOnce({ granted: false } as never);
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    const listener = pushToStartTokenListenerMock.mock.calls.at(-1)?.[0];
+    listener?.({ activityPushToStartToken: "push-to-start-token" });
+
+    return Effect.gen(function* () {
+      yield* runBackgroundOperations();
+      expect(registrationRecordStore.current?.pushToStartToken).toBe("push-to-start-token");
     }).pipe(Effect.provide(relayTestLayer));
   });
 
@@ -932,4 +976,59 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(widgetMocks.start).toHaveBeenCalledTimes(1);
   });
+
+  it.effect("serializes concurrent direct device registration refreshes", () =>
+    Effect.gen(function* () {
+      Constants.expoConfig!.extra = {
+        relay: {
+          url: "https://relay.example.test/",
+        },
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((request: RequestInfo | URL) => {
+          const url = request instanceof Request ? request.url : String(request);
+          return Promise.resolve(
+            Response.json(
+              url.endsWith("/v1/client/dpop-token")
+                ? {
+                    access_token: "relay-dpop-token",
+                    issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+                    token_type: "DPoP",
+                    expires_in: 300,
+                    scope: "mobile:registration",
+                  }
+                : { ok: true },
+            ),
+          );
+        }),
+      );
+      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+      yield* runBackgroundOperations();
+
+      let releaseFirst!: (deviceId: string) => void;
+      vi.mocked(loadOrCreateAgentAwarenessDeviceId).mockClear();
+      vi.mocked(loadOrCreateAgentAwarenessDeviceId)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              releaseFirst = resolve;
+            }),
+        )
+        .mockResolvedValue("device-1");
+
+      const first = yield* Effect.forkChild(refreshAgentAwarenessRegistration());
+      yield* Effect.yieldNow;
+      const second = yield* Effect.forkChild(refreshAgentAwarenessRegistration());
+      yield* Effect.yieldNow;
+      expect(loadOrCreateAgentAwarenessDeviceId).toHaveBeenCalledTimes(1);
+
+      releaseFirst("device-1");
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+      expect(loadOrCreateAgentAwarenessDeviceId).toHaveBeenCalledTimes(2);
+      yield* runBackgroundOperations();
+      releaseAgentAwarenessRelayTokenProvider();
+    }).pipe(Effect.provide(relayTestLayer)),
+  );
 });

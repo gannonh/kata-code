@@ -4,7 +4,10 @@ import {
   squashAtomCommandFailure,
 } from "@kata-sh/code-client-runtime/state/runtime";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { connectPairing as connectPairingCommand } from "~/connection/onboarding";
+import {
+  connectPairing as connectPairingCommand,
+  connectRelayEnvironment as connectRelayEnvironmentCommand,
+} from "~/connection/onboarding";
 import { primaryServerProvidersAtom } from "~/state/server";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
@@ -17,7 +20,10 @@ import {
   deleteSandboxProfile,
   fetchSandboxList,
   mintSandboxHandoff,
+  mintSandboxRelayHandoff,
   pollSandboxOperation,
+  startSandboxDeployment,
+  stopSandboxDeployment,
   type SandboxDeploymentForm,
   type SandboxListResponse,
   type SandboxProfileForm,
@@ -77,6 +83,9 @@ function deploymentId(
 
 export function DeploymentSettings() {
   const connectPairing = useAtomCommand(connectPairingCommand, { reportFailure: false });
+  const connectRelayEnvironment = useAtomCommand(connectRelayEnvironmentCommand, {
+    reportFailure: false,
+  });
   const [data, setData] = useState<SandboxListResponse | null>(null);
   const [profileForm, setProfileForm] = useState(initialProfileForm);
   const [deploymentForm, setDeploymentForm] = useState(initialDeploymentForm);
@@ -85,6 +94,7 @@ export function DeploymentSettings() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isCreatingDeployment, setIsCreatingDeployment] = useState(false);
   const [activeHandoffId, setActiveHandoffId] = useState<string | null>(null);
+  const [activeLifecycleId, setActiveLifecycleId] = useState<string | null>(null);
   const [activeDeleteId, setActiveDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
@@ -92,6 +102,7 @@ export function DeploymentSettings() {
     () => serverProviders.filter((provider) => provider.driver === "codex"),
     [serverProviders],
   );
+  const relayAvailable = data?.relayAvailable === true;
 
   const availableProfiles = useMemo(
     () =>
@@ -209,24 +220,106 @@ export function DeploymentSettings() {
     [deploymentForm, refresh],
   );
 
-  const attachDeployment = useCallback(
-    async (deploymentId: string) => {
-      setActiveHandoffId(deploymentId);
-      setError(null);
-      try {
-        const handoff = await mintSandboxHandoff(deploymentId);
+  const attachHandoff = useCallback(
+    async (
+      handoff:
+        | Awaited<ReturnType<typeof mintSandboxHandoff>>
+        | Awaited<ReturnType<typeof mintSandboxRelayHandoff>>,
+    ) => {
+      if (handoff.attachment === "direct") {
         const result = await connectPairing({ pairingUrl: handoff.pairingUrl });
         if (result._tag === "Failure") {
           if (isAtomCommandInterrupted(result)) return;
           throw squashAtomCommandFailure(result);
         }
+        return;
+      }
+      const result = await connectRelayEnvironment({
+        environmentId: handoff.relayEnvironmentId,
+        label: handoff.label,
+      });
+      if (result._tag === "Failure") {
+        if (isAtomCommandInterrupted(result)) return;
+        throw squashAtomCommandFailure(result);
+      }
+    },
+    [connectPairing, connectRelayEnvironment],
+  );
+
+  const attachDeployment = useCallback(
+    async (deploymentId: string, attachment: "direct" | "relay") => {
+      setActiveHandoffId(`${deploymentId}:${attachment}`);
+      setError(null);
+      try {
+        const handoff =
+          attachment === "direct"
+            ? await mintSandboxHandoff(deploymentId)
+            : await mintSandboxRelayHandoff(deploymentId);
+        await attachHandoff(handoff);
+        await refresh();
       } catch (cause) {
         setError(errorMessage(cause));
       } finally {
         setActiveHandoffId(null);
       }
     },
-    [connectPairing],
+    [attachHandoff],
+  );
+
+  const startDeployment = useCallback(
+    async (deploymentId: string, revision: number, attachment: "direct" | "relay") => {
+      setActiveLifecycleId(`${deploymentId}:start`);
+      setError(null);
+      try {
+        const accepted = await startSandboxDeployment(deploymentId, revision, attachment);
+        const receipt = await pollSandboxOperation(accepted.operationId);
+        setOperation({
+          operationId: receipt.operationId,
+          status: receipt.status,
+          ...(receipt.error ? { error: receipt.error } : {}),
+        });
+        if (receipt.status === "Failed") {
+          throw new Error(receipt.error ?? "The sandbox could not be started.");
+        }
+        await refresh();
+        const handoff =
+          attachment === "direct"
+            ? await mintSandboxHandoff(deploymentId)
+            : await mintSandboxRelayHandoff(deploymentId);
+        await attachHandoff(handoff);
+        await refresh();
+      } catch (cause) {
+        setError(errorMessage(cause));
+      } finally {
+        setActiveLifecycleId(null);
+      }
+    },
+    [attachHandoff, refresh],
+  );
+
+  const stopDeployment = useCallback(
+    async (deploymentId: string, revision: number) => {
+      setActiveLifecycleId(`${deploymentId}:stop`);
+      setError(null);
+      try {
+        const accepted = await stopSandboxDeployment(deploymentId, revision);
+        const receipt = await pollSandboxOperation(accepted.operationId);
+        setOperation({
+          operationId: receipt.operationId,
+          status: receipt.status,
+          ...(receipt.error ? { error: receipt.error } : {}),
+        });
+        if (receipt.status === "Failed") {
+          throw new Error(receipt.error ?? "The sandbox could not be stopped.");
+        }
+        await refresh();
+      } catch (cause) {
+        setError(errorMessage(cause));
+      } finally {
+        setActiveLifecycleId(null);
+      }
+    },
+    [refresh],
   );
 
   const removeProfile = useCallback(
@@ -525,7 +618,7 @@ export function DeploymentSettings() {
         description="Attach an identified deployment through the ordinary onboarding flow."
       >
         <div className="mt-3 space-y-2" data-testid="kata-sandbox-deployments">
-          {data?.deployments.map(({ deployment, observation }) => {
+          {data?.deployments.map(({ deployment, observation, actions = [] }) => {
             const id = deploymentId(deployment);
             const source = deployment.state === "Deleted" ? undefined : deployment.intent.source;
             return (
@@ -542,35 +635,73 @@ export function DeploymentSettings() {
                 {observation?.state === "Unknown" && observation.diagnostic ? (
                   <p className="mt-1 text-xs text-destructive">{observation.diagnostic}</p>
                 ) : null}
-                {deployment.state === "Identified" ? (
+                {deployment.state !== "Deleted" ? (
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Button
-                      disabled={activeHandoffId === id || activeDeleteId !== null}
-                      onClick={() => void attachDeployment(id)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {activeHandoffId === id ? "Attaching..." : "Attach environment"}
-                    </Button>
-                    <Button
-                      disabled={activeDeleteId !== null}
-                      onClick={() => void removeDeployment(id, deployment.revision)}
-                      size="sm"
-                      variant="ghost-muted"
-                    >
-                      {activeDeleteId === `deployment:${id}` ? "Deleting..." : "Delete"}
-                    </Button>
+                    {actions.includes("start") ? (
+                      <>
+                        <Button
+                          disabled={activeLifecycleId !== null || activeDeleteId !== null}
+                          onClick={() => void startDeployment(id, deployment.revision, "direct")}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {activeLifecycleId === `${id}:start` ? "Starting..." : "Start direct"}
+                        </Button>
+                        {relayAvailable ? (
+                          <Button
+                            disabled={activeLifecycleId !== null || activeDeleteId !== null}
+                            onClick={() => void startDeployment(id, deployment.revision, "relay")}
+                            size="sm"
+                            variant="outline"
+                          >
+                            Start relay
+                          </Button>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {actions.includes("stop") ? (
+                      <Button
+                        disabled={activeLifecycleId !== null || activeDeleteId !== null}
+                        onClick={() => void stopDeployment(id, deployment.revision)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {activeLifecycleId === `${id}:stop` ? "Stopping..." : "Stop"}
+                      </Button>
+                    ) : null}
+                    {actions.includes("attach") ? (
+                      <>
+                        <Button
+                          disabled={activeHandoffId !== null || activeDeleteId !== null}
+                          onClick={() => void attachDeployment(id, "direct")}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {activeHandoffId === `${id}:direct` ? "Attaching..." : "Attach direct"}
+                        </Button>
+                        {relayAvailable ? (
+                          <Button
+                            disabled={activeHandoffId !== null || activeDeleteId !== null}
+                            onClick={() => void attachDeployment(id, "relay")}
+                            size="sm"
+                            variant="outline"
+                          >
+                            {activeHandoffId === `${id}:relay` ? "Attaching..." : "Attach relay"}
+                          </Button>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {actions.includes("delete") ? (
+                      <Button
+                        disabled={activeDeleteId !== null}
+                        onClick={() => void removeDeployment(id, deployment.revision)}
+                        size="sm"
+                        variant="ghost-muted"
+                      >
+                        {activeDeleteId === `deployment:${id}` ? "Deleting..." : "Delete"}
+                      </Button>
+                    ) : null}
                   </div>
-                ) : deployment.state === "Allocated" || deployment.state === "Requested" ? (
-                  <Button
-                    className="mt-2"
-                    disabled={activeDeleteId !== null}
-                    onClick={() => void removeDeployment(id, deployment.revision)}
-                    size="sm"
-                    variant="ghost-muted"
-                  >
-                    {activeDeleteId === `deployment:${id}` ? "Deleting..." : "Delete"}
-                  </Button>
                 ) : null}
               </div>
             );

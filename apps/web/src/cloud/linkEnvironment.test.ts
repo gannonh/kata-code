@@ -343,6 +343,62 @@ describe("web cloud link environment client", () => {
     }),
   );
 
+  it.effect("compensates a relay link when the returned environment is invalid", () =>
+    Effect.gen(function* () {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            challenge: "challenge",
+            expiresAt: "2026-06-06T00:05:00.000Z",
+          }),
+        )
+        .mockResolvedValueOnce(Response.json("signed-proof"))
+        .mockResolvedValueOnce(
+          Response.json({
+            ok: true,
+            environmentId: "environment-other",
+            endpoint: {
+              httpBaseUrl: "https://desktop.example.test",
+              wsBaseUrl: "wss://desktop.example.test",
+              providerKind: "cloudflare_tunnel",
+            },
+            endpointRuntime: null,
+            relayIssuer: "https://relay.example.test",
+            cloudUserId: "user-1",
+            environmentCredential: "environment-credential",
+            cloudMintPublicKey: "public-key",
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ ok: true, endpointRuntimeStatus: { status: "disabled" } }),
+        )
+        .mockResolvedValueOnce(Response.json({ ok: true }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = yield* Effect.result(
+        withServices(
+          linkPrimaryEnvironmentToCloud({
+            target: TARGET,
+            clerkToken: "clerk-token",
+          }),
+        ),
+      );
+
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toBe(
+          "Relay returned credentials for a different environment.",
+        );
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+      expect(String(fetchMock.mock.calls[3]?.[0])).toContain("/api/connect/unlink");
+      expect(String(fetchMock.mock.calls[4]?.[0])).toContain(
+        "/v1/client/environment-links/environment-1",
+      );
+    }),
+  );
+
   it.effect("links publish-only without a managed tunnel", () =>
     Effect.gen(function* () {
       const fetchMock = vi
@@ -410,6 +466,30 @@ describe("web cloud link environment client", () => {
       ).pipe(Effect.flip);
 
       expect(relayClientInstallDialog.requestConfirmation).not.toHaveBeenCalled();
+    }),
+  );
+
+  it.effect("propagates relay unlink failures after local unlink succeeds", () =>
+    Effect.gen(function* () {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ ok: true, endpointRuntimeStatus: { status: "disabled" } }),
+        )
+        .mockResolvedValueOnce(Response.json({ malformed: true }, { status: 500 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = yield* Effect.result(
+        withServices(
+          unlinkPrimaryEnvironmentFromCloud({
+            target: TARGET,
+            clerkToken: "clerk-token",
+          }),
+        ),
+      );
+
+      expect(result._tag).toBe("Failure");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     }),
   );
 
