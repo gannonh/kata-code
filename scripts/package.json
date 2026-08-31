@@ -19,6 +19,7 @@
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/pngjs": "6.0.5",
+    "@vercel/sandbox": "3.2.1",
     "vite-plus": "catalog:"
   }
 }

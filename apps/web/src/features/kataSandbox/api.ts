@@ -4,20 +4,18 @@ import {
   SandboxListResponse as SandboxListResponseSchema,
   type SandboxListResponse as SandboxListResponseContract,
 } from "@kata-sh/code-kata-sandbox-contracts/http";
+import {
+  SandboxOperationReceipt as SandboxOperationReceiptSchema,
+  type SandboxImageInput,
+  type SandboxOperationReceipt as SandboxOperationReceiptContract,
+} from "@kata-sh/code-kata-sandbox-contracts/domain";
 import { readDesktopPrimaryBearerToken } from "~/environments/primary/desktopAuth";
 import { resolvePrimaryEnvironmentHttpUrl } from "~/environments/primary/target";
 import { randomUUID } from "~/lib/utils";
 
 export type SandboxListResponse = SandboxListResponseContract;
 
-export type SandboxOperationReceipt = {
-  readonly operationId: string;
-  readonly requestId: string;
-  readonly command: string;
-  readonly status: "Accepted" | "Running" | "Succeeded" | "Failed";
-  readonly error?: string;
-  readonly deploymentId?: string;
-};
+export type SandboxOperationReceipt = SandboxOperationReceiptContract;
 
 export type SandboxHandoff = {
   readonly pairingUrl: string;
@@ -30,12 +28,13 @@ export type SandboxProfileForm = {
   readonly expectedRevision?: number;
   readonly name: string;
   readonly socketPath: string;
-  readonly imageDigest: string;
+  readonly image: SandboxImageInput;
   readonly enabled: boolean;
 };
 
 export type SandboxDeploymentForm = {
   readonly profileId: string;
+  readonly expectedRevision?: number;
   readonly label: string;
   readonly repository: string;
   readonly ref: string;
@@ -57,7 +56,29 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isString = (value: unknown): value is string => typeof value === "string";
 
+export function isHostSandboxClient(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.desktopBridge !== undefined) return true;
+  if (!window.location.origin.startsWith("http")) return false;
+  return new URL(resolvePrimaryEnvironmentHttpUrl("/")).origin === window.location.origin;
+}
+
+function shouldIncludePrimaryCookies(requestUrl: string): boolean {
+  if (
+    typeof window === "undefined" ||
+    window.desktopBridge !== undefined ||
+    !window.location.origin.startsWith("http")
+  ) {
+    return false;
+  }
+
+  return new URL(requestUrl).origin === window.location.origin;
+}
+
 const decodeSandboxListResponse = Schema.decodeUnknownSync(SandboxListResponseSchema);
+const decodeSandboxOperationResponse = Schema.decodeUnknownSync(
+  Schema.Struct({ receipt: SandboxOperationReceiptSchema }),
+);
 
 function decodeListResponse(value: unknown): SandboxListResponse {
   try {
@@ -68,32 +89,11 @@ function decodeListResponse(value: unknown): SandboxListResponse {
 }
 
 function decodeOperationReceipt(value: unknown): SandboxOperationReceipt {
-  if (!isRecord(value) || !isRecord(value.receipt)) {
+  try {
+    return decodeSandboxOperationResponse(value).receipt;
+  } catch {
     throw new Error("The sandbox operation response is invalid.");
   }
-
-  const receipt = value.receipt;
-  if (
-    !isString(receipt.operationId) ||
-    !isString(receipt.requestId) ||
-    !isString(receipt.command) ||
-    !isString(receipt.status) ||
-    (receipt.status !== "Accepted" &&
-      receipt.status !== "Running" &&
-      receipt.status !== "Succeeded" &&
-      receipt.status !== "Failed")
-  ) {
-    throw new Error("The sandbox operation receipt is invalid.");
-  }
-
-  return {
-    operationId: receipt.operationId,
-    requestId: receipt.requestId,
-    command: receipt.command,
-    status: receipt.status,
-    ...(isString(receipt.error) ? { error: receipt.error } : {}),
-    ...(isString(receipt.deploymentId) ? { deploymentId: receipt.deploymentId } : {}),
-  };
 }
 
 function decodeHandoff(value: unknown): SandboxHandoff {
@@ -126,7 +126,7 @@ async function request<T>(
   const requestUrl = typeof window === "undefined" ? path : resolvePrimaryEnvironmentHttpUrl(path);
   const response = await fetch(requestUrl, {
     ...init,
-    credentials: "include",
+    credentials: shouldIncludePrimaryCookies(requestUrl) ? "include" : "omit",
     headers,
   });
   const body = await response.json().catch(() => null);
@@ -165,7 +165,7 @@ export function upsertSandboxProfile(
       name: input.name.trim(),
       driverKind: "docker",
       socketPath: input.socketPath.trim() || undefined,
-      imageDigest: input.imageDigest.trim(),
+      image: input.image,
       enabled: input.enabled,
       ...(input.expectedRevision === undefined ? {} : { expectedRevision: input.expectedRevision }),
     }),
@@ -182,6 +182,7 @@ export function createSandboxDeployment(
     jsonRequest({
       requestId,
       profileId: input.profileId,
+      ...(input.expectedRevision === undefined ? {} : { expectedRevision: input.expectedRevision }),
       label: input.label.trim(),
       source: {
         repository: input.repository.trim(),
@@ -244,16 +245,18 @@ export async function pollSandboxOperation(
     readonly intervalMs?: number;
     readonly maxAttempts?: number;
     readonly wait?: (intervalMs: number) => Promise<void>;
+    readonly onReceipt?: (receipt: SandboxOperationReceipt) => void;
   } = {},
 ): Promise<SandboxOperationReceipt> {
   const intervalMs = options.intervalMs ?? 1_000;
-  const maxAttempts = options.maxAttempts ?? 60;
+  const maxAttempts = options.maxAttempts ?? 360;
   const wait =
     options.wait ??
     ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const receipt = await fetchSandboxOperation(operationId);
+    options.onReceipt?.(receipt);
     if (receipt.status === "Succeeded" || receipt.status === "Failed") {
       return receipt;
     }

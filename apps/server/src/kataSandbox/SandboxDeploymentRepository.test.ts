@@ -138,6 +138,37 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
       const stale = yield* Effect.flip(repository.saveProfile({ ...updated, revision: 3 }, 1));
       expect(stale).toBeInstanceOf(SandboxRepositoryConflictError);
 
+      const staleAcceptance = yield* Effect.flip(
+        repository.accept({
+          actor: "desktop-bootstrap",
+          receipt: {
+            ...receipt,
+            operationId: SandboxOperationId.make("operation-stale"),
+            requestId: SandboxRequestId.make("request-stale"),
+            deploymentId: SandboxDeploymentId.make("deployment-stale"),
+            expectedRevision: 0,
+          },
+          deployment: requestDeployment(intent),
+        }),
+      );
+      expect(staleAcceptance).toBeInstanceOf(SandboxRepositoryConflictError);
+
+      const acceptedWithRevision = yield* repository.accept({
+        actor: "desktop-bootstrap",
+        receipt: {
+          ...receipt,
+          operationId: SandboxOperationId.make("operation-expected"),
+          requestId: SandboxRequestId.make("request-expected"),
+          deploymentId: SandboxDeploymentId.make("deployment-expected"),
+          expectedRevision: 2,
+        },
+        deployment: requestDeployment({
+          ...intent,
+          deploymentId: SandboxDeploymentId.make("deployment-expected"),
+        }),
+      });
+      expect(acceptedWithRevision.expectedRevision).toBe(2);
+
       const accepted = yield* repository.accept({
         actor: "desktop-bootstrap",
         receipt,
@@ -174,6 +205,18 @@ it.layer(NodeServices.layer)("SandboxDeploymentRepository.layer", (it) => {
       yield* repository.saveDeployment(allocated, 1);
       const stored = yield* repository.getDeployment(deploymentId);
       expect(Option.getOrUndefined(stored)).toEqual(allocated);
+    }).pipe(
+      Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
+    ),
+  );
+
+  it.effect("treats a repeated profile delete as already complete", () =>
+    Effect.gen(function* () {
+      const repository = yield* SandboxDeploymentRepository;
+      yield* repository.saveProfile({ ...profile, enabled: false });
+      yield* repository.deleteProfile(profileId, 1);
+      yield* repository.deleteProfile(profileId, 1);
+      expect(Option.isNone(yield* repository.getProfile(profileId))).toBe(true);
     }).pipe(
       Effect.provide(sandboxDeploymentRepositoryLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
     ),

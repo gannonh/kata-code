@@ -23,6 +23,7 @@ import {
   SandboxOperationReceipt,
   SandboxProfileInput,
   SandboxProfileSummary,
+  SandboxProviderDescriptor,
   SandboxProviderProfileId,
   SandboxRequestId,
   SandboxProviderDriverKind,
@@ -86,7 +87,7 @@ export const SandboxProfileUpsertRequest = Schema.Struct({
   name: SandboxProfileInput.fields.name,
   driverKind: SandboxProviderDriverKind,
   socketPath: SandboxProfileInput.fields.socketPath,
-  imageDigest: SandboxProfileInput.fields.imageDigest,
+  image: SandboxProfileInput.fields.image,
   enabled: SandboxProfileInput.fields.enabled,
   expectedRevision: SandboxProfileInput.fields.expectedRevision,
 });
@@ -133,6 +134,8 @@ export type SandboxDeploymentSummary = typeof SandboxDeploymentSummary.Type;
 export const SandboxListResponse = Schema.Struct({
   profiles: Schema.Array(SandboxProfileSummary),
   deployments: Schema.Array(SandboxDeploymentSummary),
+  /** Registered sandbox drivers clients can use when creating profiles. */
+  providers: Schema.Array(SandboxProviderDescriptor),
 });
 export type SandboxListResponse = typeof SandboxListResponse.Type;
 

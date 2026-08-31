@@ -67,6 +67,7 @@ const testBootstrapManifest = (sandboxProfile: SandboxProfile) => ({
 
 function makeDriver(
   options: {
+    readonly validateProfile?: SandboxProviderDriver["validateProfile"];
     readonly identify?: SandboxProviderDriver["identify"];
     readonly observe?: SandboxProviderDriver["observe"];
     readonly delete?: SandboxProviderDriver["delete"];
@@ -74,7 +75,14 @@ function makeDriver(
 ): SandboxProviderDriver {
   return {
     kind: "docker",
-    validateProfile: () => Effect.succeed({ daemonVersion: "1.0", imageDigest }),
+    descriptor: {
+      driverKind: "docker",
+      category: "local-container",
+      displayName: "Docker",
+      profileForm: "docker",
+    },
+    validateProfile:
+      options.validateProfile ?? (() => Effect.succeed({ daemonVersion: "1.0", imageDigest })),
     allocate: (input) =>
       Effect.succeed({
         containerId: SandboxContainerId.make("container-1"),
@@ -181,7 +189,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
               name: profile.name,
               driverKind: "docker",
               socketPath: profile.socketPath,
-              imageDigest: profile.imageDigest,
+              image: { kind: "custom", digest: profile.imageDigest },
               enabled: true,
               profileId,
             });
@@ -207,6 +215,47 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
     }),
   );
 
+  it.effect("resolves managed images and records ready progress", () =>
+    runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const accepted = yield* service.upsertProfile("desktop-bootstrap", {
+            requestId: SandboxRequestId.make("managed-profile-request"),
+            name: "Managed Docker",
+            driverKind: "docker",
+            image: { kind: "managed", channel: "stable", version: "0.0.42" },
+            enabled: true,
+            profileId,
+          });
+          const receipt = yield* service.getOperation(accepted.operationId);
+          const listed = yield* service.list();
+          const saved = listed.profiles[0]?.profile;
+          expect(receipt.progress).toEqual({ stage: "ready" });
+          expect(saved?.imageDigest).toBe("vcr.vercel.com/team/image@sha256:" + "e".repeat(64));
+        }),
+      {
+        driverFor: () => makeDriver(),
+        managedImageRegistry: {
+          repository: "vcr.vercel.com/team/image",
+          readManifest: () =>
+            Effect.succeed({
+              digest: "sha256:" + "e".repeat(64),
+              manifests: [
+                {
+                  digest: "sha256:" + "f".repeat(64),
+                  platform: { os: "linux", architecture: "amd64" },
+                },
+                {
+                  digest: "sha256:" + "0".repeat(64),
+                  platform: { os: "linux", architecture: "arm64" },
+                },
+              ],
+            }),
+        },
+      },
+    ),
+  );
+
   it.effect("rejects a reused request id with a different payload", () =>
     runWithService(
       (service) =>
@@ -216,7 +265,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: true,
             profileId,
           });
@@ -243,7 +292,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: true,
             profileId,
           });
@@ -290,7 +339,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: true,
             profileId,
           });
@@ -329,7 +378,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: true,
             profileId,
           });
@@ -365,7 +414,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             name: profile.name,
             driverKind: "docker",
             socketPath: profile.socketPath,
-            imageDigest: profile.imageDigest,
+            image: { kind: "custom", digest: profile.imageDigest },
             enabled: false,
             profileId,
           });
@@ -379,6 +428,44 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           expect((yield* service.list()).profiles).toHaveLength(0);
         }),
       { driverFor: () => makeDriver() },
+    ),
+  );
+
+  it.effect("persists a profile before image validation fails", () =>
+    runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const accepted = yield* service.upsertProfile("desktop-bootstrap", {
+            requestId: SandboxRequestId.make("failed-profile-request"),
+            name: "Unavailable Docker",
+            driverKind: "docker",
+            image: { kind: "custom", digest: imageDigest },
+            enabled: true,
+            profileId,
+          });
+          const receipt = yield* service.getOperation(accepted.operationId);
+          const listed = yield* service.list();
+          expect(receipt.status).toBe("Failed");
+          expect(receipt.progress).toEqual({
+            stage: "failed",
+            lastStage: "validating-image",
+            diagnostic: "image pull failed",
+          });
+          expect(listed.profiles[0]?.kind).toBe("unavailable");
+          expect(listed.profiles[0]?.profile.imageDigest).toBe(imageDigest);
+        }),
+      {
+        driverFor: () =>
+          makeDriver({
+            validateProfile: () =>
+              Effect.fail(
+                new SandboxDriverError({
+                  reason: "image-unavailable",
+                  message: "image pull failed",
+                }),
+              ),
+          }),
+      },
     ),
   );
 });

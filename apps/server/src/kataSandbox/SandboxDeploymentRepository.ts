@@ -15,6 +15,7 @@ import {
   SandboxDeploymentIntent,
   SandboxDeploymentId,
   SandboxOperationReceipt,
+  SandboxOperationProgress,
   SandboxOperationResult,
   SandboxProfile,
   SandboxProfileInput,
@@ -59,6 +60,7 @@ export interface SandboxDeploymentRepositoryShape {
   ) => Effect.Effect<void, SandboxRepositoryError>;
   readonly deleteProfile: (
     profileId: SandboxProviderProfileId,
+    expectedRevision?: number,
   ) => Effect.Effect<void, SandboxRepositoryError>;
   readonly listDeployments: () => Effect.Effect<
     ReadonlyArray<SandboxDeployment>,
@@ -143,8 +145,11 @@ const OperationRow = Schema.Struct({
   deploymentId: Schema.NullOr(Schema.String),
   profileId: Schema.NullOr(Schema.String),
   profileInputJson: Schema.NullOr(Schema.String),
+  expectedRevision: Schema.NullOr(Schema.Int),
+  resolvedImageDigest: Schema.NullOr(Schema.String),
   resultJson: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
+  progressJson: Schema.NullOr(Schema.String),
   acceptedAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -158,6 +163,7 @@ const decodeSandboxDeploymentIntent = Schema.decodeUnknownEffect(SandboxDeployme
 const decodeDockerResourceHandle = Schema.decodeUnknownEffect(DockerResourceHandle);
 const decodeProviderObservation = Schema.decodeUnknownEffect(ProviderObservation);
 const decodeSandboxOperationResult = Schema.decodeUnknownEffect(SandboxOperationResult);
+const decodeSandboxOperationProgress = Schema.decodeUnknownEffect(SandboxOperationProgress);
 const decodeSandboxOperationReceipt = Schema.decodeUnknownEffect(SandboxOperationReceipt);
 const decodeSandboxProfileInput = Schema.decodeUnknownEffect(SandboxProfileInput);
 
@@ -352,6 +358,14 @@ function fromOperationRow(
                 row.resultJson,
                 "operation.result.decode",
               );
+        const progress =
+          row.progressJson === null
+            ? undefined
+            : yield* decodeJson(
+                decodeSandboxOperationProgress,
+                row.progressJson,
+                "operation.progress.decode",
+              );
         return yield* decodeSandboxOperationReceipt({
           operationId: row.operationId,
           requestId: row.requestId,
@@ -369,7 +383,12 @@ function fromOperationRow(
                   "operation.profile-input.decode",
                 ),
               }),
+          ...(row.expectedRevision === null ? {} : { expectedRevision: row.expectedRevision }),
+          ...(row.resolvedImageDigest === null
+            ? {}
+            : { resolvedImageDigest: row.resolvedImageDigest }),
           ...(result === undefined ? {} : { result }),
+          ...(progress === undefined ? {} : { progress }),
           ...(row.error === null ? {} : { error: row.error }),
           acceptedAt: row.acceptedAt,
           updatedAt: row.updatedAt,
@@ -485,8 +504,11 @@ const makeRepository = Effect.gen(function* () {
         deployment_id AS "deploymentId",
         profile_id AS "profileId",
         profile_input_json AS "profileInputJson",
+        expected_revision AS "expectedRevision",
+        resolved_image_digest AS "resolvedImageDigest",
         result_json AS "resultJson",
         error,
+        progress_json AS "progressJson",
         accepted_at AS "acceptedAt",
         updated_at AS "updatedAt"
       FROM kata_sandbox_operation_receipts
@@ -508,8 +530,11 @@ const makeRepository = Effect.gen(function* () {
         deployment_id AS "deploymentId",
         profile_id AS "profileId",
         profile_input_json AS "profileInputJson",
+        expected_revision AS "expectedRevision",
+        resolved_image_digest AS "resolvedImageDigest",
         result_json AS "resultJson",
         error,
+        progress_json AS "progressJson",
         accepted_at AS "acceptedAt",
         updated_at AS "updatedAt"
       FROM kata_sandbox_operation_receipts
@@ -531,8 +556,11 @@ const makeRepository = Effect.gen(function* () {
         deployment_id AS "deploymentId",
         profile_id AS "profileId",
         profile_input_json AS "profileInputJson",
+        expected_revision AS "expectedRevision",
+        resolved_image_digest AS "resolvedImageDigest",
         result_json AS "resultJson",
         error,
+        progress_json AS "progressJson",
         accepted_at AS "acceptedAt",
         updated_at AS "updatedAt"
       FROM kata_sandbox_operation_receipts
@@ -712,19 +740,26 @@ const makeRepository = Effect.gen(function* () {
       .pipe(mapSql("SandboxDeploymentRepository.saveDeployment"));
   };
 
-  const deleteProfile = (profileId: SandboxProviderProfileId) =>
+  const deleteProfile = (profileId: SandboxProviderProfileId, expectedRevision?: number) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
           const profiles = yield* sql`
-          SELECT enabled
+          SELECT revision, enabled
           FROM kata_sandbox_profiles
           WHERE profile_id = ${profileId}
         `;
+          if (profiles.length === 0) return;
           if (profiles[0]?.enabled !== 0) {
             return yield* new SandboxRepositoryConflictError({
               resource: profileId,
               message: "Disable the sandbox profile before deleting it.",
+            });
+          }
+          if (expectedRevision !== undefined && profiles[0]?.revision !== expectedRevision) {
+            return yield* new SandboxRepositoryConflictError({
+              resource: profileId,
+              message: `Profile revision ${expectedRevision} is stale.`,
             });
           }
           const references = yield* sql`
@@ -757,15 +792,19 @@ const makeRepository = Effect.gen(function* () {
     sql`
       INSERT INTO kata_sandbox_operation_receipts (
         operation_id, actor, request_id, command, payload_hash, status,
-        deployment_id, profile_id, profile_input_json, result_json, error, accepted_at, updated_at
+        deployment_id, profile_id, profile_input_json, expected_revision, resolved_image_digest, result_json, error, progress_json, accepted_at, updated_at
       ) VALUES (
         ${input.receipt.operationId}, ${input.actor}, ${input.receipt.requestId},
         ${input.receipt.command}, ${input.receipt.payloadHash}, ${input.receipt.status},
         ${input.receipt.deploymentId ?? null},
         ${input.receipt.profileId ?? null},
         ${input.receipt.profileInput === undefined ? null : encodeJson(input.receipt.profileInput)},
+        ${input.receipt.expectedRevision ?? null},
+        ${input.receipt.resolvedImageDigest ?? null},
         ${input.receipt.result === undefined ? null : encodeJson(input.receipt.result)},
-        ${input.receipt.error ?? null}, ${input.receipt.acceptedAt}, ${input.receipt.updatedAt}
+        ${input.receipt.error ?? null},
+        ${input.receipt.progress === undefined ? null : encodeJson(input.receipt.progress)},
+        ${input.receipt.acceptedAt}, ${input.receipt.updatedAt}
       )
       ON CONFLICT (actor, request_id) DO NOTHING
     `.pipe(Effect.asVoid);
@@ -847,14 +886,29 @@ const makeRepository = Effect.gen(function* () {
             input.receipt.profileId
           ) {
             const profiles = yield* sql`
-            SELECT enabled
+            SELECT revision, enabled
             FROM kata_sandbox_profiles
             WHERE profile_id = ${input.receipt.profileId}
           `;
+            if (profiles.length === 0) {
+              return yield* new SandboxRepositoryConflictError({
+                resource: input.receipt.profileId,
+                message: "The sandbox profile no longer exists.",
+              });
+            }
             if (profiles[0]?.enabled !== 0) {
               return yield* new SandboxRepositoryConflictError({
                 resource: input.receipt.profileId,
                 message: "Disable the sandbox profile before deleting it.",
+              });
+            }
+            if (
+              input.receipt.expectedRevision !== undefined &&
+              profiles[0]?.revision !== input.receipt.expectedRevision
+            ) {
+              return yield* new SandboxRepositoryConflictError({
+                resource: input.receipt.profileId,
+                message: `Profile revision ${input.receipt.expectedRevision} is stale.`,
               });
             }
             const references = yield* sql`
@@ -873,7 +927,7 @@ const makeRepository = Effect.gen(function* () {
           }
           if (before.length === 0 && input.receipt.command === "create" && input.deployment) {
             const profiles = yield* sql`
-            SELECT enabled
+            SELECT revision, enabled
             FROM kata_sandbox_profiles
             WHERE profile_id = ${input.deployment.intent.profileId}
           `;
@@ -881,6 +935,41 @@ const makeRepository = Effect.gen(function* () {
               return yield* new SandboxRepositoryConflictError({
                 resource: input.deployment.intent.profileId,
                 message: "Sandbox profile is unavailable.",
+              });
+            }
+            if (
+              input.receipt.expectedRevision !== undefined &&
+              profiles[0]?.revision !== input.receipt.expectedRevision
+            ) {
+              return yield* new SandboxRepositoryConflictError({
+                resource: input.deployment.intent.profileId,
+                message: `Profile revision ${input.receipt.expectedRevision} is stale.`,
+              });
+            }
+          }
+          if (
+            before.length === 0 &&
+            input.receipt.command === "delete" &&
+            input.receipt.deploymentId
+          ) {
+            const deployments = yield* sql`
+            SELECT revision
+            FROM kata_sandbox_deployments
+            WHERE deployment_id = ${input.receipt.deploymentId}
+          `;
+            if (deployments.length === 0) {
+              return yield* new SandboxRepositoryConflictError({
+                resource: input.receipt.deploymentId,
+                message: "The sandbox deployment no longer exists.",
+              });
+            }
+            if (
+              input.receipt.expectedRevision !== undefined &&
+              deployments[0]?.revision !== input.receipt.expectedRevision
+            ) {
+              return yield* new SandboxRepositoryConflictError({
+                resource: input.receipt.deploymentId,
+                message: `Deployment revision ${input.receipt.expectedRevision} is stale.`,
               });
             }
           }
@@ -936,8 +1025,11 @@ const makeRepository = Effect.gen(function* () {
           deployment_id = ${receipt.deploymentId ?? null},
           profile_id = ${receipt.profileId ?? null},
           profile_input_json = ${receipt.profileInput === undefined ? null : encodeJson(receipt.profileInput)},
+          expected_revision = ${receipt.expectedRevision ?? null},
+          resolved_image_digest = ${receipt.resolvedImageDigest ?? null},
           result_json = ${receipt.result === undefined ? null : encodeJson(receipt.result)},
           error = ${receipt.error ?? null},
+          progress_json = ${receipt.progress === undefined ? null : encodeJson(receipt.progress)},
           updated_at = ${receipt.updatedAt}
       WHERE operation_id = ${receipt.operationId}
     `.pipe(Effect.asVoid, mapSql("SandboxDeploymentRepository.saveOperation"));
