@@ -105,9 +105,12 @@ vp run --filter kata-code-relay deploy -- --stage "$USER" --env-file .env.local
 ## Hosted web app release deployment
 
 The hosted app is intentionally not deployed by Vercel's Git integration. The
-web project disables automatic Git deployments in `apps/web/vercel.ts` via
-`git.deploymentEnabled: false`, and `.github/workflows/release.yml` deploys the
-web app with Vercel CLI after the GitHub Release succeeds.
+Release `deploy_web` job runs `vercel deploy` from the monorepo root, so the
+repo-root `vercel.ts` is the config that deploy reads. It installs the web
+workspace closure, builds `@kata-sh/code-web`, and sets `outputDirectory` to
+`apps/web/dist` (Vite `outDir`). `apps/web/vercel.ts` is the same contract when
+the Vercel project Root Directory is `apps/web`; its `outputDirectory` is
+`dist`. Both files disable Git deployments via `git.deploymentEnabled: false`.
 
 Required GitHub Actions secrets:
 
@@ -136,8 +139,8 @@ Required Vercel domains:
 - `latest.app.kata.sh`: channel alias updated by stable releases.
 - `nightly.app.kata.sh`: channel alias updated by nightly releases.
 
-The router domain uses `apps/web/vercel.ts` routes. Users opt into a channel by
-visiting `/__katacode/channel?channel=latest` or
+The router domain uses the hosted-web `vercel.ts` routes. Users opt into a
+channel by visiting `/__katacode/channel?channel=latest` or
 `/__katacode/channel?channel=nightly`; the router stores the
 `katacode_web_channel` cookie and rewrites future requests on `app.kata.sh` to
 the matching channel alias.
@@ -153,14 +156,17 @@ updated before redirecting to the hosted app root.
 
 One-time Vercel dashboard setup:
 
-1. Confirm the web project root directory remains `apps/web`.
+1. Leave the hosted web project Root Directory empty so CLI deploys from the
+   monorepo root use the repo-root `vercel.ts`. If Root Directory is `apps/web`,
+   deploys use `apps/web/vercel.ts` instead. Do not set Output Directory to
+   `public`.
 2. Add the three domains above to the web project.
 3. Disable automatic Git deployments in the dashboard if desired; the committed
    `vercel.ts` setting is the source-of-truth, but disconnecting Git in the
    dashboard is also safe.
 4. Run one stable release deployment, or manually alias the current stable
    deployment, so `app.kata.sh` points at a deployment containing the router
-   rules in `apps/web/vercel.ts`. Future stable releases keep this alias current.
+   rules. Future stable releases keep this alias current.
 
 ## Nightly builds
 

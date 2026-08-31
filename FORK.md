@@ -40,7 +40,9 @@ git fetch upstream --tags
 | Desktop bundle (dev)  | `com.katacode.dev.<suffix>`                                  |
 | Hosted web            | `app.kata.sh` / `latest.app.kata.sh` / `nightly.app.kata.sh` |
 
-Single table: `packages/shared/src/branding.ts`. `apps/web/vercel.ts` inlines the same hosts (Vercel compiles it before the monorepo build).
+Single table: `packages/shared/src/branding.ts`. `apps/web/vercel.ts` and the
+repo-root `vercel.ts` inline the same hosts (Vercel compiles those files before
+the monorepo build).
 
 ## Identifier policy
 

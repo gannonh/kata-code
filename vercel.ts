@@ -1,7 +1,8 @@
 import { matchers, routes, type Transform, type VercelConfig } from "@vercel/config/v1";
 
-// Vercel compiles this file before the monorepo build; keep in sync with
-// packages/shared/src/branding.ts.
+// Release deploy_web runs `vercel deploy` from the monorepo root. Vercel
+// compiles this file before the monorepo build. Keep hosts in sync with
+// packages/shared/src/branding.ts and apps/web/vercel.ts.
 const ROUTER_HOST = "app.kata.sh";
 const HOSTED_WEB_CHANNEL_COOKIE = "katacode_web_channel";
 const LATEST_ORIGIN = "https://latest.app.kata.sh";
@@ -27,8 +28,8 @@ function channelCookie(channel: "latest" | "nightly"): string {
 
 export const config: VercelConfig = {
   buildCommand:
-    'vp run --filter @kata-sh/code-web build && node ../../scripts/apply-web-brand-assets.ts --channel "${VITE_HOSTED_APP_CHANNEL:-latest}"',
-  outputDirectory: "dist",
+    'vp run --filter @kata-sh/code-web build && node scripts/apply-web-brand-assets.ts --channel "${VITE_HOSTED_APP_CHANNEL:-latest}"',
+  outputDirectory: "apps/web/dist",
   git: {
     deploymentEnabled: false,
   },
