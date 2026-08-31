@@ -248,6 +248,12 @@ describe("release sandbox image boundaries", () => {
       assert.notInclude(serialized, "secret-token");
       assert.isTrue(commands.some((args) => args.includes("--raw")));
       assert.equal(commands.filter((args) => args[0] === "docker" && args[1] === "run").length, 2);
+      assert.isTrue(
+        commands
+          .filter((args) => args[0] === "docker" && args[1] === "run")
+          .every((args) => args.includes(`${repository}@${amd64Digest}`) || args.includes(`${repository}@${arm64Digest}`)),
+      );
+      assert.doesNotThrow(() => assertPublishedImageVerifyCommands(commands, indexDigest));
       assert.isTrue(commands.some((args) => args.includes(`${repository}:latest`)));
     } finally {
       NodeFS.rmSync(directory, { recursive: true, force: true });

@@ -374,10 +374,22 @@ export function buildBootstrapManifest(input: {
   };
 }
 
+function isDockerPullOfDigest(args: ReadonlyArray<string>, indexDigest: string): boolean {
+  if (args[0] !== "docker") return false;
+  if (args.includes("run") || args.includes("imagetools")) return false;
+  if (!args.includes("pull")) return false;
+  return args.some((arg) => arg.includes(`@${indexDigest}`));
+}
+
 export function assertPublishedImageVerifyCommands(
-  _commands: ReadonlyArray<ReadonlyArray<string>>,
-  _indexDigest: string,
-): void {}
+  commands: ReadonlyArray<ReadonlyArray<string>>,
+  indexDigest: string,
+): void {
+  const pulls = commands.filter((args) => isDockerPullOfDigest(args, indexDigest));
+  if (pulls.length > 1) {
+    throw new Error(`cannot overwrite digest ${indexDigest}`);
+  }
+}
 
 export function makeSandboxImageArtifact(input: {
   readonly repository: string;
