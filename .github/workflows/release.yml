@@ -804,7 +804,8 @@ jobs:
 
           required=(VERCEL_TOKEN VCR_ORG_ID VCR_PROJECT_ID VERCEL_ORG_ID VERCEL_PROJECT_ID)
           for name in "${required[@]}"; do
-            if [[ -z "${!name:-}" ]]; then
+            value="${!name:-}"
+            if [[ -z "${value//[[:space:]]/}" ]]; then
               echo "Missing required Vercel release configuration: $name" >&2
               exit 1
             fi

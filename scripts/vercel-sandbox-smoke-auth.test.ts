@@ -78,6 +78,33 @@ describe("resolveVercelSandboxSmokeAuth", () => {
       },
     );
   });
+
+  it("trims hosted credential values before returning them", () => {
+    assert.deepEqual(
+      resolveVercelSandboxSmokeAuth({
+        VERCEL_TOKEN: "  vercel-token  ",
+        VERCEL_ORG_ID: "  hosted-team  ",
+        VERCEL_PROJECT_ID: "  hosted-project  ",
+      }),
+      {
+        token: "vercel-token",
+        teamId: "hosted-team",
+        projectId: "hosted-project",
+      },
+    );
+  });
+
+  it("rejects whitespace-only required credentials", () => {
+    assert.throws(
+      () =>
+        resolveVercelSandboxSmokeAuth({
+          VERCEL_TOKEN: "vercel-token",
+          VERCEL_ORG_ID: "   ",
+          VERCEL_PROJECT_ID: "hosted-project",
+        }),
+      VERCEL_SANDBOX_SMOKE_AUTH_ERROR,
+    );
+  });
 });
 
 describe("release sandbox image Vercel auth contract", () => {
@@ -91,6 +118,7 @@ describe("release sandbox image Vercel auth contract", () => {
       job,
       "required=(VERCEL_TOKEN VCR_ORG_ID VCR_PROJECT_ID VERCEL_ORG_ID VERCEL_PROJECT_ID)",
     );
+    assert.include(job, 'if [[ -z "${value//[[:space:]]/}" ]]; then');
     assert.include(job, '--project "$VCR_PROJECT_ID"');
     assert.notInclude(job, '--project "$VERCEL_PROJECT_ID"');
     assert.notInclude(job, "VERCEL_ORG_ID: ${{ secrets.VCR_ORG_ID }}");
