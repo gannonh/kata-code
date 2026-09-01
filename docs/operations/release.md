@@ -107,13 +107,15 @@ vp run --filter kata-code-relay deploy -- --stage "$USER" --env-file .env.local
 The release workflow uses two Vercel projects in the same team:
 
 - The hosted web project, currently `katacode-web`, builds and deploys `apps/web`. `VERCEL_ORG_ID` and
-  `VERCEL_PROJECT_ID` identify this project.
-- The Sandbox registry project, currently `kata-code`, owns the VCR repository and runs the Vercel
-  Sandbox image smoke test. `VCR_ORG_ID` and `VCR_PROJECT_ID` identify this project.
+  `VERCEL_PROJECT_ID` identify this project. The Sandbox image job also uses these secrets for
+  `Sandbox.create`.
+- The Sandbox registry project, currently `kata-code`, owns the VCR repository. `VCR_ORG_ID` and
+  `VCR_PROJECT_ID` identify this project.
 
 GitHub Actions secrets are the release source of truth. A local `.vercel/project.json` link does not
 configure either release job. Local `E2E_VERCEL_*` variables are also outside the release workflow.
-The release smoke test uses the Sandbox registry project instead of a separate E2E project.
+The release smoke test authenticates `Sandbox.create` with the hosted web project. It does not assign
+`VCR_ORG_ID` or `VCR_PROJECT_ID` onto `VERCEL_ORG_ID` or `VERCEL_PROJECT_ID`.
 
 Both jobs use `VERCEL_TOKEN`. The token must have access to both projects in the configured team.
 
@@ -183,6 +185,8 @@ One-time Vercel dashboard setup:
 Required GitHub Actions secrets:
 
 - `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`: hosted web app team ID, used by `Sandbox.create`.
+- `VERCEL_PROJECT_ID`: hosted web app project ID, used by `Sandbox.create`.
 - `VCR_ORG_ID`: Sandbox registry team ID.
 - `VCR_PROJECT_ID`: Sandbox registry project ID.
 
@@ -196,7 +200,8 @@ Optional GitHub Actions variables:
 
 The Sandbox image job publishes each exact release tag to VCR and
 `ghcr.io/gannonh/kata-sandbox`. VCR serves authenticated Vercel workloads. GHCR serves anonymous
-Docker pulls. The job passes the VCR project credentials to the Vercel Sandbox smoke test.
+Docker pulls. The job injects hosted `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` for `Sandbox.create`.
+Registry login, `vcr config`, and readiness polling use `VCR_*`.
 A second `docker pull` of the same index digest fails with `cannot overwrite digest`.
 
 The first GHCR publish creates a private package. Open the package settings, change its visibility
