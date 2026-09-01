@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import { TestClock } from "effect/testing";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   VcsProcessExitError,
@@ -38,9 +39,27 @@ const captureProcessResult = (
   VcsProcess.make.pipe(
     Effect.provideService(
       ProcessRunner.ProcessRunner,
-      ProcessRunner.ProcessRunner.of({ run: () => result }),
+      ProcessRunner.ProcessRunner.of({
+        run: () => result,
+        runBytes: () => Effect.die("unused binary process runner"),
+      }),
     ),
     Effect.flatMap((service) => service.run(baseInput)),
+    Effect.flip,
+  );
+
+const captureProcessBytesResult = (
+  result: Effect.Effect<ProcessRunner.ProcessRunBytesOutput, ProcessRunner.ProcessRunError>,
+) =>
+  VcsProcess.make.pipe(
+    Effect.provideService(
+      ProcessRunner.ProcessRunner,
+      ProcessRunner.ProcessRunner.of({
+        run: () => Effect.die("unused text process runner"),
+        runBytes: () => result,
+      }),
+    ),
+    Effect.flatMap((service) => service.runBytes(baseInput)),
     Effect.flip,
   );
 
@@ -248,6 +267,42 @@ describe("VcsProcess.run", () => {
         argumentCount: baseInput.args.length,
       });
       expect(missingExitCodeError).not.toHaveProperty("cause");
+    }),
+  );
+
+  it.effect("wipes byte output when the process has no exit code", () =>
+    Effect.gen(function* () {
+      const stdout = new TextEncoder().encode("secret stdout");
+      const stderr = new TextEncoder().encode("secret stderr");
+      const error = yield* captureProcessBytesResult(
+        Effect.succeed({ stdout, stderr, code: null, timedOut: false }),
+      );
+
+      expect(error._tag).toBe("VcsProcessMissingExitCodeError");
+      expect(Array.from(stdout)).toEqual(Array.from({ length: stdout.length }, () => 0));
+      expect(Array.from(stderr)).toEqual(Array.from({ length: stderr.length }, () => 0));
+    }),
+  );
+
+  it.effect("wipes byte output after classifying a non-zero exit", () =>
+    Effect.gen(function* () {
+      const stdout = new TextEncoder().encode("secret stdout");
+      const stderr = new TextEncoder().encode("authentication failed for secret token");
+      const error = yield* captureProcessBytesResult(
+        Effect.succeed({
+          stdout,
+          stderr,
+          code: ChildProcessSpawner.ExitCode(1),
+          timedOut: false,
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "VcsProcessExitError",
+        failureKind: "authentication",
+      });
+      expect(Array.from(stdout)).toEqual(Array.from({ length: stdout.length }, () => 0));
+      expect(Array.from(stderr)).toEqual(Array.from({ length: stderr.length }, () => 0));
     }),
   );
 

@@ -56,6 +56,17 @@ export interface SandboxAllocationInput {
   readonly bootstrapToken?: string;
 }
 
+/**
+ * A short-lived capability for checkout code that needs the host GitHub
+ * credential. The token only exists for the callback's lifetime and is never
+ * part of a sandbox allocation input or persisted deployment state.
+ */
+export interface SandboxGitHubCheckoutCredential {
+  readonly withToken: <A, E, R>(
+    use: (token: Uint8Array) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | SandboxDriverError, R>;
+}
+
 export interface SandboxIdentifiedFacts {
   readonly environmentId: string;
   readonly endpoint: SandboxEndpoint;

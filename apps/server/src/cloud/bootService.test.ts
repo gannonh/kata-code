@@ -70,6 +70,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   const commands: string[] = [];
   const control: { failCommand: string | undefined } = { failCommand: undefined };
   const runner = ProcessRunner.ProcessRunner.of({
+    runBytes: () => Effect.die("unused binary process runner"),
     run: (input) =>
       Effect.sync(() => {
         const command = `${input.command} ${input.args.join(" ")}`;

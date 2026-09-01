@@ -33,6 +33,10 @@ export interface DockerEngine {
   readonly requestBuffer: (
     request: DockerRequest,
   ) => Effect.Effect<DockerBufferResponse, DockerEngineError>;
+  readonly requestStdin: (
+    request: DockerRequest,
+    stdin: Uint8Array,
+  ) => Effect.Effect<DockerBufferResponse, DockerEngineError>;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -126,6 +130,101 @@ function makeRequest(
   });
 }
 
+function makeStdinRequest(
+  socketPath: string,
+  request: DockerRequest,
+  stdin: Uint8Array,
+): Effect.Effect<DockerBufferResponse, DockerEngineError> {
+  const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  return Effect.tryPromise({
+    try: (signal) =>
+      new Promise<DockerBufferResponse>((resolve, reject) => {
+        let settled = false;
+        let upgradedSocket:
+          | (NodeJS.WritableStream & { destroy: (error?: Error) => void })
+          | undefined;
+        const chunks: Buffer[] = [];
+        const nodeRequest = NodeHttp.request({
+          socketPath,
+          path: request.path,
+          method: request.method ?? "POST",
+          headers: {
+            ...requestHeaders(request),
+            Connection: "Upgrade",
+            Upgrade: "tcp",
+          },
+          timeout: timeoutMs,
+        });
+        const onAbort = () => {
+          const error = new Error(`Docker request ${request.path} was interrupted`);
+          upgradedSocket?.destroy(error);
+          nodeRequest.destroy(error);
+        };
+        const settle = (complete: () => void) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener("abort", onAbort);
+          complete();
+        };
+
+        nodeRequest.on("upgrade", (response, socket, head) => {
+          upgradedSocket = socket;
+          if (timeoutMs > 0) {
+            socket.setTimeout(timeoutMs, () =>
+              socket.destroy(
+                new DockerEngineError({
+                  message: `Docker request ${request.path} timed out after ${timeoutMs}ms`,
+                }),
+              ),
+            );
+          }
+          if (head.length > 0) chunks.push(head);
+          socket.on("data", (chunk: Buffer | string) =>
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+          );
+          socket.on("error", (cause) => settle(() => reject(cause)));
+          socket.on("end", () =>
+            settle(() =>
+              resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks) }),
+            ),
+          );
+          socket.on("close", () =>
+            settle(() =>
+              resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks) }),
+            ),
+          );
+          socket.end(Buffer.from(stdin.buffer, stdin.byteOffset, stdin.byteLength));
+        });
+        nodeRequest.on("response", (response) => {
+          response.on("error", (cause) => settle(() => reject(cause)));
+          response.on("data", (chunk: Buffer | string) =>
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+          );
+          response.on("end", () =>
+            settle(() =>
+              resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks) }),
+            ),
+          );
+        });
+        if (timeoutMs > 0) {
+          nodeRequest.on("timeout", () => {
+            const error = new DockerEngineError({
+              message: `Docker request ${request.path} timed out after ${timeoutMs}ms`,
+            });
+            upgradedSocket?.destroy(error);
+            nodeRequest.destroy(error);
+          });
+        }
+        nodeRequest.on("error", (cause) => settle(() => reject(cause)));
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
+        if (request.body !== undefined) nodeRequest.write(request.body);
+        nodeRequest.end();
+      }),
+    catch: normalizeError,
+  });
+}
+
 export function makeDockerEngine(socketPath: string): DockerEngine {
   return {
     request: (request) =>
@@ -152,5 +251,6 @@ export function makeDockerEngine(socketPath: string): DockerEngine {
               ),
         ),
       ),
+    requestStdin: (request, stdin) => makeStdinRequest(socketPath, request, stdin),
   };
 }

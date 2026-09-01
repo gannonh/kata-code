@@ -24,6 +24,7 @@ export interface ProcessRunInput {
   readonly spawnCwd?: string | undefined;
   readonly timeout?: Duration.Input | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly envMode?: "extend" | "replace" | undefined;
   readonly stdin?: string | undefined;
   readonly maxOutputBytes?: number | undefined;
   readonly outputMode?: "error" | "truncate" | undefined;
@@ -33,6 +34,13 @@ export interface ProcessRunInput {
    * Partial stdout/stderr are not preserved.
    */
   readonly timeoutBehavior?: "error" | "timedOutResult" | undefined;
+}
+
+export interface ProcessRunBytesOutput {
+  readonly stdout: Uint8Array;
+  readonly stderr: Uint8Array;
+  readonly code: ChildProcessSpawner.ExitCode | null;
+  readonly timedOut: boolean;
 }
 
 export interface ProcessRunOutput {
@@ -144,6 +152,9 @@ export class ProcessRunner extends Context.Service<
   ProcessRunner,
   {
     readonly run: (input: ProcessRunInput) => Effect.Effect<ProcessRunOutput, ProcessRunError>;
+    readonly runBytes: (
+      input: ProcessRunInput,
+    ) => Effect.Effect<ProcessRunBytesOutput, ProcessRunError>;
   }
 >()("@kata-sh/code-cli/processRunner") {}
 
@@ -249,6 +260,69 @@ const collectText = Effect.fn("processRunner.collectText")(function* (input: {
   );
 });
 
+const collectBytes = Effect.fn("processRunner.collectBytes")(function (input: {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly cwd?: string | undefined;
+  readonly spawnCwd?: string | undefined;
+  readonly streamName: "stdout" | "stderr";
+  readonly stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>;
+  readonly maxOutputBytes: number;
+}) {
+  const chunks: Uint8Array<ArrayBufferLike>[] = [];
+  let bytes = 0;
+  let handedOff = false;
+  return input.stream.pipe(
+    Stream.mapError(
+      (cause) =>
+        new ProcessReadError({
+          command: input.command,
+          argumentCount: input.args.length,
+          cwd: input.cwd,
+          spawnCwd: input.spawnCwd,
+          stream: input.streamName,
+          cause,
+        }),
+    ),
+    Stream.runForEach((chunk) => {
+      if (bytes + chunk.byteLength > input.maxOutputBytes) {
+        const observedBytes = bytes + chunk.byteLength;
+        chunk.fill(0);
+        return Effect.fail(
+          new ProcessOutputLimitError({
+            command: input.command,
+            argumentCount: input.args.length,
+            cwd: input.cwd,
+            spawnCwd: input.spawnCwd,
+            stream: input.streamName,
+            maxBytes: input.maxOutputBytes,
+            observedBytes,
+          }),
+        );
+      }
+      chunks.push(chunk);
+      bytes += chunk.byteLength;
+      return Effect.void;
+    }),
+    Effect.map(() => {
+      const output = chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks, bytes);
+      if (chunks.length > 1) {
+        for (const chunk of chunks) chunk.fill(0);
+      }
+      chunks.length = 0;
+      handedOff = true;
+      return output;
+    }),
+    Effect.ensuring(
+      Effect.sync(() => {
+        if (!handedOff) {
+          for (const chunk of chunks) chunk.fill(0);
+        }
+      }),
+    ),
+  );
+});
+
 function finalizeRunProcess<R>(
   effect: Effect.Effect<ProcessRunOutput, ProcessRunError, R | Scope.Scope>,
   input: ProcessRunInput,
@@ -295,7 +369,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
   const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const outputMode = input.outputMode ?? "error";
   const truncatedMarker = input.truncatedMarker ?? "";
-  const extendEnv = input.env !== undefined;
+  const extendEnv = input.env !== undefined && input.envMode !== "replace";
   const spawnCommand = yield* resolveSpawnCommand(
     input.command,
     input.args,
@@ -404,14 +478,136 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
   } satisfies ProcessRunOutput;
 });
 
+const runProcessBytesCore = Effect.fn("processRunner.runProcessBytesCore")(function* (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  input: ProcessRunInput,
+): Effect.fn.Return<ProcessRunBytesOutput, ProcessRunError, Scope.Scope> {
+  const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const extendEnv = input.env !== undefined && input.envMode !== "replace";
+  const spawnCommand = yield* resolveSpawnCommand(
+    input.command,
+    input.args,
+    input.env === undefined ? {} : { env: input.env, extendEnv },
+  );
+  const child = yield* spawner
+    .spawn(
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        ...((input.spawnCwd ?? input.cwd) ? { cwd: input.spawnCwd ?? input.cwd } : {}),
+        ...(input.env !== undefined ? { env: input.env, extendEnv } : {}),
+        shell: spawnCommand.shell,
+      }),
+    )
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProcessSpawnError({
+            command: input.command,
+            argumentCount: input.args.length,
+            cwd: input.cwd,
+            spawnCwd: input.spawnCwd,
+            resolvedCommand: spawnCommand.command,
+            resolvedArgumentCount: spawnCommand.args.length,
+            shell: spawnCommand.shell,
+            cause,
+          }),
+      ),
+    );
+  const stdin = input.stdin;
+  const writeStdin =
+    stdin === undefined
+      ? Effect.void
+      : Stream.run(Stream.encodeText(Stream.make(stdin)), child.stdin).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProcessStdinError({
+                command: input.command,
+                argumentCount: input.args.length,
+                cwd: input.cwd,
+                spawnCwd: input.spawnCwd,
+                stdinBytes: Buffer.byteLength(stdin),
+                cause,
+              }),
+          ),
+        );
+  let stdout: Uint8Array | undefined;
+  let stderr: Uint8Array | undefined;
+  let handedOff = false;
+  return yield* Effect.gen(function* () {
+    yield* Effect.all(
+      [
+        collectBytes({
+          ...input,
+          streamName: "stdout",
+          stream: child.stdout,
+          maxOutputBytes,
+        }).pipe(Effect.tap((value) => Effect.sync(() => (stdout = value)))),
+        collectBytes({
+          ...input,
+          streamName: "stderr",
+          stream: child.stderr,
+          maxOutputBytes,
+        }).pipe(Effect.tap((value) => Effect.sync(() => (stderr = value)))),
+        writeStdin,
+      ],
+      { concurrency: "unbounded" },
+    );
+    const code = yield* child.exitCode.pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProcessReadError({
+            command: input.command,
+            argumentCount: input.args.length,
+            cwd: input.cwd,
+            spawnCwd: input.spawnCwd,
+            stream: "exitCode",
+            cause,
+          }),
+      ),
+    );
+    handedOff = true;
+    return { stdout: stdout!, stderr: stderr!, code, timedOut: false };
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        if (!handedOff) {
+          stdout?.fill(0);
+          stderr?.fill(0);
+        }
+      }),
+    ),
+  );
+});
+
 export const make = Effect.fn("ProcessRunner.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
   const run: ProcessRunner["Service"]["run"] = (input) =>
     finalizeRunProcess(runProcessCore(spawner, input), input);
 
+  const runBytes: ProcessRunner["Service"]["runBytes"] = (input) =>
+    runProcessBytesCore(spawner, input).pipe(
+      Effect.scoped,
+      Effect.timeoutOption(input.timeout ?? DEFAULT_TIMEOUT),
+      Effect.flatMap((result) =>
+        Option.isSome(result)
+          ? Effect.succeed(result.value)
+          : Effect.fail(
+              new ProcessTimeoutError({
+                command: input.command,
+                argumentCount: input.args.length,
+                cwd: input.cwd,
+                spawnCwd: input.spawnCwd,
+                timeoutMs: Duration.toMillis(
+                  Duration.fromInputUnsafe(input.timeout ?? DEFAULT_TIMEOUT),
+                ),
+              }),
+            ),
+      ),
+    );
+
   return ProcessRunner.of({
     run,
+    runBytes,
   });
 });
 

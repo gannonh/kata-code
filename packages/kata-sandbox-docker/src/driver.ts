@@ -25,6 +25,7 @@ import {
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
 import {
   SandboxDriverError,
+  type SandboxGitHubCheckoutCredential,
   type SandboxIdentifiedFacts,
   type SandboxProviderDriver,
   type SandboxProviderResourceInput,
@@ -46,6 +47,9 @@ const IMAGE_PULL_TIMEOUT_MS = 5 * 60_000;
 const READY_PATH = "/.well-known/kata/environment";
 const DEFAULT_ENDPOINT_HOST = "127.0.0.1";
 const CHECKOUT_READY_PATH = "/tmp/kata-sandbox-checkout-ready";
+const CREDENTIAL_ROOT = "/run/kata-credentials";
+const GITHUB_TOKEN_PATH = CREDENTIAL_ROOT + "/github-token";
+const GIT_ASKPASS_PATH = CREDENTIAL_ROOT + "/git-askpass";
 
 interface DockerInspect {
   readonly Id: string;
@@ -68,6 +72,7 @@ export interface DockerSandboxDriverOptions {
   readonly engineForSocketPath?: (socketPath: string) => DockerEngine;
   readonly endpointHost?: string;
   readonly now?: () => string;
+  readonly checkoutCredential?: SandboxGitHubCheckoutCredential;
   readonly readinessProbe?: (
     endpoint: string,
     manifest: SandboxBootstrapManifest,
@@ -306,7 +311,7 @@ function createBody(input: {
     Image: input.profile.imageDigest,
     Cmd: [
       "sh",
-      "-lc",
+      "-c",
       "while [ ! -f " +
         shellQuote(CHECKOUT_READY_PATH) +
         " ]; do sleep 0.1; done\nexec katacode serve --host 0.0.0.0 --port " +
@@ -317,6 +322,9 @@ function createBody(input: {
     ExposedPorts: { [DEFAULT_SANDBOX_CONTAINER_PORT + "/tcp"]: {} },
     Labels: dockerOwnershipLabels(input.intent),
     HostConfig: {
+      Tmpfs: {
+        [CREDENTIAL_ROOT]: "rw,exec,nosuid,nodev,size=65536,uid=1001,gid=1001,mode=0700",
+      },
       PortBindings: {
         [DEFAULT_SANDBOX_CONTAINER_PORT + "/tcp"]: [
           { HostIp: hostIpForEndpoint(input.endpointHost), HostPort: "" },
@@ -358,7 +366,9 @@ function buildTarArchive(
     chunks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512));
   }
   chunks.push(Buffer.alloc(1024));
-  return Buffer.concat(chunks);
+  const archive = Buffer.concat(chunks);
+  for (const chunk of chunks) chunk.fill(0);
+  return archive;
 }
 
 export function buildAuthArchive(authJson: Uint8Array): Uint8Array {
@@ -378,6 +388,272 @@ export function buildProviderSettingsArchive(modelSelection: ModelSelection): Ui
   return buildTarArchive([
     { name: "settings.json", data: Buffer.from(settings, "utf8"), mode: 0o600 },
   ]);
+}
+
+const GIT_ASKPASS =
+  "#!/bin/sh\n" +
+  'case "$1" in\n' +
+  "  Username*) printf '%s\\n' x-access-token ;;\n" +
+  "  Password*) cat /run/kata-credentials/github-token ;;\n" +
+  "  *) exit 1 ;;\n" +
+  "esac\n";
+
+function fixedSetupError(message: string): SandboxDriverError {
+  return new SandboxDriverError({ reason: "setup-failed", message });
+}
+
+function checkoutFailure(exitCode: number): SandboxDriverError {
+  const stage =
+    exitCode === 41
+      ? "workspace initialization"
+      : exitCode === 42
+        ? "remote configuration"
+        : exitCode === 43
+          ? "fetch"
+          : exitCode === 44
+            ? "detached checkout"
+            : exitCode === 45
+              ? "commit verification"
+              : exitCode === 46
+                ? "ready marker"
+                : exitCode === 47
+                  ? "credential file presence"
+                  : exitCode === 48
+                    ? "credential file content"
+                    : exitCode === 49
+                      ? "credential file access"
+                      : exitCode === 50
+                        ? "askpass validation"
+                        : "checkout command";
+  return fixedSetupError(`Authenticated Git ${stage} failed.`);
+}
+
+const CREDENTIAL_CLEANUP_COMMAND =
+  "rm -f " + shellQuote(GITHUB_TOKEN_PATH) + " " + shellQuote(GIT_ASKPASS_PATH);
+
+function cleanupCheckoutCredential(
+  engine: DockerEngine,
+  resource: DockerResourceHandle,
+): Effect.Effect<void, SandboxDriverError> {
+  return exec(engine, resource, CREDENTIAL_CLEANUP_COMMAND, "/", "setup-failed").pipe(
+    Effect.mapError(() => fixedSetupError("Sandbox credential cleanup failed.")),
+    Effect.flatMap((result) =>
+      result.exitCode === 0
+        ? Effect.void
+        : Effect.fail(fixedSetupError("Sandbox credential cleanup failed.")),
+    ),
+  );
+}
+
+function checkoutIsReady(
+  engine: DockerEngine,
+  resource: DockerResourceHandle,
+  resolvedCommitSha: string,
+): Effect.Effect<boolean, SandboxDriverError> {
+  return exec(
+    engine,
+    resource,
+    "test -f " +
+      shellQuote(CHECKOUT_READY_PATH) +
+      ' && test "$(git -C ' +
+      shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
+      ' rev-parse HEAD 2>/dev/null)" = ' +
+      shellQuote(resolvedCommitSha),
+    "/",
+    "setup-failed",
+  ).pipe(
+    Effect.map((result) => result.exitCode === 0),
+    Effect.mapError(() => fixedSetupError("Sandbox checkout readiness check failed.")),
+  );
+}
+
+function authenticatedCheckoutCommand(intent: SandboxDeploymentIntent): string {
+  const workspace = shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT);
+  return (
+    "set -eu\n" +
+    "cleanup() { " +
+    CREDENTIAL_CLEANUP_COMMAND +
+    "; }\n" +
+    "trap cleanup EXIT HUP INT TERM\n" +
+    "export GIT_ASKPASS=" +
+    shellQuote(GIT_ASKPASS_PATH) +
+    "\n" +
+    "export GIT_TERMINAL_PROMPT=0\n" +
+    "export GIT_CONFIG_GLOBAL=/dev/null\n" +
+    "export GIT_CONFIG_NOSYSTEM=1\n" +
+    "test -e " +
+    shellQuote(GITHUB_TOKEN_PATH) +
+    " || exit 47\n" +
+    "test -s " +
+    shellQuote(GITHUB_TOKEN_PATH) +
+    " || exit 48\n" +
+    "test -r " +
+    shellQuote(GITHUB_TOKEN_PATH) +
+    " || exit 49\n" +
+    "test -x " +
+    shellQuote(GIT_ASKPASS_PATH) +
+    " || exit 50\n" +
+    'test "$(' +
+    shellQuote(GIT_ASKPASS_PATH) +
+    " 'Username for github.com')\" = x-access-token || exit 50\n" +
+    "mkdir -p " +
+    workspace +
+    " || exit 41" +
+    "\n" +
+    "git -C " +
+    workspace +
+    " init || exit 41\n" +
+    "git -C " +
+    workspace +
+    " remote remove origin 2>/dev/null || true\n" +
+    "git -C " +
+    workspace +
+    " remote add origin " +
+    shellQuote("https://github.com/" + intent.source.repository + ".git") +
+    " || exit 42" +
+    "\n" +
+    "git -C " +
+    workspace +
+    " fetch --depth=1 origin " +
+    shellQuote(intent.source.resolvedCommitSha) +
+    " || exit 43" +
+    "\n" +
+    "git -C " +
+    workspace +
+    " checkout --detach FETCH_HEAD || exit 44\n" +
+    'test "$(git -C ' +
+    workspace +
+    ' rev-parse HEAD)" = ' +
+    shellQuote(intent.source.resolvedCommitSha) +
+    " || exit 45"
+  );
+}
+
+function authenticatedCheckout(
+  engine: DockerEngine,
+  resource: DockerResourceHandle,
+  intent: SandboxDeploymentIntent,
+  credential: SandboxGitHubCheckoutCredential,
+): Effect.Effect<void, SandboxDriverError> {
+  const bestEffortCleanup = cleanupCheckoutCredential(engine, resource).pipe(
+    Effect.catch(() => Effect.void),
+  );
+  return credential
+    .withToken((token) => {
+      return Effect.gen(function* () {
+        const askpass = yield* exec(
+          engine,
+          resource,
+          "umask 077; printf '%s' " +
+            shellQuote(Buffer.from(GIT_ASKPASS, "utf8").toString("base64")) +
+            " | base64 -d > " +
+            shellQuote(GIT_ASKPASS_PATH) +
+            "; chmod 700 " +
+            shellQuote(GIT_ASKPASS_PATH),
+          "/",
+          "setup-failed",
+        ).pipe(Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")));
+        if (askpass.exitCode !== 0) {
+          return yield* fixedSetupError("Authenticated Git checkout failed.");
+        }
+        const tokenWrite = yield* execWithStdin(
+          engine,
+          resource,
+          "umask 077; cat > " +
+            shellQuote(GITHUB_TOKEN_PATH) +
+            "; chmod 600 " +
+            shellQuote(GITHUB_TOKEN_PATH),
+          token,
+          "/",
+          "setup-failed",
+        ).pipe(Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")));
+        if (tokenWrite.exitCode !== 0) {
+          return yield* fixedSetupError("Authenticated Git checkout failed.");
+        }
+        const result = yield* exec(
+          engine,
+          resource,
+          authenticatedCheckoutCommand(intent),
+          "/",
+          "setup-failed",
+        ).pipe(Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")));
+        if (result.exitCode !== 0) {
+          return yield* checkoutFailure(result.exitCode);
+        }
+        yield* cleanupCheckoutCredential(engine, resource).pipe(
+          Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")),
+        );
+        const ready = yield* exec(
+          engine,
+          resource,
+          "touch " + shellQuote(CHECKOUT_READY_PATH) + " || exit 46",
+          "/",
+          "setup-failed",
+        ).pipe(Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")));
+        if (ready.exitCode !== 0) {
+          return yield* checkoutFailure(ready.exitCode);
+        }
+      });
+    })
+    .pipe(Effect.ensuring(bestEffortCleanup));
+}
+
+function execWithStdin(
+  engine: DockerEngine,
+  resource: DockerResourceHandle,
+  command: string,
+  stdin: Uint8Array,
+  cwd: string,
+  reason: SandboxDriverError["reason"],
+): Effect.Effect<{ readonly exitCode: number }, SandboxDriverError> {
+  return Effect.gen(function* () {
+    const created = yield* engine
+      .request({
+        path: "/containers/" + resource.containerId + "/exec",
+        method: "POST",
+        body: JSON.stringify({
+          Cmd: ["sh", "-lc", command],
+          WorkingDir: cwd,
+          AttachStdin: true,
+          AttachStdout: true,
+          AttachStderr: true,
+        }),
+      })
+      .pipe(Effect.mapError((error) => engineFailure(error, reason)));
+    if (!isSuccess(created.status)) {
+      return yield* fixedSetupError("Authenticated Git checkout failed.");
+    }
+    const execId = yield* Effect.try({
+      try: () => decodeExecCreate(parseJson(created.body)),
+      catch: () => fixedSetupError("Authenticated Git checkout failed."),
+    });
+    const started = yield* engine
+      .requestStdin(
+        {
+          path: "/exec/" + execId.Id + "/start",
+          method: "POST",
+          body: JSON.stringify({ Detach: false, Tty: false }),
+        },
+        stdin,
+      )
+      .pipe(Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")));
+    const startedStatus = started.status;
+    started.body.fill(0);
+    if (startedStatus !== 101 && !isSuccess(startedStatus)) {
+      return yield* fixedSetupError("Authenticated Git checkout failed.");
+    }
+    const inspected = yield* engine
+      .request({ path: "/exec/" + execId.Id + "/json" })
+      .pipe(Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")));
+    if (!isSuccess(inspected.status)) {
+      return yield* fixedSetupError("Authenticated Git checkout failed.");
+    }
+    const exit = yield* Effect.try({
+      try: () => decodeExecInspect(parseJson(inspected.body)),
+      catch: () => fixedSetupError("Authenticated Git checkout failed."),
+    });
+    return { exitCode: exit.ExitCode ?? 1 };
+  });
 }
 
 function demultiplex(buffer: Uint8Array): {
@@ -1074,47 +1350,22 @@ export function makeDockerSandboxDriver(
             message: "Docker did not publish the sandbox port after start.",
           });
         }
-        const clone = yield* exec(
+        yield* cleanupCheckoutCredential(engine, input.resource);
+        const ready = yield* checkoutIsReady(
           engine,
           input.resource,
-          "set -eu\n" +
-            "mkdir -p " +
-            shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
-            "\n" +
-            "git -C " +
-            shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
-            " init\n" +
-            "git -C " +
-            shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
-            " remote remove origin 2>/dev/null || true\n" +
-            "git -C " +
-            shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
-            " remote add origin " +
-            shellQuote("https://github.com/" + input.intent.source.repository + ".git") +
-            "\n" +
-            "git -C " +
-            shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
-            " fetch --depth=1 origin " +
-            shellQuote(input.intent.source.resolvedCommitSha) +
-            "\n" +
-            "git -C " +
-            shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
-            " checkout --detach FETCH_HEAD\n" +
-            'test "$(git -C ' +
-            shellQuote(DEFAULT_SANDBOX_WORKSPACE_ROOT) +
-            ' rev-parse HEAD)" = ' +
-            shellQuote(input.intent.source.resolvedCommitSha) +
-            "\n" +
-            "touch " +
-            shellQuote(CHECKOUT_READY_PATH),
-          "/",
-          "setup-failed",
+          input.intent.source.resolvedCommitSha,
         );
-        if (clone.exitCode !== 0) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Git checkout failed: " + clone.stderr.slice(0, 200),
-          });
+        if (!ready) {
+          if (options.checkoutCredential === undefined) {
+            return yield* fixedSetupError("Authenticated Git checkout is unavailable.");
+          }
+          yield* authenticatedCheckout(
+            engine,
+            input.resource,
+            input.intent,
+            options.checkoutCredential,
+          );
         }
         const endpoint = endpointUrl(endpointHost, port);
         const readiness = yield* readinessProbe(endpoint, input.manifest);

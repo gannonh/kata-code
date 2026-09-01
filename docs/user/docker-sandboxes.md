@@ -9,7 +9,8 @@ Docker sandboxes run a separate Kata Code environment for a GitHub repository an
    or a tunnel cannot reach the sandbox pairing port.
 2. Select Sandboxes → Local Container → Docker.
 3. Reuse an available Docker profile or select Add Docker profile.
-4. Enter a deployment label, public GitHub repository and ref, and Codex provider.
+4. Enter a deployment label, select a GitHub repository and branch, and choose a Codex provider.
+   Use the Git ref field for a tag or explicit ref such as `refs/pull/123/head`.
 5. Select Create and attach environment.
 
 Kata resolves the matching managed image to an immutable OCI digest, pulls it when Docker does not
@@ -19,6 +20,17 @@ layer counts. A failed profile remains visible with its diagnostic and can be re
 
 Profiles use the Docker Unix socket available to the Kata Code server. The default is
 `/var/run/docker.sock`. Docker must support `linux/amd64` or `linux/arm64`.
+
+Repository and branch choices come from the GitHub CLI session on the Kata Code server. Run
+`gh auth login` on that host before creating a sandbox. Repositories available to that account,
+including private repositories and organization repositories, appear in the picker. Kata resolves
+the selected ref to an exact commit before it creates the container.
+
+Private checkout credentials stay on the server and never enter browser requests or saved sandbox
+configuration. During checkout, Kata streams a short-lived credential through Docker exec stdin
+into a mode-0600 file in container memory. Kata removes the file after Git verifies the exact
+commit. Treat the local Docker daemon and anyone who can access its socket as trusted. Remote or
+untrusted Docker daemons are not supported for private repository checkout.
 
 The managed image uses the control-server version. Stable releases use the exact version tag.
 Nightly releases use the matching nightly tag. The public GHCR repository contains one OCI index for
@@ -101,6 +113,7 @@ Delete produces `Gone`; an outage never does. Allocated deployments can be delet
 returns. Disabled profiles retain their deployments and can be re-enabled after the daemon or image
 is fixed.
 
-Kata Code copies only the selected Codex `auth.json` into the sandbox. The sandbox receives no
-provider credentials for other providers. Other provider credentials, host credentials, repository
-data, and mutable package installs are excluded from the image.
+Kata Code copies only the selected Codex `auth.json` and the short-lived GitHub checkout credential
+needed for the selected source into the sandbox. The GitHub credential is removed after checkout.
+The sandbox receives no provider credentials for other providers. Other host credentials,
+repository data, and mutable package installs are excluded from the image.

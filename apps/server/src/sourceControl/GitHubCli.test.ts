@@ -17,17 +17,20 @@ const processOutput = (stdout: string): VcsProcess.VcsProcessOutput => ({
 });
 
 const mockRun = vi.fn<VcsProcess.VcsProcess["Service"]["run"]>();
+const mockRunBytes = vi.fn<VcsProcess.VcsProcess["Service"]["runBytes"]>();
 
 const layer = GitHubCli.layer.pipe(
   Layer.provide(
     Layer.mock(VcsProcess.VcsProcess)({
       run: mockRun,
+      runBytes: mockRunBytes,
     }),
   ),
 );
 
 afterEach(() => {
   mockRun.mockReset();
+  mockRunBytes.mockReset();
 });
 
 describe("GitHubCli.layer", () => {
@@ -401,6 +404,168 @@ describe("GitHubCli.layer", () => {
       assert.include(error.detail, "gh api rate_limit");
       assert.strictEqual(error.cause, cause);
       assert.notInclude(error.message, "user ID");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("lists private and internal repositories with host-scoped pagination", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            'HTTP/2.0 200 OK\nLink: <https://api.github.com/user/repos?page=2>; rel="next"\n\n' +
+              '[{"full_name":"octocat/private-repo","visibility":"private","default_branch":"main"},{"full_name":"octocat/internal-repo","visibility":"internal","default_branch":"trunk"}]',
+          ),
+        ),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.listRepositories({ cwd: "/repo", page: 3 });
+
+      expect(result).toEqual({
+        repositories: [
+          {
+            nameWithOwner: "octocat/private-repo",
+            visibility: "private",
+            defaultBranch: "main",
+          },
+          {
+            nameWithOwner: "octocat/internal-repo",
+            visibility: "internal",
+            defaultBranch: "trunk",
+          },
+        ],
+        page: 3,
+        hasMore: true,
+      });
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: [
+          "api",
+          "--method",
+          "GET",
+          "--include",
+          "/user/repos",
+          "-f",
+          "affiliation=owner,collaborator,organization_member",
+          "-f",
+          "sort=updated",
+          "-F",
+          "per_page=30",
+          "-F",
+          "page=3",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("lists branches with pagination and acquires token bytes without a string API", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            'HTTP/2.0 200 OK\nLink: <https://api.github.com/repos/octocat/private-repo/branches?page=3>; rel="next"\n\n' +
+              '[{"name":"main"},{"name":"release"}]',
+          ),
+        ),
+      );
+      const stdout = new TextEncoder().encode(" sentinel-token \n");
+      const stderr = new TextEncoder().encode("ignored warning");
+      mockRunBytes.mockReturnValueOnce(
+        Effect.succeed({ exitCode: ChildProcessSpawner.ExitCode(0), stdout, stderr }),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const branches = yield* gh.listBranches({
+        cwd: "/repo",
+        repository: "octocat/private-repo",
+        page: 2,
+      });
+      let tokenBytes: Uint8Array | undefined;
+      const token = yield* gh.withAuthTokenBytes({ cwd: "/repo" }, (bytes) => {
+        tokenBytes = bytes;
+        return Effect.succeed(new TextDecoder().decode(bytes));
+      });
+
+      expect(branches).toEqual({ branches: ["main", "release"], page: 2, hasMore: true });
+      expect(token).toBe("sentinel-token");
+      expect(Array.from(tokenBytes ?? [])).toEqual(
+        Array.from({ length: "sentinel-token".length }, () => 0),
+      );
+      expect(Array.from(stdout)).toEqual(Array.from({ length: stdout.length }, () => 0));
+      expect(Array.from(stderr)).toEqual(Array.from({ length: stderr.length }, () => 0));
+      expect(mockRunBytes).toHaveBeenCalledWith({
+        operation: "GitHubCli.withAuthTokenBytes",
+        command: "gh",
+        args: ["auth", "token", "--hostname", "github.com"],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+        maxOutputBytes: 64 * 1024,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("wipes process buffers when GitHub returns an empty token", () => {
+    const stdout = new TextEncoder().encode(" \n");
+    const stderr = new TextEncoder().encode("ignored warning");
+    mockRunBytes.mockReturnValueOnce(
+      Effect.succeed({ exitCode: ChildProcessSpawner.ExitCode(0), stdout, stderr }),
+    );
+
+    return Effect.gen(function* () {
+      const gh = yield* GitHubCli.GitHubCli;
+      const error = yield* gh
+        .withAuthTokenBytes({ cwd: "/repo" }, () => Effect.void)
+        .pipe(Effect.flip);
+
+      expect(error._tag).toBe("GitHubCliAuthenticationError");
+      expect(Array.from(stdout)).toEqual(Array.from({ length: stdout.length }, () => 0));
+      expect(Array.from(stderr)).toEqual(Array.from({ length: stderr.length }, () => 0));
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("checks GitHub authentication without exposing command output", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(Effect.succeed(processOutput("github.com authenticated\n")));
+
+      const gh = yield* GitHubCli.GitHubCli;
+      yield* gh.assertAuthenticated({ cwd: "/repo" });
+
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: ["auth", "status", "--hostname", "github.com"],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+        maxOutputBytes: 64 * 1024,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("maps a failed GitHub authentication check to a fixed error", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.fail(
+          new VcsProcessExitError({
+            operation: "GitHubCli.execute",
+            command: "gh",
+            cwd: "/repo",
+            exitCode: 1,
+            failureKind: "command-failed",
+            detail: "secret provider output",
+            stderrLength: 22,
+            stderrTruncated: false,
+          }),
+        ),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const error = yield* gh.assertAuthenticated({ cwd: "/repo" }).pipe(Effect.flip);
+
+      expect(error._tag).toBe("GitHubCliAuthenticationError");
+      expect(error.message).not.toContain("secret provider output");
     }).pipe(Effect.provide(layer)),
   );
 });

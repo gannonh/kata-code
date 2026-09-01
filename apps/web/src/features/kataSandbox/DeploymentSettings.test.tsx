@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   createSandboxDeployment,
+  fetchSandboxGitHubBranches,
+  fetchSandboxGitHubRepositories,
   fetchSandboxOperation,
   fetchSandboxList,
   mintSandboxHandoff,
@@ -63,6 +65,66 @@ describe("Docker sandbox Settings API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/kata-sandbox"),
       expect.objectContaining({ credentials: "omit" }),
+    );
+  });
+
+  it("loads decoded GitHub repository and branch metadata", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          repositories: [
+            {
+              nameWithOwner: "gannonh/private-repository",
+              visibility: "private",
+              defaultBranch: "main",
+            },
+          ],
+          page: 2,
+          hasMore: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ branches: ["main", "release/private"], page: 1, hasMore: false }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSandboxGitHubRepositories(2)).resolves.toMatchObject({
+      repositories: [{ visibility: "private" }],
+      hasMore: true,
+    });
+    await expect(
+      fetchSandboxGitHubBranches({ repository: "gannonh/private-repository", page: 1 }),
+    ).resolves.toMatchObject({ branches: ["main", "release/private"] });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("/api/kata-sandbox/github/repositories?page=2"),
+      expect.anything(),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining(
+        "/api/kata-sandbox/github/branches?repository=gannonh%2Fprivate-repository&page=1",
+      ),
+      expect.anything(),
+    );
+  });
+
+  it("rejects malformed GitHub metadata at the HTTP boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({
+          repositories: [{ nameWithOwner: "missing/default-branch", visibility: "private" }],
+          page: 1,
+          hasMore: false,
+        }),
+      ),
+    );
+
+    await expect(fetchSandboxGitHubRepositories(1)).rejects.toThrow(
+      "The GitHub repository response is invalid.",
     );
   });
 
@@ -142,7 +204,7 @@ describe("Docker sandbox Settings API", () => {
       profileId: "local",
       label: "Issue 159",
       repository: "gannonh/kata-code",
-      ref: "main",
+      ref: "refs/pull/171/head",
       providerInstanceId: "codex",
     });
     const receipt = await pollSandboxOperation("operation-1", {
@@ -168,6 +230,7 @@ describe("Docker sandbox Settings API", () => {
         body: expect.stringContaining('"repository":"gannonh/kata-code"'),
       }),
     );
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toContain('"ref":"refs/pull/171/head"');
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
       expect.stringContaining("/api/kata-sandbox/deployments/deployment-1/handoff"),

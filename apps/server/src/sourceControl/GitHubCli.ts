@@ -213,6 +213,24 @@ export interface GitHubRepositoryCloneUrls {
   readonly sshUrl: string;
 }
 
+export interface GitHubAccessibleRepository {
+  readonly nameWithOwner: string;
+  readonly defaultBranch: string;
+  readonly visibility: "public" | "private" | "internal";
+}
+
+export interface GitHubRepositoryPage {
+  readonly repositories: ReadonlyArray<GitHubAccessibleRepository>;
+  readonly page: number;
+  readonly hasMore: boolean;
+}
+
+export interface GitHubBranchPage {
+  readonly branches: ReadonlyArray<string>;
+  readonly page: number;
+  readonly hasMore: boolean;
+}
+
 export class GitHubCli extends Context.Service<
   GitHubCli,
   {
@@ -222,6 +240,7 @@ export class GitHubCli extends Context.Service<
       readonly timeoutMs?: number;
       /** Piped to the child's stdin, for payloads that must never appear in argv. */
       readonly stdin?: string;
+      readonly env?: NodeJS.ProcessEnv;
       readonly maxOutputBytes?: number;
     }) => Effect.Effect<VcsProcess.VcsProcessOutput, GitHubCliError>;
 
@@ -240,6 +259,26 @@ export class GitHubCli extends Context.Service<
       readonly cwd: string;
       readonly repository: string;
     }) => Effect.Effect<GitHubRepositoryCloneUrls, GitHubCliError>;
+
+    readonly listRepositories: (input: {
+      readonly cwd: string;
+      readonly page: number;
+    }) => Effect.Effect<GitHubRepositoryPage, GitHubCliError>;
+
+    readonly listBranches: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly page: number;
+    }) => Effect.Effect<GitHubBranchPage, GitHubCliError>;
+
+    readonly assertAuthenticated: (input: {
+      readonly cwd: string;
+    }) => Effect.Effect<void, GitHubCliError>;
+
+    readonly withAuthTokenBytes: <A, E, R>(
+      input: { readonly cwd: string },
+      use: (token: Uint8Array) => Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E | GitHubCliError, R>;
 
     readonly createRepository: (input: {
       readonly cwd: string;
@@ -275,6 +314,84 @@ const RawGitHubRepositoryCloneUrlsSchema = Schema.Struct({
 const decodeRawGitHubRepositoryCloneUrls = Schema.decodeEffect(
   Schema.fromJsonString(RawGitHubRepositoryCloneUrlsSchema),
 );
+
+const RawGitHubAccessibleRepositorySchema = Schema.Struct({
+  full_name: TrimmedNonEmptyString,
+  default_branch: TrimmedNonEmptyString,
+  visibility: Schema.Literals(["public", "private", "internal"]),
+});
+const RawGitHubAccessibleRepositoryPageSchema = Schema.Array(RawGitHubAccessibleRepositorySchema);
+const RawGitHubBranchSchema = Schema.Struct({ name: TrimmedNonEmptyString });
+const RawGitHubBranchPageSchema = Schema.Array(RawGitHubBranchSchema);
+
+function includedJsonBody(stdout: string): string {
+  const firstArray = stdout.indexOf("[");
+  return firstArray >= 0 ? stdout.slice(firstArray).trim() : stdout.trim();
+}
+
+function trimAsciiWhitespace(bytes: Uint8Array): Uint8Array {
+  let start = 0;
+  let end = bytes.byteLength;
+  while (start < end && bytes[start]! <= 0x20) start += 1;
+  while (end > start && bytes[end - 1]! <= 0x20) end -= 1;
+  return bytes.subarray(start, end);
+}
+
+function useAuthTokenBytes<A, E, R>(
+  process: Pick<VcsProcess.VcsProcess["Service"], "runBytes">,
+  input: { readonly cwd: string },
+  use: (token: Uint8Array) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | GitHubCliError, R> {
+  return Effect.acquireUseRelease(
+    process
+      .runBytes({
+        operation: "GitHubCli.withAuthTokenBytes",
+        command: "gh",
+        args: ["auth", "token", "--hostname", "github.com"],
+        cwd: input.cwd,
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+        maxOutputBytes: 64 * 1024,
+      })
+      .pipe(Effect.mapError((error) => fromVcsError({ command: "gh", cwd: input.cwd }, error))),
+    (result): Effect.Effect<A, E | GitHubCliAuthenticationError, R> => {
+      const token = trimAsciiWhitespace(result.stdout);
+      if (token.byteLength > 0) return use(token);
+      return Effect.fail(
+        new GitHubCliAuthenticationError({
+          command: "gh",
+          cwd: input.cwd,
+          cause: "GitHub CLI output omitted.",
+        }),
+      );
+    },
+    (result) =>
+      Effect.sync(() => {
+        result.stdout.fill(0);
+        result.stderr.fill(0);
+      }),
+  );
+}
+
+function includesNextLink(stdout: string): boolean {
+  return /(?:^|\n)\s*link:\s*[^\n]*rel=["']?next["']?/iu.test(stdout);
+}
+
+function decodeIncludedJson<S extends Schema.Top>(
+  stdout: string,
+  schema: S,
+  cwd: string,
+): Effect.Effect<S["Type"], GitHubCliError, S["DecodingServices"]> {
+  return Schema.decodeEffect(Schema.fromJsonString(schema))(includedJsonBody(stdout)).pipe(
+    Effect.mapError(
+      () =>
+        new GitHubCliCommandError({
+          command: "gh",
+          cwd,
+          cause: "GitHub CLI output omitted.",
+        }),
+    ),
+  );
+}
 
 function normalizeRepositoryCloneUrls(
   raw: Schema.Schema.Type<typeof RawGitHubRepositoryCloneUrlsSchema>,
@@ -335,9 +452,48 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
+        ...(input.env !== undefined ? { env: input.env } : {}),
         ...(input.maxOutputBytes !== undefined ? { maxOutputBytes: input.maxOutputBytes } : {}),
       })
       .pipe(Effect.mapError((error) => fromVcsError({ command: "gh", cwd: input.cwd }, error)));
+
+  const executeSafe = (input: Parameters<typeof execute>[0]) =>
+    execute(input).pipe(
+      Effect.mapError((error): GitHubCliError => {
+        switch (error._tag) {
+          case "GitHubCliUnavailableError":
+            return new GitHubCliUnavailableError({
+              command: "gh",
+              cwd: input.cwd,
+              cause: "GitHub CLI output omitted.",
+            });
+          case "GitHubCliAuthenticationError":
+            return new GitHubCliAuthenticationError({
+              command: "gh",
+              cwd: input.cwd,
+              cause: "GitHub CLI output omitted.",
+            });
+          case "GitHubCliRateLimitError":
+            return new GitHubCliRateLimitError({
+              command: "gh",
+              cwd: input.cwd,
+              cause: "GitHub CLI output omitted.",
+            });
+          case "GitHubPullRequestNotFoundError":
+            return new GitHubPullRequestNotFoundError({
+              command: "gh",
+              cwd: input.cwd,
+              cause: "GitHub CLI output omitted.",
+            });
+          default:
+            return new GitHubCliCommandError({
+              command: "gh",
+              cwd: input.cwd,
+              cause: "GitHub CLI output omitted.",
+            });
+        }
+      }),
+    );
 
   return GitHubCli.of({
     execute,
@@ -432,6 +588,86 @@ export const make = Effect.gen(function* () {
         ),
         Effect.map(normalizeRepositoryCloneUrls),
       ),
+    listRepositories: (input) =>
+      executeSafe({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "--method",
+          "GET",
+          "--include",
+          "/user/repos",
+          "-f",
+          "affiliation=owner,collaborator,organization_member",
+          "-f",
+          "sort=updated",
+          "-F",
+          "per_page=30",
+          "-F",
+          `page=${input.page}`,
+        ],
+      }).pipe(
+        Effect.flatMap((result) =>
+          decodeIncludedJson(
+            result.stdout,
+            RawGitHubAccessibleRepositoryPageSchema,
+            input.cwd,
+          ).pipe(
+            Effect.map((rows) => ({
+              repositories: rows.map((row) => ({
+                nameWithOwner: row.full_name,
+                defaultBranch: row.default_branch,
+                visibility: row.visibility,
+              })),
+              page: input.page,
+              hasMore: includesNextLink(result.stdout),
+            })),
+          ),
+        ),
+      ),
+    listBranches: (input) =>
+      executeSafe({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "--method",
+          "GET",
+          "--include",
+          `/repos/${input.repository}/branches`,
+          "-F",
+          "per_page=30",
+          "-F",
+          `page=${input.page}`,
+        ],
+      }).pipe(
+        Effect.flatMap((result) =>
+          decodeIncludedJson(result.stdout, RawGitHubBranchPageSchema, input.cwd).pipe(
+            Effect.map((rows) => ({
+              branches: rows.map((row) => row.name),
+              page: input.page,
+              hasMore: includesNextLink(result.stdout),
+            })),
+          ),
+        ),
+      ),
+    assertAuthenticated: (input) =>
+      executeSafe({
+        cwd: input.cwd,
+        args: ["auth", "status", "--hostname", "github.com"],
+        maxOutputBytes: 64 * 1024,
+      }).pipe(
+        Effect.mapError((error) =>
+          error._tag === "GitHubCliUnavailableError"
+            ? error
+            : new GitHubCliAuthenticationError({
+                command: "gh",
+                cwd: input.cwd,
+                cause: "GitHub CLI output omitted.",
+              }),
+        ),
+        Effect.asVoid,
+      ),
+    withAuthTokenBytes: (input, use) => useAuthTokenBytes(process, input, use),
     createRepository: (input) =>
       execute({
         cwd: input.cwd,

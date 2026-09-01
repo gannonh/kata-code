@@ -4,6 +4,7 @@ import { ProviderInstanceId, type ModelSelection } from "@kata-sh/code-contracts
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import type { SandboxGitHubCheckoutCredential } from "@kata-sh/code-kata-sandbox/driver";
 
 import {
   DockerResourceHandle,
@@ -11,7 +12,12 @@ import {
   SandboxProfile,
   SandboxProviderLabels,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
-import type { DockerEngine, DockerRequest, DockerResponse } from "./engine.ts";
+import {
+  DockerEngineError,
+  type DockerEngine,
+  type DockerRequest,
+  type DockerResponse,
+} from "./engine.ts";
 import {
   DOCKER_KIND,
   SANDBOX_RUNTIME_GID,
@@ -89,6 +95,7 @@ function fakeEngine(request: (request: DockerRequest) => DockerResponse): Docker
   return {
     request: (input) => Effect.succeed(request(input)),
     requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
+    requestStdin: () => Effect.succeed({ status: 101, body: new Uint8Array() }),
   };
 }
 
@@ -338,6 +345,7 @@ describe("Docker sandbox driver", () => {
       const body = JSON.parse(createRequest?.body ?? "{}") as {
         readonly Cmd?: ReadonlyArray<string>;
         readonly HostConfig?: {
+          readonly Tmpfs?: Record<string, string>;
           readonly PortBindings?: Record<
             string,
             ReadonlyArray<{ readonly HostIp?: string; readonly HostPort?: string }>
@@ -348,6 +356,348 @@ describe("Docker sandbox driver", () => {
       expect(body.Cmd?.[2]).toContain("while [ ! -f '/tmp/kata-sandbox-checkout-ready'");
       expect(body.Cmd?.[2]).toContain("exec katacode serve --host 0.0.0.0 --port 3773");
       expect(body.HostConfig?.PortBindings?.["3773/tcp"]?.[0]?.HostIp).toBe("0.0.0.0");
+      expect(body.HostConfig?.Tmpfs).toEqual({
+        "/run/kata-credentials": "rw,exec,nosuid,nodev,size=65536,uid=1001,gid=1001,mode=0700",
+      });
+    });
+  });
+
+  it.effect("streams the GitHub token only through upgraded exec stdin", () => {
+    const labels = dockerOwnershipLabels(intent);
+    const sentinel = "github-token-sentinel";
+    const captured: DockerRequest[] = [];
+    const execCommands = new Map<string, string>();
+    let execId = 0;
+    let credentialCalls = 0;
+    let inspectCalls = 0;
+    const stdinWrites: Array<{ readonly request: DockerRequest; readonly bytes: Uint8Array }> = [];
+    const credential: SandboxGitHubCheckoutCredential = {
+      withToken: (use) => {
+        credentialCalls += 1;
+        return use(Buffer.from(sentinel));
+      },
+    };
+    const engine: DockerEngine = {
+      request: (request) =>
+        Effect.sync(() => {
+          captured.push({
+            ...request,
+            ...(request.bodyBytes === undefined
+              ? {}
+              : { bodyBytes: Uint8Array.from(request.bodyBytes) }),
+          });
+          if (request.path.includes("/archive?path=")) return response(200);
+          if (request.path === "/containers/container-1/json") {
+            inspectCalls += 1;
+            return response(200, JSON.stringify(inspect(labels, inspectCalls > 1)));
+          }
+          if (request.path === "/containers/container-1/start") return response(204);
+          if (request.path === "/containers/container-1/exec") {
+            const id = `exec-${++execId}`;
+            const body = JSON.parse(request.body ?? "{}") as { Cmd?: string[] };
+            execCommands.set(id, body.Cmd?.[2] ?? "");
+            return response(201, JSON.stringify({ Id: id }));
+          }
+          if (request.path.startsWith("/exec/") && request.path.endsWith("/json")) {
+            const id = request.path.split("/")[2] ?? "";
+            const command = execCommands.get(id) ?? "";
+            return response(
+              200,
+              JSON.stringify({
+                ExitCode:
+                  command.includes("rev-parse HEAD") && !command.includes(" fetch --depth=1 ")
+                    ? 1
+                    : 0,
+              }),
+            );
+          }
+          return response(404);
+        }),
+      requestBuffer: (request) =>
+        Effect.sync(() => {
+          captured.push({ ...request });
+          return { status: 200, body: new Uint8Array() };
+        }),
+      requestStdin: (request, bytes) =>
+        Effect.sync(() => {
+          captured.push({ ...request });
+          stdinWrites.push({ request: { ...request }, bytes: Uint8Array.from(bytes) });
+          return { status: 101, body: new Uint8Array() };
+        }),
+    };
+    const driver = makeDockerSandboxDriver({
+      engine,
+      checkoutCredential: credential,
+      readinessProbe: () =>
+        Effect.succeed({
+          environmentId: "sandbox-env",
+          serverVersion: intent.bootstrapManifest.serverVersion,
+        }),
+    });
+    const resource = decodeResource({
+      containerId: "container-1",
+      containerName: dockerContainerName(intent.deploymentId),
+      containerPort: 3773,
+      ownership: {
+        controlEnvironmentId: intent.controlEnvironmentId,
+        deploymentId: intent.deploymentId,
+        profileId: intent.profileId,
+        profileRevision: intent.profileRevision,
+        schemaVersion: "v1",
+      },
+    });
+
+    return Effect.gen(function* () {
+      yield* driver.identify({
+        profile,
+        intent,
+        manifest,
+        codexAuthJson: new Uint8Array([123]),
+        resource,
+      });
+
+      expect(credentialCalls).toBe(1);
+      expect(stdinWrites).toHaveLength(1);
+      expect(Buffer.from(stdinWrites[0]?.bytes ?? []).toString("utf8")).toBe(sentinel);
+      expect(stdinWrites[0]?.request.path).toMatch(/^\/exec\/exec-\d+\/start$/);
+      for (const request of captured) {
+        expect(request.path).not.toContain(sentinel);
+        expect(request.body ?? "").not.toContain(sentinel);
+        expect(
+          request.bodyBytes === undefined ? "" : Buffer.from(request.bodyBytes).toString("utf8"),
+        ).not.toContain(sentinel);
+      }
+      const commands = [...execCommands.values()];
+      expect(commands.some((command) => command.includes(" fetch --depth=1 origin"))).toBe(true);
+      expect(commands.some((command) => command.includes("GIT_ASKPASS"))).toBe(true);
+      expect(commands.some((command) => command.includes("AttachStdin"))).toBe(false);
+      expect(
+        commands.some((command) =>
+          command.includes(`https://github.com/${intent.source.repository}.git`),
+        ),
+      ).toBe(true);
+      expect(commands.every((command) => !command.includes(sentinel))).toBe(true);
+      expect(
+        commands.filter((command) => command.includes("rm -f '/run/kata-credentials/github-token'"))
+          .length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it.effect("skips credential acquisition when the ready marker and exact HEAD match", () => {
+    const labels = dockerOwnershipLabels(intent);
+    let credentialCalls = 0;
+    let execCreates = 0;
+    const driver = makeDockerSandboxDriver({
+      checkoutCredential: {
+        withToken: (use) => {
+          credentialCalls += 1;
+          return use(Buffer.from("unused-token"));
+        },
+      },
+      readinessProbe: () =>
+        Effect.succeed({
+          environmentId: "sandbox-env",
+          serverVersion: intent.bootstrapManifest.serverVersion,
+        }),
+      engine: {
+        request: (request) =>
+          Effect.sync(() => {
+            if (request.path.includes("/archive?path=")) return response(200);
+            if (request.path === "/containers/container-1/json") {
+              return response(200, JSON.stringify(inspect(labels, true)));
+            }
+            if (request.path === "/containers/container-1/exec") {
+              execCreates += 1;
+              return response(201, '{"Id":"exec-ready"}');
+            }
+            if (request.path === "/exec/exec-ready/json") return response(200, '{"ExitCode":0}');
+            return response(404);
+          }),
+        requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
+        requestStdin: () => Effect.succeed({ status: 101, body: new Uint8Array() }),
+      },
+    });
+    const resource = decodeResource({
+      containerId: "container-1",
+      containerName: dockerContainerName(intent.deploymentId),
+      containerPort: 3773,
+      ownership: {
+        controlEnvironmentId: intent.controlEnvironmentId,
+        deploymentId: intent.deploymentId,
+        profileId: intent.profileId,
+        profileRevision: intent.profileRevision,
+        schemaVersion: "v1",
+      },
+    });
+
+    return Effect.gen(function* () {
+      yield* driver.identify({
+        profile,
+        intent,
+        manifest,
+        codexAuthJson: new Uint8Array([123]),
+        resource,
+      });
+      expect(execCreates).toBe(2);
+      expect(credentialCalls).toBe(0);
+    });
+  });
+
+  it.effect("cleans transient credentials when authenticated checkout fails", () => {
+    const labels = dockerOwnershipLabels(intent);
+    const sentinel = "checkout-failure-sentinel";
+    const commands = new Map<string, string>();
+    let nextExec = 0;
+    let inspectCalls = 0;
+    const driver = makeDockerSandboxDriver({
+      checkoutCredential: {
+        withToken: (use) => use(Buffer.from(sentinel)),
+      },
+      engine: {
+        request: (request) =>
+          Effect.sync(() => {
+            if (request.path.includes("/archive?path=")) return response(200);
+            if (request.path === "/containers/container-1/json") {
+              inspectCalls += 1;
+              return response(200, JSON.stringify(inspect(labels, inspectCalls > 1)));
+            }
+            if (request.path === "/containers/container-1/start") return response(204);
+            if (request.path === "/containers/container-1/exec") {
+              const id = `exec-${++nextExec}`;
+              const body = JSON.parse(request.body ?? "{}") as { Cmd?: string[] };
+              commands.set(id, body.Cmd?.[2] ?? "");
+              return response(201, JSON.stringify({ Id: id }));
+            }
+            if (request.path.startsWith("/exec/") && request.path.endsWith("/json")) {
+              const id = request.path.split("/")[2] ?? "";
+              const command = commands.get(id) ?? "";
+              const exitCode = command.includes(" fetch --depth=1 origin")
+                ? 43
+                : command.includes("rev-parse HEAD") && !command.includes("rm -f ")
+                  ? 1
+                  : 0;
+              return response(200, JSON.stringify({ ExitCode: exitCode }));
+            }
+            return response(404);
+          }),
+        requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
+        requestStdin: () => Effect.succeed({ status: 101, body: new Uint8Array() }),
+      },
+    });
+    const resource = decodeResource({
+      containerId: "container-1",
+      containerName: dockerContainerName(intent.deploymentId),
+      containerPort: 3773,
+      ownership: {
+        controlEnvironmentId: intent.controlEnvironmentId,
+        deploymentId: intent.deploymentId,
+        profileId: intent.profileId,
+        profileRevision: intent.profileRevision,
+        schemaVersion: "v1",
+      },
+    });
+
+    return Effect.gen(function* () {
+      const error = yield* driver
+        .identify({
+          profile,
+          intent,
+          manifest,
+          codexAuthJson: new Uint8Array([123]),
+          resource,
+        })
+        .pipe(Effect.flip);
+
+      expect(error.message).toBe("Authenticated Git fetch failed.");
+      expect(error.message).not.toContain(sentinel);
+      expect(
+        [...commands.values()].filter((command) =>
+          command.includes("rm -f '/run/kata-credentials/github-token'"),
+        ).length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it.effect("cleans credentials when Docker stdin streaming fails", () => {
+    const labels = dockerOwnershipLabels(intent);
+    const sentinel = "stdin-failure-sentinel";
+    const commands = new Map<string, string>();
+    const stdinWrites: Uint8Array[] = [];
+    let nextExec = 0;
+    let inspectCalls = 0;
+    const driver = makeDockerSandboxDriver({
+      checkoutCredential: {
+        withToken: (use) => use(Buffer.from(sentinel)),
+      },
+      engine: {
+        request: (request) =>
+          Effect.sync(() => {
+            if (request.path.includes("/archive?path=")) return response(200);
+            if (request.path === "/containers/container-1/json") {
+              inspectCalls += 1;
+              return response(200, JSON.stringify(inspect(labels, inspectCalls > 1)));
+            }
+            if (request.path === "/containers/container-1/start") return response(204);
+            if (request.path === "/containers/container-1/exec") {
+              const id = `exec-${++nextExec}`;
+              const body = JSON.parse(request.body ?? "{}") as { Cmd?: string[] };
+              commands.set(id, body.Cmd?.[2] ?? "");
+              return response(201, JSON.stringify({ Id: id }));
+            }
+            if (request.path.startsWith("/exec/") && request.path.endsWith("/json")) {
+              const id = request.path.split("/")[2] ?? "";
+              const command = commands.get(id) ?? "";
+              return response(
+                200,
+                JSON.stringify({
+                  ExitCode:
+                    command.includes("rev-parse HEAD") && !command.includes("rm -f ") ? 1 : 0,
+                }),
+              );
+            }
+            return response(404);
+          }),
+        requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
+        requestStdin: (_request, bytes) => {
+          stdinWrites.push(Uint8Array.from(bytes));
+          return Effect.fail(new DockerEngineError({ message: "raw transport diagnostics" }));
+        },
+      },
+    });
+    const resource = decodeResource({
+      containerId: "container-1",
+      containerName: dockerContainerName(intent.deploymentId),
+      containerPort: 3773,
+      ownership: {
+        controlEnvironmentId: intent.controlEnvironmentId,
+        deploymentId: intent.deploymentId,
+        profileId: intent.profileId,
+        profileRevision: intent.profileRevision,
+        schemaVersion: "v1",
+      },
+    });
+
+    return Effect.gen(function* () {
+      const error = yield* driver
+        .identify({
+          profile,
+          intent,
+          manifest,
+          codexAuthJson: new Uint8Array([123]),
+          resource,
+        })
+        .pipe(Effect.flip);
+
+      expect(error.message).toBe("Authenticated Git checkout failed.");
+      expect(error.message).not.toContain("raw transport diagnostics");
+      expect(Buffer.from(stdinWrites[0] ?? []).toString("utf8")).toBe(sentinel);
+      expect([...commands.values()].every((command) => !command.includes(sentinel))).toBe(true);
+      expect(
+        [...commands.values()].filter((command) =>
+          command.includes("rm -f '/run/kata-credentials/github-token'"),
+        ).length,
+      ).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -405,9 +755,13 @@ describe("Docker sandbox driver", () => {
       },
     });
     let inspectCalls = 0;
-    let execRequest: DockerRequest | undefined;
+    const execRequests: DockerRequest[] = [];
+    let execCount = 0;
     const driver = makeDockerSandboxDriver({
       endpointHost: "192.168.1.42",
+      checkoutCredential: {
+        withToken: (use) => use(Buffer.from("private-token")),
+      },
       readinessProbe: (endpoint, readinessManifest) => {
         expect(endpoint).toBe("http://192.168.1.42:41001");
         return Effect.succeed({
@@ -425,13 +779,28 @@ describe("Docker sandbox driver", () => {
             }
             if (request.path === "/containers/container-1/start") return response(204);
             if (request.path === "/containers/container-1/exec") {
-              execRequest = request;
-              return response(201, '{"Id":"exec-1"}');
+              execRequests.push(request);
+              execCount += 1;
+              return response(201, JSON.stringify({ Id: `exec-${execCount}` }));
             }
-            if (request.path === "/exec/exec-1/json") return response(200, '{"ExitCode":0}');
+            if (request.path.startsWith("/exec/") && request.path.endsWith("/json")) {
+              const id = request.path.split("/")[2] ?? "";
+              const created = execRequests[Number(id.replace("exec-", "")) - 1];
+              return response(
+                200,
+                JSON.stringify({
+                  ExitCode:
+                    created?.body?.includes("rev-parse HEAD") &&
+                    !created.body.includes(" fetch --depth=1 ")
+                      ? 1
+                      : 0,
+                }),
+              );
+            }
             return response(404);
           }),
         requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
+        requestStdin: () => Effect.succeed({ status: 101, body: new Uint8Array() }),
       },
     });
 
@@ -445,7 +814,11 @@ describe("Docker sandbox driver", () => {
       });
 
       expect(identified.endpoint).toBe("http://192.168.1.42:41001");
-      expect(execRequest?.body).toContain("touch '/tmp/kata-sandbox-checkout-ready'");
+      expect(
+        execRequests.some((request) =>
+          request.body?.includes("touch '/tmp/kata-sandbox-checkout-ready'"),
+        ),
+      ).toBe(true);
     });
   });
 

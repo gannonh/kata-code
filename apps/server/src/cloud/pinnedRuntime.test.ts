@@ -16,6 +16,7 @@ import {
 
 const successfulRunner = (fs: FileSystem.FileSystem, path: Path.Path) =>
   ProcessRunner.ProcessRunner.of({
+    runBytes: () => Effect.die("unused binary process runner"),
     run: (input) =>
       Effect.gen(function* () {
         assert.equal(input.command, "npm");
@@ -167,6 +168,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-runtime-interrupt-" });
       const started = yield* Deferred.make<void>();
       const runner = ProcessRunner.ProcessRunner.of({
+        runBytes: () => Effect.die("unused binary process runner"),
         run: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
       });
       const install = yield* ensurePinnedRuntimeInstalled({

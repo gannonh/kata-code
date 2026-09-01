@@ -29,6 +29,7 @@ import { annotateEnvironmentRequest, requireEnvironmentScope } from "../auth/htt
 import * as PairingGrantStore from "../auth/PairingGrantStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as SandboxDeploymentService from "./SandboxDeploymentService.ts";
+import * as SandboxGitHubAccess from "./SandboxGitHubAccess.ts";
 
 const SandboxBootstrapPairingRequest = Schema.Struct({
   label: TrimmedNonEmptyString,
@@ -139,11 +140,15 @@ const toHttpError = (error: SandboxDeploymentService.SandboxDeploymentServiceErr
   }
 };
 
+const githubAccessToHttpError = (error: SandboxGitHubAccess.SandboxGitHubAccessError) =>
+  new SandboxCommandError({ message: error.message });
+
 export const sandboxHttpApiLayer = HttpApiBuilder.group(
   SandboxHttpApi,
   "kataSandbox",
   Effect.fnUntraced(function* (handlers) {
     const service = yield* SandboxDeploymentService.SandboxDeploymentService;
+    const githubAccess = yield* SandboxGitHubAccess.SandboxGitHubAccess;
     return handlers
       .handle(
         "list",
@@ -160,6 +165,33 @@ export const sandboxHttpApiLayer = HttpApiBuilder.group(
           return session.scopes.has(AuthAccessReadScope)
             ? result
             : { profiles: [], deployments: [], providers: result.providers };
+        }),
+      )
+      .handle(
+        "listGitHubRepositories",
+        Effect.fn("kataSandbox.http.listGitHubRepositories")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* noStoreResponseHeaders;
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          const result = yield* githubAccess
+            .listRepositories({ page: args.payload.page ?? 1 })
+            .pipe(Effect.mapError(githubAccessToHttpError));
+          return result;
+        }),
+      )
+      .handle(
+        "listGitHubBranches",
+        Effect.fn("kataSandbox.http.listGitHubBranches")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* noStoreResponseHeaders;
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          const result = yield* githubAccess
+            .listBranches({
+              repository: args.payload.repository,
+              page: args.payload.page ?? 1,
+            })
+            .pipe(Effect.mapError(githubAccessToHttpError));
+          return result;
         }),
       )
       .handle(

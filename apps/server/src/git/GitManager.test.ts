@@ -492,9 +492,22 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     );
   };
 
+  const listRepositories: GitHubCli.GitHubCli["Service"]["listRepositories"] = (input) =>
+    Effect.die(`Unexpected repository discovery from ${input.cwd}`);
+  const listBranches: GitHubCli.GitHubCli["Service"]["listBranches"] = (input) =>
+    Effect.die(`Unexpected branch discovery for ${input.repository}`);
+  const assertAuthenticated: GitHubCli.GitHubCli["Service"]["assertAuthenticated"] = (input) =>
+    Effect.die(`Unexpected GitHub authentication check from ${input.cwd}`);
+  const withAuthTokenBytes: GitHubCli.GitHubCli["Service"]["withAuthTokenBytes"] = () =>
+    Effect.die("Unexpected GitHub token request");
+
   return {
     service: {
       execute,
+      listRepositories,
+      listBranches,
+      assertAuthenticated,
+      withAuthTokenBytes,
       listOpenPullRequests: (input) =>
         execute({
           cwd: input.cwd,

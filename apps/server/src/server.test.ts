@@ -133,6 +133,7 @@ import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as SandboxDeploymentService from "./kataSandbox/SandboxDeploymentService.ts";
+import * as SandboxGitHubAccess from "./kataSandbox/SandboxGitHubAccess.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -425,6 +426,7 @@ const buildAppUnderTest = (options?: {
     desktopTelemetryReceiver?: Partial<
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
+    sandboxGitHubAccess?: Partial<SandboxGitHubAccess.SandboxGitHubAccessShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -958,6 +960,19 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(Layer.mock(SandboxDeploymentService.SandboxDeploymentService)({})),
+      Layer.provide(
+        Layer.mock(SandboxGitHubAccess.SandboxGitHubAccess)({
+          resolve: () => Effect.die("Sandbox GitHub source resolution not stubbed in this test"),
+          listRepositories: () =>
+            Effect.die("Sandbox GitHub repository discovery not stubbed in this test"),
+          listBranches: () =>
+            Effect.die("Sandbox GitHub branch discovery not stubbed in this test"),
+          checkoutCredential: {
+            withToken: () => Effect.die("Sandbox GitHub checkout not stubbed in this test"),
+          },
+          ...options?.layers?.sandboxGitHubAccess,
+        }),
+      ),
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(ServerSecretStore.layer),
       Layer.provide(workspaceAndProjectServicesLayer),
@@ -3927,6 +3942,170 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(readWriteBody.requiredScope, "access:write");
       assert.equal(writeListResponse.status, 403);
       assert.equal(writeListBody.requiredScope, "access:read");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves no-store GitHub metadata to owner and access-write sessions", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          sandboxGitHubAccess: {
+            listRepositories: ({ page }) =>
+              Effect.succeed({
+                repositories: [
+                  {
+                    nameWithOwner: "gannonh/private-repository",
+                    visibility: "private",
+                    defaultBranch: "main",
+                  },
+                ],
+                page,
+                hasMore: true,
+              }),
+            listBranches: ({ page }) =>
+              Effect.succeed({
+                branches: ["main", "release/private"],
+                page,
+                hasMore: false,
+              }),
+          },
+        },
+      });
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const repositoriesResponse = yield* HttpClient.get(
+        "/api/kata-sandbox/github/repositories?page=2",
+        { headers: { cookie: ownerCookie } },
+      );
+      const repositories = (yield* repositoriesResponse.json) as {
+        readonly repositories: ReadonlyArray<{
+          readonly nameWithOwner: string;
+          readonly visibility: string;
+          readonly defaultBranch: string;
+        }>;
+        readonly page: number;
+        readonly hasMore: boolean;
+      };
+
+      const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+        headers: { cookie: ownerCookie },
+        body: yield* HttpBody.json({ scopes: ["access:write"] }),
+      });
+      const pairing = (yield* pairingResponse.json) as { readonly credential: string };
+      const writeCookie = yield* getAuthenticatedSessionCookieHeader(pairing.credential);
+      const branchesResponse = yield* HttpClient.get(
+        "/api/kata-sandbox/github/branches?repository=gannonh%2Fprivate-repository&page=3",
+        { headers: { cookie: writeCookie } },
+      );
+      const branches = (yield* branchesResponse.json) as {
+        readonly branches: ReadonlyArray<string>;
+        readonly page: number;
+        readonly hasMore: boolean;
+      };
+
+      assert.equal(repositoriesResponse.status, 200);
+      assert.deepEqual(repositories, {
+        repositories: [
+          {
+            nameWithOwner: "gannonh/private-repository",
+            visibility: "private",
+            defaultBranch: "main",
+          },
+        ],
+        page: 2,
+        hasMore: true,
+      });
+      assert.equal(repositoriesResponse.headers["cache-control"], "no-store");
+      assert.equal(repositoriesResponse.headers.pragma, "no-cache");
+      assert.equal(branchesResponse.status, 200);
+      assert.deepEqual(branches, {
+        branches: ["main", "release/private"],
+        page: 3,
+        hasMore: false,
+      });
+      assert.equal(branchesResponse.headers["cache-control"], "no-store");
+      assert.equal(branchesResponse.headers.pragma, "no-cache");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("keeps GitHub discovery errors out of caches", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          sandboxGitHubAccess: {
+            listRepositories: () =>
+              Effect.fail(
+                new SandboxGitHubAccess.SandboxGitHubAccessError({
+                  operation: "list-repositories",
+                  message: "GitHub repository discovery failed.",
+                }),
+              ),
+          },
+        },
+      });
+
+      const response = yield* HttpClient.get("/api/kata-sandbox/github/repositories", {
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+      });
+      const body = (yield* response.json) as { readonly message: string };
+
+      assert.equal(response.status, 502);
+      assert.equal(body.message, "GitHub repository discovery failed.");
+      assert.equal(response.headers["cache-control"], "no-store");
+      assert.equal(response.headers.pragma, "no-cache");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects GitHub metadata discovery without access-write scope", () =>
+    Effect.gen(function* () {
+      let discoveryCalls = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          sandboxGitHubAccess: {
+            listRepositories: () =>
+              Effect.sync(() => {
+                discoveryCalls += 1;
+                return { repositories: [], page: 1, hasMore: false };
+              }),
+            listBranches: () =>
+              Effect.sync(() => {
+                discoveryCalls += 1;
+                return { branches: [], page: 1, hasMore: false };
+              }),
+          },
+        },
+      });
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+        headers: { cookie: ownerCookie },
+        body: yield* HttpBody.json({ scopes: ["access:read"] }),
+      });
+      const pairing = (yield* pairingResponse.json) as { readonly credential: string };
+      const readCookie = yield* getAuthenticatedSessionCookieHeader(pairing.credential);
+      const repositoriesResponse = yield* HttpClient.get("/api/kata-sandbox/github/repositories", {
+        headers: { cookie: readCookie },
+      });
+      const repositoriesBody = (yield* repositoriesResponse.json) as {
+        readonly requiredScope: string;
+      };
+      const branchesResponse = yield* HttpClient.get(
+        "/api/kata-sandbox/github/branches?repository=gannonh%2Fprivate-repository",
+        { headers: { cookie: readCookie } },
+      );
+      const branchesBody = (yield* branchesResponse.json) as {
+        readonly requiredScope: string;
+      };
+
+      assert.equal(repositoriesResponse.status, 403);
+      assert.equal(repositoriesBody.requiredScope, "access:write");
+      assert.equal(repositoriesResponse.headers["cache-control"], "no-store");
+      assert.equal(repositoriesResponse.headers.pragma, "no-cache");
+      assert.equal(branchesResponse.status, 403);
+      assert.equal(branchesBody.requiredScope, "access:write");
+      assert.equal(branchesResponse.headers["cache-control"], "no-store");
+      assert.equal(branchesResponse.headers.pragma, "no-cache");
+      assert.equal(discoveryCalls, 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

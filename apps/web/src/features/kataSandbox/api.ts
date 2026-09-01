@@ -1,8 +1,12 @@
 import * as Schema from "effect/Schema";
 
 import {
+  SandboxGitHubBranchPage as SandboxGitHubBranchPageSchema,
+  SandboxGitHubRepositoryPage as SandboxGitHubRepositoryPageSchema,
   SandboxListResponse as SandboxListResponseSchema,
   SandboxOperationResponse as SandboxOperationResponseSchema,
+  type SandboxGitHubBranchPage,
+  type SandboxGitHubRepositoryPage,
   type SandboxListResponse as SandboxListResponseContract,
 } from "@kata-sh/code-kata-sandbox-contracts/http";
 import {
@@ -75,6 +79,10 @@ function shouldIncludePrimaryCookies(requestUrl: string): boolean {
 
 const decodeSandboxListResponse = Schema.decodeUnknownSync(SandboxListResponseSchema);
 const decodeSandboxOperationResponse = Schema.decodeUnknownSync(SandboxOperationResponseSchema);
+const decodeSandboxGitHubRepositoryPage = Schema.decodeUnknownSync(
+  SandboxGitHubRepositoryPageSchema,
+);
+const decodeSandboxGitHubBranchPage = Schema.decodeUnknownSync(SandboxGitHubBranchPageSchema);
 
 function decodeListResponse(value: unknown): SandboxListResponse {
   try {
@@ -89,6 +97,22 @@ function decodeOperationReceipt(value: unknown): SandboxOperationReceipt {
     return decodeSandboxOperationResponse(value).receipt;
   } catch {
     throw new Error("The sandbox operation response is invalid.");
+  }
+}
+
+function decodeGitHubRepositoryPage(value: unknown): SandboxGitHubRepositoryPage {
+  try {
+    return decodeSandboxGitHubRepositoryPage(value);
+  } catch {
+    throw new Error("The GitHub repository response is invalid.");
+  }
+}
+
+function decodeGitHubBranchPage(value: unknown): SandboxGitHubBranchPage {
+  try {
+    return decodeSandboxGitHubBranchPage(value);
+  } catch {
+    throw new Error("The GitHub branch response is invalid.");
   }
 }
 
@@ -146,6 +170,30 @@ export function createSandboxRequestId(): string {
 
 export function fetchSandboxList(): Promise<SandboxListResponse> {
   return request("/api/kata-sandbox", undefined, decodeListResponse);
+}
+
+export function fetchSandboxGitHubRepositories(page: number): Promise<SandboxGitHubRepositoryPage> {
+  const query = new URLSearchParams({ page: String(page) });
+  return request(
+    `/api/kata-sandbox/github/repositories?${query.toString()}`,
+    undefined,
+    decodeGitHubRepositoryPage,
+  );
+}
+
+export function fetchSandboxGitHubBranches(input: {
+  readonly repository: string;
+  readonly page: number;
+}): Promise<SandboxGitHubBranchPage> {
+  const query = new URLSearchParams({
+    repository: input.repository,
+    page: String(input.page),
+  });
+  return request(
+    `/api/kata-sandbox/github/branches?${query.toString()}`,
+    undefined,
+    decodeGitHubBranchPage,
+  );
 }
 
 export function upsertSandboxProfile(

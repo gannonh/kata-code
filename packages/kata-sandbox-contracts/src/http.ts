@@ -9,6 +9,7 @@ import {
   EnvironmentAuthenticatedAuth,
   EnvironmentInternalError,
   EnvironmentScopeRequiredError,
+  PositiveInt,
   ProviderInstanceId,
 } from "@kata-sh/code-contracts";
 
@@ -29,7 +30,41 @@ import {
   SandboxProviderProfileId,
   SandboxRequestId,
   SandboxProviderDriverKind,
+  GitHubRef,
+  GitHubRepository,
 } from "./domain.ts";
+
+export const SandboxGitHubRepositorySummary = Schema.Struct({
+  nameWithOwner: GitHubRepository,
+  visibility: Schema.Literals(["public", "private", "internal"]),
+  defaultBranch: GitHubRef,
+});
+export type SandboxGitHubRepositorySummary = typeof SandboxGitHubRepositorySummary.Type;
+
+export const SandboxGitHubRepositoryPage = Schema.Struct({
+  repositories: Schema.Array(SandboxGitHubRepositorySummary),
+  page: PositiveInt,
+  hasMore: Schema.Boolean,
+});
+export type SandboxGitHubRepositoryPage = typeof SandboxGitHubRepositoryPage.Type;
+
+export const SandboxGitHubBranchPage = Schema.Struct({
+  branches: Schema.Array(GitHubRef),
+  page: PositiveInt,
+  hasMore: Schema.Boolean,
+});
+export type SandboxGitHubBranchPage = typeof SandboxGitHubBranchPage.Type;
+
+const SandboxGitHubPageQuery = {
+  page: Schema.optional(
+    Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)),
+  ),
+};
+
+const SandboxGitHubBranchQuery = {
+  ...SandboxGitHubPageQuery,
+  repository: GitHubRepository,
+};
 
 export class SandboxConflictError extends Schema.TaggedErrorClass<SandboxConflictError>()(
   "SandboxConflictError",
@@ -169,6 +204,20 @@ export const SandboxHttpApiGroup = HttpApiGroup.make("kataSandbox")
   .add(
     HttpApiEndpoint.get("list", "/api/kata-sandbox", {
       success: SandboxListResponse,
+      error: SandboxHttpErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("listGitHubRepositories", "/api/kata-sandbox/github/repositories", {
+      payload: SandboxGitHubPageQuery,
+      success: SandboxGitHubRepositoryPage,
+      error: SandboxHttpErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("listGitHubBranches", "/api/kata-sandbox/github/branches", {
+      payload: SandboxGitHubBranchQuery,
+      success: SandboxGitHubBranchPage,
       error: SandboxHttpErrors,
     }),
   )

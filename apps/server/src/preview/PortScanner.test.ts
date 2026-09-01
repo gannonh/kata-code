@@ -39,6 +39,7 @@ const processProbeFailure: ProcessRunner.ProcessRunner["Service"]["run"] = (inpu
   );
 
 const TestProcessRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
+  runBytes: () => Effect.die("unused binary process runner"),
   run: processProbeFailure,
 });
 
@@ -59,7 +60,10 @@ const makeProbeFailureLayer = (
   PortScanner.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.succeed(ProcessRunner.ProcessRunner, { run }),
+        Layer.succeed(ProcessRunner.ProcessRunner, {
+          run,
+          runBytes: () => Effect.die("unused binary process runner"),
+        }),
         Layer.succeed(Net.NetService, {
           canListenOnHost: () => Effect.succeed(true),
           isPortAvailableOnLoopback: () => Effect.succeed(true),
@@ -94,6 +98,7 @@ const makeLsofScannerLayer = (input: {
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(ProcessRunner.ProcessRunner, {
+          runBytes: () => Effect.die("unused binary process runner"),
           run: () =>
             Effect.succeed({
               stdout: `p${input.pid()}\ncnode\nn*:${LSOF_TEST_PORT}\n`,

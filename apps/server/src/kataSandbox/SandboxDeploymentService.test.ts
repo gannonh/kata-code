@@ -40,7 +40,7 @@ import {
   type SandboxDeploymentServiceDependencies,
 } from "./SandboxDeploymentService.ts";
 import type { SandboxCredentialSeedShape } from "./SandboxCredentialSeed.ts";
-import type { SandboxSourceResolverShape } from "./SandboxSourceResolver.ts";
+import type { SandboxGitHubAccessShape } from "./SandboxGitHubAccess.ts";
 
 const imageDigest = OciImageDigest.make("ghcr.io/kata-sh/sandbox@sha256:" + "a".repeat(64));
 const profileId = SandboxProviderProfileId.make("profile-1");
@@ -224,7 +224,10 @@ const runWithService = <A>(
   ) => Effect.Effect<A, SandboxDeploymentServiceError>,
   options?: Parameters<typeof makeSandboxDeploymentService>[1],
   overrides: Partial<
-    Pick<SandboxDeploymentServiceDependencies, "cloudCliTokenManager" | "httpClient" | "repository">
+    Pick<
+      SandboxDeploymentServiceDependencies,
+      "cloudCliTokenManager" | "githubAccess" | "httpClient" | "repository"
+    >
   > = {},
   repositoryTransform: (
     repository: SandboxDeploymentRepositoryShape,
@@ -235,9 +238,12 @@ const runWithService = <A>(
     const dependencies = {
       crypto: yield* Crypto.Crypto,
       repository: repositoryTransform(baseRepository),
-      sourceResolver: {
+      githubAccess: {
         resolve: () => Effect.succeed(source),
-      } satisfies SandboxSourceResolverShape,
+        checkoutCredential: {
+          withToken: (use) => use(new Uint8Array()),
+        },
+      } satisfies Pick<SandboxGitHubAccessShape, "resolve" | "checkoutCredential">,
       credentialSeed: {
         resolve: (selectedProviderInstanceId) =>
           Effect.succeed({
@@ -306,6 +312,70 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
       }
     }),
   );
+
+  it.effect("recovers an allocated create with the persisted SHA without resolving again", () => {
+    let resolveCalls = 0;
+    let identifyCalls = 0;
+    const resolvedShas: string[] = [];
+    const driver = makeDriver({
+      identify: (input) => {
+        identifyCalls += 1;
+        resolvedShas.push(input.intent.source.resolvedCommitSha);
+        return identifyCalls === 1
+          ? Effect.die("simulated crash after allocation")
+          : Effect.succeed({
+              environmentId: "sandbox-env",
+              endpoint: "http://127.0.0.1:3774",
+              workspaceRoot: "/workspace",
+              resource: input.resource,
+            });
+      },
+    });
+
+    return runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          yield* service.upsertProfile("desktop-bootstrap", {
+            requestId: SandboxRequestId.make("profile-allocated-recovery"),
+            name: profile.name,
+            driverKind: "docker",
+            socketPath: profile.socketPath,
+            image: { kind: "custom", digest: profile.imageDigest },
+            enabled: true,
+            profileId,
+          });
+          const accepted = yield* service.create(
+            "desktop-bootstrap",
+            createInput("allocated-recovery-create"),
+          );
+          expect((yield* service.getOperation(accepted.operationId)).status).toBe("Running");
+          expect((yield* service.list()).deployments[0]?.deployment.state).toBe("Allocated");
+
+          yield* service.recover();
+
+          expect((yield* service.getOperation(accepted.operationId)).status).toBe("Succeeded");
+          expect((yield* service.list()).deployments[0]?.deployment.state).toBe("Identified");
+          expect(resolveCalls).toBe(1);
+          expect(identifyCalls).toBe(2);
+          expect(resolvedShas).toEqual([source.resolvedCommitSha, source.resolvedCommitSha]);
+        }),
+      {
+        driverFor: () => driver,
+        schedule: (effect) => effect.pipe(Effect.catchCause(() => Effect.void)),
+      },
+      {
+        githubAccess: {
+          resolve: () => {
+            resolveCalls += 1;
+            return Effect.succeed(source);
+          },
+          checkoutCredential: {
+            withToken: (use) => use(new Uint8Array()),
+          },
+        },
+      },
+    );
+  });
 
   it.effect("resolves managed images and records ready progress", () =>
     runWithService(

@@ -106,8 +106,8 @@ import {
 } from "./SandboxCredentialSeed.ts";
 import { layer as sandboxCredentialSeedLayer } from "./SandboxCredentialSeed.ts";
 import { buildSandboxBootstrapManifest } from "./SandboxBootstrapManifest.ts";
-import { SandboxSourceResolver, type SandboxSourceResolverShape } from "./SandboxSourceResolver.ts";
-import { layer as sandboxSourceResolverLayer } from "./SandboxSourceResolver.ts";
+import { SandboxGitHubAccess, type SandboxGitHubAccessShape } from "./SandboxGitHubAccess.ts";
+import { layer as sandboxGitHubAccessLayer } from "./SandboxGitHubAccess.ts";
 
 export type SandboxDeploymentServiceErrorKind = "conflict" | "not-found" | "command";
 
@@ -135,7 +135,7 @@ export interface SandboxDeploymentServiceDependencies {
   readonly repository: SandboxDeploymentRepositoryShape;
   readonly environment: Pick<ServerEnvironment.ServerEnvironment["Service"], "getEnvironmentId">;
   readonly cloudCliTokenManager?: CliTokenManager.CloudCliTokenManager["Service"];
-  readonly sourceResolver: SandboxSourceResolverShape;
+  readonly githubAccess: Pick<SandboxGitHubAccessShape, "resolve" | "checkoutCredential">;
   readonly credentialSeed: SandboxCredentialSeedShape;
   readonly secretStore: ServerSecretStore.ServerSecretStore["Service"];
   readonly crypto: Crypto.Crypto;
@@ -405,7 +405,10 @@ export function makeSandboxDeploymentService(
 ): SandboxDeploymentServiceShape {
   const repository = dependencies.repository;
   const endpointHost = options.endpointHost ?? "127.0.0.1";
-  const defaultDriver = makeDockerSandboxDriver({ endpointHost });
+  const defaultDriver = makeDockerSandboxDriver({
+    endpointHost,
+    checkoutCredential: dependencies.githubAccess.checkoutCredential,
+  });
   const driverFor = options.driverFor ?? (() => defaultDriver);
   const providerRegistry =
     options.providerRegistry ??
@@ -1894,7 +1897,7 @@ export function makeSandboxDeploymentService(
       if (input.expectedRevision !== undefined && input.expectedRevision !== profile.revision) {
         return yield* failConflict(`Profile revision ${input.expectedRevision} is stale.`);
       }
-      const source = yield* dependencies.sourceResolver
+      const source = yield* dependencies.githubAccess
         .resolve(input.source)
         .pipe(Effect.mapError((cause) => asServiceError(cause)));
       const deploymentId = SandboxDeploymentId.make(
@@ -2122,7 +2125,7 @@ const makeService = Effect.gen(function* () {
       repository: yield* SandboxDeploymentRepository,
       environment: yield* ServerEnvironment.ServerEnvironment,
       cloudCliTokenManager: yield* CliTokenManager.CloudCliTokenManager,
-      sourceResolver: yield* SandboxSourceResolver,
+      githubAccess: yield* SandboxGitHubAccess,
       credentialSeed: yield* SandboxCredentialSeed,
       secretStore: yield* ServerSecretStore.ServerSecretStore,
       crypto: yield* Crypto.Crypto,
@@ -2145,6 +2148,6 @@ export class SandboxDeploymentService extends Context.Service<
 
 export const layer = Layer.effect(SandboxDeploymentService, makeService).pipe(
   Layer.provide(sandboxDeploymentRepositoryLayer),
-  Layer.provide(sandboxSourceResolverLayer),
+  Layer.provideMerge(sandboxGitHubAccessLayer),
   Layer.provide(sandboxCredentialSeedLayer),
 );

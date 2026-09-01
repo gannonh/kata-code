@@ -55,6 +55,7 @@ import {
   type DockerDraft,
   type DockerDraftField,
 } from "./AddEnvironmentDialog.logic";
+import { SandboxGitHubSourcePicker } from "./SandboxGitHubSourcePicker";
 
 export interface AddEnvironmentDialogProps {
   readonly open: boolean;
@@ -722,40 +723,34 @@ export function AddEnvironmentDialog({
             </section>
             <section className="space-y-3 border-t border-border/60 pt-4">
               <h3 className="text-sm font-medium text-foreground">Deployment</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Deployment label">
-                  <Input
-                    value={state.draft.label}
-                    onChange={(event) =>
-                      dispatch({ type: "set-docker", field: "label", value: event.target.value })
-                    }
-                    placeholder="Feature branch sandbox"
-                    disabled={isSubmitting}
-                  />
-                </Field>
-                <Field label="GitHub repository">
-                  <Input
-                    value={state.draft.repository}
-                    onChange={(event) =>
-                      dispatch({
-                        type: "set-docker",
-                        field: "repository",
-                        value: event.target.value,
-                      })
-                    }
-                    placeholder="owner/repository"
-                    disabled={isSubmitting}
-                  />
-                </Field>
-              </div>
+              <Field label="Deployment label">
+                <Input
+                  value={state.draft.label}
+                  onChange={(event) =>
+                    dispatch({ type: "set-docker", field: "label", value: event.target.value })
+                  }
+                  placeholder="Feature branch sandbox"
+                  disabled={isSubmitting}
+                />
+              </Field>
+              <SandboxGitHubSourcePicker
+                idPrefix="add-environment-docker-source"
+                repository={state.draft.repository}
+                ref={state.draft.ref}
+                disabled={isSubmitting}
+                onRepositoryChange={(repository) =>
+                  dispatch({ type: "set-docker", field: "repository", value: repository })
+                }
+                onRefChange={(ref) => dispatch({ type: "set-docker", field: "ref", value: ref })}
+              />
               <Field label="Git ref">
                 <Input
                   value={state.draft.ref}
                   onChange={(event) =>
                     dispatch({ type: "set-docker", field: "ref", value: event.target.value })
                   }
-                  placeholder="main or refs/pull/123/head"
-                  disabled={isSubmitting}
+                  placeholder="main, a tag, or refs/pull/123/head"
+                  disabled={isSubmitting || !state.draft.repository}
                 />
               </Field>
               <Field label="Codex provider instance">
