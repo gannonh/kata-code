@@ -205,10 +205,11 @@ to the `.env` file passed to setup. Clone automatically reuses the saved token. 
 only to override saved values for that command. The command sends the token as an HTTPS authorization
 header to `github.com` remotes only, and does not save it in the Git remote URL.
 
-`wake` creates a five-minute bootstrap task named `kata-session`. Once Kata Code starts, it refreshes
-a five-minute task every minute while any client connection, active provider turn, or terminal
-subprocess exists. It keeps refreshing for 10 minutes after the last activity, then removes the task
-so Fly can suspend the Sprite. If Kata Code exits unexpectedly, the task expires within five minutes.
+`wake` creates a five-minute bootstrap task named `kata-session`, then restarts the `katacode`
+service so its Connect tunnel registers fresh connections. Once Kata Code starts, it refreshes a
+five-minute task every minute while any client connection, active provider turn, or terminal subprocess
+exists. It keeps refreshing for 10 minutes after the last activity, then removes the task so Fly can
+suspend the Sprite. If Kata Code exits unexpectedly, the task expires within five minutes.
 
 Wake does not create or restore a Connect link. Connect links persist across normal Sprite
 suspension. If the client reports that the environment is not authorized, rerun `setup` to authorize
@@ -217,9 +218,10 @@ and replace the `katacode` service.
 `status` prints the `katacode` service state and the current `kata-session` task. Reading status can
 briefly wake a suspended Sprite.
 
-`release` deletes only the current `kata-session` task. It preserves the Sprite, files, services,
-and Connect link. An active client, agent, or terminal job causes Kata Code to recreate the task, so
-stop active work before using `release` to request immediate suspension.
+`release` deletes the current `kata-session` task so Fly can suspend the Sprite. Suspension takes the
+Kata Code server and its Connect tunnel offline, which disconnects clients. The Sprite, files, service
+definition, environment, and Connect authorization persist. Run `wake` to restart the server and
+register fresh tunnel connections.
 
 #### Fix a Connect account mismatch
 

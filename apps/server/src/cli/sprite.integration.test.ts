@@ -61,26 +61,20 @@ it("runs Sprite help and wake through the CLI process", async () => {
     [cli, "connect", "sprite", "wake", "--sprite", "kata-dev"],
     { env },
   );
-  assert.include(wake.stdout, "Sprite awake");
-  assert.include(wake.stdout, "10 idle minutes");
-  assert.deepEqual((await NodeFSP.readFile(spriteLog, "utf8")).trim().split("\n"), [
-    "-s",
-    "kata-dev",
-    "exec",
-    "--",
-    "sprite-env",
-    "curl",
-    "--fail-with-body",
-    "--silent",
-    "--show-error",
-    "-X",
-    "PUT",
-    "/v1/tasks/kata-session",
-    "-H",
-    "Content-Type: application/json",
-    "-d",
-    '{"expire":"5m"}',
-  ]);
+  assert.equal(wake.stdout.trim(), "Sprite awake. Kata Code is coming online....");
+  const wakeArgs = (await NodeFSP.readFile(spriteLog, "utf8")).trim().split("\n");
+  assert.deepEqual(wakeArgs.slice(0, 6), ["-s", "kata-dev", "exec", "--", "sh", "-lc"]);
+  const wakeScript = wakeArgs.slice(6).join("\n");
+  assert.include(wakeScript, "/v1/tasks/kata-session");
+  assert.include(wakeScript, ">/dev/null");
+  assert.include(wakeScript, "services restart katacode");
+
+  const release = await execFile(
+    process.execPath,
+    [cli, "connect", "sprite", "release", "--sprite", "kata-dev"],
+    { env },
+  );
+  assert.equal(release.stdout.trim(), "Sprite released. Kata Code server shutting down...");
 });
 
 it("prints a copyable create command when setup targets a missing Sprite", async () => {
@@ -168,7 +162,7 @@ it("reports a failed Sprite wake when the child exits non-zero", async () => {
   }
 });
 
-it("distinguishes an absent Sprite task from release failures", async () => {
+it("treats an absent release task as success and reports request failures", async () => {
   const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-release-test-"));
   const spriteEnv = NodePath.join(directory, "sprite-env");
   await NodeFSP.writeFile(
@@ -184,7 +178,7 @@ it("distinguishes an absent Sprite task from release failures", async () => {
     });
 
   assert.equal((await run({ SPRITE_HTTP_STATUS: "204" })).stdout.trim(), "");
-  assert.equal((await run({ SPRITE_HTTP_STATUS: "404" })).stdout.trim(), "inactive");
+  assert.equal((await run({ SPRITE_HTTP_STATUS: "404" })).stdout.trim(), "");
 
   for (const overrides of [
     { SPRITE_HTTP_STATUS: "503" },

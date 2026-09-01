@@ -279,10 +279,12 @@ it("installs a service environment containing commas without exposing values", a
 });
 
 it("builds safe task operations", () => {
-  const wake = makeWakeInvocation(target).args;
+  const wake = makeWakeInvocation(target).args.join("\n");
   assert.include(wake, "--fail-with-body");
   assert.include(wake, "PUT");
   assert.include(wake, '{"expire":"5m"}');
+  assert.include(wake, ">/dev/null");
+  assert.include(wake, "services restart katacode");
 
   const status = makeStatusInvocation(target).args.at(-1) ?? "";
   assert.include(status, "/v1/tasks/kata-session");
@@ -370,7 +372,7 @@ it("maps a missing task to inactive and fails other task HTTP errors", async () 
 
   const missingRelease = await runShell(releaseScript, { ...stub.env, SPRITE_HTTP_CODE: "404" });
   assert.equal(missingRelease.status, 0, missingRelease.stderr);
-  assert.include(missingRelease.stdout, "inactive");
+  assert.equal(missingRelease.stdout, "");
 
   const failedRelease = await runShell(releaseScript, { ...stub.env, SPRITE_HTTP_CODE: "503" });
   assert.notEqual(failedRelease.status, 0);

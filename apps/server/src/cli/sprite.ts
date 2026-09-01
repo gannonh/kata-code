@@ -145,18 +145,14 @@ export function makeSetupInvocation(input: {
 
 export function makeWakeInvocation(target: SpriteTarget): SpriteInvocation {
   return execInvocation(target, [
-    "sprite-env",
-    "curl",
-    "--fail-with-body",
-    "--silent",
-    "--show-error",
-    "-X",
-    "PUT",
-    `/v1/tasks/${TASK_NAME}`,
-    "-H",
-    "Content-Type: application/json",
-    "-d",
-    JSON.stringify({ expire: BOOTSTRAP_TASK_TTL }),
+    "sh",
+    "-lc",
+    `sprite-env curl --fail-with-body --silent --show-error \\
+  -X PUT /v1/tasks/${TASK_NAME} \\
+  -H 'Content-Type: application/json' \\
+  -d '${JSON.stringify({ expire: BOOTSTRAP_TASK_TTL })}' \\
+  >/dev/null
+sprite-env services restart katacode >/dev/null`,
   ]);
 }
 
@@ -191,7 +187,11 @@ ${taskHttpScript(`/v1/tasks/${TASK_NAME}`)}`,
 }
 
 export function makeReleaseInvocation(target: SpriteTarget): SpriteInvocation {
-  return execInvocation(target, ["sh", "-lc", taskHttpScript(`/v1/tasks/${TASK_NAME}`, "DELETE")]);
+  return execInvocation(target, [
+    "sh",
+    "-lc",
+    `(${taskHttpScript(`/v1/tasks/${TASK_NAME}`, "DELETE")}) >/dev/null`,
+  ]);
 }
 
 const cloneScript = `
@@ -479,14 +479,12 @@ const setupCommand = Command.make("setup", {
 
 const wakeCommand = Command.make("wake", targetFlags).pipe(
   Command.withDescription(
-    "Wake the Sprite with a five-minute bootstrap task. Kata Code refreshes the task while work or clients remain active.",
+    "Wake the Sprite, restart Kata Code and its Connect tunnel, and create a five-minute bootstrap task.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       if (!(yield* runInvocation(makeWakeInvocation(targetFromFlags(flags))))) return;
-      yield* Console.log(
-        "Sprite awake. Kata Code will keep it running while clients, agents, or terminal jobs are active, then allow suspension after 10 idle minutes.",
-      );
+      yield* Console.log("Sprite awake. Kata Code is coming online....");
     }),
   ),
 );
@@ -500,14 +498,12 @@ const statusCommand = Command.make("status", targetFlags).pipe(
 
 const releaseCommand = Command.make("release", targetFlags).pipe(
   Command.withDescription(
-    "Delete only the current activity task. Active clients, agents, or terminal jobs may recreate it.",
+    "Remove the keep-awake task so the Sprite can suspend and take Kata Code offline.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       if (!(yield* runInvocation(makeReleaseInvocation(targetFromFlags(flags))))) return;
-      yield* Console.log(
-        "Sprite task released. Stop active clients, agents, and terminal jobs to prevent automatic recreation.",
-      );
+      yield* Console.log("Sprite released. Kata Code server shutting down...");
     }),
   ),
 );
