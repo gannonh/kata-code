@@ -170,19 +170,23 @@ opens the headless Connect authorization flow. It stops and replaces only the Sp
 and unrelated services remain intact. Setup forces Cloudflare HTTP/2 to avoid QUIC timeouts on
 Sprites. Rerun setup to update Kata Code or replace its service environment.
 
-Pass service environment variables or secrets with repeatable `--env KEY=VALUE` options:
+Put service environment variables and secrets in a `.env` file:
 
-```bash
-npx @kata-sh/code-cli@latest connect sprite setup \
-  --sprite kata-dev \
-  --env OPENAI_API_KEY="$OPENAI_API_KEY" \
-  --env KATACODE_PROVIDER=codex
+```dotenv
+OPENAI_API_KEY=replace-me
+KATACODE_PROVIDER=codex
 ```
 
-The command forwards these values through Sprite's `--env` option and does not print them. Setup
-replaces the service environment rather than merging with a previous setup. Names beginning with
-`KATACODE_SPRITE_` and `TUNNEL_TRANSPORT_PROTOCOL` are reserved. Sprite's environment format cannot
-represent values containing commas or newlines.
+Pass the file to setup:
+
+```bash
+npx @kata-sh/code-cli@latest connect sprite setup --sprite kata-dev --env .env
+```
+
+The command parses the file, forwards its values through Sprite's `--env` option, and does not print
+them. Setup replaces the service environment rather than merging with a previous setup. Names
+beginning with `KATACODE_SPRITE_` and `TUNNEL_TRANSPORT_PROTOCOL` are reserved. Sprite's environment
+format cannot represent values containing commas or newlines.
 
 Clone a public repository into the Sprite:
 
@@ -195,9 +199,9 @@ npx @kata-sh/code-cli@latest connect sprite clone \
 The default destination is `$HOME/workspaces/repository`. Pass `--dir /absolute/path` to override
 it. If the destination already contains a Git checkout, `clone` runs `git pull --ff-only` only when
 that checkout's fetch remote is the same repository as `--repo`. Repository URLs, destination paths,
-and package specs cannot contain commas or newlines. For a private GitHub repository, add
-`--env GH_TOKEN="$GH_TOKEN"`. The command sends the token as an HTTPS authorization header to
-`github.com` remotes only, and does not save it in the Git remote URL.
+and package specs cannot contain commas or newlines. For a private GitHub repository, add `GH_TOKEN`
+to a `.env` file and pass its path with `--env`. The command sends the token as an HTTPS
+authorization header to `github.com` remotes only, and does not save it in the Git remote URL.
 
 `wake` creates a five-minute bootstrap task named `kata-session`. Once Kata Code starts, it refreshes
 a five-minute task every minute while any client connection, active provider turn, or terminal

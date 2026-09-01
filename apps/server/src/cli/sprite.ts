@@ -1,6 +1,8 @@
+import * as NodeUtil from "node:util";
 import packageJson from "../../package.json" with { type: "json" };
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import { Command, Flag } from "effect/unstable/cli";
 import * as CliError from "effect/unstable/cli/CliError";
@@ -336,9 +338,9 @@ const orgFlag = Flag.string("org").pipe(
   Flag.optional,
   Flag.withDescription("Fly organization that owns the Sprite."),
 );
-const environmentFlag = Flag.keyValuePair("env").pipe(
-  Flag.withDefault({}),
-  Flag.withDescription("Environment or secret as KEY=VALUE. Repeat for multiple values."),
+const environmentFileFlag = Flag.string("env").pipe(
+  Flag.optional,
+  Flag.withDescription("Path to a .env file containing environment variables and secrets."),
 );
 const targetFlags = { sprite: spriteFlag, org: orgFlag };
 
@@ -352,9 +354,32 @@ function targetFromFlags(flags: {
   };
 }
 
+const readEnvironmentFile = Effect.fn("cli.sprite.readEnvironmentFile")(function* (
+  path: Option.Option<string>,
+) {
+  if (Option.isNone(path)) return {};
+  const fs = yield* FileSystem.FileSystem;
+  const contents = yield* fs
+    .readFileString(path.value)
+    .pipe(
+      Effect.mapError(
+        () => new SpriteCliError({ cause: `Could not read environment file: ${path.value}` }),
+      ),
+    );
+  return yield* Effect.try({
+    try: () =>
+      Object.fromEntries(
+        Object.entries(NodeUtil.parseEnv(contents)).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
+    catch: () => new SpriteCliError({ cause: `Could not parse environment file: ${path.value}` }),
+  });
+});
+
 const setupCommand = Command.make("setup", {
   ...targetFlags,
-  env: environmentFlag,
+  env: environmentFileFlag,
   package: Flag.string("package").pipe(
     Flag.withDefault(`@kata-sh/code-cli@${packageJson.version}`),
     Flag.withDescription("Kata Code package spec to install inside the existing Sprite."),
@@ -364,13 +389,16 @@ const setupCommand = Command.make("setup", {
     "Install or update Kata Code and replace only its service definition. Files and the Sprite remain intact.",
   ),
   Command.withHandler((flags) =>
-    runInvocation(
-      makeSetupInvocation({
-        target: targetFromFlags(flags),
-        environment: flags.env,
-        packageSpec: flags.package,
-      }),
-    ),
+    Effect.gen(function* () {
+      const environment = yield* readEnvironmentFile(flags.env);
+      yield* runInvocation(
+        makeSetupInvocation({
+          target: targetFromFlags(flags),
+          environment,
+          packageSpec: flags.package,
+        }),
+      );
+    }),
   ),
 );
 
@@ -418,20 +446,23 @@ const cloneCommand = Command.make("clone", {
     Flag.optional,
     Flag.withDescription("Absolute destination path. Defaults to $HOME/workspaces/<repository>."),
   ),
-  env: environmentFlag,
+  env: environmentFileFlag,
 }).pipe(
   Command.withDescription(
     "Clone a repository into the Sprite, or fast-forward it when already cloned.",
   ),
   Command.withHandler((flags) =>
-    runInvocation(
-      makeCloneInvocation({
-        target: targetFromFlags(flags),
-        repository: flags.repo,
-        ...(Option.isSome(flags.dir) ? { directory: flags.dir.value } : {}),
-        environment: flags.env,
-      }),
-    ),
+    Effect.gen(function* () {
+      const environment = yield* readEnvironmentFile(flags.env);
+      yield* runInvocation(
+        makeCloneInvocation({
+          target: targetFromFlags(flags),
+          repository: flags.repo,
+          ...(Option.isSome(flags.dir) ? { directory: flags.dir.value } : {}),
+          environment,
+        }),
+      );
+    }),
   ),
 );
 
@@ -443,13 +474,13 @@ export const spriteConnectCommand = Command.make("sprite").pipe(
       "Common flags:",
       "  --sprite, -s NAME    Existing Sprite name; required by every subcommand.",
       "  --org, -o NAME       Fly organization that owns the Sprite.",
-      "  --env KEY=VALUE      Setup and clone only; repeat for multiple values or secrets.",
+      "  --env PATH           Setup and clone only; read variables and secrets from a .env file.",
       "",
       "Lifecycle:",
       "  wake creates a five-minute bootstrap task. The server refreshes it while a client, agent, or terminal job is active. After 10 idle minutes it removes the task so Fly can suspend the Sprite.",
       "",
       "Examples:",
-      "  katacode connect sprite setup -s kata-dev --env OPENAI_API_KEY=$OPENAI_API_KEY",
+      "  katacode connect sprite setup -s kata-dev --env .env",
       "  katacode connect sprite wake -s kata-dev",
       "  katacode connect sprite status -s kata-dev",
       "  katacode connect sprite release -s kata-dev",

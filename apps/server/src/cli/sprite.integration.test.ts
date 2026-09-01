@@ -29,8 +29,21 @@ it("runs Sprite help and wake through the CLI process", async () => {
   const help = await execFile(process.execPath, [cli, "connect", "sprite", "--help"], { env });
   assert.include(help.stdout, "Manage Kata Code Connect on an existing Fly Sprite.");
   assert.include(help.stdout, "--sprite, -s NAME");
-  assert.include(help.stdout, "--env KEY=VALUE");
+  assert.include(help.stdout, "--env PATH");
+  assert.include(help.stdout, ".env file");
   assert.include(help.stdout, "After 10 idle minutes");
+
+  const envFile = NodePath.join(directory, ".env");
+  await NodeFSP.writeFile(envFile, 'OPENAI_API_KEY="secret value"\nKATACODE_PROVIDER=codex\n');
+  const setup = await execFile(
+    process.execPath,
+    [cli, "connect", "sprite", "setup", "--sprite", "kata-dev", "--env", envFile],
+    { env },
+  );
+  assert.notInclude(setup.stdout, "secret value");
+  const setupArgs = await NodeFSP.readFile(spriteLog, "utf8");
+  assert.include(setupArgs, "OPENAI_API_KEY=secret value");
+  assert.include(setupArgs, "KATACODE_PROVIDER=codex");
 
   const wake = await execFile(
     process.execPath,

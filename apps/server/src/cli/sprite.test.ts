@@ -123,7 +123,8 @@ it.effect("shows precise lifecycle help", () =>
         assert.include(output, "existing Fly Sprite");
         assert.include(output, "setup");
         assert.include(output, "--sprite, -s NAME");
-        assert.include(output, "--env KEY=VALUE");
+        assert.include(output, "--env PATH");
+        assert.include(output, ".env file");
         assert.include(output, "wake creates a five-minute bootstrap task");
         assert.include(output, "After 10 idle minutes");
         assert.include(output, "status");
