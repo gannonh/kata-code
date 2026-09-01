@@ -188,6 +188,7 @@ Optional GitHub Actions variables:
 The Sandbox image job publishes each exact release tag to VCR and
 `ghcr.io/gannonh/kata-sandbox`. VCR serves authenticated Vercel workloads. GHCR serves anonymous
 Docker pulls. The job passes the VCR project credentials to the Vercel Sandbox smoke test.
+A second `docker pull` of the same index digest fails with `cannot overwrite digest`.
 
 The first GHCR publish creates a private package. Open the package settings, change its visibility
 to public, and rerun the failed release. The anonymous manifest check must pass before the workflow

@@ -3,8 +3,11 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 import {
+  assertPublishedImageVerifyCommands,
+  isDockerPullOfDigest,
   makeSandboxImageArtifact,
   parsePlatformDigests,
   parseReleaseImageArgs,
@@ -12,6 +15,73 @@ import {
   vcrReadinessUrl,
   waitForVcrAmd64Ready,
 } from "./release-sandbox-image.ts";
+
+const workflowIndexDigestRef = /\$\{?(?:public_)?repository\}?@\$\{?index_digest\}?/g;
+
+function tokenizeShell(line: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  for (const ch of line) {
+    if (quote === null) {
+      if (ch === "#" && current.length === 0) break;
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (/\s/.test(ch) || ch === ";") {
+        if (current.length > 0) {
+          args.push(current);
+          current = "";
+        }
+        if (ch === ";") args.push(";");
+        continue;
+      }
+      current += ch;
+      continue;
+    }
+    if (ch === quote) {
+      quote = null;
+      continue;
+    }
+    current += ch;
+  }
+  if (current.length > 0) args.push(current);
+  return args;
+}
+
+function dockerCommandsFromWorkflowScript(
+  script: string,
+  digest: string,
+): ReadonlyArray<ReadonlyArray<string>> {
+  const commands: string[][] = [];
+  let pending: string[] = [];
+  const flush = () => {
+    if (pending.length === 0) return;
+    const dockerAt = pending.findIndex((arg) => arg === "docker");
+    if (dockerAt !== -1) {
+      commands.push(
+        pending
+          .slice(dockerAt)
+          .map((arg) => arg.replace(workflowIndexDigestRef, `image@${digest}`)),
+      );
+    }
+    pending = [];
+  };
+  for (const line of script.replace(/\\\r?\n/g, " ").split("\n")) {
+    for (const token of tokenizeShell(line)) {
+      if (token === ";") {
+        flush();
+        continue;
+      }
+      pending.push(token);
+    }
+    flush();
+  }
+  return commands;
+}
+
+const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 
 const repository = "vcr.vercel.com/team/project/kata-sandbox";
 const indexDigest = `sha256:${"a".repeat(64)}`;
@@ -103,6 +173,47 @@ describe("release sandbox image boundaries", () => {
       vcrReadinessUrl({ repository, projectId: "project-id", teamSlug: "team" }),
       "https://api.vercel.com/v1/vcr/repository/kata-sandbox/images?projectId=project-id&slug=team",
     );
+  });
+
+  it("rejects pulling one index digest for two platforms", () => {
+    assert.throws(
+      () =>
+        assertPublishedImageVerifyCommands(
+          [
+            ["docker", "pull", "--platform", "linux/amd64", `${repository}@${indexDigest}`],
+            ["docker", "pull", "--platform", "linux/arm64", `${repository}@${indexDigest}`],
+          ],
+          indexDigest,
+        ),
+      /cannot overwrite digest/,
+    );
+  });
+
+  it("rejects a workflow that pulls one index digest twice", () => {
+    const script = `
+docker  --config /tmp/docker-anonymous  pull --platform linux/amd64 \\
+  $repository@$index_digest
+docker pull --platform linux/arm64 "$public_repository@$index_digest"
+`;
+    assert.throws(
+      () =>
+        assertPublishedImageVerifyCommands(
+          dockerCommandsFromWorkflowScript(script, indexDigest),
+          indexDigest,
+        ),
+      /cannot overwrite digest/,
+    );
+  });
+
+  it("inspects the mirrored public index once", () => {
+    const workflow = NodeFS.readFileSync(
+      NodePath.join(repoRoot, ".github/workflows/release.yml"),
+      "utf8",
+    );
+    const commands = dockerCommandsFromWorkflowScript(workflow, indexDigest);
+    assert.isTrue(commands.some((args) => args.includes("imagetools") && args.includes("inspect")));
+    assert.equal(commands.filter((args) => isDockerPullOfDigest(args, indexDigest)).length, 0);
+    assert.doesNotThrow(() => assertPublishedImageVerifyCommands(commands, indexDigest));
   });
 
   it("requires both supported platform manifests", () => {
@@ -205,6 +316,16 @@ describe("release sandbox image boundaries", () => {
       assert.notInclude(serialized, "secret-token");
       assert.isTrue(commands.some((args) => args.includes("--raw")));
       assert.equal(commands.filter((args) => args[0] === "docker" && args[1] === "run").length, 2);
+      assert.isTrue(
+        commands
+          .filter((args) => args[0] === "docker" && args[1] === "run")
+          .every(
+            (args) =>
+              args.includes(`${repository}@${amd64Digest}`) ||
+              args.includes(`${repository}@${arm64Digest}`),
+          ),
+      );
+      assert.doesNotThrow(() => assertPublishedImageVerifyCommands(commands, indexDigest));
       assert.isTrue(commands.some((args) => args.includes(`${repository}:latest`)));
     } finally {
       NodeFS.rmSync(directory, { recursive: true, force: true });
