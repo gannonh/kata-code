@@ -26,6 +26,7 @@ it.effect("shows precise lifecycle help", () =>
         assert.include(output, "existing Fly Sprite");
         assert.include(output, "setup");
         assert.include(output, "wake");
+        assert.include(output, "Does not create or restore the Connect link");
         assert.include(output, "status");
         assert.include(output, "release");
         assert.include(output, "clone");

@@ -199,7 +199,9 @@ HTTP authorization header and does not save it in the Git remote URL.
 
 `wake` creates or refreshes the named Task API hold `kata-session`. The default expiry is 55 minutes;
 `--hold-minutes` accepts whole values from 1 through 60. Fly keeps compute running and billing active
-while the task exists. The task expires automatically.
+while the task exists. The task expires automatically. Wake does not create or restore a Connect
+link. If the client reports that the environment is not authorized, rerun `setup` to authorize and
+replace the `katacode` service.
 
 `release` deletes only `kata-session`. It does not stop Kata Code, unlink Connect, remove files,
 delete services, or destroy the Sprite. Once no tasks remain, Fly may suspend the Sprite according

@@ -28,11 +28,13 @@ it("runs Sprite help and wake through the CLI process", async () => {
   assert.include(help.stdout, "Manage Kata Code Connect on an existing Fly Sprite.");
   assert.include(help.stdout, "release");
 
-  await execFile(
+  const wake = await execFile(
     process.execPath,
     [cli, "connect", "sprite", "wake", "--sprite", "kata-dev", "--hold-minutes", "30"],
     { env },
   );
+  assert.include(wake.stdout, "Sprite hold active");
+  assert.include(wake.stdout, "does not authorize");
   assert.deepEqual((await NodeFSP.readFile(spriteLog, "utf8")).trim().split("\n"), [
     "-s",
     "kata-dev",

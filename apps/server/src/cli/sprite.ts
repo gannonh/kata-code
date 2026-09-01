@@ -1,4 +1,5 @@
 import packageJson from "../../package.json" with { type: "json" };
+import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { Command, Flag } from "effect/unstable/cli";
@@ -280,14 +281,21 @@ const wakeCommand = Command.make("wake", {
     Flag.withDescription("Task API hold duration from 1 through 60 minutes."),
   ),
 }).pipe(
-  Command.withDescription("Wake the Sprite and create or refresh its bounded task hold."),
+  Command.withDescription(
+    "Wake the Sprite and create or refresh its bounded task hold. Does not create or restore the Connect link.",
+  ),
   Command.withHandler((flags) =>
-    runInvocation(
-      makeWakeInvocation({
-        target: targetFromFlags(flags),
-        holdMinutes: flags.holdMinutes,
-      }),
-    ),
+    Effect.gen(function* () {
+      yield* runInvocation(
+        makeWakeInvocation({
+          target: targetFromFlags(flags),
+          holdMinutes: flags.holdMinutes,
+        }),
+      );
+      yield* Console.log(
+        "Sprite hold active. This does not authorize or restore the Connect link. Run `connect sprite setup` if the environment is not authorized.",
+      );
+    }),
   ),
 );
 
