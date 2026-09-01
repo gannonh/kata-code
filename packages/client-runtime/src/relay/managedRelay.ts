@@ -618,16 +618,15 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     return { accessToken: token.accessToken, proof, thumbprint };
   });
 
-  const invalidateAccessToken = Effect.fn("clientRuntime.managedRelay.invalidateAccessToken")(
-    function* (accessToken: string) {
+  const invalidateAccessTokens = Effect.fn("clientRuntime.managedRelay.invalidateAccessTokens")(
+    function* () {
       return yield* SynchronizedRef.modifyEffect(cachedTokens, (tokens) => {
-        const nextTokens = tokens.filter((token) => token.accessToken !== accessToken);
-        if (nextTokens.length === tokens.length) {
+        if (tokens.length === 0) {
           return Effect.succeed([false, tokens] as const);
         }
-        return (
-          options.accessTokenStore ? options.accessTokenStore.save(nextTokens) : Effect.void
-        ).pipe(Effect.as([true, nextTokens] as const));
+        return (options.accessTokenStore ? options.accessTokenStore.clear : Effect.void).pipe(
+          Effect.as([true, []] as const),
+        );
       });
     },
   );
@@ -650,7 +649,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
               if (!isRejectedDpopAccessToken(error)) {
                 return Effect.fail(error);
               }
-              return invalidateAccessToken(authorization.accessToken).pipe(
+              return invalidateAccessTokens().pipe(
                 Effect.tap((invalidated) =>
                   Effect.annotateCurrentSpan({
                     "relay.token_cache.invalidated": invalidated,

@@ -145,6 +145,84 @@ inbound firewall port. In the desktop app, sign in with the same Kata Code Conne
 If you pass `--base-dir` to `connect link`, pass the same value to `serve`. Use `@nightly` for both
 commands when the desktop app runs Nightly.
 
+##### Run on a Fly Sprite
+
+A Sprite suspends when idle, which freezes Kata Code and its outbound Connect tunnel. The
+`katacode connect sprite` commands install Kata Code as a Sprite service. The server uses the Sprite
+Tasks API to stay awake while a client, agent, or terminal job is active.
+
+The commands operate on an existing Sprite. They never create, recreate, or destroy the Sprite.
+Authenticate the Sprite CLI and create the Sprite before running setup:
+
+```bash
+npx @kata-sh/code-cli@latest connect sprite setup --sprite kata-dev --org my-org
+npx @kata-sh/code-cli@latest connect sprite wake --sprite kata-dev --org my-org
+npx @kata-sh/code-cli@latest connect sprite status --sprite kata-dev --org my-org
+npx @kata-sh/code-cli@latest connect sprite release --sprite kata-dev --org my-org
+```
+
+Run `npx @kata-sh/code-cli@latest connect sprite --help` or append `--help` to a subcommand for its
+full flag reference.
+
+`setup` installs the same Kata Code version as the CLI running the command, verifies `node-pty`, and
+opens the headless Connect authorization flow. It stops and replaces only the Sprite service named
+`katacode`, binding the new service to `127.0.0.1:8080`. Existing files, repositories, Sprite state,
+and unrelated services remain intact. Setup forces Cloudflare HTTP/2 to avoid QUIC timeouts on
+Sprites. Rerun setup to update Kata Code or replace its service environment.
+
+Put service environment variables and secrets in a `.env` file:
+
+```dotenv
+OPENAI_API_KEY=replace-me
+KATACODE_PROVIDER=codex
+```
+
+Pass the file to setup:
+
+```bash
+npx @kata-sh/code-cli@latest connect sprite setup --sprite kata-dev --env .env
+```
+
+The command parses the file with Node's dotenv parser and does not print its values. Setup writes the
+parsed environment to `~/.katacode/service-env.json` with owner-only permissions. The environment
+persists across suspension and wake-ups. Running setup without `--env` preserves it; running setup
+with a new `--env` file replaces it. Quoted commas and multiline values are supported. Names beginning
+with `KATACODE_SPRITE_` and `TUNNEL_TRANSPORT_PROTOCOL` are reserved.
+
+Clone a public repository into the Sprite:
+
+```bash
+npx @kata-sh/code-cli@latest connect sprite clone \
+  --sprite kata-dev \
+  --repo https://github.com/owner/repository.git
+```
+
+The default destination is `$HOME/workspaces/repository`. Pass `--dir /absolute/path` to override
+it. If the destination already contains a Git checkout, `clone` runs `git pull --ff-only` only when
+that checkout's fetch remote is the same repository as `--repo`. Repository URLs, destination paths,
+and package specs cannot contain commas or newlines. For a private GitHub repository, add `GH_TOKEN`
+to the `.env` file passed to setup. Clone automatically reuses the saved token. Pass `--env` to clone
+only to override saved values for that command. The command sends the token as an HTTPS authorization
+header to `github.com` remotes only, and does not save it in the Git remote URL.
+
+`wake` creates a five-minute bootstrap task named `kata-session`, then restarts the `katacode`
+service so its Connect tunnel registers fresh connections. Once Kata Code starts, it refreshes a
+five-minute task every minute while any client connection, active provider turn, or terminal subprocess
+exists. It keeps refreshing for 10 minutes after the last activity, then removes the task so Fly can
+suspend the Sprite. If Kata Code exits unexpectedly, the task expires within five minutes.
+
+Wake does not create or restore a Connect link. Connect links persist across normal Sprite
+suspension. If the client reports that the environment is not authorized, rerun `setup` to authorize
+and replace the `katacode` service.
+
+`status` prints the `katacode` service state and the current `kata-session` task. Reading status can
+briefly wake a suspended Sprite.
+
+`release` stops the `katacode` service, then deletes the `kata-session` task so Fly can suspend the
+Sprite. Stopping the service takes Kata Code and its Connect tunnel offline immediately, which
+disconnects clients. The Sprite, files, service definition, environment, and Connect authorization
+persist. Run `wake` to restart the server and register fresh tunnel connections.
+
 #### Fix a Connect account mismatch
 
 Clerk stores the desktop app session and the Connect CLI authorization separately. The environment
