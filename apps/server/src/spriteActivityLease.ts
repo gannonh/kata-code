@@ -110,15 +110,7 @@ export function spriteTaskArgs(action: "refresh" | "release"): ReadonlyArray<str
         "-d",
         `{"expire":"${TASK_TTL}"}`,
       ]
-    : [
-        "curl",
-        "-sS",
-        "-w",
-        "\n%{http_code}",
-        "-X",
-        "DELETE",
-        `/v1/tasks/${TASK_NAME}`,
-      ];
+    : ["curl", "-sS", "-w", "\n%{http_code}", "-X", "DELETE", `/v1/tasks/${TASK_NAME}`];
 }
 
 export function spriteTaskHttpCode(stdout: string): string {
