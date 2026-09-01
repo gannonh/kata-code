@@ -184,8 +184,9 @@ npx @kata-sh/code-cli@latest connect sprite setup --sprite kata-dev --env .env
 ```
 
 The command parses the file with Node's dotenv parser and does not print its values. Setup writes the
-parsed environment to `~/.katacode/service-env.json` with owner-only permissions and replaces the
-previous service environment. Quoted commas and multiline values are supported. Names beginning
+parsed environment to `~/.katacode/service-env.json` with owner-only permissions. The environment
+persists across suspension and wake-ups. Running setup without `--env` preserves it; running setup
+with a new `--env` file replaces it. Quoted commas and multiline values are supported. Names beginning
 with `KATACODE_SPRITE_` and `TUNNEL_TRANSPORT_PROTOCOL` are reserved.
 
 Clone a public repository into the Sprite:
@@ -200,8 +201,9 @@ The default destination is `$HOME/workspaces/repository`. Pass `--dir /absolute/
 it. If the destination already contains a Git checkout, `clone` runs `git pull --ff-only` only when
 that checkout's fetch remote is the same repository as `--repo`. Repository URLs, destination paths,
 and package specs cannot contain commas or newlines. For a private GitHub repository, add `GH_TOKEN`
-to a `.env` file and pass its path with `--env`. The command sends the token as an HTTPS
-authorization header to `github.com` remotes only, and does not save it in the Git remote URL.
+to the `.env` file passed to setup. Clone automatically reuses the saved token. Pass `--env` to clone
+only to override saved values for that command. The command sends the token as an HTTPS authorization
+header to `github.com` remotes only, and does not save it in the Git remote URL.
 
 `wake` creates a five-minute bootstrap task named `kata-session`. Once Kata Code starts, it refreshes
 a five-minute task every minute while any client connection, active provider turn, or terminal

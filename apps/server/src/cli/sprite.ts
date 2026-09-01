@@ -95,7 +95,18 @@ node -e 'require(require.resolve("node-pty", { paths: [process.argv[1]] }))' "$p
 katacode connect link --headless --base-dir "$HOME/.katacode"
 
 mkdir -p "$HOME/.katacode"
-printf '%s' "$KATACODE_SPRITE_ENV_B64" | base64 -d > "$HOME/.katacode/service-env.json"
+node <<'EOF'
+const fs = require("node:fs");
+const path = process.env.HOME + "/.katacode/service-env.json";
+let environment = {};
+if (process.env.KATACODE_SPRITE_ENV_B64) {
+  environment = JSON.parse(Buffer.from(process.env.KATACODE_SPRITE_ENV_B64, "base64"));
+} else if (fs.existsSync(path)) {
+  environment = JSON.parse(fs.readFileSync(path, "utf8"));
+}
+environment.TUNNEL_TRANSPORT_PROTOCOL = "http2";
+fs.writeFileSync(path, JSON.stringify(environment));
+EOF
 cat > "$HOME/.katacode/service-env.cjs" <<'EOF'
 const fs = require("node:fs");
 Object.assign(
@@ -116,19 +127,18 @@ sprite-env services create katacode \
 
 export function makeSetupInvocation(input: {
   readonly target: SpriteTarget;
-  readonly environment: Environment;
+  readonly environment?: Environment;
   readonly packageSpec: string;
 }): SpriteInvocation {
-  validateEnvironment(input.environment);
+  if (input.environment) validateEnvironment(input.environment);
   assertSpriteEnvValue("--package", input.packageSpec);
   return execInvocation(input.target, ["sh", "-lc", setupScript], {
     tty: true,
     env: {
       KATACODE_SPRITE_PACKAGE: input.packageSpec,
-      KATACODE_SPRITE_ENV_B64: encodeEnvironment({
-        ...input.environment,
-        TUNNEL_TRANSPORT_PROTOCOL: "http2",
-      }),
+      ...(input.environment
+        ? { KATACODE_SPRITE_ENV_B64: encodeEnvironment(input.environment) }
+        : {}),
     },
   });
 }
@@ -186,10 +196,16 @@ export function makeReleaseInvocation(target: SpriteTarget): SpriteInvocation {
 
 const cloneScript = `
 set -eu
-if [ -n "\${KATACODE_SPRITE_ENV_B64:-}" ]; then
-  GH_TOKEN=$(node -e 'const env = JSON.parse(Buffer.from(process.env.KATACODE_SPRITE_ENV_B64, "base64")); process.stdout.write(env.GH_TOKEN ?? "")')
-  export GH_TOKEN
-fi
+GH_TOKEN=$(node -e '
+const fs = require("node:fs");
+const path = process.env.HOME + "/.katacode/service-env.json";
+const saved = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, "utf8")) : {};
+const supplied = process.env.KATACODE_SPRITE_ENV_B64
+  ? JSON.parse(Buffer.from(process.env.KATACODE_SPRITE_ENV_B64, "base64"))
+  : {};
+process.stdout.write(supplied.GH_TOKEN ?? saved.GH_TOKEN ?? "");
+')
+export GH_TOKEN GIT_TERMINAL_PROMPT=0
 destination=\${KATACODE_SPRITE_REPO_DIR:-"$HOME/workspaces/$KATACODE_SPRITE_REPO_NAME"}
 
 normalize_git_url() {
@@ -256,6 +272,18 @@ run_git() {
   fi
 }
 
+run_git_or_explain() {
+  target_url=$1
+  shift
+  if run_git "$target_url" "$@"; then
+    return
+  fi
+  if [ -z "\${GH_TOKEN:-}" ] && is_github_http_url "$target_url"; then
+    echo "No GH_TOKEN is available for this private GitHub repository. Run Sprite setup with --env PATH, or pass --env PATH to clone." >&2
+  fi
+  return 1
+}
+
 if [ -d "$destination/.git" ]; then
   branch=$(git -C "$destination" symbolic-ref --short HEAD 2>/dev/null || true)
   remote=origin
@@ -272,13 +300,13 @@ if [ -d "$destination/.git" ]; then
     echo "Existing checkout remote '$fetch_url' does not match --repo '$KATACODE_SPRITE_REPO'." >&2
     exit 1
   fi
-  run_git "$fetch_url" -C "$destination" pull --ff-only --no-recurse-submodules
+  run_git_or_explain "$fetch_url" -C "$destination" pull --ff-only --no-recurse-submodules
 elif [ -e "$destination" ]; then
   echo "Destination exists and is not a Git repository: $destination" >&2
   exit 1
 else
   mkdir -p "$(dirname "$destination")"
-  run_git "$KATACODE_SPRITE_REPO" clone "$KATACODE_SPRITE_REPO" "$destination"
+  run_git_or_explain "$KATACODE_SPRITE_REPO" clone "$KATACODE_SPRITE_REPO" "$destination"
 fi
 `;
 
@@ -358,17 +386,16 @@ const ensureSpriteExists = Effect.fn("cli.sprite.ensureExists")(function* (targe
 });
 
 const runInvocation = Effect.fn("cli.sprite.run")(function* (invocation: SpriteInvocation) {
-  const process = yield* ChildProcess.make(invocation.command, invocation.args, {
+  const child = yield* ChildProcess.make(invocation.command, invocation.args, {
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
   });
-  const exitCode = yield* process.exitCode;
-  if (exitCode !== 0) {
-    return yield* new SpriteCliError({
-      cause: `Sprite command failed with exit code ${exitCode}.`,
-    });
-  }
+  const exitCode = yield* child.exitCode;
+  if (exitCode === 0) return true;
+  yield* Console.error(`Sprite command failed with exit code ${exitCode}.`);
+  process.exitCode = 1;
+  return false;
 });
 
 const spriteFlag = Flag.string("sprite").pipe(
@@ -382,7 +409,9 @@ const orgFlag = Flag.string("org").pipe(
 );
 const environmentFileFlag = Flag.string("env").pipe(
   Flag.optional,
-  Flag.withDescription("Path to a .env file containing environment variables and secrets."),
+  Flag.withDescription(
+    "Path to a .env file. Setup saves it across wake-ups; clone reuses saved values by default.",
+  ),
 );
 const targetFlags = { sprite: spriteFlag, org: orgFlag };
 
@@ -434,11 +463,13 @@ const setupCommand = Command.make("setup", {
     Effect.gen(function* () {
       const target = targetFromFlags(flags);
       if (!(yield* ensureSpriteExists(target))) return;
-      const environment = yield* readEnvironmentFile(flags.env);
+      const environment = Option.isSome(flags.env)
+        ? yield* readEnvironmentFile(flags.env)
+        : undefined;
       yield* runInvocation(
         makeSetupInvocation({
           target,
-          environment,
+          ...(environment ? { environment } : {}),
           packageSpec: flags.package,
         }),
       );
@@ -452,7 +483,7 @@ const wakeCommand = Command.make("wake", targetFlags).pipe(
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
-      yield* runInvocation(makeWakeInvocation(targetFromFlags(flags)));
+      if (!(yield* runInvocation(makeWakeInvocation(targetFromFlags(flags))))) return;
       yield* Console.log(
         "Sprite awake. Kata Code will keep it running while clients, agents, or terminal jobs are active, then allow suspension after 10 idle minutes.",
       );
@@ -473,7 +504,7 @@ const releaseCommand = Command.make("release", targetFlags).pipe(
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
-      yield* runInvocation(makeReleaseInvocation(targetFromFlags(flags)));
+      if (!(yield* runInvocation(makeReleaseInvocation(targetFromFlags(flags))))) return;
       yield* Console.log(
         "Sprite task released. Stop active clients, agents, and terminal jobs to prevent automatic recreation.",
       );
@@ -493,7 +524,7 @@ const cloneCommand = Command.make("clone", {
   env: environmentFileFlag,
 }).pipe(
   Command.withDescription(
-    "Clone a repository into the Sprite, or fast-forward it when already cloned.",
+    "Clone or fast-forward a repository using the environment saved by setup.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
@@ -518,7 +549,7 @@ export const spriteConnectCommand = Command.make("sprite").pipe(
       "Common flags:",
       "  --sprite, -s NAME    Existing Sprite name; required by every subcommand.",
       "  --org, -o NAME       Fly organization that owns the Sprite.",
-      "  --env PATH           Setup and clone only; read variables and secrets from a .env file.",
+      "  --env PATH           Setup saves .env file values across wake-ups; clone reuses them by default.",
       "",
       "Lifecycle:",
       "  wake creates a five-minute bootstrap task. The server refreshes it while a client, agent, or terminal job is active. After 10 idle minutes it removes the task so Fly can suspend the Sprite.",

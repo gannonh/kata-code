@@ -162,7 +162,9 @@ it("reports a failed Sprite wake when the child exits non-zero", async () => {
       stderr?: string;
     };
     assert.equal(failure.code, 1);
-    assert.include(`${failure.stdout ?? ""}${failure.stderr ?? ""}`, "exit code 22");
+    const output = `${failure.stdout ?? ""}${failure.stderr ?? ""}`;
+    assert.include(output, "exit code 22");
+    assert.notInclude(output, "CliError");
   }
 });
 

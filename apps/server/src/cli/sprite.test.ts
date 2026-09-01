@@ -176,7 +176,6 @@ it("builds setup without exposing or recreating the Sprite", () => {
   assert.notInclude(command, "secret-value");
   assert.deepEqual(decodeInvocationEnvironment(invocation), {
     OPENAI_API_KEY: "secret-value",
-    TUNNEL_TRANSPORT_PROTOCOL: "http2",
   });
   assert.include(command, "--allow-scripts=msgpackr-extract,node-pty");
   assert.include(command, "katacode connect link --headless");
@@ -194,7 +193,7 @@ it("installs a service environment containing commas without exposing values", a
   const serviceLog = NodePath.join(directory, "services.log");
   const stubs = {
     npm: '#!/bin/sh\n[ "$1" = root ] && printf "%s/.local/lib/node_modules\\n" "$HOME"\nexit 0\n',
-    node: "#!/bin/sh\nexit 0\n",
+    node: `#!/bin/sh\n[ "$1" = -e ] && exit 0\nexec ${process.execPath} "$@"\n`,
     katacode: "#!/bin/sh\nexit 0\n",
     "sprite-env": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SERVICE_LOG"\nexit 0\n',
   };
@@ -218,11 +217,32 @@ it("installs a service environment containing commas without exposing values", a
   assert.equal(result.status, 0, result.stderr);
 
   const environmentPath = NodePath.join(directory, ".katacode/service-env.json");
-  assert.deepInclude(JSON.parse(await NodeFSP.readFile(environmentPath, "utf8")), {
+  const expectedEnvironment = {
     FALLBACKS: "one,two",
     MULTILINE: "first\nsecond",
     TUNNEL_TRANSPORT_PROTOCOL: "http2",
+  };
+  assert.deepEqual(
+    JSON.parse(await NodeFSP.readFile(environmentPath, "utf8")),
+    expectedEnvironment,
+  );
+
+  const updateInvocation = makeSetupInvocation({
+    target,
+    packageSpec: "@kata-sh/code-cli@nightly",
   });
+  const updateResult = await runShell(`exec </dev/null\n${String(updateInvocation.args.at(-1))}`, {
+    ...process.env,
+    ...invocationExecEnvironment(updateInvocation),
+    HOME: directory,
+    PATH: `${bin}:${process.env.PATH}`,
+    SERVICE_LOG: serviceLog,
+  });
+  assert.equal(updateResult.status, 0, updateResult.stderr);
+  assert.deepEqual(
+    JSON.parse(await NodeFSP.readFile(environmentPath, "utf8")),
+    expectedEnvironment,
+  );
   assert.include(await NodeFSP.readFile(serviceLog, "utf8"), "--require");
   const loaded = await execFile(
     process.execPath,
@@ -235,6 +255,27 @@ it("installs a service environment containing commas without exposing values", a
     { env: { ...process.env, HOME: directory } },
   );
   assert.equal(loaded.stdout, "one,two|first\nsecond");
+
+  const replacementInvocation = makeSetupInvocation({
+    target,
+    packageSpec: "@kata-sh/code-cli@nightly",
+    environment: { REPLACED: "yes" },
+  });
+  const replacementResult = await runShell(
+    `exec </dev/null\n${String(replacementInvocation.args.at(-1))}`,
+    {
+      ...process.env,
+      ...invocationExecEnvironment(replacementInvocation),
+      HOME: directory,
+      PATH: `${bin}:${process.env.PATH}`,
+      SERVICE_LOG: serviceLog,
+    },
+  );
+  assert.equal(replacementResult.status, 0, replacementResult.stderr);
+  assert.deepEqual(JSON.parse(await NodeFSP.readFile(environmentPath, "utf8")), {
+    REPLACED: "yes",
+    TUNNEL_TRANSPORT_PROTOCOL: "http2",
+  });
 });
 
 it("builds safe task operations", () => {
@@ -367,11 +408,15 @@ it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched c
 
   const stub = await withPathStub("git", recordingGitStub);
   const gitLog = NodePath.join(stub.directory, "git.log");
+  await NodeFSP.mkdir(NodePath.join(stub.directory, ".katacode"));
+  await NodeFSP.writeFile(
+    NodePath.join(stub.directory, ".katacode/service-env.json"),
+    JSON.stringify({ GH_TOKEN: "saved-token" }),
+  );
   const cloneEnv = {
     ...stub.env,
     GIT_LOG: gitLog,
     HOME: stub.directory,
-    GH_TOKEN: "secret-value",
   };
 
   const githubDest = NodePath.join(stub.directory, "github-repo");
@@ -379,10 +424,11 @@ it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched c
     target,
     repository: "https://github.com/gannonh/kata-code.git",
     directory: githubDest,
-    environment: { GH_TOKEN: "secret-value" },
+    environment: {},
   });
   const githubResult = await runShell(String(github.args.at(-1)), {
     ...cloneEnv,
+    ...invocationExecEnvironment(github),
     KATACODE_SPRITE_REPO: "https://github.com/gannonh/kata-code.git",
     KATACODE_SPRITE_REPO_DIR: githubDest,
     KATACODE_SPRITE_REPO_NAME: "kata-code",
@@ -396,10 +442,11 @@ it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched c
     target,
     repository: "https://github.com.evil.test/gannonh/kata-code.git",
     directory: lookalikeDest,
-    environment: { GH_TOKEN: "secret-value" },
+    environment: {},
   });
   const lookalikeResult = await runShell(String(lookalike.args.at(-1)), {
     ...cloneEnv,
+    ...invocationExecEnvironment(lookalike),
     KATACODE_SPRITE_REPO: "https://github.com.evil.test/gannonh/kata-code.git",
     KATACODE_SPRITE_REPO_DIR: lookalikeDest,
     KATACODE_SPRITE_REPO_NAME: "kata-code",
