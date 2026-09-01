@@ -122,7 +122,15 @@ Both jobs use `VERCEL_TOKEN`. The token must have access to both projects in the
 The hosted app is intentionally not deployed by Vercel's Git integration. The
 web project disables automatic Git deployments in `apps/web/vercel.ts` via
 `git.deploymentEnabled: false`, and `.github/workflows/release.yml` deploys the
-web app with Vercel CLI after the GitHub Release succeeds.
+web app with Vercel CLI after the GitHub Release succeeds. Vite emits
+`apps/web/dist`; `apps/web/vercel.ts` sets `outputDirectory` to `dist` so Vercel
+does not fall back to `public`.
+
+`VERCEL_PROJECT_ID` must be the hosted web project (`katacode-web`). A CLI
+deploy that retrieves the repo-named `kata-code` project runs the repo-root
+`pnpm run build` and fails with `No Output Directory named "public"`.
+`deploy_web` writes `.vercel/project.json` from `VERCEL_ORG_ID` /
+`VERCEL_PROJECT_ID` and refuses a `kata-code` target.
 
 Required GitHub Actions secrets:
 
@@ -143,8 +151,8 @@ Required Vercel domains:
 - `latest.app.kata.sh`: channel alias updated by stable releases.
 - `nightly.app.kata.sh`: channel alias updated by nightly releases.
 
-The router domain uses `apps/web/vercel.ts` routes. Users opt into a channel by
-visiting `/__katacode/channel?channel=latest` or
+The router domain uses the hosted-web `vercel.ts` routes. Users opt into a
+channel by visiting `/__katacode/channel?channel=latest` or
 `/__katacode/channel?channel=nightly`; the router stores the
 `katacode_web_channel` cookie and rewrites future requests on `app.kata.sh` to
 the matching channel alias.
@@ -160,7 +168,8 @@ updated before redirecting to the hosted app root.
 
 One-time Vercel dashboard setup:
 
-1. Confirm the web project root directory remains `apps/web`.
+1. Confirm the web project root directory remains `apps/web` and the project
+   slug is `katacode-web`. Do not set Output Directory to `public`.
 2. Add the three domains above to the web project.
 3. Disable automatic Git deployments in the dashboard if desired; the committed
    `vercel.ts` setting is the source-of-truth, but disconnecting Git in the

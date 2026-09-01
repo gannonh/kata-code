@@ -28,6 +28,7 @@ function channelCookie(channel: "latest" | "nightly"): string {
 export const config: VercelConfig = {
   buildCommand:
     'vp run --filter @kata-sh/code-web build && node ../../scripts/apply-web-brand-assets.ts --channel "${VITE_HOSTED_APP_CHANNEL:-latest}"',
+  outputDirectory: "dist",
   git: {
     deploymentEnabled: false,
   },
