@@ -33,7 +33,7 @@ type ShellResult = {
 
 async function runShell(script: string, env: NodeJS.ProcessEnv): Promise<ShellResult> {
   try {
-    const result = await execFile("sh", ["-lc", script], { env, encoding: "utf8" });
+    const result = await execFile("sh", ["-c", script], { env, encoding: "utf8" });
     return { stdout: result.stdout, stderr: result.stderr, status: 0 };
   } catch (error) {
     const failure = error as {
@@ -70,11 +70,13 @@ if [ "$1" = services ]; then
   exit 0
 fi
 out=/dev/null
+fail=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift 2 ;;
     -w|--write-out) shift 2 ;;
-    -sS|-s|-S|--fail|--show-error|--silent) shift ;;
+    --fail) fail=1; shift ;;
+    -sS|-s|-S|--show-error|--silent) shift ;;
     -X|-H|-d) shift 2 ;;
     curl) shift ;;
     *) shift ;;
@@ -88,7 +90,7 @@ printf '%s' "$code"
 if [ "$code" = 000 ]; then
   exit 7
 fi
-[ "$code" -ge 400 ] 2>/dev/null && exit 22
+[ "$fail" = 1 ] && [ "$code" -ge 400 ] 2>/dev/null && exit 22
 exit 0
 `;
 
@@ -120,8 +122,10 @@ it.effect("shows precise lifecycle help", () =>
         const output = (yield* TestConsole.logLines).join("\n");
         assert.include(output, "existing Fly Sprite");
         assert.include(output, "setup");
-        assert.include(output, "wake");
-        assert.include(output, "Does not create or restore the Connect link");
+        assert.include(output, "--sprite, -s NAME");
+        assert.include(output, "--env KEY=VALUE");
+        assert.include(output, "wake creates a five-minute bootstrap task");
+        assert.include(output, "After 10 idle minutes");
         assert.include(output, "status");
         assert.include(output, "release");
         assert.include(output, "clone");
@@ -130,15 +134,14 @@ it.effect("shows precise lifecycle help", () =>
   ),
 );
 
-it.effect("explains setup and release safety in command help", () =>
+it.effect("explains setup safety in command help", () =>
   Effect.gen(function* () {
     yield* Command.runWith(spriteConnectCommand, { version: "0.0.0" })(["setup", "--help"]);
-    yield* Command.runWith(spriteConnectCommand, { version: "0.0.0" })(["release", "--help"]);
     const output = (yield* TestConsole.logLines).join("\n");
     assert.include(output, "replace only its service definition");
     assert.include(output, "Files and the Sprite remain intact");
-    assert.include(output, "Delete only the bounded task hold");
-    assert.include(output, "Keep the Sprite, files, service, and Connect link");
+    assert.include(output, "--sprite");
+    assert.include(output, "--env");
   }).pipe(Effect.provide(cliTestLayer)),
 );
 
@@ -166,30 +169,23 @@ it("builds setup without exposing or recreating the Sprite", () => {
   assert.notInclude(command, "sprite destroy");
 });
 
-it("builds bounded task operations", () => {
-  assert.deepEqual(makeWakeInvocation({ target, holdMinutes: 30 }).args.slice(-11), [
-    "sprite-env",
-    "curl",
-    "--fail",
-    "--show-error",
-    "-X",
-    "PUT",
-    "/v1/tasks/kata-session",
-    "-H",
-    "Content-Type: application/json",
-    "-d",
-    '{"expire":"30m"}',
-  ]);
+it("builds safe task operations", () => {
+  const wake = makeWakeInvocation(target).args;
+  assert.include(wake, "--fail-with-body");
+  assert.include(wake, "PUT");
+  assert.include(wake, '{"expire":"5m"}');
+
   const status = makeStatusInvocation(target).args.at(-1) ?? "";
   assert.include(status, "/v1/tasks/kata-session");
   assert.include(status, "--fail");
   assert.include(status, "404) echo inactive");
   assert.notInclude(status, "2>/dev/null || echo inactive");
+
   const release = makeReleaseInvocation(target).args.at(-1) ?? "";
+  assert.include(release, "-w '%{http_code}'");
   assert.include(release, "DELETE /v1/tasks/kata-session");
-  assert.include(release, "--fail");
   assert.include(release, "404) echo inactive");
-  assert.throws(() => makeWakeInvocation({ target, holdMinutes: 61 }), /1 through 60/);
+  assert.include(release, "Failed to release Sprite task: HTTP $status");
 });
 
 it("clones or fast-forwards repositories without persisting a GitHub token in the URL", () => {
@@ -201,7 +197,7 @@ it("clones or fast-forwards repositories without persisting a GitHub token in th
   const command = invocation.args.join("\n");
 
   assert.include(command, "KATACODE_SPRITE_REPO_NAME=kata-code");
-  assert.include(command, "$HOME/src/$KATACODE_SPRITE_REPO_NAME");
+  assert.include(command, "$HOME/workspaces/$KATACODE_SPRITE_REPO_NAME");
   assert.include(command, "pull --ff-only");
   assert.include(command, "http.extraHeader");
   assert.include(command, "is_github_http_url");
@@ -262,7 +258,7 @@ it("maps a missing task to inactive and fails other task HTTP errors", async () 
   assert.include(`${failedStatus.stdout}${failedStatus.stderr}`, "HTTP 500");
 
   const missingRelease = await runShell(releaseScript, { ...stub.env, SPRITE_HTTP_CODE: "404" });
-  assert.equal(missingRelease.status, 0);
+  assert.equal(missingRelease.status, 0, missingRelease.stderr);
   assert.include(missingRelease.stdout, "inactive");
 
   const failedRelease = await runShell(releaseScript, { ...stub.env, SPRITE_HTTP_CODE: "503" });
@@ -321,7 +317,7 @@ it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched c
     KATACODE_SPRITE_REPO_DIR: githubDest,
     KATACODE_SPRITE_REPO_NAME: "kata-code",
   });
-  assert.equal(githubResult.status, 0);
+  assert.equal(githubResult.status, 0, githubResult.stderr);
   assert.include(await NodeFSP.readFile(gitLog, "utf8"), "http.extraHeader");
 
   await NodeFSP.writeFile(gitLog, "");
@@ -338,6 +334,6 @@ it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched c
     KATACODE_SPRITE_REPO_DIR: lookalikeDest,
     KATACODE_SPRITE_REPO_NAME: "kata-code",
   });
-  assert.equal(lookalikeResult.status, 0);
+  assert.equal(lookalikeResult.status, 0, lookalikeResult.stderr);
   assert.notInclude(await NodeFSP.readFile(gitLog, "utf8"), "http.extraHeader");
 });

@@ -147,9 +147,9 @@ commands when the desktop app runs Nightly.
 
 ##### Run on a Fly Sprite
 
-A Sprite suspends when idle, which freezes Kata Code and drops its outbound Connect tunnel. The
-`katacode connect sprite` commands install Kata Code as a Sprite service and use the Sprite Tasks
-API to keep it awake during a session.
+A Sprite suspends when idle, which freezes Kata Code and its outbound Connect tunnel. The
+`katacode connect sprite` commands install Kata Code as a Sprite service. The server uses the Sprite
+Tasks API to stay awake while a client, agent, or terminal job is active.
 
 The commands operate on an existing Sprite. They never create, recreate, or destroy the Sprite.
 Authenticate the Sprite CLI and create the Sprite before running setup:
@@ -192,26 +192,28 @@ npx @kata-sh/code-cli@latest connect sprite clone \
   --repo https://github.com/owner/repository.git
 ```
 
-The default destination is `$HOME/src/repository`. Pass `--dir /absolute/path` to override it. If
-the destination already contains a Git checkout, `clone` runs `git pull --ff-only` only when that
-checkout's fetch remote is the same repository as `--repo`. Repository URLs, destination paths, and
-package specs cannot contain commas or newlines. For a private GitHub repository, add
+The default destination is `$HOME/workspaces/repository`. Pass `--dir /absolute/path` to override
+it. If the destination already contains a Git checkout, `clone` runs `git pull --ff-only` only when
+that checkout's fetch remote is the same repository as `--repo`. Repository URLs, destination paths,
+and package specs cannot contain commas or newlines. For a private GitHub repository, add
 `--env GH_TOKEN="$GH_TOKEN"`. The command sends the token as an HTTPS authorization header to
 `github.com` remotes only, and does not save it in the Git remote URL.
 
-`wake` creates or refreshes the named Task API hold `kata-session`. The default expiry is 55 minutes;
-`--hold-minutes` accepts whole values from 1 through 60. Fly keeps compute running and billing active
-while the task exists. The task expires automatically. Wake does not create or restore a Connect
-link. If the client reports that the environment is not authorized, rerun `setup` to authorize and
-replace the `katacode` service.
+`wake` creates a five-minute bootstrap task named `kata-session`. Once Kata Code starts, it refreshes
+a five-minute task every minute while any client connection, active provider turn, or terminal
+subprocess exists. It keeps refreshing for 10 minutes after the last activity, then removes the task
+so Fly can suspend the Sprite. If Kata Code exits unexpectedly, the task expires within five minutes.
 
-`release` deletes only `kata-session`. It does not stop Kata Code, unlink Connect, remove files,
-delete services, or destroy the Sprite. Once no tasks remain, Fly may suspend the Sprite according
-to its lifecycle policy. Releasing an already absent task succeeds and reports `inactive`.
+Wake does not create or restore a Connect link. Connect links persist across normal Sprite
+suspension. If the client reports that the environment is not authorized, rerun `setup` to authorize
+and replace the `katacode` service.
 
-`status` prints the `katacode` service state and the current `kata-session` hold. Reading status can
-briefly wake a suspended Sprite. Configure a continuously refreshed task only when uninterrupted
-access is worth continuous compute billing.
+`status` prints the `katacode` service state and the current `kata-session` task. Reading status can
+briefly wake a suspended Sprite.
+
+`release` deletes only the current `kata-session` task. It preserves the Sprite, files, services,
+and Connect link. An active client, agent, or terminal job causes Kata Code to recreate the task, so
+stop active work before using `release` to request immediate suspension.
 
 #### Fix a Connect account mismatch
 

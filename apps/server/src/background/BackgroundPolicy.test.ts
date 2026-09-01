@@ -78,6 +78,20 @@ function makeLayer(
 }
 
 describe("BackgroundPolicy", () => {
+  it.effect("tracks connected WebSocket clients", () =>
+    Effect.gen(function* () {
+      const policy = yield* BackgroundPolicy.BackgroundPolicy;
+      assert.equal(yield* policy.connectedClientCount, 0);
+
+      yield* policy.registerClientConnection;
+      yield* policy.registerClientConnection;
+      assert.equal(yield* policy.connectedClientCount, 2);
+
+      yield* policy.unregisterClientConnection;
+      assert.equal(yield* policy.connectedClientCount, 1);
+    }).pipe(Effect.provide(makeLayer(nominalHostPower))),
+  );
+
   it.effect("records foreground scoped client demand", () =>
     Effect.gen(function* () {
       const policy = yield* BackgroundPolicy.BackgroundPolicy;

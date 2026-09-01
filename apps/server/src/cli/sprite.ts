@@ -6,7 +6,7 @@ import { Command, Flag } from "effect/unstable/cli";
 import * as CliError from "effect/unstable/cli/CliError";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 
-const DEFAULT_HOLD_MINUTES = 55;
+const BOOTSTRAP_TASK_TTL = "5m";
 const TASK_NAME = "kata-session";
 const INTERNAL_ENV_PREFIX = "KATACODE_SPRITE_";
 
@@ -123,17 +123,12 @@ export function makeSetupInvocation(input: {
   });
 }
 
-export function makeWakeInvocation(input: {
-  readonly target: SpriteTarget;
-  readonly holdMinutes: number;
-}): SpriteInvocation {
-  if (!Number.isInteger(input.holdMinutes) || input.holdMinutes < 1 || input.holdMinutes > 60) {
-    throw new SpriteCliError({ cause: "--hold-minutes must be a whole number from 1 through 60." });
-  }
-  return execInvocation(input.target, [
+export function makeWakeInvocation(target: SpriteTarget): SpriteInvocation {
+  return execInvocation(target, [
     "sprite-env",
     "curl",
-    "--fail",
+    "--fail-with-body",
+    "--silent",
     "--show-error",
     "-X",
     "PUT",
@@ -141,7 +136,7 @@ export function makeWakeInvocation(input: {
     "-H",
     "Content-Type: application/json",
     "-d",
-    JSON.stringify({ expire: `${input.holdMinutes}m` }),
+    JSON.stringify({ expire: BOOTSTRAP_TASK_TTL }),
   ]);
 }
 
@@ -162,7 +157,7 @@ export function makeStatusInvocation(target: SpriteTarget): SpriteInvocation {
     "sh",
     "-lc",
     `sprite-env services list
-printf '\\nSession hold:\\n'
+printf '\\nActivity task:\\n'
 ${taskHttpScript(`/v1/tasks/${TASK_NAME}`, 'cat "$body"')}`,
   ]);
 }
@@ -171,21 +166,27 @@ export function makeReleaseInvocation(target: SpriteTarget): SpriteInvocation {
   return execInvocation(target, [
     "sh",
     "-lc",
-    taskHttpScript(
-      `/v1/tasks/${TASK_NAME}`,
-      `del=$(sprite-env curl -sS --fail --show-error -o /dev/null -w "%{http_code}" -X DELETE /v1/tasks/${TASK_NAME} || true)
-case "$del" in
+    `response=$(mktemp)
+trap 'rm -f "$response"' EXIT
+if ! status=$(sprite-env curl -sS -o "$response" -w '%{http_code}' -X DELETE /v1/tasks/${TASK_NAME}); then
+  cat "$response" >&2
+  exit 1
+fi
+case "$status" in
+  2??) cat "$response" ;;
   404) echo inactive ;;
-  2??) ;;
-  *) echo "Sprite task request failed\${del:+ (HTTP $del)}." >&2; exit 1 ;;
+  *)
+    cat "$response" >&2
+    echo "Failed to release Sprite task: HTTP $status" >&2
+    exit 1
+    ;;
 esac`,
-    ),
   ]);
 }
 
 const cloneScript = `
 set -eu
-destination=\${KATACODE_SPRITE_REPO_DIR:-"$HOME/src/$KATACODE_SPRITE_REPO_NAME"}
+destination=\${KATACODE_SPRITE_REPO_DIR:-"$HOME/workspaces/$KATACODE_SPRITE_REPO_NAME"}
 
 normalize_git_url() {
   url=$(printf '%s\\n' "$1" | tr '[:upper:]' '[:lower:]')
@@ -373,41 +374,39 @@ const setupCommand = Command.make("setup", {
   ),
 );
 
-const wakeCommand = Command.make("wake", {
-  ...targetFlags,
-  holdMinutes: Flag.integer("hold-minutes").pipe(
-    Flag.withDefault(DEFAULT_HOLD_MINUTES),
-    Flag.withDescription("Task API hold duration from 1 through 60 minutes."),
-  ),
-}).pipe(
+const wakeCommand = Command.make("wake", targetFlags).pipe(
   Command.withDescription(
-    "Wake the Sprite and create or refresh its bounded task hold. Does not create or restore the Connect link.",
+    "Wake the Sprite with a five-minute bootstrap task. Kata Code refreshes the task while work or clients remain active.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
-      yield* runInvocation(
-        makeWakeInvocation({
-          target: targetFromFlags(flags),
-          holdMinutes: flags.holdMinutes,
-        }),
-      );
+      yield* runInvocation(makeWakeInvocation(targetFromFlags(flags)));
       yield* Console.log(
-        "Sprite hold active. This does not authorize or restore the Connect link. Run `connect sprite setup` if the environment is not authorized.",
+        "Sprite awake. Kata Code will keep it running while clients, agents, or terminal jobs are active, then allow suspension after 10 idle minutes.",
       );
     }),
   ),
 );
 
 const statusCommand = Command.make("status", targetFlags).pipe(
-  Command.withDescription("Show the Kata Code service and bounded task hold. May wake the Sprite."),
+  Command.withDescription(
+    "Show the Kata Code service and automatic activity task. May wake the Sprite.",
+  ),
   Command.withHandler((flags) => runInvocation(makeStatusInvocation(targetFromFlags(flags)))),
 );
 
 const releaseCommand = Command.make("release", targetFlags).pipe(
   Command.withDescription(
-    "Delete only the bounded task hold. Keep the Sprite, files, service, and Connect link.",
+    "Delete only the current activity task. Active clients, agents, or terminal jobs may recreate it.",
   ),
-  Command.withHandler((flags) => runInvocation(makeReleaseInvocation(targetFromFlags(flags)))),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      yield* runInvocation(makeReleaseInvocation(targetFromFlags(flags)));
+      yield* Console.log(
+        "Sprite task released. Stop active clients, agents, and terminal jobs to prevent automatic recreation.",
+      );
+    }),
+  ),
 );
 
 const cloneCommand = Command.make("clone", {
@@ -417,7 +416,7 @@ const cloneCommand = Command.make("clone", {
   ),
   dir: Flag.string("dir").pipe(
     Flag.optional,
-    Flag.withDescription("Absolute destination path. Defaults to $HOME/src/<repository>."),
+    Flag.withDescription("Absolute destination path. Defaults to $HOME/workspaces/<repository>."),
   ),
   env: environmentFlag,
 }).pipe(
@@ -437,6 +436,27 @@ const cloneCommand = Command.make("clone", {
 );
 
 export const spriteConnectCommand = Command.make("sprite").pipe(
-  Command.withDescription("Manage Kata Code Connect on an existing Fly Sprite."),
+  Command.withDescription(
+    [
+      "Manage Kata Code Connect on an existing Fly Sprite.",
+      "",
+      "Common flags:",
+      "  --sprite, -s NAME    Existing Sprite name; required by every subcommand.",
+      "  --org, -o NAME       Fly organization that owns the Sprite.",
+      "  --env KEY=VALUE      Setup and clone only; repeat for multiple values or secrets.",
+      "",
+      "Lifecycle:",
+      "  wake creates a five-minute bootstrap task. The server refreshes it while a client, agent, or terminal job is active. After 10 idle minutes it removes the task so Fly can suspend the Sprite.",
+      "",
+      "Examples:",
+      "  katacode connect sprite setup -s kata-dev --env OPENAI_API_KEY=$OPENAI_API_KEY",
+      "  katacode connect sprite wake -s kata-dev",
+      "  katacode connect sprite status -s kata-dev",
+      "  katacode connect sprite release -s kata-dev",
+      "  katacode connect sprite clone -s kata-dev --repo https://github.com/owner/repo.git",
+      "",
+      "Run `katacode connect sprite <subcommand> --help` for exact flags.",
+    ].join("\n"),
+  ),
   Command.withSubcommands([setupCommand, wakeCommand, statusCommand, releaseCommand, cloneCommand]),
 );

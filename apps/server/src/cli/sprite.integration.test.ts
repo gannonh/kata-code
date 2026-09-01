@@ -6,6 +6,8 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import { assert, it } from "@effect/vitest";
 
+import { makeReleaseInvocation } from "./sprite.ts";
+
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 const cli = NodePath.resolve(import.meta.dirname, "../bin.ts");
 
@@ -26,15 +28,17 @@ it("runs Sprite help and wake through the CLI process", async () => {
 
   const help = await execFile(process.execPath, [cli, "connect", "sprite", "--help"], { env });
   assert.include(help.stdout, "Manage Kata Code Connect on an existing Fly Sprite.");
-  assert.include(help.stdout, "release");
+  assert.include(help.stdout, "--sprite, -s NAME");
+  assert.include(help.stdout, "--env KEY=VALUE");
+  assert.include(help.stdout, "After 10 idle minutes");
 
   const wake = await execFile(
     process.execPath,
-    [cli, "connect", "sprite", "wake", "--sprite", "kata-dev", "--hold-minutes", "30"],
+    [cli, "connect", "sprite", "wake", "--sprite", "kata-dev"],
     { env },
   );
-  assert.include(wake.stdout, "Sprite hold active");
-  assert.include(wake.stdout, "does not authorize");
+  assert.include(wake.stdout, "Sprite awake");
+  assert.include(wake.stdout, "10 idle minutes");
   assert.deepEqual((await NodeFSP.readFile(spriteLog, "utf8")).trim().split("\n"), [
     "-s",
     "kata-dev",
@@ -42,7 +46,8 @@ it("runs Sprite help and wake through the CLI process", async () => {
     "--",
     "sprite-env",
     "curl",
-    "--fail",
+    "--fail-with-body",
+    "--silent",
     "--show-error",
     "-X",
     "PUT",
@@ -50,7 +55,7 @@ it("runs Sprite help and wake through the CLI process", async () => {
     "-H",
     "Content-Type: application/json",
     "-d",
-    '{"expire":"30m"}',
+    '{"expire":"5m"}',
   ]);
 });
 
@@ -68,11 +73,10 @@ it("reports a failed Sprite wake when the child exits non-zero", async () => {
   };
 
   try {
-    await execFile(
-      process.execPath,
-      [cli, "connect", "sprite", "wake", "--sprite", "kata-dev", "--hold-minutes", "30"],
-      { env, encoding: "utf8" },
-    );
+    await execFile(process.execPath, [cli, "connect", "sprite", "wake", "--sprite", "kata-dev"], {
+      env,
+      encoding: "utf8",
+    });
     assert.fail("wake should fail when sprite-env curl exits 22");
   } catch (error) {
     const failure = error as {
@@ -82,5 +86,37 @@ it("reports a failed Sprite wake when the child exits non-zero", async () => {
     };
     assert.equal(failure.code, 1);
     assert.include(`${failure.stdout ?? ""}${failure.stderr ?? ""}`, "exit code 22");
+  }
+});
+
+it("distinguishes an absent Sprite task from release failures", async () => {
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-release-test-"));
+  const spriteEnv = NodePath.join(directory, "sprite-env");
+  await NodeFSP.writeFile(
+    spriteEnv,
+    '#!/bin/sh\nprintf "%s" "${SPRITE_HTTP_STATUS:-204}"\nexit "${SPRITE_EXIT_CODE:-0}"\n',
+  );
+  await NodeFSP.chmod(spriteEnv, 0o755);
+  const script = makeReleaseInvocation({ sprite: "kata-dev" }).args.at(-1);
+  assert.isDefined(script);
+  const run = (overrides: NodeJS.ProcessEnv) =>
+    execFile("sh", ["-c", script], {
+      env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, ...overrides },
+    });
+
+  assert.equal((await run({ SPRITE_HTTP_STATUS: "204" })).stdout, "");
+  assert.equal((await run({ SPRITE_HTTP_STATUS: "404" })).stdout.trim(), "inactive");
+
+  for (const overrides of [
+    { SPRITE_HTTP_STATUS: "503" },
+    { SPRITE_HTTP_STATUS: "", SPRITE_EXIT_CODE: "7" },
+  ]) {
+    let failure: unknown;
+    try {
+      await run(overrides);
+    } catch (cause) {
+      failure = cause;
+    }
+    assert.isDefined(failure);
   }
 });
