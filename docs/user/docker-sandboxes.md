@@ -45,6 +45,26 @@ variables:
 vp run --filter @kata-sh/code-kata-sandbox-docker build:image
 ```
 
+To test an unreleased development build, write the builder result to a file:
+
+```bash
+node packages/kata-sandbox-docker/scripts/build-image.mjs \
+  --output-file /tmp/kata-sandbox-dev-image.json
+```
+
+Copy `serverArtifactSha256`, `codexVersion`, and `codexArtifactSha256` from that file into the
+development server environment:
+
+```dotenv
+KATACODE_SANDBOX_SERVER_ARTIFACT_SHA256=<serverArtifactSha256>
+KATACODE_SANDBOX_CODEX_VERSION=<codexVersion>
+KATACODE_SANDBOX_CODEX_ARTIFACT_SHA256=<codexArtifactSha256>
+```
+
+Restart the development server so it loads those values. Create the Docker profile with Advanced
+enabled and paste the result's `imageId` into the custom image field. Managed images only resolve
+published release tags, so an unreleased `dev:desktop` version requires this override.
+
 The source manifest pins the Node base image digest and the exact Codex package and npm integrity.
 The builder verifies both values before Docker work. The image contains Node 24, Git, GitHub CLI,
 native build tools, the Kata CLI, the Codex CLI, and the bootstrap verifier. It creates writable
