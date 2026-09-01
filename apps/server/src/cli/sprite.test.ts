@@ -294,10 +294,14 @@ it("builds safe task operations", () => {
   assert.notInclude(status, "2>/dev/null || echo inactive");
 
   const release = makeReleaseInvocation(target).args.at(-1) ?? "";
+  assert.include(release, "services stop katacode");
   assert.include(release, "-w '\\n%{http_code}'");
   assert.include(release, "DELETE /v1/tasks/kata-session");
   assert.include(release, "404) echo inactive");
   assert.include(release, "Sprite task request failed");
+  assert.isTrue(
+    release.indexOf("services stop katacode") < release.indexOf("DELETE /v1/tasks/kata-session"),
+  );
 });
 
 it("clones or fast-forwards repositories without persisting a GitHub token in the URL", () => {
@@ -459,4 +463,34 @@ it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched c
   });
   assert.equal(lookalikeResult.status, 0, lookalikeResult.stderr);
   assert.notInclude(await NodeFSP.readFile(gitLog, "utf8"), "http.extraHeader");
+});
+
+it("stops katacode before deleting the activity task", async () => {
+  const stub = await withPathStub(
+    "sprite-env",
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$SPRITE_ENV_LOG"
+if [ "$1" = services ]; then
+  exit 0
+fi
+${spriteEnvHttpStub.slice(spriteEnvHttpStub.indexOf("while"))}`,
+  );
+  const log = NodePath.join(stub.directory, "sprite-env.log");
+  const result = await runShell(String(makeReleaseInvocation(target).args.at(-1)), {
+    ...stub.env,
+    SPRITE_ENV_LOG: log,
+    SPRITE_HTTP_CODE: "204",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const commands = (await NodeFSP.readFile(log, "utf8")).trim().split("\n");
+  assert.equal(commands[0], "services stop katacode");
+  assert.isTrue(
+    commands.some(
+      (command) => command.includes("DELETE") && command.includes("/v1/tasks/kata-session"),
+    ),
+  );
+  assert.isTrue(
+    commands.findIndex((command) => command.startsWith("services stop")) <
+      commands.findIndex((command) => command.includes("DELETE")),
+  );
 });

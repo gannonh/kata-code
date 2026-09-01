@@ -10,6 +10,7 @@ import {
   SPRITE_TASK_REFRESH_MS,
   runSpriteTaskCommand,
   spriteTaskArgs,
+  spriteTaskHttpCode,
   type SpriteLeaseState,
 } from "./spriteActivityLease.ts";
 
@@ -62,8 +63,14 @@ it("detects client, provider, and terminal activity", () => {
 
 it.effect("handles automatic Sprite task HTTP results", () =>
   Effect.gen(function* () {
+    const releaseArgs = spriteTaskArgs("release");
     assert.include(spriteTaskArgs("refresh"), "--fail-with-body");
-    assert.include(spriteTaskArgs("release"), "%{http_code}");
+    assert.include(releaseArgs, "\n%{http_code}");
+    assert.isFalse(releaseArgs.includes("--output"));
+    assert.isFalse(releaseArgs.includes("-o"));
+    assert.equal(spriteTaskHttpCode("deleted\n204"), "204");
+    assert.equal(spriteTaskHttpCode("\n404"), "404");
+    assert.equal(spriteTaskHttpCode("404"), "404");
 
     const transportError = yield* runSpriteTaskCommand(
       runnerResult("", 22 as ChildProcessSpawner.ExitCode),
@@ -71,11 +78,14 @@ it.effect("handles automatic Sprite task HTTP results", () =>
     ).pipe(Effect.flip);
     assert.include(transportError, "code 22");
 
-    yield* runSpriteTaskCommand(runnerResult("404"), spriteTaskArgs("release"), {
+    yield* runSpriteTaskCommand(runnerResult("\n404"), spriteTaskArgs("release"), {
+      acceptNotFound: true,
+    });
+    yield* runSpriteTaskCommand(runnerResult("deleted\n204"), spriteTaskArgs("release"), {
       acceptNotFound: true,
     });
     const serverError = yield* runSpriteTaskCommand(
-      runnerResult("503"),
+      runnerResult("error-body\n503"),
       spriteTaskArgs("release"),
       { acceptNotFound: true },
     ).pipe(Effect.flip);

@@ -112,16 +112,19 @@ export function spriteTaskArgs(action: "refresh" | "release"): ReadonlyArray<str
       ]
     : [
         "curl",
-        "--silent",
-        "--show-error",
-        "--output",
-        "/dev/null",
-        "--write-out",
-        "%{http_code}",
+        "-sS",
+        "-w",
+        "\n%{http_code}",
         "-X",
         "DELETE",
         `/v1/tasks/${TASK_NAME}`,
       ];
+}
+
+export function spriteTaskHttpCode(stdout: string): string {
+  const trimmed = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+  const separator = trimmed.lastIndexOf("\n");
+  return (separator === -1 ? trimmed : trimmed.slice(separator + 1)).trim();
 }
 
 export function runSpriteTaskCommand(
@@ -134,8 +137,9 @@ export function runSpriteTaskCommand(
       if (result.code !== 0) {
         return Effect.fail(`sprite-env exited with code ${result.code}`);
       }
-      if (options?.acceptNotFound && result.stdout !== "404" && !/^2\d\d$/.test(result.stdout)) {
-        return Effect.fail(`Sprite task API returned HTTP ${result.stdout}`);
+      const code = spriteTaskHttpCode(result.stdout);
+      if (options?.acceptNotFound && code !== "404" && !/^2\d\d$/.test(code)) {
+        return Effect.fail(`Sprite task API returned HTTP ${code}`);
       }
       return Effect.void;
     }),

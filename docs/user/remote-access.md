@@ -218,10 +218,10 @@ and replace the `katacode` service.
 `status` prints the `katacode` service state and the current `kata-session` task. Reading status can
 briefly wake a suspended Sprite.
 
-`release` deletes the current `kata-session` task so Fly can suspend the Sprite. Suspension takes the
-Kata Code server and its Connect tunnel offline, which disconnects clients. The Sprite, files, service
-definition, environment, and Connect authorization persist. Run `wake` to restart the server and
-register fresh tunnel connections.
+`release` stops the `katacode` service, then deletes the `kata-session` task so Fly can suspend the
+Sprite. Stopping the service takes Kata Code and its Connect tunnel offline immediately, which
+disconnects clients. The Sprite, files, service definition, environment, and Connect authorization
+persist. Run `wake` to restart the server and register fresh tunnel connections.
 
 #### Fix a Connect account mismatch
 

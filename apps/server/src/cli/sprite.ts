@@ -191,7 +191,9 @@ export function makeReleaseInvocation(target: SpriteTarget): SpriteInvocation {
   return execInvocation(target, [
     "sh",
     "-lc",
-    `(${taskHttpScript(`/v1/tasks/${TASK_NAME}`, "DELETE")}) >/dev/null`,
+    `set -eu
+sprite-env services stop katacode >/dev/null 2>&1 || true
+(${taskHttpScript(`/v1/tasks/${TASK_NAME}`, "DELETE")}) >/dev/null`,
   ]);
 }
 
