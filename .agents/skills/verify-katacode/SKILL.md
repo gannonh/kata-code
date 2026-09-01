@@ -81,6 +81,7 @@ Use one named session for the run. Do not pass `--session-name` (that persists c
 ```bash
 PAIRING_OPEN_URL="${WEB_ORIGIN}/pair#${PAIRING_URL#*#}"
 agent-browser --session katacode-verify open "$PAIRING_OPEN_URL"
+agent-browser --session katacode-verify set viewport 1400 900
 agent-browser --session katacode-verify wait --text "What should we work on?"
 agent-browser --session katacode-verify snapshot -i
 # If `/pair` was already mounted (token-free before-shot), fill Pairing token and Continue instead.
@@ -90,22 +91,22 @@ agent-browser --session katacode-verify snapshot -i
 
 After pairing, the app strips the token from the URL and redirects to `/`. Wait until you see either:
 
-- heading **What should we work on?** and a button **Add project** (fresh home, no projects), or
-- a chat composer whose placeholder starts with **Ask anything** (only if this home already has a project, which a correct launch should not)
+- the text **What should we work on?** (a styled div, not a heading role) and a button **Add project** (fresh home, no projects), or
+- a draft at `/draft/...` with a composer textbox (only if this home already has a project, which a correct launch should not)
 
-Then follow the matching file under `features/`. Prefer ARIA names, `data-testid`, and route paths over coordinates.
+Then follow the matching file under `features/`. Prefer ARIA names, `data-testid`, and route paths over coordinates. `wait --text` matches visible text only: icon buttons such as `Usage` and `Refresh usage` are named by `aria-label`, so wait on a heading or use `find role button --name`.
 
 Stable handles in this app:
 
 | What | Handle |
 | --- | --- |
-| Pairing form | heading `Pair with this environment`, textbox `Pairing token`, button `Continue` |
-| Empty landing | heading `What should we work on?`, button `Add project` |
+| Pairing form | heading `Pair with this environment`, textbox `Pairing token`, buttons `Continue` and `Reload app` |
+| Empty landing | text `What should we work on?` (no heading role), button `Add project` |
 | Sidebar settings | button `Settings` |
 | Sidebar usage | button `Usage` |
-| Command palette | `data-testid="command-palette"`, name `Command palette`, shortcut `mod+k` (⌘K on macOS, Ctrl+K elsewhere) |
+| Command palette | `data-testid="command-palette"` with `data-palette-mode="command"`, name `Command palette`, shortcut `mod+k` (⌘K on macOS, Ctrl+K elsewhere). The same testid serves File picker (`files`) and Search project contents (`content`) |
 | Usage page | heading `Usage`, groups `Usage metric` / `Usage period` / `Usage breakdown`, button `Refresh usage` |
-| Settings | breadcrumb `Settings breadcrumb`, searchbox `Search settings`, nav labels `General`, `Appearance`, `Keybindings`, `Providers`, `Integrations`, `Source Control`, `Connections`, `Archive` |
+| Settings | breadcrumb `Settings breadcrumb`, combobox `Search settings`, nav labels `General`, `Appearance`, `Keybindings`, `Providers`, `Integrations`, `Source Control`, `Connections`, `Archive` |
 
 Do not call internal atoms, test-only endpoints, or `t3-sqlite-state.ts exec` to claim a user path works. SQLite inspection is a side-effect check after a real UI action, and only against the disposable home.
 

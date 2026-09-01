@@ -7,12 +7,14 @@ This directory is the maintained source for verifying user-facing behavior of th
 - Launch with `eval "$(.agents/skills/verify-katacode/bin/launch)"` so the stack has a disposable `--home-dir` and `RUN_ID` / `WEB_ORIGIN` / `HOME_DIR` / `PAIRING_URL` are set in the shell (or `source` the printed `ENV_FILE`).
 - Run `.agents/skills/verify-katacode/bin/doctor` and require the printed `WEB_ORIGIN` and home dir to match that run.
 - Pair the `katacode-verify` agent-browser session by opening `PAIRING_OPEN_URL="${WEB_ORIGIN}/pair#${PAIRING_URL#*#}"` exactly once as the first navigation.
+- After the first `open`, run `agent-browser --session katacode-verify set viewport 1400 900` so the sidebar footer shows icon buttons and Usage keeps its segmented groups.
 - Never drive an instance doctor did not accept. A `vp run dev` already running in this worktree is someone else's session.
 
 ## Driving conventions
 
 - Start every recipe from the paired empty landing unless its preconditions say otherwise.
-- Prefer ARIA roles and accessible names. The command palette also has `data-testid="command-palette"`.
+- Prefer ARIA roles and accessible names. The command palette also has `data-testid="command-palette"`; check `data-palette-mode` because File picker and Search project contents share that testid.
+- `wait --text` only sees visible text. Icon buttons (`Usage`, `Refresh usage`, `Settings`) are named by `aria-label`; wait on a heading or use `find role button --name` instead.
 - Treat every command as literal. Keep quoted names and the pairing URL fragment unchanged.
 - Run browser actions through `agent-browser --session katacode-verify`. Load `agent-browser skills get core` first so flags match the installed CLI.
 - Restore nothing on a disposable home. Do not remove `uat-evidence/<RUN_ID>/` during cleanup.
