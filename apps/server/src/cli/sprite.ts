@@ -4,6 +4,7 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import { Command, Flag } from "effect/unstable/cli";
 import * as CliError from "effect/unstable/cli/CliError";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
@@ -85,7 +86,9 @@ function execInvocation(
 
 const setupScript = `
 set -eu
-npm install --global --prefix "$HOME/.local" "$KATACODE_SPRITE_PACKAGE"
+npm install --global --prefix "$HOME/.local" \
+  --allow-scripts=msgpackr-extract,node-pty \
+  "$KATACODE_SPRITE_PACKAGE"
 export PATH="$HOME/.local/bin:$PATH"
 package_root=$(npm root --global --prefix "$HOME/.local")/@kata-sh/code-cli
 node -e 'require(require.resolve("node-pty", { paths: [process.argv[1]] }))' "$package_root"
@@ -147,15 +150,23 @@ export function makeWakeInvocation(target: SpriteTarget): SpriteInvocation {
   ]);
 }
 
-function taskHttpScript(url: string, onSuccess: string): string {
+function taskHttpScript(url: string, method = "GET"): string {
+  const methodArgs = method === "GET" ? "" : `-X ${method}`;
   return `set -eu
-body=$(mktemp)
-trap 'rm -f "$body"' EXIT
-code=$(sprite-env curl -sS --fail --show-error -o "$body" -w "%{http_code}" ${url} || true)
+response=$(mktemp)
+errors=$(mktemp)
+trap 'rm -f "$response" "$errors"' EXIT
+sprite-env curl -sS -w '\\n%{http_code}' ${methodArgs} ${url} > "$response" 2> "$errors" || true
+code=$(tail -n 1 "$response")
 case "$code" in
-  404) echo inactive; exit 0 ;;
-  2??) ${onSuccess} ;;
-  *) echo "Sprite task request failed\${code:+ (HTTP $code)}." >&2; exit 1 ;;
+  404) echo inactive ;;
+  2??) sed '$d' "$response" ;;
+  *)
+    cat "$errors" >&2
+    sed '$d' "$response" >&2
+    echo "Sprite task request failed\${code:+ (HTTP $code)}." >&2
+    exit 1
+    ;;
 esac`;
 }
 
@@ -165,30 +176,12 @@ export function makeStatusInvocation(target: SpriteTarget): SpriteInvocation {
     "-lc",
     `sprite-env services list
 printf '\\nActivity task:\\n'
-${taskHttpScript(`/v1/tasks/${TASK_NAME}`, 'cat "$body"')}`,
+${taskHttpScript(`/v1/tasks/${TASK_NAME}`)}`,
   ]);
 }
 
 export function makeReleaseInvocation(target: SpriteTarget): SpriteInvocation {
-  return execInvocation(target, [
-    "sh",
-    "-lc",
-    `response=$(mktemp)
-trap 'rm -f "$response"' EXIT
-if ! status=$(sprite-env curl -sS -o "$response" -w '%{http_code}' -X DELETE /v1/tasks/${TASK_NAME}); then
-  cat "$response" >&2
-  exit 1
-fi
-case "$status" in
-  2??) cat "$response" ;;
-  404) echo inactive ;;
-  *)
-    cat "$response" >&2
-    echo "Failed to release Sprite task: HTTP $status" >&2
-    exit 1
-    ;;
-esac`,
-  ]);
+  return execInvocation(target, ["sh", "-lc", taskHttpScript(`/v1/tasks/${TASK_NAME}`, "DELETE")]);
 }
 
 const cloneScript = `
@@ -324,6 +317,46 @@ export function makeCloneInvocation(input: {
   });
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+const ensureSpriteExists = Effect.fn("cli.sprite.ensureExists")(function* (target: SpriteTarget) {
+  const child = yield* ChildProcess.make("sprite", [...targetArgs(target), "exec", "--", "true"], {
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  const [exitCode, stderr] = yield* Effect.all(
+    [
+      child.exitCode,
+      child.stderr.pipe(
+        Stream.decodeText(),
+        Stream.runFold(
+          () => "",
+          (output, chunk) => output + chunk,
+        ),
+      ),
+    ],
+    { concurrency: "unbounded" },
+  );
+  if (exitCode === 0) return true;
+
+  const createCommand = [
+    "sprite create --skip-console --sprite",
+    shellQuote(target.sprite),
+    ...(target.org ? ["--org", shellQuote(target.org)] : []),
+  ].join(" ");
+  const message = stderr.includes("sprite not found")
+    ? `Sprite '${target.sprite}' does not exist.\n\nCreate it, then rerun setup:\n\n  ${createCommand}`
+    : stderr.trim() || `Could not access Sprite '${target.sprite}'.`;
+  yield* Console.error(message);
+  yield* Effect.sync(() => {
+    process.exitCode = 1;
+  });
+  return false;
+});
+
 const runInvocation = Effect.fn("cli.sprite.run")(function* (invocation: SpriteInvocation) {
   const process = yield* ChildProcess.make(invocation.command, invocation.args, {
     stdin: "inherit",
@@ -399,10 +432,12 @@ const setupCommand = Command.make("setup", {
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
+      const target = targetFromFlags(flags);
+      if (!(yield* ensureSpriteExists(target))) return;
       const environment = yield* readEnvironmentFile(flags.env);
       yield* runInvocation(
         makeSetupInvocation({
-          target: targetFromFlags(flags),
+          target,
           environment,
           packageSpec: flags.package,
         }),

@@ -88,13 +88,9 @@ if [ "$1" = services ]; then
   echo katacode
   exit 0
 fi
-out=/dev/null
-fail=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    -o) out=$2; shift 2 ;;
     -w|--write-out) shift 2 ;;
-    --fail) fail=1; shift ;;
     -sS|-s|-S|--show-error|--silent) shift ;;
     -X|-H|-d) shift 2 ;;
     curl) shift ;;
@@ -102,14 +98,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 code=\${SPRITE_HTTP_CODE:-200}
-if [ "$out" != /dev/null ]; then
-  printf '%s' "\${SPRITE_HTTP_BODY:-hold-ok}" > "$out"
-fi
-printf '%s' "$code"
-if [ "$code" = 000 ]; then
-  exit 7
-fi
-[ "$fail" = 1 ] && [ "$code" -ge 400 ] 2>/dev/null && exit 22
+printf '%s\\n%s' "\${SPRITE_HTTP_BODY:-hold-ok}" "$code"
+[ "$code" = 000 ] && exit 7
+[ "$code" -ge 400 ] 2>/dev/null && exit 22
 exit 0
 `;
 
@@ -187,6 +178,8 @@ it("builds setup without exposing or recreating the Sprite", () => {
     OPENAI_API_KEY: "secret-value",
     TUNNEL_TRANSPORT_PROTOCOL: "http2",
   });
+  assert.include(command, "--allow-scripts=msgpackr-extract,node-pty");
+  assert.include(command, "katacode connect link --headless");
   assert.include(command, "sprite-env services delete katacode");
   assert.include(command, "service-env.json");
   assert.include(command, "--require");
@@ -215,7 +208,7 @@ it("installs a service environment containing commas without exposing values", a
     packageSpec: "@kata-sh/code-cli@nightly",
     environment: { FALLBACKS: "one,two", MULTILINE: "first\nsecond" },
   });
-  const result = await runShell(String(invocation.args.at(-1)), {
+  const result = await runShell(`exec </dev/null\n${String(invocation.args.at(-1))}`, {
     ...process.env,
     ...invocationExecEnvironment(invocation),
     HOME: directory,
@@ -252,15 +245,16 @@ it("builds safe task operations", () => {
 
   const status = makeStatusInvocation(target).args.at(-1) ?? "";
   assert.include(status, "/v1/tasks/kata-session");
-  assert.include(status, "--fail");
+  assert.notInclude(status, " -o ");
+  assert.include(status, "-w '\\n%{http_code}'");
   assert.include(status, "404) echo inactive");
   assert.notInclude(status, "2>/dev/null || echo inactive");
 
   const release = makeReleaseInvocation(target).args.at(-1) ?? "";
-  assert.include(release, "-w '%{http_code}'");
+  assert.include(release, "-w '\\n%{http_code}'");
   assert.include(release, "DELETE /v1/tasks/kata-session");
   assert.include(release, "404) echo inactive");
-  assert.include(release, "Failed to release Sprite task: HTTP $status");
+  assert.include(release, "Sprite task request failed");
 });
 
 it("clones or fast-forwards repositories without persisting a GitHub token in the URL", () => {

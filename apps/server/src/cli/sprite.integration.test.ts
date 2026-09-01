@@ -83,6 +83,59 @@ it("runs Sprite help and wake through the CLI process", async () => {
   ]);
 });
 
+it("prints a copyable create command when setup targets a missing Sprite", async () => {
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-missing-test-"));
+  const sprite = NodePath.join(directory, "sprite");
+  const envFile = NodePath.join(directory, ".env");
+  await NodeFSP.writeFile(
+    sprite,
+    '#!/bin/sh\necho "Error: failed to start sprite command: sprite not found" >&2\nexit 1\n',
+  );
+  await NodeFSP.chmod(sprite, 0o755);
+  await NodeFSP.writeFile(envFile, "OPENAI_API_KEY=secret\n");
+  const env = {
+    ...process.env,
+    PATH: `${directory}:${process.env.PATH}`,
+    KATACODE_RELAY_URL: "https://relay.example.test",
+    KATACODE_CLERK_PUBLISHABLE_KEY: "pk_test_sprite_cli",
+    KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "sprite-cli-test",
+  };
+
+  let failure:
+    | { readonly code?: number | string | null; readonly stdout?: string; readonly stderr?: string }
+    | undefined;
+  try {
+    await execFile(
+      process.execPath,
+      [
+        cli,
+        "connect",
+        "sprite",
+        "setup",
+        "--sprite",
+        "missing-sprite",
+        "--org",
+        "example-org",
+        "--env",
+        envFile,
+      ],
+      { env },
+    );
+  } catch (cause) {
+    failure = cause as typeof failure;
+  }
+
+  assert.equal(failure?.code, 1);
+  const output = `${failure?.stdout ?? ""}${failure?.stderr ?? ""}`;
+  assert.include(output, "Sprite 'missing-sprite' does not exist.");
+  assert.include(
+    output,
+    "sprite create --skip-console --sprite 'missing-sprite' --org 'example-org'",
+  );
+  assert.notInclude(output, "CliError");
+  assert.notInclude(output, "at ensureSpriteExists");
+});
+
 it("reports a failed Sprite wake when the child exits non-zero", async () => {
   const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-cli-fail-"));
   const sprite = NodePath.join(directory, "sprite");
@@ -118,7 +171,7 @@ it("distinguishes an absent Sprite task from release failures", async () => {
   const spriteEnv = NodePath.join(directory, "sprite-env");
   await NodeFSP.writeFile(
     spriteEnv,
-    '#!/bin/sh\nprintf "%s" "${SPRITE_HTTP_STATUS:-204}"\nexit "${SPRITE_EXIT_CODE:-0}"\n',
+    '#!/bin/sh\nstatus=${SPRITE_HTTP_STATUS:-204}\n[ "${SPRITE_EXIT_CODE:-0}" != 0 ] && status=${SPRITE_HTTP_STATUS:-000}\nprintf "\\n%s" "$status"\nexit "${SPRITE_EXIT_CODE:-0}"\n',
   );
   await NodeFSP.chmod(spriteEnv, 0o755);
   const script = makeReleaseInvocation({ sprite: "kata-dev" }).args.at(-1);
@@ -128,7 +181,7 @@ it("distinguishes an absent Sprite task from release failures", async () => {
       env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, ...overrides },
     });
 
-  assert.equal((await run({ SPRITE_HTTP_STATUS: "204" })).stdout, "");
+  assert.equal((await run({ SPRITE_HTTP_STATUS: "204" })).stdout.trim(), "");
   assert.equal((await run({ SPRITE_HTTP_STATUS: "404" })).stdout.trim(), "inactive");
 
   for (const overrides of [
