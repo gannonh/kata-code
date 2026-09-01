@@ -31,15 +31,13 @@ type ShellResult = {
   readonly status: number;
 };
 
-async function runShell(
-  script: string,
-  env: NodeJS.ProcessEnv,
-): Promise<ShellResult> {
+async function runShell(script: string, env: NodeJS.ProcessEnv): Promise<ShellResult> {
   try {
     const result = await execFile("sh", ["-lc", script], { env, encoding: "utf8" });
     return { stdout: result.stdout, stderr: result.stderr, status: 0 };
   } catch (error) {
-    const failure = error as NodeUtil.ExecFileException & {
+    const failure = error as {
+      code?: number | string | null;
       stdout?: string;
       stderr?: string;
     };
@@ -185,12 +183,12 @@ it("builds bounded task operations", () => {
   const status = makeStatusInvocation(target).args.at(-1) ?? "";
   assert.include(status, "/v1/tasks/kata-session");
   assert.include(status, "--fail");
-  assert.include(status, '404) echo inactive');
+  assert.include(status, "404) echo inactive");
   assert.notInclude(status, "2>/dev/null || echo inactive");
   const release = makeReleaseInvocation(target).args.at(-1) ?? "";
   assert.include(release, "DELETE /v1/tasks/kata-session");
   assert.include(release, "--fail");
-  assert.include(release, '404) echo inactive');
+  assert.include(release, "404) echo inactive");
   assert.throws(() => makeWakeInvocation({ target, holdMinutes: 61 }), /1 through 60/);
 });
 
@@ -276,7 +274,14 @@ it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched c
   const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-clone-"));
   const dest = NodePath.join(directory, "checkout");
   await execFile("git", ["init", dest]);
-  await execFile("git", ["-C", dest, "remote", "add", "origin", "https://evil.example/kata-code.git"]);
+  await execFile("git", [
+    "-C",
+    dest,
+    "remote",
+    "add",
+    "origin",
+    "https://evil.example/kata-code.git",
+  ]);
   const mismatch = makeCloneInvocation({
     target,
     repository: "https://github.com/gannonh/kata-code.git",

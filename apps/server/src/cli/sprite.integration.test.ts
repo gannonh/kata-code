@@ -75,8 +75,12 @@ it("reports a failed Sprite wake when the child exits non-zero", async () => {
     );
     assert.fail("wake should fail when sprite-env curl exits 22");
   } catch (error) {
-    const failure = error as NodeUtil.ExecFileException & { stderr?: string };
+    const failure = error as {
+      code?: number | string | null;
+      stdout?: string;
+      stderr?: string;
+    };
     assert.equal(failure.code, 1);
-    assert.include(failure.stderr ?? "", "exit code 22");
+    assert.include(`${failure.stdout ?? ""}${failure.stderr ?? ""}`, "exit code 22");
   }
 });
