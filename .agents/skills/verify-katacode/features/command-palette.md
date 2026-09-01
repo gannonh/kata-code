@@ -37,7 +37,7 @@ Preconditions:
 ## Gotchas
 
 - Default binding is `mod+k` when `terminalFocus` is false. Do not prove this from inside a terminal.
-- File picker (`mod+p`) and project content search (`mod+shift+f`) are different overlays (`File picker`, `Search project contents`) that reuse `data-testid="command-palette"` with `data-palette-mode` `files` and `content`. Escape from either returns to the root command palette instead of closing; a second Escape closes. A snapshot of those is not command palette proof.
+- File picker (`mod+p`) and project content search (`mod+shift+f`) are different overlays (`File picker`, `Search project contents`). The outer dialog still has `data-testid="command-palette"` with `data-palette-mode` `files` or `content`, but the inner panels use `data-testid="project-file-picker"` and `data-testid="project-content-search"`. Prefer those inner testids (or the dialog ARIA name) when distinguishing overlays. Escape from either returns to the root command palette instead of closing; a second Escape closes. A snapshot of those is not command palette proof.
 - `Add project` is disabled when no environment is connected. After a correct pair it is enabled. If it is disabled, pairing did not finish. Unpaired, `mod+k` does nothing because the palette is not mounted.
 - With more than one environment, or none connected, `Add project` shows an `Environments` group before `Sources`.
 - The palette restores focus to the composer on close when a draft or thread is open. The empty landing has no composer, so prove that from `/draft/...`. Wait for the dialog to disappear before taking the next screenshot of the page underneath.

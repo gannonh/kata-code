@@ -37,7 +37,7 @@ Preconditions:
 ## Gotchas
 
 - `/settings` redirects to `/settings/general`. Assert General, not a page whose heading is only `Settings`.
-- Connections renders for every scope. With the startup admin URL its `This environment` section shows `Network access` plus pairing and client management (and a `Docker sandboxes` section); with a token from `node apps/server/src/bin.ts pair` it shows `Administrative access` instead. Record which one you saw. The fallback copy proves the scope, not the management UI.
+- Connections renders for every scope. With the startup admin URL its `This environment` section shows `Network access` plus pairing and client management; with a token from `node apps/server/src/bin.ts pair` it shows `Administrative access` instead. Record which one you saw. The fallback copy proves the scope, not the management UI. Docker sandboxes are a separate surface and out of scope for this map.
 - Diagnostics is a route (`/settings/diagnostics`) that is not in the main nav labels. Reach it from General → About → `View diagnostics`; the breadcrumb reads `Diagnostics`. Do not treat it as missing Settings.
 - Restore defaults lives on General only and is disabled on a clean home. Do not click it during a verification run unless that is the feature under test; it writes settings on this server.
 - Settings search uses `/` as a hint when the box is empty. Typing `/` into a focused composer is a different shortcut. Focus `Search settings` first.
