@@ -1,3 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off - exercises clone/task shell scripts with PATH stubs.
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeUtil from "node:util";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -14,8 +20,99 @@ import {
   spriteConnectCommand,
 } from "./sprite.ts";
 
+const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
+
 const target = { sprite: "kata-dev", org: "example-org" } as const;
 const cliTestLayer = Layer.merge(NodeServices.layer, TestConsole.layer);
+
+type ShellResult = {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly status: number;
+};
+
+async function runShell(
+  script: string,
+  env: NodeJS.ProcessEnv,
+): Promise<ShellResult> {
+  try {
+    const result = await execFile("sh", ["-lc", script], { env, encoding: "utf8" });
+    return { stdout: result.stdout, stderr: result.stderr, status: 0 };
+  } catch (error) {
+    const failure = error as NodeUtil.ExecFileException & {
+      stdout?: string;
+      stderr?: string;
+    };
+    return {
+      stdout: failure.stdout ?? "",
+      stderr: failure.stderr ?? "",
+      status: typeof failure.code === "number" ? failure.code : 1,
+    };
+  }
+}
+
+async function withPathStub(
+  fileName: string,
+  contents: string,
+): Promise<{ directory: string; env: NodeJS.ProcessEnv }> {
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-stub-"));
+  await NodeFSP.writeFile(NodePath.join(directory, fileName), contents, { mode: 0o755 });
+  return {
+    directory,
+    env: {
+      ...process.env,
+      PATH: `${directory}:${process.env.PATH}`,
+    },
+  };
+}
+
+const spriteEnvHttpStub = `#!/bin/sh
+if [ "$1" = services ]; then
+  echo katacode
+  exit 0
+fi
+out=/dev/null
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift 2 ;;
+    -w|--write-out) shift 2 ;;
+    -sS|-s|-S|--fail|--show-error|--silent) shift ;;
+    -X|-H|-d) shift 2 ;;
+    curl) shift ;;
+    *) shift ;;
+  esac
+done
+code=\${SPRITE_HTTP_CODE:-200}
+if [ "$out" != /dev/null ]; then
+  printf '%s' "\${SPRITE_HTTP_BODY:-hold-ok}" > "$out"
+fi
+printf '%s' "$code"
+if [ "$code" = 000 ]; then
+  exit 7
+fi
+[ "$code" -ge 400 ] 2>/dev/null && exit 22
+exit 0
+`;
+
+const recordingGitStub = `#!/bin/sh
+printf '%s\\n' "$*" >> "$GIT_LOG"
+cmd=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -C) shift 2 ;;
+    -c) shift 2 ;;
+    *) cmd=$1; break ;;
+  esac
+done
+if [ "$cmd" = clone ]; then
+  dest=""
+  for arg in "$@"; do
+    dest=$arg
+  done
+  mkdir -p "$dest/.git"
+fi
+exit 0
+`;
 
 it.effect("shows precise lifecycle help", () =>
   Command.runWith(spriteConnectCommand, { version: "0.0.0" })(["--help"]).pipe(
@@ -72,9 +169,11 @@ it("builds setup without exposing or recreating the Sprite", () => {
 });
 
 it("builds bounded task operations", () => {
-  assert.deepEqual(makeWakeInvocation({ target, holdMinutes: 30 }).args.slice(-9), [
+  assert.deepEqual(makeWakeInvocation({ target, holdMinutes: 30 }).args.slice(-11), [
     "sprite-env",
     "curl",
+    "--fail",
+    "--show-error",
     "-X",
     "PUT",
     "/v1/tasks/kata-session",
@@ -83,10 +182,15 @@ it("builds bounded task operations", () => {
     "-d",
     '{"expire":"30m"}',
   ]);
-  assert.include(makeStatusInvocation(target).args.at(-1) ?? "", "/v1/tasks/kata-session");
+  const status = makeStatusInvocation(target).args.at(-1) ?? "";
+  assert.include(status, "/v1/tasks/kata-session");
+  assert.include(status, "--fail");
+  assert.include(status, '404) echo inactive');
+  assert.notInclude(status, "2>/dev/null || echo inactive");
   const release = makeReleaseInvocation(target).args.at(-1) ?? "";
   assert.include(release, "DELETE /v1/tasks/kata-session");
-  assert.include(release, "echo inactive");
+  assert.include(release, "--fail");
+  assert.include(release, '404) echo inactive');
   assert.throws(() => makeWakeInvocation({ target, holdMinutes: 61 }), /1 through 60/);
 });
 
@@ -102,6 +206,8 @@ it("clones or fast-forwards repositories without persisting a GitHub token in th
   assert.include(command, "$HOME/src/$KATACODE_SPRITE_REPO_NAME");
   assert.include(command, "pull --ff-only");
   assert.include(command, "http.extraHeader");
+  assert.include(command, "is_github_http_url");
+  assert.include(command, "does not match --repo");
   assert.notInclude(command, "x-access-token:secret-value@");
   assert.throws(
     () =>
@@ -113,4 +219,120 @@ it("clones or fast-forwards repositories without persisting a GitHub token in th
       }),
     /absolute path/,
   );
+  assert.throws(
+    () =>
+      makeCloneInvocation({
+        target,
+        repository: "https://github.com/gan,non/kata-code.git",
+        environment: {},
+      }),
+    /comma or newline/,
+  );
+  assert.throws(
+    () =>
+      makeCloneInvocation({
+        target,
+        repository: "https://github.com/gannonh/kata-code.git",
+        directory: "/tmp/foo,bar",
+        environment: {},
+      }),
+    /comma or newline/,
+  );
+  assert.throws(
+    () =>
+      makeSetupInvocation({
+        target,
+        packageSpec: "@kata-sh/code-cli@1.0,nightly",
+        environment: {},
+      }),
+    /comma or newline/,
+  );
+});
+
+it("maps a missing task to inactive and fails other task HTTP errors", async () => {
+  const stub = await withPathStub("sprite-env", spriteEnvHttpStub);
+  const statusScript = String(makeStatusInvocation(target).args.at(-1));
+  const releaseScript = String(makeReleaseInvocation(target).args.at(-1));
+
+  const missingStatus = await runShell(statusScript, { ...stub.env, SPRITE_HTTP_CODE: "404" });
+  assert.equal(missingStatus.status, 0);
+  assert.include(missingStatus.stdout, "inactive");
+
+  const failedStatus = await runShell(statusScript, { ...stub.env, SPRITE_HTTP_CODE: "500" });
+  assert.notEqual(failedStatus.status, 0);
+  assert.notInclude(failedStatus.stdout, "inactive");
+  assert.include(`${failedStatus.stdout}${failedStatus.stderr}`, "HTTP 500");
+
+  const missingRelease = await runShell(releaseScript, { ...stub.env, SPRITE_HTTP_CODE: "404" });
+  assert.equal(missingRelease.status, 0);
+  assert.include(missingRelease.stdout, "inactive");
+
+  const failedRelease = await runShell(releaseScript, { ...stub.env, SPRITE_HTTP_CODE: "503" });
+  assert.notEqual(failedRelease.status, 0);
+  assert.include(`${failedRelease.stdout}${failedRelease.stderr}`, "HTTP 503");
+});
+
+it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched checkout", async () => {
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-clone-"));
+  const dest = NodePath.join(directory, "checkout");
+  await execFile("git", ["init", dest]);
+  await execFile("git", ["-C", dest, "remote", "add", "origin", "https://evil.example/kata-code.git"]);
+  const mismatch = makeCloneInvocation({
+    target,
+    repository: "https://github.com/gannonh/kata-code.git",
+    directory: dest,
+    environment: { GH_TOKEN: "secret-value" },
+  });
+  const mismatchResult = await runShell(String(mismatch.args.at(-1)), {
+    ...process.env,
+    KATACODE_SPRITE_REPO: "https://github.com/gannonh/kata-code.git",
+    KATACODE_SPRITE_REPO_DIR: dest,
+    KATACODE_SPRITE_REPO_NAME: "kata-code",
+    GH_TOKEN: "secret-value",
+    HOME: directory,
+  });
+  assert.notEqual(mismatchResult.status, 0);
+  assert.include(mismatchResult.stderr, "does not match --repo");
+
+  const stub = await withPathStub("git", recordingGitStub);
+  const gitLog = NodePath.join(stub.directory, "git.log");
+  const cloneEnv = {
+    ...stub.env,
+    GIT_LOG: gitLog,
+    HOME: stub.directory,
+    GH_TOKEN: "secret-value",
+  };
+
+  const githubDest = NodePath.join(stub.directory, "github-repo");
+  const github = makeCloneInvocation({
+    target,
+    repository: "https://github.com/gannonh/kata-code.git",
+    directory: githubDest,
+    environment: { GH_TOKEN: "secret-value" },
+  });
+  const githubResult = await runShell(String(github.args.at(-1)), {
+    ...cloneEnv,
+    KATACODE_SPRITE_REPO: "https://github.com/gannonh/kata-code.git",
+    KATACODE_SPRITE_REPO_DIR: githubDest,
+    KATACODE_SPRITE_REPO_NAME: "kata-code",
+  });
+  assert.equal(githubResult.status, 0);
+  assert.include(await NodeFSP.readFile(gitLog, "utf8"), "http.extraHeader");
+
+  await NodeFSP.writeFile(gitLog, "");
+  const lookalikeDest = NodePath.join(stub.directory, "lookalike-repo");
+  const lookalike = makeCloneInvocation({
+    target,
+    repository: "https://github.com.evil.test/gannonh/kata-code.git",
+    directory: lookalikeDest,
+    environment: { GH_TOKEN: "secret-value" },
+  });
+  const lookalikeResult = await runShell(String(lookalike.args.at(-1)), {
+    ...cloneEnv,
+    KATACODE_SPRITE_REPO: "https://github.com.evil.test/gannonh/kata-code.git",
+    KATACODE_SPRITE_REPO_DIR: lookalikeDest,
+    KATACODE_SPRITE_REPO_NAME: "kata-code",
+  });
+  assert.equal(lookalikeResult.status, 0);
+  assert.notInclude(await NodeFSP.readFile(gitLog, "utf8"), "http.extraHeader");
 });

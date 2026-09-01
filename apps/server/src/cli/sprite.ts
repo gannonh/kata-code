@@ -38,6 +38,14 @@ function formatEnvironment(environment: Environment): string {
     .join(",");
 }
 
+function assertSpriteEnvValue(label: string, value: string): void {
+  if (value.includes(",") || value.includes("\n") || value.includes("\r")) {
+    throw new SpriteCliError({
+      cause: `${label} contains a comma or newline unsupported by Sprite --env.`,
+    });
+  }
+}
+
 function validateEnvironment(environment: Environment): void {
   for (const [key, value] of Object.entries(environment)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
@@ -46,11 +54,7 @@ function validateEnvironment(environment: Environment): void {
     if (key === "TUNNEL_TRANSPORT_PROTOCOL" || key.startsWith(INTERNAL_ENV_PREFIX)) {
       throw new SpriteCliError({ cause: `Reserved environment variable: ${key}` });
     }
-    if (value.includes(",") || value.includes("\n") || value.includes("\r")) {
-      throw new SpriteCliError({
-        cause: `Environment variable ${key} contains a comma or newline unsupported by Sprite --env.`,
-      });
-    }
+    assertSpriteEnvValue(`Environment variable ${key}`, value);
   }
 }
 
@@ -108,6 +112,7 @@ export function makeSetupInvocation(input: {
   readonly packageSpec: string;
 }): SpriteInvocation {
   validateEnvironment(input.environment);
+  assertSpriteEnvValue("--package", input.packageSpec);
   return execInvocation(input.target, ["sh", "-lc", setupScript], {
     tty: true,
     env: {
@@ -128,6 +133,8 @@ export function makeWakeInvocation(input: {
   return execInvocation(input.target, [
     "sprite-env",
     "curl",
+    "--fail",
+    "--show-error",
     "-X",
     "PUT",
     `/v1/tasks/${TASK_NAME}`,
@@ -138,13 +145,25 @@ export function makeWakeInvocation(input: {
   ]);
 }
 
+function taskHttpScript(url: string, onSuccess: string): string {
+  return `set -eu
+body=$(mktemp)
+trap 'rm -f "$body"' EXIT
+code=$(sprite-env curl -sS --fail --show-error -o "$body" -w "%{http_code}" ${url} || true)
+case "$code" in
+  404) echo inactive; exit 0 ;;
+  2??) ${onSuccess} ;;
+  *) echo "Sprite task request failed\${code:+ (HTTP $code)}." >&2; exit 1 ;;
+esac`;
+}
+
 export function makeStatusInvocation(target: SpriteTarget): SpriteInvocation {
   return execInvocation(target, [
     "sh",
     "-lc",
     `sprite-env services list
 printf '\\nSession hold:\\n'
-sprite-env curl /v1/tasks/${TASK_NAME} 2>/dev/null || echo inactive`,
+${taskHttpScript(`/v1/tasks/${TASK_NAME}`, 'cat "$body"')}`,
   ]);
 }
 
@@ -152,33 +171,109 @@ export function makeReleaseInvocation(target: SpriteTarget): SpriteInvocation {
   return execInvocation(target, [
     "sh",
     "-lc",
-    `if sprite-env curl /v1/tasks/${TASK_NAME} >/dev/null 2>&1; then
-  sprite-env curl -X DELETE /v1/tasks/${TASK_NAME}
-else
-  echo inactive
-fi`,
+    taskHttpScript(
+      `/v1/tasks/${TASK_NAME}`,
+      `del=$(sprite-env curl -sS --fail --show-error -o /dev/null -w "%{http_code}" -X DELETE /v1/tasks/${TASK_NAME} || true)
+case "$del" in
+  404) echo inactive ;;
+  2??) ;;
+  *) echo "Sprite task request failed\${del:+ (HTTP $del)}." >&2; exit 1 ;;
+esac`,
+    ),
   ]);
 }
 
 const cloneScript = `
 set -eu
 destination=\${KATACODE_SPRITE_REPO_DIR:-"$HOME/src/$KATACODE_SPRITE_REPO_NAME"}
+
+normalize_git_url() {
+  url=$(printf '%s\\n' "$1" | tr '[:upper:]' '[:lower:]')
+  url=\${url#"\${url%%[![:space:]]*}"}
+  url=\${url%"\${url##*[![:space:]]}"}
+  case "$url" in
+    *.git) url=\${url%.git} ;;
+  esac
+  while [ "$url" != "\${url%/}" ]; do
+    url=\${url%/}
+  done
+  case "$url" in
+    *://*)
+      rest=\${url#*://}
+      rest=\${rest%%[?#]*}
+      authority=\${rest%%/*}
+      path=\${rest#"$authority"}
+      path=\${path#/}
+      case "$authority" in
+        *@*) hostport=\${authority##*@} ;;
+        *) hostport=$authority ;;
+      esac
+      printf '%s/%s\\n' "\${hostport%%:*}" "$path"
+      ;;
+    *:*)
+      left=\${url%%:*}
+      path=\${url#*:}
+      case "$left" in
+        *@*) host=\${left##*@} ;;
+        *) host=$left ;;
+      esac
+      printf '%s/%s\\n' "$host" "$path"
+      ;;
+    *)
+      printf '%s\\n' "$url"
+      ;;
+  esac
+}
+
+is_github_http_url() {
+  url=$(printf '%s\\n' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$url" in
+    http://*|https://*) ;;
+    *) return 1 ;;
+  esac
+  rest=\${url#*://}
+  rest=\${rest%%[/?#]*}
+  case "$rest" in
+    *@*) rest=\${rest##*@} ;;
+  esac
+  host=\${rest%%:*}
+  [ "$host" = github.com ] || [ "\${host%.github.com}" != "$host" ]
+}
+
 run_git() {
-  if [ -n "\${GH_TOKEN:-}" ]; then
+  target_url=$1
+  shift
+  if [ -n "\${GH_TOKEN:-}" ] && is_github_http_url "$target_url"; then
     auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\\n')
     git -c http.extraHeader="Authorization: Basic $auth" "$@"
   else
     git "$@"
   fi
 }
+
 if [ -d "$destination/.git" ]; then
-  run_git -C "$destination" pull --ff-only
+  branch=$(git -C "$destination" symbolic-ref --short HEAD 2>/dev/null || true)
+  remote=origin
+  if [ -n "$branch" ]; then
+    configured=$(git -C "$destination" config --get "branch.\${branch}.remote" || true)
+    if [ -n "$configured" ]; then
+      remote=$configured
+    fi
+  fi
+  fetch_url=$(git -C "$destination" remote get-url "$remote")
+  requested=$(normalize_git_url "$KATACODE_SPRITE_REPO")
+  existing=$(normalize_git_url "$fetch_url")
+  if [ "$requested" != "$existing" ]; then
+    echo "Existing checkout remote '$fetch_url' does not match --repo '$KATACODE_SPRITE_REPO'." >&2
+    exit 1
+  fi
+  run_git "$fetch_url" -C "$destination" pull --ff-only --no-recurse-submodules
 elif [ -e "$destination" ]; then
   echo "Destination exists and is not a Git repository: $destination" >&2
   exit 1
 else
   mkdir -p "$(dirname "$destination")"
-  run_git clone "$KATACODE_SPRITE_REPO" "$destination"
+  run_git "$KATACODE_SPRITE_REPO" clone "$KATACODE_SPRITE_REPO" "$destination"
 fi
 `;
 
@@ -200,8 +295,12 @@ export function makeCloneInvocation(input: {
   readonly environment: Environment;
 }): SpriteInvocation {
   validateEnvironment(input.environment);
-  if (input.directory !== undefined && !input.directory.startsWith("/")) {
-    throw new SpriteCliError({ cause: "--dir must be an absolute path." });
+  assertSpriteEnvValue("--repo", input.repository);
+  if (input.directory !== undefined) {
+    if (!input.directory.startsWith("/")) {
+      throw new SpriteCliError({ cause: "--dir must be an absolute path." });
+    }
+    assertSpriteEnvValue("--dir", input.directory);
   }
   return execInvocation(input.target, ["sh", "-lc", cloneScript], {
     env: {

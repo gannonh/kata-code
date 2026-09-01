@@ -42,6 +42,8 @@ it("runs Sprite help and wake through the CLI process", async () => {
     "--",
     "sprite-env",
     "curl",
+    "--fail",
+    "--show-error",
     "-X",
     "PUT",
     "/v1/tasks/kata-session",
@@ -50,4 +52,31 @@ it("runs Sprite help and wake through the CLI process", async () => {
     "-d",
     '{"expire":"30m"}',
   ]);
+});
+
+it("reports a failed Sprite wake when the child exits non-zero", async () => {
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-cli-fail-"));
+  const sprite = NodePath.join(directory, "sprite");
+  await NodeFSP.writeFile(sprite, "#!/bin/sh\nexit 22\n");
+  await NodeFSP.chmod(sprite, 0o755);
+  const env = {
+    ...process.env,
+    PATH: `${directory}:${process.env.PATH}`,
+    KATACODE_RELAY_URL: "https://relay.example.test",
+    KATACODE_CLERK_PUBLISHABLE_KEY: "pk_test_sprite_cli",
+    KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "sprite-cli-test",
+  };
+
+  try {
+    await execFile(
+      process.execPath,
+      [cli, "connect", "sprite", "wake", "--sprite", "kata-dev", "--hold-minutes", "30"],
+      { env, encoding: "utf8" },
+    );
+    assert.fail("wake should fail when sprite-env curl exits 22");
+  } catch (error) {
+    const failure = error as NodeUtil.ExecFileException & { stderr?: string };
+    assert.equal(failure.code, 1);
+    assert.include(failure.stderr ?? "", "exit code 22");
+  }
 });

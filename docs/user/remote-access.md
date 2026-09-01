@@ -193,9 +193,11 @@ npx @kata-sh/code-cli@latest connect sprite clone \
 ```
 
 The default destination is `$HOME/src/repository`. Pass `--dir /absolute/path` to override it. If
-the destination already contains that Git repository, `clone` runs `git pull --ff-only` instead.
-For a private GitHub repository, add `--env GH_TOKEN="$GH_TOKEN"`. The command sends the token as an
-HTTP authorization header and does not save it in the Git remote URL.
+the destination already contains a Git checkout, `clone` runs `git pull --ff-only` only when that
+checkout's fetch remote is the same repository as `--repo`. Repository URLs, destination paths, and
+package specs cannot contain commas or newlines. For a private GitHub repository, add
+`--env GH_TOKEN="$GH_TOKEN"`. The command sends the token as an HTTPS authorization header to
+`github.com` remotes only, and does not save it in the Git remote URL.
 
 `wake` creates or refreshes the named Task API hold `kata-session`. The default expiry is 55 minutes;
 `--hold-minutes` accepts whole values from 1 through 60. Fly keeps compute running and billing active
