@@ -147,7 +147,8 @@ export function makeWakeInvocation(target: SpriteTarget): SpriteInvocation {
   return execInvocation(target, [
     "sh",
     "-lc",
-    `sprite-env curl --fail-with-body --silent --show-error \\
+    `set -eu
+sprite-env curl --fail-with-body --silent --show-error \\
   -X PUT /v1/tasks/${TASK_NAME} \\
   -H 'Content-Type: application/json' \\
   -d '${JSON.stringify({ expire: BOOTSTRAP_TASK_TTL })}' \\

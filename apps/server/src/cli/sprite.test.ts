@@ -358,8 +358,12 @@ it("clones or fast-forwards repositories without persisting a GitHub token in th
 
 it("maps a missing task to inactive and fails other task HTTP errors", async () => {
   const stub = await withPathStub("sprite-env", spriteEnvHttpStub);
+  const wakeScript = String(makeWakeInvocation(target).args.at(-1));
   const statusScript = String(makeStatusInvocation(target).args.at(-1));
   const releaseScript = String(makeReleaseInvocation(target).args.at(-1));
+
+  const failedWake = await runShell(wakeScript, { ...stub.env, SPRITE_HTTP_CODE: "500" });
+  assert.notEqual(failedWake.status, 0);
 
   const missingStatus = await runShell(statusScript, { ...stub.env, SPRITE_HTTP_CODE: "404" });
   assert.equal(missingStatus.status, 0);
