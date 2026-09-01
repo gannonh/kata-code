@@ -49,15 +49,18 @@ function assertSpriteEnvValue(label: string, value: string): void {
 }
 
 function validateEnvironment(environment: Environment): void {
-  for (const [key, value] of Object.entries(environment)) {
+  for (const key of Object.keys(environment)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
       throw new SpriteCliError({ cause: `Invalid environment variable name: ${key}` });
     }
     if (key === "TUNNEL_TRANSPORT_PROTOCOL" || key.startsWith(INTERNAL_ENV_PREFIX)) {
       throw new SpriteCliError({ cause: `Reserved environment variable: ${key}` });
     }
-    assertSpriteEnvValue(`Environment variable ${key}`, value);
   }
+}
+
+function encodeEnvironment(environment: Environment): string {
+  return Buffer.from(JSON.stringify(environment)).toString("base64");
 }
 
 function execInvocation(
@@ -88,22 +91,22 @@ package_root=$(npm root --global --prefix "$HOME/.local")/@kata-sh/code-cli
 node -e 'require(require.resolve("node-pty", { paths: [process.argv[1]] }))' "$package_root"
 katacode connect link --headless --base-dir "$HOME/.katacode"
 
-service_env=TUNNEL_TRANSPORT_PROTOCOL=http2
-old_ifs=$IFS
-IFS=,
-for key in $KATACODE_SPRITE_ENV_KEYS; do
-  [ -n "$key" ] || continue
-  value=$(printenv "$key")
-  service_env="$service_env,$key=$value"
-done
-IFS=$old_ifs
+mkdir -p "$HOME/.katacode"
+printf '%s' "$KATACODE_SPRITE_ENV_B64" | base64 -d > "$HOME/.katacode/service-env.json"
+cat > "$HOME/.katacode/service-env.cjs" <<'EOF'
+const fs = require("node:fs");
+Object.assign(
+  process.env,
+  JSON.parse(fs.readFileSync(process.env.HOME + "/.katacode/service-env.json", "utf8")),
+);
+EOF
+chmod 600 "$HOME/.katacode/service-env.json" "$HOME/.katacode/service-env.cjs"
 
 sprite-env services stop katacode >/dev/null 2>&1 || true
 sprite-env services delete katacode >/dev/null 2>&1 || true
 sprite-env services create katacode \
-  --cmd "$HOME/.local/bin/katacode" \
-  --args "serve,--host,127.0.0.1,--port,8080,--base-dir,$HOME/.katacode" \
-  --env "$service_env" \
+  --cmd "$(command -v node)" \
+  --args "--require,$HOME/.katacode/service-env.cjs,$package_root/dist/bin.mjs,serve,--host,127.0.0.1,--port,8080,--base-dir,$HOME/.katacode" \
   --dir "$HOME" \
   --no-stream
 `;
@@ -119,8 +122,10 @@ export function makeSetupInvocation(input: {
     tty: true,
     env: {
       KATACODE_SPRITE_PACKAGE: input.packageSpec,
-      KATACODE_SPRITE_ENV_KEYS: Object.keys(input.environment).join(","),
-      ...input.environment,
+      KATACODE_SPRITE_ENV_B64: encodeEnvironment({
+        ...input.environment,
+        TUNNEL_TRANSPORT_PROTOCOL: "http2",
+      }),
     },
   });
 }
@@ -188,6 +193,10 @@ esac`,
 
 const cloneScript = `
 set -eu
+if [ -n "\${KATACODE_SPRITE_ENV_B64:-}" ]; then
+  GH_TOKEN=$(node -e 'const env = JSON.parse(Buffer.from(process.env.KATACODE_SPRITE_ENV_B64, "base64")); process.stdout.write(env.GH_TOKEN ?? "")')
+  export GH_TOKEN
+fi
 destination=\${KATACODE_SPRITE_REPO_DIR:-"$HOME/workspaces/$KATACODE_SPRITE_REPO_NAME"}
 
 normalize_git_url() {
@@ -310,7 +319,7 @@ export function makeCloneInvocation(input: {
       KATACODE_SPRITE_REPO: input.repository,
       KATACODE_SPRITE_REPO_DIR: input.directory ?? "",
       KATACODE_SPRITE_REPO_NAME: repositoryName(input.repository),
-      ...input.environment,
+      KATACODE_SPRITE_ENV_B64: encodeEnvironment(input.environment),
     },
   });
 }

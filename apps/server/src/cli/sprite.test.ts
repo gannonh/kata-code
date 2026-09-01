@@ -23,6 +23,25 @@ import {
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
 const target = { sprite: "kata-dev", org: "example-org" } as const;
+
+function invocationExecEnvironment(invocation: { readonly args: ReadonlyArray<string> }) {
+  const envIndex = invocation.args.indexOf("--env");
+  const encoded = invocation.args[envIndex + 1];
+  assert.isDefined(encoded);
+  return Object.fromEntries(
+    encoded.split(",").map((entry) => {
+      const separator = entry.indexOf("=");
+      return [entry.slice(0, separator), entry.slice(separator + 1)];
+    }),
+  );
+}
+
+function decodeInvocationEnvironment(invocation: { readonly args: ReadonlyArray<string> }) {
+  const encoded = invocationExecEnvironment(invocation).KATACODE_SPRITE_ENV_B64;
+  assert.isDefined(encoded);
+  return JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as Record<string, string>;
+}
+
 const cliTestLayer = Layer.merge(NodeServices.layer, TestConsole.layer);
 
 type ShellResult = {
@@ -154,7 +173,7 @@ it("builds setup without exposing or recreating the Sprite", () => {
   });
   const command = invocation.args.join("\n");
 
-  assert.deepEqual(invocation.args.slice(0, 8), [
+  assert.deepEqual(invocation.args.slice(0, 7), [
     "-s",
     "kata-dev",
     "-o",
@@ -162,12 +181,67 @@ it("builds setup without exposing or recreating the Sprite", () => {
     "exec",
     "--tty",
     "--env",
-    "KATACODE_SPRITE_PACKAGE=@kata-sh/code-cli@nightly,KATACODE_SPRITE_ENV_KEYS=OPENAI_API_KEY,OPENAI_API_KEY=secret-value",
   ]);
+  assert.notInclude(command, "secret-value");
+  assert.deepEqual(decodeInvocationEnvironment(invocation), {
+    OPENAI_API_KEY: "secret-value",
+    TUNNEL_TRANSPORT_PROTOCOL: "http2",
+  });
   assert.include(command, "sprite-env services delete katacode");
-  assert.include(command, "TUNNEL_TRANSPORT_PROTOCOL=http2");
+  assert.include(command, "service-env.json");
+  assert.include(command, "--require");
   assert.notInclude(command, "sprite create");
   assert.notInclude(command, "sprite destroy");
+});
+
+it("installs a service environment containing commas without exposing values", async () => {
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-setup-"));
+  const bin = NodePath.join(directory, "bin");
+  await NodeFSP.mkdir(bin);
+  const serviceLog = NodePath.join(directory, "services.log");
+  const stubs = {
+    npm: '#!/bin/sh\n[ "$1" = root ] && printf "%s/.local/lib/node_modules\\n" "$HOME"\nexit 0\n',
+    node: "#!/bin/sh\nexit 0\n",
+    katacode: "#!/bin/sh\nexit 0\n",
+    "sprite-env": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SERVICE_LOG"\nexit 0\n',
+  };
+  await Promise.all(
+    Object.entries(stubs).map(([name, contents]) =>
+      NodeFSP.writeFile(NodePath.join(bin, name), contents, { mode: 0o755 }),
+    ),
+  );
+  const invocation = makeSetupInvocation({
+    target,
+    packageSpec: "@kata-sh/code-cli@nightly",
+    environment: { FALLBACKS: "one,two", MULTILINE: "first\nsecond" },
+  });
+  const result = await runShell(String(invocation.args.at(-1)), {
+    ...process.env,
+    ...invocationExecEnvironment(invocation),
+    HOME: directory,
+    PATH: `${bin}:${process.env.PATH}`,
+    SERVICE_LOG: serviceLog,
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const environmentPath = NodePath.join(directory, ".katacode/service-env.json");
+  assert.deepInclude(JSON.parse(await NodeFSP.readFile(environmentPath, "utf8")), {
+    FALLBACKS: "one,two",
+    MULTILINE: "first\nsecond",
+    TUNNEL_TRANSPORT_PROTOCOL: "http2",
+  });
+  assert.include(await NodeFSP.readFile(serviceLog, "utf8"), "--require");
+  const loaded = await execFile(
+    process.execPath,
+    [
+      "--require",
+      NodePath.join(directory, ".katacode/service-env.cjs"),
+      "-e",
+      'process.stdout.write(process.env.FALLBACKS + "|" + process.env.MULTILINE)',
+    ],
+    { env: { ...process.env, HOME: directory } },
+  );
+  assert.equal(loaded.stdout, "one,two|first\nsecond");
 });
 
 it("builds safe task operations", () => {
@@ -193,7 +267,7 @@ it("clones or fast-forwards repositories without persisting a GitHub token in th
   const invocation = makeCloneInvocation({
     target,
     repository: "https://github.com/gannonh/kata-code.git",
-    environment: { GH_TOKEN: "secret-value" },
+    environment: { GH_TOKEN: "secret,value\nsecond-line" },
   });
   const command = invocation.args.join("\n");
 
@@ -203,7 +277,8 @@ it("clones or fast-forwards repositories without persisting a GitHub token in th
   assert.include(command, "http.extraHeader");
   assert.include(command, "is_github_http_url");
   assert.include(command, "does not match --repo");
-  assert.notInclude(command, "x-access-token:secret-value@");
+  assert.notInclude(command, "secret,value");
+  assert.equal(decodeInvocationEnvironment(invocation).GH_TOKEN, "secret,value\nsecond-line");
   assert.throws(
     () =>
       makeCloneInvocation({

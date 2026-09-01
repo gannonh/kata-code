@@ -34,7 +34,10 @@ it("runs Sprite help and wake through the CLI process", async () => {
   assert.include(help.stdout, "After 10 idle minutes");
 
   const envFile = NodePath.join(directory, ".env");
-  await NodeFSP.writeFile(envFile, 'OPENAI_API_KEY="secret value"\nKATACODE_PROVIDER=codex\n');
+  await NodeFSP.writeFile(
+    envFile,
+    'OPENAI_API_KEY="secret value"\nKATACODE_E2E_PI_MODEL_FALLBACKS="one,two"\n',
+  );
   const setup = await execFile(
     process.execPath,
     [cli, "connect", "sprite", "setup", "--sprite", "kata-dev", "--env", envFile],
@@ -42,8 +45,16 @@ it("runs Sprite help and wake through the CLI process", async () => {
   );
   assert.notInclude(setup.stdout, "secret value");
   const setupArgs = await NodeFSP.readFile(spriteLog, "utf8");
-  assert.include(setupArgs, "OPENAI_API_KEY=secret value");
-  assert.include(setupArgs, "KATACODE_PROVIDER=codex");
+  assert.notInclude(setupArgs, "secret value");
+  const encodedEnvironment = setupArgs
+    .split(/[\n,]/)
+    .find((entry) => entry.startsWith("KATACODE_SPRITE_ENV_B64="))
+    ?.slice("KATACODE_SPRITE_ENV_B64=".length);
+  assert.isDefined(encodedEnvironment);
+  assert.deepInclude(JSON.parse(Buffer.from(encodedEnvironment, "base64").toString("utf8")), {
+    OPENAI_API_KEY: "secret value",
+    KATACODE_E2E_PI_MODEL_FALLBACKS: "one,two",
+  });
 
   const wake = await execFile(
     process.execPath,

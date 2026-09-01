@@ -183,10 +183,10 @@ Pass the file to setup:
 npx @kata-sh/code-cli@latest connect sprite setup --sprite kata-dev --env .env
 ```
 
-The command parses the file, forwards its values through Sprite's `--env` option, and does not print
-them. Setup replaces the service environment rather than merging with a previous setup. Names
-beginning with `KATACODE_SPRITE_` and `TUNNEL_TRANSPORT_PROTOCOL` are reserved. Sprite's environment
-format cannot represent values containing commas or newlines.
+The command parses the file with Node's dotenv parser and does not print its values. Setup writes the
+parsed environment to `~/.katacode/service-env.json` with owner-only permissions and replaces the
+previous service environment. Quoted commas and multiline values are supported. Names beginning
+with `KATACODE_SPRITE_` and `TUNNEL_TRANSPORT_PROTOCOL` are reserved.
 
 Clone a public repository into the Sprite:
 
