@@ -287,7 +287,7 @@ run_git_or_explain() {
   return 1
 }
 
-if [ -d "$destination/.git" ]; then
+if [ -e "$destination/.git" ]; then
   branch=$(git -C "$destination" symbolic-ref --short HEAD 2>/dev/null || true)
   remote=origin
   if [ -n "$branch" ]; then

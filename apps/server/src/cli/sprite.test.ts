@@ -315,6 +315,8 @@ it("clones or fast-forwards repositories without persisting a GitHub token in th
   assert.include(command, "KATACODE_SPRITE_REPO_NAME=kata-code");
   assert.include(command, "$HOME/workspaces/$KATACODE_SPRITE_REPO_NAME");
   assert.include(command, "pull --ff-only");
+  assert.include(command, '[ -e "$destination/.git" ]');
+  assert.notInclude(command, '[ -d "$destination/.git" ]');
   assert.include(command, "http.extraHeader");
   assert.include(command, "is_github_http_url");
   assert.include(command, "does not match --repo");
@@ -463,6 +465,68 @@ it("attaches GH_TOKEN only to github.com HTTP remotes and rejects a mismatched c
   });
   assert.equal(lookalikeResult.status, 0, lookalikeResult.stderr);
   assert.notInclude(await NodeFSP.readFile(gitLog, "utf8"), "http.extraHeader");
+});
+
+it("fast-forwards a linked Git worktree checkout", async () => {
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "sprite-worktree-"));
+  const repo = NodePath.join(directory, "main");
+  const worktree = NodePath.join(directory, "linked");
+  const realGit = (await execFile("sh", ["-c", "command -v git"])).stdout.trim();
+  await execFile(realGit, ["init", repo, "-b", "main"]);
+  await execFile(realGit, ["-C", repo, "config", "user.email", "sprite@example.test"]);
+  await execFile(realGit, ["-C", repo, "config", "user.name", "Sprite Test"]);
+  await execFile(realGit, ["-C", repo, "commit", "--allow-empty", "-m", "init"]);
+  await execFile(realGit, [
+    "-C",
+    repo,
+    "remote",
+    "add",
+    "origin",
+    "https://github.com/gannonh/kata-code.git",
+  ]);
+  await execFile(realGit, ["-C", repo, "worktree", "add", "-b", "sprite-wt", worktree]);
+  await execFile(realGit, ["-C", worktree, "config", "branch.sprite-wt.remote", "origin"]);
+  assert.isTrue((await NodeFSP.stat(NodePath.join(worktree, ".git"))).isFile());
+
+  const stub = await withPathStub(
+    "git",
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$GIT_LOG"
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    -C|-c) skip=1 ;;
+    *)
+      if [ "\${skip:-}" = 1 ]; then
+        skip=
+      else
+        cmd=$arg
+        break
+      fi
+      ;;
+  esac
+done
+if [ "$cmd" = pull ]; then
+  exit 0
+fi
+exec ${JSON.stringify(realGit)} "$@"
+`,
+  );
+  const gitLog = NodePath.join(stub.directory, "git.log");
+  const invocation = makeCloneInvocation({
+    target,
+    repository: "https://github.com/gannonh/kata-code.git",
+    directory: worktree,
+    environment: {},
+  });
+  const result = await runShell(String(invocation.args.at(-1)), {
+    ...stub.env,
+    ...invocationExecEnvironment(invocation),
+    GIT_LOG: gitLog,
+    HOME: directory,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.include(await NodeFSP.readFile(gitLog, "utf8"), "pull --ff-only");
 });
 
 it("stops katacode before deleting the activity task", async () => {
