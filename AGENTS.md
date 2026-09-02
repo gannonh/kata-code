@@ -16,23 +16,23 @@ Specs for this repository are GitHub Issues, not files.
 
 - Read the roadmap with `gh issue list --label kind:spec --state open`.
 - Read a spec with `gh issue view <N>`; read an epic's slices with `gh api repos/{owner}/{repo}/issues/<N>/sub_issues --jq '.[] | {number, title, state}'`.
-- Do not create local spec files. Use the `plan-build-verify` skill, which publishes specs as issues.
+- Do not create local spec files. Use the `plan-build-verify` plugin, which publishes specs as issues.
 - Never build an issue that is not labeled `status:approved` without explicit maintainer approval.
 - Post build reports and acceptance evidence as comments on the spec issue.
 
 ## Skills
 
-Product OS is plan-build-verify. Install the per-project skills (no `-g`) so cloud VMs get them:
+Product OS is [plan-build-verify](https://github.com/gannonh/plan-build-verify). Install per-project skills (no `-g`) so cloud VMs get them:
 
 ```bash
 ./scripts/install-skills.sh
 ```
 
-Or the equivalent:
+plan-build-verify is a plugin, not a pack skill. Install from [gannonh/plan-build-verify](https://github.com/gannonh/plan-build-verify):
 
-```bash
-npx skills add gannonh/skills --skill plan-build-verify --skill address-pr-comments -y
-```
+- **Cursor:** copy `plugins/cursor` to `~/.cursor/plugins/local/plan-build-verify`, enable **Allow Local Plugin Imports**, then enable `plan-build-verify`.
+- **Claude:** `/plugin marketplace add gannonh/plan-build-verify` then `/plugin install plan-build-verify@plan-build-verify`
+- **Codex:** `codex plugin marketplace add gannonh/plan-build-verify` then `codex plugin add plan-build-verify@plan-build-verify`
 
 First-party skills in git: `ios-debugger-agent`, `ios-simulator-browser`, `test-t3-app`, `test-t3-mobile`, `verify-katacode`. Everything else under `.agents/skills` is installed locally and is not tracked.
 
