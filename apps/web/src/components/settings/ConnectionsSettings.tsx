@@ -36,6 +36,7 @@ import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestam
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
 import {
   applyWslEnableSelection,
+  canShowHostSandboxes,
   isQrShareableEndpoint,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
@@ -91,6 +92,7 @@ import {
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,
 } from "~/environments/primary";
+import { usePrimarySettings } from "../../hooks/useSettings";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { useUiStateStore } from "~/uiStateStore";
 import {
@@ -1780,6 +1782,11 @@ export function ConnectionsSettings() {
   );
   const canManageLocalBackend = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
   const canManageHostSandboxes = canManageLocalBackend && isHostSandboxClient();
+  const enableSandboxes = usePrimarySettings((settings) => settings.enableSandboxes);
+  const showHostSandboxes = canShowHostSandboxes({
+    canManageHostSandboxes,
+    enableSandboxes,
+  });
   const canManageRelay = currentSessionScopes?.includes(AuthRelayWriteScope) ?? false;
   const authAccessChanges = useEnvironmentQuery(
     canManageLocalBackend && primaryEnvironmentId !== null
@@ -2667,7 +2674,7 @@ export function ConnectionsSettings() {
             )}
           </SettingsSection>
 
-          {canManageHostSandboxes ? <DeploymentSettings /> : null}
+          {showHostSandboxes ? <DeploymentSettings /> : null}
 
           {isLocalBackendRemotelyReachable ? (
             <SettingsSection
@@ -2983,7 +2990,7 @@ export function ConnectionsSettings() {
             authenticated={
               Boolean(desktopBridge) || primarySessionState.data?.authenticated === true
             }
-            canManageSandboxes={canManageHostSandboxes}
+            canManageSandboxes={showHostSandboxes}
             discoveredSshHosts={discoveredSshHosts}
             discoveredSshHostsError={desktopSshHosts.error}
             isLoadingDiscoveredSshHosts={desktopSshHosts.isPending}

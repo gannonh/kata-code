@@ -178,6 +178,14 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
 });
 
 describe("ServerSettings worktree defaults", () => {
+  it("defaults sandboxes off for legacy configs", () => {
+    expect(decodeServerSettings({}).enableSandboxes).toBe(false);
+  });
+
+  it("accepts sandboxes preview updates", () => {
+    expect(decodeServerSettingsPatch({ enableSandboxes: true }).enableSandboxes).toBe(true);
+  });
+
   it("defaults start-from-origin on for legacy configs", () => {
     expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true);
   });

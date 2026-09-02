@@ -28,6 +28,7 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { annotateEnvironmentRequest, requireEnvironmentScope } from "../auth/http.ts";
 import * as PairingGrantStore from "../auth/PairingGrantStore.ts";
 import * as ServerConfig from "../config.ts";
+import { readSandboxesEnabled } from "./sandboxFeature.ts";
 import * as SandboxDeploymentService from "./SandboxDeploymentService.ts";
 import * as SandboxGitHubAccess from "./SandboxGitHubAccess.ts";
 
@@ -72,6 +73,15 @@ function bearerCredential(authorization: string | undefined): string | undefined
 
 const noStoreResponseHeaders = HttpEffect.appendPreResponseHandler((_request, response) =>
   Effect.succeed(HttpServerResponse.setHeaders(response, NO_STORE_HEADERS)),
+);
+
+export const sandboxFeatureGateLayer = HttpRouter.middleware((httpEffect) =>
+  Effect.gen(function* () {
+    if (!(yield* readSandboxesEnabled)) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    return yield* httpEffect;
+  }),
 );
 
 export const sandboxBootstrapPairingRouteLayer = HttpRouter.add(

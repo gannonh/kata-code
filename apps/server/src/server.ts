@@ -116,7 +116,11 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
-import { sandboxBootstrapPairingRouteLayer, sandboxHttpApiLayer } from "./kataSandbox/http.ts";
+import {
+  sandboxBootstrapPairingRouteLayer,
+  sandboxFeatureGateLayer,
+  sandboxHttpApiLayer,
+} from "./kataSandbox/http.ts";
 import * as SandboxDeploymentService from "./kataSandbox/SandboxDeploymentService.ts";
 import * as NetService from "@kata-sh/code-shared/Net";
 import * as RelayClient from "@kata-sh/code-shared/relayClient";
@@ -460,6 +464,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     ),
     HttpApiBuilder.layer(SandboxHttpApi).pipe(
       Layer.provide(sandboxHttpApiLayer),
+      Layer.provide(sandboxFeatureGateLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
     sandboxBootstrapPairingRouteLayer,

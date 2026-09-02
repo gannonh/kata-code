@@ -162,3 +162,45 @@ jobs:
 
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
+
+  docker_sandbox_e2e:
+    name: Docker Sandbox E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@kata-sh/code-cli...
+              - --filter=@kata-sh/code-kata-sandbox-docker...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build host-platform sandbox image
+        run: |
+          node packages/kata-sandbox-docker/scripts/build-image.mjs \
+            --output-file "${{ runner.temp }}/kata-sandbox-dev-image.json"
+
+      - name: Run Docker sandbox HTTP E2E
+        env:
+          KATACODE_DOCKER_HTTP_E2E: "1"
+          KATACODE_SANDBOX_IMAGE_DIGEST_FILE: ${{ runner.temp }}/kata-sandbox-dev-image.json
+        run: vp test run apps/server/src/kataSandbox/DockerSandboxHttpE2E.test.ts

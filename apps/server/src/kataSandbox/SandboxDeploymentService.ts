@@ -61,6 +61,7 @@ import {
   makeOciRegistry,
   DEFAULT_MANAGED_IMAGE_REPOSITORY,
   SandboxDriverError,
+  type SandboxBootstrapFacts,
   type ManagedImageRegistry,
   type SandboxProviderDriver,
 } from "@kata-sh/code-kata-sandbox";
@@ -90,7 +91,8 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveHeadlessConnectionHost } from "../startupAccess.ts";
-import { makeDockerSandboxDriver } from "@kata-sh/code-kata-sandbox-docker";
+import { makeDockerSandboxDriver, publishHostForBind } from "@kata-sh/code-kata-sandbox-docker";
+import packageJson from "../../package.json" with { type: "json" };
 import { SandboxProviderRegistry } from "@kata-sh/code-kata-sandbox";
 import {
   SandboxDeploymentRepository,
@@ -147,9 +149,13 @@ export interface SandboxDeploymentServiceDependencies {
 export interface SandboxDeploymentServiceOptions {
   readonly driverFor?: (profile: SandboxProfile) => SandboxProviderDriver;
   readonly endpointHost?: string;
+  readonly publishHost?: string;
+  readonly sandboxImageRepository?: string;
+  readonly hostAvailability?: () => Effect.Effect<string | undefined>;
   readonly relayUrl?: string;
   readonly bootstrapManifestFor?: (
     profile: SandboxProfile,
+    facts?: SandboxBootstrapFacts,
   ) => SandboxDeploymentIntent["bootstrapManifest"];
   readonly now?: () => string;
   readonly schedule?: (effect: Effect.Effect<void, never>) => Effect.Effect<void, never>;
@@ -267,6 +273,27 @@ function operationResultForDeleted(deployment: SandboxDeployment) {
       ? { environmentId: deployment.environmentId }
       : {}),
   };
+}
+
+function probeSandboxHostAvailability(input: {
+  readonly driver: SandboxProviderDriver;
+  readonly registry: ManagedImageRegistry;
+  readonly serverVersion: string;
+}): Effect.Effect<string | undefined> {
+  return Effect.gen(function* () {
+    if (input.driver.probeHost !== undefined) {
+      const daemon = yield* input.driver.probeHost().pipe(Effect.either);
+      if (daemon._tag === "Left") return diagnostic(daemon.left);
+    }
+    const resolved = yield* resolveManagedImage(
+      { serverVersion: input.serverVersion, channel: "stable" },
+      input.registry,
+    ).pipe(Effect.either);
+    if (resolved._tag === "Left") {
+      return `Managed image for version ${input.serverVersion} was not found.`;
+    }
+    return undefined;
+  });
 }
 
 function driverAvailabilityReason(
@@ -407,6 +434,7 @@ export function makeSandboxDeploymentService(
   const endpointHost = options.endpointHost ?? "127.0.0.1";
   const defaultDriver = makeDockerSandboxDriver({
     endpointHost,
+    publishHost: options.publishHost ?? "127.0.0.1",
     checkoutCredential: dependencies.githubAccess.checkoutCredential,
   });
   const driverFor = options.driverFor ?? (() => defaultDriver);
@@ -419,9 +447,17 @@ export function makeSandboxDeploymentService(
     dependencies.managedImageRegistry ??
     makeOciRegistry({
       repository:
-        process.env.KATACODE_SANDBOX_IMAGE_REPOSITORY?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
+        options.sandboxImageRepository?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
     });
-  const bootstrapManifestFor = options.bootstrapManifestFor ?? buildSandboxBootstrapManifest;
+  const bootstrapManifestFor =
+    options.bootstrapManifestFor ??
+    ((profile, facts) => {
+      if (facts === undefined) {
+        throw new Error("Sandbox bootstrap facts are required to build a manifest.");
+      }
+      return buildSandboxBootstrapManifest(profile, facts);
+    });
+  const hostAvailability = options.hostAvailability ?? (() => Effect.succeed(undefined));
   const now = options.now ?? (() => new Date().toISOString());
   const operationScope = options.operationScope;
   const schedule: (effect: Effect.Effect<void, never>) => Effect.Effect<void, never> =
@@ -1801,11 +1837,16 @@ export function makeSandboxDeploymentService(
               Effect.catch(() => Effect.succeed(false)),
             )
           : false;
+      const hostDiagnostic = yield* hostAvailability();
       return {
         profiles: profileSummaries,
         deployments: deploymentSummaries,
         relayAvailable,
-        providers: providerRegistry.listDescriptors(),
+        providers: providerRegistry.listDescriptors().map((descriptor) =>
+          descriptor.driverKind === "docker" && hostDiagnostic !== undefined
+            ? { ...descriptor, availabilityDiagnostic: hostDiagnostic }
+            : descriptor,
+        ),
       };
     });
 
@@ -1903,8 +1944,11 @@ export function makeSandboxDeploymentService(
       const deploymentId = SandboxDeploymentId.make(
         yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
       );
+      const facts = yield* driverFor(profile)
+        .validateProfile(profile, undefined, { pullIfMissing: false })
+        .pipe(Effect.mapError(asServiceError));
       const bootstrapManifest = yield* Effect.try({
-        try: () => bootstrapManifestFor(profile),
+        try: () => bootstrapManifestFor(profile, facts),
         catch: (cause) => asServiceError(cause),
       });
       const intent = {
@@ -2117,15 +2161,21 @@ export function makeSandboxDeploymentService(
 
 const makeService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
+  const githubAccess = yield* SandboxGitHubAccess;
   const relayUrl = yield* relayUrlConfig.pipe(Effect.option, Effect.map(Option.getOrUndefined));
   const operationScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(operationScope, Exit.void));
+  const probeDriver = makeDockerSandboxDriver({
+    endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
+    publishHost: publishHostForBind(serverConfig.host),
+    checkoutCredential: githubAccess.checkoutCredential,
+  });
   const service = makeSandboxDeploymentService(
     {
       repository: yield* SandboxDeploymentRepository,
       environment: yield* ServerEnvironment.ServerEnvironment,
       cloudCliTokenManager: yield* CliTokenManager.CloudCliTokenManager,
-      githubAccess: yield* SandboxGitHubAccess,
+      githubAccess,
       credentialSeed: yield* SandboxCredentialSeed,
       secretStore: yield* ServerSecretStore.ServerSecretStore,
       crypto: yield* Crypto.Crypto,
@@ -2133,6 +2183,17 @@ const makeService = Effect.gen(function* () {
     },
     {
       endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
+      publishHost: publishHostForBind(serverConfig.host),
+      sandboxImageRepository: serverConfig.sandboxImageRepository,
+      hostAvailability: () =>
+        probeSandboxHostAvailability({
+          driver: probeDriver,
+          registry: makeOciRegistry({
+            repository:
+              serverConfig.sandboxImageRepository?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
+          }),
+          serverVersion: packageJson.version,
+        }),
       ...(relayUrl === undefined ? {} : { relayUrl }),
       operationScope,
     },

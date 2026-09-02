@@ -26,7 +26,11 @@ import {
   buildProviderSettingsArchive,
   dockerContainerName,
   dockerOwnershipLabels,
+  IMAGE_NOT_BUILT_BY_KATA,
+  hostIpForEndpoint,
   makeDockerSandboxDriver,
+  publishHostForBind,
+  sandboxImageLabels,
 } from "./driver.ts";
 
 const decodeProfile = Schema.decodeUnknownSync(SandboxProfile);
@@ -74,6 +78,17 @@ const intent = decodeIntent({
 });
 
 const manifest = intent.bootstrapManifest;
+const labeledImageInspect = JSON.stringify({
+  Config: {
+    Labels: sandboxImageLabels({
+      kataVersion: manifest.kataVersion,
+      serverVersion: manifest.serverVersion,
+      serverArtifactSha256: manifest.serverArtifactSha256,
+      codexVersion: manifest.codexVersion,
+      codexArtifactSha256: manifest.codexArtifactSha256,
+    }),
+  },
+});
 
 const inspect = (labels: Record<string, string>, running = false) => ({
   Id: "container-1",
@@ -106,7 +121,7 @@ describe("Docker sandbox driver", () => {
       engine: fakeEngine((request) => {
         requests.push(request);
         if (request.path === "/_ping") return response(200, "OK");
-        if (request.path.startsWith("/images/")) return response(200, "{}");
+        if (request.path.startsWith("/images/")) return response(200, labeledImageInspect);
         if (request.path === "/version") return response(200, '{"ApiVersion":"1.45"}');
         return response(404);
       }),
@@ -115,12 +130,32 @@ describe("Docker sandbox driver", () => {
     return Effect.gen(function* () {
       const result = yield* driver.validateProfile(profile);
       expect(result.imageDigest).toBe(profile.imageDigest);
+      expect(result.kataVersion).toBe(manifest.kataVersion);
+      expect(result.serverArtifactSha256).toBe(manifest.serverArtifactSha256);
+      expect(result.codexVersion).toBe(manifest.codexVersion);
       expect(requests.map((request) => request.path)).toEqual([
         "/_ping",
         "/images/" + encodeURIComponent(profile.imageDigest) + "/json",
         "/version",
       ]);
       expect(requests.some((request) => request.path.startsWith("/images/create"))).toBe(false);
+    });
+  });
+
+  it.effect("reports a missing Kata image label as an unavailable profile", () => {
+    const driver = makeDockerSandboxDriver({
+      engine: fakeEngine((request) => {
+        if (request.path === "/_ping") return response(200, "OK");
+        if (request.path.startsWith("/images/")) return response(200, "{}");
+        if (request.path === "/version") return response(200, '{"ApiVersion":"1.45"}');
+        return response(404);
+      }),
+    });
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.flip(driver.validateProfile(profile));
+      expect(result.reason).toBe("invalid-profile");
+      expect(result.message).toBe(IMAGE_NOT_BUILT_BY_KATA);
     });
   });
 
@@ -162,7 +197,7 @@ describe("Docker sandbox driver", () => {
         if (request.path === "/_ping") return response(200, "OK");
         if (request.path.startsWith("/images/") && request.path.endsWith("/json")) {
           inspectCount += 1;
-          return inspectCount === 1 ? response(404) : response(200, "{}");
+          return inspectCount === 1 ? response(404) : response(200, labeledImageInspect);
         }
         if (request.path.startsWith("/images/create")) {
           return response(
@@ -355,10 +390,56 @@ describe("Docker sandbox driver", () => {
       expect(body.Cmd?.[0]).toBe("sh");
       expect(body.Cmd?.[2]).toContain("while [ ! -f '/tmp/kata-sandbox-checkout-ready'");
       expect(body.Cmd?.[2]).toContain("exec katacode serve --host 0.0.0.0 --port 3773");
-      expect(body.HostConfig?.PortBindings?.["3773/tcp"]?.[0]?.HostIp).toBe("0.0.0.0");
+      expect(body.HostConfig?.PortBindings?.["3773/tcp"]?.[0]?.HostIp).toBe("192.168.1.42");
       expect(body.HostConfig?.Tmpfs).toEqual({
         "/run/kata-credentials": "rw,exec,nosuid,nodev,size=65536,uid=1001,gid=1001,mode=0700",
       });
+    });
+  });
+
+  it("binds published ports to loopback unless the control server opted into a host address", () => {
+    expect(hostIpForEndpoint("127.0.0.1")).toBe("127.0.0.1");
+    expect(hostIpForEndpoint("localhost")).toBe("127.0.0.1");
+    expect(hostIpForEndpoint("0.0.0.0")).toBe("127.0.0.1");
+    expect(hostIpForEndpoint("192.168.1.42")).toBe("192.168.1.42");
+    expect(publishHostForBind(undefined)).toBe("127.0.0.1");
+    expect(publishHostForBind("0.0.0.0")).toBe("127.0.0.1");
+    expect(publishHostForBind("192.168.1.42")).toBe("192.168.1.42");
+  });
+
+  it.effect("publishes loopback by default when the endpoint host is the machine LAN address", () => {
+    let createRequest: DockerRequest | undefined;
+    const driver = makeDockerSandboxDriver({
+      endpointHost: "192.168.1.42",
+      publishHost: "127.0.0.1",
+      engine: fakeEngine((request) => {
+        if (request.path.startsWith("/containers/create?")) {
+          createRequest = request;
+          return response(201, '{"Id":"container-1"}');
+        }
+        if (request.path === "/containers/container-1/json") {
+          return response(200, JSON.stringify(inspect(dockerOwnershipLabels(intent))));
+        }
+        return response(404);
+      }),
+    });
+
+    return Effect.gen(function* () {
+      yield* driver.allocate({
+        profile,
+        intent,
+        manifest,
+        codexAuthJson: new Uint8Array([123]),
+      });
+      const body = JSON.parse(createRequest?.body ?? "{}") as {
+        readonly HostConfig?: {
+          readonly PortBindings?: Record<
+            string,
+            ReadonlyArray<{ readonly HostIp?: string }>
+          >;
+        };
+      };
+      expect(body.HostConfig?.PortBindings?.["3773/tcp"]?.[0]?.HostIp).toBe("127.0.0.1");
     });
   });
 

@@ -9,6 +9,7 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
 import { EnvironmentId, PositiveInt, type ModelSelection } from "@kata-sh/code-contracts";
 import {
+  DEFAULT_DOCKER_SOCKET_PATH,
   DEFAULT_SANDBOX_CONTAINER_PORT,
   DEFAULT_SANDBOX_KATA_HOME,
   DEFAULT_SANDBOX_WORKSPACE_ROOT,
@@ -30,6 +31,7 @@ import {
   type SandboxProviderDriver,
   type SandboxProviderResourceInput,
   type SandboxStartedFacts,
+  type SandboxBootstrapFacts,
   type SandboxValidatedProfile,
   type SandboxValidationProgressReporter,
 } from "@kata-sh/code-kata-sandbox/driver";
@@ -43,6 +45,15 @@ const DOCKER_DESCRIPTOR = {
   displayName: "Docker",
   profileForm: "docker",
 } satisfies SandboxProviderDescriptor;
+export const SANDBOX_IMAGE_LABELS = {
+  kataVersion: "com.katacode.sandbox.kata-version",
+  serverVersion: "com.katacode.sandbox.server-version",
+  serverArtifactSha256: "com.katacode.sandbox.server-artifact-sha256",
+  codexVersion: "com.katacode.sandbox.codex-version",
+  codexArtifactSha256: "com.katacode.sandbox.codex-artifact-sha256",
+} as const;
+export const IMAGE_NOT_BUILT_BY_KATA = "image was not built by Kata Code";
+const SHA256_HEX = /^[0-9a-f]{64}$/i;
 const IMAGE_PULL_TIMEOUT_MS = 5 * 60_000;
 const READY_PATH = "/.well-known/kata/environment";
 const DEFAULT_ENDPOINT_HOST = "127.0.0.1";
@@ -71,6 +82,7 @@ export interface DockerSandboxDriverOptions {
   readonly socketPath?: string;
   readonly engineForSocketPath?: (socketPath: string) => DockerEngine;
   readonly endpointHost?: string;
+  readonly publishHost?: string;
   readonly now?: () => string;
   readonly checkoutCredential?: SandboxGitHubCheckoutCredential;
   readonly readinessProbe?: (
@@ -123,6 +135,24 @@ const decodeExecInspect = Schema.decodeUnknownSync(
 const decodeDockerVersion = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ ApiVersion: Schema.String })),
 );
+const decodeImageInspect = Schema.decodeUnknownSync(
+  Schema.Struct({
+    Config: Schema.optional(
+      Schema.Struct({
+        Labels: Schema.optional(
+          Schema.Union([Schema.Record(Schema.String, Schema.String), Schema.Null]),
+        ),
+      }),
+    ),
+    ContainerConfig: Schema.optional(
+      Schema.Struct({
+        Labels: Schema.optional(
+          Schema.Union([Schema.Record(Schema.String, Schema.String), Schema.Null]),
+        ),
+      }),
+    ),
+  }),
+);
 const decodeEnvironmentId = Schema.decodeUnknownSync(EnvironmentId);
 
 function decodeReadiness(value: unknown): ReadinessResponse {
@@ -167,9 +197,66 @@ function isLoopbackHost(host: string): boolean {
   return normalized === "localhost" || normalized === "::1" || normalized.startsWith("127.");
 }
 
-function hostIpForEndpoint(host: string): string {
-  if (isLoopbackHost(host)) return "127.0.0.1";
-  return host.includes(":") ? "::" : "0.0.0.0";
+function isUnspecifiedHost(host: string): boolean {
+  const normalized = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, "$1");
+  return normalized === "" || normalized === "0.0.0.0" || normalized === "::";
+}
+
+export function publishHostForBind(bindHost: string | undefined): string {
+  if (bindHost === undefined || isLoopbackHost(bindHost) || isUnspecifiedHost(bindHost)) {
+    return "127.0.0.1";
+  }
+  return bindHost.trim().replace(/^\[(.*)\]$/, "$1");
+}
+
+export function hostIpForEndpoint(host: string): string {
+  if (isLoopbackHost(host) || isUnspecifiedHost(host)) return "127.0.0.1";
+  return host.trim().replace(/^\[(.*)\]$/, "$1");
+}
+
+export function sandboxImageLabels(facts: SandboxBootstrapFacts): Record<string, string> {
+  return {
+    [SANDBOX_IMAGE_LABELS.kataVersion]: facts.kataVersion,
+    [SANDBOX_IMAGE_LABELS.serverVersion]: facts.serverVersion,
+    [SANDBOX_IMAGE_LABELS.serverArtifactSha256]: facts.serverArtifactSha256,
+    [SANDBOX_IMAGE_LABELS.codexVersion]: facts.codexVersion,
+    [SANDBOX_IMAGE_LABELS.codexArtifactSha256]: facts.codexArtifactSha256,
+  };
+}
+
+export function parseSandboxImageLabels(
+  labels: Record<string, string> | null | undefined,
+): SandboxBootstrapFacts | undefined {
+  if (labels === null || labels === undefined) return undefined;
+  const kataVersion = labels[SANDBOX_IMAGE_LABELS.kataVersion]?.trim();
+  const serverVersion = labels[SANDBOX_IMAGE_LABELS.serverVersion]?.trim();
+  const serverArtifactSha256 = labels[SANDBOX_IMAGE_LABELS.serverArtifactSha256]?.trim();
+  const codexVersion = labels[SANDBOX_IMAGE_LABELS.codexVersion]?.trim();
+  const codexArtifactSha256 = labels[SANDBOX_IMAGE_LABELS.codexArtifactSha256]?.trim();
+  if (
+    kataVersion === undefined ||
+    kataVersion.length === 0 ||
+    serverVersion === undefined ||
+    serverVersion.length === 0 ||
+    codexVersion === undefined ||
+    codexVersion.length === 0 ||
+    serverArtifactSha256 === undefined ||
+    !SHA256_HEX.test(serverArtifactSha256) ||
+    codexArtifactSha256 === undefined ||
+    !SHA256_HEX.test(codexArtifactSha256)
+  ) {
+    return undefined;
+  }
+  return {
+    kataVersion,
+    serverVersion,
+    serverArtifactSha256,
+    codexVersion,
+    codexArtifactSha256,
+  };
 }
 
 function endpointUrl(host: string, port: number): string {
@@ -296,6 +383,7 @@ function createBody(input: {
   readonly intent: SandboxDeploymentIntent;
   readonly bootstrapToken?: string;
   readonly endpointHost: string;
+  readonly publishHost?: string;
 }): string {
   const env = [
     "HOME=/home/katacode",
@@ -327,7 +415,7 @@ function createBody(input: {
       },
       PortBindings: {
         [DEFAULT_SANDBOX_CONTAINER_PORT + "/tcp"]: [
-          { HostIp: hostIpForEndpoint(input.endpointHost), HostPort: "" },
+          { HostIp: hostIpForEndpoint(input.publishHost ?? input.endpointHost), HostPort: "" },
         ],
       },
       AutoRemove: false,
@@ -911,6 +999,23 @@ function validateProfile(
         message: "Docker image inspection returned " + image.status + ".",
       });
     }
+    const inspect = yield* Effect.try({
+      try: () => decodeImageInspect(JSON.parse(image.body) as unknown),
+      catch: () =>
+        new SandboxDriverError({
+          reason: "invalid-profile",
+          message: IMAGE_NOT_BUILT_BY_KATA,
+        }),
+    });
+    const facts = parseSandboxImageLabels(
+      inspect.Config?.Labels ?? inspect.ContainerConfig?.Labels ?? null,
+    );
+    if (facts === undefined) {
+      return yield* new SandboxDriverError({
+        reason: "invalid-profile",
+        message: IMAGE_NOT_BUILT_BY_KATA,
+      });
+    }
     const version = yield* engine
       .request({ path: "/version" })
       .pipe(Effect.mapError((error) => engineFailure(error, "daemon-unavailable")));
@@ -923,7 +1028,40 @@ function validateProfile(
     const parsed = yield* decodeDockerVersion(version.body).pipe(
       Effect.mapError((cause) => asDriverError(cause, "daemon-unavailable")),
     );
-    return { daemonVersion: parsed.ApiVersion, imageDigest: profile.imageDigest };
+    return {
+      daemonVersion: parsed.ApiVersion,
+      imageDigest: profile.imageDigest,
+      ...facts,
+    };
+  });
+}
+
+export function probeDockerDaemon(
+  engine: DockerEngine,
+): Effect.Effect<{ readonly daemonVersion: string }, SandboxDriverError> {
+  return Effect.gen(function* () {
+    const ping = yield* engine
+      .request({ path: "/_ping" })
+      .pipe(Effect.mapError((error) => engineFailure(error, "daemon-unavailable")));
+    if (!isSuccess(ping.status)) {
+      return yield* new SandboxDriverError({
+        reason: "daemon-unavailable",
+        message: "Docker daemon returned " + ping.status + ".",
+      });
+    }
+    const version = yield* engine
+      .request({ path: "/version" })
+      .pipe(Effect.mapError((error) => engineFailure(error, "daemon-unavailable")));
+    if (!isSuccess(version.status)) {
+      return yield* new SandboxDriverError({
+        reason: "daemon-unavailable",
+        message: "Docker version returned " + version.status + ".",
+      });
+    }
+    const parsed = yield* decodeDockerVersion(version.body).pipe(
+      Effect.mapError((cause) => asDriverError(cause, "daemon-unavailable")),
+    );
+    return { daemonVersion: parsed.ApiVersion };
   });
 }
 
@@ -1003,6 +1141,7 @@ export function makeDockerSandboxDriver(
   const now = options.now ?? (() => new Date().toISOString());
   const readinessProbe = options.readinessProbe ?? defaultReadinessProbe;
   const endpointHost = options.endpointHost ?? DEFAULT_ENDPOINT_HOST;
+  const publishHost = options.publishHost;
 
   const inspectPowerResource = (
     input: SandboxProviderResourceInput,
@@ -1164,6 +1303,8 @@ export function makeDockerSandboxDriver(
     descriptor: DOCKER_DESCRIPTOR,
     validateProfile: (profile, reportProgress, validationOptions) =>
       validateProfile(engineFor(profile.socketPath), profile, reportProgress, validationOptions),
+    probeHost: () =>
+      probeDockerDaemon(engineFor(options.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH)),
     allocate: (input) =>
       Effect.gen(function* () {
         yield* validateAllocationInput(input);
@@ -1183,7 +1324,7 @@ export function makeDockerSandboxDriver(
           .request({
             path: "/containers/create?name=" + encodeURIComponent(name),
             method: "POST",
-            body: createBody({ ...input, endpointHost }),
+            body: createBody({ ...input, endpointHost, publishHost }),
           })
           .pipe(Effect.mapError((error) => engineFailure(error, "allocation-failed")));
         if (created.status === 409) {

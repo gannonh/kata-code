@@ -65,14 +65,18 @@ const source = {
   resolvedCommitSha: CommitSha.make("b".repeat(40)),
 };
 
-const testBootstrapManifest = (sandboxProfile: SandboxProfile) => ({
-  version: 1 as const,
-  imageDigest: sandboxProfile.imageDigest,
+const testBootstrapFacts = {
   kataVersion: "0.0.42",
   serverVersion: "0.0.42",
   serverArtifactSha256: "c".repeat(64),
   codexVersion: "0.1.0",
   codexArtifactSha256: "d".repeat(64),
+};
+
+const testBootstrapManifest = (sandboxProfile: SandboxProfile) => ({
+  version: 1 as const,
+  imageDigest: sandboxProfile.imageDigest,
+  ...testBootstrapFacts,
 });
 
 function makeDriver(
@@ -93,7 +97,8 @@ function makeDriver(
       profileForm: "docker",
     },
     validateProfile:
-      options.validateProfile ?? (() => Effect.succeed({ daemonVersion: "1.0", imageDigest })),
+      options.validateProfile ??
+      (() => Effect.succeed({ daemonVersion: "1.0", imageDigest, ...testBootstrapFacts })),
     allocate: (input) =>
       Effect.succeed({
         containerId: SandboxContainerId.make("container-1"),
@@ -1076,6 +1081,24 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           expect((yield* service.list()).profiles).toHaveLength(0);
         }),
       { driverFor: () => makeDriver() },
+    ),
+  );
+
+  it.effect("attaches host availability diagnostics to the Docker provider", () =>
+    runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const listed = yield* service.list();
+          const docker = listed.providers.find((provider) => provider.driverKind === "docker");
+          expect(docker?.availabilityDiagnostic).toBe(
+            "Managed image for version 0.0.42 was not found.",
+          );
+        }),
+      {
+        driverFor: () => makeDriver(),
+        hostAvailability: () =>
+          Effect.succeed("Managed image for version 0.0.42 was not found."),
+      },
     ),
   );
 

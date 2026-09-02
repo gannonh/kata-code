@@ -4,6 +4,8 @@ import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
+  AuthAccessWriteScope,
+  AuthAdministrativeScopes,
   type BackgroundActivityProfile,
   type DesktopUpdateChannel,
   ProviderDriverKind,
@@ -63,6 +65,7 @@ import {
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import { usePrimarySessionState } from "../../environments/primary";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -509,6 +512,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
         ? ["Provider update checks"]
         : []),
+      ...(settings.enableSandboxes !== DEFAULT_UNIFIED_SETTINGS.enableSandboxes
+        ? ["Sandboxes (preview)"]
+        : []),
       ...(isBackgroundActivityDirty ? ["Background activity"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
@@ -562,6 +568,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.glassOpacity,
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
+      settings.enableSandboxes,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarProjectGroupingMode,
@@ -648,6 +655,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       enableLegacyTokenStreaming: DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
+      enableSandboxes: DEFAULT_UNIFIED_SETTINGS.enableSandboxes,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
@@ -1763,6 +1771,45 @@ function LegacyFeaturesSection() {
   );
 }
 
+function SandboxesPreviewSetting() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const desktopBridge = window.desktopBridge;
+  const primarySessionState = usePrimarySessionState();
+  const currentSessionScopes = desktopBridge
+    ? AuthAdministrativeScopes
+    : primarySessionState.data?.authenticated
+      ? (primarySessionState.data.scopes ?? null)
+      : null;
+  const canAdminister = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
+  if (!canAdminister) return null;
+  return (
+    <SettingsRow
+      {...searchableSetting("sandboxes-preview")}
+      description="Turn on Docker sandboxes for this server. Off by default. Takes effect on the next request."
+      resetAction={
+        settings.enableSandboxes !== DEFAULT_UNIFIED_SETTINGS.enableSandboxes ? (
+          <SettingResetButton
+            label="sandboxes preview"
+            onClick={() =>
+              updateSettings({
+                enableSandboxes: DEFAULT_UNIFIED_SETTINGS.enableSandboxes,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.enableSandboxes}
+          onCheckedChange={(checked) => updateSettings({ enableSandboxes: Boolean(checked) })}
+          aria-label="Sandboxes (preview)"
+        />
+      }
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -2017,6 +2064,8 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        <SandboxesPreviewSetting />
 
         <SettingsRow
           title={

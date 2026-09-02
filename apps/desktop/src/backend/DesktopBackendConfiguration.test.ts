@@ -141,6 +141,7 @@ describe("DesktopBackendConfiguration", () => {
         assert.isUndefined(first.env.KATACODE_PORT);
         assert.isUndefined(first.env.KATACODE_MODE);
         assert.isUndefined(first.env.KATACODE_DESKTOP_LAN_HOST);
+        assert.notProperty(first.env, "KATACODE_SANDBOXES");
 
         assert.equal(first.bootstrap.mode, "desktop");
         assert.equal(first.bootstrap.noBrowser, true);
