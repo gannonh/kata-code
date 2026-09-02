@@ -82,7 +82,7 @@ export const sandboxFeatureGateLayer = HttpRouter.middleware((httpEffect) =>
     }
     return yield* httpEffect;
   }),
-);
+).layer;
 
 export const sandboxBootstrapPairingRouteLayer = HttpRouter.add(
   "POST",

@@ -427,6 +427,7 @@ const buildAppUnderTest = (options?: {
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
     sandboxGitHubAccess?: Partial<SandboxGitHubAccess.SandboxGitHubAccessShape>;
+    sandboxDeploymentService?: Partial<SandboxDeploymentService.SandboxDeploymentService["Service"]>;
   };
 }) =>
   Effect.gen(function* () {
@@ -959,7 +960,24 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.cloudCliTokenManager,
         }),
       ),
-      Layer.provide(Layer.mock(SandboxDeploymentService.SandboxDeploymentService)({})),
+      Layer.provide(
+        Layer.mock(SandboxDeploymentService.SandboxDeploymentService)({
+          list: () =>
+            Effect.succeed({
+              profiles: [],
+              deployments: [],
+              providers: [
+                {
+                  driverKind: "docker",
+                  category: "local-container",
+                  displayName: "Docker",
+                  profileForm: "docker",
+                },
+              ],
+            }),
+          ...options?.layers?.sandboxDeploymentService,
+        }),
+      ),
       Layer.provide(
         Layer.mock(SandboxGitHubAccess.SandboxGitHubAccess)({
           resolve: () => Effect.die("Sandbox GitHub source resolution not stubbed in this test"),
