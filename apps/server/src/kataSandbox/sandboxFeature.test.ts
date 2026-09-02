@@ -23,9 +23,6 @@ describe("sandbox feature flag", () => {
     const stored = { ...DEFAULT_SERVER_SETTINGS, enableSandboxes: false };
     assert.equal(presentServerSettingsForClient(stored, undefined).enableSandboxes, false);
     assert.equal(presentServerSettingsForClient(stored, true).enableSandboxes, true);
-    assert.equal(
-      applySandboxesOverride(stored, false).enableSandboxes,
-      false,
-    );
+    assert.equal(applySandboxesOverride(stored, false).enableSandboxes, false);
   });
 });

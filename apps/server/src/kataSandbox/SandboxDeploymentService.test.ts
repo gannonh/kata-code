@@ -1096,8 +1096,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
         }),
       {
         driverFor: () => makeDriver(),
-        hostAvailability: () =>
-          Effect.succeed("Managed image for version 0.0.42 was not found."),
+        hostAvailability: () => Effect.succeed("Managed image for version 0.0.42 was not found."),
       },
     ),
   );

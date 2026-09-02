@@ -5,10 +5,7 @@ import type { ServerSettings } from "@kata-sh/code-contracts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 
-export function sandboxesEnabled(
-  override: boolean | undefined,
-  stored: boolean,
-): boolean {
+export function sandboxesEnabled(override: boolean | undefined, stored: boolean): boolean {
   return override ?? stored;
 }
 

@@ -446,8 +446,7 @@ export function makeSandboxDeploymentService(
     options.managedImageRegistry ??
     dependencies.managedImageRegistry ??
     makeOciRegistry({
-      repository:
-        options.sandboxImageRepository?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
+      repository: options.sandboxImageRepository?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
     });
   const bootstrapManifestFor =
     options.bootstrapManifestFor ??
@@ -1842,11 +1841,13 @@ export function makeSandboxDeploymentService(
         profiles: profileSummaries,
         deployments: deploymentSummaries,
         relayAvailable,
-        providers: providerRegistry.listDescriptors().map((descriptor) =>
-          descriptor.driverKind === "docker" && hostDiagnostic !== undefined
-            ? { ...descriptor, availabilityDiagnostic: hostDiagnostic }
-            : descriptor,
-        ),
+        providers: providerRegistry
+          .listDescriptors()
+          .map((descriptor) =>
+            descriptor.driverKind === "docker" && hostDiagnostic !== undefined
+              ? { ...descriptor, availabilityDiagnostic: hostDiagnostic }
+              : descriptor,
+          ),
       };
     });
 

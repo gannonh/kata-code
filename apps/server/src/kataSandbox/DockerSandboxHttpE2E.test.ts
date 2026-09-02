@@ -129,7 +129,7 @@ function stopServe(child: NodeChildProcess.ChildProcess): Effect.Effect<void> {
     }
   }).pipe(
     Effect.andThen(
-      Effect.async<void>((resume) => {
+      Effect.callback<void>((resume) => {
         if (child.exitCode !== null || child.signalCode !== null) {
           resume(Effect.void);
           return;
@@ -153,7 +153,7 @@ function stopServe(child: NodeChildProcess.ChildProcess): Effect.Effect<void> {
 }
 
 function waitForPairing(child: NodeChildProcess.ChildProcess, output: { text: string }) {
-  return Effect.async<{ readonly origin: string; readonly token: string }, Error>((resume) => {
+  return Effect.callback<{ readonly origin: string; readonly token: string }, Error>((resume) => {
     const settle = () => {
       const match = /Pairing URL:\s*(\S+)/.exec(output.text);
       if (match === null) return false;
@@ -188,12 +188,14 @@ function waitForPairing(child: NodeChildProcess.ChildProcess, output: { text: st
       child.off("exit", onExit);
     });
   }).pipe(
-    Effect.timeoutFail({
+    Effect.timeoutOrElse({
       duration: Duration.seconds(60),
-      onTimeout: () =>
-        new DockerSandboxHttpE2EError({
-          message: `Timed out waiting for the isolated serve pairing URL.\n${output.text}`,
-        }),
+      orElse: () =>
+        Effect.fail(
+          new DockerSandboxHttpE2EError({
+            message: `Timed out waiting for the isolated serve pairing URL.\n${output.text}`,
+          }),
+        ),
     }),
   );
 }
@@ -313,9 +315,7 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
     () => {
       const imageDigest = readImageDigest();
       const profileId = `docker-http-e2e-${NodeCrypto.randomUUID()}`;
-      const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "kata-sandbox-http-e2e-"),
-      );
+      const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kata-sandbox-http-e2e-"));
       const codexHome = NodePath.join(baseDir, "codex-home");
       writeIsolatedHome(baseDir, codexHome);
 

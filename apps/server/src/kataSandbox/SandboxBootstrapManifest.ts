@@ -1,4 +1,7 @@
-import type { SandboxBootstrapManifest, SandboxProfile } from "@kata-sh/code-kata-sandbox-contracts/domain";
+import type {
+  SandboxBootstrapManifest,
+  SandboxProfile,
+} from "@kata-sh/code-kata-sandbox-contracts/domain";
 import type { SandboxBootstrapFacts } from "@kata-sh/code-kata-sandbox/driver";
 
 export function buildSandboxBootstrapManifest(

@@ -427,7 +427,9 @@ const buildAppUnderTest = (options?: {
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
     sandboxGitHubAccess?: Partial<SandboxGitHubAccess.SandboxGitHubAccessShape>;
-    sandboxDeploymentService?: Partial<SandboxDeploymentService.SandboxDeploymentService["Service"]>;
+    sandboxDeploymentService?: Partial<
+      SandboxDeploymentService.SandboxDeploymentService["Service"]
+    >;
   };
 }) =>
   Effect.gen(function* () {
@@ -4019,7 +4021,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       };
 
       assert.equal(listResponse.status, 200);
-      assert.equal(body.providers.some((provider) => provider.driverKind === "docker"), true);
+      assert.equal(
+        body.providers.some((provider) => provider.driverKind === "docker"),
+        true,
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

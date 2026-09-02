@@ -16,6 +16,8 @@ describe("Connections sandbox gate", () => {
   });
 
   it("shows the Sandboxes section when scope and the preview flag are on", () => {
-    expect(canShowHostSandboxes({ canManageHostSandboxes: true, enableSandboxes: true })).toBe(true);
+    expect(canShowHostSandboxes({ canManageHostSandboxes: true, enableSandboxes: true })).toBe(
+      true,
+    );
   });
 });

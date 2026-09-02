@@ -120,10 +120,7 @@ export interface SandboxProviderDriver {
     reportProgress?: SandboxValidationProgressReporter,
     options?: SandboxValidationOptions,
   ) => Effect.Effect<SandboxValidatedProfile, SandboxDriverError>;
-  readonly probeHost?: () => Effect.Effect<
-    { readonly daemonVersion: string },
-    SandboxDriverError
-  >;
+  readonly probeHost?: () => Effect.Effect<{ readonly daemonVersion: string }, SandboxDriverError>;
   readonly allocate: (
     input: SandboxAllocationInput,
   ) => Effect.Effect<DockerResourceHandle, SandboxDriverError>;

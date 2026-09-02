@@ -407,41 +407,41 @@ describe("Docker sandbox driver", () => {
     expect(publishHostForBind("192.168.1.42")).toBe("192.168.1.42");
   });
 
-  it.effect("publishes loopback by default when the endpoint host is the machine LAN address", () => {
-    let createRequest: DockerRequest | undefined;
-    const driver = makeDockerSandboxDriver({
-      endpointHost: "192.168.1.42",
-      publishHost: "127.0.0.1",
-      engine: fakeEngine((request) => {
-        if (request.path.startsWith("/containers/create?")) {
-          createRequest = request;
-          return response(201, '{"Id":"container-1"}');
-        }
-        if (request.path === "/containers/container-1/json") {
-          return response(200, JSON.stringify(inspect(dockerOwnershipLabels(intent))));
-        }
-        return response(404);
-      }),
-    });
-
-    return Effect.gen(function* () {
-      yield* driver.allocate({
-        profile,
-        intent,
-        manifest,
-        codexAuthJson: new Uint8Array([123]),
+  it.effect(
+    "publishes loopback by default when the endpoint host is the machine LAN address",
+    () => {
+      let createRequest: DockerRequest | undefined;
+      const driver = makeDockerSandboxDriver({
+        endpointHost: "192.168.1.42",
+        publishHost: "127.0.0.1",
+        engine: fakeEngine((request) => {
+          if (request.path.startsWith("/containers/create?")) {
+            createRequest = request;
+            return response(201, '{"Id":"container-1"}');
+          }
+          if (request.path === "/containers/container-1/json") {
+            return response(200, JSON.stringify(inspect(dockerOwnershipLabels(intent))));
+          }
+          return response(404);
+        }),
       });
-      const body = JSON.parse(createRequest?.body ?? "{}") as {
-        readonly HostConfig?: {
-          readonly PortBindings?: Record<
-            string,
-            ReadonlyArray<{ readonly HostIp?: string }>
-          >;
+
+      return Effect.gen(function* () {
+        yield* driver.allocate({
+          profile,
+          intent,
+          manifest,
+          codexAuthJson: new Uint8Array([123]),
+        });
+        const body = JSON.parse(createRequest?.body ?? "{}") as {
+          readonly HostConfig?: {
+            readonly PortBindings?: Record<string, ReadonlyArray<{ readonly HostIp?: string }>>;
+          };
         };
-      };
-      expect(body.HostConfig?.PortBindings?.["3773/tcp"]?.[0]?.HostIp).toBe("127.0.0.1");
-    });
-  });
+        expect(body.HostConfig?.PortBindings?.["3773/tcp"]?.[0]?.HostIp).toBe("127.0.0.1");
+      });
+    },
+  );
 
   it.effect("streams the GitHub token only through upgraded exec stdin", () => {
     const labels = dockerOwnershipLabels(intent);

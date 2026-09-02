@@ -1303,8 +1303,7 @@ export function makeDockerSandboxDriver(
     descriptor: DOCKER_DESCRIPTOR,
     validateProfile: (profile, reportProgress, validationOptions) =>
       validateProfile(engineFor(profile.socketPath), profile, reportProgress, validationOptions),
-    probeHost: () =>
-      probeDockerDaemon(engineFor(options.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH)),
+    probeHost: () => probeDockerDaemon(engineFor(options.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH)),
     allocate: (input) =>
       Effect.gen(function* () {
         yield* validateAllocationInput(input);
