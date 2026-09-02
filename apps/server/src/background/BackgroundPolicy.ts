@@ -29,6 +29,9 @@ import * as HostPowerMonitor from "./HostPowerMonitor.ts";
 export class BackgroundPolicy extends Context.Service<
   BackgroundPolicy,
   {
+    readonly registerClientConnection: Effect.Effect<void>;
+    readonly unregisterClientConnection: Effect.Effect<void>;
+    readonly connectedClientCount: Effect.Effect<number>;
     readonly reportClientActivity: (
       sessionId: AuthSessionId,
       rpcClientId: RpcClientId,
@@ -212,6 +215,7 @@ export const make = Effect.fn("background.policy.make")(function* () {
   const hostPowerMonitor = yield* HostPowerMonitor.HostPowerMonitor;
   const serverSettings = yield* ServerSettingsService;
   const leasesRef = yield* Ref.make(new Map<string, ClientActivityLease>());
+  const connectedClientCountRef = yield* Ref.make(0);
   const changes = yield* PubSub.sliding<BackgroundPolicySnapshot>(1);
   const publishMutex = yield* Semaphore.make(1);
 
@@ -334,6 +338,11 @@ export const make = Effect.fn("background.policy.make")(function* () {
   ).pipe(Effect.forkScoped);
 
   return BackgroundPolicy.of({
+    registerClientConnection: Ref.update(connectedClientCountRef, (count) => count + 1),
+    unregisterClientConnection: Ref.update(connectedClientCountRef, (count) =>
+      Math.max(0, count - 1),
+    ),
+    connectedClientCount: Ref.get(connectedClientCountRef),
     reportClientActivity,
     removeRpcClient,
     reportHostPowerState: hostPowerMonitor.report,

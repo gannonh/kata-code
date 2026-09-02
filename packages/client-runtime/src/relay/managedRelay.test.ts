@@ -1,5 +1,8 @@
 import { EnvironmentId } from "@kata-sh/code-contracts";
-import { RelayEnvironmentStatusScope } from "@kata-sh/code-contracts/relay";
+import {
+  RelayEnvironmentConnectScope,
+  RelayEnvironmentStatusScope,
+} from "@kata-sh/code-contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -273,6 +276,15 @@ describe("ManagedRelayClient", () => {
         thumbprint: "client-thumbprint",
         scopes: [RelayEnvironmentStatusScope],
         accessToken: "stale-relay-token",
+        expiresAtMillis: Number.MAX_SAFE_INTEGER,
+      },
+      {
+        accountId: "user-1",
+        clientId: "kata-mobile",
+        relayUrl: "https://relay.example.test",
+        thumbprint: "client-thumbprint",
+        scopes: [RelayEnvironmentStatusScope, RelayEnvironmentConnectScope],
+        accessToken: "stale-broader-relay-token",
         expiresAtMillis: Number.MAX_SAFE_INTEGER,
       },
     ];

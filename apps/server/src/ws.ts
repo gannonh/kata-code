@@ -383,6 +383,8 @@ const makeWsRpcLayer = (
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
+      yield* backgroundPolicy.registerClientConnection;
+      yield* Effect.addFinalizer(() => backgroundPolicy.unregisterClientConnection);
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(

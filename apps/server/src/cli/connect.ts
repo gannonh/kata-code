@@ -53,6 +53,7 @@ import {
   offerServiceDuringOnboarding,
   recoverServiceOnboardingOffer,
 } from "./service.ts";
+import { spriteConnectCommand } from "./sprite.ts";
 
 const jsonFlag = Flag.boolean("json").pipe(
   Flag.withDescription("Emit JSON instead of human-readable output."),
@@ -738,5 +739,6 @@ export const connectCommand = Command.make("connect", {
     connectStatusCommand,
     connectUnlinkCommand,
     connectLogoutCommand,
+    spriteConnectCommand,
   ]),
 );
