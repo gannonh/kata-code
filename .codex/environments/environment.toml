@@ -8,4 +8,4 @@ vp i
 ln -sf $CODEX_SOURCE_TREE_PATH/.env $CODEX_WORKTREE_PATH/.env 
 ln -sf $CODEX_SOURCE_TREE_PATH/infra/relay/.env $CODEX_WORKTREE_PATH/infra/relay/.env 
 node $CODEX_WORKTREE_PATH/apps/web/scripts/warm-dep-cache.ts
-$CODEX_WORKTREE_PATH/scripts/install-skills.sh'''
+(cd "$CODEX_WORKTREE_PATH" && ./scripts/install-skills.sh)'''
