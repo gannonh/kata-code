@@ -22,21 +22,13 @@ Specs for this repository are GitHub Issues, not files.
 
 ## Skills
 
-Product OS is plan-build-verify. Install the per-project skills (no `-g`) so cloud VMs get them:
+Product OS is plan-build-verify. Bootstrap shared workflow skills and project-specific installs (no `-g`) so cloud VMs and worktrees pick them up:
 
 ```bash
 ./scripts/install-skills.sh
 ```
 
-Or the equivalent:
-
-```bash
-npx skills add gannonh/skills --skill plan-build-verify --skill address-pr-comments -y
-```
-
-First-party skills in git: `ios-debugger-agent`, `ios-simulator-browser`, `test-t3-app`, `test-t3-mobile`, `verify-katacode`. Everything else under `.agents/skills` is installed locally and is not tracked.
-
-Do not install the whole `gannonh/skills` pack. Cursor deep mode uses the pstack plugin; do not npx-install `ps`. Leave first-party skills alone.
+`worktree:setup` and Codex's environment hook call this automatically. The script runs `@gannonh/agent-setup`'s shared skill pack, adds the repo-critical `plan-build-verify` skill, and installs Maestro for mobile testing; copies land in `.agents/skills/` and `.claude/skills/` and are gitignored. First-party skills in git: `ios-debugger-agent`, `ios-simulator-browser`, `test-t3-app`, `test-t3-mobile`, `verify-katacode`. Do not install the whole `gannonh/skills` pack. Cursor deep mode uses the pstack plugin; do not npx-install `ps`. Leave first-party skills alone. For a full machine bootstrap (Codex/Cursor plugins, Pi extensions, home-dir configs), use `npx @gannonh/agent-setup --all`.
 
 ## What makes Kata Code special?
 
