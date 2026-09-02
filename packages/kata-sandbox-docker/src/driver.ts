@@ -55,6 +55,7 @@ export const SANDBOX_IMAGE_LABELS = {
 export const IMAGE_NOT_BUILT_BY_KATA = "image was not built by Kata Code";
 const SHA256_HEX = /^[0-9a-f]{64}$/i;
 const IMAGE_PULL_TIMEOUT_MS = 5 * 60_000;
+const CHECKOUT_TIMEOUT_MS = 2 * 60_000;
 const READY_PATH = "/.well-known/kata/environment";
 const DEFAULT_ENDPOINT_HOST = "127.0.0.1";
 const CHECKOUT_READY_PATH = "/tmp/kata-sandbox-checkout-ready";
@@ -664,6 +665,7 @@ function authenticatedCheckout(
           authenticatedCheckoutCommand(intent),
           "/",
           "setup-failed",
+          CHECKOUT_TIMEOUT_MS,
         ).pipe(Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")));
         if (result.exitCode !== 0) {
           return yield* checkoutFailure(result.exitCode);
@@ -771,6 +773,7 @@ function exec(
   command: string,
   cwd: string,
   reason: SandboxDriverError["reason"],
+  timeoutMs?: number,
 ): Effect.Effect<
   { readonly exitCode: number; readonly stdout: string; readonly stderr: string },
   SandboxDriverError
@@ -805,6 +808,7 @@ function exec(
         method: "POST",
         body: JSON.stringify({ Detach: false, Tty: false }),
         hijacked: true,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       })
       .pipe(Effect.mapError((error) => engineFailure(error, reason)));
     const output = demultiplex(started.body);
@@ -1522,7 +1526,18 @@ export function makeDockerSandboxDriver(
             hostPort: PositiveInt.make(port),
           },
         } satisfies SandboxIdentifiedFacts;
-      }),
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: "4 minutes",
+          orElse: () =>
+            Effect.fail(
+              new SandboxDriverError({
+                reason: "setup-failed",
+                message: "Sandbox identify timed out.",
+              }),
+            ),
+        }),
+      ),
     observe: (input): Effect.Effect<ProviderObservation, SandboxDriverError> =>
       powerObservation({ profile: input.profile, resource: input.resource }),
     delete: (input): Effect.Effect<ProviderObservation, SandboxDriverError> => {

@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - Docker Engine access uses the Unix-socket HTTP API.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off - Docker Engine access uses the Unix-socket HTTP API.
 import * as NodeHttp from "node:http";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -42,25 +42,45 @@ export interface DockerEngine {
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 function requestHeaders(request: DockerRequest): Record<string, string> {
+  const headers: Record<string, string> = {};
   if (request.body !== undefined) {
-    return {
-      "Content-Type": "application/json",
-      "Content-Length": String(Buffer.byteLength(request.body)),
-    };
+    headers["Content-Type"] = "application/json";
+    headers["Content-Length"] = String(Buffer.byteLength(request.body));
+  } else if (request.bodyBytes !== undefined) {
+    headers["Content-Type"] = request.contentType ?? "application/x-tar";
+    headers["Content-Length"] = String(request.bodyBytes.byteLength);
   }
-  if (request.bodyBytes !== undefined) {
-    return {
-      "Content-Type": request.contentType ?? "application/x-tar",
-      "Content-Length": String(request.bodyBytes.byteLength),
-    };
+  if (request.hijacked === true) {
+    headers.Connection = "Upgrade";
+    headers.Upgrade = "tcp";
   }
-  return request.hijacked === true ? { Connection: "close" } : {};
+  return headers;
 }
 
 function normalizeError(cause: unknown): DockerEngineError {
   return new DockerEngineError({
     message: cause instanceof Error ? cause.message : String(cause),
     cause,
+  });
+}
+
+function timeoutError(path: string, timeoutMs: number): DockerEngineError {
+  return new DockerEngineError({
+    message: `Docker request ${path} timed out after ${timeoutMs}ms`,
+  });
+}
+
+function destroyLater(
+  socket: { destroy: (error?: Error) => void } | undefined,
+  request: NodeHttp.ClientRequest,
+): void {
+  setImmediate(() => {
+    try {
+      socket?.destroy();
+      request.destroy();
+    } catch {
+      // Hijacked Docker sockets can block destroy after the request settled.
+    }
   });
 }
 
@@ -75,61 +95,66 @@ function makeRequest(
       new Promise<DockerResponse | DockerBufferResponse>((resolve, reject) => {
         let settled = false;
         let nodeRequest: NodeHttp.ClientRequest;
-        const onAbort = () =>
-          nodeRequest.destroy(new Error(`Docker request ${request.path} was interrupted`));
+        let upgradedSocket: { destroy: (error?: Error) => void } | undefined;
+        let timer: ReturnType<typeof setTimeout> | undefined;
         const settle = (complete: () => void) => {
           if (settled) return;
           settled = true;
+          if (timer !== undefined) clearTimeout(timer);
           signal.removeEventListener("abort", onAbort);
           complete();
         };
-
-        nodeRequest = NodeHttp.request(
-          {
-            socketPath,
-            path: request.path,
-            method: request.method ?? "GET",
-            headers: requestHeaders(request),
-            timeout: timeoutMs,
-          },
-          (response) => {
-            const chunks: Buffer[] = [];
-            const onTimeout = () =>
-              nodeRequest.destroy(
-                new DockerEngineError({
-                  message: `Docker request ${request.path} timed out after ${timeoutMs}ms`,
-                }),
-              );
-            // ClientRequest#timeout only covers time-to-headers. Hijacked Docker
-            // exec start returns headers immediately and streams until the command
-            // exits, so a silent git fetch would hang until the caller gave up.
-            if (timeoutMs > 0) response.setTimeout(timeoutMs, onTimeout);
-            response.on("error", (cause) => settle(() => reject(cause)));
-            response.on("data", (chunk: Buffer | string) =>
-              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
-            );
-            response.on("end", () => {
-              const body = Buffer.concat(chunks);
-              settle(() =>
-                resolve(
-                  binary
-                    ? { status: response.statusCode ?? 0, body }
-                    : { status: response.statusCode ?? 0, body: body.toString("utf8") },
-                ),
-              );
-            });
-          },
-        );
-        if (timeoutMs > 0) {
-          nodeRequest.on("timeout", () =>
-            nodeRequest.destroy(
-              new DockerEngineError({
-                message: `Docker request ${request.path} timed out after ${timeoutMs}ms`,
-              }),
-            ),
+        const fail = (cause: unknown) =>
+          settle(() => {
+            reject(cause);
+            destroyLater(upgradedSocket, nodeRequest);
+          });
+        const onAbort = () => fail(new Error(`Docker request ${request.path} was interrupted`));
+        const onTimeout = () => fail(timeoutError(request.path, timeoutMs));
+        const finish = (status: number, chunks: Buffer[]) => {
+          const body = Buffer.concat(chunks);
+          settle(() =>
+            resolve(binary ? { status, body } : { status, body: body.toString("utf8") }),
           );
+        };
+
+        nodeRequest = NodeHttp.request({
+          socketPath,
+          path: request.path,
+          method: request.method ?? "GET",
+          headers: requestHeaders(request),
+          timeout: timeoutMs,
+        });
+        nodeRequest.on("response", (response) => {
+          const chunks: Buffer[] = [];
+          // ClientRequest#timeout only covers time-to-headers. Hijacked Docker
+          // exec start returns headers immediately and streams until the command
+          // exits. Destroy without reject left identify Running for 10 minutes.
+          if (timeoutMs > 0) response.setTimeout(timeoutMs, onTimeout);
+          response.on("error", fail);
+          response.on("data", (chunk: Buffer | string) =>
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+          );
+          response.on("end", () => finish(response.statusCode ?? 0, chunks));
+        });
+        nodeRequest.on("upgrade", (response, socket, head) => {
+          upgradedSocket = socket;
+          const chunks: Buffer[] = [];
+          if (head.length > 0) chunks.push(head);
+          if (timeoutMs > 0) socket.setTimeout(timeoutMs, onTimeout);
+          socket.on("error", fail);
+          socket.on("data", (chunk: Buffer | string) =>
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+          );
+          socket.on("end", () => finish(response.statusCode ?? 0, chunks));
+        });
+        if (timeoutMs > 0) {
+          nodeRequest.on("timeout", onTimeout);
+          if (request.hijacked === true) {
+            timer = setTimeout(onTimeout, timeoutMs);
+          }
         }
-        nodeRequest.on("error", (cause) => settle(() => reject(cause)));
+        nodeRequest.on("error", fail);
         signal.addEventListener("abort", onAbort, { once: true });
         if (signal.aborted) onAbort();
         if (request.body !== undefined) nodeRequest.write(request.body);
@@ -154,6 +179,7 @@ function makeStdinRequest(
           | (NodeJS.WritableStream & { destroy: (error?: Error) => void })
           | undefined;
         const chunks: Buffer[] = [];
+        let timer: ReturnType<typeof setTimeout> | undefined;
         const nodeRequest = NodeHttp.request({
           socketPath,
           path: request.path,
@@ -165,34 +191,29 @@ function makeStdinRequest(
           },
           timeout: timeoutMs,
         });
-        const onAbort = () => {
-          const error = new Error(`Docker request ${request.path} was interrupted`);
-          upgradedSocket?.destroy(error);
-          nodeRequest.destroy(error);
-        };
         const settle = (complete: () => void) => {
           if (settled) return;
           settled = true;
+          if (timer !== undefined) clearTimeout(timer);
           signal.removeEventListener("abort", onAbort);
           complete();
         };
+        const fail = (cause: unknown) =>
+          settle(() => {
+            reject(cause);
+            destroyLater(upgradedSocket, nodeRequest);
+          });
+        const onAbort = () => fail(new Error(`Docker request ${request.path} was interrupted`));
+        const onTimeout = () => fail(timeoutError(request.path, timeoutMs));
 
         nodeRequest.on("upgrade", (response, socket, head) => {
           upgradedSocket = socket;
-          if (timeoutMs > 0) {
-            socket.setTimeout(timeoutMs, () =>
-              socket.destroy(
-                new DockerEngineError({
-                  message: `Docker request ${request.path} timed out after ${timeoutMs}ms`,
-                }),
-              ),
-            );
-          }
+          if (timeoutMs > 0) socket.setTimeout(timeoutMs, onTimeout);
           if (head.length > 0) chunks.push(head);
           socket.on("data", (chunk: Buffer | string) =>
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
           );
-          socket.on("error", (cause) => settle(() => reject(cause)));
+          socket.on("error", fail);
           socket.on("end", () =>
             settle(() =>
               resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks) }),
@@ -206,7 +227,8 @@ function makeStdinRequest(
           socket.end(Buffer.from(stdin.buffer, stdin.byteOffset, stdin.byteLength));
         });
         nodeRequest.on("response", (response) => {
-          response.on("error", (cause) => settle(() => reject(cause)));
+          if (timeoutMs > 0) response.setTimeout(timeoutMs, onTimeout);
+          response.on("error", fail);
           response.on("data", (chunk: Buffer | string) =>
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
           );
@@ -217,15 +239,10 @@ function makeStdinRequest(
           );
         });
         if (timeoutMs > 0) {
-          nodeRequest.on("timeout", () => {
-            const error = new DockerEngineError({
-              message: `Docker request ${request.path} timed out after ${timeoutMs}ms`,
-            });
-            upgradedSocket?.destroy(error);
-            nodeRequest.destroy(error);
-          });
+          nodeRequest.on("timeout", onTimeout);
+          timer = setTimeout(onTimeout, timeoutMs);
         }
-        nodeRequest.on("error", (cause) => settle(() => reject(cause)));
+        nodeRequest.on("error", fail);
         signal.addEventListener("abort", onAbort, { once: true });
         if (signal.aborted) onAbort();
         if (request.body !== undefined) nodeRequest.write(request.body);

@@ -283,12 +283,38 @@ function containerLogs(ids: ReadonlyArray<string>): string {
   if (ids.length === 0) return "";
   return ids
     .map((id) => {
-      const result = NodeChildProcess.spawnSync("docker", ["logs", "--tail", "80", id], {
+      const inspect = NodeChildProcess.spawnSync(
+        "docker",
+        [
+          "inspect",
+          "--format",
+          "{{.State.Status}} error={{.State.Error}} exit={{.State.ExitCode}}",
+          id,
+        ],
+        { encoding: "utf8" },
+      );
+      const logs = NodeChildProcess.spawnSync("docker", ["logs", "--tail", "80", id], {
         encoding: "utf8",
       });
-      return `--- docker logs ${id} ---\n${result.stdout}\n${result.stderr}`;
+      return `--- docker ${id} ---\n${inspect.stdout}${inspect.stderr}--- logs ---\n${logs.stdout}\n${logs.stderr}`;
     })
     .join("\n");
+}
+
+function describeDocker(profileId: string, deploymentId?: string): string {
+  try {
+    const listed = NodeChildProcess.spawnSync(
+      "docker",
+      ["ps", "-a", "--filter", "name=kata-sandbox-", "--format", "{{.ID}} {{.Status}} {{.Names}}"],
+      { encoding: "utf8" },
+    );
+    const ids = dockerIds(
+      ownedContainerFilters({ profileId, ...(deploymentId === undefined ? {} : { deploymentId }) }),
+    );
+    return `deploymentId=${deploymentId ?? ""}\n${listed.stdout}${listed.stderr}\n${containerLogs(ids)}`;
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause);
+  }
 }
 
 function describeReceipt(receipt: SandboxReceipt): string {
@@ -313,7 +339,7 @@ function waitForReceipt(input: {
   readonly token: string;
   readonly operationId: string;
   readonly ceiling: Duration.Duration;
-  readonly diagnostics?: () => string;
+  readonly diagnostics?: (receipt: SandboxReceipt) => string;
 }) {
   return Effect.gen(function* () {
     const deadline = (yield* Clock.currentTimeMillis) + Duration.toMillis(input.ceiling);
@@ -333,12 +359,12 @@ function waitForReceipt(input: {
       if (receipt.status === "Succeeded") return receipt;
       if (receipt.status === "Failed") {
         return yield* new DockerSandboxHttpE2EError({
-          message: `${receipt.error ?? `Sandbox operation ${input.operationId} failed.`}\n${input.diagnostics?.() ?? ""}`,
+          message: `${receipt.error ?? `Sandbox operation ${input.operationId} failed.`}\n${input.diagnostics?.(receipt) ?? ""}`,
         });
       }
       if ((yield* Clock.currentTimeMillis) >= deadline) {
         return yield* new DockerSandboxHttpE2EError({
-          message: `Timed out waiting for sandbox operation ${input.operationId} (${describeReceipt(receipt)}).\n${input.diagnostics?.() ?? ""}`,
+          message: `Timed out waiting for sandbox operation ${input.operationId} (${describeReceipt(receipt)}).\n${input.diagnostics?.(receipt) ?? ""}`,
         });
       }
       yield* Effect.sleep("250 millis");
@@ -435,8 +461,8 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
             enabled: true,
           },
         });
-        const diagnostics = () =>
-          `${output.text}\n${containerLogs(dockerIds(ownedContainerFilters({ profileId, ...(deploymentId === undefined ? {} : { deploymentId }) })))}`;
+        const diagnostics = (receipt: SandboxReceipt) =>
+          `${output.text}\n${describeDocker(profileId, receipt.deploymentId ?? deploymentId)}`;
         const upserted = yield* waitForReceipt({
           origin: pairing.origin,
           token,
