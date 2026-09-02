@@ -171,7 +171,8 @@ jobs:
       contents: read
       actions: write
     env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      # secrets.GH_TOKEN is optional; an empty value shadows GITHUB_TOKEN and `gh auth status` fails.
+      GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
