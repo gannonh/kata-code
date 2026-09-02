@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - the gated harness spawns an isolated serve process and talks HTTP plus Docker CLI.
+// @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off - the gated harness spawns an isolated serve process and talks HTTP plus Docker CLI.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -14,6 +14,7 @@ import {
 } from "@kata-sh/code-contracts";
 import { SandboxProviderLabels } from "@kata-sh/code-kata-sandbox-contracts/domain";
 import { describe, expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -119,6 +120,31 @@ function ownedContainerFilters(input: {
   return filters;
 }
 
+function onChildExit(child: NodeChildProcess.ChildProcess, onExit: () => void): () => void {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    onExit();
+    return () => undefined;
+  }
+  const timer = setTimeout(() => {
+    if (child.pid !== undefined && child.exitCode === null) {
+      try {
+        process.kill(child.pid, "SIGKILL");
+      } catch {
+        // The captured serve PID is already gone.
+      }
+    }
+  }, 5_000);
+  const finished = () => {
+    clearTimeout(timer);
+    onExit();
+  };
+  child.once("exit", finished);
+  return () => {
+    clearTimeout(timer);
+    child.off("exit", finished);
+  };
+}
+
 function stopServe(child: NodeChildProcess.ChildProcess): Effect.Effect<void> {
   return Effect.sync(() => {
     if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
@@ -130,23 +156,7 @@ function stopServe(child: NodeChildProcess.ChildProcess): Effect.Effect<void> {
   }).pipe(
     Effect.andThen(
       Effect.callback<void>((resume) => {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          resume(Effect.void);
-          return;
-        }
-        const timer = setTimeout(() => {
-          if (child.pid !== undefined && child.exitCode === null) {
-            try {
-              process.kill(child.pid, "SIGKILL");
-            } catch {
-              // The captured serve PID is already gone.
-            }
-          }
-        }, 5_000);
-        child.once("exit", () => {
-          clearTimeout(timer);
-          resume(Effect.void);
-        });
+        onChildExit(child, () => resume(Effect.void));
       }),
     ),
   );
@@ -200,6 +210,29 @@ function waitForPairing(child: NodeChildProcess.ChildProcess, output: { text: st
   );
 }
 
+async function httpJson<Body>(input: {
+  readonly origin: string;
+  readonly token: string;
+  readonly method: string;
+  readonly path: string;
+  readonly body?: unknown;
+}): Promise<{ readonly status: number; readonly body: Body; readonly text: string }> {
+  const response = await fetch(new URL(input.path, input.origin), {
+    method: input.method,
+    headers: {
+      authorization: `Bearer ${input.token}`,
+      ...(input.body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+  });
+  const text = await response.text();
+  return {
+    status: response.status,
+    text,
+    body: (text.length === 0 ? {} : JSON.parse(text)) as Body,
+  };
+}
+
 function jsonRequest<Body>(input: {
   readonly origin: string;
   readonly token: string;
@@ -208,48 +241,35 @@ function jsonRequest<Body>(input: {
   readonly body?: unknown;
 }): Effect.Effect<{ readonly status: number; readonly body: Body; readonly text: string }, Error> {
   return Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(new URL(input.path, input.origin), {
-        method: input.method,
-        headers: {
-          authorization: `Bearer ${input.token}`,
-          ...(input.body === undefined ? {} : { "content-type": "application/json" }),
-        },
-        body: input.body === undefined ? undefined : JSON.stringify(input.body),
-      });
-      const text = await response.text();
-      return {
-        status: response.status,
-        text,
-        body: (text.length === 0 ? {} : JSON.parse(text)) as Body,
-      };
-    },
+    try: () => httpJson<Body>(input),
     catch: asError,
   });
 }
 
+async function exchangeAccessTokenHttp(origin: string, credential: string): Promise<string> {
+  const response = await fetch(new URL("/oauth/token", origin), {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: AuthTokenExchangeGrantType,
+      subject_token: credential,
+      subject_token_type: AuthEnvironmentBootstrapTokenType,
+      requested_token_type: AuthAccessTokenType,
+      scope: AuthAdministrativeScopes.join(" "),
+    }),
+  });
+  const body = (await response.json()) as { readonly access_token?: string };
+  if (response.status !== 200 || body.access_token === undefined) {
+    throw new DockerSandboxHttpE2EError({
+      message: `Token exchange failed with ${String(response.status)}.`,
+    });
+  }
+  return body.access_token;
+}
+
 function exchangeAccessToken(origin: string, credential: string) {
   return Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(new URL("/oauth/token", origin), {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: AuthTokenExchangeGrantType,
-          subject_token: credential,
-          subject_token_type: AuthEnvironmentBootstrapTokenType,
-          requested_token_type: AuthAccessTokenType,
-          scope: AuthAdministrativeScopes.join(" "),
-        }),
-      });
-      const body = (await response.json()) as { readonly access_token?: string };
-      if (response.status !== 200 || body.access_token === undefined) {
-        throw new DockerSandboxHttpE2EError({
-          message: `Token exchange failed with ${String(response.status)}.`,
-        });
-      }
-      return body.access_token;
-    },
+    try: () => exchangeAccessTokenHttp(origin, credential),
     catch: asError,
   });
 }
@@ -261,7 +281,7 @@ function waitForReceipt(input: {
   readonly ceiling: Duration.Duration;
 }) {
   return Effect.gen(function* () {
-    const deadline = Date.now() + Duration.toMillis(input.ceiling);
+    const deadline = (yield* Clock.currentTimeMillis) + Duration.toMillis(input.ceiling);
     while (true) {
       const response = yield* jsonRequest<{ readonly receipt: SandboxReceipt }>({
         origin: input.origin,
@@ -281,7 +301,7 @@ function waitForReceipt(input: {
           message: receipt.error ?? `Sandbox operation ${input.operationId} failed.`,
         });
       }
-      if (Date.now() >= deadline) {
+      if ((yield* Clock.currentTimeMillis) >= deadline) {
         return yield* new DockerSandboxHttpE2EError({
           message: `Timed out waiting for sandbox operation ${input.operationId} (last status ${receipt.status}).`,
         });

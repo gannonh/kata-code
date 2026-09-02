@@ -28,7 +28,8 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { annotateEnvironmentRequest, requireEnvironmentScope } from "../auth/http.ts";
 import * as PairingGrantStore from "../auth/PairingGrantStore.ts";
 import * as ServerConfig from "../config.ts";
-import { readSandboxesEnabled } from "./sandboxFeature.ts";
+import * as ServerSettingsService from "../serverSettings.ts";
+import { sandboxesEnabled } from "./sandboxFeature.ts";
 import * as SandboxDeploymentService from "./SandboxDeploymentService.ts";
 import * as SandboxGitHubAccess from "./SandboxGitHubAccess.ts";
 
@@ -75,12 +76,21 @@ const noStoreResponseHeaders = HttpEffect.appendPreResponseHandler((_request, re
   Effect.succeed(HttpServerResponse.setHeaders(response, NO_STORE_HEADERS)),
 );
 
-export const sandboxFeatureGateLayer = HttpRouter.middleware((httpEffect) =>
+export const sandboxFeatureGateLayer = HttpRouter.middleware(
   Effect.gen(function* () {
-    if (!(yield* readSandboxesEnabled)) {
-      return HttpServerResponse.text("Not Found", { status: 404 });
-    }
-    return yield* httpEffect;
+    const config = yield* ServerConfig.ServerConfig;
+    const settingsService = yield* ServerSettingsService.ServerSettingsService;
+    const enabled = settingsService.getSettings.pipe(
+      Effect.catch(() => Effect.succeed({ enableSandboxes: false })),
+      Effect.map((settings) => sandboxesEnabled(config.sandboxesEnabled, settings.enableSandboxes)),
+    );
+    return (httpEffect) =>
+      Effect.gen(function* () {
+        if (!(yield* enabled)) {
+          return HttpServerResponse.text("Not Found", { status: 404 });
+        }
+        return yield* httpEffect;
+      });
   }),
 ).layer;
 
