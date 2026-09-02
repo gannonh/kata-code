@@ -2,23 +2,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# gannonh/skills
-npx --yes skills add gannonh/skills --skill plan-build-verify -y --copy --agent claude-code cursor
-npx --yes skills add gannonh/skills --skill thermo-run -y --copy --agent claude-code cursor
-npx --yes skills add gannonh/skills --skill readme -y --copy --agent claude-code cursor
+# Copy a skill onto disk. Best-effort: a registry or network hiccup for a single
+# skill must not abort dependency setup (this script runs from worktree:setup and
+# from the Cloud Agent environment install).
+add_skill() {
+  if ! npx --yes skills add "$@" -y --copy --agent claude-code cursor; then
+    echo "install-skills: skipped 'skills add $*' (command failed)" >&2
+  fi
+}
 
-# gannonh/skills/pstack-skills
-# npx --yes skills add gannonh/skills/pstack-skills -y --agent codex
+# Project-specific third party
+add_skill tovimx/maestro-mobile-testing-skill --skill maestro-mobile-testing
 
-# cursor/plugins
-npx --yes skills add cursor/plugins --skill thermo-nuclear-code-quality-review -y --copy --agent claude-code cursor
-npx --yes skills add cursor/plugins --skill thermo-nuclear-review -y --copy --agent claude-code cursor
-npx --yes skills add cursor/plugins --skill unslop -y --copy --agent claude-code cursor
-
-# misc
-# npx --yes skills add anthropics/claude-plugins-community --skill eli5 -y --copy --agent claude-code cursor
-# npx --yes skills add humanlayer/skills --skill show-me -y --copy --agent claude-code cursor
-# npx --yes skills add warpdotdev/common-skills --skill skill-doctor -y --copy --agent claude-code cursor
-
-## project specific third party skills
-npx --yes skills add tovimx/maestro-mobile-testing-skill --skill maestro-mobile-testing -y --copy --agent claude-code cursor
+# NOTE: - First-party project-specific skills are git-tracked
+#       - Workflow skills and plugins should be boot-strapped with
+#         `npx @gannonh/agent-setup install`
