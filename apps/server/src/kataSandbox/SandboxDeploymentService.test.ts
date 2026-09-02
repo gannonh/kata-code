@@ -36,6 +36,7 @@ import {
 } from "./SandboxDeploymentRepository.ts";
 import { layer as sandboxDeploymentRepositoryLayer } from "./SandboxDeploymentRepository.ts";
 import {
+  decodeTargetPairing,
   makeSandboxDeploymentService,
   probeSandboxHostAvailability,
   SandboxDeploymentServiceError,
@@ -284,6 +285,18 @@ const createInput = (requestId: string, label = "Issue 159") => ({
 });
 
 it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
+  it.effect("decodes a bootstrap pairing JSON body whose expiresAt is an ISO string", () =>
+    Effect.gen(function* () {
+      const decoded = yield* decodeTargetPairing({
+        id: "link-1",
+        credential: "one-use-token",
+        expiresAt: "2026-09-02T16:19:29.000Z",
+      });
+      expect(decoded.credential).toBe("one-use-token");
+      expect(decoded.expiresAt).toBe("2026-09-02T16:19:29.000Z");
+    }),
+  );
+
   it.effect("captures an exact source, runs the durable lifecycle, and deduplicates retries", () =>
     Effect.gen(function* () {
       const result = yield* runWithService(

@@ -1,4 +1,4 @@
-// @effect-diagnostics globalDate:off - operation timestamps use the injectable service clock.
+// @effect-diagnostics globalDate:off globalFetch:off - operation timestamps use the injectable service clock; pairing uses native fetch plus AbortSignal.
 // @effect-diagnostics nodeBuiltinImport:off - bootstrap tokens and request hashes use Node primitives.
 // @effect-diagnostics preferSchemaOverJson:off - request hashes and private target HTTP bodies are JSON.
 import * as NodeBuffer from "node:buffer";
@@ -207,7 +207,9 @@ export interface SandboxDeploymentServiceShape {
 }
 
 const BOOTSTRAP_SECRET_PREFIX = "kata-sandbox-bootstrap-";
-const decodeAuthPairingCredentialResult = Schema.decodeUnknownEffect(AuthPairingCredentialResult);
+const decodeAuthPairingCredentialResult = Schema.decodeUnknownEffect(
+  Schema.toCodecJson(AuthPairingCredentialResult),
+);
 
 const asServiceError = (cause: unknown): SandboxDeploymentServiceError => {
   if (cause instanceof SandboxDeploymentServiceError) return cause;
@@ -377,7 +379,7 @@ function profileMatchesInput(
   );
 }
 
-const decodeTargetPairing = (value: unknown) =>
+export const decodeTargetPairing = (value: unknown) =>
   decodeAuthPairingCredentialResult(value).pipe(
     Effect.map((decoded) => ({
       credential: decoded.credential,
