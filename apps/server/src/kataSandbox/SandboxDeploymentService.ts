@@ -1155,6 +1155,7 @@ export function makeSandboxDeploymentService(
 
       if (deployment.state === "Requested") {
         yield* assertOperationClaimed(receipt.operationId, claimId);
+        yield* Effect.logInfo("sandbox.create.validateProfile");
         yield* driver
           .validateProfile(
             profile,
@@ -1165,6 +1166,7 @@ export function makeSandboxDeploymentService(
             { pullIfMissing: false },
           )
           .pipe(Effect.mapError(asServiceError));
+        yield* Effect.logInfo("sandbox.create.allocate");
         const resource = yield* driver
           .allocate({
             profile,
@@ -1193,6 +1195,7 @@ export function makeSandboxDeploymentService(
 
       if (deployment.state === "Allocated") {
         yield* assertOperationClaimed(receipt.operationId, claimId);
+        yield* Effect.logInfo("sandbox.create.identify");
         const identified = yield* driver
           .identify({
             profile,

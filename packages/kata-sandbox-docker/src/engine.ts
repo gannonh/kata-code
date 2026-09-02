@@ -53,6 +53,8 @@ function requestHeaders(request: DockerRequest): Record<string, string> {
   if (request.hijacked === true) {
     headers.Connection = "Upgrade";
     headers.Upgrade = "tcp";
+  } else {
+    headers.Connection = "close";
   }
   return headers;
 }
@@ -124,6 +126,7 @@ function makeRequest(
           method: request.method ?? "GET",
           headers: requestHeaders(request),
           timeout: timeoutMs,
+          agent: false,
         });
         nodeRequest.on("response", (response) => {
           const chunks: Buffer[] = [];
@@ -150,9 +153,10 @@ function makeRequest(
         });
         if (timeoutMs > 0) {
           nodeRequest.on("timeout", onTimeout);
-          if (request.hijacked === true) {
-            timer = setTimeout(onTimeout, timeoutMs);
-          }
+          // Docker's unix socket often never emits Node's idle timeout or
+          // response 'end'. A wall-clock deadline is the only bound that
+          // always rejects the Promise.
+          timer = setTimeout(onTimeout, timeoutMs);
         }
         nodeRequest.on("error", fail);
         signal.addEventListener("abort", onAbort, { once: true });
@@ -190,6 +194,7 @@ function makeStdinRequest(
             Upgrade: "tcp",
           },
           timeout: timeoutMs,
+          agent: false,
         });
         const settle = (complete: () => void) => {
           if (settled) return;
