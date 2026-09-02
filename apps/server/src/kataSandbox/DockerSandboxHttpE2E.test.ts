@@ -42,6 +42,11 @@ interface SandboxReceipt {
     readonly deploymentId?: string;
     readonly endpoint?: string;
   };
+  readonly progress?: {
+    readonly stage?: string;
+    readonly lastStage?: string;
+    readonly diagnostic?: string;
+  };
 }
 
 class DockerSandboxHttpE2EError extends Data.TaggedError("DockerSandboxHttpE2EError")<{
@@ -274,11 +279,41 @@ function exchangeAccessToken(origin: string, credential: string) {
   });
 }
 
+function containerLogs(ids: ReadonlyArray<string>): string {
+  if (ids.length === 0) return "";
+  return ids
+    .map((id) => {
+      const result = NodeChildProcess.spawnSync("docker", ["logs", "--tail", "80", id], {
+        encoding: "utf8",
+      });
+      return `--- docker logs ${id} ---\n${result.stdout}\n${result.stderr}`;
+    })
+    .join("\n");
+}
+
+function describeReceipt(receipt: SandboxReceipt): string {
+  const progress = [
+    receipt.progress?.stage,
+    receipt.progress?.lastStage,
+    receipt.progress?.diagnostic,
+  ]
+    .filter((value): value is string => value !== undefined && value.length > 0)
+    .join(" ");
+  return [
+    `status=${receipt.status}`,
+    receipt.error === undefined ? undefined : `error=${receipt.error}`,
+    progress.length === 0 ? undefined : `progress=${progress}`,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(" ");
+}
+
 function waitForReceipt(input: {
   readonly origin: string;
   readonly token: string;
   readonly operationId: string;
   readonly ceiling: Duration.Duration;
+  readonly diagnostics?: () => string;
 }) {
   return Effect.gen(function* () {
     const deadline = (yield* Clock.currentTimeMillis) + Duration.toMillis(input.ceiling);
@@ -298,12 +333,12 @@ function waitForReceipt(input: {
       if (receipt.status === "Succeeded") return receipt;
       if (receipt.status === "Failed") {
         return yield* new DockerSandboxHttpE2EError({
-          message: receipt.error ?? `Sandbox operation ${input.operationId} failed.`,
+          message: `${receipt.error ?? `Sandbox operation ${input.operationId} failed.`}\n${input.diagnostics?.() ?? ""}`,
         });
       }
       if ((yield* Clock.currentTimeMillis) >= deadline) {
         return yield* new DockerSandboxHttpE2EError({
-          message: `Timed out waiting for sandbox operation ${input.operationId} (last status ${receipt.status}).`,
+          message: `Timed out waiting for sandbox operation ${input.operationId} (${describeReceipt(receipt)}).\n${input.diagnostics?.() ?? ""}`,
         });
       }
       yield* Effect.sleep("250 millis");
@@ -400,11 +435,14 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
             enabled: true,
           },
         });
+        const diagnostics = () =>
+          `${output.text}\n${containerLogs(dockerIds(ownedContainerFilters({ profileId, ...(deploymentId === undefined ? {} : { deploymentId }) })))}`;
         const upserted = yield* waitForReceipt({
           origin: pairing.origin,
           token,
           operationId: upsertId,
           ceiling: Duration.minutes(2),
+          diagnostics,
         });
         expect(upserted.result?.kind).toBe("profile");
 
@@ -426,6 +464,7 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
           token,
           operationId: createId,
           ceiling: Duration.minutes(10),
+          diagnostics,
         });
         const createdDeploymentId = created.deploymentId ?? created.result?.deploymentId;
         if (createdDeploymentId === undefined) {
@@ -467,6 +506,7 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
           token,
           operationId: deleteId,
           ceiling: Duration.minutes(2),
+          diagnostics,
         });
         expect(deleted.result?.kind).toBe("deleted");
         expect(

@@ -10,6 +10,42 @@ import * as Effect from "effect/Effect";
 
 import { makeDockerEngine } from "./engine.ts";
 
+describe("Docker engine request timeout", () => {
+  it.effect("times out a streaming response that never ends", () => {
+    return Effect.acquireUseRelease(
+      Effect.promise(async () => {
+        const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kata-docker-"));
+        const socketPath = NodePath.join(directory, "engine.sock");
+        const server = NodeHttp.createServer((_request, response) => {
+          response.writeHead(200, { "Content-Type": "application/json" });
+        });
+        await new Promise<void>((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(socketPath, resolve);
+        });
+        return { directory, server, socketPath };
+      }),
+      ({ socketPath }) =>
+        Effect.gen(function* () {
+          const result = yield* makeDockerEngine(socketPath)
+            .request({ path: "/never-ends", timeoutMs: 200 })
+            .pipe(Effect.result);
+          expect(result._tag).toBe("Failure");
+          if (result._tag === "Failure") {
+            expect(result.failure.message).toContain("timed out after 200ms");
+          }
+        }),
+      ({ directory, server }) =>
+        Effect.promise(async () => {
+          await new Promise<void>((resolve, reject) =>
+            server.close((error) => (error === undefined ? resolve() : reject(error))),
+          );
+          await NodeFSP.rm(directory, { recursive: true });
+        }),
+    );
+  });
+});
+
 describe("Docker engine stdin requests", () => {
   it.effect("waits for the HTTP upgrade before writing binary stdin", () => {
     const requestBodies: Buffer[] = [];

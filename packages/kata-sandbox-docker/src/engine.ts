@@ -94,6 +94,16 @@ function makeRequest(
           },
           (response) => {
             const chunks: Buffer[] = [];
+            const onTimeout = () =>
+              nodeRequest.destroy(
+                new DockerEngineError({
+                  message: `Docker request ${request.path} timed out after ${timeoutMs}ms`,
+                }),
+              );
+            // ClientRequest#timeout only covers time-to-headers. Hijacked Docker
+            // exec start returns headers immediately and streams until the command
+            // exits, so a silent git fetch would hang until the caller gave up.
+            if (timeoutMs > 0) response.setTimeout(timeoutMs, onTimeout);
             response.on("error", (cause) => settle(() => reject(cause)));
             response.on("data", (chunk: Buffer | string) =>
               chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
