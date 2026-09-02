@@ -13,6 +13,7 @@ import {
   AuthTokenExchangeGrantType,
 } from "@kata-sh/code-contracts";
 import { SandboxProviderLabels } from "@kata-sh/code-kata-sandbox-contracts/domain";
+import { dockerContainerName } from "@kata-sh/code-kata-sandbox-docker";
 import { describe, expect, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
@@ -305,13 +306,19 @@ function describeDocker(profileId: string, deploymentId?: string): string {
   try {
     const listed = NodeChildProcess.spawnSync(
       "docker",
-      ["ps", "-a", "--filter", "name=kata-sandbox-", "--format", "{{.ID}} {{.Status}} {{.Names}}"],
+      ["ps", "-a", "--format", "{{.ID}} {{.Status}} {{.Names}} {{.Ports}}"],
       { encoding: "utf8" },
     );
+    const named =
+      deploymentId === undefined
+        ? { stdout: "", stderr: "" }
+        : NodeChildProcess.spawnSync("docker", ["inspect", dockerContainerName(deploymentId)], {
+            encoding: "utf8",
+          });
     const ids = dockerIds(
       ownedContainerFilters({ profileId, ...(deploymentId === undefined ? {} : { deploymentId }) }),
     );
-    return `deploymentId=${deploymentId ?? ""}\n${listed.stdout}${listed.stderr}\n${containerLogs(ids)}`;
+    return `deploymentId=${deploymentId ?? ""}\n${listed.stdout}${listed.stderr}\n${named.stdout}${named.stderr}\n${containerLogs(ids)}`;
   } catch (cause) {
     return cause instanceof Error ? cause.message : String(cause);
   }

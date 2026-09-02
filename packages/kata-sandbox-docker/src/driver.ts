@@ -1,11 +1,8 @@
-// @effect-diagnostics globalDate:off - timestamps are injected through the driver clock option.
-// @effect-diagnostics preferSchemaOverJson:off - Docker Engine request and response bodies are private wire data.
+// @effect-diagnostics globalDate:off globalFetch:off globalTimers:off preferSchemaOverJson:off - timestamps are injected; readiness uses fetch plus a wall-clock deadline.
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
-import * as Schedule from "effect/Schedule";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
 import { EnvironmentId, PositiveInt, type ModelSelection } from "@kata-sh/code-contracts";
 import {
@@ -56,6 +53,10 @@ export const IMAGE_NOT_BUILT_BY_KATA = "image was not built by Kata Code";
 const SHA256_HEX = /^[0-9a-f]{64}$/i;
 const IMAGE_PULL_TIMEOUT_MS = 5 * 60_000;
 const CHECKOUT_TIMEOUT_MS = 2 * 60_000;
+const IDENTIFY_TIMEOUT_MS = 4 * 60_000;
+const READY_CEILING_MS = 30_000;
+const READY_ATTEMPT_MS = 2_000;
+const READY_PAUSE_MS = 250;
 const READY_PATH = "/.well-known/kata/environment";
 const DEFAULT_ENDPOINT_HOST = "127.0.0.1";
 const CHECKOUT_READY_PATH = "/tmp/kata-sandbox-checkout-ready";
@@ -90,6 +91,8 @@ export interface DockerSandboxDriverOptions {
     endpoint: string,
     manifest: SandboxBootstrapManifest,
   ) => Effect.Effect<ReadinessResponse, SandboxDriverError>;
+  readonly identifyTimeoutMs?: number;
+  readonly readyCeilingMs?: number;
 }
 
 export function dockerContainerName(deploymentId: string): string {
@@ -834,49 +837,122 @@ function exec(
   });
 }
 
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
+async function probeSandboxReadiness(
+  endpoint: string,
+  manifest: SandboxBootstrapManifest,
+  ceilingMs: number,
+  signal: AbortSignal,
+): Promise<ReadinessResponse> {
+  const ceiling = AbortSignal.timeout(ceilingMs);
+  const combined = AbortSignal.any([signal, ceiling]);
+  let lastError = "Kata readiness did not succeed.";
+  while (!combined.aborted) {
+    try {
+      const response = await fetch(endpoint + READY_PATH, {
+        signal: AbortSignal.any([combined, AbortSignal.timeout(READY_ATTEMPT_MS)]),
+      });
+      if (!isSuccess(response.status)) {
+        lastError = "Kata readiness returned " + response.status + ".";
+      } else {
+        const readiness = decodeReadiness((await response.json()) as unknown);
+        if (readiness.serverVersion !== manifest.serverVersion) {
+          throw new SandboxDriverError({
+            reason: "setup-failed",
+            message:
+              "sandbox server version " +
+              readiness.serverVersion +
+              " does not match " +
+              manifest.serverVersion,
+          });
+        }
+        return readiness;
+      }
+    } catch (cause) {
+      if (cause instanceof SandboxDriverError) throw cause;
+      lastError = cause instanceof Error ? cause.message : String(cause);
+    }
+    if (combined.aborted) break;
+    await Promise.race([
+      waitForAbort(combined),
+      waitForAbort(AbortSignal.timeout(READY_PAUSE_MS)),
+    ]);
+  }
+  throw new SandboxDriverError({
+    reason: "setup-failed",
+    message: lastError,
+  });
+}
+
 function defaultReadinessProbe(
   endpoint: string,
   manifest: SandboxBootstrapManifest,
+  ceilingMs: number,
 ): Effect.Effect<ReadinessResponse, SandboxDriverError> {
+  return Effect.tryPromise({
+    try: (signal) => probeSandboxReadiness(endpoint, manifest, ceilingMs, signal),
+    catch: (cause) =>
+      cause instanceof SandboxDriverError ? cause : asDriverError(cause, "setup-failed"),
+  });
+}
+
+// ponytail: resume on setTimeout without joining the identify fiber. Effect.timeoutOrElse
+// is raceFirst and waits for the loser; a hung fetch or uninterruptible acquire never finishes.
+function withHardDeadline<A>(
+  effect: Effect.Effect<A, SandboxDriverError>,
+  timeoutMs: number,
+  message: string,
+): Effect.Effect<A, SandboxDriverError> {
   return Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    return yield* Effect.gen(function* () {
-      const response = yield* client
-        .execute(HttpClientRequest.get(endpoint + READY_PATH))
-        .pipe(
-          Effect.retry(
-            Schedule.spaced("250 millis").pipe(Schedule.upTo({ duration: "30 seconds" })),
+    const fiber = yield* Effect.forkDetach(effect, { startImmediately: true });
+    return yield* Effect.callback<A, SandboxDriverError>((resume) => {
+      let settled = false;
+      const settle = (next: Effect.Effect<A, SandboxDriverError>) => {
+        if (settled) return;
+        settled = true;
+        resume(next);
+      };
+      const deadline = AbortSignal.timeout(timeoutMs);
+      const onTimeout = () => {
+        settle(
+          Effect.fail(
+            new SandboxDriverError({
+              reason: "setup-failed",
+              message,
+            }),
           ),
         );
-      if (!isSuccess(response.status)) {
-        return yield* new SandboxDriverError({
-          reason: "setup-failed",
-          message: "Kata readiness returned " + response.status + ".",
-        });
-      }
-      const body = yield* response.json;
-      const readiness = yield* Effect.try({
-        try: () => decodeReadiness(body),
-        catch: (cause) => asDriverError(cause, "setup-failed"),
+      };
+      deadline.addEventListener("abort", onTimeout, { once: true });
+      if (deadline.aborted) onTimeout();
+      fiber.addObserver((exit) => {
+        if (Exit.isSuccess(exit)) {
+          settle(Effect.succeed(exit.value));
+          return;
+        }
+        const squashed = Cause.squash(exit.cause);
+        settle(
+          Effect.fail(
+            squashed instanceof SandboxDriverError
+              ? squashed
+              : asDriverError(squashed, "setup-failed"),
+          ),
+        );
       });
-      if (readiness.serverVersion !== manifest.serverVersion) {
-        return yield* new SandboxDriverError({
-          reason: "setup-failed",
-          message:
-            "sandbox server version " +
-            readiness.serverVersion +
-            " does not match " +
-            manifest.serverVersion,
-        });
-      }
-      return readiness;
-    }).pipe(Effect.timeout("30 seconds"));
-  }).pipe(
-    Effect.mapError((cause) =>
-      cause instanceof SandboxDriverError ? cause : asDriverError(cause, "setup-failed"),
-    ),
-    Effect.provide(FetchHttpClient.layer),
-  );
+      return Effect.sync(() => {
+        deadline.removeEventListener("abort", onTimeout);
+      });
+    });
+  });
 }
 
 type DockerPullMessage = {
@@ -1143,7 +1219,11 @@ export function makeDockerSandboxDriver(
     options.engineForSocketPath?.(socketPath) ??
     makeDockerEngine(options.socketPath ?? socketPath);
   const now = options.now ?? (() => new Date().toISOString());
-  const readinessProbe = options.readinessProbe ?? defaultReadinessProbe;
+  const identifyTimeoutMs = options.identifyTimeoutMs ?? IDENTIFY_TIMEOUT_MS;
+  const readyCeilingMs = options.readyCeilingMs ?? READY_CEILING_MS;
+  const readinessProbe =
+    options.readinessProbe ??
+    ((endpoint, manifest) => defaultReadinessProbe(endpoint, manifest, readyCeilingMs));
   const endpointHost = options.endpointHost ?? DEFAULT_ENDPOINT_HOST;
   const publishHost = options.publishHost ?? endpointHost;
 
@@ -1394,9 +1474,11 @@ export function makeDockerSandboxDriver(
         );
       }),
     identify: (input) =>
-      Effect.gen(function* () {
+      withHardDeadline(
+        Effect.gen(function* () {
         yield* validateAllocationInput(input);
         const engine = engineFor(input.profile.socketPath);
+        yield* Effect.logInfo("sandbox.identify.inspect");
         const existing = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
         if (existing === undefined || !resourceIdentityMatches(existing, input.resource)) {
           return yield* new SandboxDriverError({
@@ -1404,6 +1486,7 @@ export function makeDockerSandboxDriver(
             message: "Docker resource identity could not be verified before setup.",
           });
         }
+        yield* Effect.logInfo("sandbox.identify.archive");
         const archive = buildAuthArchive(input.codexAuthJson);
         const copied = yield* engine
           .request({
@@ -1461,6 +1544,7 @@ export function makeDockerSandboxDriver(
           });
         }
         if (!inspected.State.Running) {
+          yield* Effect.logInfo("sandbox.identify.start");
           const started = yield* engine
             .request({
               path: "/containers/" + input.resource.containerId + "/start",
@@ -1504,6 +1588,7 @@ export function makeDockerSandboxDriver(
           if (options.checkoutCredential === undefined) {
             return yield* fixedSetupError("Authenticated Git checkout is unavailable.");
           }
+          yield* Effect.logInfo("sandbox.identify.checkout");
           yield* authenticatedCheckout(
             engine,
             input.resource,
@@ -1512,6 +1597,7 @@ export function makeDockerSandboxDriver(
           );
         }
         const endpoint = endpointUrl(endpointHost, port);
+        yield* Effect.logInfo("sandbox.identify.ready");
         const readiness = yield* readinessProbe(endpoint, input.manifest);
         return {
           environmentId: readiness.environmentId,
@@ -1526,17 +1612,9 @@ export function makeDockerSandboxDriver(
             hostPort: PositiveInt.make(port),
           },
         } satisfies SandboxIdentifiedFacts;
-      }).pipe(
-        Effect.timeoutOrElse({
-          duration: "4 minutes",
-          orElse: () =>
-            Effect.fail(
-              new SandboxDriverError({
-                reason: "setup-failed",
-                message: "Sandbox identify timed out.",
-              }),
-            ),
         }),
+        identifyTimeoutMs,
+        "Sandbox identify timed out.",
       ),
     observe: (input): Effect.Effect<ProviderObservation, SandboxDriverError> =>
       powerObservation({ profile: input.profile, resource: input.resource }),

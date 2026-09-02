@@ -1238,6 +1238,7 @@ export function makeSandboxDeploymentService(
           identified.connectorOrigin,
         );
         yield* saveDeployment(next, deployment.revision);
+        yield* Effect.logInfo("sandbox.create.identified");
         deployment = next;
         yield* saveObservation(
           deploymentId,

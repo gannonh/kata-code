@@ -1,10 +1,15 @@
+// @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off - readiness tests bind a local HTTP listener.
 // @effect-diagnostics preferSchemaOverJson:off - these tests inspect private Docker request JSON.
+import * as NodeHttp from "node:http";
 
 import { ProviderInstanceId, type ModelSelection } from "@kata-sh/code-contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { SandboxGitHubCheckoutCredential } from "@kata-sh/code-kata-sandbox/driver";
+import {
+  SandboxDriverError,
+  type SandboxGitHubCheckoutCredential,
+} from "@kata-sh/code-kata-sandbox/driver";
 
 import {
   DockerResourceHandle,
@@ -112,6 +117,57 @@ function fakeEngine(request: (request: DockerRequest) => DockerResponse): Docker
     requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
     requestStdin: () => Effect.succeed({ status: 101, body: new Uint8Array() }),
   };
+}
+
+function identifyResource() {
+  return decodeResource({
+    containerId: "container-1",
+    containerName: dockerContainerName(intent.deploymentId),
+    containerPort: 3773,
+    ownership: {
+      controlEnvironmentId: intent.controlEnvironmentId,
+      deploymentId: intent.deploymentId,
+      profileId: intent.profileId,
+      profileRevision: intent.profileRevision,
+      schemaVersion: "v1",
+    },
+  });
+}
+
+function readyIdentifyEngine(labels: Record<string, string>, hostPort = "41001"): DockerEngine {
+  return {
+    request: (request) =>
+      Effect.sync(() => {
+        if (request.path.includes("/archive?path=")) return response(200);
+        if (request.path === "/containers/container-1/json") {
+          return response(
+            200,
+            JSON.stringify({
+              ...inspect(labels, true),
+              NetworkSettings: {
+                Ports: {
+                  "3773/tcp": [{ HostPort: hostPort }],
+                },
+              },
+            }),
+          );
+        }
+        if (request.path === "/containers/container-1/exec") {
+          return response(201, '{"Id":"exec-ready"}');
+        }
+        if (request.path === "/exec/exec-ready/json") return response(200, '{"ExitCode":0}');
+        return response(404);
+      }),
+    requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
+    requestStdin: () => Effect.succeed({ status: 101, body: new Uint8Array() }),
+  };
+}
+
+function closeHttpServer(server: NodeHttp.Server): Promise<void> {
+  server.closeAllConnections();
+  return new Promise((resolve, reject) =>
+    server.close((error) => (error === undefined ? resolve() : reject(error))),
+  );
 }
 
 describe("Docker sandbox driver", () => {
@@ -1090,6 +1146,81 @@ describe("Docker sandbox driver", () => {
       });
     });
   });
+
+  it.live(
+    "fails identify when an uninterruptible probe outlives the wall-clock deadline",
+    () => {
+      const driver = makeDockerSandboxDriver({
+        identifyTimeoutMs: 80,
+        readinessProbe: () =>
+          Effect.tryPromise({
+            try: () => new Promise<never>(() => undefined),
+            catch: (cause) =>
+              new SandboxDriverError({
+                reason: "setup-failed",
+                message: cause instanceof Error ? cause.message : String(cause),
+                cause,
+              }),
+          }),
+        engine: readyIdentifyEngine(dockerOwnershipLabels(intent)),
+      });
+
+      return Effect.gen(function* () {
+        const error = yield* driver
+          .identify({
+            profile,
+            intent,
+            manifest,
+            codexAuthJson: new Uint8Array([123]),
+            resource: identifyResource(),
+          })
+          .pipe(Effect.flip);
+        expect(error.message).toBe("Sandbox identify timed out.");
+      });
+    },
+    { timeout: 2_000 },
+  );
+
+  it.live(
+    "fails identify when readiness never answers",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(async () => {
+          const server = NodeHttp.createServer(() => undefined);
+          await new Promise<void>((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, "127.0.0.1", resolve);
+          });
+          const address = server.address();
+          if (address === null || typeof address === "string") {
+            throw new Error("readiness listener did not bind a port.");
+          }
+          return { server, port: address.port };
+        }),
+        ({ port }) => {
+          const driver = makeDockerSandboxDriver({
+            readyCeilingMs: 80,
+            identifyTimeoutMs: 2_000,
+            engine: readyIdentifyEngine(dockerOwnershipLabels(intent), String(port)),
+          });
+          return Effect.gen(function* () {
+            const error = yield* driver
+              .identify({
+                profile,
+                intent,
+                manifest,
+                codexAuthJson: new Uint8Array([123]),
+                resource: identifyResource(),
+              })
+              .pipe(Effect.flip);
+            expect(error.reason).toBe("setup-failed");
+            expect(error.message).not.toBe("Sandbox identify timed out.");
+          });
+        },
+        ({ server }) => Effect.promise(() => closeHttpServer(server)),
+      ),
+    { timeout: 2_000 },
+  );
 
   it("uses the complete label set and never the display label for ownership", () => {
     const labels = dockerOwnershipLabels(intent);
