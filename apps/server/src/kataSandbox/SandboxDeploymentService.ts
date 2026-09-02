@@ -275,25 +275,25 @@ function operationResultForDeleted(deployment: SandboxDeployment) {
   };
 }
 
-function probeSandboxHostAvailability(input: {
+export function probeSandboxHostAvailability(input: {
   readonly driver: SandboxProviderDriver;
   readonly registry: ManagedImageRegistry;
   readonly serverVersion: string;
 }): Effect.Effect<string | undefined> {
   return Effect.gen(function* () {
     if (input.driver.probeHost !== undefined) {
-      const daemon = yield* input.driver.probeHost().pipe(Effect.either);
-      if (daemon._tag === "Left") return diagnostic(daemon.left);
+      const daemon = yield* input.driver.probeHost().pipe(Effect.result);
+      if (daemon._tag === "Failure") return diagnostic(daemon.failure);
     }
     const resolved = yield* resolveManagedImage(
       { serverVersion: input.serverVersion, channel: "stable" },
       input.registry,
-    ).pipe(Effect.either);
-    if (resolved._tag === "Left") {
+    ).pipe(Effect.result);
+    if (resolved._tag === "Failure") {
       return `Managed image for version ${input.serverVersion} was not found.`;
     }
     return undefined;
-  });
+  }).pipe(Effect.catchDefect((defect) => Effect.succeed(diagnostic(defect))));
 }
 
 function driverAvailabilityReason(
@@ -447,6 +447,7 @@ export function makeSandboxDeploymentService(
     dependencies.managedImageRegistry ??
     makeOciRegistry({
       repository: options.sandboxImageRepository?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
+      ...(dependencies.httpClient === undefined ? {} : { httpClient: dependencies.httpClient }),
     });
   const bootstrapManifestFor =
     options.bootstrapManifestFor ??
@@ -2171,6 +2172,7 @@ const makeService = Effect.gen(function* () {
     publishHost: publishHostForBind(serverConfig.host),
     checkoutCredential: githubAccess.checkoutCredential,
   });
+  const httpClient = yield* HttpClient.HttpClient;
   const service = makeSandboxDeploymentService(
     {
       repository: yield* SandboxDeploymentRepository,
@@ -2180,18 +2182,21 @@ const makeService = Effect.gen(function* () {
       credentialSeed: yield* SandboxCredentialSeed,
       secretStore: yield* ServerSecretStore.ServerSecretStore,
       crypto: yield* Crypto.Crypto,
-      httpClient: yield* HttpClient.HttpClient,
+      httpClient,
     },
     {
       endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
       publishHost: publishHostForBind(serverConfig.host),
-      sandboxImageRepository: serverConfig.sandboxImageRepository,
+      ...(serverConfig.sandboxImageRepository === undefined
+        ? {}
+        : { sandboxImageRepository: serverConfig.sandboxImageRepository }),
       hostAvailability: () =>
         probeSandboxHostAvailability({
           driver: probeDriver,
           registry: makeOciRegistry({
             repository:
               serverConfig.sandboxImageRepository?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
+            httpClient,
           }),
           serverVersion: packageJson.version,
         }),

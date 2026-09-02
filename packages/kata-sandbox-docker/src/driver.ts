@@ -1141,7 +1141,7 @@ export function makeDockerSandboxDriver(
   const now = options.now ?? (() => new Date().toISOString());
   const readinessProbe = options.readinessProbe ?? defaultReadinessProbe;
   const endpointHost = options.endpointHost ?? DEFAULT_ENDPOINT_HOST;
-  const publishHost = options.publishHost;
+  const publishHost = options.publishHost ?? endpointHost;
 
   const inspectPowerResource = (
     input: SandboxProviderResourceInput,

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - this test reads the adjacent Dockerfile.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";

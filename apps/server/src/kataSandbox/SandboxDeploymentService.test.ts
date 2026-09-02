@@ -21,10 +21,11 @@ import {
   type ProviderObservation,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
 import {
+  makeOciRegistry,
   SandboxDriverError,
   type SandboxProviderDriver,
   type SandboxProviderPowerCapability,
-} from "@kata-sh/code-kata-sandbox/driver";
+} from "@kata-sh/code-kata-sandbox";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
@@ -36,6 +37,7 @@ import {
 import { layer as sandboxDeploymentRepositoryLayer } from "./SandboxDeploymentRepository.ts";
 import {
   makeSandboxDeploymentService,
+  probeSandboxHostAvailability,
   SandboxDeploymentServiceError,
   type SandboxDeploymentServiceDependencies,
 } from "./SandboxDeploymentService.ts";
@@ -1097,6 +1099,27 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
       {
         driverFor: () => makeDriver(),
         hostAvailability: () => Effect.succeed("Managed image for version 0.0.42 was not found."),
+      },
+    ),
+  );
+
+  it.effect("lists when the OCI registry client is missing from context", () =>
+    runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const listed = yield* service.list();
+          const docker = listed.providers.find((provider) => provider.driverKind === "docker");
+          expect(docker?.driverKind).toBe("docker");
+          expect(docker?.availabilityDiagnostic).toBeTruthy();
+        }),
+      {
+        driverFor: () => makeDriver(),
+        hostAvailability: () =>
+          probeSandboxHostAvailability({
+            driver: makeDriver(),
+            registry: makeOciRegistry({ repository: "ghcr.io/gannonh/kata-sandbox" }),
+            serverVersion: "0.0.42",
+          }),
       },
     ),
   );

@@ -358,7 +358,11 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
           method: "GET",
           path: "/api/kata-sandbox",
         });
-        expect(list.status).toBe(200);
+        if (list.status !== 200) {
+          return yield* new DockerSandboxHttpE2EError({
+            message: `GET /api/kata-sandbox returned ${String(list.status)}: ${list.text}\n${output.text}`,
+          });
+        }
         expect(list.body.providers.some((provider) => provider.driverKind === "docker")).toBe(true);
 
         const upsertId = yield* acceptOperation({
@@ -452,7 +456,14 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
         Effect.ensuring(
           Effect.sync(() => {
             try {
-              removeContainers(dockerIds(ownedContainerFilters({ profileId, deploymentId })));
+              removeContainers(
+                dockerIds(
+                  ownedContainerFilters({
+                    profileId,
+                    ...(deploymentId === undefined ? {} : { deploymentId }),
+                  }),
+                ),
+              );
             } catch {
               // Leftover container cleanup is best-effort after the receipt path.
             }

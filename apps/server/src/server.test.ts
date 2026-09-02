@@ -4028,6 +4028,50 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("encodes a Docker availability diagnostic through the list HTTP boundary", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              enableSandboxes: true,
+            }),
+          },
+          sandboxDeploymentService: {
+            list: () =>
+              Effect.succeed({
+                profiles: [],
+                deployments: [],
+                relayAvailable: false,
+                providers: [
+                  {
+                    driverKind: "docker" as const,
+                    category: "local-container" as const,
+                    displayName: "Docker",
+                    profileForm: "docker" as const,
+                    availabilityDiagnostic: "Managed image for version 0.0.42 was not found.",
+                  },
+                ],
+              }),
+          },
+        },
+      });
+      const listResponse = yield* HttpClient.get("/api/kata-sandbox", {
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+      });
+      const body = (yield* listResponse.json) as {
+        readonly providers: ReadonlyArray<{ readonly availabilityDiagnostic?: string }>;
+      };
+
+      assert.equal(listResponse.status, 200);
+      assert.equal(
+        body.providers[0]?.availabilityDiagnostic,
+        "Managed image for version 0.0.42 was not found.",
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("lets KATACODE_SANDBOXES=0 hide routes when the stored setting is on", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({
