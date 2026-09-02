@@ -882,10 +882,7 @@ async function probeSandboxReadiness(
       lastError = cause instanceof Error ? cause.message : String(cause);
     }
     if (combined.aborted) break;
-    await Promise.race([
-      waitForAbort(combined),
-      waitForAbort(AbortSignal.timeout(READY_PAUSE_MS)),
-    ]);
+    await Promise.race([waitForAbort(combined), waitForAbort(AbortSignal.timeout(READY_PAUSE_MS))]);
   }
   throw new SandboxDriverError({
     reason: "setup-failed",
@@ -1476,142 +1473,146 @@ export function makeDockerSandboxDriver(
     identify: (input) =>
       withHardDeadline(
         Effect.gen(function* () {
-        yield* validateAllocationInput(input);
-        const engine = engineFor(input.profile.socketPath);
-        yield* Effect.logInfo("sandbox.identify.inspect");
-        const existing = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
-        if (existing === undefined || !resourceIdentityMatches(existing, input.resource)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Docker resource identity could not be verified before setup.",
-          });
-        }
-        yield* Effect.logInfo("sandbox.identify.archive");
-        const archive = buildAuthArchive(input.codexAuthJson);
-        const copied = yield* engine
-          .request({
-            path:
-              "/containers/" +
-              input.resource.containerId +
-              "/archive?path=" +
-              encodeURIComponent("/home/katacode/.codex"),
-            method: "PUT",
-            bodyBytes: archive,
-          })
-          .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
-        if (!isSuccess(copied.status)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Docker auth seed returned " + copied.status + ".",
-          });
-        }
-        if (input.modelSelection !== undefined) {
-          const settingsCopied = yield* engine
+          yield* validateAllocationInput(input);
+          const engine = engineFor(input.profile.socketPath);
+          yield* Effect.logInfo("sandbox.identify.inspect");
+          const existing = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
+          if (existing === undefined || !resourceIdentityMatches(existing, input.resource)) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Docker resource identity could not be verified before setup.",
+            });
+          }
+          yield* Effect.logInfo("sandbox.identify.archive");
+          const archive = buildAuthArchive(input.codexAuthJson);
+          const copied = yield* engine
             .request({
               path:
                 "/containers/" +
                 input.resource.containerId +
                 "/archive?path=" +
-                encodeURIComponent(DEFAULT_SANDBOX_KATA_HOME),
+                encodeURIComponent("/home/katacode/.codex"),
               method: "PUT",
-              bodyBytes: buildProviderSettingsArchive(input.modelSelection),
+              bodyBytes: archive,
             })
             .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
-          if (!isSuccess(settingsCopied.status)) {
+          if (!isSuccess(copied.status)) {
             return yield* new SandboxDriverError({
               reason: "setup-failed",
-              message: "Docker provider settings seed returned " + settingsCopied.status + ".",
+              message: "Docker auth seed returned " + copied.status + ".",
             });
           }
-        }
-        const inspected = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
-        if (inspected === undefined) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox container disappeared before start.",
-          });
-        }
-        if (!resourceIdentityMatches(inspected, input.resource)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox resource identity changed before start.",
-          });
-        }
-        if (!labelsMatch(inspected, input.intent)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox ownership labels changed before start.",
-          });
-        }
-        if (!inspected.State.Running) {
-          yield* Effect.logInfo("sandbox.identify.start");
-          const started = yield* engine
-            .request({
-              path: "/containers/" + input.resource.containerId + "/start",
-              method: "POST",
-            })
-            .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
-          if (!isSuccess(started.status) && started.status !== 304) {
+          if (input.modelSelection !== undefined) {
+            const settingsCopied = yield* engine
+              .request({
+                path:
+                  "/containers/" +
+                  input.resource.containerId +
+                  "/archive?path=" +
+                  encodeURIComponent(DEFAULT_SANDBOX_KATA_HOME),
+                method: "PUT",
+                bodyBytes: buildProviderSettingsArchive(input.modelSelection),
+              })
+              .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
+            if (!isSuccess(settingsCopied.status)) {
+              return yield* new SandboxDriverError({
+                reason: "setup-failed",
+                message: "Docker provider settings seed returned " + settingsCopied.status + ".",
+              });
+            }
+          }
+          const inspected = yield* inspectByName(
+            engine,
+            input.resource.containerId,
+            "setup-failed",
+          );
+          if (inspected === undefined) {
             return yield* new SandboxDriverError({
               reason: "setup-failed",
-              message: "Docker start returned " + started.status + ".",
+              message: "Sandbox container disappeared before start.",
             });
           }
-        }
-        const running = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
-        if (running === undefined) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox container disappeared after start.",
-          });
-        }
-        if (!resourceIdentityMatches(running, input.resource)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox resource identity changed after start.",
-          });
-        }
-        const port = hostPort(running);
-        if (port === undefined) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Docker did not publish the sandbox port after start.",
-          });
-        }
-        yield* cleanupCheckoutCredential(engine, input.resource);
-        const ready = yield* checkoutIsReady(
-          engine,
-          input.resource,
-          input.intent.source.resolvedCommitSha,
-        );
-        if (!ready) {
-          if (options.checkoutCredential === undefined) {
-            return yield* fixedSetupError("Authenticated Git checkout is unavailable.");
+          if (!resourceIdentityMatches(inspected, input.resource)) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Sandbox resource identity changed before start.",
+            });
           }
-          yield* Effect.logInfo("sandbox.identify.checkout");
-          yield* authenticatedCheckout(
+          if (!labelsMatch(inspected, input.intent)) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Sandbox ownership labels changed before start.",
+            });
+          }
+          if (!inspected.State.Running) {
+            yield* Effect.logInfo("sandbox.identify.start");
+            const started = yield* engine
+              .request({
+                path: "/containers/" + input.resource.containerId + "/start",
+                method: "POST",
+              })
+              .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
+            if (!isSuccess(started.status) && started.status !== 304) {
+              return yield* new SandboxDriverError({
+                reason: "setup-failed",
+                message: "Docker start returned " + started.status + ".",
+              });
+            }
+          }
+          const running = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
+          if (running === undefined) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Sandbox container disappeared after start.",
+            });
+          }
+          if (!resourceIdentityMatches(running, input.resource)) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Sandbox resource identity changed after start.",
+            });
+          }
+          const port = hostPort(running);
+          if (port === undefined) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Docker did not publish the sandbox port after start.",
+            });
+          }
+          yield* cleanupCheckoutCredential(engine, input.resource);
+          const ready = yield* checkoutIsReady(
             engine,
             input.resource,
-            input.intent,
-            options.checkoutCredential,
+            input.intent.source.resolvedCommitSha,
           );
-        }
-        const endpoint = endpointUrl(endpointHost, port);
-        yield* Effect.logInfo("sandbox.identify.ready");
-        const readiness = yield* readinessProbe(endpoint, input.manifest);
-        return {
-          environmentId: readiness.environmentId,
-          endpoint,
-          connectorOrigin: {
-            localHttpHost: DEFAULT_ENDPOINT_HOST,
-            localHttpPort: PositiveInt.make(DEFAULT_SANDBOX_CONTAINER_PORT),
-          },
-          workspaceRoot: DEFAULT_SANDBOX_WORKSPACE_ROOT,
-          resource: {
-            ...input.resource,
-            hostPort: PositiveInt.make(port),
-          },
-        } satisfies SandboxIdentifiedFacts;
+          if (!ready) {
+            if (options.checkoutCredential === undefined) {
+              return yield* fixedSetupError("Authenticated Git checkout is unavailable.");
+            }
+            yield* Effect.logInfo("sandbox.identify.checkout");
+            yield* authenticatedCheckout(
+              engine,
+              input.resource,
+              input.intent,
+              options.checkoutCredential,
+            );
+          }
+          const endpoint = endpointUrl(endpointHost, port);
+          yield* Effect.logInfo("sandbox.identify.ready");
+          const readiness = yield* readinessProbe(endpoint, input.manifest);
+          return {
+            environmentId: readiness.environmentId,
+            endpoint,
+            connectorOrigin: {
+              localHttpHost: DEFAULT_ENDPOINT_HOST,
+              localHttpPort: PositiveInt.make(DEFAULT_SANDBOX_CONTAINER_PORT),
+            },
+            workspaceRoot: DEFAULT_SANDBOX_WORKSPACE_ROOT,
+            resource: {
+              ...input.resource,
+              hostPort: PositiveInt.make(port),
+            },
+          } satisfies SandboxIdentifiedFacts;
         }),
         identifyTimeoutMs,
         "Sandbox identify timed out.",

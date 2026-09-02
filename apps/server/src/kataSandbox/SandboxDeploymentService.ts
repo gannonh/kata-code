@@ -76,7 +76,6 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -386,34 +385,44 @@ const decodeTargetPairing = (value: unknown) =>
     })),
   );
 
+const PAIRING_TIMEOUT_MS = 30_000;
+
+async function requestSandboxPairingCredentialJson(
+  input: SandboxPairingCredentialInput,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const response = await fetch(
+    new URL("/api/kata-sandbox/bootstrap-pairing-token", input.endpoint),
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${input.bootstrapToken}`,
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        label: input.label,
+        ...(input.scopes === undefined ? {} : { scopes: input.scopes }),
+      }),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(PAIRING_TIMEOUT_MS)]),
+    },
+  );
+  const text = await response.text();
+  if (response.status < 200 || response.status >= 300) {
+    throw new SandboxDeploymentServiceError({
+      kind: "command",
+      message: `Sandbox pairing credential request returned HTTP ${response.status}: ${text.slice(0, 200)}`,
+    });
+  }
+  return text.length === 0 ? {} : JSON.parse(text);
+}
+
 function issueTargetPairingCredential(
   input: SandboxPairingCredentialInput,
 ): Effect.Effect<SandboxPairingCredential, SandboxDeploymentServiceError> {
-  return Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    return yield* Effect.gen(function* () {
-      const response = yield* client.execute(
-        HttpClientRequest.post(
-          new URL("/api/kata-sandbox/bootstrap-pairing-token", input.endpoint),
-        ).pipe(
-          HttpClientRequest.bearerToken(input.bootstrapToken),
-          HttpClientRequest.acceptJson,
-          HttpClientRequest.bodyJsonUnsafe({
-            label: input.label,
-            ...(input.scopes === undefined ? {} : { scopes: input.scopes }),
-          }),
-        ),
-      );
-      if (response.status < 200 || response.status >= 300) {
-        return yield* new SandboxDeploymentServiceError({
-          kind: "command",
-          message: `Sandbox pairing credential request returned HTTP ${response.status}.`,
-        });
-      }
-      return yield* decodeTargetPairing(yield* response.json);
-    }).pipe(Effect.timeout("30 seconds"));
-  }).pipe(
-    Effect.mapError((cause) =>
+  return Effect.tryPromise({
+    try: (signal) => requestSandboxPairingCredentialJson(input, signal),
+    catch: (cause) =>
       cause instanceof SandboxDeploymentServiceError
         ? cause
         : new SandboxDeploymentServiceError({
@@ -421,8 +430,19 @@ function issueTargetPairingCredential(
             message: diagnostic(cause),
             cause,
           }),
+  }).pipe(
+    Effect.flatMap((value) =>
+      decodeTargetPairing(value).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SandboxDeploymentServiceError({
+              kind: "command",
+              message: diagnostic(cause),
+              cause,
+            }),
+        ),
+      ),
     ),
-    Effect.provide(FetchHttpClient.layer),
   );
 }
 
@@ -1076,6 +1096,7 @@ export function makeSandboxDeploymentService(
       if (deployment.resource.hostPort === undefined) {
         return yield* failConflict("The sandbox has no local host port for direct attachment.");
       }
+      yield* Effect.logInfo("sandbox.handoff.pairing");
       const issued = yield* issuePairingCredential({
         endpoint: localDockerEndpoint(deployment.endpoint),
         bootstrapToken,

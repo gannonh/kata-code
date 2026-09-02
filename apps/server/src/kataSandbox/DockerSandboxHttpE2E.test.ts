@@ -513,13 +513,22 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
           readonly attachment?: string;
           readonly pairingUrl?: string;
           readonly endpoint?: string;
+          readonly message?: string;
         }>({
           origin: pairing.origin,
           token,
           method: "POST",
           path: `/api/kata-sandbox/deployments/${createdDeploymentId}/handoff`,
         });
-        expect(handoff.status).toBe(200);
+        if (handoff.status !== 200) {
+          return yield* new DockerSandboxHttpE2EError({
+            message: `Handoff returned ${String(handoff.status)}: ${handoff.text}\n${diagnostics({
+              operationId: createId,
+              status: created.status,
+              deploymentId: createdDeploymentId,
+            })}`,
+          });
+        }
         expect(handoff.body.attachment).toBe("direct");
         expect(handoff.body.pairingUrl).toBeTruthy();
         expect(handoff.body.endpoint?.startsWith("http://127.0.0.1:")).toBe(true);
