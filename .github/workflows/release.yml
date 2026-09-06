@@ -871,8 +871,8 @@ jobs:
 
   publish_cli:
     name: Publish CLI to npm
-    needs: [preflight, relay_public_config, build]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build.result == 'success' && needs.preflight.outputs.dry_run != 'true' }}
+    needs: [preflight, relay_public_config, build, build_sandbox_image]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build.result == 'success' && needs.build_sandbox_image.result == 'success' && needs.preflight.outputs.dry_run != 'true' }}
     runs-on: ubuntu-24.04 # ubuntu-24.04
     timeout-minutes: 10
     permissions:

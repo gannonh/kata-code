@@ -31,7 +31,15 @@ export class SandboxDriverError extends Data.TaggedError("SandboxDriverError")<{
   readonly cause?: unknown;
 }> {}
 
-export interface SandboxValidatedProfile {
+export interface SandboxBootstrapFacts {
+  readonly kataVersion: string;
+  readonly serverVersion: string;
+  readonly serverArtifactSha256: string;
+  readonly codexVersion: string;
+  readonly codexArtifactSha256: string;
+}
+
+export interface SandboxValidatedProfile extends SandboxBootstrapFacts {
   readonly daemonVersion: string;
   readonly imageDigest: string;
 }
@@ -112,6 +120,7 @@ export interface SandboxProviderDriver {
     reportProgress?: SandboxValidationProgressReporter,
     options?: SandboxValidationOptions,
   ) => Effect.Effect<SandboxValidatedProfile, SandboxDriverError>;
+  readonly probeHost?: () => Effect.Effect<{ readonly daemonVersion: string }, SandboxDriverError>;
   readonly allocate: (
     input: SandboxAllocationInput,
   ) => Effect.Effect<DockerResourceHandle, SandboxDriverError>;

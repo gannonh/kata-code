@@ -2,8 +2,6 @@
 ARG KATACODE_BASE_IMAGE
 FROM ${KATACODE_BASE_IMAGE}
 
-LABEL org.opencontainers.image.source="https://github.com/gannonh/kata-code"
-
 ARG KATACODE_CLI_VERSION
 ARG KATACODE_CLI_SHA256
 ARG DEBIAN_SNAPSHOT=20260824T000000Z
@@ -11,6 +9,13 @@ ARG KATACODE_CLI_PACKAGE=@kata-sh/code-cli
 ARG CODEX_VERSION
 ARG CODEX_SHA256
 ARG CODEX_PACKAGE=@openai/codex
+
+LABEL org.opencontainers.image.source="https://github.com/gannonh/kata-code" \
+  com.katacode.sandbox.kata-version="${KATACODE_CLI_VERSION}" \
+  com.katacode.sandbox.server-version="${KATACODE_CLI_VERSION}" \
+  com.katacode.sandbox.server-artifact-sha256="${KATACODE_CLI_SHA256}" \
+  com.katacode.sandbox.codex-version="${CODEX_VERSION}" \
+  com.katacode.sandbox.codex-artifact-sha256="${CODEX_SHA256}"
 
 # node:24-bookworm-slim intentionally omits source-control and native build
 # tooling. Use the snapshot recorded by the pinned base image so package

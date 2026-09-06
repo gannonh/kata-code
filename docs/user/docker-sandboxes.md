@@ -2,16 +2,28 @@
 
 Docker sandboxes run a separate Kata Code environment for a GitHub repository and ref.
 
+The feature is a preview and is off by default. An administrative session turns
+it on with **Sandboxes (preview)** in Settings → General. The next request
+picks up the change. No restart is required. `KATACODE_SANDBOXES=1` or `=0` on
+the server process overrides the stored switch for that process. With the
+switch off, sandbox routes, Connections, and Add Environment hide the feature.
+Existing deployments stay in the database.
+
+A stock install creates a sandbox from the managed image for the running server
+version. No environment variables, digest, or local image build are required.
+
 ## Create a sandbox
 
-1. Open Settings → Connections and select Add environment on the Kata host
+1. Turn on Sandboxes (preview) in Settings → General, or start the server with
+   `KATACODE_SANDBOXES=1`.
+2. Open Settings → Connections and select Add environment on the Kata host
    (the desktop app or the locally hosted web app). Remote clients over Connect
    or a tunnel cannot reach the sandbox pairing port.
-2. Select Sandboxes → Local Container → Docker.
-3. Reuse an available Docker profile or select Add Docker profile.
-4. Enter a deployment label, select a GitHub repository and branch, and choose a Codex provider.
+3. Select Sandboxes → Local Container → Docker.
+4. Reuse an available Docker profile or select Add Docker profile.
+5. Enter a deployment label, select a GitHub repository and branch, and choose a Codex provider.
    Use the Git ref field for a tag or explicit ref such as `refs/pull/123/head`.
-5. Select Create and attach environment.
+6. Select Create and attach environment.
 
 Kata resolves the matching managed image to an immutable OCI digest, pulls it when Docker does not
 have it, validates the image, creates the container, and attaches it through ordinary environment
@@ -57,25 +69,18 @@ variables:
 vp run --filter @kata-sh/code-kata-sandbox-docker build:image
 ```
 
-To test an unreleased development build, write the builder result to a file:
+To test an unreleased development build, write the builder result to a file and
+paste the result's `imageId` into Advanced on the Docker step:
 
 ```bash
 node packages/kata-sandbox-docker/scripts/build-image.mjs \
   --output-file /tmp/kata-sandbox-dev-image.json
 ```
 
-Copy `serverArtifactSha256`, `codexVersion`, and `codexArtifactSha256` from that file into the
-development server environment:
-
-```dotenv
-KATACODE_SANDBOX_SERVER_ARTIFACT_SHA256=<serverArtifactSha256>
-KATACODE_SANDBOX_CODEX_VERSION=<codexVersion>
-KATACODE_SANDBOX_CODEX_ARTIFACT_SHA256=<codexArtifactSha256>
-```
-
-Restart the development server so it loads those values. Create the Docker profile with Advanced
-enabled and paste the result's `imageId` into the custom image field. Managed images only resolve
-published release tags, so an unreleased `dev:desktop` version requires this override.
+The image stamps Kata version, server artifact SHA-256, and Codex version and
+digest as OCI labels. Create reads those labels from the image. Managed images
+only resolve published release tags, so an unreleased `dev:desktop` version
+requires the Advanced override.
 
 The source manifest pins the Node base image digest and the exact Codex package and npm integrity.
 The builder verifies both values before Docker work. The image contains Node 24, Git, GitHub CLI,

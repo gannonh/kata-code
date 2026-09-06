@@ -1,11 +1,18 @@
+// @effect-diagnostics nodeBuiltinImport:off - this test reads the adjacent Dockerfile.
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+
 import { assert, describe, it } from "@effect/vitest";
 
 import {
   buildImageDockerArgs,
   createImageBuildFacts,
   extractBuildxIndexDigest,
+  ghaCacheFlags,
   normalizeDockerPlatforms,
   parseImageBuildArgs,
+  sandboxImageBuildCacheScope,
   validatePushedImageTags,
 } from "./imageBuild.ts";
 
@@ -87,6 +94,37 @@ describe("image build boundaries", () => {
     assert.include(args, "--tag");
     assert.include(args, "/tmp/context");
     assert.notInclude(args, "--push");
+  });
+
+  it("adds buildx cache flags keyed on the source manifest and lockfile", () => {
+    const scope = sandboxImageBuildCacheScope("source", "lock");
+    const cache = ghaCacheFlags(scope);
+    const args = buildImageDockerArgs({
+      platforms: "linux/arm64",
+      push: false,
+      tags: ["kata-sandbox-local"],
+      metadataPath: "/tmp/buildx.json",
+      dockerfilePath: "/repo/Dockerfile",
+      contextPath: "/tmp/context",
+      buildArgs: [],
+      ...cache,
+    });
+    assert.match(scope, /^kata-sandbox-[0-9a-f]{12}$/);
+    assert.include(args, "--cache-from");
+    assert.include(args, `type=gha,scope=${scope}`);
+    assert.include(args, "--cache-to");
+    assert.include(args, `type=gha,mode=max,scope=${scope}`);
+  });
+
+  it("stamps Kata sandbox labels from the image build args", () => {
+    const dockerfile = NodeFS.readFileSync(
+      NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "../Dockerfile"),
+      "utf8",
+    );
+    assert.include(dockerfile, "com.katacode.sandbox.kata-version");
+    assert.include(dockerfile, "com.katacode.sandbox.server-artifact-sha256");
+    assert.include(dockerfile, "com.katacode.sandbox.codex-version");
+    assert.include(dockerfile, "com.katacode.sandbox.codex-artifact-sha256");
   });
 
   it("builds a zstd OCI registry export for both platforms", () => {

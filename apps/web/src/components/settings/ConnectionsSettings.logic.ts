@@ -45,6 +45,13 @@ export function selectQrEndpointOption<T extends QrEndpointOption>(
   );
 }
 
+export function canShowHostSandboxes(input: {
+  readonly canManageHostSandboxes: boolean;
+  readonly enableSandboxes: boolean;
+}): boolean {
+  return input.canManageHostSandboxes && input.enableSandboxes;
+}
+
 export async function applyWslEnableSelection(input: {
   readonly bridge: WslEnableBridge;
   readonly mode: "both" | "wsl-only";

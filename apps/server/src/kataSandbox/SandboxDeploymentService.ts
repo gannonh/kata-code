@@ -1,4 +1,4 @@
-// @effect-diagnostics globalDate:off - operation timestamps use the injectable service clock.
+// @effect-diagnostics globalDate:off globalFetch:off - operation timestamps use the injectable service clock; pairing uses native fetch plus AbortSignal.
 // @effect-diagnostics nodeBuiltinImport:off - bootstrap tokens and request hashes use Node primitives.
 // @effect-diagnostics preferSchemaOverJson:off - request hashes and private target HTTP bodies are JSON.
 import * as NodeBuffer from "node:buffer";
@@ -61,6 +61,7 @@ import {
   makeOciRegistry,
   DEFAULT_MANAGED_IMAGE_REPOSITORY,
   SandboxDriverError,
+  type SandboxBootstrapFacts,
   type ManagedImageRegistry,
   type SandboxProviderDriver,
 } from "@kata-sh/code-kata-sandbox";
@@ -75,7 +76,6 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -90,7 +90,8 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveHeadlessConnectionHost } from "../startupAccess.ts";
-import { makeDockerSandboxDriver } from "@kata-sh/code-kata-sandbox-docker";
+import { makeDockerSandboxDriver, publishHostForBind } from "@kata-sh/code-kata-sandbox-docker";
+import packageJson from "../../package.json" with { type: "json" };
 import { SandboxProviderRegistry } from "@kata-sh/code-kata-sandbox";
 import {
   SandboxDeploymentRepository,
@@ -147,9 +148,13 @@ export interface SandboxDeploymentServiceDependencies {
 export interface SandboxDeploymentServiceOptions {
   readonly driverFor?: (profile: SandboxProfile) => SandboxProviderDriver;
   readonly endpointHost?: string;
+  readonly publishHost?: string;
+  readonly sandboxImageRepository?: string;
+  readonly hostAvailability?: () => Effect.Effect<string | undefined>;
   readonly relayUrl?: string;
   readonly bootstrapManifestFor?: (
     profile: SandboxProfile,
+    facts?: SandboxBootstrapFacts,
   ) => SandboxDeploymentIntent["bootstrapManifest"];
   readonly now?: () => string;
   readonly schedule?: (effect: Effect.Effect<void, never>) => Effect.Effect<void, never>;
@@ -202,7 +207,9 @@ export interface SandboxDeploymentServiceShape {
 }
 
 const BOOTSTRAP_SECRET_PREFIX = "kata-sandbox-bootstrap-";
-const decodeAuthPairingCredentialResult = Schema.decodeUnknownEffect(AuthPairingCredentialResult);
+const decodeAuthPairingCredentialResult = Schema.decodeUnknownEffect(
+  Schema.toCodecJson(AuthPairingCredentialResult),
+);
 
 const asServiceError = (cause: unknown): SandboxDeploymentServiceError => {
   if (cause instanceof SandboxDeploymentServiceError) return cause;
@@ -267,6 +274,27 @@ function operationResultForDeleted(deployment: SandboxDeployment) {
       ? { environmentId: deployment.environmentId }
       : {}),
   };
+}
+
+export function probeSandboxHostAvailability(input: {
+  readonly driver: SandboxProviderDriver;
+  readonly registry: ManagedImageRegistry;
+  readonly serverVersion: string;
+}): Effect.Effect<string | undefined> {
+  return Effect.gen(function* () {
+    if (input.driver.probeHost !== undefined) {
+      const daemon = yield* input.driver.probeHost().pipe(Effect.result);
+      if (daemon._tag === "Failure") return diagnostic(daemon.failure);
+    }
+    const resolved = yield* resolveManagedImage(
+      { serverVersion: input.serverVersion, channel: "stable" },
+      input.registry,
+    ).pipe(Effect.result);
+    if (resolved._tag === "Failure") {
+      return `Managed image for version ${input.serverVersion} was not found.`;
+    }
+    return undefined;
+  }).pipe(Effect.catchDefect((defect) => Effect.succeed(diagnostic(defect))));
 }
 
 function driverAvailabilityReason(
@@ -351,7 +379,7 @@ function profileMatchesInput(
   );
 }
 
-const decodeTargetPairing = (value: unknown) =>
+export const decodeTargetPairing = (value: unknown) =>
   decodeAuthPairingCredentialResult(value).pipe(
     Effect.map((decoded) => ({
       credential: decoded.credential,
@@ -359,34 +387,44 @@ const decodeTargetPairing = (value: unknown) =>
     })),
   );
 
+const PAIRING_TIMEOUT_MS = 30_000;
+
+async function requestSandboxPairingCredentialJson(
+  input: SandboxPairingCredentialInput,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const response = await fetch(
+    new URL("/api/kata-sandbox/bootstrap-pairing-token", input.endpoint),
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${input.bootstrapToken}`,
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        label: input.label,
+        ...(input.scopes === undefined ? {} : { scopes: input.scopes }),
+      }),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(PAIRING_TIMEOUT_MS)]),
+    },
+  );
+  const text = await response.text();
+  if (response.status < 200 || response.status >= 300) {
+    throw new SandboxDeploymentServiceError({
+      kind: "command",
+      message: `Sandbox pairing credential request returned HTTP ${response.status}: ${text.slice(0, 200)}`,
+    });
+  }
+  return text.length === 0 ? {} : JSON.parse(text);
+}
+
 function issueTargetPairingCredential(
   input: SandboxPairingCredentialInput,
 ): Effect.Effect<SandboxPairingCredential, SandboxDeploymentServiceError> {
-  return Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    return yield* Effect.gen(function* () {
-      const response = yield* client.execute(
-        HttpClientRequest.post(
-          new URL("/api/kata-sandbox/bootstrap-pairing-token", input.endpoint),
-        ).pipe(
-          HttpClientRequest.bearerToken(input.bootstrapToken),
-          HttpClientRequest.acceptJson,
-          HttpClientRequest.bodyJsonUnsafe({
-            label: input.label,
-            ...(input.scopes === undefined ? {} : { scopes: input.scopes }),
-          }),
-        ),
-      );
-      if (response.status < 200 || response.status >= 300) {
-        return yield* new SandboxDeploymentServiceError({
-          kind: "command",
-          message: `Sandbox pairing credential request returned HTTP ${response.status}.`,
-        });
-      }
-      return yield* decodeTargetPairing(yield* response.json);
-    }).pipe(Effect.timeout("30 seconds"));
-  }).pipe(
-    Effect.mapError((cause) =>
+  return Effect.tryPromise({
+    try: (signal) => requestSandboxPairingCredentialJson(input, signal),
+    catch: (cause) =>
       cause instanceof SandboxDeploymentServiceError
         ? cause
         : new SandboxDeploymentServiceError({
@@ -394,8 +432,19 @@ function issueTargetPairingCredential(
             message: diagnostic(cause),
             cause,
           }),
+  }).pipe(
+    Effect.flatMap((value) =>
+      decodeTargetPairing(value).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SandboxDeploymentServiceError({
+              kind: "command",
+              message: diagnostic(cause),
+              cause,
+            }),
+        ),
+      ),
     ),
-    Effect.provide(FetchHttpClient.layer),
   );
 }
 
@@ -407,6 +456,7 @@ export function makeSandboxDeploymentService(
   const endpointHost = options.endpointHost ?? "127.0.0.1";
   const defaultDriver = makeDockerSandboxDriver({
     endpointHost,
+    publishHost: options.publishHost ?? "127.0.0.1",
     checkoutCredential: dependencies.githubAccess.checkoutCredential,
   });
   const driverFor = options.driverFor ?? (() => defaultDriver);
@@ -418,10 +468,18 @@ export function makeSandboxDeploymentService(
     options.managedImageRegistry ??
     dependencies.managedImageRegistry ??
     makeOciRegistry({
-      repository:
-        process.env.KATACODE_SANDBOX_IMAGE_REPOSITORY?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
+      repository: options.sandboxImageRepository?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
+      ...(dependencies.httpClient === undefined ? {} : { httpClient: dependencies.httpClient }),
     });
-  const bootstrapManifestFor = options.bootstrapManifestFor ?? buildSandboxBootstrapManifest;
+  const bootstrapManifestFor =
+    options.bootstrapManifestFor ??
+    ((profile, facts) => {
+      if (facts === undefined) {
+        throw new Error("Sandbox bootstrap facts are required to build a manifest.");
+      }
+      return buildSandboxBootstrapManifest(profile, facts);
+    });
+  const hostAvailability = options.hostAvailability ?? (() => Effect.succeed(undefined));
   const now = options.now ?? (() => new Date().toISOString());
   const operationScope = options.operationScope;
   const schedule: (effect: Effect.Effect<void, never>) => Effect.Effect<void, never> =
@@ -1040,6 +1098,7 @@ export function makeSandboxDeploymentService(
       if (deployment.resource.hostPort === undefined) {
         return yield* failConflict("The sandbox has no local host port for direct attachment.");
       }
+      yield* Effect.logInfo("sandbox.handoff.pairing");
       const issued = yield* issuePairingCredential({
         endpoint: localDockerEndpoint(deployment.endpoint),
         bootstrapToken,
@@ -1119,6 +1178,7 @@ export function makeSandboxDeploymentService(
 
       if (deployment.state === "Requested") {
         yield* assertOperationClaimed(receipt.operationId, claimId);
+        yield* Effect.logInfo("sandbox.create.validateProfile");
         yield* driver
           .validateProfile(
             profile,
@@ -1129,6 +1189,7 @@ export function makeSandboxDeploymentService(
             { pullIfMissing: false },
           )
           .pipe(Effect.mapError(asServiceError));
+        yield* Effect.logInfo("sandbox.create.allocate");
         const resource = yield* driver
           .allocate({
             profile,
@@ -1157,6 +1218,7 @@ export function makeSandboxDeploymentService(
 
       if (deployment.state === "Allocated") {
         yield* assertOperationClaimed(receipt.operationId, claimId);
+        yield* Effect.logInfo("sandbox.create.identify");
         const identified = yield* driver
           .identify({
             profile,
@@ -1199,6 +1261,7 @@ export function makeSandboxDeploymentService(
           identified.connectorOrigin,
         );
         yield* saveDeployment(next, deployment.revision);
+        yield* Effect.logInfo("sandbox.create.identified");
         deployment = next;
         yield* saveObservation(
           deploymentId,
@@ -1801,11 +1864,18 @@ export function makeSandboxDeploymentService(
               Effect.catch(() => Effect.succeed(false)),
             )
           : false;
+      const hostDiagnostic = yield* hostAvailability();
       return {
         profiles: profileSummaries,
         deployments: deploymentSummaries,
         relayAvailable,
-        providers: providerRegistry.listDescriptors(),
+        providers: providerRegistry
+          .listDescriptors()
+          .map((descriptor) =>
+            descriptor.driverKind === "docker" && hostDiagnostic !== undefined
+              ? { ...descriptor, availabilityDiagnostic: hostDiagnostic }
+              : descriptor,
+          ),
       };
     });
 
@@ -1903,8 +1973,11 @@ export function makeSandboxDeploymentService(
       const deploymentId = SandboxDeploymentId.make(
         yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
       );
+      const facts = yield* driverFor(profile)
+        .validateProfile(profile, undefined, { pullIfMissing: false })
+        .pipe(Effect.mapError(asServiceError));
       const bootstrapManifest = yield* Effect.try({
-        try: () => bootstrapManifestFor(profile),
+        try: () => bootstrapManifestFor(profile, facts),
         catch: (cause) => asServiceError(cause),
       });
       const intent = {
@@ -2117,22 +2190,43 @@ export function makeSandboxDeploymentService(
 
 const makeService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
+  const githubAccess = yield* SandboxGitHubAccess;
   const relayUrl = yield* relayUrlConfig.pipe(Effect.option, Effect.map(Option.getOrUndefined));
   const operationScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(operationScope, Exit.void));
+  const probeDriver = makeDockerSandboxDriver({
+    endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
+    publishHost: publishHostForBind(serverConfig.host),
+    checkoutCredential: githubAccess.checkoutCredential,
+  });
+  const httpClient = yield* HttpClient.HttpClient;
   const service = makeSandboxDeploymentService(
     {
       repository: yield* SandboxDeploymentRepository,
       environment: yield* ServerEnvironment.ServerEnvironment,
       cloudCliTokenManager: yield* CliTokenManager.CloudCliTokenManager,
-      githubAccess: yield* SandboxGitHubAccess,
+      githubAccess,
       credentialSeed: yield* SandboxCredentialSeed,
       secretStore: yield* ServerSecretStore.ServerSecretStore,
       crypto: yield* Crypto.Crypto,
-      httpClient: yield* HttpClient.HttpClient,
+      httpClient,
     },
     {
       endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
+      publishHost: publishHostForBind(serverConfig.host),
+      ...(serverConfig.sandboxImageRepository === undefined
+        ? {}
+        : { sandboxImageRepository: serverConfig.sandboxImageRepository }),
+      hostAvailability: () =>
+        probeSandboxHostAvailability({
+          driver: probeDriver,
+          registry: makeOciRegistry({
+            repository:
+              serverConfig.sandboxImageRepository?.trim() || DEFAULT_MANAGED_IMAGE_REPOSITORY,
+            httpClient,
+          }),
+          serverVersion: packageJson.version,
+        }),
       ...(relayUrl === undefined ? {} : { relayUrl }),
       operationScope,
     },

@@ -48,9 +48,11 @@ import {
   addEnvironmentReducer,
   createInitialAddEnvironmentState,
   createInitialDockerDraft,
+  dockerProviderDiagnostic,
   groupSandboxProviders,
   hasSandboxProviderAdvertisement,
   normalizeManagedImageVersion,
+  shouldOfferSandboxImageOverride,
   type AddEnvironmentState,
   type DockerDraft,
   type DockerDraftField,
@@ -185,6 +187,8 @@ export function AddEnvironmentDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const sandboxProviders = sandboxList?.providers ?? [];
+  const dockerDiagnostic = dockerProviderDiagnostic(sandboxProviders);
+  const offerSandboxImageOverride = shouldOfferSandboxImageOverride(dockerDiagnostic);
   const showSandboxChoice =
     authenticated && canManageSandboxes && hasSandboxProviderAdvertisement(sandboxProviders);
   const providerGroups = useMemo(() => groupSandboxProviders(sandboxProviders), [sandboxProviders]);
@@ -651,6 +655,7 @@ export function AddEnvironmentDialog({
       <form className="space-y-4" onSubmit={(event) => void createDocker(event)}>
         {operation ? <OperationProgress operation={operation} /> : null}
         {state.attachment ? <AttachmentResult attachment={state.attachment} /> : null}
+        {canEdit && dockerDiagnostic ? <ErrorText>{dockerDiagnostic}</ErrorText> : null}
         {canEdit ? (
           <>
             <section className="space-y-2">
@@ -711,6 +716,7 @@ export function AddEnvironmentDialog({
                 <ProfileDraft
                   draft={state.draft}
                   disabled={isSubmitting}
+                  openAdvanced={offerSandboxImageOverride}
                   onChange={(field, value) => dispatch({ type: "set-docker", field, value })}
                 />
               ) : selectedProfile ? (
@@ -969,10 +975,12 @@ function BackButton({
 function ProfileDraft({
   draft,
   disabled,
+  openAdvanced,
   onChange,
 }: {
   readonly draft: DockerDraft;
   readonly disabled: boolean;
+  readonly openAdvanced?: boolean;
   readonly onChange: (field: DockerDraftField, value: string) => void;
 }) {
   return (
@@ -1003,7 +1011,7 @@ function ProfileDraft({
           {draft.imageChannel} · {draft.imageVersion}
         </code>
       </div>
-      <details className="rounded-lg border border-border/60 px-3 py-2">
+      <details className="rounded-lg border border-border/60 px-3 py-2" open={openAdvanced}>
         <summary className="cursor-pointer text-xs font-medium text-foreground">
           Advanced: immutable image override
         </summary>

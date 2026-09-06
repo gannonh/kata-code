@@ -21,10 +21,11 @@ import {
   type ProviderObservation,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
 import {
+  makeOciRegistry,
   SandboxDriverError,
   type SandboxProviderDriver,
   type SandboxProviderPowerCapability,
-} from "@kata-sh/code-kata-sandbox/driver";
+} from "@kata-sh/code-kata-sandbox";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
@@ -35,7 +36,9 @@ import {
 } from "./SandboxDeploymentRepository.ts";
 import { layer as sandboxDeploymentRepositoryLayer } from "./SandboxDeploymentRepository.ts";
 import {
+  decodeTargetPairing,
   makeSandboxDeploymentService,
+  probeSandboxHostAvailability,
   SandboxDeploymentServiceError,
   type SandboxDeploymentServiceDependencies,
 } from "./SandboxDeploymentService.ts";
@@ -65,14 +68,18 @@ const source = {
   resolvedCommitSha: CommitSha.make("b".repeat(40)),
 };
 
-const testBootstrapManifest = (sandboxProfile: SandboxProfile) => ({
-  version: 1 as const,
-  imageDigest: sandboxProfile.imageDigest,
+const testBootstrapFacts = {
   kataVersion: "0.0.42",
   serverVersion: "0.0.42",
   serverArtifactSha256: "c".repeat(64),
   codexVersion: "0.1.0",
   codexArtifactSha256: "d".repeat(64),
+};
+
+const testBootstrapManifest = (sandboxProfile: SandboxProfile) => ({
+  version: 1 as const,
+  imageDigest: sandboxProfile.imageDigest,
+  ...testBootstrapFacts,
 });
 
 function makeDriver(
@@ -93,7 +100,8 @@ function makeDriver(
       profileForm: "docker",
     },
     validateProfile:
-      options.validateProfile ?? (() => Effect.succeed({ daemonVersion: "1.0", imageDigest })),
+      options.validateProfile ??
+      (() => Effect.succeed({ daemonVersion: "1.0", imageDigest, ...testBootstrapFacts })),
     allocate: (input) =>
       Effect.succeed({
         containerId: SandboxContainerId.make("container-1"),
@@ -277,6 +285,18 @@ const createInput = (requestId: string, label = "Issue 159") => ({
 });
 
 it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
+  it.effect("decodes a bootstrap pairing JSON body whose expiresAt is an ISO string", () =>
+    Effect.gen(function* () {
+      const decoded = yield* decodeTargetPairing({
+        id: "link-1",
+        credential: "one-use-token",
+        expiresAt: "2026-09-02T16:19:29.000Z",
+      });
+      expect(decoded.credential).toBe("one-use-token");
+      expect(decoded.expiresAt).toBe("2026-09-02T16:19:29.000Z");
+    }),
+  );
+
   it.effect("captures an exact source, runs the durable lifecycle, and deduplicates retries", () =>
     Effect.gen(function* () {
       const result = yield* runWithService(
@@ -1076,6 +1096,44 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           expect((yield* service.list()).profiles).toHaveLength(0);
         }),
       { driverFor: () => makeDriver() },
+    ),
+  );
+
+  it.effect("attaches host availability diagnostics to the Docker provider", () =>
+    runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const listed = yield* service.list();
+          const docker = listed.providers.find((provider) => provider.driverKind === "docker");
+          expect(docker?.availabilityDiagnostic).toBe(
+            "Managed image for version 0.0.42 was not found.",
+          );
+        }),
+      {
+        driverFor: () => makeDriver(),
+        hostAvailability: () => Effect.succeed("Managed image for version 0.0.42 was not found."),
+      },
+    ),
+  );
+
+  it.effect("lists when the OCI registry client is missing from context", () =>
+    runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const listed = yield* service.list();
+          const docker = listed.providers.find((provider) => provider.driverKind === "docker");
+          expect(docker?.driverKind).toBe("docker");
+          expect(docker?.availabilityDiagnostic).toBeTruthy();
+        }),
+      {
+        driverFor: () => makeDriver(),
+        hostAvailability: () =>
+          probeSandboxHostAvailability({
+            driver: makeDriver(),
+            registry: makeOciRegistry({ repository: "ghcr.io/gannonh/kata-sandbox" }),
+            serverVersion: "0.0.42",
+          }),
+      },
     ),
   );
 

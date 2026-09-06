@@ -84,6 +84,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { presentServerSettingsForClient } from "./kataSandbox/sandboxFeature.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -997,8 +998,9 @@ const makeWsRpcLayer = (
       const loadServerConfig = Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const providers = yield* providerRegistry.getProviders;
-        const settings = ServerSettings.redactServerSettingsForClient(
+        const settings = presentServerSettingsForClient(
           yield* serverSettings.getSettings,
+          config.sandboxesEnabled,
         );
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
@@ -1517,7 +1519,9 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.serverGetSettings,
             serverSettings.getSettings.pipe(
-              Effect.map(ServerSettings.redactServerSettingsForClient),
+              Effect.map((settings) =>
+                presentServerSettingsForClient(settings, config.sandboxesEnabled),
+              ),
             ),
             {
               "rpc.aggregate": "server",
@@ -1528,7 +1532,11 @@ const makeWsRpcLayer = (
             WS_METHODS.serverUpdateSettings,
             serverSettings
               .updateSettings(patch)
-              .pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
+              .pipe(
+                Effect.map((settings) =>
+                  presentServerSettingsForClient(settings, config.sandboxesEnabled),
+                ),
+              ),
             {
               "rpc.aggregate": "server",
             },
@@ -2201,7 +2209,9 @@ const makeWsRpcLayer = (
                 Stream.debounce(Duration.millis(PROVIDER_STATUS_DEBOUNCE_MS)),
               );
               const settingsUpdates = serverSettings.streamChanges.pipe(
-                Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
+                Stream.map((settings) =>
+                  presentServerSettingsForClient(settings, config.sandboxesEnabled),
+                ),
                 Stream.map((settings) => ({
                   version: 1 as const,
                   type: "settingsUpdated" as const,
