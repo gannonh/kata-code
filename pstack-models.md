@@ -1,7 +1,3 @@
----
-description: pstack per-role model choices (overrides skill defaults)
-alwaysApply: true
----
 <!-- pstack:models:begin -->
 # pstack model configuration
 
