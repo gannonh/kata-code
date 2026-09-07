@@ -1,3 +1,5 @@
+import { EnvironmentId } from "@kata-sh/code-contracts";
+import { discoveredList } from "./testFixtures";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -8,6 +10,10 @@ import {
   groupSandboxProviders,
   hasSandboxProviderAdvertisement,
   normalizeManagedImageVersion,
+  formatSandboxProgress,
+  discoverSandboxCreates,
+  isCurrentSandboxList,
+  sandboxDiscardTarget,
   shouldOfferSandboxImageOverride,
 } from "./AddEnvironmentDialog.logic";
 
@@ -36,7 +42,7 @@ describe("Add Environment flow state", () => {
 
     expect(dockerStep).toMatchObject({
       step: "docker",
-      draft: { imageVersion: "0.42.0", profileMode: "existing" },
+      draft: { imageVersion: "0.42.0" },
     });
   });
 
@@ -47,69 +53,59 @@ describe("Add Environment flow state", () => {
     );
     const running = addEnvironmentReducer(docker, {
       type: "operation",
-      operation: { phase: "deployment", operationId: "op-1", status: "Running", stage: "starting" },
+      operation: { operationId: "op-1", status: "Running" },
     });
 
     expect(addEnvironmentReducer(running, { type: "back" })).toBe(running);
     const failed = addEnvironmentReducer(running, {
       type: "operation",
       operation: {
-        phase: "deployment",
         operationId: "op-1",
         status: "Failed",
-        stage: "failed",
       },
     });
     expect(addEnvironmentReducer(failed, { type: "back" })).toEqual({
       step: "sandbox-providers",
       error: null,
     });
-    expect(addEnvironmentReducer(failed, { type: "retry" })).toMatchObject({
-      step: "docker",
-      operation: null,
-      attachment: null,
-      draft: createInitialDockerDraft({ serverVersion: "v0.42.0" }),
-    });
   });
 
-  it("turns an in-flight Docker operation into a failed retryable state", () => {
+  it("keeps server status authoritative when observation fails", () => {
     const docker = addEnvironmentReducer(
-      { step: "sandbox-providers", error: null },
+      { step: "choice" },
       { type: "choose-docker", docker: createInitialDockerDraft({ serverVersion: "0.42.0" }) },
     );
-    const selected = addEnvironmentReducer(docker, {
-      type: "select-profile",
-      profileId: "profile-failed",
-    });
-    const running = addEnvironmentReducer(selected, {
+    const running = addEnvironmentReducer(docker, {
       type: "operation",
-      operation: {
-        phase: "profile",
-        operationId: "op-profile",
-        status: "Running",
-        profileId: "profile-failed",
-      },
+      operation: { operationId: "op", status: "Running" },
     });
-    const failed = addEnvironmentReducer(running, {
-      type: "fail-operation",
-      error: "The sandbox operation did not finish in time.",
-    });
-    expect(failed).toMatchObject({
-      step: "docker",
-      error: "The sandbox operation did not finish in time.",
-      operation: {
-        phase: "profile",
-        status: "Failed",
-        profileId: "profile-failed",
-        error: "The sandbox operation did not finish in time.",
-      },
-      draft: { profileId: "profile-failed", profileMode: "existing" },
-    });
-    expect(addEnvironmentReducer(failed, { type: "retry" })).toMatchObject({
-      step: "docker",
-      operation: null,
-      draft: { profileId: "profile-failed", profileMode: "existing" },
-    });
+    expect(
+      addEnvironmentReducer(running, { type: "error", error: "Authorization revoked" }),
+    ).toMatchObject({ operation: { status: "Running" }, error: "Authorization revoked" });
+    expect(createInitialDockerDraft({ serverVersion: "0.42.0" })).not.toHaveProperty("profileId");
+  });
+  it("formats pull percentage and sizes, and retains the failed stage", () => {
+    expect(
+      formatSandboxProgress({
+        stage: "pulling-image",
+        downloadedBytes: 55_000_000,
+        totalBytes: 130_000_000,
+      }),
+    ).toBe("Pulling image (42%, 55 MB of 130 MB)");
+    expect(
+      formatSandboxProgress({
+        stage: "pulling-image",
+        downloadedBytes: 55_000_000,
+        totalBytes: null,
+      }),
+    ).toBe("Pulling image (55 MB)");
+    expect(
+      formatSandboxProgress({
+        stage: "failed",
+        lastStage: "checking-out-source",
+        diagnostic: "Failed",
+      }),
+    ).toBe("Failed while checking out source");
   });
 
   it("normalizes server versions for managed images", () => {
@@ -148,4 +144,50 @@ describe("Add Environment flow state", () => {
     expect(shouldOfferSandboxImageOverride(missingImage)).toBe(true);
     expect(shouldOfferSandboxImageOverride("Docker daemon returned 500.")).toBe(false);
   });
+});
+
+it("discovers active and finished-while-closed creates, retaining explicit registered continuation", () => {
+  expect(discoverSandboxCreates(discoveredList("Running"), []).automatic?.operationId).toBe(
+    "operation-0",
+  );
+  expect(discoverSandboxCreates(discoveredList("Succeeded"), []).automatic?.operationId).toBe(
+    "operation-0",
+  );
+  const registered = discoverSandboxCreates(discoveredList("Succeeded"), [
+    EnvironmentId.make("environment-0"),
+  ]);
+  expect(registered.automatic).toBeUndefined();
+  expect(registered.candidates).toHaveLength(1);
+  expect(discoverSandboxCreates(discoveredList("Running", 2), []).automatic).toBeUndefined();
+  expect(discoverSandboxCreates(discoveredList("Running", 2), []).candidates).toHaveLength(2);
+});
+it("requires discard confirmation and cancels it without selecting a deletion target", () => {
+  const docker = addEnvironmentReducer(
+    { step: "choice" },
+    { type: "choose-docker", docker: createInitialDockerDraft({ serverVersion: "0.0.42" }) },
+  );
+  const failed = addEnvironmentReducer(docker, {
+    type: "operation",
+    operation: {
+      operationId: "operation",
+      deploymentId: "sandbox",
+      status: "Failed",
+    },
+  });
+  expect(sandboxDiscardTarget(failed)).toBeUndefined();
+  const confirmed = addEnvironmentReducer(failed, { type: "request-discard" });
+  expect(sandboxDiscardTarget(confirmed)).toBe("sandbox");
+  expect(
+    sandboxDiscardTarget(addEnvironmentReducer(confirmed, { type: "cancel-discard" })),
+  ).toBeUndefined();
+});
+
+it("requires a successful list from the current open before automatic discovery", () => {
+  const previous = new AbortController();
+  const reopened = new AbortController();
+  expect(isCurrentSandboxList(previous.signal, reopened.signal)).toBe(false);
+  expect(isCurrentSandboxList(null, reopened.signal)).toBe(false);
+  expect(isCurrentSandboxList(reopened.signal, reopened.signal)).toBe(true);
+  reopened.abort();
+  expect(isCurrentSandboxList(reopened.signal, reopened.signal)).toBe(false);
 });

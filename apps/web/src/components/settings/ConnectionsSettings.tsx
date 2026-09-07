@@ -30,6 +30,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
+import { useOpenSandbox } from "~/features/kataSandbox/useOpenSandbox";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
@@ -1691,6 +1692,7 @@ function CloudRemoteEnvironmentRows({
 }
 
 export function ConnectionsSettings() {
+  const openSandbox = useOpenSandbox();
   const desktopBridge = window.desktopBridge;
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -2049,6 +2051,7 @@ export function ConnectionsSettings() {
         if (isAtomCommandInterrupted(result)) throw new Error("Connection cancelled.");
         throw squashAtomCommandFailure(result);
       }
+      return result.value;
     },
     [connectPairing],
   );
@@ -2997,6 +3000,8 @@ export function ConnectionsSettings() {
             onRefreshSshHosts={desktopSshHosts.refresh}
             serverVersion={primaryServerConfig?.environment.serverVersion ?? "0.0.0"}
             onConnectPairing={handleAddEnvironmentPairing}
+            registeredEnvironmentIds={environments.map((environment) => environment.environmentId)}
+            onOpenSandbox={openSandbox}
             onConnectSsh={handleAddEnvironmentSsh}
             onConnectSshTarget={handleAddEnvironmentSshTarget}
           />

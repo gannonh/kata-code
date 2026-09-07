@@ -1,3 +1,5 @@
+import type { EnvironmentId } from "@kata-sh/code-contracts";
+import type { SandboxListResponse } from "./api";
 import type {
   SandboxImageChannel,
   SandboxOperationProgress,
@@ -6,10 +8,7 @@ import type {
 
 export type AddEnvironmentChoice = "remote" | "ssh" | "sandbox";
 
-export type DockerProfileMode = "existing" | "new";
 export type DockerDraftField =
-  | "profileId"
-  | "profileName"
   | "socketPath"
   | "imageChannel"
   | "imageVersion"
@@ -20,9 +19,6 @@ export type DockerDraftField =
   | "providerInstanceId";
 
 export interface DockerDraft {
-  readonly profileId: string;
-  readonly profileMode: DockerProfileMode;
-  readonly profileName: string;
   readonly socketPath: string;
   readonly imageChannel: SandboxImageChannel;
   readonly imageVersion: string;
@@ -33,17 +29,14 @@ export interface DockerDraft {
   readonly providerInstanceId: string;
 }
 
-export type SandboxOperationPhase = "profile" | "deployment";
 export type SandboxOperationStatus = "Accepted" | "Running" | "Succeeded" | "Failed";
 
 export interface SandboxOperationView {
-  readonly phase: SandboxOperationPhase;
   readonly operationId: string;
   readonly status: SandboxOperationStatus;
   readonly progress?: SandboxOperationProgress;
-  readonly stage?: string;
   readonly error?: string;
-  readonly profileId?: string;
+  readonly acceptedAt?: string;
   readonly deploymentId?: string;
 }
 
@@ -73,6 +66,7 @@ export type AddEnvironmentState =
       readonly draft: DockerDraft;
       readonly operation: SandboxOperationView | null;
       readonly attachment: AttachmentView | null;
+      readonly discardRequested: boolean;
       readonly error: string | null;
     };
 
@@ -92,11 +86,9 @@ export type AddEnvironmentAction =
       readonly field: DockerDraftField;
       readonly value: string;
     }
-  | { readonly type: "select-profile"; readonly profileId: string }
-  | { readonly type: "new-profile" }
   | { readonly type: "operation"; readonly operation: SandboxOperationView }
-  | { readonly type: "fail-operation"; readonly error: string }
-  | { readonly type: "retry" }
+  | { readonly type: "request-discard" }
+  | { readonly type: "cancel-discard" }
   | { readonly type: "attachment"; readonly attachment: AttachmentView }
   | { readonly type: "error"; readonly error: string | null };
 
@@ -105,9 +97,6 @@ export function createInitialDockerDraft(input: {
   readonly providerInstanceId?: string | undefined;
 }): DockerDraft {
   return {
-    profileId: "",
-    profileMode: "existing",
-    profileName: "",
     socketPath: "/var/run/docker.sock",
     imageChannel: "stable",
     imageVersion: normalizeManagedImageVersion(input.serverVersion),
@@ -182,6 +171,7 @@ export function addEnvironmentReducer(
         draft: action.docker,
         operation: null,
         attachment: null,
+        discardRequested: false,
         error: null,
       };
     case "back":
@@ -213,42 +203,16 @@ export function addEnvironmentReducer(
         } as DockerDraft,
         error: null,
       };
-    case "select-profile":
-      return state.step !== "docker"
-        ? state
-        : {
-            ...state,
-            draft: { ...state.draft, profileId: action.profileId, profileMode: "existing" },
-            error: null,
-          };
-    case "new-profile":
-      return state.step !== "docker"
-        ? state
-        : {
-            ...state,
-            draft: { ...state.draft, profileId: "", profileMode: "new" },
-            error: null,
-          };
     case "operation":
       return state.step !== "docker"
         ? state
         : { ...state, operation: action.operation, error: null };
-    case "fail-operation":
-      if (state.step !== "docker") {
-        return state.step === "choice" ? state : { ...state, error: action.error };
-      }
-      return {
-        ...state,
-        error: action.error,
-        operation:
-          state.operation === null
-            ? state.operation
-            : { ...state.operation, status: "Failed", error: action.error },
-      };
-    case "retry":
-      return state.step !== "docker" || state.operation?.status !== "Failed"
-        ? state
-        : { ...state, operation: null, attachment: null, error: null };
+    case "request-discard":
+      return state.step === "docker" && state.operation?.status === "Failed"
+        ? { ...state, discardRequested: true }
+        : state;
+    case "cancel-discard":
+      return state.step === "docker" ? { ...state, discardRequested: false } : state;
     case "attachment":
       return state.step !== "docker" ? state : { ...state, attachment: action.attachment };
     case "error":
@@ -256,12 +220,62 @@ export function addEnvironmentReducer(
   }
 }
 
-export function dockerDraftWithProfile(
-  state: Extract<AddEnvironmentState, { readonly step: "docker" }>,
-  profileId: string,
-): Extract<AddEnvironmentState, { readonly step: "docker" }> {
-  return addEnvironmentReducer(state, { type: "select-profile", profileId }) as Extract<
-    AddEnvironmentState,
-    { readonly step: "docker" }
-  >;
+export function formatSandboxProgress(progress: SandboxOperationProgress | undefined): string {
+  if (progress === undefined) return "Preparing sandbox";
+  const labels = {
+    "resolving-image": "Resolving image",
+    "pulling-image": "Pulling image",
+    "validating-image": "Validating image",
+    "creating-container": "Creating container",
+    "checking-out-source": "Checking out source",
+    "starting-server": "Starting server",
+    ready: "Sandbox ready",
+    failed: "Create failed",
+  };
+  if (progress.stage === "failed")
+    return `Failed while ${labels[progress.lastStage].toLowerCase()}`;
+  if (progress.stage !== "pulling-image") return labels[progress.stage];
+  const downloaded = progress.downloadedBytes ?? 0;
+  const size = (bytes: number) =>
+    `${(bytes / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 })} MB`;
+  return progress.totalBytes !== undefined &&
+    progress.totalBytes !== null &&
+    progress.totalBytes > 0
+    ? `Pulling image (${Math.min(100, Math.round((downloaded / progress.totalBytes) * 100))}%, ${size(downloaded)} of ${size(progress.totalBytes)})`
+    : `Pulling image (${size(downloaded)})`;
+}
+
+export function discoverSandboxCreates(
+  list: SandboxListResponse | null,
+  registered: ReadonlyArray<EnvironmentId>,
+) {
+  const candidates =
+    list?.deployments.filter(
+      (summary) => summary.deployment.state !== "Deleted" && summary.createReceipt !== undefined,
+    ) ?? [];
+  const unfinished = candidates.filter(
+    ({ deployment, createReceipt }) =>
+      createReceipt?.status === "Accepted" ||
+      createReceipt?.status === "Running" ||
+      (createReceipt?.status === "Succeeded" &&
+        deployment.state === "Identified" &&
+        !registered.includes(deployment.environmentId)),
+  );
+  return {
+    candidates,
+    automatic: unfinished.length === 1 ? unfinished[0]?.createReceipt : undefined,
+  };
+}
+
+export function sandboxDiscardTarget(state: AddEnvironmentState): string | undefined {
+  return state.step === "docker" && state.discardRequested && state.operation?.status === "Failed"
+    ? state.operation.deploymentId
+    : undefined;
+}
+
+export function isCurrentSandboxList(
+  listSignal: AbortSignal | null,
+  dialogSignal: AbortSignal,
+): boolean {
+  return listSignal === dialogSignal && !dialogSignal.aborted;
 }
