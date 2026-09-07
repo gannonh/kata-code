@@ -76,14 +76,14 @@ The operating contract below reflects KAT-3269 as of 2026-09-06. Grok Bot's `dis
 Read one label from each group on the Linear issue. `runtime` selects `codex` or `cursor`. `model` selects a short name from the map below. `model-effort` selects `low`, `medium`, `high`, `xhigh`, or `max`. Linear reserves the group name `effort`, so use `model-effort`. Notation such as `runtime:codex` means group `runtime`, label `codex`.
 
 | Model label | Slug               |
-| ----------- | ------------------ |
+| ----------- | ------------------ | --------------------------- |
 | `sol`       | `gpt-5.6-sol`      |
 | `astra`     | `gpt-6-astra`      |
 | `fable`     | `claude-fable-5-1` |
-| `composer`  | `composer-2.5`     | // pragma: allowlist secret
+| `composer`  | `composer-2.5`     | // pragma: allowlist secret |
 | `grok`      | `grok-4.6`         |
 | `opus`      | `claude-opus-5`    |
-| `luna`      | `gpt-5.6-luna`     | // pragma: allowlist secret
+| `luna`      | `gpt-5.6-luna`     | // pragma: allowlist secret |
 | `terra`     | `gpt-5.6-terra`    |
 
 Validate the runtime/model pair and the model's effort support against `dispatch-runtimes` before launching. This slug map does not make every runtime/model/effort combination valid. Missing, multiple, unknown, unsupported, or conflicting labels stop dispatch. Report the selected labels and the exact correction needed on the issue. Never silently substitute a runtime, model, effort, host, or default. If the selected model or worker is unavailable, stop rather than falling back.
