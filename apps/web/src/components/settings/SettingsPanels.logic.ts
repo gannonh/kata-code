@@ -331,3 +331,28 @@ export function backgroundActivityOverrideSettings(
     },
   };
 }
+
+export const GENERAL_FOLDED_SECTION_ORDER = ["Experimental", "Legacy features"] as const;
+
+export const EXPERIMENTAL_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set(["sandboxes-preview"]);
+
+export const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
+  "legacy-plan-mode",
+  "legacy-token-streaming",
+  "legacy-sidebar",
+]);
+
+const FOLDED_SECTION_TARGET_IDS = [
+  { heading: "Experimental", ids: EXPERIMENTAL_FEATURE_TARGET_IDS },
+  { heading: "Legacy features", ids: LEGACY_FEATURE_TARGET_IDS },
+] as const satisfies ReadonlyArray<{
+  heading: (typeof GENERAL_FOLDED_SECTION_ORDER)[number];
+  ids: ReadonlySet<string>;
+}>;
+
+export function foldedSectionHeadingForSearchTarget(targetId: string): string | null {
+  for (const section of FOLDED_SECTION_TARGET_IDS) {
+    if (section.ids.has(targetId)) return section.heading;
+  }
+  return null;
+}

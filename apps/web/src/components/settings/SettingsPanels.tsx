@@ -135,6 +135,8 @@ import {
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
   resolveBackgroundActivityProfileOption,
+  EXPERIMENTAL_FEATURE_TARGET_IDS,
+  LEGACY_FEATURE_TARGET_IDS,
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
@@ -1667,13 +1669,40 @@ function AutoSettleDaysInput({
   );
 }
 
-// The legacy rows sit behind the fold, so a settings-search jump has to
-// expand the section before its target can mount and scroll.
-const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
-  "legacy-plan-mode",
-  "legacy-token-streaming",
-  "legacy-sidebar",
-]);
+function ExperimentalFeaturesSection() {
+  const [open, setOpen] = useState(false);
+  const searchTargetId = useSettingsSearchTargetId();
+  // Unfold once per search jump so a still-set target cannot reopen a fold the user closed.
+  const lastExpandedTargetRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (searchTargetId === null) {
+      lastExpandedTargetRef.current = null;
+      return;
+    }
+    if (!EXPERIMENTAL_FEATURE_TARGET_IDS.has(searchTargetId)) return;
+    if (lastExpandedTargetRef.current === searchTargetId) return;
+    lastExpandedTargetRef.current = searchTargetId;
+    setOpen(true);
+  }, [searchTargetId]);
+
+  return (
+    <section className="space-y-3">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
+          <h2 className="text-lg font-semibold tracking-[-0.025em] text-muted-foreground transition-colors group-hover:text-foreground">
+            Experimental
+          </h2>
+          <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          <div className="relative space-y-1 overflow-visible pt-3 text-foreground">
+            <SandboxesPreviewSetting />
+          </div>
+        </CollapsiblePanel>
+      </Collapsible>
+    </section>
+  );
+}
 
 /**
  * Retired features kept only for users who still depend on them. Collapsed by
@@ -1786,7 +1815,7 @@ function SandboxesPreviewSetting() {
   return (
     <SettingsRow
       {...searchableSetting("sandboxes-preview")}
-      description="Turn on Docker sandboxes for this server. Off by default. Takes effect on the next request."
+      description="Preview for development. Turn on Docker sandboxes for this server. Off by default. Takes effect on the next request."
       resetAction={
         settings.enableSandboxes !== DEFAULT_UNIFIED_SETTINGS.enableSandboxes ? (
           <SettingResetButton
@@ -2064,8 +2093,6 @@ export function GeneralSettingsPanel() {
             />
           }
         />
-
-        <SandboxesPreviewSetting />
 
         <SettingsRow
           title={
@@ -2424,6 +2451,7 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
+      <ExperimentalFeaturesSection />
       <LegacyFeaturesSection />
     </SettingsPageContainer>
   );

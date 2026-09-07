@@ -11,12 +11,16 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   backgroundActivitySharedPolicySettings,
   buildProviderInstanceUpdatePatch,
+  EXPERIMENTAL_FEATURE_TARGET_IDS,
+  foldedSectionHeadingForSearchTarget,
   formatDiagnosticsDescription,
+  GENERAL_FOLDED_SECTION_ORDER,
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
   isSamePreviewViewport,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
+  LEGACY_FEATURE_TARGET_IDS,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
 } from "./SettingsPanels.logic";
@@ -293,5 +297,30 @@ describe("isSamePreviewViewport", () => {
         { _tag: "preset", width: 390, height: 844, presetId: "iphone-12-pro" },
       ),
     ).toBe(false);
+  });
+});
+
+describe("general folded sections", () => {
+  it("orders Experimental above Legacy features", () => {
+    expect(GENERAL_FOLDED_SECTION_ORDER).toEqual(["Experimental", "Legacy features"]);
+  });
+
+  it("maps a sandboxes preview search jump to Experimental", () => {
+    expect(foldedSectionHeadingForSearchTarget("sandboxes-preview")).toBe("Experimental");
+    expect(EXPERIMENTAL_FEATURE_TARGET_IDS.has("sandboxes-preview")).toBe(true);
+  });
+
+  it("leaves everyday general rows unfolded", () => {
+    expect(foldedSectionHeadingForSearchTarget("project-grouping")).toBeNull();
+    expect(foldedSectionHeadingForSearchTarget("provider-update-checks")).toBeNull();
+  });
+
+  it("maps legacy search jumps to Legacy features", () => {
+    expect(foldedSectionHeadingForSearchTarget("legacy-plan-mode")).toBe("Legacy features");
+    expect(foldedSectionHeadingForSearchTarget("legacy-token-streaming")).toBe("Legacy features");
+    expect(foldedSectionHeadingForSearchTarget("legacy-sidebar")).toBe("Legacy features");
+    expect(LEGACY_FEATURE_TARGET_IDS).toEqual(
+      new Set(["legacy-plan-mode", "legacy-token-streaming", "legacy-sidebar"]),
+    );
   });
 });
