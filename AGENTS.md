@@ -56,52 +56,82 @@
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
-- GitHub Issues stay enabled as inbound only. Do not use them for internal planning or as the spec. When a GitHub Issue needs work, create a full Linear issue with spec and AC, link the GitHub Issue, and implement against Linear.
+- GitHub Issues stay enabled as an inbound channel for users and contributors. Do not use them for internal planning or as the spec. When a GitHub Issue needs work, create a full Linear issue with spec and AC, link the GitHub Issue for context, and implement against the Linear issue.
 - The Linear issue (and parent epic, if any) is the spec. Read it before implementing. Implement only the acceptance criteria written there. If research or implementation changes the spec, edit the Linear issue before continuing.
-- A request with no Linear issue gets one before Build starts; create it or ask. Small bounded edits (copy, single config value) are exempt.
-- Prefer the smallest change that satisfies the AC. File out-of-AC work as a new Backlog issue; keep it out of the current PR.
-- Every implementing PR names exactly one Linear issue id in its title or body. Prefer Linear's generated branch name so the GitHub integration links PR and issue.
+- A request with no Linear issue gets one before Build starts; create it or ask. Small bounded edits such as a copy change or a single config value are exempt.
+- Prefer the smallest change that satisfies the AC. File work discovered outside the AC as a new Backlog issue and keep it out of the current PR.
+- Every implementing PR names exactly one Linear issue id in its title or body. Create the branch with Linear's generated branch name so the GitHub integration links the PR and issue automatically.
 - When blocked, comment on the Linear issue with the exact ask and stop.
+- One implementing agent per Linear id: use that issue's own branch and worktree. Do not share a checkout across concurrent tickets.
 
 ## Docs and artifacts
 
-- Architecture docs, process docs, ADRs, and other durable artifacts live under `docs/` in the repository.
+- Architecture docs, process docs, ADRs, and other durable artifacts live as files in the repository under `docs/`.
+
+## Build labels (when present)
+
+If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them as the intended Build route. Do not invent or silently substitute a different runtime, model, or effort. If labels are missing, conflicting, or unclear, comment on the issue with the exact correction needed and stop.
+
+| Model label | Slug |
+| --- | --- |
+| `sol` | `gpt-5.6-sol` |
+| `astra` | `gpt-6-astra` |
+| `fable` | `claude-fable-5-1` |
+| `composer` | `composer-2.5` |
+| `grok` | `grok-4.6` |
+| `opus` | `claude-opus-5` |
+| `luna` | `gpt-5.6-luna` |
+| `terra` | `gpt-5.6-terra` |
+
+`human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
 
 ## Project milestones (Linear)
 
-Linear **project milestones** are multi-ticket product gate/phase outcomes (not issue status, not epics, not project roster).
+Linear **project milestones** are multi-ticket product gate/phase outcomes.
 
-- Name gated outcomes `Gate N: <outcome>` with **PASS when…** in the milestone description; later phases `Phase N: <name>` until a formal PASS exists.
-- Plan sets the milestone on implementable tickets that belong to that gate/phase.
-- Do not use milestones for sprints, weeks, or single PRs.
+### Layers (do not conflate)
+
+- **Project status** — live vs paused roster.
+- **Milestone** — multi-ticket product gate/phase outcome (e.g. Gate 0: Foundation).
+- **Epic** — parent issue grouping work.
+- **Issue status** — unit-of-work on the rail (Backlog → Todo → Start → In Progress → review columns → Done).
+
+### Naming
+
+- `Gate N: <outcome>` — formal PASS criteria in the milestone description.
+- `Phase N: <name>` — later phases without a formal PASS yet.
+- Do not use milestones for sprints, weeks, or individual PRs.
+
+### Rules
+
+1. Every implementable ticket that belongs to a gate/phase should have that **project milestone** set.
+2. Milestone description starts with **PASS when…** (or "no formal PASS yet").
+3. Gate **PASS** = in-scope milestone issues Done + gate verification ticket evidence (if any).
+4. Child issues carry the milestone; epics may span milestones.
 
 ## Work states (Linear columns)
 
-These columns are gates for **implementers**. Who moves the board for the crew is outside this file.
+Linear status is the phase of the work. This section defines the states and their gates. Plugins and skills define how work is done inside each phase.
 
-- **Backlog** — Spec and AC. Do not implement.
-- **Todo** — Approved and queued. Wait for Start before Build.
-- **Start** — Explicit start signal. Build may begin.
-- **In Progress** — Implement on a branch/worktree keyed to this Linear id. Keep the PR **draft** until artifacts and diffs are reviewable. One agent ↔ one Linear id worktree; do not share a checkout across concurrent tickets.
-- **Agent Review** — Fix CI and answer every review thread (human or bot) on the **existing** branch. Do not open a competing PR. Author being a human does not waive this.
-- **Human Review** — **Stop.** Do not dispatch further coding agents, CI-fix loops, or review drives on this PR until the issue moves or a human says resume.
-- **Merging** — Permission to merge. Do not merge from an earlier column.
-- **Done** — Merged. Further AC proof is recorded on the Linear issue; do not flip Done yourself to mean “verified.”
-- **Canceled / Duplicate** — Terminal. New work needs a new issue.
+- **Backlog.** Spec and AC live here. Do not implement from Backlog.
+- **Todo.** Approved and queued. Moving Backlog → Todo is the approval. Wait for Start before Build.
+- **Start.** Explicit start signal. Build begins after the issue moves to In Progress.
+- **In Progress.** Implement on the issue's branch and isolated worktree against its AC. Draft PRs stay here. Keep the PR draft until artifacts and diffs are reviewable. When complete, mark the PR ready for review and move the issue to Agent Review.
+- **Agent Review.** Fix CI and answer every review thread, human or bot, on the existing branch. Resolve false-positive bot findings with a reply stating why. When the PR is merge-ready, move the issue to Human Review.
+- **Human Review.** Human-owned stand-down. Do not dispatch coding agents, CI fixes, or review runs on the PR until the issue moves or a human says resume.
+- **Merging.** Permission to merge. Merge only from this column.
+- **Done.** Merged. Verify follows: confirm the AC landed and record the result as a comment on the issue. If the AC did not land, reopen the issue or open a new issue linked to it.
+- **Canceled / Duplicate.** Terminal. New work needs a new issue.
 
-**Merge-ready:** not draft, clean mergeability, required CI green, no open review threads, no unanswered comments.
+Merge-ready means: PR marked ready for review, clean mergeability, required CI green, no open review threads, no unanswered comments.
 
-If a PR closes without merging, comment on the Linear issue with the reason and leave further board moves to the human/crew.
+If a PR closes without merging, comment on the issue with the reason and move it to Todo.
 
-Ship means cutting a release channel (nightly, stable, TestFlight). It is not “PR merged.”
+Ship means cutting a release on one of the project's channels (for example nightly or stable). Release process is defined per project.
 
-### Human-driven Build
-
-If the Linear issue has the **`human-build`** label, Build is human-owned: do not expect an Eng Manager kick, and do not start a parallel crew Build on the same Linear id. You may still implement if a human briefed you directly. From **Agent Review** onward, normal review/merge rules above still apply.
-
-This section overrides conflicting skill/rule text about _when_ to implement or merge. If still unclear, ask the user before proceeding.
-
+This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instruction that contradicts it. When the conflict is unclear, ask the user before proceeding.
 <!-- end dev lifecycle -->
+
 <!-- pstack:models:begin -->
 
 # pstack model configuration
@@ -116,13 +146,14 @@ judgment and prose: codex:gpt-6-astra@high
 hardest tasks: codex:gpt-6-astra@max
 how explorer: codex:gpt-6-astra@low
 how explainer: codex:gpt-6-astra@high
-how critics: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
-why investigators, synthesizer: inherit-parent
-reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
-arena cross-judge pool: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
+how critics: codex:gpt-6-astra@xhigh, codex:gpt-5.6-terra@max, codex:gpt-5.6-luna@max, codex:gpt-5.6-sol@max
+why investigators: inherit-parent
+why synthesizer: inherit-parent
+reflect tooling: inherit-parent
+reflect judgment, divergent, synthesizer: inherit-parent
+arena runners: codex:gpt-6-astra@xhigh, codex:gpt-5.6-terra@max, codex:gpt-5.6-luna@max, codex:gpt-5.6-sol@max
+arena cross-judge pool: codex:gpt-6-astra@xhigh, codex:gpt-5.6-terra@max, codex:gpt-5.6-luna@max, codex:gpt-5.6-sol@max
 swarm workers: codex:gpt-6-astra@low
-architect runners: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
-interrogate reviewers: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
-
+architect runners: codex:gpt-6-astra@xhigh, codex:gpt-5.6-terra@max, codex:gpt-5.6-luna@max, codex:gpt-5.6-sol@max
+interrogate reviewers: codex:gpt-6-astra@xhigh, codex:gpt-5.6-terra@max, codex:gpt-5.6-luna@max, codex:gpt-5.6-sol@max
 <!-- pstack:models:end -->

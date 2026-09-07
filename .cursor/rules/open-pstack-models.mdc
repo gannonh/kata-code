@@ -9,15 +9,17 @@ Provider-qualified per-role choices. Read the installed pstack provider-dispatch
 
 feature, refactoring: cursor:cursor-grok-4.6@xhigh
 bug-fix: cursor:cursor-grok-4.6@xhigh
-perf-issue: codex:gpt-5.6-sol@high
-hillclimb: codex:gpt-5.6-sol@high
-judgment and prose: codex:gpt-6-astra@high
+perf-issue: cursor:cursor-grok-4.6@xhigh
+hillclimb: cursor:claude-fable-5-1@medium
+judgment and prose: cursor:claude-fable-5-1@medium
 hardest tasks: codex:gpt-6-astra@max
 how explorer: cursor:cursor-grok-4.6@xhigh
 how explainer: cursor:cursor-grok-4.6@xhigh
 how critics: cursor:claude-fable-5-1@medium, codex:gpt-6-astra@medium, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@medium
-why investigators, synthesizer: inherit-parent
-reflect tooling, judgment, divergent, synthesizer: inherit-parent
+why investigators: inherit-parent
+why synthesizer: inherit-parent
+reflect tooling: inherit-parent
+reflect judgment, divergent, synthesizer: inherit-parent
 arena runners: cursor:claude-fable-5-1@medium, codex:gpt-6-astra@medium, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@medium
 arena cross-judge pool: cursor:claude-fable-5-1@medium, codex:gpt-6-astra@medium, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@medium
 swarm workers: cursor:cursor-grok-4.6@xhigh
