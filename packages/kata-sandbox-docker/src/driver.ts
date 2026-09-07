@@ -1,14 +1,12 @@
-// @effect-diagnostics globalDate:off - timestamps are injected through the driver clock option.
-// @effect-diagnostics preferSchemaOverJson:off - Docker Engine request and response bodies are private wire data.
+// @effect-diagnostics globalDate:off globalFetch:off globalTimers:off preferSchemaOverJson:off - timestamps are injected; readiness uses fetch plus a wall-clock deadline.
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
-import * as Schedule from "effect/Schedule";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
 import { EnvironmentId, PositiveInt, type ModelSelection } from "@kata-sh/code-contracts";
 import {
+  DEFAULT_DOCKER_SOCKET_PATH,
   DEFAULT_SANDBOX_CONTAINER_PORT,
   DEFAULT_SANDBOX_KATA_HOME,
   DEFAULT_SANDBOX_WORKSPACE_ROOT,
@@ -30,6 +28,7 @@ import {
   type SandboxProviderDriver,
   type SandboxProviderResourceInput,
   type SandboxStartedFacts,
+  type SandboxBootstrapFacts,
   type SandboxValidatedProfile,
   type SandboxValidationProgressReporter,
 } from "@kata-sh/code-kata-sandbox/driver";
@@ -43,7 +42,21 @@ const DOCKER_DESCRIPTOR = {
   displayName: "Docker",
   profileForm: "docker",
 } satisfies SandboxProviderDescriptor;
+export const SANDBOX_IMAGE_LABELS = {
+  kataVersion: "com.katacode.sandbox.kata-version",
+  serverVersion: "com.katacode.sandbox.server-version",
+  serverArtifactSha256: "com.katacode.sandbox.server-artifact-sha256",
+  codexVersion: "com.katacode.sandbox.codex-version",
+  codexArtifactSha256: "com.katacode.sandbox.codex-artifact-sha256",
+} as const;
+export const IMAGE_NOT_BUILT_BY_KATA = "image was not built by Kata Code";
+const SHA256_HEX = /^[0-9a-f]{64}$/i;
 const IMAGE_PULL_TIMEOUT_MS = 5 * 60_000;
+const CHECKOUT_TIMEOUT_MS = 2 * 60_000;
+const IDENTIFY_TIMEOUT_MS = 4 * 60_000;
+const READY_CEILING_MS = 30_000;
+const READY_ATTEMPT_MS = 2_000;
+const READY_PAUSE_MS = 250;
 const READY_PATH = "/.well-known/kata/environment";
 const DEFAULT_ENDPOINT_HOST = "127.0.0.1";
 const CHECKOUT_READY_PATH = "/tmp/kata-sandbox-checkout-ready";
@@ -71,12 +84,15 @@ export interface DockerSandboxDriverOptions {
   readonly socketPath?: string;
   readonly engineForSocketPath?: (socketPath: string) => DockerEngine;
   readonly endpointHost?: string;
+  readonly publishHost?: string;
   readonly now?: () => string;
   readonly checkoutCredential?: SandboxGitHubCheckoutCredential;
   readonly readinessProbe?: (
     endpoint: string,
     manifest: SandboxBootstrapManifest,
   ) => Effect.Effect<ReadinessResponse, SandboxDriverError>;
+  readonly identifyTimeoutMs?: number;
+  readonly readyCeilingMs?: number;
 }
 
 export function dockerContainerName(deploymentId: string): string {
@@ -123,6 +139,24 @@ const decodeExecInspect = Schema.decodeUnknownSync(
 const decodeDockerVersion = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ ApiVersion: Schema.String })),
 );
+const decodeImageInspect = Schema.decodeUnknownSync(
+  Schema.Struct({
+    Config: Schema.optional(
+      Schema.Struct({
+        Labels: Schema.optional(
+          Schema.Union([Schema.Record(Schema.String, Schema.String), Schema.Null]),
+        ),
+      }),
+    ),
+    ContainerConfig: Schema.optional(
+      Schema.Struct({
+        Labels: Schema.optional(
+          Schema.Union([Schema.Record(Schema.String, Schema.String), Schema.Null]),
+        ),
+      }),
+    ),
+  }),
+);
 const decodeEnvironmentId = Schema.decodeUnknownSync(EnvironmentId);
 
 function decodeReadiness(value: unknown): ReadinessResponse {
@@ -167,9 +201,66 @@ function isLoopbackHost(host: string): boolean {
   return normalized === "localhost" || normalized === "::1" || normalized.startsWith("127.");
 }
 
-function hostIpForEndpoint(host: string): string {
-  if (isLoopbackHost(host)) return "127.0.0.1";
-  return host.includes(":") ? "::" : "0.0.0.0";
+function isUnspecifiedHost(host: string): boolean {
+  const normalized = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, "$1");
+  return normalized === "" || normalized === "0.0.0.0" || normalized === "::";
+}
+
+export function publishHostForBind(bindHost: string | undefined): string {
+  if (bindHost === undefined || isLoopbackHost(bindHost) || isUnspecifiedHost(bindHost)) {
+    return "127.0.0.1";
+  }
+  return bindHost.trim().replace(/^\[(.*)\]$/, "$1");
+}
+
+export function hostIpForEndpoint(host: string): string {
+  if (isLoopbackHost(host) || isUnspecifiedHost(host)) return "127.0.0.1";
+  return host.trim().replace(/^\[(.*)\]$/, "$1");
+}
+
+export function sandboxImageLabels(facts: SandboxBootstrapFacts): Record<string, string> {
+  return {
+    [SANDBOX_IMAGE_LABELS.kataVersion]: facts.kataVersion,
+    [SANDBOX_IMAGE_LABELS.serverVersion]: facts.serverVersion,
+    [SANDBOX_IMAGE_LABELS.serverArtifactSha256]: facts.serverArtifactSha256,
+    [SANDBOX_IMAGE_LABELS.codexVersion]: facts.codexVersion,
+    [SANDBOX_IMAGE_LABELS.codexArtifactSha256]: facts.codexArtifactSha256,
+  };
+}
+
+export function parseSandboxImageLabels(
+  labels: Record<string, string> | null | undefined,
+): SandboxBootstrapFacts | undefined {
+  if (labels === null || labels === undefined) return undefined;
+  const kataVersion = labels[SANDBOX_IMAGE_LABELS.kataVersion]?.trim();
+  const serverVersion = labels[SANDBOX_IMAGE_LABELS.serverVersion]?.trim();
+  const serverArtifactSha256 = labels[SANDBOX_IMAGE_LABELS.serverArtifactSha256]?.trim();
+  const codexVersion = labels[SANDBOX_IMAGE_LABELS.codexVersion]?.trim();
+  const codexArtifactSha256 = labels[SANDBOX_IMAGE_LABELS.codexArtifactSha256]?.trim();
+  if (
+    kataVersion === undefined ||
+    kataVersion.length === 0 ||
+    serverVersion === undefined ||
+    serverVersion.length === 0 ||
+    codexVersion === undefined ||
+    codexVersion.length === 0 ||
+    serverArtifactSha256 === undefined ||
+    !SHA256_HEX.test(serverArtifactSha256) ||
+    codexArtifactSha256 === undefined ||
+    !SHA256_HEX.test(codexArtifactSha256)
+  ) {
+    return undefined;
+  }
+  return {
+    kataVersion,
+    serverVersion,
+    serverArtifactSha256,
+    codexVersion,
+    codexArtifactSha256,
+  };
 }
 
 function endpointUrl(host: string, port: number): string {
@@ -296,6 +387,7 @@ function createBody(input: {
   readonly intent: SandboxDeploymentIntent;
   readonly bootstrapToken?: string;
   readonly endpointHost: string;
+  readonly publishHost?: string;
 }): string {
   const env = [
     "HOME=/home/katacode",
@@ -327,7 +419,7 @@ function createBody(input: {
       },
       PortBindings: {
         [DEFAULT_SANDBOX_CONTAINER_PORT + "/tcp"]: [
-          { HostIp: hostIpForEndpoint(input.endpointHost), HostPort: "" },
+          { HostIp: hostIpForEndpoint(input.publishHost ?? input.endpointHost), HostPort: "" },
         ],
       },
       AutoRemove: false,
@@ -576,6 +668,7 @@ function authenticatedCheckout(
           authenticatedCheckoutCommand(intent),
           "/",
           "setup-failed",
+          CHECKOUT_TIMEOUT_MS,
         ).pipe(Effect.mapError(() => fixedSetupError("Authenticated Git checkout failed.")));
         if (result.exitCode !== 0) {
           return yield* checkoutFailure(result.exitCode);
@@ -683,6 +776,7 @@ function exec(
   command: string,
   cwd: string,
   reason: SandboxDriverError["reason"],
+  timeoutMs?: number,
 ): Effect.Effect<
   { readonly exitCode: number; readonly stdout: string; readonly stderr: string },
   SandboxDriverError
@@ -717,6 +811,7 @@ function exec(
         method: "POST",
         body: JSON.stringify({ Detach: false, Tty: false }),
         hijacked: true,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       })
       .pipe(Effect.mapError((error) => engineFailure(error, reason)));
     const output = demultiplex(started.body);
@@ -742,49 +837,119 @@ function exec(
   });
 }
 
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
+async function probeSandboxReadiness(
+  endpoint: string,
+  manifest: SandboxBootstrapManifest,
+  ceilingMs: number,
+  signal: AbortSignal,
+): Promise<ReadinessResponse> {
+  const ceiling = AbortSignal.timeout(ceilingMs);
+  const combined = AbortSignal.any([signal, ceiling]);
+  let lastError = "Kata readiness did not succeed.";
+  while (!combined.aborted) {
+    try {
+      const response = await fetch(endpoint + READY_PATH, {
+        signal: AbortSignal.any([combined, AbortSignal.timeout(READY_ATTEMPT_MS)]),
+      });
+      if (!isSuccess(response.status)) {
+        lastError = "Kata readiness returned " + response.status + ".";
+      } else {
+        const readiness = decodeReadiness((await response.json()) as unknown);
+        if (readiness.serverVersion !== manifest.serverVersion) {
+          throw new SandboxDriverError({
+            reason: "setup-failed",
+            message:
+              "sandbox server version " +
+              readiness.serverVersion +
+              " does not match " +
+              manifest.serverVersion,
+          });
+        }
+        return readiness;
+      }
+    } catch (cause) {
+      if (cause instanceof SandboxDriverError) throw cause;
+      lastError = cause instanceof Error ? cause.message : String(cause);
+    }
+    if (combined.aborted) break;
+    await Promise.race([waitForAbort(combined), waitForAbort(AbortSignal.timeout(READY_PAUSE_MS))]);
+  }
+  throw new SandboxDriverError({
+    reason: "setup-failed",
+    message: lastError,
+  });
+}
+
 function defaultReadinessProbe(
   endpoint: string,
   manifest: SandboxBootstrapManifest,
+  ceilingMs: number,
 ): Effect.Effect<ReadinessResponse, SandboxDriverError> {
+  return Effect.tryPromise({
+    try: (signal) => probeSandboxReadiness(endpoint, manifest, ceilingMs, signal),
+    catch: (cause) =>
+      cause instanceof SandboxDriverError ? cause : asDriverError(cause, "setup-failed"),
+  });
+}
+
+// ponytail: resume on setTimeout without joining the identify fiber. Effect.timeoutOrElse
+// is raceFirst and waits for the loser; a hung fetch or uninterruptible acquire never finishes.
+function withHardDeadline<A>(
+  effect: Effect.Effect<A, SandboxDriverError>,
+  timeoutMs: number,
+  message: string,
+): Effect.Effect<A, SandboxDriverError> {
   return Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    return yield* Effect.gen(function* () {
-      const response = yield* client
-        .execute(HttpClientRequest.get(endpoint + READY_PATH))
-        .pipe(
-          Effect.retry(
-            Schedule.spaced("250 millis").pipe(Schedule.upTo({ duration: "30 seconds" })),
+    const fiber = yield* Effect.forkDetach(effect, { startImmediately: true });
+    return yield* Effect.callback<A, SandboxDriverError>((resume) => {
+      let settled = false;
+      const settle = (next: Effect.Effect<A, SandboxDriverError>) => {
+        if (settled) return;
+        settled = true;
+        resume(next);
+      };
+      const deadline = AbortSignal.timeout(timeoutMs);
+      const onTimeout = () => {
+        settle(
+          Effect.fail(
+            new SandboxDriverError({
+              reason: "setup-failed",
+              message,
+            }),
           ),
         );
-      if (!isSuccess(response.status)) {
-        return yield* new SandboxDriverError({
-          reason: "setup-failed",
-          message: "Kata readiness returned " + response.status + ".",
-        });
-      }
-      const body = yield* response.json;
-      const readiness = yield* Effect.try({
-        try: () => decodeReadiness(body),
-        catch: (cause) => asDriverError(cause, "setup-failed"),
+      };
+      deadline.addEventListener("abort", onTimeout, { once: true });
+      if (deadline.aborted) onTimeout();
+      fiber.addObserver((exit) => {
+        if (Exit.isSuccess(exit)) {
+          settle(Effect.succeed(exit.value));
+          return;
+        }
+        const squashed = Cause.squash(exit.cause);
+        settle(
+          Effect.fail(
+            squashed instanceof SandboxDriverError
+              ? squashed
+              : asDriverError(squashed, "setup-failed"),
+          ),
+        );
       });
-      if (readiness.serverVersion !== manifest.serverVersion) {
-        return yield* new SandboxDriverError({
-          reason: "setup-failed",
-          message:
-            "sandbox server version " +
-            readiness.serverVersion +
-            " does not match " +
-            manifest.serverVersion,
-        });
-      }
-      return readiness;
-    }).pipe(Effect.timeout("30 seconds"));
-  }).pipe(
-    Effect.mapError((cause) =>
-      cause instanceof SandboxDriverError ? cause : asDriverError(cause, "setup-failed"),
-    ),
-    Effect.provide(FetchHttpClient.layer),
-  );
+      return Effect.sync(() => {
+        deadline.removeEventListener("abort", onTimeout);
+      });
+    });
+  });
 }
 
 type DockerPullMessage = {
@@ -911,6 +1076,23 @@ function validateProfile(
         message: "Docker image inspection returned " + image.status + ".",
       });
     }
+    const inspect = yield* Effect.try({
+      try: () => decodeImageInspect(JSON.parse(image.body) as unknown),
+      catch: () =>
+        new SandboxDriverError({
+          reason: "invalid-profile",
+          message: IMAGE_NOT_BUILT_BY_KATA,
+        }),
+    });
+    const facts = parseSandboxImageLabels(
+      inspect.Config?.Labels ?? inspect.ContainerConfig?.Labels ?? null,
+    );
+    if (facts === undefined) {
+      return yield* new SandboxDriverError({
+        reason: "invalid-profile",
+        message: IMAGE_NOT_BUILT_BY_KATA,
+      });
+    }
     const version = yield* engine
       .request({ path: "/version" })
       .pipe(Effect.mapError((error) => engineFailure(error, "daemon-unavailable")));
@@ -923,7 +1105,40 @@ function validateProfile(
     const parsed = yield* decodeDockerVersion(version.body).pipe(
       Effect.mapError((cause) => asDriverError(cause, "daemon-unavailable")),
     );
-    return { daemonVersion: parsed.ApiVersion, imageDigest: profile.imageDigest };
+    return {
+      daemonVersion: parsed.ApiVersion,
+      imageDigest: profile.imageDigest,
+      ...facts,
+    };
+  });
+}
+
+export function probeDockerDaemon(
+  engine: DockerEngine,
+): Effect.Effect<{ readonly daemonVersion: string }, SandboxDriverError> {
+  return Effect.gen(function* () {
+    const ping = yield* engine
+      .request({ path: "/_ping" })
+      .pipe(Effect.mapError((error) => engineFailure(error, "daemon-unavailable")));
+    if (!isSuccess(ping.status)) {
+      return yield* new SandboxDriverError({
+        reason: "daemon-unavailable",
+        message: "Docker daemon returned " + ping.status + ".",
+      });
+    }
+    const version = yield* engine
+      .request({ path: "/version" })
+      .pipe(Effect.mapError((error) => engineFailure(error, "daemon-unavailable")));
+    if (!isSuccess(version.status)) {
+      return yield* new SandboxDriverError({
+        reason: "daemon-unavailable",
+        message: "Docker version returned " + version.status + ".",
+      });
+    }
+    const parsed = yield* decodeDockerVersion(version.body).pipe(
+      Effect.mapError((cause) => asDriverError(cause, "daemon-unavailable")),
+    );
+    return { daemonVersion: parsed.ApiVersion };
   });
 }
 
@@ -1001,8 +1216,13 @@ export function makeDockerSandboxDriver(
     options.engineForSocketPath?.(socketPath) ??
     makeDockerEngine(options.socketPath ?? socketPath);
   const now = options.now ?? (() => new Date().toISOString());
-  const readinessProbe = options.readinessProbe ?? defaultReadinessProbe;
+  const identifyTimeoutMs = options.identifyTimeoutMs ?? IDENTIFY_TIMEOUT_MS;
+  const readyCeilingMs = options.readyCeilingMs ?? READY_CEILING_MS;
+  const readinessProbe =
+    options.readinessProbe ??
+    ((endpoint, manifest) => defaultReadinessProbe(endpoint, manifest, readyCeilingMs));
   const endpointHost = options.endpointHost ?? DEFAULT_ENDPOINT_HOST;
+  const publishHost = options.publishHost ?? endpointHost;
 
   const inspectPowerResource = (
     input: SandboxProviderResourceInput,
@@ -1164,6 +1384,7 @@ export function makeDockerSandboxDriver(
     descriptor: DOCKER_DESCRIPTOR,
     validateProfile: (profile, reportProgress, validationOptions) =>
       validateProfile(engineFor(profile.socketPath), profile, reportProgress, validationOptions),
+    probeHost: () => probeDockerDaemon(engineFor(options.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH)),
     allocate: (input) =>
       Effect.gen(function* () {
         yield* validateAllocationInput(input);
@@ -1183,7 +1404,7 @@ export function makeDockerSandboxDriver(
           .request({
             path: "/containers/create?name=" + encodeURIComponent(name),
             method: "POST",
-            body: createBody({ ...input, endpointHost }),
+            body: createBody({ ...input, endpointHost, publishHost }),
           })
           .pipe(Effect.mapError((error) => engineFailure(error, "allocation-failed")));
         if (created.status === 409) {
@@ -1250,139 +1471,152 @@ export function makeDockerSandboxDriver(
         );
       }),
     identify: (input) =>
-      Effect.gen(function* () {
-        yield* validateAllocationInput(input);
-        const engine = engineFor(input.profile.socketPath);
-        const existing = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
-        if (existing === undefined || !resourceIdentityMatches(existing, input.resource)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Docker resource identity could not be verified before setup.",
-          });
-        }
-        const archive = buildAuthArchive(input.codexAuthJson);
-        const copied = yield* engine
-          .request({
-            path:
-              "/containers/" +
-              input.resource.containerId +
-              "/archive?path=" +
-              encodeURIComponent("/home/katacode/.codex"),
-            method: "PUT",
-            bodyBytes: archive,
-          })
-          .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
-        if (!isSuccess(copied.status)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Docker auth seed returned " + copied.status + ".",
-          });
-        }
-        if (input.modelSelection !== undefined) {
-          const settingsCopied = yield* engine
+      withHardDeadline(
+        Effect.gen(function* () {
+          yield* validateAllocationInput(input);
+          const engine = engineFor(input.profile.socketPath);
+          yield* Effect.logInfo("sandbox.identify.inspect");
+          const existing = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
+          if (existing === undefined || !resourceIdentityMatches(existing, input.resource)) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Docker resource identity could not be verified before setup.",
+            });
+          }
+          yield* Effect.logInfo("sandbox.identify.archive");
+          const archive = buildAuthArchive(input.codexAuthJson);
+          const copied = yield* engine
             .request({
               path:
                 "/containers/" +
                 input.resource.containerId +
                 "/archive?path=" +
-                encodeURIComponent(DEFAULT_SANDBOX_KATA_HOME),
+                encodeURIComponent("/home/katacode/.codex"),
               method: "PUT",
-              bodyBytes: buildProviderSettingsArchive(input.modelSelection),
+              bodyBytes: archive,
             })
             .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
-          if (!isSuccess(settingsCopied.status)) {
+          if (!isSuccess(copied.status)) {
             return yield* new SandboxDriverError({
               reason: "setup-failed",
-              message: "Docker provider settings seed returned " + settingsCopied.status + ".",
+              message: "Docker auth seed returned " + copied.status + ".",
             });
           }
-        }
-        const inspected = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
-        if (inspected === undefined) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox container disappeared before start.",
-          });
-        }
-        if (!resourceIdentityMatches(inspected, input.resource)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox resource identity changed before start.",
-          });
-        }
-        if (!labelsMatch(inspected, input.intent)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox ownership labels changed before start.",
-          });
-        }
-        if (!inspected.State.Running) {
-          const started = yield* engine
-            .request({
-              path: "/containers/" + input.resource.containerId + "/start",
-              method: "POST",
-            })
-            .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
-          if (!isSuccess(started.status) && started.status !== 304) {
+          if (input.modelSelection !== undefined) {
+            const settingsCopied = yield* engine
+              .request({
+                path:
+                  "/containers/" +
+                  input.resource.containerId +
+                  "/archive?path=" +
+                  encodeURIComponent(DEFAULT_SANDBOX_KATA_HOME),
+                method: "PUT",
+                bodyBytes: buildProviderSettingsArchive(input.modelSelection),
+              })
+              .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
+            if (!isSuccess(settingsCopied.status)) {
+              return yield* new SandboxDriverError({
+                reason: "setup-failed",
+                message: "Docker provider settings seed returned " + settingsCopied.status + ".",
+              });
+            }
+          }
+          const inspected = yield* inspectByName(
+            engine,
+            input.resource.containerId,
+            "setup-failed",
+          );
+          if (inspected === undefined) {
             return yield* new SandboxDriverError({
               reason: "setup-failed",
-              message: "Docker start returned " + started.status + ".",
+              message: "Sandbox container disappeared before start.",
             });
           }
-        }
-        const running = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
-        if (running === undefined) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox container disappeared after start.",
-          });
-        }
-        if (!resourceIdentityMatches(running, input.resource)) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Sandbox resource identity changed after start.",
-          });
-        }
-        const port = hostPort(running);
-        if (port === undefined) {
-          return yield* new SandboxDriverError({
-            reason: "setup-failed",
-            message: "Docker did not publish the sandbox port after start.",
-          });
-        }
-        yield* cleanupCheckoutCredential(engine, input.resource);
-        const ready = yield* checkoutIsReady(
-          engine,
-          input.resource,
-          input.intent.source.resolvedCommitSha,
-        );
-        if (!ready) {
-          if (options.checkoutCredential === undefined) {
-            return yield* fixedSetupError("Authenticated Git checkout is unavailable.");
+          if (!resourceIdentityMatches(inspected, input.resource)) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Sandbox resource identity changed before start.",
+            });
           }
-          yield* authenticatedCheckout(
+          if (!labelsMatch(inspected, input.intent)) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Sandbox ownership labels changed before start.",
+            });
+          }
+          if (!inspected.State.Running) {
+            yield* Effect.logInfo("sandbox.identify.start");
+            const started = yield* engine
+              .request({
+                path: "/containers/" + input.resource.containerId + "/start",
+                method: "POST",
+              })
+              .pipe(Effect.mapError((error) => engineFailure(error, "setup-failed")));
+            if (!isSuccess(started.status) && started.status !== 304) {
+              return yield* new SandboxDriverError({
+                reason: "setup-failed",
+                message: "Docker start returned " + started.status + ".",
+              });
+            }
+          }
+          const running = yield* inspectByName(engine, input.resource.containerId, "setup-failed");
+          if (running === undefined) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Sandbox container disappeared after start.",
+            });
+          }
+          if (!resourceIdentityMatches(running, input.resource)) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Sandbox resource identity changed after start.",
+            });
+          }
+          const port = hostPort(running);
+          if (port === undefined) {
+            return yield* new SandboxDriverError({
+              reason: "setup-failed",
+              message: "Docker did not publish the sandbox port after start.",
+            });
+          }
+          yield* cleanupCheckoutCredential(engine, input.resource);
+          const ready = yield* checkoutIsReady(
             engine,
             input.resource,
-            input.intent,
-            options.checkoutCredential,
+            input.intent.source.resolvedCommitSha,
           );
-        }
-        const endpoint = endpointUrl(endpointHost, port);
-        const readiness = yield* readinessProbe(endpoint, input.manifest);
-        return {
-          environmentId: readiness.environmentId,
-          endpoint,
-          connectorOrigin: {
-            localHttpHost: DEFAULT_ENDPOINT_HOST,
-            localHttpPort: PositiveInt.make(DEFAULT_SANDBOX_CONTAINER_PORT),
-          },
-          workspaceRoot: DEFAULT_SANDBOX_WORKSPACE_ROOT,
-          resource: {
-            ...input.resource,
-            hostPort: PositiveInt.make(port),
-          },
-        } satisfies SandboxIdentifiedFacts;
-      }),
+          if (!ready) {
+            if (options.checkoutCredential === undefined) {
+              return yield* fixedSetupError("Authenticated Git checkout is unavailable.");
+            }
+            yield* Effect.logInfo("sandbox.identify.checkout");
+            yield* authenticatedCheckout(
+              engine,
+              input.resource,
+              input.intent,
+              options.checkoutCredential,
+            );
+          }
+          const endpoint = endpointUrl(endpointHost, port);
+          yield* Effect.logInfo("sandbox.identify.ready");
+          const readiness = yield* readinessProbe(endpoint, input.manifest);
+          return {
+            environmentId: readiness.environmentId,
+            endpoint,
+            connectorOrigin: {
+              localHttpHost: DEFAULT_ENDPOINT_HOST,
+              localHttpPort: PositiveInt.make(DEFAULT_SANDBOX_CONTAINER_PORT),
+            },
+            workspaceRoot: DEFAULT_SANDBOX_WORKSPACE_ROOT,
+            resource: {
+              ...input.resource,
+              hostPort: PositiveInt.make(port),
+            },
+          } satisfies SandboxIdentifiedFacts;
+        }),
+        identifyTimeoutMs,
+        "Sandbox identify timed out.",
+      ),
     observe: (input): Effect.Effect<ProviderObservation, SandboxDriverError> =>
       powerObservation({ profile: input.profile, resource: input.resource }),
     delete: (input): Effect.Effect<ProviderObservation, SandboxDriverError> => {

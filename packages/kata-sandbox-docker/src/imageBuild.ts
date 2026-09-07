@@ -57,6 +57,8 @@ export interface ImageBuildCommandInput {
   readonly dockerfilePath: string;
   readonly contextPath: string;
   readonly buildArgs: ReadonlyArray<string>;
+  readonly cacheFrom?: ReadonlyArray<string>;
+  readonly cacheTo?: ReadonlyArray<string>;
 }
 
 function requiredValue(args: ReadonlyArray<string>, index: number, flag: string): string {
@@ -162,8 +164,32 @@ export function buildImageDockerArgs(input: ImageBuildCommandInput): ReadonlyArr
     input.dockerfilePath,
     ...tags.flatMap((tag) => ["--tag", tag]),
     ...input.buildArgs.flatMap((buildArg) => ["--build-arg", buildArg]),
+    ...(input.cacheFrom ?? []).flatMap((cacheFrom) => ["--cache-from", cacheFrom]),
+    ...(input.cacheTo ?? []).flatMap((cacheTo) => ["--cache-to", cacheTo]),
     input.contextPath,
   ];
+}
+
+export function sandboxImageBuildCacheScope(
+  sourceManifestSha256: string,
+  lockfileSha256: string,
+): string {
+  const digest = NodeCrypto.createHash("sha256")
+    .update(sourceManifestSha256)
+    .update("\n")
+    .update(lockfileSha256)
+    .digest("hex");
+  return `kata-sandbox-${digest.slice(0, 12)}`;
+}
+
+export function ghaCacheFlags(scope: string): {
+  readonly cacheFrom: ReadonlyArray<string>;
+  readonly cacheTo: ReadonlyArray<string>;
+} {
+  return {
+    cacheFrom: [`type=gha,scope=${scope}`],
+    cacheTo: [`type=gha,mode=max,scope=${scope}`],
+  };
 }
 
 function isSha256Digest(value: unknown): value is string {
@@ -564,6 +590,15 @@ export async function runImageBuild(args = process.argv.slice(2)): Promise<Image
     const platform = platforms[0];
     if (platform === undefined)
       throw new Error("Docker platform resolution returned no platforms.");
+    const cache =
+      process.env.GITHUB_ACTIONS === "true"
+        ? ghaCacheFlags(
+            sandboxImageBuildCacheScope(
+              sha256(sourceManifestPath),
+              sha256(NodePath.join(packageDirectory, "runtime-package-lock.json")),
+            ),
+          )
+        : undefined;
     const dockerArgs = buildImageDockerArgs({
       platforms: platforms.join(","),
       push: options.push,
@@ -580,6 +615,7 @@ export async function runImageBuild(args = process.argv.slice(2)): Promise<Image
         `CODEX_SHA256=${codexArtifactSha256}`,
         `CODEX_PACKAGE=${String(codexPackage.name ?? "")}`,
       ],
+      ...(cache === undefined ? {} : cache),
     });
     await runStreaming("docker", dockerArgs, { cwd: repositoryRoot });
 

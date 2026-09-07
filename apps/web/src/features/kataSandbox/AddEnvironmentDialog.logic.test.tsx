@@ -4,8 +4,11 @@ import {
   addEnvironmentReducer,
   createInitialAddEnvironmentState,
   createInitialDockerDraft,
+  dockerProviderDiagnostic,
   groupSandboxProviders,
+  hasSandboxProviderAdvertisement,
   normalizeManagedImageVersion,
+  shouldOfferSandboxImageOverride,
 } from "./AddEnvironmentDialog.logic";
 
 describe("Add Environment flow state", () => {
@@ -112,5 +115,37 @@ describe("Add Environment flow state", () => {
   it("normalizes server versions for managed images", () => {
     expect(normalizeManagedImageVersion("v1.2.3")).toBe("1.2.3");
     expect(normalizeManagedImageVersion("not-a-version")).toBe("0.0.0");
+  });
+
+  it("hides the Sandboxes card when the server advertises no providers", () => {
+    expect(hasSandboxProviderAdvertisement(undefined)).toBe(false);
+    expect(hasSandboxProviderAdvertisement([])).toBe(false);
+    expect(
+      hasSandboxProviderAdvertisement([
+        {
+          driverKind: "docker",
+          category: "local-container",
+          displayName: "Docker",
+          profileForm: "docker",
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  it("surfaces Docker host diagnostics before form input and opens Advanced for a missing managed image", () => {
+    const missingImage = "Managed image for version 0.0.42 was not found.";
+    expect(
+      dockerProviderDiagnostic([
+        {
+          driverKind: "docker",
+          category: "local-container",
+          displayName: "Docker",
+          profileForm: "docker",
+          availabilityDiagnostic: missingImage,
+        },
+      ]),
+    ).toBe(missingImage);
+    expect(shouldOfferSandboxImageOverride(missingImage)).toBe(true);
+    expect(shouldOfferSandboxImageOverride("Docker daemon returned 500.")).toBe(false);
   });
 });

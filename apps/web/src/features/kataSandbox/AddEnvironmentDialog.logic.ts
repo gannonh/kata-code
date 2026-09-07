@@ -147,6 +147,16 @@ export function hasSandboxProviderAdvertisement(
   return (providers?.length ?? 0) > 0;
 }
 
+export function dockerProviderDiagnostic(
+  providers: ReadonlyArray<SandboxProviderDescriptor> | undefined,
+): string | undefined {
+  return providers?.find((provider) => provider.driverKind === "docker")?.availabilityDiagnostic;
+}
+
+export function shouldOfferSandboxImageOverride(diagnostic: string | undefined): boolean {
+  return diagnostic !== undefined && diagnostic.startsWith("Managed image for version ");
+}
+
 function remoteState(): Extract<AddEnvironmentState, { readonly step: "remote" }> {
   return { step: "remote", host: "", pairingCode: "", error: null };
 }

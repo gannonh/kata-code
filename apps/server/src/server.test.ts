@@ -427,6 +427,9 @@ const buildAppUnderTest = (options?: {
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
     sandboxGitHubAccess?: Partial<SandboxGitHubAccess.SandboxGitHubAccessShape>;
+    sandboxDeploymentService?: Partial<
+      SandboxDeploymentService.SandboxDeploymentService["Service"]
+    >;
   };
 }) =>
   Effect.gen(function* () {
@@ -962,7 +965,24 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.cloudCliTokenManager,
         }),
       ),
-      Layer.provide(Layer.mock(SandboxDeploymentService.SandboxDeploymentService)({})),
+      Layer.provide(
+        Layer.mock(SandboxDeploymentService.SandboxDeploymentService)({
+          list: () =>
+            Effect.succeed({
+              profiles: [],
+              deployments: [],
+              providers: [
+                {
+                  driverKind: "docker",
+                  category: "local-container",
+                  displayName: "Docker",
+                  profileForm: "docker",
+                },
+              ],
+            }),
+          ...options?.layers?.sandboxDeploymentService,
+        }),
+      ),
       Layer.provide(
         Layer.mock(SandboxGitHubAccess.SandboxGitHubAccess)({
           resolve: () => Effect.die("Sandbox GitHub source resolution not stubbed in this test"),
@@ -3948,10 +3968,160 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("hides sandbox HTTP routes when the preview flag is off", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const listResponse = yield* HttpClient.get("/api/kata-sandbox", {
+        headers: { cookie },
+      });
+      const createResponse = yield* HttpClient.post("/api/kata-sandbox/deployments", {
+        headers: { cookie },
+        body: yield* HttpBody.json({
+          requestId: "00000000-0000-4000-8000-000000000001",
+          profileId: "profile-1",
+          label: "Off",
+          source: { repository: "gannonh/kata-code", ref: "main" },
+          providerInstanceId: "codex",
+        }),
+      });
+      const bootstrapResponse = yield* HttpClient.post(
+        "/api/kata-sandbox/bootstrap-pairing-token",
+        {
+          headers: { authorization: "Bearer missing" },
+          body: yield* HttpBody.json({ label: "sandbox-bootstrap" }),
+        },
+      );
+
+      assert.equal(listResponse.status, 404);
+      assert.equal(yield* listResponse.text, "Not Found");
+      assert.equal(createResponse.status, 404);
+      assert.equal(bootstrapResponse.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("registers sandbox HTTP routes when the stored setting is on", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              enableSandboxes: true,
+            }),
+          },
+        },
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const listResponse = yield* HttpClient.get("/api/kata-sandbox", {
+        headers: { cookie },
+      });
+      const body = (yield* listResponse.json) as {
+        readonly providers: ReadonlyArray<{ readonly driverKind: string }>;
+      };
+
+      assert.equal(listResponse.status, 200);
+      assert.equal(
+        body.providers.some((provider) => provider.driverKind === "docker"),
+        true,
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("encodes a Docker availability diagnostic through the list HTTP boundary", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              enableSandboxes: true,
+            }),
+          },
+          sandboxDeploymentService: {
+            list: () =>
+              Effect.succeed({
+                profiles: [],
+                deployments: [],
+                relayAvailable: false,
+                providers: [
+                  {
+                    driverKind: "docker" as const,
+                    category: "local-container" as const,
+                    displayName: "Docker",
+                    profileForm: "docker" as const,
+                    availabilityDiagnostic: "Managed image for version 0.0.42 was not found.",
+                  },
+                ],
+              }),
+          },
+        },
+      });
+      const listResponse = yield* HttpClient.get("/api/kata-sandbox", {
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+      });
+      const body = (yield* listResponse.json) as {
+        readonly providers: ReadonlyArray<{ readonly availabilityDiagnostic?: string }>;
+      };
+
+      assert.equal(listResponse.status, 200);
+      assert.equal(
+        body.providers[0]?.availabilityDiagnostic,
+        "Managed image for version 0.0.42 was not found.",
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("lets KATACODE_SANDBOXES=0 hide routes when the stored setting is on", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: { sandboxesEnabled: false },
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              enableSandboxes: true,
+            }),
+          },
+        },
+      });
+      const response = yield* HttpClient.get("/api/kata-sandbox", {
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+      });
+      assert.equal(response.status, 404);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("lets KATACODE_SANDBOXES=1 register routes when the stored setting is off", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: { sandboxesEnabled: true },
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              enableSandboxes: false,
+            }),
+          },
+        },
+      });
+      const response = yield* HttpClient.get("/api/kata-sandbox", {
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+      });
+      assert.equal(response.status, 200);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("serves no-store GitHub metadata to owner and access-write sessions", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({
         layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              enableSandboxes: true,
+            }),
+          },
           sandboxGitHubAccess: {
             listRepositories: ({ page }) =>
               Effect.succeed({
@@ -4035,6 +4205,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest({
         layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              enableSandboxes: true,
+            }),
+          },
           sandboxGitHubAccess: {
             listRepositories: () =>
               Effect.fail(
@@ -4064,6 +4240,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       let discoveryCalls = 0;
       yield* buildAppUnderTest({
         layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              enableSandboxes: true,
+            }),
+          },
           sandboxGitHubAccess: {
             listRepositories: () =>
               Effect.sync(() => {
