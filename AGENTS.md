@@ -1,5 +1,4 @@
 <!-- begin global rules -->
-
 ## Global Agent Instructions
 
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
@@ -52,7 +51,6 @@
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
-
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -133,7 +131,6 @@ This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instructi
 <!-- end dev lifecycle -->
 
 <!-- pstack:models:begin -->
-
 # pstack model configuration
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
