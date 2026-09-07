@@ -39,6 +39,7 @@ it("shows elapsed progress and reconnection without operation IDs or raw bytes",
   expect(html).toContain("42%, 55 MB of 130 MB");
   expect(html).toContain("Reconnecting");
   expect(html).toContain("1m 5s elapsed");
+  expect(html).toMatch(/<p aria-hidden="true"[^>]*>1m 5s elapsed<\/p>/);
   expect(html).not.toContain("secret-operation-uuid");
   expect(html).not.toContain("55000000");
 });
