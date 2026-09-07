@@ -291,7 +291,7 @@ function fromDeploymentRow(raw: unknown): Effect.Effect<SandboxDeployment, Persi
             if (intent === undefined)
               return yield* decodeFailure(
                 "deployment.decode",
-                "Requested deployment has no intent.",
+                `${row.state} deployment has no intent.`,
               );
             return yield* decodeSandboxDeployment({
               state: row.state,
