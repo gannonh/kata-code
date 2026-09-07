@@ -739,6 +739,31 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
     ),
   );
 
+  it.effect("does not start preparation after the worker loses its claim", () => {
+    let validations = 0;
+    const base = makeDriver();
+    const driver: SandboxProviderDriver = {
+      ...base,
+      validateProfile: (sandboxProfile, report, validateOptions) => {
+        validations += 1;
+        return base.validateProfile(sandboxProfile, report, validateOptions);
+      },
+    };
+    return runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const created = yield* service.create("one", createInput("claim-lost"));
+          const receipt = yield* service.getOperation(created.operationId);
+          expect(receipt.status).toBe("Failed");
+          expect(receipt.error).toContain("no longer claimed");
+          expect(validations).toBe(0);
+        }),
+      { driverFor: () => driver },
+      {},
+      (repository) => ({ ...repository, ownsOperation: () => Effect.succeed(false) }),
+    );
+  });
+
   it.effect("keeps a retry alive when the catalog reconciles during its admission", () => {
     let failValidation = true;
     const base = makeDriver();

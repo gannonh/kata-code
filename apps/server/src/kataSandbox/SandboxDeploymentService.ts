@@ -1272,6 +1272,7 @@ export function makeSandboxDeploymentService(
       }
 
       if (deployment.state === "Preparing") {
+        yield* assertOperationClaimed(receipt.operationId, claimId);
         yield* updateOperation(receipt, claimId, {
           status: "Running",
           progress: { stage: "resolving-image" },
