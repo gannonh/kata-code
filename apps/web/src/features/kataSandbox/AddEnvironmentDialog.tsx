@@ -208,7 +208,11 @@ export function AddEnvironmentDialog({
   const [observationStopped, setObservationStopped] = useState(false);
   const [elapsedNow, setElapsedNow] = useState(Date.now());
   useEffect(() => {
-    if (!open) observation.current?.abort();
+    if (!open) {
+      observation.current?.abort();
+      return;
+    }
+    setElapsedNow(Date.now());
     const timer = setInterval(() => setElapsedNow(Date.now()), 1000);
     return () => {
       clearInterval(timer);
@@ -1007,7 +1011,7 @@ export function OperationProgress({
         {reconnecting ? "Reconnecting… " : ""}
         {formatSandboxProgress(operation.progress)}
       </p>
-      <p className="text-xs text-muted-foreground">
+      <p aria-hidden className="text-xs text-muted-foreground">
         {Math.floor(seconds / 60)}m {seconds % 60}s elapsed
       </p>
       {operation.progress?.stage === "failed" ? (
