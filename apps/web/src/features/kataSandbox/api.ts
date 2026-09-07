@@ -35,8 +35,8 @@ export type SandboxProfileForm = {
 };
 
 export type SandboxDeploymentForm = {
-  readonly profileId: string;
-  readonly expectedRevision?: number;
+  readonly image: SandboxImageInput;
+  readonly socketPath: string;
   readonly label: string;
   readonly repository: string;
   readonly ref: string;
@@ -154,6 +154,7 @@ async function request<T>(
     throw new SandboxApiError(message, response.status);
   }
 
+  init?.signal?.throwIfAborted();
   return decode(body);
 }
 
@@ -168,8 +169,12 @@ export function createSandboxRequestId(): string {
   return randomUUID();
 }
 
-export function fetchSandboxList(): Promise<SandboxListResponse> {
-  return request("/api/kata-sandbox", undefined, decodeListResponse);
+export function fetchSandboxList(signal?: AbortSignal): Promise<SandboxListResponse> {
+  return request(
+    "/api/kata-sandbox",
+    signal === undefined ? undefined : { signal },
+    decodeListResponse,
+  );
 }
 
 export function fetchSandboxGitHubRepositories(page: number): Promise<SandboxGitHubRepositoryPage> {
@@ -217,21 +222,26 @@ export function upsertSandboxProfile(
 
 export function createSandboxDeployment(
   input: SandboxDeploymentForm,
+  signal?: AbortSignal,
 ): Promise<{ readonly operationId: string }> {
   const requestId = createSandboxRequestId();
   return request(
     "/api/kata-sandbox/deployments",
-    jsonRequest({
-      requestId,
-      profileId: input.profileId,
-      ...(input.expectedRevision === undefined ? {} : { expectedRevision: input.expectedRevision }),
-      label: input.label.trim(),
-      source: {
-        repository: input.repository.trim(),
-        ref: input.ref.trim(),
-      },
-      providerInstanceId: input.providerInstanceId.trim(),
-    }),
+    {
+      ...jsonRequest({
+        requestId,
+        kind: "new",
+        image: input.image,
+        socketPath: input.socketPath.trim() || undefined,
+        label: input.label.trim(),
+        source: {
+          repository: input.repository.trim(),
+          ref: input.ref.trim(),
+        },
+        providerInstanceId: input.providerInstanceId.trim(),
+      }),
+      ...(signal === undefined ? {} : { signal }),
+    },
     decodeAccepted,
   );
 }
@@ -305,41 +315,84 @@ export function deleteSandboxDeployment(
   );
 }
 
-export function fetchSandboxOperation(operationId: string): Promise<SandboxOperationReceipt> {
+export function fetchSandboxOperation(
+  operationId: string,
+  signal?: AbortSignal,
+): Promise<SandboxOperationReceipt> {
   return request(
     `/api/kata-sandbox/operations/${encodeURIComponent(operationId)}`,
-    undefined,
+    signal === undefined ? undefined : { signal },
     decodeOperationReceipt,
+  );
+}
+
+export function retrySandboxDeployment(
+  previousOperationId: string,
+): Promise<{ readonly operationId: string }> {
+  return request(
+    "/api/kata-sandbox/deployments",
+    jsonRequest({ kind: "retry", requestId: createSandboxRequestId(), previousOperationId }),
+    decodeAccepted,
   );
 }
 
 export async function pollSandboxOperation(
   operationId: string,
   options: {
-    readonly intervalMs?: number;
-    readonly maxAttempts?: number;
     readonly wait?: (intervalMs: number) => Promise<void>;
+    readonly now?: () => number;
+    readonly signal?: AbortSignal;
     readonly onReceipt?: (receipt: SandboxOperationReceipt) => void;
+    readonly onReconnecting?: (reconnecting: boolean) => void;
   } = {},
 ): Promise<SandboxOperationReceipt> {
-  const intervalMs = options.intervalMs ?? 1_000;
-  const maxAttempts = options.maxAttempts ?? 360;
+  const now = options.now ?? Date.now;
+  let acceptedAt = now();
   const wait =
-    options.wait ??
-    ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
-
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const receipt = await fetchSandboxOperation(operationId);
-    options.onReceipt?.(receipt);
-    if (receipt.status === "Succeeded" || receipt.status === "Failed") {
-      return receipt;
+    options.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (;;) {
+    options.signal?.throwIfAborted();
+    try {
+      let receipt: SandboxOperationReceipt;
+      try {
+        receipt = await fetchSandboxOperation(operationId, options.signal);
+      } catch (error) {
+        if (!(error instanceof SandboxApiError) || error.status !== 404) throw error;
+        const listed = await fetchSandboxList(options.signal);
+        const recovered = listed.deployments
+          .map((summary) => summary.createReceipt)
+          .find(
+            (candidate) =>
+              candidate?.operationId === operationId ||
+              candidate?.previousOperationId === operationId,
+          );
+        if (recovered === undefined)
+          throw new SandboxApiError(
+            "This sandbox operation is no longer available. Reopen Add environment to choose an existing sandbox or create one.",
+            404,
+          );
+        receipt = recovered;
+        operationId = receipt.operationId;
+      }
+      options.signal?.throwIfAborted();
+      acceptedAt = Date.parse(receipt.acceptedAt);
+      options.onReconnecting?.(false);
+      options.onReceipt?.(receipt);
+      if (receipt.status === "Succeeded" || receipt.status === "Failed") return receipt;
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      const transient =
+        error instanceof TypeError ||
+        (error instanceof SandboxApiError &&
+          (error.status >= 500 || error.status === 408 || error.status === 429));
+      if (!transient) {
+        options.onReconnecting?.(false);
+        throw error;
+      }
+      options.onReconnecting?.(true);
     }
-    if (attempt + 1 < maxAttempts) {
-      await wait(intervalMs);
-    }
+    await wait(now() - acceptedAt < 60_000 ? 1_000 : 5_000);
   }
-
-  throw new Error("The sandbox operation did not finish in time.");
 }
 
 export function mintSandboxHandoff(

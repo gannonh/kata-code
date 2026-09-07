@@ -27,3 +27,13 @@ describe("redactSecrets", () => {
     expect(redactDiagnostic(undefined)).toBe("Unknown diagnostic");
   });
 });
+
+it("redacts complete quoted secrets, bearer credentials, and URL userinfo", () => {
+  const value = redactDiagnostic(
+    new Error(
+      'password="sentinel phrase" token=sentinel-token Authorization: Bearer sentinel-bearer https://sentinel-user:sentinel-pass@example.com https://sentinel-token@example.com/repo',
+    ),
+  );
+  for (const secret of ["sentinel", "phrase"]) expect(value).not.toContain(secret);
+  expect(value).toContain("[redacted]");
+});

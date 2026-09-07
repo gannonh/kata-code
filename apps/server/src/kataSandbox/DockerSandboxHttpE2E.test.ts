@@ -7,14 +7,41 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import {
+  ORCHESTRATION_WS_METHODS,
   AuthAccessTokenType,
   AuthAdministrativeScopes,
+  AuthStandardClientScopes,
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
 } from "@kata-sh/code-contracts";
 import { SandboxProviderLabels } from "@kata-sh/code-kata-sandbox-contracts/domain";
 import { dockerContainerName } from "@kata-sh/code-kata-sandbox-docker";
 import { describe, expect, it } from "@effect/vitest";
+import { RelayWebClientId } from "@kata-sh/code-contracts/relay";
+import {
+  Connection,
+  EnvironmentRegistry,
+  registerPairingConnection,
+  Connectivity,
+  Wakeups,
+  ProfileStore,
+  CredentialStore,
+  type ConnectionProfile,
+  type ConnectionCredential,
+  type ConnectionTarget,
+} from "@kata-sh/code-client-runtime/connection";
+import * as Platform from "@kata-sh/code-client-runtime/platform";
+import { TokenStore } from "@kata-sh/code-client-runtime/authorization";
+import { ManagedRelay } from "@kata-sh/code-client-runtime/relay";
+import { remoteHttpClientLayer, subscribe } from "@kata-sh/code-client-runtime/rpc";
+import { ensureWorkspaceProject } from "@kata-sh/code-client-runtime/operations";
+import { normalizeProjectPathForComparison } from "@kata-sh/code-shared/path";
+import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
+import * as Deferred from "effect/Deferred";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
+import * as Socket from "effect/unstable/socket/Socket";
 import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
@@ -44,6 +71,7 @@ interface SandboxReceipt {
     readonly endpoint?: string;
   };
   readonly progress?: {
+    readonly history?: ReadonlyArray<{ readonly stage: string; readonly at: string }>;
     readonly stage?: string;
     readonly lastStage?: string;
     readonly diagnostic?: string;
@@ -113,17 +141,15 @@ function removeContainers(ids: ReadonlyArray<string>): void {
   NodeChildProcess.spawnSync("docker", ["rm", "-f", ...ids], { encoding: "utf8" });
 }
 
-function ownedContainerFilters(input: {
-  readonly profileId?: string;
-  readonly deploymentId?: string;
-}): ReadonlyArray<string> {
-  const filters = [`label=${SandboxProviderLabels.schemaVersion}=v1`];
-  if (input.deploymentId !== undefined) {
-    filters.push(`label=${SandboxProviderLabels.deploymentId}=${input.deploymentId}`);
-  } else if (input.profileId !== undefined) {
-    filters.push(`label=${SandboxProviderLabels.profileId}=${input.profileId}`);
-  }
-  return filters;
+function ownedContainerFilters(deploymentId: string): ReadonlyArray<string> {
+  return [
+    `label=${SandboxProviderLabels.schemaVersion}=v1`,
+    `label=${SandboxProviderLabels.deploymentId}=${deploymentId}`,
+  ];
+}
+
+function redactDiagnostics(text: string): string {
+  return text.replace(/(token|pairingCode|access_token)=([^\s&#"']+)/gi, "$1=[redacted]");
 }
 
 function onChildExit(child: NodeChildProcess.ChildProcess, onExit: () => void): () => void {
@@ -190,7 +216,7 @@ function waitForPairing(child: NodeChildProcess.ChildProcess, output: { text: st
       resume(
         Effect.fail(
           new DockerSandboxHttpE2EError({
-            message: `Isolated serve exited ${String(code)} before printing a pairing URL.\n${output.text}`,
+            message: `Isolated serve exited ${String(code)} before printing a pairing URL.\n${redactDiagnostics(output.text)}`,
           }),
         ),
       );
@@ -209,7 +235,7 @@ function waitForPairing(child: NodeChildProcess.ChildProcess, output: { text: st
       orElse: () =>
         Effect.fail(
           new DockerSandboxHttpE2EError({
-            message: `Timed out waiting for the isolated serve pairing URL.\n${output.text}`,
+            message: `Timed out waiting for the isolated serve pairing URL.\n${redactDiagnostics(output.text)}`,
           }),
         ),
     }),
@@ -297,27 +323,29 @@ function containerLogs(ids: ReadonlyArray<string>): string {
       const logs = NodeChildProcess.spawnSync("docker", ["logs", "--tail", "80", id], {
         encoding: "utf8",
       });
-      return `--- docker ${id} ---\n${inspect.stdout}${inspect.stderr}--- logs ---\n${logs.stdout}\n${logs.stderr}`;
+      return `--- docker ${id} ---\n${inspect.stdout}${inspect.stderr}--- logs ---\n${redactDiagnostics(logs.stdout)}\n${redactDiagnostics(logs.stderr)}`;
     })
     .join("\n");
 }
 
-function describeDocker(profileId: string, deploymentId?: string): string {
+function describeDocker(deploymentId: string): string {
   try {
     const listed = NodeChildProcess.spawnSync(
       "docker",
       ["ps", "-a", "--format", "{{.ID}} {{.Status}} {{.Names}} {{.Ports}}"],
       { encoding: "utf8" },
     );
-    const named =
-      deploymentId === undefined
-        ? { stdout: "", stderr: "" }
-        : NodeChildProcess.spawnSync("docker", ["inspect", dockerContainerName(deploymentId)], {
-            encoding: "utf8",
-          });
-    const ids = dockerIds(
-      ownedContainerFilters({ profileId, ...(deploymentId === undefined ? {} : { deploymentId }) }),
+    const named = NodeChildProcess.spawnSync(
+      "docker",
+      [
+        "inspect",
+        "--format",
+        "{{.State.Status}} error={{.State.Error}} exit={{.State.ExitCode}}",
+        dockerContainerName(deploymentId),
+      ],
+      { encoding: "utf8" },
     );
+    const ids = dockerIds(ownedContainerFilters(deploymentId));
     return `deploymentId=${deploymentId ?? ""}\n${listed.stdout}${listed.stderr}\n${named.stdout}${named.stderr}\n${containerLogs(ids)}`;
   } catch (cause) {
     return cause instanceof Error ? cause.message : String(cause);
@@ -397,12 +425,121 @@ function acceptOperation(input: {
   });
 }
 
+const readProjects = subscribe(ORCHESTRATION_WS_METHODS.subscribeShell, {}).pipe(
+  Stream.filter((event) => event.kind === "snapshot"),
+  Stream.map((event) => event.snapshot.projects),
+  Stream.runHead,
+  Effect.flatMap(
+    Option.match({
+      onNone: () =>
+        Effect.fail(new DockerSandboxHttpE2EError({ message: "Shell closed before a snapshot" })),
+      onSome: Effect.succeed,
+    }),
+  ),
+);
+
+function makeClientLayer() {
+  const profiles = new Map<string, ConnectionProfile>();
+  const credentials = new Map<string, ConnectionCredential>();
+  const targets = new Map<string, ConnectionTarget>();
+  const unsupported = Effect.die("The Docker bearer client must not use SSH or relay");
+  const platform = Layer.mergeAll(
+    Layer.succeed(Platform.ClientPresentation, {
+      metadata: { label: "Docker HTTP E2E", deviceType: "desktop" },
+      scopes: AuthStandardClientScopes,
+    }),
+    Layer.succeed(Platform.PrimaryEnvironmentAuth, { bearerToken: Effect.succeed(Option.none()) }),
+    Layer.succeed(Platform.CloudSession, { clerkToken: unsupported }),
+    Layer.succeed(Platform.RelayDeviceIdentity, { deviceId: Effect.succeed(Option.none()) }),
+    Layer.succeed(Platform.SshEnvironmentGateway, {
+      provision: () => unsupported,
+      prepare: () => unsupported,
+      disconnect: () => unsupported,
+    }),
+    Layer.succeed(Platform.PlatformConnectionSource, { registrations: Stream.succeed([]) }),
+    Layer.succeed(Platform.ConnectionTargetStore, {
+      list: Effect.sync(() => [...targets.values()]),
+    }),
+    Layer.succeed(Platform.ConnectionRegistrationStore, {
+      register: (registration) =>
+        Effect.sync(() => {
+          targets.set(registration.target.environmentId, registration.target);
+          if (registration._tag === "BearerConnectionRegistration") {
+            profiles.set(registration.profile.connectionId, registration.profile);
+            credentials.set(registration.profile.connectionId, registration.credential);
+          }
+        }),
+      remove: (target) =>
+        Effect.sync(() => {
+          targets.delete(target.environmentId);
+        }),
+    }),
+    ProfileStore.layer({
+      get: (id) => Effect.sync(() => Option.fromUndefinedOr(profiles.get(id))),
+      put: (profile) =>
+        Effect.sync(() => {
+          profiles.set(profile.connectionId, profile);
+        }),
+      remove: (id) =>
+        Effect.sync(() => {
+          profiles.delete(id);
+        }),
+    }),
+    CredentialStore.layer({
+      get: (id) => Effect.sync(() => Option.fromUndefinedOr(credentials.get(id))),
+      put: (id, credential) =>
+        Effect.sync(() => {
+          credentials.set(id, credential);
+        }),
+      remove: (id) =>
+        Effect.sync(() => {
+          credentials.delete(id);
+        }),
+    }),
+    Layer.succeed(Platform.EnvironmentCacheStore, {
+      loadShell: () => Effect.succeed(Option.none()),
+      saveShell: () => Effect.void,
+      loadThread: () => Effect.succeed(Option.none()),
+      saveThread: () => Effect.void,
+      removeThread: () => Effect.void,
+      loadServerConfig: () => Effect.succeed(Option.none()),
+      saveServerConfig: () => Effect.void,
+      loadVcsRefs: () => Effect.succeed(Option.none()),
+      saveVcsRefs: () => Effect.void,
+      removeVcsRefs: () => Effect.void,
+      clearVcsRefs: () => Effect.void,
+      clear: () => Effect.void,
+    }),
+    Connectivity.layer({ status: Effect.succeed("online"), changes: Stream.never }),
+    Wakeups.layer({ changes: Stream.never }),
+    TokenStore.layer({
+      get: () => Effect.succeed(Option.none()),
+      put: () => unsupported,
+      remove: () => Effect.void,
+    }),
+    Layer.succeed(ManagedRelay.ManagedRelayDpopSigner, {
+      thumbprint: unsupported,
+      createProof: () => unsupported,
+    }),
+    remoteHttpClientLayer(globalThis.fetch),
+    NodeCryptoLayer.layer,
+    Socket.layerWebSocketConstructorGlobal,
+  );
+  const runtime = Layer.merge(
+    platform,
+    ManagedRelay.layer({ relayUrl: "http://relay.invalid", clientId: RelayWebClientId }).pipe(
+      Layer.provide(platform),
+    ),
+  );
+  return Connection.layer.pipe(Layer.provideMerge(runtime));
+}
+
 describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
   it.live(
     "creates a sandbox through the authenticated HTTP boundary",
     () => {
       const imageDigest = readImageDigest();
-      const profileId = `docker-http-e2e-${NodeCrypto.randomUUID()}`;
+
       const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kata-sandbox-http-e2e-"));
       const codexHome = NodePath.join(baseDir, "codex-home");
       writeIsolatedHome(baseDir, codexHome);
@@ -448,37 +585,13 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
         });
         if (list.status !== 200) {
           return yield* new DockerSandboxHttpE2EError({
-            message: `GET /api/kata-sandbox returned ${String(list.status)}: ${list.text}\n${output.text}`,
+            message: `GET /api/kata-sandbox returned ${String(list.status)}: ${list.text}\n${redactDiagnostics(output.text)}`,
           });
         }
         expect(list.body.providers.some((provider) => provider.driverKind === "docker")).toBe(true);
 
-        const upsertId = yield* acceptOperation({
-          origin: pairing.origin,
-          token,
-          method: "POST",
-          path: "/api/kata-sandbox/profiles",
-          body: {
-            requestId: NodeCrypto.randomUUID(),
-            profileId,
-            name: "Docker HTTP E2E",
-            driverKind: "docker",
-            socketPath,
-            image: { kind: "custom", digest: imageDigest },
-            enabled: true,
-          },
-        });
         const diagnostics = (receipt: SandboxReceipt) =>
-          `${output.text}\n${describeDocker(profileId, receipt.deploymentId ?? deploymentId)}`;
-        const upserted = yield* waitForReceipt({
-          origin: pairing.origin,
-          token,
-          operationId: upsertId,
-          ceiling: Duration.minutes(2),
-          diagnostics,
-        });
-        expect(upserted.result?.kind).toBe("profile");
-
+          `${redactDiagnostics(output.text)}\n${deploymentId === undefined ? "" : describeDocker(receipt.deploymentId ?? deploymentId)}`;
         const createId = yield* acceptOperation({
           origin: pairing.origin,
           token,
@@ -486,12 +599,23 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
           path: "/api/kata-sandbox/deployments",
           body: {
             requestId: NodeCrypto.randomUUID(),
-            profileId,
+            kind: "new",
+            socketPath,
+            image: { kind: "custom", digest: imageDigest },
             label: "HTTP E2E",
             source: { repository: sourceRepository, ref: sourceRef },
             providerInstanceId: "codex",
           },
         });
+        const accepted = yield* jsonRequest<{ readonly receipt: SandboxReceipt }>({
+          origin: pairing.origin,
+          token,
+          method: "GET",
+          path: `/api/kata-sandbox/operations/${createId}`,
+        });
+        expect(accepted.status).toBe(200);
+        expect(["Accepted", "Running"]).toContain(accepted.body.receipt.status);
+        deploymentId = accepted.body.receipt.deploymentId;
         const created = yield* waitForReceipt({
           origin: pairing.origin,
           token,
@@ -507,31 +631,83 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
         }
         deploymentId = createdDeploymentId;
         expect(created.result?.kind).toBe("deployment");
+        const history = created.progress?.history ?? [];
+        expect(history.map((entry) => entry.stage)).toEqual([
+          "resolving-image",
+          ...(history.some((entry) => entry.stage === "pulling-image") ? ["pulling-image"] : []),
+          "validating-image",
+          "creating-container",
+          "checking-out-source",
+          "starting-server",
+          "ready",
+        ]);
+        expect(history.every((entry) => Number.isFinite(Date.parse(entry.at)))).toBe(true);
+        expect(history.map((entry) => Date.parse(entry.at))).toEqual(
+          history.map((entry) => Date.parse(entry.at)).toSorted((a, b) => a - b),
+        );
         expect(created.result?.endpoint?.startsWith("http://127.0.0.1:")).toBe(true);
 
-        const handoff = yield* jsonRequest<{
-          readonly attachment?: string;
-          readonly pairingUrl?: string;
-          readonly endpoint?: string;
-          readonly message?: string;
-        }>({
-          origin: pairing.origin,
-          token,
-          method: "POST",
-          path: `/api/kata-sandbox/deployments/${createdDeploymentId}/handoff`,
-        });
-        if (handoff.status !== 200) {
-          return yield* new DockerSandboxHttpE2EError({
-            message: `Handoff returned ${String(handoff.status)}: ${handoff.text}\n${diagnostics({
-              operationId: createId,
-              status: created.status,
-              deploymentId: createdDeploymentId,
-            })}`,
-          });
+        const handoffs = yield* Effect.forEach(
+          [0, 1],
+          () =>
+            jsonRequest<{
+              readonly attachment: string;
+              readonly pairingUrl: string;
+              readonly endpoint: string;
+            }>({
+              origin: pairing.origin,
+              token,
+              method: "POST",
+              path: `/api/kata-sandbox/deployments/${createdDeploymentId}/handoff`,
+            }),
+          { concurrency: "unbounded" },
+        );
+        for (const handoff of handoffs) {
+          expect(handoff.status).toBe(200);
+          expect(handoff.body.attachment).toBe("direct");
+          expect(typeof handoff.body.pairingUrl).toBe("string");
+          expect(handoff.body.endpoint.startsWith("http://127.0.0.1:")).toBe(true);
         }
-        expect(handoff.body.attachment).toBe("direct");
-        expect(handoff.body.pairingUrl).toBeTruthy();
-        expect(handoff.body.endpoint?.startsWith("http://127.0.0.1:")).toBe(true);
+        expect(handoffs[0]?.body.pairingUrl === handoffs[1]?.body.pairingUrl).toBe(false);
+        const barriers = [yield* Deferred.make<void>(), yield* Deferred.make<void>()];
+        const projects = yield* Effect.forEach(
+          handoffs,
+          (handoff, index) =>
+            Effect.gen(function* () {
+              const environmentId = yield* registerPairingConnection({
+                pairingUrl: handoff.body.pairingUrl,
+              });
+              const registry = yield* EnvironmentRegistry;
+              const before = yield* registry.run(environmentId, readProjects);
+              expect(before).toHaveLength(0);
+              const barrier = barriers[index];
+              if (barrier === undefined) return yield* Effect.die("Missing client barrier");
+              yield* Deferred.succeed(barrier, undefined);
+              yield* Effect.forEach(barriers, Deferred.await);
+              const projectId = yield* registry.run(
+                environmentId,
+                ensureWorkspaceProject({
+                  workspaceRoot: index === 0 ? "/workspace" : "/workspace/",
+                  title: "Hello-World",
+                }),
+              );
+              const repeated = yield* registry.run(
+                environmentId,
+                ensureWorkspaceProject({ workspaceRoot: "/workspace", title: "Hello-World" }),
+              );
+              expect(repeated).toBe(projectId);
+              const after = yield* registry.run(environmentId, readProjects);
+              const matching = after.filter(
+                (project) =>
+                  normalizeProjectPathForComparison(project.workspaceRoot) === "/workspace",
+              );
+              expect(matching).toHaveLength(1);
+              expect(matching[0]?.id).toBe(projectId);
+              return { environmentId, projectId };
+            }).pipe(Effect.provide(makeClientLayer()), Effect.scoped),
+          { concurrency: "unbounded" },
+        );
+        expect(projects[0]).toEqual(projects[1]);
 
         const deleteId = yield* acceptOperation({
           origin: pairing.origin,
@@ -551,21 +727,13 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
           diagnostics,
         });
         expect(deleted.result?.kind).toBe("deleted");
-        expect(
-          dockerIds(ownedContainerFilters({ profileId, deploymentId: createdDeploymentId })),
-        ).toEqual([]);
+        expect(dockerIds(ownedContainerFilters(createdDeploymentId))).toEqual([]);
       }).pipe(
         Effect.ensuring(
           Effect.sync(() => {
             try {
-              removeContainers(
-                dockerIds(
-                  ownedContainerFilters({
-                    profileId,
-                    ...(deploymentId === undefined ? {} : { deploymentId }),
-                  }),
-                ),
-              );
+              if (deploymentId === undefined) return;
+              removeContainers(dockerIds(ownedContainerFilters(deploymentId)));
             } catch {
               // Leftover container cleanup is best-effort after the receipt path.
             }

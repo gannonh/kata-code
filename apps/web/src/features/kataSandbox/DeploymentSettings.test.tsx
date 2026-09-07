@@ -197,18 +197,17 @@ describe("Docker sandbox Settings API", () => {
       enabled: true,
     });
     const profileReceipt = await pollSandboxOperation(profileAccepted.operationId, {
-      intervalMs: 0,
       wait: async () => undefined,
     });
     const accepted = await createSandboxDeployment({
-      profileId: "local",
+      image: { kind: "custom", digest: "sha256:" + "b".repeat(64) },
+      socketPath: "/var/run/docker.sock",
       label: "Issue 159",
       repository: "gannonh/kata-code",
       ref: "refs/pull/171/head",
       providerInstanceId: "codex",
     });
     const receipt = await pollSandboxOperation("operation-1", {
-      intervalMs: 0,
       wait: async () => undefined,
     });
     const handoff = await mintSandboxHandoff("deployment-1");

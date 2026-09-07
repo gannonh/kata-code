@@ -177,6 +177,13 @@ export const runKataSandboxMigrations = Effect.fn("kataSandbox.runMigrations")(f
             AND json_extract(profile_input_json, '$.imageDigest') IS NOT NULL
         `;
       }
+      const receiptColumns = yield* sql<{
+        readonly name: string;
+      }>`PRAGMA table_info(kata_sandbox_operation_receipts)`;
+      if (!receiptColumns.some((column) => column.name === "previous_operation_id")) {
+        yield* sql`ALTER TABLE kata_sandbox_operation_receipts ADD COLUMN previous_operation_id TEXT`;
+      }
+      yield* sql`CREATE UNIQUE INDEX IF NOT EXISTS kata_sandbox_operation_successor_idx ON kata_sandbox_operation_receipts(previous_operation_id) WHERE previous_operation_id IS NOT NULL`;
     }),
   );
 });

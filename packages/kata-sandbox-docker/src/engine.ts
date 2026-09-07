@@ -16,6 +16,7 @@ export interface DockerRequest {
   readonly contentType?: string;
   readonly timeoutMs?: number;
   readonly hijacked?: boolean;
+  readonly onLine?: (line: string) => Promise<void>;
 }
 
 export interface DockerResponse {
@@ -135,10 +136,30 @@ function makeRequest(
           // exits. Destroy without reject left identify Running for 10 minutes.
           if (timeoutMs > 0) response.setTimeout(timeoutMs, onTimeout);
           response.on("error", fail);
-          response.on("data", (chunk: Buffer | string) =>
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
-          );
-          response.on("end", () => finish(response.statusCode ?? 0, chunks));
+          let pending = "";
+          let delivery = Promise.resolve();
+          if (request.onLine !== undefined) response.setEncoding("utf8");
+          response.on("data", (chunk: Buffer | string) => {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            if (request.onLine === undefined) return;
+            pending += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+            const lines = pending.split("\n");
+            pending = lines.pop() ?? "";
+            response.pause();
+            delivery = delivery.then(async () => {
+              for (const line of lines) await request.onLine?.(line);
+              response.resume();
+            });
+            void delivery.catch(fail);
+          });
+          response.on("end", () => {
+            void delivery
+              .then(async () => {
+                if (pending.length > 0) await request.onLine?.(pending);
+                finish(response.statusCode ?? 0, chunks);
+              })
+              .catch(fail);
+          });
         });
         nodeRequest.on("upgrade", (response, socket, head) => {
           upgradedSocket = socket;

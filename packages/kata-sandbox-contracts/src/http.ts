@@ -130,17 +130,25 @@ export const SandboxProfileUpsertRequest = Schema.Struct({
 });
 export type SandboxProfileUpsertRequest = typeof SandboxProfileUpsertRequest.Type;
 
-export const SandboxCreateRequest = Schema.Struct({
-  requestId: SandboxRequestId,
-  profileId: SandboxProviderProfileId,
-  label: SandboxDeploymentLabel,
-  source: Schema.Struct({
-    repository: ResolvedGitHubSource.fields.repository,
-    ref: ResolvedGitHubSource.fields.ref,
+export const SandboxCreateRequest = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("new"),
+    requestId: SandboxRequestId,
+    image: SandboxProfileInput.fields.image,
+    socketPath: SandboxProfileInput.fields.socketPath,
+    label: SandboxDeploymentLabel,
+    source: Schema.Struct({
+      repository: ResolvedGitHubSource.fields.repository,
+      ref: ResolvedGitHubSource.fields.ref,
+    }),
+    providerInstanceId: ProviderInstanceId,
   }),
-  providerInstanceId: ProviderInstanceId,
-  expectedRevision: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-});
+  Schema.Struct({
+    kind: Schema.Literal("retry"),
+    requestId: SandboxRequestId,
+    previousOperationId: SandboxOperationId,
+  }),
+]);
 export type SandboxCreateRequest = typeof SandboxCreateRequest.Type;
 
 export const SandboxStartRequest = Schema.Struct({
@@ -179,6 +187,8 @@ export type SandboxAccepted = typeof SandboxAccepted.Type;
 
 export const SandboxDeploymentSummary = Schema.Struct({
   deployment: SandboxDeployment,
+  createReceipt: Schema.optional(SandboxOperationReceipt),
+  recovery: Schema.optional(Schema.Literals(["retry", "reconcile", "open"])),
   observation: Schema.optional(ProviderObservation),
   actions: Schema.optional(Schema.Array(SandboxDeploymentAction)),
 });

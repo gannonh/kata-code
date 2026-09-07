@@ -1,15 +1,16 @@
 import { useAtomValue } from "@effect/atom-react";
-import { ArrowLeftIcon, CheckIcon, ContainerIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import { ArrowLeftIcon, ContainerIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
 } from "react";
-import type { DesktopDiscoveredSshHost } from "@kata-sh/code-contracts";
+import type { DesktopDiscoveredSshHost, EnvironmentId } from "@kata-sh/code-contracts";
 import {
   OciImageDigest,
   type SandboxProviderDescriptor,
@@ -17,7 +18,6 @@ import {
 import * as Schema from "effect/Schema";
 
 import { primaryServerProvidersAtom } from "~/state/server";
-import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import {
@@ -30,19 +30,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../components/ui/dialog";
-import { Spinner } from "../../components/ui/spinner";
 import { toastManager } from "../../components/ui/toast";
 import {
   createSandboxDeployment,
   deleteSandboxDeployment,
   fetchSandboxList,
-  mintSandboxHandoff,
   pollSandboxOperation,
   type SandboxListResponse,
   type SandboxOperationReceipt,
   type SandboxDeploymentForm,
-  type SandboxProfileForm,
-  upsertSandboxProfile,
+  retrySandboxDeployment,
 } from "./api";
 import {
   addEnvironmentReducer,
@@ -52,11 +49,16 @@ import {
   groupSandboxProviders,
   hasSandboxProviderAdvertisement,
   normalizeManagedImageVersion,
+  formatSandboxProgress,
+  discoverSandboxCreates,
+  isCurrentSandboxList,
+  sandboxDiscardTarget,
   shouldOfferSandboxImageOverride,
   type AddEnvironmentState,
   type DockerDraft,
-  type DockerDraftField,
+  type AddEnvironmentAction,
 } from "./AddEnvironmentDialog.logic";
+import { openCreatedSandbox } from "./onboarding";
 import { SandboxGitHubSourcePicker } from "./SandboxGitHubSourcePicker";
 
 export interface AddEnvironmentDialogProps {
@@ -74,7 +76,13 @@ export interface AddEnvironmentDialogProps {
     readonly pairingUrl?: string;
     readonly host?: string;
     readonly pairingCode?: string;
-  }) => Promise<void>;
+  }) => Promise<EnvironmentId>;
+  readonly registeredEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  readonly onOpenSandbox: (
+    environmentId: EnvironmentId,
+    title: string,
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly onConnectSsh: (input: {
     readonly host: string;
     readonly username: string;
@@ -85,20 +93,15 @@ export interface AddEnvironmentDialogProps {
 
 const isOciImageDigest = Schema.is(OciImageDigest);
 
-function operationView(phase: "profile" | "deployment", receipt: SandboxOperationReceipt) {
-  const profileId =
-    receipt.result?.kind === "profile" ? receipt.result.profileId : receipt.profileId;
+function operationView(receipt: SandboxOperationReceipt) {
   return {
-    phase,
     operationId: receipt.operationId,
     status: receipt.status,
-    ...(receipt.progress === undefined
-      ? {}
-      : { progress: receipt.progress, stage: receipt.progress.stage }),
-    ...(receipt.error ? { error: receipt.error } : {}),
-    ...(profileId ? { profileId } : {}),
-    ...(receipt.deploymentId ? { deploymentId: receipt.deploymentId } : {}),
-  } as const;
+    acceptedAt: receipt.acceptedAt,
+    ...(receipt.progress === undefined ? {} : { progress: receipt.progress }),
+    ...(receipt.error === undefined ? {} : { error: receipt.error }),
+    ...(receipt.deploymentId === undefined ? {} : { deploymentId: receipt.deploymentId }),
+  };
 }
 
 function errorMessage(error: unknown): string {
@@ -107,7 +110,7 @@ function errorMessage(error: unknown): string {
     : "The environment request failed.";
 }
 
-function profileImage(draft: DockerDraft): NonNullable<SandboxProfileForm["image"]> {
+function profileImage(draft: DockerDraft): SandboxDeploymentForm["image"] {
   const override = draft.imageOverride.trim();
   return override.length > 0
     ? { kind: "custom", digest: override }
@@ -118,25 +121,15 @@ function profileImage(draft: DockerDraft): NonNullable<SandboxProfileForm["image
       };
 }
 
-function deploymentForm(
-  draft: DockerDraft,
-  profileId: string,
-  expectedRevision?: number,
-): SandboxDeploymentForm {
+function deploymentForm(draft: DockerDraft): SandboxDeploymentForm {
   return {
-    profileId,
-    ...(expectedRevision === undefined ? {} : { expectedRevision }),
-    label: draft.label,
+    image: profileImage(draft),
+    socketPath: draft.socketPath,
+    label: draft.label.trim() || draft.repository.split("/").at(-1) || "Sandbox",
     repository: draft.repository,
     ref: draft.ref,
     providerInstanceId: draft.providerInstanceId,
   };
-}
-
-function readProfileImageLabel(
-  profile: SandboxListResponse["profiles"][number]["profile"],
-): string {
-  return profile.imageDigest;
 }
 
 function remoteInput(state: Extract<AddEnvironmentState, { readonly step: "remote" }>) {
@@ -155,26 +148,44 @@ export function AddEnvironmentDialog({
   onRefreshSshHosts,
   serverVersion,
   onConnectPairing,
+  registeredEnvironmentIds,
+  onOpenSandbox,
   onConnectSsh,
   onConnectSshTarget,
 }: AddEnvironmentDialogProps) {
+  const dialogSession = useRef(new AbortController());
+  const listSession = useRef<AbortSignal | null>(null);
+  const registrations = useRef(registeredEnvironmentIds);
+  registrations.current = registeredEnvironmentIds;
   const [sandboxList, setSandboxList] = useState<SandboxListResponse | null>(null);
   const [sandboxListError, setSandboxListError] = useState<string | null>(null);
   const [isLoadingSandboxList, setIsLoadingSandboxList] = useState(false);
   const refreshSandboxList = useCallback(async () => {
     if (!authenticated) return;
+    const signal = dialogSession.current.signal;
     setIsLoadingSandboxList(true);
     try {
-      setSandboxList(await fetchSandboxList());
+      const list = await fetchSandboxList(signal);
+      if (signal.aborted || signal !== dialogSession.current.signal) return;
+      listSession.current = signal;
+      setSandboxList(list);
       setSandboxListError(null);
     } catch (error) {
-      setSandboxListError(errorMessage(error));
+      if (!signal.aborted && signal === dialogSession.current.signal)
+        setSandboxListError(errorMessage(error));
     } finally {
-      setIsLoadingSandboxList(false);
+      if (signal === dialogSession.current.signal) setIsLoadingSandboxList(false);
     }
   }, [authenticated]);
   useEffect(() => {
+    dialogSession.current.abort();
+    const session = new AbortController();
+    dialogSession.current = session;
+    listSession.current = null;
+    setSandboxList(null);
     if (open && authenticated) void refreshSandboxList();
+    else session.abort();
+    return () => session.abort();
   }, [authenticated, open, refreshSandboxList]);
 
   const codexProviders = useAtomValue(primaryServerProvidersAtom).filter(
@@ -192,22 +203,26 @@ export function AddEnvironmentDialog({
   const showSandboxChoice =
     authenticated && canManageSandboxes && hasSandboxProviderAdvertisement(sandboxProviders);
   const providerGroups = useMemo(() => groupSandboxProviders(sandboxProviders), [sandboxProviders]);
-  const availableProfiles = useMemo(
-    () =>
-      sandboxList?.profiles.filter(
-        (summary) => summary.kind === "available" && summary.profile.enabled,
-      ) ?? [],
-    [sandboxList],
-  );
-  const selectedProfile = availableProfiles.find(
-    (summary) =>
-      state.step === "docker" &&
-      state.draft.profileMode === "existing" &&
-      summary.profile.profileId === state.draft.profileId,
-  );
+  const observation = useRef<AbortController | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [observationStopped, setObservationStopped] = useState(false);
+  const [elapsedNow, setElapsedNow] = useState(Date.now());
+  useEffect(() => {
+    if (!open) {
+      observation.current?.abort();
+      return;
+    }
+    setElapsedNow(Date.now());
+    const timer = setInterval(() => setElapsedNow(Date.now()), 1000);
+    return () => {
+      clearInterval(timer);
+      observation.current?.abort();
+    };
+  }, [open]);
   const sandboxOperationActive =
     state.step === "docker" &&
     state.operation !== null &&
+    !observationStopped &&
     (state.operation.status === "Accepted" || state.operation.status === "Running");
   const attachmentPending = state.step === "docker" && state.attachment?.status === "pending";
   const isBusy = isSubmitting || sandboxOperationActive || attachmentPending;
@@ -222,26 +237,13 @@ export function AddEnvironmentDialog({
     state.step === "docker" ? state.draft.providerInstanceId : null,
   ]);
 
-  useEffect(() => {
-    if (state.step !== "docker" || state.operation !== null) return;
-    if (state.draft.profileMode === "existing" && state.draft.profileId.length > 0) return;
-    if (availableProfiles.length === 0 && state.draft.profileMode !== "new") {
-      dispatch({ type: "new-profile" });
-      return;
-    }
-    if (
-      state.draft.profileMode === "existing" &&
-      !availableProfiles.some((summary) => summary.profile.profileId === state.draft.profileId)
-    ) {
-      const profileId = availableProfiles[0]?.profile.profileId;
-      if (profileId !== undefined) dispatch({ type: "select-profile", profileId });
-    }
-  }, [availableProfiles, state]);
-
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
-      if (!nextOpen && (sandboxOperationActive || attachmentPending)) return;
       if (!nextOpen) {
+        dialogSession.current.abort();
+        listSession.current = null;
+        setIsSubmitting(false);
+        observation.current?.abort();
         dispatch({
           type: "reset",
           docker: createInitialDockerDraft({ serverVersion, providerInstanceId: firstProviderId }),
@@ -249,7 +251,7 @@ export function AddEnvironmentDialog({
       }
       onOpenChange(nextOpen);
     },
-    [attachmentPending, firstProviderId, onOpenChange, sandboxOperationActive, serverVersion],
+    [onOpenChange, serverVersion, firstProviderId],
   );
 
   const showError = useCallback((error: unknown) => {
@@ -294,47 +296,117 @@ export function AddEnvironmentDialog({
     }
   };
 
-  const attach = async (deploymentId: string) => {
+  const attach = async (deploymentId: string, signal = dialogSession.current.signal) => {
+    if (signal.aborted) return;
     dispatch({ type: "attachment", attachment: { status: "pending" } });
     try {
-      const handoff = await mintSandboxHandoff(deploymentId);
-      await onConnectPairing({ pairingUrl: handoff.pairingUrl });
+      await openCreatedSandbox(deploymentId, {
+        signal,
+        isRegistered: (id) => registrations.current.includes(id),
+        connectPairing: onConnectPairing,
+        openProject: onOpenSandbox,
+      });
+      signal.throwIfAborted();
       dispatch({ type: "attachment", attachment: { status: "succeeded" } });
-      toastManager.add({
-        type: "success",
-        title: "Sandbox environment attached",
-        description: "The sandbox is saved as an ordinary environment.",
-      });
-      void refreshSandboxList();
+      handleOpenChange(false);
     } catch (error) {
-      dispatch({
-        type: "attachment",
-        attachment: { status: "failed", error: errorMessage(error) },
-      });
+      if (!signal.aborted)
+        dispatch({
+          type: "attachment",
+          attachment: { status: "failed", error: errorMessage(error) },
+        });
     }
   };
 
+  const observe = async (operationId: string) => {
+    observation.current?.abort();
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, dialogSession.current.signal]);
+    if (signal.aborted) return;
+    observation.current = controller;
+    setObservationStopped(false);
+    setReconnecting(false);
+    try {
+      const receipt = await pollSandboxOperation(operationId, {
+        signal,
+        onReceipt: (receipt) => dispatch({ type: "operation", operation: operationView(receipt) }),
+        onReconnecting: setReconnecting,
+      });
+      if (receipt.status === "Succeeded" && receipt.deploymentId !== undefined)
+        await attach(receipt.deploymentId, signal);
+      else await refreshSandboxList();
+    } catch (error) {
+      if (!signal.aborted) {
+        setReconnecting(false);
+        setObservationStopped(true);
+        showError(error);
+      }
+    }
+  };
+
+  const resume = (receipt: SandboxOperationReceipt) => {
+    dispatch({
+      type: "choose-docker",
+      docker: createInitialDockerDraft({ serverVersion, providerInstanceId: firstProviderId }),
+    });
+    dispatch({ type: "operation", operation: operationView(receipt) });
+    void observe(receipt.operationId);
+  };
+
+  const resumeRef = useRef(resume);
+  resumeRef.current = resume;
+  useEffect(() => {
+    if (
+      !open ||
+      state.step !== "choice" ||
+      sandboxList === null ||
+      !isCurrentSandboxList(listSession.current, dialogSession.current.signal)
+    )
+      return;
+    const { automatic } = discoverSandboxCreates(sandboxList, registeredEnvironmentIds);
+    if (automatic !== undefined) resumeRef.current(automatic);
+  }, [open, state.step, sandboxList, registeredEnvironmentIds]);
+
   const retryFailedOperation = async () => {
     if (state.step !== "docker" || state.operation?.status !== "Failed") return;
-    const failedOperation = state.operation;
-    if (failedOperation.phase !== "deployment" || failedOperation.deploymentId === undefined) {
-      dispatch({ type: "retry" });
-      return;
-    }
+    const signal = dialogSession.current.signal;
     setIsSubmitting(true);
-    dispatch({ type: "error", error: null });
     try {
-      const accepted = await deleteSandboxDeployment(failedOperation.deploymentId);
-      const receipt = await pollSandboxOperation(accepted.operationId);
-      if (receipt.status === "Failed") {
-        throw new Error(receipt.error ?? "The failed sandbox deployment could not be cleaned up.");
-      }
-      dispatch({ type: "retry" });
-      void refreshSandboxList();
+      const accepted = await retrySandboxDeployment(state.operation.operationId);
+      signal.throwIfAborted();
+      dispatch({
+        type: "operation",
+        operation: { operationId: accepted.operationId, status: "Accepted" },
+      });
+      await observe(accepted.operationId);
     } catch (error) {
-      showError(error);
+      if (!signal.aborted) showError(error);
     } finally {
-      setIsSubmitting(false);
+      if (signal === dialogSession.current.signal) setIsSubmitting(false);
+    }
+  };
+
+  const discard = async () => {
+    const deploymentId = sandboxDiscardTarget(state);
+    if (deploymentId === undefined) return;
+    const signal = dialogSession.current.signal;
+    setIsSubmitting(true);
+    try {
+      const accepted = await deleteSandboxDeployment(deploymentId);
+      signal.throwIfAborted();
+      const receipt = await pollSandboxOperation(accepted.operationId, { signal });
+      signal.throwIfAborted();
+      if (receipt.status === "Failed") throw new Error(receipt.error ?? "Sandbox discard failed.");
+      dispatch({ type: "cancel-discard" });
+      dispatch({
+        type: "choose-docker",
+        docker: createInitialDockerDraft({ serverVersion, providerInstanceId: firstProviderId }),
+      });
+      await refreshSandboxList();
+    } catch (error) {
+      if (!signal.aborted) showError(error);
+    } finally {
+      if (signal === dialogSession.current.signal) setIsSubmitting(false);
     }
   };
 
@@ -342,136 +414,81 @@ export function AddEnvironmentDialog({
     event.preventDefault();
     if (state.step !== "docker" || isSubmitting || state.operation !== null) return;
     const draft = state.draft;
-    const profileId = draft.profileId.trim();
-    if (draft.profileMode === "existing" && profileId.length === 0) {
-      showError("Select an available Docker profile or add a Docker profile.");
+    if (!draft.repository.trim() || !draft.ref.trim() || !draft.providerInstanceId.trim()) {
+      showError(new Error("Select a repository, branch, and Codex provider instance."));
       return;
     }
-    if (draft.profileMode === "new" && !draft.profileName.trim()) {
-      showError("Profile name is required.");
+    if (draft.imageOverride.trim() && !isOciImageDigest(draft.imageOverride.trim())) {
+      showError(new Error("The custom image must be an immutable sha256 OCI digest."));
       return;
     }
-    if (!draft.label.trim() || !draft.repository.trim() || !draft.ref.trim()) {
-      showError("Deployment label, GitHub repository, and ref are required.");
-      return;
-    }
-    if (!draft.providerInstanceId.trim()) {
-      showError("Select a Codex provider instance.");
-      return;
-    }
-    if (
-      draft.profileMode === "new" &&
-      draft.imageOverride.trim().length > 0 &&
-      !isOciImageDigest(draft.imageOverride.trim())
-    ) {
-      showError("The immutable image override must be a sha256 OCI digest.");
-      return;
-    }
-
+    const signal = dialogSession.current.signal;
     setIsSubmitting(true);
-    dispatch({ type: "error", error: null });
     try {
-      let selectedProfileId = profileId;
-      let selectedProfileRevision = selectedProfile?.profile.revision;
-      const listedProfile = sandboxList?.profiles.find(
-        (summary) => summary.profile.profileId === profileId,
-      )?.profile;
-      const retryUnavailableProfile =
-        draft.profileMode === "existing" && profileId.length > 0 && selectedProfile === undefined;
-      if (draft.profileMode === "new" || retryUnavailableProfile) {
-        const profileInput: SandboxProfileForm = {
-          ...(retryUnavailableProfile
-            ? { profileId, expectedRevision: listedProfile?.revision ?? 1 }
-            : {}),
-          name: draft.profileName.trim() || listedProfile?.name || "Docker",
-          socketPath: draft.socketPath,
-          image:
-            retryUnavailableProfile && listedProfile
-              ? { kind: "custom", digest: listedProfile.imageDigest }
-              : profileImage(draft),
-          enabled: true,
-        };
-        const accepted = await upsertSandboxProfile(profileInput);
-        dispatch({
-          type: "operation",
-          operation: {
-            phase: "profile",
-            operationId: accepted.operationId,
-            status: "Accepted",
-            ...(profileId ? { profileId } : {}),
-          },
-        });
-        const receipt = await pollSandboxOperation(accepted.operationId, {
-          onReceipt: (nextReceipt) =>
-            dispatch({ type: "operation", operation: operationView("profile", nextReceipt) }),
-        });
-        const receiptProfileId =
-          receipt.result?.kind === "profile"
-            ? (receipt.result.profileId ?? "")
-            : (receipt.profileId ?? "");
-        if (receiptProfileId) dispatch({ type: "select-profile", profileId: receiptProfileId });
-        void refreshSandboxList();
-        if (receipt.status === "Failed")
-          throw new Error(receipt.error ?? "The Docker profile could not be saved.");
-        selectedProfileId = receiptProfileId;
-        if (!selectedProfileId) throw new Error("The Docker profile was saved without an id.");
-        selectedProfileRevision = listedProfile?.revision ?? 1;
-      }
-
-      const accepted = await createSandboxDeployment(
-        deploymentForm(draft, selectedProfileId, selectedProfileRevision),
-      );
+      const accepted = await createSandboxDeployment(deploymentForm(draft), signal);
+      signal.throwIfAborted();
       dispatch({
         type: "operation",
-        operation: {
-          phase: "deployment",
-          operationId: accepted.operationId,
-          status: "Accepted",
-        },
+        operation: { operationId: accepted.operationId, status: "Accepted" },
       });
-      const receipt = await pollSandboxOperation(accepted.operationId, {
-        onReceipt: (nextReceipt) =>
-          dispatch({ type: "operation", operation: operationView("deployment", nextReceipt) }),
-      });
-      if (receipt.status === "Failed")
-        throw new Error(receipt.error ?? "The sandbox deployment failed.");
-      const deploymentId =
-        receipt.result?.kind === "deployment" ? receipt.result.deploymentId : receipt.deploymentId;
-      if (!deploymentId) throw new Error("The deployment completed without an id.");
-      dispatch({ type: "operation", operation: operationView("deployment", receipt) });
-      await attach(deploymentId);
+      await observe(accepted.operationId);
     } catch (error) {
-      dispatch({ type: "fail-operation", error: errorMessage(error) });
+      if (!signal.aborted) showError(error);
     } finally {
-      setIsSubmitting(false);
+      if (signal === dialogSession.current.signal) setIsSubmitting(false);
     }
   };
 
+  const renderResume = () => {
+    const { candidates } = discoverSandboxCreates(sandboxList, registeredEnvironmentIds);
+    return candidates.length === 0 ? null : (
+      <section className="space-y-2" aria-label="Existing sandboxes">
+        <h3 className="text-sm font-medium">Continue a sandbox</h3>
+        {candidates.map(({ deployment, createReceipt }) =>
+          deployment.state === "Deleted" || createReceipt === undefined ? null : (
+            <Button
+              key={createReceipt.operationId}
+              type="button"
+              variant="outline"
+              onClick={() => resume(createReceipt)}
+            >
+              {createReceipt.status === "Succeeded" ? "Open sandbox" : "Resume sandbox"}:{" "}
+              {deployment.intent.label}
+            </Button>
+          ),
+        )}
+      </section>
+    );
+  };
+
   const renderChoice = () => (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <ChoiceCard
-        title="Remote link"
-        description="Enter a backend host and pairing code."
-        icon={<ContainerIcon aria-hidden className="size-4" />}
-        onClick={() => dispatch({ type: "choose", choice: "remote" })}
-      />
-      {desktopBridge ? (
+    <>
+      <div className="grid gap-3 sm:grid-cols-2">
         <ChoiceCard
-          title="SSH"
-          description="Use local SSH config, agent, and tunnels for the backend."
-          icon={<TerminalIcon aria-hidden className="size-4" />}
-          onClick={() => dispatch({ type: "choose", choice: "ssh" })}
-        />
-      ) : null}
-      {showSandboxChoice ? (
-        <ChoiceCard
-          title="Sandboxes"
-          description="Create an isolated Kata environment from a local or cloud provider."
+          title="Remote link"
+          description="Enter a backend host and pairing code."
           icon={<ContainerIcon aria-hidden className="size-4" />}
-          onClick={() => dispatch({ type: "choose", choice: "sandbox" })}
+          onClick={() => dispatch({ type: "choose", choice: "remote" })}
         />
-      ) : null}
-    </div>
+        {desktopBridge ? (
+          <ChoiceCard
+            title="SSH"
+            description="Use local SSH config, agent, and tunnels for the backend."
+            icon={<TerminalIcon aria-hidden className="size-4" />}
+            onClick={() => dispatch({ type: "choose", choice: "ssh" })}
+          />
+        ) : null}
+        {showSandboxChoice ? (
+          <ChoiceCard
+            title="Sandboxes"
+            description="Create an isolated Kata environment from a local or cloud provider."
+            icon={<ContainerIcon aria-hidden className="size-4" />}
+            onClick={() => dispatch({ type: "choose", choice: "sandbox" })}
+          />
+        ) : null}
+      </div>
+      {renderResume()}
+    </>
   );
 
   const renderRemote = () => {
@@ -628,13 +645,6 @@ export function AddEnvironmentDialog({
             }
           />
         ) : null}
-        {providerGroups.cloud.length > 0 ? (
-          <ProviderGroup
-            title="Cloud Provider"
-            providers={providerGroups.cloud}
-            onDocker={() => undefined}
-          />
-        ) : null}
         {sandboxListError ? <ErrorText>{sandboxListError}</ErrorText> : null}
         {providerGroups.local.length === 0 && providerGroups.cloud.length === 0 ? (
           <p className="text-sm text-muted-foreground">No sandbox providers are available.</p>
@@ -649,175 +659,91 @@ export function AddEnvironmentDialog({
   const renderDocker = () => {
     if (state.step !== "docker") return null;
     const operation = state.operation;
-    const canEdit = operation === null;
-    const profileNeedsCreation = state.draft.profileMode === "new";
+    const recovery = sandboxList?.deployments.find(
+      (summary) => summary.createReceipt?.operationId === operation?.operationId,
+    )?.recovery;
     return (
       <form className="space-y-4" onSubmit={(event) => void createDocker(event)}>
-        {operation ? <OperationProgress operation={operation} /> : null}
+        {operation ? (
+          <OperationProgress operation={operation} now={elapsedNow} reconnecting={reconnecting} />
+        ) : null}
         {state.attachment ? <AttachmentResult attachment={state.attachment} /> : null}
-        {canEdit && dockerDiagnostic ? <ErrorText>{dockerDiagnostic}</ErrorText> : null}
-        {canEdit ? (
+        {operation === null ? (
           <>
-            <section className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-medium text-foreground">Docker profile</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Reuse an available profile or add one for this machine.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  onClick={() => dispatch({ type: "new-profile" })}
-                >
-                  <PlusIcon className="size-3.5" />
-                  Add Docker profile
-                </Button>
-              </div>
-              {availableProfiles.length > 0 ? (
-                <div className="space-y-1" role="listbox" aria-label="Available Docker profiles">
-                  {availableProfiles.map((summary) => {
-                    const selected =
-                      state.draft.profileMode === "existing" &&
-                      state.draft.profileId === summary.profile.profileId;
-                    return (
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={selected}
-                        key={summary.profile.profileId}
-                        className={cn(
-                          "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left",
-                          selected
-                            ? "border-primary bg-primary/5"
-                            : "border-border/60 hover:bg-muted/40",
-                        )}
-                        onClick={() =>
-                          dispatch({ type: "select-profile", profileId: summary.profile.profileId })
-                        }
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium">
-                            {summary.profile.name}
-                          </span>
-                          <span className="block truncate text-[11px] text-muted-foreground">
-                            {readProfileImageLabel(summary.profile)}
-                          </span>
-                        </span>
-                        {selected ? <CheckIcon className="size-4 shrink-0 text-primary" /> : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {profileNeedsCreation ? (
-                <ProfileDraft
-                  draft={state.draft}
-                  disabled={isSubmitting}
-                  openAdvanced={offerSandboxImageOverride}
-                  onChange={(field, value) => dispatch({ type: "set-docker", field, value })}
-                />
-              ) : selectedProfile ? (
-                <p className="text-xs text-muted-foreground">
-                  Docker socket: <code>{selectedProfile.profile.socketPath}</code>
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">Add a Docker profile to continue.</p>
-              )}
-            </section>
-            <section className="space-y-3 border-t border-border/60 pt-4">
-              <h3 className="text-sm font-medium text-foreground">Deployment</h3>
-              <Field label="Deployment label">
-                <Input
-                  value={state.draft.label}
-                  onChange={(event) =>
-                    dispatch({ type: "set-docker", field: "label", value: event.target.value })
-                  }
-                  placeholder="Feature branch sandbox"
-                  disabled={isSubmitting}
-                />
-              </Field>
-              <SandboxGitHubSourcePicker
-                idPrefix="add-environment-docker-source"
-                repository={state.draft.repository}
-                ref={state.draft.ref}
-                disabled={isSubmitting}
-                onRepositoryChange={(repository) =>
-                  dispatch({ type: "set-docker", field: "repository", value: repository })
-                }
-                onRefChange={(ref) => dispatch({ type: "set-docker", field: "ref", value: ref })}
-              />
-              <Field label="Git ref">
-                <Input
-                  value={state.draft.ref}
-                  onChange={(event) =>
-                    dispatch({ type: "set-docker", field: "ref", value: event.target.value })
-                  }
-                  placeholder="main, a tag, or refs/pull/123/head"
-                  disabled={isSubmitting || !state.draft.repository}
-                />
-              </Field>
-              <Field label="Codex provider instance">
-                <select
-                  aria-label="Codex provider instance"
-                  className="h-8.5 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground"
-                  value={state.draft.providerInstanceId}
-                  onChange={(event) =>
-                    dispatch({
-                      type: "set-docker",
-                      field: "providerInstanceId",
-                      value: event.target.value,
-                    })
-                  }
-                  disabled={isSubmitting}
-                >
-                  <option value="">Select a Codex provider</option>
-                  {codexProviders.map((provider) => (
-                    <option key={provider.instanceId} value={provider.instanceId}>
-                      {provider.displayName ?? provider.instanceId}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </section>
+            {renderResume()}
+            {dockerDiagnostic ? <ErrorText>{dockerDiagnostic}</ErrorText> : null}
+            <DockerCreateFields
+              draft={state.draft}
+              isSubmitting={isSubmitting}
+              offerSandboxImageOverride={offerSandboxImageOverride}
+              codexProviders={codexProviders}
+              dispatch={dispatch}
+            />
           </>
         ) : null}
         {state.error ? <ErrorText>{state.error}</ErrorText> : null}
-        <DialogFooter variant="bare" className="px-0">
-          <BackButton disabled={isBusy} onClick={() => dispatch({ type: "back" })} />
-          {operation?.status === "Failed" ? (
+        {state.discardRequested ? (
+          <div role="alertdialog" aria-label="Discard sandbox confirmation">
+            <p>Discard this sandbox and delete its container? This cannot be undone.</p>
             <Button
-              disabled={isSubmitting}
               type="button"
-              onClick={() => void retryFailedOperation()}
+              variant="outline"
+              onClick={() => dispatch({ type: "cancel-discard" })}
             >
-              Retry
+              Cancel
             </Button>
+            <Button type="button" disabled={isSubmitting} onClick={() => void discard()}>
+              Confirm discard
+            </Button>
+          </div>
+        ) : null}
+        {observationStopped && operation ? (
+          <Button type="button" onClick={() => void observe(operation.operationId)}>
+            Refresh operation
+          </Button>
+        ) : null}
+        <DialogFooter variant="bare" className="px-0">
+          <BackButton
+            disabled={isBusy}
+            onClick={() =>
+              observationStopped ? handleOpenChange(false) : dispatch({ type: "back" })
+            }
+          />
+          {operation?.status === "Failed" ? (
+            <>
+              <Button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() =>
+                  recovery === "reconcile" ? void refreshSandboxList() : void retryFailedOperation()
+                }
+              >
+                {recovery === "reconcile" ? "Reconcile sandbox" : "Try again"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => dispatch({ type: "request-discard" })}
+              >
+                Discard sandbox
+              </Button>
+            </>
           ) : null}
           {operation?.status === "Succeeded" &&
-          state.attachment?.status === "failed" &&
+          state.attachment?.status !== "pending" &&
           operation.deploymentId ? (
             <Button
-              disabled={isBusy}
               type="button"
-              onClick={() => void attach(operation.deploymentId!)}
+              onClick={() => {
+                if (operation.deploymentId) void attach(operation.deploymentId);
+              }}
             >
-              Retry attachment
+              Open sandbox
             </Button>
           ) : null}
           {operation === null ? (
-            <Button
-              disabled={
-                isSubmitting ||
-                (availableProfiles.length === 0 &&
-                  !profileNeedsCreation &&
-                  state.draft.profileId.length === 0)
-              }
-              type="submit"
-            >
-              {isSubmitting ? "Creating…" : "Create and attach environment"}
+            <Button disabled={isSubmitting} type="submit">
+              {isSubmitting ? "Creating…" : "Create sandbox"}
             </Button>
           ) : null}
         </DialogFooter>
@@ -972,100 +898,127 @@ function BackButton({
   );
 }
 
-function ProfileDraft({
+export function DockerCreateFields({
   draft,
-  disabled,
-  openAdvanced,
-  onChange,
+  isSubmitting,
+  offerSandboxImageOverride,
+  codexProviders,
+  dispatch,
 }: {
   readonly draft: DockerDraft;
-  readonly disabled: boolean;
-  readonly openAdvanced?: boolean;
-  readonly onChange: (field: DockerDraftField, value: string) => void;
+  readonly isSubmitting: boolean;
+  readonly offerSandboxImageOverride: boolean;
+  readonly codexProviders: ReadonlyArray<{
+    readonly instanceId: string;
+    readonly displayName?: string | undefined;
+  }>;
+  readonly dispatch: (action: AddEnvironmentAction) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
-      <Field label="Profile name">
+    <>
+      {" "}
+      <SandboxGitHubSourcePicker
+        idPrefix="add-environment-docker-source"
+        repository={draft.repository}
+        ref={draft.ref}
+        disabled={isSubmitting}
+        onRepositoryChange={(repository) =>
+          dispatch({ type: "set-docker", field: "repository", value: repository })
+        }
+        onRefChange={(ref) => dispatch({ type: "set-docker", field: "ref", value: ref })}
+      />
+      <Field label="Codex provider instance">
+        <select
+          aria-label="Codex provider instance"
+          className="h-8.5 w-full rounded-lg border border-input bg-background px-2 text-sm"
+          value={draft.providerInstanceId}
+          disabled={isSubmitting}
+          onChange={(event) =>
+            dispatch({ type: "set-docker", field: "providerInstanceId", value: event.target.value })
+          }
+        >
+          <option value="">Select a Codex provider</option>
+          {codexProviders.map((provider) => (
+            <option key={provider.instanceId} value={provider.instanceId}>
+              {provider.displayName ?? provider.instanceId}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Label (optional)">
         <Input
-          autoFocus
-          value={draft.profileName}
-          onChange={(event) => onChange("profileName", event.target.value)}
-          placeholder="Local Docker"
-          disabled={disabled}
+          aria-label="Label (optional)"
+          value={draft.label}
+          placeholder={draft.repository.split("/").at(-1) || "Repository name"}
+          onChange={(event) =>
+            dispatch({ type: "set-docker", field: "label", value: event.target.value })
+          }
         />
       </Field>
-      <Field label="Docker Unix socket">
-        <Input
-          aria-label="Docker Unix socket"
-          value={draft.socketPath}
-          onChange={(event) => onChange("socketPath", event.target.value)}
-          disabled={disabled}
-        />
-      </Field>
-      <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-        <p className="text-xs font-medium text-foreground">Kata-managed image</p>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          The stable image for this server version is selected automatically.
-        </p>
-        <code className="mt-2 block text-[11px] text-muted-foreground">
-          {draft.imageChannel} · {draft.imageVersion}
-        </code>
-      </div>
-      <details className="rounded-lg border border-border/60 px-3 py-2" open={openAdvanced}>
-        <summary className="cursor-pointer text-xs font-medium text-foreground">
-          Advanced: immutable image override
-        </summary>
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          Optional sha256 OCI digest. Leave empty to use the Kata-managed image.
-        </p>
-        <Input
-          aria-label="Immutable image override"
-          className="mt-2"
-          value={draft.imageOverride}
-          onChange={(event) => onChange("imageOverride", event.target.value)}
-          disabled={disabled}
-        />
+      <details open={offerSandboxImageOverride || undefined} className="space-y-3">
+        <summary className="cursor-pointer text-sm">Advanced</summary>
+        <Field label="Manual ref">
+          <Input
+            aria-label="Manual ref"
+            value={draft.ref}
+            onChange={(event) =>
+              dispatch({ type: "set-docker", field: "ref", value: event.target.value })
+            }
+          />
+        </Field>
+        <Field label="Docker socket">
+          <Input
+            aria-label="Docker socket"
+            value={draft.socketPath}
+            onChange={(event) =>
+              dispatch({ type: "set-docker", field: "socketPath", value: event.target.value })
+            }
+          />
+        </Field>
+        <Field label="Custom image">
+          <Input
+            aria-label="Custom image"
+            value={draft.imageOverride}
+            placeholder="registry/image@sha256:…"
+            onChange={(event) =>
+              dispatch({ type: "set-docker", field: "imageOverride", value: event.target.value })
+            }
+          />
+        </Field>
       </details>
-    </div>
+    </>
   );
 }
 
-function OperationProgress({
+export function OperationProgress({
   operation,
+  now,
+  reconnecting,
 }: {
   readonly operation: NonNullable<
     Extract<AddEnvironmentState, { readonly step: "docker" }>["operation"]
   >;
+  readonly now: number;
+  readonly reconnecting: boolean;
 }) {
-  const stageLabel = operation.stage?.replaceAll("-", " ") ?? operation.status.toLowerCase();
-  const progress = operation.progress;
-  const pulling = progress?.stage === "pulling-image" ? progress : undefined;
-  const failed = progress?.stage === "failed" ? progress : undefined;
+  const seconds = Math.max(
+    0,
+    Math.floor((now - Date.parse(operation.acceptedAt ?? new Date(now).toISOString())) / 1000),
+  );
   return (
     <div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-2" role="status">
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        {operation.status === "Succeeded" ? (
-          <CheckIcon className="size-4 text-success" />
-        ) : operation.status === "Failed" ? null : (
-          <Spinner className="size-3.5" />
-        )}
-        {operation.phase === "profile" ? "Docker profile" : "Docker deployment"}{" "}
-        <span className="text-xs font-normal text-muted-foreground">{stageLabel}</span>
-      </div>
-      <p className="mt-1 text-[11px] text-muted-foreground">Operation {operation.operationId}</p>
-      {pulling ? (
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Downloaded {pulling.downloadedBytes ?? 0} bytes
-          {pulling.totalBytes === null || pulling.totalBytes === undefined
-            ? ""
-            : ` of ${pulling.totalBytes}`}
-          {pulling.layersTotal === null || pulling.layersTotal === undefined
-            ? ""
-            : ` · ${pulling.layersCompleted ?? 0}/${pulling.layersTotal} layers`}
-        </p>
+      <p>
+        {reconnecting ? "Reconnecting… " : ""}
+        {formatSandboxProgress(operation.progress)}
+      </p>
+      <p aria-hidden className="text-xs text-muted-foreground">
+        {Math.floor(seconds / 60)}m {seconds % 60}s elapsed
+      </p>
+      {operation.progress?.stage === "failed" ? (
+        <ErrorText>{operation.progress.diagnostic}</ErrorText>
+      ) : operation.error ? (
+        <ErrorText>{operation.error}</ErrorText>
       ) : null}
-      {failed ? <ErrorText>{failed.diagnostic}</ErrorText> : null}
-      {operation.error && !failed ? <ErrorText>{operation.error}</ErrorText> : null}
     </div>
   );
 }

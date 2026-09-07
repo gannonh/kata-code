@@ -49,7 +49,7 @@ export type SandboxValidationProgressReporter = (
     SandboxOperationProgress,
     { readonly stage: "pulling-image" | "validating-image" }
   >,
-) => Effect.Effect<void>;
+) => Effect.Effect<void, SandboxDriverError>;
 
 export interface SandboxValidationOptions {
   readonly pullIfMissing?: boolean;
@@ -62,6 +62,12 @@ export interface SandboxAllocationInput {
   readonly codexAuthJson: Uint8Array;
   readonly modelSelection?: ModelSelection;
   readonly bootstrapToken?: string;
+  readonly reportProgress?: (
+    progress: Extract<
+      SandboxOperationProgress,
+      { readonly stage: "checking-out-source" | "starting-server" }
+    >,
+  ) => Effect.Effect<void, SandboxDriverError>;
 }
 
 /**
@@ -121,6 +127,9 @@ export interface SandboxProviderDriver {
     options?: SandboxValidationOptions,
   ) => Effect.Effect<SandboxValidatedProfile, SandboxDriverError>;
   readonly probeHost?: () => Effect.Effect<{ readonly daemonVersion: string }, SandboxDriverError>;
+  readonly inspectAllocation: (
+    intent: SandboxDeploymentIntent,
+  ) => Effect.Effect<DockerResourceHandle | ProviderObservation, SandboxDriverError>;
   readonly allocate: (
     input: SandboxAllocationInput,
   ) => Effect.Effect<DockerResourceHandle, SandboxDriverError>;

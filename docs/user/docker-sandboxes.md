@@ -20,15 +20,38 @@ version. No environment variables, digest, or local image build are required.
    (the desktop app or the locally hosted web app). Remote clients over Connect
    or a tunnel cannot reach the sandbox pairing port.
 3. Select Sandboxes → Local Container → Docker.
-4. Reuse an available Docker profile or select Add Docker profile.
-5. Enter a deployment label, select a GitHub repository and branch, and choose a Codex provider.
-   Use the Git ref field for a tag or explicit ref such as `refs/pull/123/head`.
-6. Select Create and attach environment.
+4. Select a GitHub repository and branch, then choose a Codex provider instance.
+   Leave the optional label blank to use the repository name.
+5. If needed, expand Advanced to enter a manual ref, Docker socket path, or custom immutable image.
+6. Select Create sandbox.
 
-Kata resolves the matching managed image to an immutable OCI digest, pulls it when Docker does not
-have it, validates the image, creates the container, and attaches it through ordinary environment
-onboarding. Profile progress shows image resolution, pull, validation, and bounded download and
-layer counts. A failed profile remains visible with its diagnostic and can be retried.
+The form shows image resolution, download percentage and sizes, validation, container creation,
+source checkout, and server startup with elapsed time. Kata saves the operation before image
+preparation begins. You can close the dialog or reload the page while creation continues.
+Reopen Add environment to resume. If several sandboxes need attention, select one from
+Continue a sandbox. A completed sandbox offers Open sandbox, including when pairing or navigation
+was interrupted.
+
+Kata imports the ordinary pairing handoff, opens the repository at `/workspace` as a project,
+and starts a new thread. Reopening the same sandbox reuses its project. Profiles are configured
+automatically and reused when their socket and image match.
+
+If the connection drops, the dialog shows Reconnecting while the server continues. Authorization
+loss or a missing operation shows a diagnostic and a Refresh operation action. No browser
+observation timeout cancels the server create operation.
+
+### Recover a failed create
+
+A failed create shows the stage and a redacted diagnostic.
+
+- Select Try again to resume a retained container. If cleanup confirmed that the container is
+  absent, Kata links a replacement attempt using the original resolved commit.
+- If cleanup is uncertain, select Reconcile sandbox to check Docker before retrying. Kata does
+  not allocate a replacement until it confirms the previous resource is absent.
+- Select Discard sandbox to delete it. Confirm discard before Kata removes the container.
+
+If creation succeeded but attachment failed, select Open sandbox to continue pairing and project
+setup. This action does not allocate another container.
 
 Profiles use the Docker Unix socket available to the Kata Code server. The default is
 `/var/run/docker.sock`. Docker must support `linux/amd64` or `linux/arm64`.
@@ -50,15 +73,14 @@ both platforms. Docker selects the host platform. Vercel Sandbox uses the same i
 VCR. The default repository is `ghcr.io/gannonh/kata-sandbox`; deployments using another registry
 set `KATACODE_SANDBOX_IMAGE_REPOSITORY` to that full repository name.
 
-If a managed profile reports an OCI `401`, check the server version and image repository. Current
+If image preparation reports an OCI `401`, check the server version and image repository. Current
 releases pull anonymously from GHCR. An older server or a
 `KATACODE_SANDBOX_IMAGE_REPOSITORY` override can still point at a registry that requires
 credentials.
 
 ## Advanced image override
 
-Leave the managed image selected for normal use. Development profiles can provide an immutable
-custom image under Advanced. Use a repository digest such as
+Leave the managed image selected for normal use. You can provide an immutable custom image under Advanced. Use a repository digest such as
 `registry.example.com/team/image@sha256:<64 hex characters>` or a local Docker image ID in the form
 `sha256:<64 hex characters>`. Mutable tags are rejected and are never stored.
 

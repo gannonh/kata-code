@@ -3979,7 +3979,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         headers: { cookie },
         body: yield* HttpBody.json({
           requestId: "00000000-0000-4000-8000-000000000001",
-          profileId: "profile-1",
+          kind: "new",
+          image: { kind: "custom", digest: "sha256:" + "a".repeat(64) },
+          socketPath: "/var/run/docker.sock",
           label: "Off",
           source: { repository: "gannonh/kata-code", ref: "main" },
           providerInstanceId: "codex",

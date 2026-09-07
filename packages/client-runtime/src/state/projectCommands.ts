@@ -12,6 +12,8 @@ import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
 } from "./runtime.ts";
+import { ensureWorkspaceProject } from "../operations/workspaceProject.ts";
+export { WorkspaceProjectError } from "../operations/workspaceProject.ts";
 import {
   type CreateProjectInput,
   type DeleteProjectInput,
@@ -78,6 +80,10 @@ export function createProjectEnvironmentAtoms<R, E>(
     }),
     optimisticFile: (target: OptimisticProjectFileTarget) =>
       optimisticFileFamily(optimisticProjectFileKey(target)),
+    ensureWorkspace: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:ensure-workspace",
+      execute: ensureWorkspaceProject,
+    }),
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:project:create",
       execute: (input: CreateProjectInput) => createProject(input),

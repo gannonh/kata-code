@@ -242,6 +242,34 @@ describe("OrchestrationEngine", () => {
     await runtime.dispose();
   });
 
+  it("serializes concurrent workspace project creation and accepts only one normalized root", async () => {
+    const system = await createOrchestrationSystem();
+    try {
+      const results = await Promise.allSettled(
+        ["one", "two"].map((client, index) =>
+          system.run(
+            system.engine.dispatch({
+              type: "project.create",
+              commandId: CommandId.make(`sandbox-client-${client}`),
+              projectId: asProjectId(`sandbox-project-${client}`),
+              title: "Sandbox",
+              workspaceRoot: index === 0 ? "/workspace" : "/workspace/",
+              createWorkspaceRootIfMissing: false,
+              createdAt: now(),
+            }),
+          ),
+        ),
+      );
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(
+        (await system.readModel()).projects.filter((project) => project.deletedAt === null),
+      ).toHaveLength(1);
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it("persists deterministic read models for repeated snapshot reads", async () => {
     const createdAt = now();
     const system = await createOrchestrationSystem();
