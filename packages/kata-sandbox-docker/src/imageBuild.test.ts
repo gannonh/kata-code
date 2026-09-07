@@ -122,6 +122,7 @@ describe("image build boundaries", () => {
       "utf8",
     );
     assert.include(dockerfile, "com.katacode.sandbox.kata-version");
+    assert.include(dockerfile, "com.katacode.sandbox.server-version");
     assert.include(dockerfile, "com.katacode.sandbox.server-artifact-sha256");
     assert.include(dockerfile, "com.katacode.sandbox.codex-version");
     assert.include(dockerfile, "com.katacode.sandbox.codex-artifact-sha256");

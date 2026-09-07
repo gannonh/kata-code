@@ -89,7 +89,7 @@ import { relayUrlConfig } from "../cloud/publicConfig.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
-import { resolveHeadlessConnectionHost } from "../startupAccess.ts";
+import { resolveSandboxEndpointHost } from "../startupAccess.ts";
 import { makeDockerSandboxDriver, publishHostForBind } from "@kata-sh/code-kata-sandbox-docker";
 import packageJson from "../../package.json" with { type: "json" };
 import { SandboxProviderRegistry } from "@kata-sh/code-kata-sandbox";
@@ -265,6 +265,8 @@ function payloadHash(value: unknown): string {
   return NodeCrypto.createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
 }
 
+const MANAGED_IMAGE_PROBE_TIMEOUT = "10 seconds";
+
 function operationResultForDeleted(deployment: SandboxDeployment) {
   return {
     kind: "deleted" as const,
@@ -289,7 +291,7 @@ export function probeSandboxHostAvailability(input: {
     const resolved = yield* resolveManagedImage(
       { serverVersion: input.serverVersion, channel: "stable" },
       input.registry,
-    ).pipe(Effect.result);
+    ).pipe(Effect.timeout(MANAGED_IMAGE_PROBE_TIMEOUT), Effect.result);
     if (resolved._tag === "Failure") {
       return `Managed image for version ${input.serverVersion} was not found.`;
     }
@@ -2194,9 +2196,10 @@ const makeService = Effect.gen(function* () {
   const relayUrl = yield* relayUrlConfig.pipe(Effect.option, Effect.map(Option.getOrUndefined));
   const operationScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(operationScope, Exit.void));
+  const publishHost = publishHostForBind(serverConfig.host);
   const probeDriver = makeDockerSandboxDriver({
-    endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
-    publishHost: publishHostForBind(serverConfig.host),
+    endpointHost: resolveSandboxEndpointHost(serverConfig.host),
+    publishHost,
     checkoutCredential: githubAccess.checkoutCredential,
   });
   const httpClient = yield* HttpClient.HttpClient;
@@ -2212,8 +2215,8 @@ const makeService = Effect.gen(function* () {
       httpClient,
     },
     {
-      endpointHost: resolveHeadlessConnectionHost(serverConfig.host),
-      publishHost: publishHostForBind(serverConfig.host),
+      endpointHost: resolveSandboxEndpointHost(serverConfig.host),
+      publishHost,
       ...(serverConfig.sandboxImageRepository === undefined
         ? {}
         : { sandboxImageRepository: serverConfig.sandboxImageRepository }),

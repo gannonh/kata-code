@@ -42,6 +42,16 @@ const isIpv4Family = (family: string | number): boolean => family === "IPv4" || 
 
 const isIpv6Family = (family: string | number): boolean => family === "IPv6" || family === 6;
 
+export const resolveSandboxEndpointHost = (
+  host: string | undefined,
+  interfaces: NetworkInterfacesMap = NodeOS.networkInterfaces(),
+): string => {
+  if (!host || isLoopbackHost(host) || isWildcardHost(host)) {
+    return "127.0.0.1";
+  }
+  return resolveHeadlessConnectionHost(host, interfaces);
+};
+
 export const resolveHeadlessConnectionHost = (
   host: string | undefined,
   interfaces: NetworkInterfacesMap = NodeOS.networkInterfaces(),

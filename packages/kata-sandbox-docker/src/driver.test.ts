@@ -35,6 +35,7 @@ import {
   hostIpForEndpoint,
   makeDockerSandboxDriver,
   publishHostForBind,
+  SANDBOX_IMAGE_LABELS,
   sandboxImageLabels,
 } from "./driver.ts";
 
@@ -93,6 +94,13 @@ const labeledImageInspect = JSON.stringify({
       codexArtifactSha256: manifest.codexArtifactSha256,
     }),
   },
+});
+
+it("labeled image fixtures include every Dockerfile sandbox label", () => {
+  const labels = JSON.parse(labeledImageInspect).Config.Labels as Record<string, string>;
+  for (const key of Object.values(SANDBOX_IMAGE_LABELS)) {
+    expect(labels[key]).toBeTruthy();
+  }
 });
 
 const inspect = (labels: Record<string, string>, running = false) => ({

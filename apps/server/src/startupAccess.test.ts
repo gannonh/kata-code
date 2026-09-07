@@ -6,6 +6,7 @@ import {
   renderTerminalQrCode,
   resolveHeadlessConnectionHost,
   resolveHeadlessConnectionString,
+  resolveSandboxEndpointHost,
   resolveListeningPort,
 } from "./startupAccess.ts";
 
@@ -17,6 +18,26 @@ it("prefers localhost when no explicit host is configured", () => {
 it("keeps explicit bind hosts in the connection string", () => {
   expect(resolveHeadlessConnectionString("127.0.0.1", 3773)).toBe("http://127.0.0.1:3773");
   expect(resolveHeadlessConnectionString("::1", 3773)).toBe("http://[::1]:3773");
+});
+
+it("keeps sandbox endpoint probes on loopback when the control server binds a wildcard", () => {
+  const interfaces = {
+    en0: [
+      {
+        address: "192.168.1.42",
+        netmask: "255.255.255.0",
+        family: "IPv4",
+        mac: "00:00:00:00:00:00",
+        internal: false,
+        cidr: "192.168.1.42/24",
+      },
+    ],
+  };
+
+  expect(resolveSandboxEndpointHost("0.0.0.0", interfaces)).toBe("127.0.0.1");
+  expect(resolveSandboxEndpointHost("::", interfaces)).toBe("127.0.0.1");
+  expect(resolveSandboxEndpointHost(undefined, interfaces)).toBe("127.0.0.1");
+  expect(resolveSandboxEndpointHost("192.168.1.42", interfaces)).toBe("192.168.1.42");
 });
 
 it("resolves wildcard hosts to a concrete external interface when one is available", () => {

@@ -47,3 +47,33 @@ registration.
 
 The Docker driver copies only the selected Codex `auth.json` into `/home/katacode/.codex`. It does
 not mount host credential directories into the container.
+
+## Image build
+
+The image builder reads the checked-in source manifest. Run it without image or Codex environment
+variables:
+
+```bash
+vp run --filter @kata-sh/code-kata-sandbox-docker build:image
+```
+
+To test an unreleased development build, write the builder result to a file and paste the result's
+`imageId` into the Advanced image override on the Docker profile step:
+
+```bash
+node packages/kata-sandbox-docker/scripts/build-image.mjs \
+  --output-file /tmp/kata-sandbox-dev-image.json
+```
+
+The source manifest pins the Node base image digest and the exact Codex package and npm integrity.
+The builder verifies both values before Docker work. The image contains Node 24, Git, GitHub CLI,
+native build tools, the Kata CLI, the Codex CLI, and the bootstrap verifier. It creates writable
+`HOME=/home/katacode` and `KATACODE_HOME=/var/lib/katacode` directories for the runtime user.
+
+The Dockerfile stamps these OCI labels, which `parseSandboxImageLabels` requires at create time:
+
+- `com.katacode.sandbox.kata-version`
+- `com.katacode.sandbox.server-version`
+- `com.katacode.sandbox.server-artifact-sha256`
+- `com.katacode.sandbox.codex-version`
+- `com.katacode.sandbox.codex-artifact-sha256`

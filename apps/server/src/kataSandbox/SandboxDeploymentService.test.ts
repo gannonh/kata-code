@@ -1130,7 +1130,10 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
         hostAvailability: () =>
           probeSandboxHostAvailability({
             driver: makeDriver(),
-            registry: makeOciRegistry({ repository: "ghcr.io/gannonh/kata-sandbox" }),
+            registry: makeOciRegistry({
+              repository: "ghcr.io/gannonh/kata-sandbox",
+              baseUrl: "http://127.0.0.1:1/",
+            }),
             serverVersion: "0.0.42",
           }),
       },

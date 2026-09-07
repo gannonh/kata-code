@@ -169,14 +169,13 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      # Required for docker buildx `type=gha` cache import/export in the image build step.
       actions: write
-    env:
-      # secrets.GH_TOKEN is optional; an empty value shadows GITHUB_TOKEN and `gh auth status` fails.
-      GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           sparse-checkout: |
             /*
             !/.repos/

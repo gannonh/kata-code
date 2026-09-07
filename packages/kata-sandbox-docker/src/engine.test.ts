@@ -64,7 +64,7 @@ describe("Docker engine request timeout", () => {
               return;
             }
             socket.write("progress\n", (error) => {
-              if (error !== null) clearInterval(tick);
+              if (error) clearInterval(tick);
             });
           }, 40);
           socket.on("error", () => clearInterval(tick));
