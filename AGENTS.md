@@ -164,21 +164,20 @@ This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instructi
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
 
-feature, refactoring: cursor:cursor-grok-4.6@xhigh
-bug-fix: codex:gpt-5.6-sol@max
-perf-issue: codex:gpt-5.6-sol@max
-hillclimb: codex:gpt-5.6-sol@max
+feature, refactoring: codex:gpt-6-astra@low
+bug-fix: codex:gpt-6-astra@low
+perf-issue: codex:gpt-6-astra@low
+hillclimb: codex:gpt-6-astra@low
 judgment and prose: codex:gpt-6-astra@high
 hardest tasks: codex:gpt-6-astra@max
-how explorer: cursor:cursor-grok-4.6@xhigh
-how explainer: cursor:claude-fable-5-1@high
-how critics: cursor:claude-fable-5-1@xhigh, codex:gpt-6-astra@xhigh, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@xhigh
+how explorer: codex:gpt-6-astra@low
+how explainer: codex:gpt-6-astra@high
+how critics: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
 why investigators, synthesizer: inherit-parent
 reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: cursor:claude-fable-5-1@xhigh, codex:gpt-6-astra@xhigh, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@xhigh
-arena cross-judge pool: cursor:claude-fable-5-1@xhigh, codex:gpt-6-astra@xhigh, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@xhigh
-swarm workers: cursor:cursor-grok-4.6@xhigh
-architect runners: cursor:claude-fable-5-1@xhigh, codex:gpt-6-astra@xhigh, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@xhigh
-interrogate reviewers: cursor:claude-fable-5-1@xhigh, codex:gpt-6-astra@xhigh, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@xhigh
-
+arena runners: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
+arena cross-judge pool: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
+swarm workers: codex:gpt-6-astra@low
+architect runners: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
+interrogate reviewers: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
 <!-- pstack:models:end -->
