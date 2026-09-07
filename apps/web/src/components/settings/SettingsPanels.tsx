@@ -1670,6 +1670,14 @@ function AutoSettleDaysInput({
 }
 
 function ExperimentalFeaturesSection() {
+  const desktopBridge = window.desktopBridge;
+  const primarySessionState = usePrimarySessionState();
+  const currentSessionScopes = desktopBridge
+    ? AuthAdministrativeScopes
+    : primarySessionState.data?.authenticated
+      ? (primarySessionState.data.scopes ?? null)
+      : null;
+  const canAdminister = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
   const [open, setOpen] = useState(false);
   const searchTargetId = useSettingsSearchTargetId();
   // Unfold once per search jump so a still-set target cannot reopen a fold the user closed.
@@ -1684,6 +1692,8 @@ function ExperimentalFeaturesSection() {
     lastExpandedTargetRef.current = searchTargetId;
     setOpen(true);
   }, [searchTargetId]);
+
+  if (!canAdminister) return null;
 
   return (
     <section className="space-y-3">
@@ -1803,15 +1813,6 @@ function LegacyFeaturesSection() {
 function SandboxesPreviewSetting() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const desktopBridge = window.desktopBridge;
-  const primarySessionState = usePrimarySessionState();
-  const currentSessionScopes = desktopBridge
-    ? AuthAdministrativeScopes
-    : primarySessionState.data?.authenticated
-      ? (primarySessionState.data.scopes ?? null)
-      : null;
-  const canAdminister = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
-  if (!canAdminister) return null;
   return (
     <SettingsRow
       {...searchableSetting("sandboxes-preview")}
