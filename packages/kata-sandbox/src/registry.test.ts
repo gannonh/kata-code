@@ -14,6 +14,7 @@ const driver = {
     profileForm: "docker" as const,
   },
   validateProfile: () => Effect.never,
+  inspectAllocation: () => Effect.never,
   allocate: () => Effect.never,
   identify: () => Effect.never,
   observe: () => Effect.never,

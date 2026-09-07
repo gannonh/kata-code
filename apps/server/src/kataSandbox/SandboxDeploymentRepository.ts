@@ -993,7 +993,7 @@ const makeRepository = Effect.gen(function* () {
           }
           if (input.receipt.command === "delete") {
             const successors =
-              yield* sql`SELECT successor.operation_id FROM kata_sandbox_operation_receipts predecessor JOIN kata_sandbox_operation_receipts successor ON successor.previous_operation_id = predecessor.operation_id WHERE predecessor.deployment_id = ${input.receipt.deploymentId ?? null}`;
+              yield* sql`SELECT successor.operation_id FROM kata_sandbox_operation_receipts predecessor JOIN kata_sandbox_operation_receipts successor ON successor.previous_operation_id = predecessor.operation_id WHERE predecessor.deployment_id = ${input.receipt.deploymentId ?? null} AND successor.deployment_id != predecessor.deployment_id`;
             if (successors.length > 0)
               return yield* new SandboxRepositoryConflictError({
                 resource: input.receipt.deploymentId ?? "",

@@ -313,7 +313,7 @@ function driverAvailabilityReason(
 }
 
 function diagnostic(cause: unknown): string {
-  const message = cause instanceof Error ? cause.message : redactDiagnostic(cause);
+  const message = redactDiagnostic(cause instanceof Error ? cause.message : cause);
   return message.trim().slice(0, 500) || "The sandbox operation failed.";
 }
 
@@ -675,13 +675,18 @@ export function makeSandboxDeploymentService(
   const saveDeployment = (deployment: SandboxDeployment, expectedRevision?: number) =>
     repository.saveDeployment(deployment, expectedRevision).pipe(Effect.mapError(asServiceError));
 
+  const safeObservation = (observation: ProviderObservation): ProviderObservation =>
+    observation.state === "Unknown"
+      ? { ...observation, diagnostic: diagnostic(observation.diagnostic) }
+      : observation;
+
   const saveObservation = (
     deploymentId: SandboxDeploymentId,
     observation: ProviderObservation,
     expectedRevision?: number,
   ) =>
     repository
-      .saveObservation(deploymentId, observation, expectedRevision)
+      .saveObservation(deploymentId, safeObservation(observation), expectedRevision)
       .pipe(Effect.mapError(asServiceError));
 
   const assertOperationClaimed = (operationId: SandboxOperationId, claimId: string) =>
@@ -834,7 +839,7 @@ export function makeSandboxDeploymentService(
             ),
         ),
       );
-      return observation;
+      return safeObservation(observation);
     });
 
   const observationFor = (
@@ -1554,6 +1559,10 @@ export function makeSandboxDeploymentService(
         }
       }
 
+      if (deployment.state !== "Allocated" && deployment.state !== "Identified")
+        return yield* failConflict(
+          "The sandbox changed during discard. Refresh it before trying again.",
+        );
       yield* assertOperationClaimed(receipt.operationId, claimId);
       const observation = yield* driverFor(deployment.intent.profileSnapshot)
         .delete({ profile: deployment.intent.profileSnapshot, resource: deployment.resource })

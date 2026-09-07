@@ -19,41 +19,45 @@ function closeServer(server: NodeHttp.Server): Promise<void> {
 
 describe("Docker engine request timeout", () => {
   it.live("delivers pull lines before response completion and preserves binary responses", () =>
-    Effect.promise(async () => {
-      const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kata-docker-"));
-      const socketPath = NodePath.join(directory, "engine.sock");
-      const binary = Buffer.from([0, 255, 128, 195, 40, 0]);
-      let finish: (() => void) | undefined;
-      const server = NodeHttp.createServer((request, response) => {
-        if (request.url === "/binary") {
-          response.end(binary);
-          return;
-        }
-        response.write("first\n");
-        finish = () => response.end("second\n");
-      });
-      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-      try {
-        const engine = makeDockerEngine(socketPath);
-        const lines: string[] = [];
-        await Effect.runPromise(
-          engine.request({
+    Effect.acquireUseRelease(
+      Effect.promise(async () => {
+        const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kata-docker-"));
+        const socketPath = NodePath.join(directory, "engine.sock");
+        const binary = Buffer.from([0, 255, 128, 195, 40, 0]);
+        let finish: (() => void) | undefined;
+        const server = NodeHttp.createServer((request, response) => {
+          if (request.url === "/binary") {
+            response.end(binary);
+            return;
+          }
+          response.write("first\n");
+          finish = () => response.end("second\n");
+        });
+        await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+        return { directory, socketPath, binary, server, finish: () => finish?.() };
+      }),
+      ({ socketPath, binary, finish }) =>
+        Effect.gen(function* () {
+          const engine = makeDockerEngine(socketPath);
+          const lines: string[] = [];
+          yield* engine.request({
             path: "/pull",
             timeoutMs: 1000,
             onLine: async (line) => {
               lines.push(line);
-              if (line === "first") finish?.();
+              if (line === "first") finish();
             },
-          }),
-        );
-        expect(lines).toEqual(["first", "second"]);
-        const result = await Effect.runPromise(engine.requestBuffer({ path: "/binary" }));
-        expect(Buffer.from(result.body)).toEqual(binary);
-      } finally {
-        await closeServer(server);
-        await NodeFSP.rm(directory, { recursive: true });
-      }
-    }),
+          });
+          expect(lines).toEqual(["first", "second"]);
+          const result = yield* engine.requestBuffer({ path: "/binary" });
+          expect(Buffer.from(result.body)).toEqual(binary);
+        }),
+      ({ directory, server }) =>
+        Effect.promise(async () => {
+          await closeServer(server);
+          await NodeFSP.rm(directory, { recursive: true });
+        }),
+    ),
   );
 
   it.effect("times out a streaming response that never ends", () => {

@@ -1,3 +1,4 @@
+// @effect-diagnostics preferSchemaOverJson:off - assertions inspect serialized diagnostic fields for synthetic secret sentinels.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -32,6 +33,7 @@ import * as CliTokenManager from "../cloud/CliTokenManager.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import {
   SandboxDeploymentRepository,
+  SandboxRepositoryConflictError,
   type SandboxDeploymentRepositoryShape,
 } from "./SandboxDeploymentRepository.ts";
 import { layer as sandboxDeploymentRepositoryLayer } from "./SandboxDeploymentRepository.ts";
@@ -518,6 +520,225 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
     ),
   );
 
+  it.effect("discards the latest retained retry and redacts durable failure diagnostics", () => {
+    let attempts = 0;
+    let deletions = 0;
+    return runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const first = yield* service.create("client-one", createInput("retained-first"));
+          const failed = yield* service.getOperation(first.operationId);
+          expect(failed.status).toBe("Failed");
+          expect(JSON.stringify(failed)).not.toContain("sentinel-bearer");
+          expect(JSON.stringify(failed)).not.toContain("sentinel-password");
+          const listed = yield* service.list();
+          expect(JSON.stringify(listed)).not.toContain("sentinel-password");
+          expect(listed.deployments[0]?.deployment.state).toBe("Allocated");
+          const retry = yield* service.create("client-two", {
+            kind: "retry",
+            requestId: SandboxRequestId.make("retained-retry"),
+            previousOperationId: first.operationId,
+          });
+          const completed = yield* service.getOperation(retry.operationId);
+          expect(completed.status).toBe("Succeeded");
+          expect(completed.deploymentId).toBe(failed.deploymentId);
+          if (completed.deploymentId === undefined) throw new Error("Missing deployment");
+          const discarded = yield* service.delete("client-two", {
+            requestId: SandboxRequestId.make("discard-latest"),
+            deploymentId: completed.deploymentId,
+          });
+          expect((yield* service.getOperation(discarded.operationId)).status).toBe("Succeeded");
+          expect((yield* service.list()).deployments[0]?.deployment.state).toBe("Deleted");
+        }),
+      {
+        driverFor: () =>
+          makeDriver({
+            identify: (input) =>
+              ++attempts === 1
+                ? Effect.fail(
+                    new SandboxDriverError({
+                      reason: "setup-failed",
+                      message: "Authorization: Bearer sentinel-bearer password=sentinel-password",
+                    }),
+                  )
+                : Effect.succeed({
+                    environmentId: "sandbox-env",
+                    endpoint: "http://127.0.0.1:3774",
+                    workspaceRoot: "/workspace",
+                    resource: input.resource,
+                  }),
+            delete: () =>
+              Effect.succeed<ProviderObservation>({
+                state: ++deletions === 1 ? "Running" : "Gone",
+                observedAt: "2026-08-30T00:00:05.000Z",
+              }),
+          }),
+      },
+    );
+  });
+
+  it.effect(
+    "blocks unknown allocation until ownership inspection recovers the retained resource",
+    () => {
+      const base = makeDriver();
+      let retained: DockerResourceHandle | undefined;
+      let canInspect = false;
+      let allocations = 0;
+      const driver: SandboxProviderDriver = {
+        ...base,
+        allocate: (input) =>
+          Effect.gen(function* () {
+            allocations += 1;
+            retained = yield* base.allocate(input);
+            return yield* new SandboxDriverError({
+              reason: "allocation-failed",
+              message: "Docker create response was lost",
+            });
+          }),
+        inspectAllocation: () =>
+          retained !== undefined && canInspect
+            ? Effect.succeed(retained)
+            : Effect.succeed({
+                state: "Unknown",
+                observedAt: "2026-08-30T00:00:05.000Z",
+                diagnostic: "Docker is unreachable",
+              }),
+      };
+      return runWithService(
+        (service) =>
+          Effect.gen(function* () {
+            const first = yield* service.create("one", createInput("lost-response"));
+            expect((yield* service.getOperation(first.operationId)).progress).toMatchObject({
+              stage: "failed",
+              lastStage: "creating-container",
+            });
+            expect((yield* service.list()).deployments[0]?.recovery).toBe("reconcile");
+            const blocked = yield* service
+              .create("two", {
+                kind: "retry",
+                requestId: SandboxRequestId.make("blocked"),
+                previousOperationId: first.operationId,
+              })
+              .pipe(Effect.result);
+            expect(blocked._tag).toBe("Failure");
+            expect(allocations).toBe(1);
+            canInspect = true;
+            const reconciled = yield* service.list();
+            expect(reconciled.deployments[0]?.deployment.state).toBe("Allocated");
+            const resumed = yield* service.create("two", {
+              kind: "retry",
+              requestId: SandboxRequestId.make("resumed"),
+              previousOperationId: first.operationId,
+            });
+            expect((yield* service.getOperation(resumed.operationId)).status).toBe("Succeeded");
+            expect(allocations).toBe(1);
+          }),
+        { driverFor: () => driver },
+      );
+    },
+  );
+
+  it.effect("recovers ownership after allocation handle persistence fails", () => {
+    const base = makeDriver();
+    let retained: DockerResourceHandle | undefined;
+    let allocations = 0;
+    let failWrite = true;
+    const driver: SandboxProviderDriver = {
+      ...base,
+      allocate: (input) =>
+        base.allocate(input).pipe(
+          Effect.tap((resource) =>
+            Effect.sync(() => {
+              retained = resource;
+              allocations += 1;
+            }),
+          ),
+        ),
+      inspectAllocation: () =>
+        retained === undefined
+          ? Effect.succeed({ state: "Gone", observedAt: "2026-08-30T00:00:05Z" })
+          : Effect.succeed(retained),
+      delete: () =>
+        Effect.succeed({
+          state: "Unknown",
+          observedAt: "2026-08-30T00:00:05Z",
+          diagnostic: "Cleanup uncertain",
+        }),
+    };
+    return runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const first = yield* service.create("one", createInput("handle-write-failed"));
+          expect((yield* service.getOperation(first.operationId)).status).toBe("Failed");
+          expect((yield* service.list()).deployments[0]?.deployment.state).toBe("Allocated");
+          const retry = yield* service.create("two", {
+            kind: "retry",
+            requestId: SandboxRequestId.make("handle-write-retry"),
+            previousOperationId: first.operationId,
+          });
+          expect((yield* service.getOperation(retry.operationId)).status).toBe("Succeeded");
+          expect(allocations).toBe(1);
+        }),
+      { driverFor: () => driver },
+      {},
+      (repository) => ({
+        ...repository,
+        saveDeployment: (deployment, expectedRevision) => {
+          if (deployment.state === "Allocated" && failWrite) {
+            failWrite = false;
+            return Effect.fail(
+              new SandboxRepositoryConflictError({
+                resource: deployment.intent.deploymentId,
+                message: "Handle persistence interrupted",
+              }),
+            );
+          }
+          return repository.saveDeployment(deployment, expectedRevision);
+        },
+      }),
+    );
+  });
+
+  it.effect("arbitrates replacement retry against discard across authorized actors", () =>
+    runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const first = yield* service.create("first", createInput("race-first"));
+          const receipt = yield* service.getOperation(first.operationId);
+          if (receipt.deploymentId === undefined) throw new Error("Missing deployment");
+          const results = yield* Effect.all(
+            [
+              service
+                .create("second", {
+                  kind: "retry",
+                  requestId: SandboxRequestId.make("race-retry"),
+                  previousOperationId: first.operationId,
+                })
+                .pipe(Effect.result),
+              service
+                .delete("third", {
+                  requestId: SandboxRequestId.make("race-discard"),
+                  deploymentId: receipt.deploymentId,
+                })
+                .pipe(Effect.result),
+            ],
+            { concurrency: "unbounded" },
+          );
+          expect(results.filter((result) => result._tag === "Success")).toHaveLength(1);
+          expect(results.filter((result) => result._tag === "Failure")).toHaveLength(1);
+        }),
+      {
+        driverFor: () =>
+          makeDriver({
+            identify: () =>
+              Effect.fail(
+                new SandboxDriverError({ reason: "setup-failed", message: "failed checkout" }),
+              ),
+          }),
+      },
+    ),
+  );
+
   it.effect("links one replacement at the original SHA after confirmed compensation", () => {
     let attempts = 0;
     const shas: string[] = [];
@@ -528,16 +749,21 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           const failed = yield* service.getOperation(first.operationId);
           expect(failed.status).toBe("Failed");
           expect((yield* service.list()).deployments[0]?.deployment.state).toBe("Compensated");
-          const second = yield* service.create("second-client", {
-            kind: "retry",
-            requestId: SandboxRequestId.make("retry-two"),
-            previousOperationId: first.operationId,
-          });
-          const duplicate = yield* service.create("third-client", {
-            kind: "retry",
-            requestId: SandboxRequestId.make("retry-three"),
-            previousOperationId: first.operationId,
-          });
+          const [second, duplicate] = yield* Effect.all(
+            [
+              service.create("second-client", {
+                kind: "retry",
+                requestId: SandboxRequestId.make("retry-two"),
+                previousOperationId: first.operationId,
+              }),
+              service.create("third-client", {
+                kind: "retry",
+                requestId: SandboxRequestId.make("retry-three"),
+                previousOperationId: first.operationId,
+              }),
+            ],
+            { concurrency: "unbounded" },
+          );
           expect(second).toEqual(duplicate);
           const succeeded = yield* service.getOperation(second.operationId);
           expect(succeeded.status).toBe("Succeeded");
@@ -585,6 +811,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           const deployments = yield* service.list();
           expect(deployments.deployments[0]?.deployment.state).toBe("Allocated");
           expect(deployments.deployments[0]?.observation?.state).toBe("Unknown");
+          expect(JSON.stringify(deployments)).not.toContain("sentinel-observation");
         }),
       {
         driverFor: () =>
@@ -600,13 +827,13 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
               Effect.succeed<ProviderObservation>({
                 state: "Unknown",
                 observedAt: "2026-08-30T00:00:05.000Z",
-                diagnostic: "Docker could not confirm deletion.",
+                diagnostic: "Docker password=sentinel-observation could not confirm deletion.",
               }),
             observe: () =>
               Effect.succeed<ProviderObservation>({
                 state: "Unknown",
                 observedAt: "2026-08-30T00:00:06.000Z",
-                diagnostic: "Docker could not confirm deletion.",
+                diagnostic: "Docker password=sentinel-observation could not confirm deletion.",
               }),
           }),
       },
