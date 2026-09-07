@@ -641,6 +641,35 @@ const makeRepository = Effect.gen(function* () {
     `,
   });
 
+  const listCreateRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: OperationRow,
+    execute: () => sql`
+      SELECT
+        operation_id AS "operationId",
+        actor,
+        previous_operation_id AS "previousOperationId",
+        request_id AS "requestId",
+        command,
+        payload_hash AS "payloadHash",
+        status,
+        deployment_id AS "deploymentId",
+        profile_id AS "profileId",
+        profile_input_json AS "profileInputJson",
+        attachment,
+        expected_revision AS "expectedRevision",
+        resolved_image_digest AS "resolvedImageDigest",
+        result_json AS "resultJson",
+        error,
+        progress_json AS "progressJson",
+        accepted_at AS "acceptedAt",
+        updated_at AS "updatedAt"
+      FROM kata_sandbox_operation_receipts
+      WHERE command = 'create'
+      ORDER BY accepted_at ASC, rowid ASC
+    `,
+  });
+
   const mapSql =
     (operation: string) =>
     <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, SandboxRepositoryError, R> =>
@@ -1294,13 +1323,8 @@ const makeRepository = Effect.gen(function* () {
     ownsOperation,
     releaseInFlightClaims,
     listCreateOperations: () =>
-      sql`SELECT operation_id FROM kata_sandbox_operation_receipts WHERE command = 'create' ORDER BY accepted_at, rowid`.pipe(
-        Effect.flatMap((rows) =>
-          Effect.all(rows.map((row) => getOperation(String(row.operation_id)))),
-        ),
-        Effect.map((receipts) =>
-          receipts.flatMap((receipt) => (Option.isSome(receipt) ? [receipt.value] : [])),
-        ),
+      listCreateRows(undefined).pipe(
+        Effect.flatMap((rows) => Effect.all(rows.map(fromOperationRow))),
         mapSql("SandboxDeploymentRepository.listCreateOperations"),
       ),
     listInFlightOperations,
