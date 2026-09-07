@@ -130,6 +130,7 @@ async function request<T>(
   path: string,
   init: RequestInit | undefined,
   decode: (value: unknown) => T,
+  searchParams?: Record<string, string>,
 ): Promise<T> {
   const bearerToken = await readDesktopPrimaryBearerToken();
   const headers = new Headers(init?.headers);
@@ -141,7 +142,12 @@ async function request<T>(
     headers.set("Authorization", `Bearer ${bearerToken}`);
   }
 
-  const requestUrl = typeof window === "undefined" ? path : resolvePrimaryEnvironmentHttpUrl(path);
+  const requestUrl =
+    typeof window === "undefined"
+      ? searchParams
+        ? `${path}?${new URLSearchParams(searchParams).toString()}`
+        : path
+      : resolvePrimaryEnvironmentHttpUrl(path, searchParams);
   const response = await fetch(requestUrl, {
     ...init,
     credentials: shouldIncludePrimaryCookies(requestUrl) ? "include" : "omit",
@@ -178,27 +184,19 @@ export function fetchSandboxList(signal?: AbortSignal): Promise<SandboxListRespo
 }
 
 export function fetchSandboxGitHubRepositories(page: number): Promise<SandboxGitHubRepositoryPage> {
-  const query = new URLSearchParams({ page: String(page) });
-  return request(
-    `/api/kata-sandbox/github/repositories?${query.toString()}`,
-    undefined,
-    decodeGitHubRepositoryPage,
-  );
+  return request("/api/kata-sandbox/github/repositories", undefined, decodeGitHubRepositoryPage, {
+    page: String(page),
+  });
 }
 
 export function fetchSandboxGitHubBranches(input: {
   readonly repository: string;
   readonly page: number;
 }): Promise<SandboxGitHubBranchPage> {
-  const query = new URLSearchParams({
+  return request("/api/kata-sandbox/github/branches", undefined, decodeGitHubBranchPage, {
     repository: input.repository,
     page: String(input.page),
   });
-  return request(
-    `/api/kata-sandbox/github/branches?${query.toString()}`,
-    undefined,
-    decodeGitHubBranchPage,
-  );
 }
 
 export function upsertSandboxProfile(
