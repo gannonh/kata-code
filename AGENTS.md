@@ -1,4 +1,5 @@
 <!-- begin global rules -->
+
 ## Global Agent Instructions
 
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
@@ -51,6 +52,7 @@
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
+
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -97,13 +99,14 @@ Ship means cutting a release channel (nightly, stable, TestFlight). It is not â€
 
 If the Linear issue has the **`human-build`** label, Build is human-owned: do not expect an Eng Manager kick, and do not start a parallel crew Build on the same Linear id. You may still implement if a human briefed you directly. From **Agent Review** onward, normal review/merge rules above still apply.
 
-This section overrides conflicting skill/rule text about *when* to implement or merge. If still unclear, ask the user before proceeding.
+This section overrides conflicting skill/rule text about _when_ to implement or merge. If still unclear, ask the user before proceeding.
+
 <!-- end dev lifecycle -->
 <!-- pstack:models:begin -->
+
 # pstack model configuration
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
-
 
 feature, refactoring: codex:gpt-6-astra@low
 bug-fix: codex:gpt-6-astra@low
@@ -121,4 +124,5 @@ arena cross-judge pool: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gp
 swarm workers: codex:gpt-6-astra@low
 architect runners: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
 interrogate reviewers: codex:gpt-6-astra@xhigh, codex:gpt-6-terra@max, codex:gpt-6-luna@max, codex:gpt-5.6-sol@max
+
 <!-- pstack:models:end -->
