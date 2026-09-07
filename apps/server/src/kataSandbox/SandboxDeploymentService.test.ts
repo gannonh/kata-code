@@ -739,6 +739,54 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
     ),
   );
 
+  it.effect("keeps a retry alive when the catalog reconciles during its admission", () => {
+    let failValidation = true;
+    const base = makeDriver();
+    const driver: SandboxProviderDriver = {
+      ...base,
+      validateProfile: (sandboxProfile, report, validateOptions) =>
+        failValidation
+          ? Effect.fail(
+              new SandboxDriverError({ reason: "setup-failed", message: "daemon offline" }),
+            )
+          : base.validateProfile(sandboxProfile, report, validateOptions),
+    };
+    let service: ReturnType<typeof makeSandboxDeploymentService> | undefined;
+    let interleaved = false;
+    return runWithService(
+      (created) =>
+        Effect.gen(function* () {
+          service = created;
+          const first = yield* created.create("one", createInput("preparing-failed"));
+          expect((yield* created.getOperation(first.operationId)).status).toBe("Failed");
+          failValidation = false;
+          const retry = yield* created.create("two", {
+            kind: "retry",
+            requestId: SandboxRequestId.make("preparing-retry"),
+            previousOperationId: first.operationId,
+          });
+          expect(interleaved).toBe(true);
+          expect((yield* created.getOperation(retry.operationId)).status).toBe("Succeeded");
+          expect((yield* created.list()).deployments).toHaveLength(1);
+        }),
+      { driverFor: () => driver },
+      {},
+      (repository) => ({
+        ...repository,
+        accept: (input) => {
+          if (
+            input.receipt.previousOperationId === undefined ||
+            service === undefined ||
+            interleaved
+          )
+            return repository.accept(input);
+          interleaved = true;
+          return service.list().pipe(Effect.orDie, Effect.andThen(repository.accept(input)));
+        },
+      }),
+    );
+  });
+
   it.effect("links one replacement at the original SHA after confirmed compensation", () => {
     let attempts = 0;
     const shas: string[] = [];
