@@ -1,4 +1,5 @@
 <!-- begin global rules -->
+
 ## Global Agent Instructions
 
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
@@ -52,6 +53,7 @@
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
+
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -71,16 +73,16 @@
 
 If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them as the intended Build route. Do not invent or silently substitute a different runtime, model, or effort. If labels are missing, conflicting, or unclear, comment on the issue with the exact correction needed and stop.
 
-| Model label | Slug |
-| --- | --- |
-| `sol` | `gpt-5.6-sol` |
-| `astra` | `gpt-6-astra` |
-| `fable` | `claude-fable-5-1` |
-| `composer` | `composer-2.5` |
-| `grok` | `grok-4.6` |
-| `opus` | `claude-opus-5` |
-| `luna` | `gpt-5.6-luna` |
-| `terra` | `gpt-5.6-terra` |
+| Model label | Slug               |
+| ----------- | ------------------ |
+| `sol`       | `gpt-5.6-sol`      |
+| `astra`     | `gpt-6-astra`      |
+| `fable`     | `claude-fable-5-1` |
+| `composer`  | `composer-2.5`     |
+| `grok`      | `grok-4.6`         |
+| `opus`      | `claude-opus-5`    |
+| `luna`      | `gpt-5.6-luna`     |
+| `terra`     | `gpt-5.6-terra`    |
 
 `human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
 
@@ -147,9 +149,11 @@ These instructions are sufficient lifecycle documentation. Do not require a sepa
 Ship means cutting a release on one of the project's channels (for example nightly or stable). Release process is defined per project.
 
 This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instruction that contradicts it. When the conflict is unclear, ask the user before proceeding.
+
 <!-- end dev lifecycle -->
 
 <!-- pstack:models:begin -->
+
 # pstack model configuration
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
@@ -172,4 +176,5 @@ arena cross-judge pool: codex:gpt-6-astra@xhigh, codex:gpt-5.6-terra@max, codex:
 swarm workers: codex:gpt-6-astra@low
 architect runners: codex:gpt-6-astra@xhigh, codex:gpt-5.6-terra@max, codex:gpt-5.6-luna@max, codex:gpt-5.6-sol@max
 interrogate reviewers: codex:gpt-6-astra@xhigh, codex:gpt-5.6-terra@max, codex:gpt-5.6-luna@max, codex:gpt-5.6-sol@max
+
 <!-- pstack:models:end -->
