@@ -118,6 +118,21 @@ it("does not accept a late create response after its dialog closes", async () =>
   await expect(pending).rejects.toThrow();
 });
 
+it("passes its abort signal to the operation and recovery list requests", async () => {
+  const fetch = vi.fn(async (url: string, _init?: RequestInit) =>
+    url.includes("operations")
+      ? Response.json({}, { status: 404 })
+      : Response.json({ profiles: [], deployments: [], providers: [] }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const controller = new AbortController();
+  await expect(pollSandboxOperation("op", { signal: controller.signal })).rejects.toThrow(
+    "no longer available",
+  );
+  expect(fetch).toHaveBeenCalledTimes(2);
+  for (const [, init] of fetch.mock.calls) expect(init?.signal).toBe(controller.signal);
+});
+
 it("preserves the last Running receipt when a later 404 is confirmed by discovery", async () => {
   let calls = 0;
   const observed: string[] = [];

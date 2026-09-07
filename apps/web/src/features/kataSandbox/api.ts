@@ -315,10 +315,13 @@ export function deleteSandboxDeployment(
   );
 }
 
-export function fetchSandboxOperation(operationId: string): Promise<SandboxOperationReceipt> {
+export function fetchSandboxOperation(
+  operationId: string,
+  signal?: AbortSignal,
+): Promise<SandboxOperationReceipt> {
   return request(
     `/api/kata-sandbox/operations/${encodeURIComponent(operationId)}`,
-    undefined,
+    signal === undefined ? undefined : { signal },
     decodeOperationReceipt,
   );
 }
@@ -352,10 +355,10 @@ export async function pollSandboxOperation(
     try {
       let receipt: SandboxOperationReceipt;
       try {
-        receipt = await fetchSandboxOperation(operationId);
+        receipt = await fetchSandboxOperation(operationId, options.signal);
       } catch (error) {
         if (!(error instanceof SandboxApiError) || error.status !== 404) throw error;
-        const listed = await fetchSandboxList();
+        const listed = await fetchSandboxList(options.signal);
         const recovered = listed.deployments
           .map((summary) => summary.createReceipt)
           .find(
