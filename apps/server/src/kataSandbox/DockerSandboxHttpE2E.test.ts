@@ -647,17 +647,20 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
         );
         expect(created.result?.endpoint?.startsWith("http://127.0.0.1:")).toBe(true);
 
-        const handoffs = yield* Effect.forEach([0, 1], () =>
-          jsonRequest<{
-            readonly attachment: string;
-            readonly pairingUrl: string;
-            readonly endpoint: string;
-          }>({
-            origin: pairing.origin,
-            token,
-            method: "POST",
-            path: `/api/kata-sandbox/deployments/${createdDeploymentId}/handoff`,
-          }),
+        const handoffs = yield* Effect.forEach(
+          [0, 1],
+          () =>
+            jsonRequest<{
+              readonly attachment: string;
+              readonly pairingUrl: string;
+              readonly endpoint: string;
+            }>({
+              origin: pairing.origin,
+              token,
+              method: "POST",
+              path: `/api/kata-sandbox/deployments/${createdDeploymentId}/handoff`,
+            }),
+          { concurrency: "unbounded" },
         );
         for (const handoff of handoffs) {
           expect(handoff.status).toBe(200);
