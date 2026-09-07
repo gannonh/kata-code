@@ -203,4 +203,6 @@ jobs:
         env:
           KATACODE_DOCKER_HTTP_E2E: "1"
           KATACODE_SANDBOX_IMAGE_DIGEST_FILE: ${{ runner.temp }}/kata-sandbox-dev-image.json
+          # Scoped to this step only: create resolves the GitHub source via gh on the spawned serve process.
+          GH_TOKEN: ${{ github.token }}
         run: vp test run apps/server/src/kataSandbox/DockerSandboxHttpE2E.test.ts
