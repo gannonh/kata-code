@@ -36,6 +36,7 @@ import {
   type IdentifiedDeployment,
   type ProviderObservation,
   type RequestedDeployment,
+  type PreparingDeployment,
 } from "@kata-sh/code-kata-sandbox-contracts/domain";
 import {
   type SandboxCreateRequest,
@@ -56,7 +57,6 @@ import {
   deleteDeployment,
   identifyDeployment,
   redactDiagnostic,
-  requestDeployment,
   resolveManagedImage,
   makeOciRegistry,
   DEFAULT_MANAGED_IMAGE_REPOSITORY,
@@ -571,12 +571,14 @@ export function makeSandboxDeploymentService(
   const acceptOperation = (input: {
     readonly actor: string;
     readonly receipt: SandboxOperationReceipt;
-    readonly deployment?: RequestedDeployment;
+    readonly deployment?: RequestedDeployment | PreparingDeployment;
   }) =>
     repository.accept(input satisfies SandboxAcceptedOperation).pipe(
       Effect.mapError(asServiceError),
       Effect.flatMap((accepted) =>
-        accepted.payloadHash !== input.receipt.payloadHash
+        accepted.payloadHash !== input.receipt.payloadHash &&
+        (input.receipt.previousOperationId === undefined ||
+          accepted.previousOperationId !== input.receipt.previousOperationId)
           ? failConflict("The request id was already used for a different sandbox command.")
           : Effect.succeed({
               receipt: accepted,
@@ -618,14 +620,33 @@ export function makeSandboxDeploymentService(
         >
       >,
   ) =>
-    saveClaimedOperation(
-      {
-        ...receipt,
-        ...update,
-        updatedAt: now(),
-      },
-      claimId,
-    );
+    Effect.gen(function* () {
+      const current = yield* repository
+        .getOperation(receipt.operationId)
+        .pipe(Effect.mapError(asServiceError));
+      const latest = Option.isSome(current) ? current.value : receipt;
+      const progress = update.progress;
+      const history = latest.progress?.history ?? [];
+      yield* saveClaimedOperation(
+        {
+          ...latest,
+          ...update,
+          ...(progress === undefined
+            ? {}
+            : {
+                progress: {
+                  ...progress,
+                  history:
+                    latest.progress?.stage === progress.stage
+                      ? history
+                      : [...history, { stage: progress.stage, at: now() }].slice(-32),
+                },
+              }),
+          updatedAt: now(),
+        },
+        claimId,
+      );
+    });
 
   const markFailed = (receipt: SandboxOperationReceipt, claimId: string, cause: unknown) =>
     repository.getOperation(receipt.operationId).pipe(
@@ -956,7 +977,10 @@ export function makeSandboxDeploymentService(
       const relayPairing = yield* issuePairingCredential({
         endpoint: localEndpoint,
         bootstrapToken,
-        label: targetPairingLabel(deployment.intent.deploymentId),
+        label:
+          targetPairingLabel(deployment.intent.deploymentId) +
+          "-" +
+          (yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError))),
         scopes: [AuthRelayReadScope, AuthRelayWriteScope],
       });
       const sandboxToken = yield* exchangePairingCredential(client, {
@@ -1104,7 +1128,10 @@ export function makeSandboxDeploymentService(
       const issued = yield* issuePairingCredential({
         endpoint: localDockerEndpoint(deployment.endpoint),
         bootstrapToken,
-        label: targetPairingLabel(deployment.intent.deploymentId),
+        label:
+          targetPairingLabel(deployment.intent.deploymentId) +
+          "-" +
+          (yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError))),
       });
       return {
         deploymentId: deployment.intent.deploymentId,
@@ -1115,6 +1142,56 @@ export function makeSandboxDeploymentService(
         workspaceRoot: deployment.workspaceRoot,
         expiresAt: issued.expiresAt,
       } satisfies SandboxHandoff;
+    });
+
+  const reconcileCreate = (
+    deployment: PreparingDeployment | RequestedDeployment | AllocatedDeployment,
+  ) =>
+    Effect.gen(function* () {
+      if (deployment.state === "Preparing") {
+        yield* saveDeployment(
+          { state: "Compensated", revision: deployment.revision + 1, intent: deployment.intent },
+          deployment.revision,
+        );
+        return;
+      }
+      if (deployment.state === "Requested") {
+        const inspected = yield* driverFor(deployment.intent.profileSnapshot)
+          .inspectAllocation(deployment.intent)
+          .pipe(
+            Effect.mapError(asServiceError),
+            Effect.catch((cause) =>
+              Effect.succeed<ProviderObservation>({
+                state: "Unknown",
+                observedAt: now(),
+                diagnostic: diagnostic(cause),
+              }),
+            ),
+          );
+        if (!("state" in inspected)) {
+          const allocated = allocateDeployment(deployment, inspected, now());
+          yield* saveDeployment(allocated, deployment.revision);
+          yield* observeDeployment(allocated);
+        } else {
+          yield* saveObservation(deployment.intent.deploymentId, inspected, deployment.revision);
+          if (inspected.state === "Gone")
+            yield* saveDeployment(
+              {
+                state: "Compensated",
+                revision: deployment.revision + 1,
+                intent: deployment.intent,
+              },
+              deployment.revision,
+            );
+        }
+        return;
+      }
+      const observation = yield* observeDeployment(deployment);
+      if (observation.state === "Gone")
+        yield* saveDeployment(
+          { state: "Compensated", revision: deployment.revision + 1, intent: deployment.intent },
+          deployment.revision,
+        );
     });
 
   const compensateAllocation = (
@@ -1140,8 +1217,10 @@ export function makeSandboxDeploymentService(
         );
       yield* saveObservation(deployment.intent.deploymentId, observation);
       if (observation.state === "Gone") {
-        const deleted = deleteDeployment(deployment, now());
-        yield* saveDeployment(deleted, deployment.revision);
+        yield* saveDeployment(
+          { state: "Compensated", revision: deployment.revision + 1, intent: deployment.intent },
+          deployment.revision,
+        );
         yield* dependencies.secretStore
           .remove(BOOTSTRAP_SECRET_PREFIX + deployment.intent.deploymentId)
           .pipe(Effect.catch(() => Effect.void));
@@ -1160,8 +1239,82 @@ export function makeSandboxDeploymentService(
       }
       const deploymentId = SandboxDeploymentId.make(receipt.deploymentId);
       let deployment = yield* getDeployment(deploymentId);
-      if (deployment.state === "Deleted") {
+      if (deployment.state === "Deleted" || deployment.state === "Compensated") {
         return yield* failConflict("The sandbox deployment was deleted before creation finished.");
+      }
+
+      if (deployment.state === "Preparing") {
+        yield* updateOperation(receipt, claimId, {
+          status: "Running",
+          progress: { stage: "resolving-image" },
+        });
+        const admission = deployment.intent;
+        const imageDigest =
+          receipt.resolvedImageDigest ??
+          (admission.image.kind === "custom"
+            ? admission.image.digest
+            : (yield* resolveManagedImage(
+                { serverVersion: admission.image.version, channel: admission.image.channel },
+                managedImageRegistry,
+              ).pipe(Effect.mapError(asServiceError))).immutableReference);
+        yield* updateOperation(receipt, claimId, {
+          status: "Running",
+          resolvedImageDigest: imageDigest,
+        });
+        const profiles = yield* repository.listProfiles().pipe(Effect.mapError(asServiceError));
+        const matching = profiles.find(
+          (profile) =>
+            profile.enabled &&
+            profile.socketPath === admission.socketPath &&
+            profile.imageDigest === imageDigest,
+        );
+        const profile: SandboxProfile = matching ?? {
+          profileId: admission.profileId,
+          name: "Docker",
+          driverKind: "docker",
+          socketPath: admission.socketPath,
+          imageDigest,
+          enabled: true,
+          revision: 1,
+          createdAt: now(),
+          updatedAt: now(),
+        };
+        if (matching === undefined)
+          yield* repository.saveProfile(profile).pipe(Effect.mapError(asServiceError));
+        const facts = yield* driverFor(profile)
+          .validateProfile(
+            profile,
+            (progress) =>
+              updateOperation(receipt, claimId, { status: "Running", progress }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new SandboxDriverError({
+                      reason: "setup-failed",
+                      message: cause.message,
+                      cause,
+                    }),
+                ),
+              ),
+            { pullIfMissing: true },
+          )
+          .pipe(Effect.mapError(asServiceError));
+        const bootstrapManifest = yield* Effect.try({
+          try: () => bootstrapManifestFor(profile, facts),
+          catch: asServiceError,
+        });
+        const prepared: RequestedDeployment = {
+          state: "Requested",
+          revision: deployment.revision + 1,
+          intent: {
+            ...admission,
+            profileId: profile.profileId,
+            profileRevision: profile.revision,
+            profileSnapshot: profile,
+            bootstrapManifest,
+          },
+        };
+        yield* saveDeployment(prepared, deployment.revision);
+        deployment = prepared;
       }
 
       const intent = deployment.intent;
@@ -1180,18 +1333,10 @@ export function makeSandboxDeploymentService(
 
       if (deployment.state === "Requested") {
         yield* assertOperationClaimed(receipt.operationId, claimId);
-        yield* Effect.logInfo("sandbox.create.validateProfile");
-        yield* driver
-          .validateProfile(
-            profile,
-            (progress) =>
-              updateOperation(receipt, claimId, { status: "Running", progress }).pipe(
-                Effect.catch(() => Effect.void),
-              ),
-            { pullIfMissing: false },
-          )
-          .pipe(Effect.mapError(asServiceError));
-        yield* Effect.logInfo("sandbox.create.allocate");
+        yield* updateOperation(receipt, claimId, {
+          status: "Running",
+          progress: { stage: "creating-container" },
+        });
         const resource = yield* driver
           .allocate({
             profile,
@@ -1232,6 +1377,17 @@ export function makeSandboxDeploymentService(
               : { modelSelection: credentialSeed.modelSelection }),
             bootstrapToken,
             resource: deployment.resource,
+            reportProgress: (progress) =>
+              updateOperation(receipt, claimId, { status: "Running", progress }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new SandboxDriverError({
+                      reason: "setup-failed",
+                      message: cause.message,
+                      cause,
+                    }),
+                ),
+              ),
           })
           .pipe(
             Effect.mapError(asServiceError),
@@ -1307,7 +1463,7 @@ export function makeSandboxDeploymentService(
         return yield* failCommand("Delete operation has no deployment id.");
       }
       const deploymentId = SandboxDeploymentId.make(receipt.deploymentId);
-      const deployment = yield* getDeployment(deploymentId);
+      let deployment = yield* getDeployment(deploymentId);
       const inFlight = yield* repository
         .listInFlightOperations()
         .pipe(Effect.mapError(asServiceError));
@@ -1342,6 +1498,14 @@ export function makeSandboxDeploymentService(
         return yield* failConflict(`Deployment revision ${receipt.expectedRevision} is stale.`);
       }
       if (deployment.state === "Requested") {
+        yield* reconcileCreate(deployment);
+        deployment = yield* getDeployment(deploymentId);
+        if (deployment.state === "Requested")
+          return yield* failConflict(
+            "Docker could not confirm resource ownership. Reconcile before discard.",
+          );
+      }
+      if (deployment.state === "Preparing" || deployment.state === "Compensated") {
         yield* assertOperationClaimed(receipt.operationId, claimId);
         const deleted = deleteDeployment(deployment, now());
         yield* saveDeployment(deleted, deployment.revision);
@@ -1659,7 +1823,13 @@ export function makeSandboxDeploymentService(
     busy = false,
   ): ReadonlyArray<"start" | "stop" | "attach" | "delete"> => {
     if (busy || deployment.state === "Deleted") return [];
-    if (deployment.state === "Requested" || deployment.state === "Allocated") return ["delete"];
+    if (
+      deployment.state === "Preparing" ||
+      deployment.state === "Compensated" ||
+      deployment.state === "Requested" ||
+      deployment.state === "Allocated"
+    )
+      return ["delete"];
     const power = driverFor(deployment.intent.profileSnapshot).power;
     if (power === undefined) return ["attach", "delete"];
     switch (observation?.state) {
@@ -1804,6 +1974,24 @@ export function makeSandboxDeploymentService(
         }),
         { concurrency: 4 },
       );
+      const failedCreates = yield* repository
+        .listCreateOperations()
+        .pipe(Effect.mapError(asServiceError));
+      for (const failed of failedCreates.filter((receipt) => receipt.status === "Failed")) {
+        if (failed.deploymentId === undefined) continue;
+        const deployment = yield* getDeployment(failed.deploymentId);
+        if (
+          deployment.state === "Preparing" ||
+          deployment.state === "Requested" ||
+          deployment.state === "Allocated"
+        ) {
+          const active = yield* repository
+            .listInFlightOperations()
+            .pipe(Effect.mapError(asServiceError));
+          if (!active.some((receipt) => receipt.deploymentId === failed.deploymentId))
+            yield* withDeploymentLock(failed.deploymentId, reconcileCreate(deployment));
+        }
+      }
       const deployments = yield* repository.listDeployments().pipe(Effect.mapError(asServiceError));
       const inFlight = yield* repository
         .listInFlightOperations()
@@ -1813,6 +2001,9 @@ export function makeSandboxDeploymentService(
           operation.deploymentId === undefined ? [] : [operation.deploymentId],
         ),
       );
+      const createOperations = yield* repository
+        .listCreateOperations()
+        .pipe(Effect.mapError(asServiceError));
       const deploymentSummaries = yield* Effect.all(
         deployments.map((deployment) => {
           const busy = busyDeployments.has(
@@ -1833,7 +2024,11 @@ export function makeSandboxDeploymentService(
               })),
             );
           }
-          if (deployment.state === "Requested") {
+          if (
+            deployment.state === "Requested" ||
+            deployment.state === "Preparing" ||
+            deployment.state === "Compensated"
+          ) {
             return Effect.succeed({ deployment, actions: busy ? [] : (["delete"] as const) });
           }
           return observationFor(deployment).pipe(
@@ -1869,7 +2064,41 @@ export function makeSandboxDeploymentService(
       const hostDiagnostic = yield* hostAvailability();
       return {
         profiles: profileSummaries,
-        deployments: deploymentSummaries,
+        deployments: deploymentSummaries.flatMap((summary) => {
+          const deploymentId =
+            summary.deployment.state === "Deleted"
+              ? summary.deployment.deploymentId
+              : summary.deployment.intent.deploymentId;
+          const createReceipt = createOperations.findLast(
+            (receipt) => receipt.deploymentId === deploymentId,
+          );
+          if (
+            createReceipt !== undefined &&
+            createOperations.some(
+              (receipt) =>
+                receipt.previousOperationId === createReceipt.operationId &&
+                receipt.deploymentId !== deploymentId,
+            )
+          )
+            return [];
+          return [
+            {
+              ...summary,
+              ...(createReceipt === undefined ? {} : { createReceipt }),
+              ...(createReceipt?.status === "Succeeded"
+                ? { recovery: "open" as const }
+                : createReceipt?.status === "Failed" && summary.deployment.state !== "Deleted"
+                  ? {
+                      recovery:
+                        summary.deployment.state === "Requested" ||
+                        ("observation" in summary && summary.observation?.state === "Unknown")
+                          ? ("reconcile" as const)
+                          : ("retry" as const),
+                    }
+                  : {}),
+            },
+          ];
+        }),
         relayAvailable,
         providers: providerRegistry
           .listDescriptors()
@@ -1962,57 +2191,117 @@ export function makeSandboxDeploymentService(
       const hash = payloadHash({ command: "create", input });
       const existing = yield* existingOperation(actor, input.requestId, hash);
       if (Option.isSome(existing)) return { operationId: existing.value.operationId };
-      const profile = yield* getProfile(input.profileId);
-      if (!profile.enabled) {
-        return yield* failConflict(`Sandbox profile '${profile.profileId}' is disabled.`);
-      }
-      if (input.expectedRevision !== undefined && input.expectedRevision !== profile.revision) {
-        return yield* failConflict(`Profile revision ${input.expectedRevision} is stale.`);
+      if (input.kind === "retry") {
+        const creates = yield* repository
+          .listCreateOperations()
+          .pipe(Effect.mapError(asServiceError));
+        const successor = creates.find(
+          (receipt) => receipt.previousOperationId === input.previousOperationId,
+        );
+        if (successor !== undefined) return { operationId: successor.operationId };
+        const previous = yield* repository
+          .getOperation(input.previousOperationId)
+          .pipe(Effect.mapError(asServiceError));
+        if (
+          Option.isNone(previous) ||
+          previous.value.command !== "create" ||
+          previous.value.status !== "Failed" ||
+          previous.value.deploymentId === undefined
+        )
+          return yield* failConflict("Only a failed create can be retried.");
+        const old = yield* getDeployment(previous.value.deploymentId);
+        if (old.state === "Deleted") return yield* failConflict("This sandbox has been discarded.");
+        if (old.state === "Requested" || old.state === "Allocated") {
+          const observation = yield* repository
+            .getObservation(old.intent.deploymentId)
+            .pipe(Effect.mapError(asServiceError));
+          if (Option.isNone(observation) || observation.value.state === "Unknown")
+            return yield* failConflict(
+              "Reconcile the sandbox to confirm its resource before retrying.",
+            );
+        }
+        const operationId = SandboxOperationId.make(
+          yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
+        );
+        let deployment: PreparingDeployment | undefined;
+        let deploymentId = old.intent.deploymentId;
+        if (old.state === "Compensated") {
+          deploymentId = SandboxDeploymentId.make(
+            yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
+          );
+          const intent = old.intent;
+          deployment = {
+            state: "Preparing",
+            revision: 1,
+            intent: {
+              deploymentId,
+              controlEnvironmentId: intent.controlEnvironmentId,
+              profileId: SandboxProviderProfileId.make(
+                yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
+              ),
+              providerInstanceId: intent.providerInstanceId,
+              label: intent.label,
+              source: intent.source,
+              image:
+                "profileSnapshot" in intent
+                  ? { kind: "custom", digest: intent.profileSnapshot.imageDigest }
+                  : previous.value.resolvedImageDigest === undefined
+                    ? intent.image
+                    : { kind: "custom", digest: previous.value.resolvedImageDigest },
+              socketPath:
+                "profileSnapshot" in intent ? intent.profileSnapshot.socketPath : intent.socketPath,
+              workspaceRoot: intent.workspaceRoot,
+              kataHome: intent.kataHome,
+              requestedAt: now(),
+            },
+          };
+        }
+        const receipt = {
+          ...createReceipt(operationId, input.requestId, "create", hash, deploymentId),
+          previousOperationId: input.previousOperationId,
+          ...(previous.value.resolvedImageDigest === undefined
+            ? {}
+            : { resolvedImageDigest: previous.value.resolvedImageDigest }),
+        };
+        const accepted = yield* acceptOperation({
+          actor,
+          receipt,
+          ...(deployment === undefined ? {} : { deployment }),
+        });
+        if (accepted.created) yield* scheduleOperation(accepted.receipt);
+        return { operationId: accepted.receipt.operationId };
       }
       const source = yield* dependencies.githubAccess
         .resolve(input.source)
-        .pipe(Effect.mapError((cause) => asServiceError(cause)));
+        .pipe(Effect.mapError(asServiceError));
       const deploymentId = SandboxDeploymentId.make(
         yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
       );
-      const facts = yield* driverFor(profile)
-        .validateProfile(profile, undefined, { pullIfMissing: false })
-        .pipe(Effect.mapError(asServiceError));
-      const bootstrapManifest = yield* Effect.try({
-        try: () => bootstrapManifestFor(profile, facts),
-        catch: (cause) => asServiceError(cause),
-      });
-      const intent = {
-        deploymentId,
-        controlEnvironmentId: yield* dependencies.environment.getEnvironmentId,
-        profileId: profile.profileId,
-        profileRevision: profile.revision,
-        profileSnapshot: profile,
-        providerInstanceId: input.providerInstanceId,
-        label: input.label,
-        source,
-        bootstrapManifest,
-        workspaceRoot: DEFAULT_SANDBOX_WORKSPACE_ROOT,
-        kataHome: DEFAULT_SANDBOX_KATA_HOME,
-        requestedAt: now(),
+      const profileId = SandboxProviderProfileId.make(
+        yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
+      );
+      const deployment: PreparingDeployment = {
+        state: "Preparing",
+        revision: 1,
+        intent: {
+          deploymentId,
+          controlEnvironmentId: yield* dependencies.environment.getEnvironmentId,
+          profileId,
+          providerInstanceId: input.providerInstanceId,
+          label: input.label,
+          source,
+          image: input.image,
+          socketPath: input.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH,
+          workspaceRoot: DEFAULT_SANDBOX_WORKSPACE_ROOT,
+          kataHome: DEFAULT_SANDBOX_KATA_HOME,
+          requestedAt: now(),
+        },
       };
       const operationId = SandboxOperationId.make(
         yield* dependencies.crypto.randomUUIDv4.pipe(Effect.mapError(asServiceError)),
       );
-      const receipt = createReceipt(
-        operationId,
-        input.requestId,
-        "create",
-        hash,
-        deploymentId,
-        undefined,
-        input.expectedRevision ?? profile.revision,
-      );
-      const accepted = yield* acceptOperation({
-        actor,
-        receipt,
-        deployment: requestDeployment(intent),
-      });
+      const receipt = createReceipt(operationId, input.requestId, "create", hash, deploymentId);
+      const accepted = yield* acceptOperation({ actor, receipt, deployment });
       if (accepted.created) yield* scheduleOperation(accepted.receipt);
       return { operationId: accepted.receipt.operationId };
     });

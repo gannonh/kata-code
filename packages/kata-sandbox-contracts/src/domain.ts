@@ -226,6 +226,35 @@ export const SandboxDeploymentIntent = Schema.Struct({
 });
 export type SandboxDeploymentIntent = typeof SandboxDeploymentIntent.Type;
 
+export const SandboxCreateAdmission = Schema.Struct({
+  deploymentId: SandboxDeploymentId,
+  controlEnvironmentId: EnvironmentId,
+  profileId: SandboxProviderProfileId,
+  providerInstanceId: ProviderInstanceId,
+  label: SandboxDeploymentLabel,
+  source: ResolvedGitHubSource,
+  image: SandboxImageInput,
+  socketPath: UnixSocketPath,
+  workspaceRoot: SandboxWorkspaceRoot,
+  kataHome: SandboxWorkspaceRoot,
+  requestedAt: IsoDateTime,
+});
+export type SandboxCreateAdmission = typeof SandboxCreateAdmission.Type;
+
+export const PreparingDeployment = Schema.Struct({
+  state: Schema.Literal("Preparing"),
+  revision: PositiveInt,
+  intent: SandboxCreateAdmission,
+});
+export type PreparingDeployment = typeof PreparingDeployment.Type;
+
+export const CompensatedDeployment = Schema.Struct({
+  state: Schema.Literal("Compensated"),
+  revision: PositiveInt,
+  intent: Schema.Union([SandboxDeploymentIntent, SandboxCreateAdmission]),
+});
+export type CompensatedDeployment = typeof CompensatedDeployment.Type;
+
 export const RequestedDeployment = Schema.Struct({
   state: Schema.Literal("Requested"),
   revision: PositiveInt,
@@ -267,6 +296,8 @@ export const DeletedDeployment = Schema.Struct({
 export type DeletedDeployment = typeof DeletedDeployment.Type;
 
 export const SandboxDeployment = Schema.Union([
+  PreparingDeployment,
+  CompensatedDeployment,
   RequestedDeployment,
   AllocatedDeployment,
   IdentifiedDeployment,
@@ -321,6 +352,9 @@ export const SandboxOperationProgressStage = Schema.Literals([
   "resolving-image",
   "pulling-image",
   "validating-image",
+  "creating-container",
+  "checking-out-source",
+  "starting-server",
   "ready",
   "failed",
 ]);
@@ -331,21 +365,35 @@ const SandboxProgressStageBeforeFailure = Schema.Literals([
   "resolving-image",
   "pulling-image",
   "validating-image",
+  "creating-container",
+  "checking-out-source",
+  "starting-server",
   "ready",
 ]);
 
+const SandboxProgressHistory = {
+  history: Schema.optional(
+    Schema.Array(Schema.Struct({ stage: SandboxOperationProgressStage, at: IsoDateTime })),
+  ),
+};
+
 export const SandboxOperationProgress = Schema.Union([
-  Schema.Struct({ stage: Schema.Literal("resolving-image") }),
+  Schema.Struct({ ...SandboxProgressHistory, stage: Schema.Literal("resolving-image") }),
   Schema.Struct({
+    ...SandboxProgressHistory,
     stage: Schema.Literal("pulling-image"),
     downloadedBytes: Schema.optional(NonNegativeInt),
     totalBytes: Schema.optional(Schema.NullOr(NonNegativeInt)),
     layersCompleted: Schema.optional(NonNegativeInt),
     layersTotal: Schema.optional(Schema.NullOr(NonNegativeInt)),
   }),
-  Schema.Struct({ stage: Schema.Literal("validating-image") }),
-  Schema.Struct({ stage: Schema.Literal("ready") }),
+  Schema.Struct({ ...SandboxProgressHistory, stage: Schema.Literal("validating-image") }),
+  Schema.Struct({ ...SandboxProgressHistory, stage: Schema.Literal("creating-container") }),
+  Schema.Struct({ ...SandboxProgressHistory, stage: Schema.Literal("checking-out-source") }),
+  Schema.Struct({ ...SandboxProgressHistory, stage: Schema.Literal("starting-server") }),
+  Schema.Struct({ ...SandboxProgressHistory, stage: Schema.Literal("ready") }),
   Schema.Struct({
+    ...SandboxProgressHistory,
     stage: Schema.Literal("failed"),
     lastStage: SandboxProgressStageBeforeFailure,
     diagnostic: SandboxDiagnostic,
@@ -387,6 +435,7 @@ export type SandboxOperationResult = typeof SandboxOperationResult.Type;
 export const SandboxOperationReceipt = Schema.Struct({
   operationId: SandboxOperationId,
   requestId: SandboxRequestId,
+  previousOperationId: Schema.optional(SandboxOperationId),
   command: SandboxOperationKind,
   payloadHash: TrimmedNonEmptyString,
   status: SandboxOperationStatus,

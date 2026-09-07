@@ -101,7 +101,13 @@ function makeDriver(
     },
     validateProfile:
       options.validateProfile ??
-      (() => Effect.succeed({ daemonVersion: "1.0", imageDigest, ...testBootstrapFacts })),
+      ((_profile, report) =>
+        Effect.gen(function* () {
+          yield* report?.({ stage: "validating-image" }) ?? Effect.void;
+          return { daemonVersion: "1.0", imageDigest, ...testBootstrapFacts };
+        })),
+    inspectAllocation: () =>
+      Effect.succeed({ state: "Gone", observedAt: "2026-08-30T00:00:05.000Z" }),
     allocate: (input) =>
       Effect.succeed({
         containerId: SandboxContainerId.make("container-1"),
@@ -119,14 +125,18 @@ function makeDriver(
     identify:
       options.identify ??
       ((input) =>
-        Effect.succeed({
-          environmentId: "sandbox-env",
-          endpoint: "http://127.0.0.1:3774",
-          workspaceRoot: "/workspace",
-          resource: {
-            ...input.resource,
-            hostPort: 3774,
-          },
+        Effect.gen(function* () {
+          yield* input.reportProgress?.({ stage: "checking-out-source" }) ?? Effect.void;
+          yield* input.reportProgress?.({ stage: "starting-server" }) ?? Effect.void;
+          return {
+            environmentId: "sandbox-env",
+            endpoint: "http://127.0.0.1:3774",
+            workspaceRoot: "/workspace",
+            resource: {
+              ...input.resource,
+              hostPort: 3774,
+            },
+          };
         })),
     observe:
       options.observe ??
@@ -278,7 +288,8 @@ const runWithService = <A>(
 
 const createInput = (requestId: string, label = "Issue 159") => ({
   requestId: SandboxRequestId.make(requestId),
-  profileId,
+  kind: "new" as const,
+  image: { kind: "custom" as const, digest: imageDigest },
   label,
   source: { repository: source.repository, ref: source.ref },
   providerInstanceId,
@@ -296,6 +307,39 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
       expect(decoded.expiresAt).toBe("2026-09-02T16:19:29.000Z");
     }),
   );
+
+  it.effect("accepts a durable preparation before doing image work", () => {
+    let validations = 0;
+    return runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const accepted = yield* service.create("desktop-bootstrap", {
+            requestId: SandboxRequestId.make("prepare-first"),
+            kind: "new",
+            image: { kind: "custom", digest: imageDigest },
+            label: "Repository",
+            source: { repository: source.repository, ref: source.ref },
+            providerInstanceId,
+          });
+          expect(validations).toBe(0);
+          const receipt = yield* service.getOperation(accepted.operationId);
+          expect(receipt.status).toBe("Accepted");
+          const listed = yield* service.list();
+          expect(listed.deployments[0]?.deployment.state).toBe("Preparing");
+          expect(listed.deployments[0]?.createReceipt?.operationId).toBe(accepted.operationId);
+        }),
+      {
+        driverFor: () =>
+          makeDriver({
+            validateProfile: () => {
+              validations += 1;
+              return Effect.succeed({ daemonVersion: "1", imageDigest, ...testBootstrapFacts });
+            },
+          }),
+        schedule: () => Effect.void,
+      },
+    );
+  });
 
   it.effect("captures an exact source, runs the durable lifecycle, and deduplicates retries", () =>
     Effect.gen(function* () {
@@ -315,6 +359,15 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             const first = yield* service.create("desktop-bootstrap", input);
             const second = yield* service.create("desktop-bootstrap", input);
             const deployment = yield* service.list();
+            const receipt = yield* service.getOperation(first.operationId);
+            expect(receipt.progress?.history?.map((entry) => entry.stage)).toEqual([
+              "resolving-image",
+              "validating-image",
+              "creating-container",
+              "checking-out-source",
+              "starting-server",
+              "ready",
+            ]);
             return { first, second, deployment };
           }),
         {
@@ -412,7 +465,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           const receipt = yield* service.getOperation(accepted.operationId);
           const listed = yield* service.list();
           const saved = listed.profiles[0]?.profile;
-          expect(receipt.progress).toEqual({ stage: "ready" });
+          expect(receipt.progress).toMatchObject({ stage: "ready" });
           expect(saved?.imageDigest).toBe("vcr.vercel.com/team/image@sha256:" + "e".repeat(64));
         }),
       {
@@ -464,6 +517,54 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
       { driverFor: () => makeDriver() },
     ),
   );
+
+  it.effect("links one replacement at the original SHA after confirmed compensation", () => {
+    let attempts = 0;
+    const shas: string[] = [];
+    return runWithService(
+      (service) =>
+        Effect.gen(function* () {
+          const first = yield* service.create("first-client", createInput("failed-first"));
+          const failed = yield* service.getOperation(first.operationId);
+          expect(failed.status).toBe("Failed");
+          expect((yield* service.list()).deployments[0]?.deployment.state).toBe("Compensated");
+          const second = yield* service.create("second-client", {
+            kind: "retry",
+            requestId: SandboxRequestId.make("retry-two"),
+            previousOperationId: first.operationId,
+          });
+          const duplicate = yield* service.create("third-client", {
+            kind: "retry",
+            requestId: SandboxRequestId.make("retry-three"),
+            previousOperationId: first.operationId,
+          });
+          expect(second).toEqual(duplicate);
+          const succeeded = yield* service.getOperation(second.operationId);
+          expect(succeeded.status).toBe("Succeeded");
+          expect(succeeded.previousOperationId).toBe(first.operationId);
+          expect(succeeded.deploymentId).not.toBe(failed.deploymentId);
+          expect(shas).toEqual([source.resolvedCommitSha, source.resolvedCommitSha]);
+        }),
+      {
+        driverFor: () =>
+          makeDriver({
+            identify: (input) => {
+              shas.push(input.intent.source.resolvedCommitSha);
+              return ++attempts === 1
+                ? Effect.fail(
+                    new SandboxDriverError({ reason: "setup-failed", message: "checkout failed" }),
+                  )
+                : Effect.succeed({
+                    environmentId: "sandbox-env",
+                    endpoint: "http://127.0.0.1:3774",
+                    workspaceRoot: "/workspace",
+                    resource: input.resource,
+                  });
+            },
+          }),
+      },
+    );
+  });
 
   it.effect("retains an allocated container when compensation cannot prove deletion", () =>
     runWithService(
@@ -806,7 +907,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           expect(finalDeployment).toMatchObject({
             state: "Identified",
             endpoint: "http://127.0.0.1:3775",
-            revision: 4,
+            revision: 5,
           });
         }),
       ),
@@ -847,7 +948,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           const cleanup = yield* service.delete("desktop-bootstrap", {
             requestId: SandboxRequestId.make("malformed-relay-delete"),
             deploymentId: created.deploymentId,
-            expectedRevision: 3,
+            expectedRevision: 4,
           });
           expect((yield* service.getOperation(cleanup.operationId)).status).toBe("Succeeded");
           expect(
@@ -959,13 +1060,13 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           expect((yield* service.list()).deployments[0]?.deployment).toMatchObject({
             state: "Identified",
             attachment: "relay",
-            revision: 4,
+            revision: 5,
           });
 
           const deleted = yield* service.delete("desktop-bootstrap", {
             requestId: SandboxRequestId.make("relay-delete"),
             deploymentId: created.deploymentId,
-            expectedRevision: 4,
+            expectedRevision: 5,
           });
           const deleteReceipt = yield* service.getOperation(deleted.operationId);
           expect(deleteReceipt.result).toEqual({
@@ -1039,7 +1140,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
             const deleted = yield* service.delete("desktop-bootstrap", {
               requestId: SandboxRequestId.make("relay-unauthorized-delete"),
               deploymentId: created.deploymentId,
-              expectedRevision: 4,
+              expectedRevision: 5,
             });
             const receipt = yield* service.getOperation(deleted.operationId);
             expect(receipt.status).toBe("Failed");
@@ -1155,7 +1256,7 @@ it.layer(NodeServices.layer)("SandboxDeploymentService", (it) => {
           const receipt = yield* service.getOperation(accepted.operationId);
           const listed = yield* service.list();
           expect(receipt.status).toBe("Failed");
-          expect(receipt.progress).toEqual({
+          expect(receipt.progress).toMatchObject({
             stage: "failed",
             lastStage: "validating-image",
             diagnostic: "image pull failed",

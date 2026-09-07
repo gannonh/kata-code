@@ -121,7 +121,20 @@ function response(status: number, body = ""): DockerResponse {
 
 function fakeEngine(request: (request: DockerRequest) => DockerResponse): DockerEngine {
   return {
-    request: (input) => Effect.succeed(request(input)),
+    request: (input) =>
+      Effect.tryPromise({
+        try: async () => {
+          const result = request(input);
+          if (input.onLine !== undefined)
+            for (const line of result.body.split("\n")) await input.onLine(line);
+          return result;
+        },
+        catch: (cause) =>
+          new DockerEngineError({
+            message: cause instanceof Error ? cause.message : String(cause),
+            cause,
+          }),
+      }),
     requestBuffer: () => Effect.succeed({ status: 200, body: new Uint8Array() }),
     requestStdin: () => Effect.succeed({ status: 101, body: new Uint8Array() }),
   };
@@ -309,8 +322,8 @@ describe("Docker sandbox driver", () => {
           layersTotal: 1,
         },
         {
-          downloadedBytes: 0,
-          totalBytes: null,
+          downloadedBytes: 2,
+          totalBytes: 2,
           layersCompleted: 1,
           layersTotal: 1,
         },

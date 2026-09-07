@@ -1007,55 +1007,70 @@ function validateProfile(
         layersCompleted: 0,
         layersTotal: null,
       });
+      const layers = new Map<
+        string,
+        { current: number; total: number | null; complete: boolean }
+      >();
+      const onLine = (line: string) =>
+        Effect.gen(function* () {
+          const message = parseDockerPullMessage(line);
+          if (message === undefined) return;
+          const pullError = dockerPullError(message);
+          if (pullError !== undefined)
+            return yield* new SandboxDriverError({
+              reason: "image-unavailable",
+              message: pullError,
+            });
+          if (typeof message.id !== "string") return;
+          const previous = layers.get(message.id) ?? { current: 0, total: null, complete: false };
+          const current = message.progressDetail?.current;
+          const total = message.progressDetail?.total;
+          const complete =
+            previous.complete ||
+            (typeof message.status === "string" &&
+              /(?:pull complete|already exists|download complete)/iu.test(message.status));
+          const downloading = message.status === "Downloading";
+          const knownTotal =
+            downloading && typeof total === "number" && Number.isSafeInteger(total) && total >= 0
+              ? total
+              : previous.total;
+          layers.set(message.id, {
+            current:
+              complete && knownTotal !== null
+                ? knownTotal
+                : downloading &&
+                    typeof current === "number" &&
+                    Number.isSafeInteger(current) &&
+                    current >= 0
+                  ? current
+                  : previous.current,
+            total: knownTotal,
+            complete,
+          });
+          const values = [...layers.values()];
+          yield* report({
+            stage: "pulling-image",
+            downloadedBytes: values.reduce((sum, layer) => sum + layer.current, 0),
+            totalBytes: values.every((layer) => layer.total !== null || layer.complete)
+              ? values.reduce((sum, layer) => sum + (layer.total ?? 0), 0)
+              : null,
+            layersCompleted: values.filter((layer) => layer.complete).length,
+            layersTotal: values.length,
+          });
+        });
       const pulled = yield* engine
         .request({
           path: "/images/create?fromImage=" + encodeURIComponent(profile.imageDigest),
           method: "POST",
           timeoutMs: IMAGE_PULL_TIMEOUT_MS,
+          onLine: (line) => Effect.runPromise(onLine(line)),
         })
         .pipe(Effect.mapError((error) => engineFailure(error, "image-unavailable")));
-      if (!isSuccess(pulled.status)) {
+      if (!isSuccess(pulled.status))
         return yield* new SandboxDriverError({
           reason: "image-unavailable",
           message: "Docker image pull returned " + pulled.status + ".",
         });
-      }
-      const layerIds = new Set<string>();
-      const completedLayerIds = new Set<string>();
-      for (const line of pulled.body.split("\n")) {
-        const message = parseDockerPullMessage(line);
-        if (message === undefined) continue;
-        const pullError = dockerPullError(message);
-        if (pullError !== undefined) {
-          return yield* new SandboxDriverError({
-            reason: "image-unavailable",
-            message: pullError,
-          });
-        }
-        const layerId = typeof message.id === "string" ? message.id : undefined;
-        if (layerId !== undefined) layerIds.add(layerId);
-        if (
-          layerId !== undefined &&
-          typeof message.status === "string" &&
-          /(?:pull complete|already exists|download complete)/iu.test(message.status)
-        ) {
-          completedLayerIds.add(layerId);
-        }
-        const current = message.progressDetail?.current;
-        const total = message.progressDetail?.total;
-        if (
-          (current === undefined || (Number.isInteger(current) && (current as number) >= 0)) &&
-          (total === undefined || (Number.isInteger(total) && (total as number) >= 0))
-        ) {
-          yield* report({
-            stage: "pulling-image",
-            downloadedBytes: typeof current === "number" ? current : 0,
-            totalBytes: typeof total === "number" ? total : null,
-            layersCompleted: completedLayerIds.size,
-            layersTotal: layerIds.size || null,
-          });
-        }
-      }
       image = yield* engine
         .request({ path: "/images/" + encodeURIComponent(profile.imageDigest) + "/json" })
         .pipe(Effect.mapError((error) => engineFailure(error, "image-unavailable")));
@@ -1385,6 +1400,22 @@ export function makeDockerSandboxDriver(
     validateProfile: (profile, reportProgress, validationOptions) =>
       validateProfile(engineFor(profile.socketPath), profile, reportProgress, validationOptions),
     probeHost: () => probeDockerDaemon(engineFor(options.socketPath ?? DEFAULT_DOCKER_SOCKET_PATH)),
+    inspectAllocation: (intent) =>
+      Effect.gen(function* () {
+        const existing = yield* inspectByName(
+          engineFor(intent.profileSnapshot.socketPath),
+          dockerContainerName(intent.deploymentId),
+          "observation-failed",
+        );
+        if (existing === undefined) return { state: "Gone" as const, observedAt: now() };
+        if (!allocatedIdentityMatches(existing, intent))
+          return {
+            state: "Unknown" as const,
+            observedAt: now(),
+            diagnostic: "The Docker container has foreign ownership.",
+          };
+        return yield* makeHandle(existing, intent);
+      }),
     allocate: (input) =>
       Effect.gen(function* () {
         yield* validateAllocationInput(input);
@@ -1579,6 +1610,7 @@ export function makeDockerSandboxDriver(
               message: "Docker did not publish the sandbox port after start.",
             });
           }
+          yield* input.reportProgress?.({ stage: "checking-out-source" }) ?? Effect.void;
           yield* cleanupCheckoutCredential(engine, input.resource);
           const ready = yield* checkoutIsReady(
             engine,
@@ -1599,6 +1631,7 @@ export function makeDockerSandboxDriver(
           }
           const endpoint = endpointUrl(endpointHost, port);
           yield* Effect.logInfo("sandbox.identify.ready");
+          yield* input.reportProgress?.({ stage: "starting-server" }) ?? Effect.void;
           const readiness = yield* readinessProbe(endpoint, input.manifest);
           return {
             environmentId: readiness.environmentId,
