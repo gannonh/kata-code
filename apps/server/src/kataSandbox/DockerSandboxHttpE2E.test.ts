@@ -10,6 +10,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   AuthAccessTokenType,
   AuthAdministrativeScopes,
+  AuthStandardClientScopes,
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
 } from "@kata-sh/code-contracts";
@@ -445,7 +446,7 @@ function makeClientLayer() {
   const platform = Layer.mergeAll(
     Layer.succeed(Platform.ClientPresentation, {
       metadata: { label: "Docker HTTP E2E", deviceType: "desktop" },
-      scopes: AuthAdministrativeScopes,
+      scopes: AuthStandardClientScopes,
     }),
     Layer.succeed(Platform.PrimaryEnvironmentAuth, { bearerToken: Effect.succeed(Option.none()) }),
     Layer.succeed(Platform.CloudSession, { clerkToken: unsupported }),
