@@ -111,6 +111,44 @@ describe("Docker sandbox Settings API", () => {
     );
   });
 
+  it("keeps GitHub discovery query strings unencoded when window is present", async () => {
+    vi.stubEnv("VITE_HTTP_URL", "");
+    vi.stubEnv("VITE_WS_URL", "");
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    vi.stubGlobal("window", {
+      location: new URL("http://[::1]:7495/settings/connections"),
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          repositories: [
+            {
+              nameWithOwner: "gannonh/private-repository",
+              visibility: "private",
+              defaultBranch: "main",
+            },
+          ],
+          page: 1,
+          hasMore: false,
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ branches: ["main"], page: 1, hasMore: false }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchSandboxGitHubRepositories(1);
+    await fetchSandboxGitHubBranches({ repository: "gannonh/private-repository", page: 1 });
+
+    const repositoryUrl = String(fetchMock.mock.calls[0]?.[0]);
+    const branchUrl = String(fetchMock.mock.calls[1]?.[0]);
+    expect(repositoryUrl).toBe("http://[::1]:7495/api/kata-sandbox/github/repositories?page=1");
+    expect(repositoryUrl).not.toContain("%3F");
+    expect(branchUrl).toBe(
+      "http://[::1]:7495/api/kata-sandbox/github/branches?repository=gannonh%2Fprivate-repository&page=1",
+    );
+    expect(branchUrl).not.toContain("%3F");
+  });
+
   it("rejects malformed GitHub metadata at the HTTP boundary", async () => {
     vi.stubGlobal(
       "fetch",
