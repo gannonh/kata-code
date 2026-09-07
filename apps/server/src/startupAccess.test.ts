@@ -1,3 +1,5 @@
+import * as NodeOS from "node:os";
+
 import { assert, expect, it } from "@effect/vitest";
 
 import {
@@ -32,7 +34,7 @@ it("keeps sandbox endpoint probes on loopback when the control server binds a wi
         cidr: "192.168.1.42/24",
       },
     ],
-  };
+  } as ReturnType<typeof NodeOS.networkInterfaces>;
 
   expect(resolveSandboxEndpointHost("0.0.0.0", interfaces)).toBe("127.0.0.1");
   expect(resolveSandboxEndpointHost("::", interfaces)).toBe("127.0.0.1");
