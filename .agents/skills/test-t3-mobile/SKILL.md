@@ -1,6 +1,6 @@
 ---
 name: test-t3-mobile
-description: Launch and test Kata Code Mobile on an iOS Simulator or Android Emulator against disposable local T3 environments, including Metro and dev-client reuse, native rebuild decisions, per-client pairing, seeded projects, semantic UI control, screenshots, and iOS serve-sim streaming. Use after mobile UI or native changes, when reproducing phone or tablet behavior, pairing an emulator to isolated state, or verifying mobile behavior on macOS, Linux, or Windows.
+description: Launch and test Kata Code Mobile on an iOS Simulator or Android Emulator against disposable local T3 environments, including Metro and dev-client reuse, native rebuild decisions, per-client pairing, seeded projects, semantic UI control, and screenshots. Use after mobile UI or native changes, when reproducing phone or tablet behavior, pairing an emulator to isolated state, or verifying mobile behavior on macOS, Linux, or Windows.
 ---
 
 # Test T3 Mobile
@@ -13,7 +13,7 @@ Command examples use POSIX shell syntax. On Windows, use PowerShell equivalents:
 
 Inspect the host and the affected code before launching processes:
 
-- On macOS with Xcode, prefer one representative iOS Simulator when the change is cross-platform so the user can watch through serve-sim.
+- On macOS with Xcode, prefer one representative iOS Simulator when the change is cross-platform.
 - On macOS, Linux, or Windows with the Android SDK, use one Android Emulator when Android is the affected surface or iOS tooling is unavailable.
 - When the change is platform-specific, test that platform. When neither platform is viable, report the missing SDK, emulator, or dev-client prerequisite rather than claiming verification.
 
@@ -161,7 +161,7 @@ Use `snapshot_ui` and current element references from XcodeBuildMCP for taps and
 
 Prefer semantic Android automation exposed by the current agent host. Otherwise inspect the current hierarchy with `adb shell uiautomator dump`, target stable resource IDs, content descriptions, text, or bounds, and use scoped `adb shell input` actions. Refresh the hierarchy after navigation. Capture the final state with `adb exec-out screencap -p`.
 
-Android does not use serve-sim. Use a browser-compatible Android mirror when the host already provides one; otherwise return focused emulator screenshots as evidence rather than installing unrelated streaming infrastructure during verification.
+Use a browser-compatible Android mirror when the host already provides one; otherwise return focused emulator screenshots as evidence.
 
 ## Verify and clean up
 
@@ -171,7 +171,7 @@ Exercise only the affected flow on one representative device unless the change s
 2. Capture the relevant final state.
 3. Remove the disposable environment from Kata Code Dev.
 4. Remove any `adb reverse` rule created for this test with `adb -s <emulator-serial> reverse --remove tcp:<metro-port>`.
-5. Stop only the serve-sim, Metro, backend, emulator, and log processes started by this test.
+5. Stop only the Metro, backend, emulator, and log processes started by this test.
 6. Remove only base directories and temporary Git repositories deliberately created for this test. Preserve them when they contain useful reproduction evidence.
 
 Keep local verification focused. Do not turn this workflow into a full repository test run.

@@ -7,9 +7,11 @@ repackage the official x86_64 AppImage from GitHub Releases.
 ## Publishing
 
 AUR publishing is parked at `.github/disabled/publish-aur.yml` until a later phase.
-The parked workflow can run manually for a specific tag. It selects the stable or nightly
-package, then updates its version and checksums, builds it, regenerates `.SRCINFO`, and pushes it
-to the AUR.
+GitHub only runs workflows under `.github/workflows/`; move the file there before any manual
+dispatch. Until then, use the release script below to validate a release on Arch Linux.
+
+When enabled, the workflow selects the stable or nightly package, updates its version and
+checksums, builds it, regenerates `.SRCINFO`, and pushes it to the AUR.
 
 To validate a release on Arch Linux:
 
