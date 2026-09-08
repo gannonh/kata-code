@@ -63,7 +63,6 @@ import { getDriverOption } from "../settings/providerDriverMeta";
 import { TerminalViewport } from "../ThreadTerminalDrawer";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 import { ClaudeAI, OpenAI } from "../Icons";
-import { T3Wordmark } from "../T3Wordmark";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -90,6 +89,8 @@ type WizardStep = "connection" | "agents" | "import";
 const NO_ENVIRONMENTS: readonly EnvironmentId[] = [];
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
+/** Same invocation the README and docs/user/remote-access.md use. */
+const KATA_CLI = "npx @kata-sh/code-cli@latest";
 const ONBOARDING_STAGES = ["Connect", "Agents", "Projects"] as const;
 const SCAN_LIMIT_MESSAGE = "Scan limit reached. Some projects or conversations may be missing.";
 
@@ -189,13 +190,13 @@ export function WelcomeWizard({
         showCloseButton={false}
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >
-        <DialogTitle className="sr-only">Set up T3 Code</DialogTitle>
+        <DialogTitle className="sr-only">Set up Kata Code</DialogTitle>
         <div className="flex min-h-0 flex-col">
           <DialogHeader className="gap-4">
-            <div className="flex items-baseline gap-1.5" role="img" aria-label="T3 Code">
-              <T3Wordmark className="h-4 w-auto shrink-0" aria-hidden />
-              <span className="text-[1.4rem] font-medium tracking-tight text-muted-foreground">
-                Code
+            <div className="flex items-center gap-2" role="img" aria-label="Kata Code">
+              <img src="/apple-touch-icon.png" alt="" className="size-6 shrink-0 rounded-md" />
+              <span className="text-[1.4rem] font-medium tracking-tight text-foreground">
+                Kata Code
               </span>
             </div>
             <WizardSteps
@@ -441,7 +442,7 @@ function ConnectAccountOption({
         }
       >
         <CloudIcon className="size-4 text-muted-foreground" />
-        <span className="flex-1">T3 Connect</span>
+        <span className="flex-1">Kata Code Connect</span>
         <span className="text-xs text-muted-foreground">
           {!isLoaded
             ? "Loading sign-in…"
@@ -475,9 +476,9 @@ function ConnectAccountOption({
           <p className="text-sm text-muted-foreground">
             Run this on each computer you want to connect.
           </p>
-          <CommandBlock command="npx t3 connect" className="mt-3" />
+          <CommandBlock command={`${KATA_CLI} connect`} className="mt-3" />
           <p className="mt-3 text-xs text-muted-foreground">
-            Keep T3 Code running. Select the computers you want to set up above.
+            Keep Kata Code running. Select the computers you want to set up above.
           </p>
         </div>
       </CollapsiblePanel>
@@ -592,9 +593,9 @@ function PairingForm({
             <p className="text-sm text-muted-foreground">
               Run this on the computer with your code.
             </p>
-            <CommandBlock command="npx t3 pair" className="mt-2" />
+            <CommandBlock command={`${KATA_CLI} pair`} className="mt-2" />
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Start T3 Code first, or run <code className="font-mono">npx t3 serve</code>. Add{" "}
+              Start Kata Code first, or run <code className="font-mono">{KATA_CLI} serve</code>. Add{" "}
               <code className="font-mono">--tailscale</code> to use your tailnet.
             </p>
           </CollapsiblePanel>
