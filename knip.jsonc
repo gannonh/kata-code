@@ -14,7 +14,8 @@
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option, not a source import.
-      "entry": ["knip-schemas.ts"],
+      // Worktree setup invokes setup-worktree.ts directly from t3.json.
+      "entry": ["knip-schemas.ts", "setup-worktree.ts"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
