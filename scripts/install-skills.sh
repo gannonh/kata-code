@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Copy a skill onto disk. Best-effort: a registry or network hiccup for a single
-# skill must not abort dependency setup (this script runs from worktree:setup and
-# from the Cloud Agent environment install).
+# skill must not abort dependency setup (this script runs from t3.json worktree
+# setup and from the Cloud Agent environment install).
 add_skill() {
   if ! npx --yes skills add "$@" -y --copy --agent claude-code cursor; then
     echo "install-skills: skipped 'skills add $*' (command failed)" >&2

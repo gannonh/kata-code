@@ -47,11 +47,11 @@ interface VariantOutputs {
   readonly ios: string;
   readonly macos: string;
   readonly universal: string;
-  readonly appleTouch: string;
-  readonly favicon16: string;
-  readonly favicon32: string;
-  readonly faviconIco: string;
-  readonly windowsIco: string;
+  readonly appleTouch?: string;
+  readonly favicon16?: string;
+  readonly favicon32?: string;
+  readonly faviconIco?: string;
+  readonly windowsIco?: string;
 }
 
 interface IconVariant {
@@ -211,10 +211,6 @@ const ICON_VARIANTS = [
       macos: BRAND_ASSET_PATHS.developmentDesktopIconPng,
       universal: BRAND_ASSET_PATHS.developmentUniversalIconPng,
       appleTouch: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
-      favicon16: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
-      favicon32: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
-      faviconIco: BRAND_ASSET_PATHS.developmentWebFaviconIco,
-      windowsIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
     },
   },
   {
@@ -224,10 +220,6 @@ const ICON_VARIANTS = [
       ios: BRAND_ASSET_PATHS.nightlyIosIconPng,
       macos: BRAND_ASSET_PATHS.nightlyMacIconPng,
       universal: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
-      appleTouch: BRAND_ASSET_PATHS.nightlyWebAppleTouchIconPng,
-      favicon16: BRAND_ASSET_PATHS.nightlyWebFavicon16Png,
-      favicon32: BRAND_ASSET_PATHS.nightlyWebFavicon32Png,
-      faviconIco: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
       windowsIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
     },
   },
@@ -586,25 +578,37 @@ const renderVariant = Effect.fn("iconExport.renderVariant")(function* (
   });
 
   const ios = yield* render("iOS", 1024);
-  const icoRenditions = yield* Effect.forEach(
-    WINDOWS_ICON_SIZES,
-    (size) => render("iOS", size).pipe(Effect.map((contents) => ({ size, contents }))),
-    { concurrency: 1 },
-  );
-  const ico = yield* Effect.try({
-    try: () => encodePngIco(icoRenditions),
-    catch: (cause) => new IconExportEncodingError({ variant: variant.label, cause }),
-  });
-
-  return new Map<string, Buffer>([
+  const outputs = new Map<string, Buffer>([
     [variant.outputs.ios, ios],
     [variant.outputs.universal, ios],
-    [variant.outputs.appleTouch, yield* render("iOS", 180)],
-    [variant.outputs.favicon16, yield* render("iOS", 16)],
-    [variant.outputs.favicon32, yield* render("iOS", 32)],
-    [variant.outputs.faviconIco, ico],
-    [variant.outputs.windowsIco, ico],
   ]);
+  if (variant.outputs.appleTouch !== undefined) {
+    outputs.set(variant.outputs.appleTouch, yield* render("iOS", 180));
+  }
+  if (variant.outputs.favicon16 !== undefined) {
+    outputs.set(variant.outputs.favicon16, yield* render("iOS", 16));
+  }
+  if (variant.outputs.favicon32 !== undefined) {
+    outputs.set(variant.outputs.favicon32, yield* render("iOS", 32));
+  }
+  if (variant.outputs.faviconIco !== undefined || variant.outputs.windowsIco !== undefined) {
+    const icoRenditions = yield* Effect.forEach(
+      WINDOWS_ICON_SIZES,
+      (size) => render("iOS", size).pipe(Effect.map((contents) => ({ size, contents }))),
+      { concurrency: 1 },
+    );
+    const ico = yield* Effect.try({
+      try: () => encodePngIco(icoRenditions),
+      catch: (cause) => new IconExportEncodingError({ variant: variant.label, cause }),
+    });
+    if (variant.outputs.faviconIco !== undefined) {
+      outputs.set(variant.outputs.faviconIco, ico);
+    }
+    if (variant.outputs.windowsIco !== undefined) {
+      outputs.set(variant.outputs.windowsIco, ico);
+    }
+  }
+  return outputs;
 });
 
 const logManualMacOsExportInstructions = Effect.fn("iconExport.logManualMacOsExportInstructions")(
