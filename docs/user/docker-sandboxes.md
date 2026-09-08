@@ -3,8 +3,8 @@
 Docker sandboxes run a separate Kata Code environment for a GitHub repository and ref.
 
 The feature is a preview and is off by default. An administrative session turns
-it on with **Sandboxes (preview)** in Settings → General. The next request
-picks up the change. No restart is required. `KATACODE_SANDBOXES=1` or `=0` on
+it on with **Sandboxes (preview)** under Experimental in Settings → General.
+The next request picks up the change. No restart is required. `KATACODE_SANDBOXES=1` or `=0` on
 the server process overrides the stored switch for that process. With the
 switch off, sandbox routes, Connections, and Add Environment hide the feature.
 Existing deployments stay in the database.
@@ -14,7 +14,7 @@ version. No environment variables, digest, or local image build are required.
 
 ## Create a sandbox
 
-1. Turn on Sandboxes (preview) in Settings → General, or start the server with
+1. Turn on Sandboxes (preview) under Experimental in Settings → General, or start the server with
    `KATACODE_SANDBOXES=1`.
 2. Open Settings → Connections and select Add environment on the Kata host
    (the desktop app or the locally hosted web app). Remote clients over Connect

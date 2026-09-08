@@ -1,4 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off - Reads SettingsPanels.tsx to assert Experimental placement.
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import {
+  AuthAccessWriteScope,
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   ProviderDriverKind,
@@ -11,15 +16,25 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   backgroundActivitySharedPolicySettings,
   buildProviderInstanceUpdatePatch,
+  EXPERIMENTAL_FEATURE_TARGET_IDS,
+  foldedSectionHeadingForSearchTarget,
   formatDiagnosticsDescription,
+  GENERAL_FOLDED_SECTION_ORDER,
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
   isSamePreviewViewport,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
+  LEGACY_FEATURE_TARGET_IDS,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
+  sessionCanAdministerSettings,
 } from "./SettingsPanels.logic";
+
+const generalPanelSource = NodeFS.readFileSync(
+  NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "SettingsPanels.tsx"),
+  "utf8",
+);
 
 describe("typography settings restore", () => {
   it("detects family and size changes by font row", () => {
@@ -292,6 +307,83 @@ describe("isSamePreviewViewport", () => {
         { _tag: "freeform", width: 390, height: 844 },
         { _tag: "preset", width: 390, height: 844, presetId: "iphone-12-pro" },
       ),
+    ).toBe(false);
+  });
+});
+
+describe("general folded sections", () => {
+  it("orders Experimental above Legacy features", () => {
+    expect(GENERAL_FOLDED_SECTION_ORDER).toEqual(["Experimental", "Legacy features"]);
+  });
+
+  it("maps a sandboxes preview search jump to Experimental", () => {
+    expect(foldedSectionHeadingForSearchTarget("sandboxes-preview")).toBe("Experimental");
+    expect(EXPERIMENTAL_FEATURE_TARGET_IDS.has("sandboxes-preview")).toBe(true);
+  });
+
+  it("leaves everyday general rows unfolded", () => {
+    expect(foldedSectionHeadingForSearchTarget("project-grouping")).toBeNull();
+    expect(foldedSectionHeadingForSearchTarget("provider-update-checks")).toBeNull();
+  });
+
+  it("maps legacy search jumps to Legacy features", () => {
+    expect(foldedSectionHeadingForSearchTarget("legacy-plan-mode")).toBe("Legacy features");
+    expect(foldedSectionHeadingForSearchTarget("legacy-token-streaming")).toBe("Legacy features");
+    expect(foldedSectionHeadingForSearchTarget("legacy-sidebar")).toBe("Legacy features");
+    expect(LEGACY_FEATURE_TARGET_IDS).toEqual(
+      new Set(["legacy-plan-mode", "legacy-token-streaming", "legacy-sidebar"]),
+    );
+  });
+
+  it("keeps the sandboxes row inside Experimental, above Legacy", () => {
+    const experimentalFn = generalPanelSource.indexOf("function ExperimentalFeaturesSection");
+    const row = generalPanelSource.indexOf("<SandboxesPreviewSetting />");
+    const everydayPanel = generalPanelSource.indexOf("export function GeneralSettingsPanel");
+    const mountExperimental = generalPanelSource.indexOf("<ExperimentalFeaturesSection />");
+    const mountLegacy = generalPanelSource.indexOf("<LegacyFeaturesSection />");
+    expect(experimentalFn).toBeGreaterThan(-1);
+    expect(row).toBeGreaterThan(experimentalFn);
+    expect(row).toBeLessThan(everydayPanel);
+    expect(generalPanelSource.slice(everydayPanel, mountExperimental)).not.toContain(
+      "<SandboxesPreviewSetting />",
+    );
+    expect(mountExperimental).toBeGreaterThan(-1);
+    expect(mountExperimental).toBeLessThan(mountLegacy);
+  });
+});
+
+describe("sessionCanAdministerSettings", () => {
+  it("treats a desktop bridge session as administrative", () => {
+    expect(
+      sessionCanAdministerSettings({
+        hasDesktopBridge: true,
+        authenticated: false,
+        scopes: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("requires access:write on a browser session", () => {
+    expect(
+      sessionCanAdministerSettings({
+        hasDesktopBridge: false,
+        authenticated: true,
+        scopes: [AuthAccessWriteScope],
+      }),
+    ).toBe(true);
+    expect(
+      sessionCanAdministerSettings({
+        hasDesktopBridge: false,
+        authenticated: true,
+        scopes: [],
+      }),
+    ).toBe(false);
+    expect(
+      sessionCanAdministerSettings({
+        hasDesktopBridge: false,
+        authenticated: false,
+        scopes: [AuthAccessWriteScope],
+      }),
     ).toBe(false);
   });
 });

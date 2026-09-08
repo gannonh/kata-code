@@ -90,4 +90,11 @@ describe("searchSettings", () => {
       targetId: "appearance",
     });
   });
+
+  it("routes sandboxes preview to general settings", () => {
+    expect(searchSettings("sandboxes")[0]).toMatchObject({
+      id: "sandboxes-preview",
+      to: "/settings/general",
+    });
+  });
 });
