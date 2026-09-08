@@ -3,7 +3,6 @@ import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/AppSymbol";
-import { useThemeColor } from "../../lib/useThemeColor";
 import { deriveAndroidHomeFabLayout } from "./android-home-fab-layout";
 
 /**
@@ -28,7 +27,6 @@ function AndroidHomeFab(props: {
   readonly width?: number;
 }) {
   const insets = useSafeAreaInsets();
-  const primaryForegroundColor = useThemeColor("--color-primary-foreground");
   const { fabBottom } = deriveAndroidHomeFabLayout({ bottomInset: insets.bottom });
 
   return (
@@ -46,7 +44,7 @@ function AndroidHomeFab(props: {
         <SymbolView
           name="square.and.pencil"
           size={22}
-          tintColor={primaryForegroundColor}
+          tintColorClassName={"accent-primary-foreground"}
           type="monochrome"
         />
       </Pressable>

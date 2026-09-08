@@ -5,7 +5,7 @@ import { AppText as Text } from "../../components/AppText";
 import {
   ThreadMarkdownImageView,
   type ThreadMarkdownImageRequestCallbacks,
-} from "../threads/ThreadFeed";
+} from "../threads/ThreadMarkdownImage";
 
 type RaceCase = "late-success" | "late-error";
 type RaceSource = "a" | "b";
@@ -53,7 +53,7 @@ export function MarkdownImageRaceFixture() {
         unavailable={false}
         alt={`${phase.raceCase} image ${phase.source.toUpperCase()}`}
         title={null}
-        onPressImage={() => undefined}
+        onPressPreview={() => undefined}
         testID={testID}
         onRequestCallbacks={(requestUri, callbacks) => {
           callbacksByUri.current.set(requestUri, callbacks);

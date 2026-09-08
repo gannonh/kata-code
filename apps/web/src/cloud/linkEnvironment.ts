@@ -16,22 +16,15 @@ import {
   WS_METHODS,
 } from "@kata-sh/code-contracts";
 import {
-  type RelayClientDeviceRecord,
-  type RelayClientEnvironmentRecord,
   type RelayEnvironmentLinkResponse,
-  type RelayProtectedError as RelayProtectedErrorType,
   type RelayManagedEndpointProviderKind,
 } from "@kata-sh/code-contracts/relay";
 import { EnvironmentRegistry } from "@kata-sh/code-client-runtime/connection";
 import { request, runStream } from "@kata-sh/code-client-runtime/rpc";
 import { makeEnvironmentHttpApiClient } from "@kata-sh/code-client-runtime/rpc";
-import { ManagedRelay } from "@kata-sh/code-client-runtime/relay";
+import { ManagedRelay, relayProtectedErrorMessage } from "@kata-sh/code-client-runtime/relay";
 import { isLoopbackHost } from "@kata-sh/code-shared/preview";
 
-import {
-  readPrimaryEnvironmentDescriptor,
-  readPrimaryEnvironmentTarget,
-} from "../environments/primary";
 import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
 import { resolveCloudPublicConfig } from "./publicConfig";
 import {
@@ -39,14 +32,6 @@ import {
   reportRelayClientInstallProgress,
   requestRelayClientInstallConfirmation,
 } from "./relayClientInstallDialog";
-
-export function normalizeRelayBaseUrl(value: string | null | undefined): string | null {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return null;
-  }
-  return trimmed.replace(/\/+$/g, "");
-}
 
 function relayUrl(): string | null {
   return resolveCloudPublicConfig().relayUrl;
@@ -129,50 +114,6 @@ const isEnvironmentCloudApiError = Schema.is(
   ]),
 );
 
-function relayProtectedErrorMessage(error: RelayProtectedErrorType): string {
-  switch (error._tag) {
-    case "RelayAuthInvalidError":
-      switch (error.reason) {
-        case "missing_bearer":
-        case "invalid_bearer":
-          return "Relay rejected the cloud session token.";
-        case "invalid_dpop":
-          return "Relay rejected the DPoP proof.";
-        case "not_authorized":
-          return "Relay rejected the authenticated request.";
-      }
-    case "RelayEnvironmentLinkProofExpiredError":
-      return "Relay rejected an expired environment link proof.";
-    case "RelayEnvironmentLinkProofInvalidError":
-      return `Relay rejected the environment link proof (${error.reason}).`;
-    case "RelayEnvironmentConnectNotAuthorizedError":
-      // "Not authorized" covers non-auth causes too; surface the reason so a
-      // missing link doesn't read as a credential problem.
-      if (error.reason === "environment_link_not_found") {
-        return "Relay has no active link for this environment. The environment server may not have re-established its link yet.";
-      }
-      return error.reason
-        ? `Relay rejected the environment connection request (${error.reason}).`
-        : "Relay rejected the environment connection request.";
-    case "RelayEnvironmentEndpointUnavailableError":
-      return `Relay could not reach the environment endpoint (${error.reason}).`;
-    case "RelayEnvironmentEndpointTimedOutError":
-      return "Relay timed out while contacting the environment endpoint.";
-    case "RelayEnvironmentLinkFailedError":
-      return `Relay could not link the environment (${error.reason}).`;
-    case "RelayEnvironmentLinkUnavailableError":
-      return `Relay cannot provision the managed endpoint (${error.reason}).`;
-    case "RelayEnvironmentLinkLimitExceededError":
-      return `Relay refused the link: this account already has its maximum of ${error.maxTunnels} managed tunnels. Unlink an environment to free one up.`;
-    case "RelayAgentActivityPublishProofExpiredError":
-      return "Relay rejected an expired agent activity publish proof.";
-    case "RelayAgentActivityPublishProofInvalidError":
-      return `Relay rejected the agent activity publish proof (${error.reason}).`;
-    case "RelayInternalError":
-      return `Relay encountered an internal error (${error.reason}).`;
-  }
-}
-
 function decodedRelayClientError(message: string) {
   return (cause: ManagedRelay.ManagedRelayClientError) => {
     const relayError =
@@ -244,93 +185,6 @@ export interface CloudLinkTarget {
 }
 
 export type CloudLinkState = EnvironmentCloudLinkStateResult;
-
-export function collectCloudLinkTargets(input: {
-  readonly primary: CloudLinkTarget | null;
-  readonly saved: ReadonlyArray<CloudLinkTarget>;
-}): ReadonlyArray<CloudLinkTarget> {
-  const byId = new Map<string, CloudLinkTarget>();
-  if (input.primary) {
-    byId.set(input.primary.environmentId, input.primary);
-  }
-  for (const environment of input.saved) {
-    if (!byId.has(environment.environmentId)) {
-      byId.set(environment.environmentId, environment);
-    }
-  }
-  return [...byId.values()];
-}
-
-export function readPrimaryCloudLinkTarget(): CloudLinkTarget | null {
-  const descriptor = readPrimaryEnvironmentDescriptor();
-  const target = readPrimaryEnvironmentTarget();
-  if (!descriptor || !target) {
-    return null;
-  }
-  return {
-    environmentId: descriptor.environmentId,
-    label: descriptor.label,
-    httpBaseUrl: target.target.httpBaseUrl,
-    wsBaseUrl: target.target.wsBaseUrl,
-  };
-}
-
-export function listManagedCloudEnvironments(input: {
-  readonly clerkToken: string;
-}): Effect.Effect<
-  ReadonlyArray<RelayClientEnvironmentRecord>,
-  CloudEnvironmentLinkError,
-  ManagedRelay.ManagedRelayClient
-> {
-  return Effect.gen(function* () {
-    const configuredRelayUrl = relayUrl();
-    if (!configuredRelayUrl) {
-      return yield* new CloudEnvironmentLinkError({
-        message: "KATACODE_RELAY_URL is not configured.",
-      });
-    }
-    const relayClient = yield* ManagedRelay.ManagedRelayClient;
-    return yield* relayClient
-      .listEnvironments({
-        clerkToken: input.clerkToken,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new CloudEnvironmentLinkError({
-              message: "Could not list relay-managed environments.",
-              cause,
-            }),
-        ),
-      );
-  });
-}
-
-export function listCloudDevices(input: {
-  readonly clerkToken: string;
-}): Effect.Effect<
-  ReadonlyArray<RelayClientDeviceRecord>,
-  CloudEnvironmentLinkError,
-  ManagedRelay.ManagedRelayClient
-> {
-  return Effect.gen(function* () {
-    if (!relayUrl()) {
-      return yield* new CloudEnvironmentLinkError({
-        message: "KATACODE_RELAY_URL is not configured.",
-      });
-    }
-    const relayClient = yield* ManagedRelay.ManagedRelayClient;
-    return yield* relayClient.listDevices({ clerkToken: input.clerkToken }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new CloudEnvironmentLinkError({
-            message: "Could not list cloud devices.",
-            cause,
-          }),
-      ),
-    );
-  });
-}
 
 export function readPrimaryCloudLinkState(input: {
   readonly target: CloudLinkTarget;

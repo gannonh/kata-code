@@ -3,7 +3,7 @@ import { relayClerkTokenOptions } from "@kata-sh/code-shared/relayAuth";
 import { normalizeSecureRelayUrl } from "@kata-sh/code-shared/relayUrl";
 import * as Schema from "effect/Schema";
 
-export class CloudPublicConfigMissingError extends Schema.TaggedErrorClass<CloudPublicConfigMissingError>()(
+export class CloudPublicConfigMissingError extends Schema.TaggedError<CloudPublicConfigMissingError>()(
   "CloudPublicConfigMissingError",
   {
     key: Schema.Literal("KATACODE_CLERK_JWT_TEMPLATE"),

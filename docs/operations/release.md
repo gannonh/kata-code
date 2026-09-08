@@ -30,7 +30,7 @@ This document covers the unified release workflow for stable and nightly desktop
 - Deploys the hosted web app to Vercel only after a release is published:
   - stable releases are aliased to the `latest` hosted app channel
   - nightly releases are aliased to the `nightly` hosted app channel
-- Signing is optional and auto-detected per platform from secrets.
+- macOS publication requires signing and notarization credentials. Windows signing is auto-detected from its secrets.
 
 ## Required release credentials
 
@@ -260,10 +260,11 @@ the **Update server** action targeting a package version that does not exist yet
 
 For a release smoke test, confirm `npm view @kata-sh/code-cli@<version> version` returns the expected version, then
 connect the new client to a server on the previous version and verify that the update action
-reconnects to the matching server. Use releases with identical migration manifests for the
-automatic path. When the manifest changed, verify that the remote action stops before restart and
-shows the exact local `npx @kata-sh/code-cli@<version> service update` command. Also test the manual or
-desktop-managed guidance when those environments are available.
+reconnects to the matching server. When the release adds database migrations, verify that the
+remote update applies them and reconnects. A failed trial must restore the database snapshot and
+restart the previous server. If the installed launcher does not support the target protocol,
+verify that the update stops before restart and run `npx @kata-sh/code-cli@<version> service update`
+once on the server machine. Also test manual and desktop-managed guidance when available.
 
 ## Desktop auto-update notes
 
@@ -358,7 +359,8 @@ Required secrets used by the workflow:
 - `CSC_KEY_PASSWORD`
 - `APPLE_ID`
 - `APPLE_APP_SPECIFIC_PASSWORD`
-- `APPLE_TEAM_ID` (10-character Apple Developer Team ID)
+
+Set the `APPLE_TEAM_ID` repository secret to the 10-character Apple Developer Team ID.
 
 Optional API-key notarization credentials (use these instead of Apple ID credentials when available):
 
@@ -387,11 +389,11 @@ Checklist:
 6. If using desktop passkeys, base64-encode the provisioning profile and store it as
    `MACOS_PROVISIONING_PROFILE`.
 7. Store the `.p12` export password as `CSC_KEY_PASSWORD`, and set the `APPLE_TEAM_ID`
-   secret to the 10-character Apple Developer Team ID. Set `APPLE_ID` and an
+   repository secret to the 10-character Apple Developer Team ID. Set `APPLE_ID` and an
    app-specific password for notarization.
 8. Optionally create an App Store Connect API key (Team key) and set `APPLE_API_KEY`,
    `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` instead of the Apple ID credentials.
-9. Complete the Clerk Native API and AASA setup in [Kata Code Connect Clerk Setup](../internals/t3-connect.md#desktop-passkeys).
+9. Complete the Clerk Native API and AASA setup in [Kata Code Connect Clerk Setup](./connect-setup.md#desktop-passkeys).
 10. Re-run a tag release and confirm macOS artifacts are signed/notarized. If a provisioning profile
     is configured, confirm the expected `com.apple.developer.associated-domains` entitlement.
 
@@ -444,7 +446,7 @@ Checklist:
 ## 5) Troubleshooting
 
 - macOS build unsigned when expected signed:
-  - Check all Apple secrets plus the `APPLE_TEAM_ID` secret are populated and non-empty.
+  - Check all Apple secrets plus the `APPLE_TEAM_ID` repository secret are populated and non-empty.
   - Confirm the provisioning profile belongs to `APPLE_TEAM_ID.com.katacode.app` and includes
     Associated Domains.
 - Windows build unsigned when expected signed:
@@ -452,3 +454,12 @@ Checklist:
 - Build fails with signing error:
   - Retry with secrets removed to confirm unsigned path still works.
   - Re-check certificate/profile names and tenant/client credentials.
+
+## Signed builds without desktop passkeys
+
+`APPLE_TEAM_ID` is a GitHub repository secret. `MACOS_PROVISIONING_PROFILE` is a secret.
+For local signed builds, pass `KATACODE_APPLE_TEAM_ID` and
+`KATACODE_MACOS_PROVISIONING_PROFILE` to include passkey entitlements. The build derives the
+relying-party domain from `KATACODE_CLERK_PUBLISHABLE_KEY` unless
+`KATACODE_CLERK_PASSKEY_RP_DOMAINS` overrides it. Without a provisioning profile, the app can
+remain signed but has no Associated Domains entitlement.

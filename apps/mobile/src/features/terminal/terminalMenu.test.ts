@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { type KnownTerminalSession } from "@kata-sh/code-client-runtime/state/terminal";
+import {
+  EMPTY_TERMINAL_BUFFER_STATE,
+  type KnownTerminalSession,
+} from "@kata-sh/code-client-runtime/state/terminal";
 import { DEFAULT_TERMINAL_ID, EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 
 import { getTerminalLabel } from "@kata-sh/code-shared/terminalLabels";
@@ -55,12 +58,13 @@ function makeKnownSession(input: {
             updatedAt: input.updatedAt ?? "2026-04-15T20:00:00.000Z",
           }
         : null,
-      buffer: "",
+      output: EMPTY_TERMINAL_BUFFER_STATE.output,
       status: input.status,
       error: null,
       hasRunningSubprocess: false,
       updatedAt: input.updatedAt ?? "2026-04-15T20:00:00.000Z",
       version: 1,
+      lifecycleVersion: 1,
     },
   };
 }

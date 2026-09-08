@@ -94,7 +94,9 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.deepEqual(options, {
+      isDevelopment: true,
       linuxWmClass: "katacode-dev",
+      linuxDesktopEntryName: "katacode-dev.desktop",
       passwordStore: "gnome-libsecret",
     });
   });

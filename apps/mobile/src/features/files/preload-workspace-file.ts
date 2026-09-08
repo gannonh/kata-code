@@ -1,9 +1,13 @@
 import { executeAtomQuery } from "@kata-sh/code-client-runtime/state/runtime";
 import type { EnvironmentId } from "@kata-sh/code-contracts";
+import {
+  isWorkspaceBrowserPreviewPath,
+  isWorkspaceImagePreviewPath,
+} from "@kata-sh/code-shared/filePreview";
 
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
-import { isBrowserPreviewFile, isImagePreviewFile } from "./filePath";
+import { isVideoPreviewFile } from "./filePath";
 import { prepareSourceFileDocument } from "./source-file-document";
 import { sourceHighlightAtom } from "./sourceHighlightingState";
 import type { ReviewDiffTheme } from "../review/shikiReviewHighlighter";
@@ -25,7 +29,11 @@ export function preloadWorkspaceFileContents(input: {
   readonly relativePath: string;
   readonly theme: ReviewDiffTheme;
 }): void {
-  if (isBrowserPreviewFile(input.relativePath) || isImagePreviewFile(input.relativePath)) {
+  if (
+    isWorkspaceBrowserPreviewPath(input.relativePath) ||
+    isWorkspaceImagePreviewPath(input.relativePath) ||
+    isVideoPreviewFile(input.relativePath)
+  ) {
     return;
   }
 

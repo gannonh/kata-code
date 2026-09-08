@@ -72,7 +72,7 @@ const formatProcessInvocation = (input: {
     : `'${input.command}' in '${executionCwd}'`;
 };
 
-export class ProcessSpawnError extends Schema.TaggedErrorClass<ProcessSpawnError>()(
+export class ProcessSpawnError extends Schema.TaggedError<ProcessSpawnError>()(
   "ProcessSpawnError",
   {
     ...ProcessInvocationFields,
@@ -87,7 +87,7 @@ export class ProcessSpawnError extends Schema.TaggedErrorClass<ProcessSpawnError
   }
 }
 
-export class ProcessStdinError extends Schema.TaggedErrorClass<ProcessStdinError>()(
+export class ProcessStdinError extends Schema.TaggedError<ProcessStdinError>()(
   "ProcessStdinError",
   {
     ...ProcessInvocationFields,
@@ -100,7 +100,7 @@ export class ProcessStdinError extends Schema.TaggedErrorClass<ProcessStdinError
   }
 }
 
-export class ProcessOutputLimitError extends Schema.TaggedErrorClass<ProcessOutputLimitError>()(
+export class ProcessOutputLimitError extends Schema.TaggedError<ProcessOutputLimitError>()(
   "ProcessOutputLimitError",
   {
     ...ProcessInvocationFields,
@@ -114,20 +114,17 @@ export class ProcessOutputLimitError extends Schema.TaggedErrorClass<ProcessOutp
   }
 }
 
-export class ProcessReadError extends Schema.TaggedErrorClass<ProcessReadError>()(
-  "ProcessReadError",
-  {
-    ...ProcessInvocationFields,
-    stream: Schema.Literals(["stdout", "stderr", "exitCode"]),
-    cause: Schema.Defect(),
-  },
-) {
+export class ProcessReadError extends Schema.TaggedError<ProcessReadError>()("ProcessReadError", {
+  ...ProcessInvocationFields,
+  stream: Schema.Literals(["stdout", "stderr", "exitCode"]),
+  cause: Schema.Defect(),
+}) {
   override get message(): string {
     return `Failed to read ${this.stream} for process ${formatProcessInvocation(this)}`;
   }
 }
 
-export class ProcessTimeoutError extends Schema.TaggedErrorClass<ProcessTimeoutError>()(
+export class ProcessTimeoutError extends Schema.TaggedError<ProcessTimeoutError>()(
   "ProcessTimeoutError",
   {
     ...ProcessInvocationFields,
@@ -250,13 +247,11 @@ const collectText = Effect.fn("processRunner.collectText")(function* (input: {
         });
       },
     ),
-    Effect.map(
-      (state): CollectedUint8StreamText => ({
-        ...decodeUtf8(Buffer.concat(state.chunks, state.bytes)),
-        bytes: state.bytes,
-        truncated: false,
-      }),
-    ),
+    Effect.map((state): CollectedUint8StreamText => ({
+      ...decodeUtf8(Buffer.concat(state.chunks, state.bytes)),
+      bytes: state.bytes,
+      truncated: false,
+    })),
   );
 });
 
@@ -578,6 +573,7 @@ const runProcessBytesCore = Effect.fn("processRunner.runProcessBytesCore")(funct
   );
 });
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("ProcessRunner.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 

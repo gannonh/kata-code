@@ -23,6 +23,8 @@ export {
 export type {
   MarkdownImageRenderer,
   MarkdownImageRequest,
+  MarkdownFileContextMenu,
+  MarkdownFileContextMenuAction,
   NativeMarkdownTextStyle,
   SelectableMarkdownSkill,
   SelectableMarkdownTextProps,

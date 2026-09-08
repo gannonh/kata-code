@@ -15,14 +15,14 @@ import {
 import * as Electron from "electron";
 
 export const DESKTOP_HOST = "app";
-export const DESKTOP_PRODUCTION_SCHEME = PROTOCOL_SCHEME;
-export const DESKTOP_DEVELOPMENT_SCHEME = PROTOCOL_SCHEME_DEV;
+const DESKTOP_PRODUCTION_SCHEME = PROTOCOL_SCHEME;
+const DESKTOP_DEVELOPMENT_SCHEME = PROTOCOL_SCHEME_DEV;
 
 export function getDesktopScheme(isDevelopment: boolean): string {
   return desktopProtocolScheme(isDevelopment);
 }
 
-export function getDesktopOrigin(isDevelopment: boolean): string {
+function getDesktopOrigin(isDevelopment: boolean): string {
   return `${getDesktopScheme(isDevelopment)}://${DESKTOP_HOST}`;
 }
 
@@ -30,7 +30,7 @@ export function getDesktopUrl(isDevelopment: boolean): string {
   return `${getDesktopOrigin(isDevelopment)}/`;
 }
 
-export class ElectronProtocolRegistrationError extends Schema.TaggedErrorClass<ElectronProtocolRegistrationError>()(
+export class ElectronProtocolRegistrationError extends Schema.TaggedError<ElectronProtocolRegistrationError>()(
   "ElectronProtocolRegistrationError",
   {
     scheme: Schema.String,
@@ -42,7 +42,7 @@ export class ElectronProtocolRegistrationError extends Schema.TaggedErrorClass<E
   }
 }
 
-export class ElectronProtocolUnregistrationError extends Schema.TaggedErrorClass<ElectronProtocolUnregistrationError>()(
+export class ElectronProtocolUnregistrationError extends Schema.TaggedError<ElectronProtocolUnregistrationError>()(
   "ElectronProtocolUnregistrationError",
   {
     scheme: Schema.String,
@@ -93,6 +93,7 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
     `script-src ${scriptSources.join(" ")}`,
     `connect-src ${connectSources.join(" ")}`,
     `img-src 'self' ${input.scheme}: blob: data: http: https:`,
+    `media-src 'self' ${input.scheme}: blob: http: https:`,
     "style-src 'self' 'unsafe-inline'",
     `font-src 'self' ${input.scheme}: data:`,
     "worker-src 'self' blob:",
@@ -146,7 +147,7 @@ const DESKTOP_SCHEME_PRIVILEGES = {
 /**
  * Must run synchronously during process bootstrap, before Electron emits `ready`.
  */
-export function registerDesktopSchemePrivilegesSync(): void {
+function registerDesktopSchemePrivilegesSync(): void {
   Electron.protocol.registerSchemesAsPrivileged(
     [PROTOCOL_SCHEME, PROTOCOL_SCHEME_LEGACY, PROTOCOL_SCHEME_DEV].map((scheme) => ({
       scheme,
@@ -226,6 +227,7 @@ async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<
   throw lastError;
 }
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registered = yield* Ref.make(false);
 

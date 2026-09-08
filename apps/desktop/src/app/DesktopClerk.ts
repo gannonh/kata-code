@@ -31,7 +31,7 @@ import {
 
 declare const __KATACODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
-export class DesktopClerkBridgeInitializationError extends Schema.TaggedErrorClass<DesktopClerkBridgeInitializationError>()(
+export class DesktopClerkBridgeInitializationError extends Schema.TaggedError<DesktopClerkBridgeInitializationError>()(
   "DesktopClerkBridgeInitializationError",
   {
     stateDir: Schema.String,
@@ -44,7 +44,7 @@ export class DesktopClerkBridgeInitializationError extends Schema.TaggedErrorCla
   }
 }
 
-export class DesktopClerkBridgeCleanupError extends Schema.TaggedErrorClass<DesktopClerkBridgeCleanupError>()(
+export class DesktopClerkBridgeCleanupError extends Schema.TaggedError<DesktopClerkBridgeCleanupError>()(
   "DesktopClerkBridgeCleanupError",
   {
     stateDir: Schema.String,
@@ -68,7 +68,7 @@ export class DesktopClerk extends Context.Service<
   }
 >()("@kata-sh/code-desktop/app/DesktopClerk") {}
 
-export function resolveDesktopClerkFrontendApiHostname(
+function resolveDesktopClerkFrontendApiHostname(
   publishableKey: string | undefined,
 ): string | undefined {
   const normalizedKey = publishableKey?.trim();
@@ -144,6 +144,7 @@ export function resetDesktopClerkBeforeReadyForTests(): void {
   preReadyBridgeError = undefined;
 }
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   // Clerk registers the renderer scheme during bridge creation, which must
   // happen before Electron emits `ready`. Keeping this service dependency

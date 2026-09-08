@@ -1,49 +1,81 @@
-# Running Kata Code in the Background
+# Running Kata Code in the background
 
-On a Linux host, Kata Code can run as a background service for your user. It starts when the machine
-boots and keeps running after you log out.
+On Linux and macOS, Kata Code can run as a service for your user so you do not need
+to keep a terminal open.
 
-## Manage the Service
+## Manage the service
 
-Install it with the latest Kata Code release:
+Run these commands on the machine that will host Kata Code:
+
+| Task                            | Command                                          |
+| ------------------------------- | ------------------------------------------------ |
+| Install and start               | `npx @kata-sh/code-cli@latest service install`   |
+| Inspect status and log location | `npx @kata-sh/code-cli@latest service status`    |
+| Update or repair                | `npx @kata-sh/code-cli@latest service update`    |
+| Stop and remove from startup    | `npx @kata-sh/code-cli@latest service uninstall` |
+
+Uninstalling the service leaves your projects, threads, and settings intact.
+
+Install and update use the version of the CLI you invoke. For nightly, use
+`npx @kata-sh/code-cli@nightly service update`; replace `nightly` with an exact version to pin
+one. An older CLI refuses to replace a newer service unless you explicitly add
+`--allow-downgrade`.
+
+Updating restarts the server. Finish active work first, and wait for any remote
+update already in progress. To match a remote client's version, follow
+[Updating Kata Code](./updating.md).
+
+## Platform support
+
+Linux needs systemd user services. Setup enables lingering so Kata Code starts at
+boot and keeps running after logout. If this needs administrator permission,
+setup prints a recovery command before changing the service.
+
+macOS starts the service when you log in and stops it when you log out. Keep the
+Mac logged in and awake for unattended remote access. Installing over SSH while
+nobody is logged in at the Mac's screen can fail at the final start step; the
+service is still installed and will start at the next login.
+
+Windows background services are not supported.
+
+Kata Code Connect can offer service installation during setup, but the two are managed
+separately. Signing out of Kata Code Connect does not stop or uninstall the service.
+
+## Troubleshooting
+
+Start with `katacode service status` on the host. It prints the log path and, on Linux,
+checks whether the installed service is running, enabled, and allowed to survive
+logout.
+
+If it stops when your SSH session closes, check for `linger-disabled`. An
+administrator can enable lingering with:
 
 ```sh
-npx @kata-sh/code-cli@latest service install
+sudo loginctl enable-linger "$(id -un)"
 ```
 
-Check whether it is installed:
+Over SSH, allow sudo to prompt:
 
 ```sh
-npx @kata-sh/code-cli@latest service status
+ssh -t your-server 'sudo loginctl enable-linger "$(id -un)"'
 ```
 
-Update or repair it:
+Then retry service setup as your normal user. Run only the `loginctl` command
+with sudo; running Kata Code as root creates a separate installation and Connect
+identity. Without administrator access, run `katacode serve` in a terminal and keep
+that session open.
 
-```sh
-npx @kata-sh/code-cli@latest service update
-```
+| Status problem                          | Next step                                                                                                                      |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `linger-unavailable`                    | Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.                             |
+| `user-manager-unavailable`              | Run `systemctl --user status` in a login session for the service user; check your distribution's systemd user-session support. |
+| `service-disabled` or `service-stopped` | Read the log and `systemctl --user status t3code.service`, then use the repair command printed by Kata Code.                   |
 
-Stop it and remove it from startup:
+On macOS, check **System Settings → General → Login Items** if the service no
+longer starts at login. If agent work cannot access Desktop, Documents, or
+Downloads, it may need Full Disk Access for the Node executable listed in
+`ProgramArguments` in
+`~/Library/LaunchAgents/com.katacode.app.service.plist`.
 
-```sh
-npx @kata-sh/code-cli@latest service uninstall
-```
-
-Updating restarts Kata Code briefly. Let active agent work and terminal commands finish first.
-If a remote update is already in progress, wait for it to finish before retrying a local update.
-
-The systemd unit runs a small stable launcher. Exact Kata Code versions are installed separately, so
-a failed remote candidate can return to the previous version without rewriting the unit. The
-launcher snapshots the database before a remote candidate starts, so database updates roll back
-with the server version. An older launcher may require one local `service update` before this is
-available.
-
-## Using It with Kata Code Connect
-
-Kata Code Connect may offer to install the service during setup so the host stays reachable after you log
-out. This is only an onboarding shortcut: the service and Kata Code Connect are managed separately.
-
-Signing out of Kata Code Connect does not remove the service. Use `katacode service uninstall` when you no longer
-want Kata Code to start in the background.
-
-The background service currently requires Linux with systemd.
+For failures after signing in to Kata Code Connect, see
+[connection troubleshooting](./remote-access.md#kata-code-connect-troubleshooting).

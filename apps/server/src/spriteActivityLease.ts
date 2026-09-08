@@ -79,7 +79,7 @@ function terminalKey(terminal: Pick<TerminalSummary, "threadId" | "terminalId">)
   return JSON.stringify([terminal.threadId, terminal.terminalId]);
 }
 
-export function updateTerminalActivity(
+function updateTerminalActivity(
   terminals: ReadonlyMap<string, TerminalSummary>,
   event: TerminalMetadataStreamEvent,
 ): Map<string, TerminalSummary> {

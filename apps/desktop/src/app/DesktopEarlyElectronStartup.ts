@@ -1,4 +1,4 @@
-import { desktopProtocolScheme } from "@kata-sh/code-shared/branding";
+import { desktopProtocolScheme, desktopLinuxDesktopEntryName } from "@kata-sh/code-shared/branding";
 import { fromLenientJson } from "@kata-sh/code-shared/schemaJson";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -26,9 +26,14 @@ interface EarlyDesktopSettingsInput {
 type EarlyLinuxElectronOptionsInput = EarlyDesktopSettingsInput;
 
 export interface EarlyLinuxElectronOptions {
+  readonly isDevelopment: boolean;
   readonly linuxWmClass: string;
+  readonly linuxDesktopEntryName: string;
   readonly passwordStore: LinuxPasswordStoreSwitch | null;
 }
+
+const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
+  desktopLinuxDesktopEntryName(isDevelopment);
 
 const trimNonEmpty = (value: string | undefined): string | null => {
   const trimmed = value?.trim();
@@ -81,8 +86,11 @@ export function resolveEarlyLinuxElectronOptions(
   input: EarlyLinuxElectronOptionsInput,
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
+  const isDevelopment = isDevelopmentEnvironment(input.env);
   return {
-    linuxWmClass: desktopProtocolScheme(isDevelopmentEnvironment(input.env)),
+    isDevelopment,
+    linuxWmClass: desktopProtocolScheme(isDevelopment),
+    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

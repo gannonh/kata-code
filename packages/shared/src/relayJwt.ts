@@ -19,7 +19,7 @@ export const RELAY_MINT_RESPONSE_TYP = WIRE_RELAY_ENV_MINT_RESPONSE_JWT_TYP;
 export const RELAY_HEALTH_RESPONSE_TYP = WIRE_RELAY_ENV_HEALTH_RESPONSE_JWT_TYP;
 export const RELAY_ACTIVITY_PUBLISH_TYP = WIRE_RELAY_ENV_ACTIVITY_JWT_TYP;
 
-export class RelayJwtError extends Schema.TaggedErrorClass<RelayJwtError>()("RelayJwtError", {
+export class RelayJwtError extends Schema.TaggedError<RelayJwtError>()("RelayJwtError", {
   operation: Schema.Literals(["sign", "verify"]),
   typ: Schema.String,
   issuer: Schema.optional(Schema.String),

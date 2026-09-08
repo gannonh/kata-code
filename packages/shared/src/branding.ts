@@ -1,8 +1,10 @@
 export const APP_BASE_NAME = "Kata Code" as const;
 
 /** Compact product abbreviation for space-constrained surfaces. */
+/** @public Kata identity contract documented in FORK.md. */
 export const PRODUCT_ABBREVIATION = "KC" as const;
 
+/** @public Kata identity contract documented in FORK.md. */
 export const CLOUD_PRODUCT_NAME = "Kata Code Connect" as const;
 
 /** Default user state directory under the home folder (`~/.katacode`). */
@@ -29,7 +31,8 @@ export const DESKTOP_BUNDLE_ID = "com.katacode.app" as const;
  * use `PROTOCOL_SCHEME`; this name stays on the previous slug until a later
  * installer migration.
  */
-export const DESKTOP_LINUX_EXECUTABLE_NAME = PROTOCOL_SCHEME_LEGACY;
+/** @public Kata identity contract documented in FORK.md. */
+export const DESKTOP_LINUX_EXECUTABLE_NAME = "t3code" as const;
 
 /** OS-registered schemes for packaged desktop builds. Canonical first. */
 export const DESKTOP_PACKAGED_PROTOCOL_SCHEMES = [
@@ -60,6 +63,7 @@ export function desktopUrlHandlerSchemes(isDevelopment: boolean): readonly strin
 export const DESKTOP_BUNDLE_ID_DEV_PREFIX = "com.katacode.dev" as const;
 
 /** Hosted web router host (Vercel). */
+/** @public Kata identity contract documented in FORK.md. */
 export const HOSTED_WEB_ROUTER_HOST = "app.kata.sh" as const;
 
 export const DEFAULT_HOSTED_APP_ORIGIN = `https://${HOSTED_WEB_ROUTER_HOST}` as const;
@@ -70,6 +74,7 @@ export const HOSTED_WEB_NIGHTLY_ORIGIN = "https://nightly.app.kata.sh" as const;
 
 export const HOSTED_WEB_CHANNEL_PATH = "/__katacode/channel" as const;
 
+/** @public Kata identity contract documented in FORK.md. */
 export const HOSTED_WEB_CHANNEL_COOKIE = "katacode_web_channel" as const;
 
 const NIGHTLY_SERVER_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/;
@@ -87,6 +92,7 @@ export const envKey = (suffix: string): string => `${ENV_PREFIX}${suffix}`;
 export const resolveDefaultKatacodeHome = (homeDirectory: string): string =>
   `${homeDirectory.replace(/[/\\]+$/, "")}/${DEFAULT_HOME_DIR_NAME}`;
 
+/** @public Kata identity contract documented in FORK.md. */
 export const isNightlyAppVersion = (version: string): boolean =>
   NIGHTLY_SERVER_VERSION_PATTERN.test(version.trim());
 
@@ -127,7 +133,7 @@ export function resolveServerBackedAppDisplayName(input: {
     : formatAppDisplayName({ baseName: input.baseName, stageLabel });
 }
 
-export function resolveAppStageLabel(input: {
+function resolveAppStageLabel(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
   readonly hostedAppChannel?: "latest" | "nightly" | null;

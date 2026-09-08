@@ -9,11 +9,10 @@
     }
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vp test run"
   },
   "dependencies": {
-    "@effect/platform-node": "catalog:",
     "@kata-sh/code-contracts": "workspace:*",
     "@kata-sh/code-shared": "workspace:*",
     "effect": "catalog:"

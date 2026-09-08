@@ -5,6 +5,7 @@ import type {
 } from "@kata-sh/code-contracts";
 import * as NetService from "@kata-sh/code-shared/Net";
 import * as SshAuth from "@kata-sh/code-ssh/auth";
+import { resolveSshTarget } from "@kata-sh/code-ssh/command";
 import { discoverSshHosts } from "@kata-sh/code-ssh/config";
 import {
   SshCommandError,
@@ -54,6 +55,9 @@ export class DesktopSshEnvironment extends Context.Service<
     readonly discoverHosts: (input?: {
       readonly homeDir?: string;
     }) => Effect.Effect<readonly DesktopDiscoveredSshHost[], DesktopSshEnvironmentDiscoverError>;
+    readonly resolveHost: (
+      alias: string,
+    ) => Effect.Effect<DesktopSshEnvironmentTarget, SshCommandError | SshInvalidTargetError>;
     readonly ensureEnvironment: (
       target: DesktopSshEnvironmentTarget,
       options?: { readonly issuePairingToken?: boolean },
@@ -124,6 +128,7 @@ const makePasswordPrompt = (
     prompts.request(request).pipe(Effect.mapError(toSshPasswordPromptError)),
 });
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const manager = yield* SshTunnel.SshEnvironmentManager;
   const prompts = yield* DesktopSshPasswordPrompts.DesktopSshPasswordPrompts;
@@ -135,6 +140,11 @@ export const make = Effect.gen(function* () {
       discoverDesktopSshHostsEffect(input).pipe(
         Effect.provide(runtimeContext),
         Effect.withSpan("desktop.ssh.discoverHosts"),
+      ),
+    resolveHost: (alias) =>
+      resolveSshTarget(alias.trim()).pipe(
+        Effect.provide(runtimeContext),
+        Effect.withSpan("desktop.ssh.resolveHost"),
       ),
     ensureEnvironment: (target, ensureOptions) =>
       manager

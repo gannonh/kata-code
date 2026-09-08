@@ -23,14 +23,6 @@ export function resolveSidebarStageBackdropVariant(
   return null;
 }
 
-export function resolveSidebarStageFocusRingOffsetClass(
-  variant: SidebarStageBackdropVariant,
-): string {
-  return variant === "nightly"
-    ? "focus-visible:ring-offset-(--stage-night-bottom)"
-    : "focus-visible:ring-offset-(--stage-art-bottom)";
-}
-
 export function resolveEnvironmentIdentificationPillLabel(
   stageLabel: string,
 ): EnvironmentIdentificationPillLabel | null {
@@ -52,18 +44,6 @@ export function useEnvironmentStageLabel(): string {
 
 export function useSidebarStageBackdropVariant(enabled = true): SidebarStageBackdropVariant | null {
   return resolveSidebarStageBackdropVariant(useEnvironmentStageLabel(), enabled);
-}
-
-/** Stage-channel header art; palettes mirror the per-channel app icons in `assets/`. */
-export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdropVariant }) {
-  return (
-    <div
-      aria-hidden
-      className="sidebar-stage-backdrop pointer-events-none absolute inset-x-0 top-0 z-0 h-20 select-none overflow-hidden"
-    >
-      <StageBackdropArt variant={variant} />
-    </div>
-  );
 }
 
 export function StageBackdropArt({ variant }: { variant: SidebarStageBackdropVariant }) {

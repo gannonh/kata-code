@@ -1,4 +1,1 @@
-export {
-  isTransportConnectionErrorMessage,
-  sanitizeThreadErrorMessage,
-} from "@kata-sh/code-client-runtime/errors";
+export { sanitizeThreadErrorMessage } from "@kata-sh/code-client-runtime/errors";
