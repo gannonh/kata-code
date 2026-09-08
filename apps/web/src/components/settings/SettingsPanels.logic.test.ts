@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Reads SettingsPanels.tsx to assert Experimental placement.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
